@@ -67,6 +67,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [ ] `scripts/github-setup.sh settings` before the first push of the workflows: it limits the environments `renovate` and `github-pages` to `main` (a job would create them unprotected) and adds both rulesets (owner)
 - [ ] Renovate GitHub App, variable `RENOVATE_CLIENT_ID`, secret `RENOVATE_PRIVATE_KEY` in the environment `renovate` (owner, ADR 0015)
 - [ ] Commit on a branch, PR, CI green (needs owner OK)
+- [ ] `scripts/github-setup.sh codeql` after the first merge, once CodeQL has analysed `main` (ADR 0014)
 - [ ] One test PR that touches `.github/`: GitHub must ask for the code owner's review (ADR 0014)
 - [ ] DNS at OMCnet: TXT verification + `physarum CNAME karstensiemer.github.io.`, then `github-setup.sh domain` and `https` (owner)
 

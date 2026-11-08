@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
-# One-time GitHub repository settings (docs/adr/0012-hosting.md, 0014-ci-hardening.md, 0015-renovate.md).
+# GitHub repository settings (docs/adr/0012-hosting.md, 0014-ci-hardening.md, 0015-renovate.md).
+# Every mode can run again; rulesets are updated by name.
 # Usage:
-#   scripts/github-setup.sh settings   # run before the first push: merge rules, security features, CodeQL,
+#   scripts/github-setup.sh settings   # before the first push: merge rules, security features, CodeQL,
 #                                      # Pages source, environments limited to main, rulesets
+#   scripts/github-setup.sh codeql     # after the first merge: CodeQL merge gate (needs an analysis of main)
 #   scripts/github-setup.sh domain     # custom domain + HTTPS; only after the DNS records exist
 set -euo pipefail
 
 REPO="${REPO:-KarstenSiemer/physarum-slime-mold}"
 DOMAIN="${DOMAIN:-physarum.karstensiemer.de}"
+
+# Creates or updates the ruleset with this name from the JSON on stdin.
+ruleset() {
+  local name=$1 body id
+  body=$(cat)
+  id=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == \"$name\") | .id")
+  if [ -n "$id" ]; then
+    gh api -X PUT "repos/$REPO/rulesets/$id" --input - <<<"$body" >/dev/null
+  else
+    gh api -X POST "repos/$REPO/rulesets" --input - <<<"$body" >/dev/null
+  fi
+}
 
 settings() {
   echo "Merge settings: squash only, auto-merge (Renovate), delete merged branches"
@@ -23,8 +37,12 @@ settings() {
   gh api -X PUT "repos/$REPO/vulnerability-alerts"
   gh api -X PUT "repos/$REPO/private-vulnerability-reporting"
 
-  echo "CodeQL default setup"
-  gh api -X PATCH "repos/$REPO/code-scanning/default-setup" -f state=configured -f query_suite=extended >/dev/null
+  # Languages are named because main may not contain code yet; pull requests are scanned from now on.
+  echo "CodeQL default setup (JavaScript/TypeScript and Actions)"
+  if ! gh api -X PATCH "repos/$REPO/code-scanning/default-setup" -f state=configured -f query_suite=extended \
+    -f 'languages[]=javascript-typescript' -f 'languages[]=actions' >/dev/null; then
+    echo "  CodeQL default setup failed; run '$0 codeql' after the first merge." >&2
+  fi
 
   echo "GitHub Pages: build and deploy from GitHub Actions"
   gh api -X POST "repos/$REPO/pages" -f build_type=workflow >/dev/null 2>&1 ||
@@ -42,10 +60,12 @@ JSON
     fi
   done
 
-  echo "Ruleset for main: pull requests, linear history, required checks, CodeQL gate"
+  echo "Ruleset main: pull requests, linear history, required checks"
   # integration_id 15368 = GitHub Actions; only Actions can report these checks. build is required too:
   # verify needs build, and a job skipped after a failed dependency would count as passed.
-  gh api -X POST "repos/$REPO/rulesets" --input - >/dev/null <<'JSON'
+  # Unattributed commits (author email not linked to a GitHub account) need one human approval; the
+  # owner's commits and Renovate's App commits are attributed. GitHub's default, set explicitly.
+  ruleset main <<'JSON'
 {
   "name": "main",
   "target": "branch",
@@ -63,6 +83,7 @@ JSON
         "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": false,
         "require_last_push_approval": false,
+        "require_extra_approval_for_unattributed_changes": true,
         "required_review_thread_resolution": false,
         "allowed_merge_methods": ["squash"]
       }
@@ -78,14 +99,6 @@ JSON
           { "context": "dependency-review", "integration_id": 15368 }
         ]
       }
-    },
-    {
-      "type": "code_scanning",
-      "parameters": {
-        "code_scanning_tools": [
-          { "tool": "CodeQL", "alerts_threshold": "errors", "security_alerts_threshold": "high_or_higher" }
-        ]
-      }
     }
   ]
 }
@@ -94,8 +107,8 @@ JSON
   # A pull request runs the workflow files it contains, so green checks prove nothing about a PR that edits
   # them. Changes to the files in .github/CODEOWNERS need the owner's approval. Admins may bypass this
   # ruleset only through a pull request, so the owner can merge their own PRs; the checks above still apply.
-  echo "Ruleset for main: code owner review for CI, Renovate, npm and hook settings"
-  gh api -X POST "repos/$REPO/rulesets" --input - >/dev/null <<'JSON'
+  echo "Ruleset code owners: owner review for CI, Renovate, npm and hook settings"
+  ruleset "code owners" <<'JSON'
 {
   "name": "code owners",
   "target": "branch",
@@ -110,6 +123,7 @@ JSON
         "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": true,
         "require_last_push_approval": true,
+        "require_extra_approval_for_unattributed_changes": true,
         "required_review_thread_resolution": false,
         "allowed_merge_methods": ["squash"]
       }
@@ -118,6 +132,39 @@ JSON
 }
 JSON
   echo "Done. Store the Renovate App key as a secret of the environment renovate, not of the repository."
+  echo "After the first merge and CodeQL analysis of main, run: $0 codeql"
+}
+
+# The gate blocks every merge while the required tool has no analysis, and ruleset main has no bypass,
+# so it is added only once main has a CodeQL analysis.
+codeql() {
+  echo "CodeQL default setup (languages detected on main)"
+  gh api -X PATCH "repos/$REPO/code-scanning/default-setup" -f state=configured -f query_suite=extended >/dev/null
+  if [ -z "$(gh api "repos/$REPO/code-scanning/analyses?tool_name=CodeQL&ref=refs/heads/main&per_page=1" --jq '.[0].id' 2>/dev/null)" ]; then
+    echo "No CodeQL analysis of main yet. Wait until the first one finishes, then run: $0 codeql" >&2
+    exit 1
+  fi
+  echo "Ruleset codeql: block merges with new CodeQL errors or high and critical security alerts"
+  ruleset codeql <<'JSON'
+{
+  "name": "codeql",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    {
+      "type": "code_scanning",
+      "parameters": {
+        "code_scanning_tools": [
+          { "tool": "CodeQL", "alerts_threshold": "errors", "security_alerts_threshold": "high_or_higher" }
+        ]
+      }
+    }
+  ]
+}
+JSON
+  echo "Done."
 }
 
 domain() {
@@ -132,9 +179,9 @@ https() {
 }
 
 case "${1:-}" in
-  settings | domain | https) "$1" ;;
+  settings | codeql | domain | https) "$1" ;;
   *)
-    echo "usage: $0 settings|domain|https" >&2
+    echo "usage: $0 settings|codeql|domain|https" >&2
     exit 2
     ;;
 esac

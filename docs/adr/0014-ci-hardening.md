@@ -59,7 +59,7 @@ reporting, CodeQL default setup, and:
 - Environments `renovate` and `github-pages` limited to `main`. A workflow pushed to any other
   branch could otherwise read the Renovate App key or deploy the site. A job that names a missing
   environment creates it without protection, so the script must run before the first push.
-- Ruleset `main`: PR required, linear history, CodeQL gate, and the required checks `build`,
+- Ruleset `main`: PR required, linear history, and the required checks `build`,
   `verify`, `zizmor` and `dependency-review`, bound to the GitHub Actions app (id 15368), so no
   other app or token can report them. `build` is required as well, because a job that is skipped
   after a failed dependency counts as passed. Conversation resolution is off: on a public
@@ -72,6 +72,19 @@ reporting, CodeQL default setup, and:
   `main` still apply. Per GitHub's rules documentation, code owner review applies with an
   approval count of 0, so npm updates still merge without a review. Check it once with a test PR
   that touches `.github/`.
+- CodeQL default setup (`settings`) names its languages (`javascript-typescript`, `actions`),
+  because `main` held no code before the first merge; pull requests are scanned from then on.
+- Ruleset `codeql` (`scripts/github-setup.sh codeql`, after the first merge): blocks merges with
+  new CodeQL errors or high and critical security alerts. GitHub blocks every merge while a
+  required code scanning tool has no analysis, and ruleset `main` has no bypass, so this gate is
+  added only once `main` has a CodeQL analysis.
+- Both rulesets set `require_extra_approval_for_unattributed_changes: true`. GitHub applied
+  this default when the script ran on 2026-11-08, and the script now writes it explicitly. A
+  commit whose author email is not linked to a GitHub account needs one human approval. The
+  owner's commits (`karsten.siemer@aetherize.com`, linked) and Renovate's commits through its
+  GitHub App are attributed. If Renovate PRs ever wait for an approval for this reason, set it
+  to `false` in ruleset `main`.
+- The script can run again: rulesets are created or updated by name.
 
 ## Consequences
 
