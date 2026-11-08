@@ -16,8 +16,13 @@ catch what CI would reject, without hiding CI failures.
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | pre-commit | file hygiene (large files > 500 KB, merge markers, YAML/JSON, line endings), `detect-private-key`, gitleaks, actionlint, zizmor (pedantic, offline), workflow + Renovate schema, typos (report only), Prettier, ESLint, WGSL compile check (Tint in headless Chromium, only when `.wgsl` changes), no commits to `main` |
 | pre-push   | `svelte-check`, unit tests                                                                                                                                                                                                                                                                                              |
+| commit-msg | a `Signed-off-by:` line (`git commit -s`), which the DCO app checks on every PR                                                                                                                                                                                                                                         |
 
-`pre-commit install` sets up both stages (`default_install_hook_types`).
+`pre-commit install` sets up all three stages (`default_install_hook_types`). Hooks without
+their own stages run in `pre-commit` and `pre-push` only (`default_stages`), never on the
+commit message. The sign-off hook only checks: the sign-off is the author's statement under the
+Developer Certificate of Origin, so it is never added automatically. The DCO app on GitHub
+skips commits by bots, so Renovate's commits need none.
 
 ## Consequences
 

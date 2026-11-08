@@ -1,7 +1,9 @@
 # Fast checks before every commit; the full suite runs in CI. See docs/adr/0016-pre-commit.md.
 # Revisions are frozen to commit SHAs; Renovate keeps them current.
 minimum_pre_commit_version: '4.4.0'
-default_install_hook_types: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
+# Hooks without their own stages run on files, never on the commit message.
+default_stages: [pre-commit, pre-push]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
@@ -78,6 +80,14 @@ repos:
         types_or: [ts, svelte]
         pass_filenames: false
         stages: [pre-push]
+      # The DCO app on GitHub rejects commits without a sign-off. Checked, never added: the sign-off is
+      # the author's own statement, so it stays a conscious `git commit -s`.
+      - id: dco-signoff
+        name: DCO sign-off (git commit -s)
+        language: pygrep
+        entry: '^Signed-off-by: .+ <[^>]+>$'
+        args: [--negate]
+        stages: [commit-msg]
       - id: unit-tests
         name: unit tests
         language: unsupported
