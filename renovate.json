@@ -1,0 +1,65 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency updates as pull requests, auto-merged when CI is green. See docs/adr/0015-renovate.md.",
+  "extends": [
+    "config:best-practices",
+    ":pinAllExceptPeerDependencies",
+    "helpers:pinGitHubActionDigestsToSemver",
+    ":enablePreCommit"
+  ],
+  "timezone": "Europe/Berlin",
+  "rangeStrategy": "pin",
+  "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
+  "automergeStrategy": "squash",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__fixtures__/**",
+    ".claude/skills/**"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Renovate's own image in the Renovate workflow, pinned by version and digest.",
+      "managerFilePatterns": ["/^\\.github/workflows/renovate\\.yml$/"],
+      "matchStrings": [
+        "renovate-image: (?<depName>docker\\.io/renovate/renovate):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Auto-merge non-major updates of stable (≥ 1.0) dependencies once all required checks pass. Actions report versions as v1.2.3.",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "matchCurrentVersion": "!/^v?0\\./",
+      "automerge": true
+    },
+    {
+      "description": "Type definitions only; CI type-checks every use.",
+      "matchPackageNames": ["@webgpu/types"],
+      "automerge": true
+    },
+    {
+      "description": "Code that runs with repository secrets or on the owner's machine is reviewed, never auto-merged: workflow actions, pre-commit hooks and Renovate's image. A moved or backdated git tag passes the release age (docs/adr/0015-renovate.md).",
+      "matchManagers": ["github-actions", "pre-commit", "custom.regex"],
+      "automerge": false
+    },
+    {
+      "description": "One pull request for all non-major npm updates.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "npm non-major"
+    }
+  ]
+}

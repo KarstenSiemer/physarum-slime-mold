@@ -1,0 +1,7 @@
+# A pull request runs its own workflow files, so CI cannot check changes to CI. These paths need the
+# owner's review (the "code owners" ruleset in scripts/github-setup.sh, docs/adr/0014-ci-hardening.md).
+/.github/ @KarstenSiemer
+/renovate.json @KarstenSiemer
+/.npmrc @KarstenSiemer
+/.pre-commit-config.yaml @KarstenSiemer
+/scripts/ @KarstenSiemer

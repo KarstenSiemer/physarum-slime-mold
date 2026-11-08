@@ -1,0 +1,3 @@
+[default.extend-words]
+# "Nat. Comput." is the journal Natural Computing.
+Comput = "Comput"

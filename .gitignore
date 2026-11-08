@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.vite/
+*.log
+.DS_Store
+CLAUDE-SECURITY-*/
+
+# Copyrighted paper (MIT Press); cite by DOI instead.
+artl.2010.16.2.pdf
+
+.vitest/

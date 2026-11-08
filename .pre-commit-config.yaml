@@ -1,0 +1,87 @@
+# Fast checks before every commit; the full suite runs in CI. See docs/adr/0016-pre-commit.md.
+# Revisions are frozen to commit SHAs; Renovate keeps them current.
+minimum_pre_commit_version: '4.4.0'
+default_install_hook_types: [pre-commit, pre-push]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      # Vendored third-party skills stay byte-identical to their upstream commits: no fixers or linters,
+      # but the secret scanners (detect-private-key, gitleaks) still check them.
+      - id: check-yaml
+        exclude: &vendored ^\.claude/skills/
+      - id: check-json
+        exclude: *vendored
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        exclude: *vendored
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: *vendored
+      - id: trailing-whitespace
+        exclude: *vendored
+      - id: no-commit-to-branch
+        args: [--branch, main]
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 2ca41cc1372d1e939a6a879f18cdc19fc1cac1ce # frozen: v8.30.0
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: 06a39750ec31860bb44f2acf67182c40016cd1e7 # frozen: v1.32.0
+    hooks:
+      - id: zizmor
+        args: [--persona=pedantic, --offline]
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 39478bf2c099a58683d3f1aedf675105318b078d # frozen: 0.39.0
+    hooks:
+      - id: check-github-workflows
+      - id: check-renovate
+  - repo: https://github.com/crate-ci/typos
+    rev: ef3265d70a75c507b4c110d855cdfab6ce90d4bf # frozen: v1.52.0
+    hooks:
+      - id: typos
+        args: [--force-exclude] # report only, never rewrite text
+        exclude: *vendored
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        language: unsupported
+        entry: npx prettier --write --ignore-unknown
+        types_or: [ts, javascript, svelte, json, yaml, markdown, css, html]
+        exclude: *vendored
+      - id: eslint
+        name: eslint
+        language: unsupported
+        entry: npx eslint --max-warnings=0
+        types_or: [ts, javascript, svelte]
+        exclude: *vendored
+        require_serial: true # one process: each one would build the whole TypeScript program
+      - id: wgsl
+        name: WGSL compiles (Tint in headless Chromium)
+        language: unsupported
+        entry: npx vitest run --project gpu -t "compile"
+        files: '\.wgsl$'
+        pass_filenames: false
+      - id: svelte-check
+        name: svelte-check
+        language: unsupported
+        entry: npm run check
+        types_or: [ts, svelte]
+        pass_filenames: false
+        stages: [pre-push]
+      - id: unit-tests
+        name: unit tests
+        language: unsupported
+        entry: npm test
+        types_or: [ts, svelte]
+        pass_filenames: false
+        stages: [pre-push]

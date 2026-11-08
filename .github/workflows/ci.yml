@@ -1,0 +1,99 @@
+# Build, verify, and deploy main to GitHub Pages. See docs/adr/0012-hosting.md and 0014-ci-hardening.md.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The site is built here with the build chain only: vite.config.ts loads no test tooling, and no
+  # linter, test runner or downloaded browser runs in this job. verify tests this artifact; deploy publishes it.
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false # no cache in the job that builds the deployed site (cache poisoning)
+      - run: npm ci
+      - name: Verify registry signatures and provenance
+        run: npm audit signatures
+      - name: Audit shipped dependencies
+        run: npm audit --omit=dev --audit-level=low
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist
+
+  verify:
+    name: verify
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run check
+      - run: npm test
+      - name: Install Chromium for WebGPU tests (SwiftShader on CI)
+        run: npx playwright install --with-deps --no-shell chromium
+      - run: npm run test:gpu
+      - name: Download the built site
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/site
+      - name: Unpack the built site (e2e tests run against the files that deploy publishes)
+        run: mkdir dist && tar -xf "$RUNNER_TEMP/site/artifact.tar" -C dist
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-report
+          path: |
+            playwright-report/
+            .vitest/attachments/
+          retention-days: 7
+
+  deploy:
+    name: deploy
+    needs: [build, verify]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write # publish the site
+      id-token: write # OIDC token that proves the deployment comes from this workflow
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

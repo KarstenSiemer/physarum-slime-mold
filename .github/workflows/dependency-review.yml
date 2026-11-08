@@ -1,0 +1,27 @@
+# Blocks pull requests that add vulnerable or unexpectedly licensed dependencies.
+name: Dependency review
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: dependency-review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          allow-licenses: >-
+            MIT, Apache-2.0, MPL-2.0, BSD-2-Clause, BSD-3-Clause, ISC, BlueOak-1.0.0, 0BSD, CC0-1.0,
+            Unlicense, CC-BY-4.0, Python-2.0
+          comment-summary-in-pr: never

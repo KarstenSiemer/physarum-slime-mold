@@ -1,0 +1,268 @@
+// Runs in Chromium with real GPU APIs (Metal locally, SwiftShader in CI). See ADR 0010.
+// Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { WebGl2Backend } from './gl/backend';
+import agentsWgsl from './shaders/agents.wgsl?raw';
+import bloomWgsl from './shaders/bloom.wgsl?raw';
+import common from './shaders/common.wgsl?raw';
+import diffuseWgsl from './shaders/diffuse.wgsl?raw';
+import histogramWgsl from './shaders/histogram.wgsl?raw';
+import initWgsl from './shaders/init.wgsl?raw';
+import paintWgsl from './shaders/paint.wgsl?raw';
+import renderWgsl from './shaders/render.wgsl?raw';
+import type { Backend, Sim } from './types';
+import { WebGpuBackend } from './webgpu';
+
+const lane = (a: Float32Array, l = 0) => Float64Array.from({ length: a.length / 4 }, (_, i) => a[i * 4 + l] ?? 0);
+const total = (a: ArrayLike<number>) => Array.from(a).reduce((s, v) => s + v, 0);
+
+describe('WGSL', () => {
+  it('compiles without errors or warnings', async () => {
+    const backend = await WebGpuBackend.create(document.createElement('canvas'));
+    const { device } = backend.gpu;
+    const sources = {
+      agents: common + agentsWgsl,
+      init: common + initWgsl,
+      diffuse: common + diffuseWgsl,
+      paint: common + paintWgsl,
+      render: renderWgsl,
+      bloom: bloomWgsl,
+      histogram: histogramWgsl,
+    };
+    for (const [name, code] of Object.entries(sources)) {
+      const info = await device.createShaderModule({ code }).getCompilationInfo();
+      expect(info.messages.map((m) => `${name}:${m.lineNum}: ${m.type}: ${m.message}`)).toEqual([]);
+    }
+    backend.destroy();
+  });
+});
+
+const BACKENDS = {
+  webgpu: (c: HTMLCanvasElement): Promise<Backend> => WebGpuBackend.create(c),
+  // Creating the backend compiles and links every GLSL program; errors throw here.
+  webgl2: (c: HTMLCanvasElement): Promise<Backend> => Promise.resolve(WebGl2Backend.create(c)),
+};
+
+describe.each(Object.entries(BACKENDS))('%s', (_, create) => {
+  let backend: Backend;
+  const live: Sim[] = [];
+
+  beforeAll(async () => {
+    backend = await create(document.createElement('canvas'));
+    console.info('backend', backend.description);
+  });
+  afterEach(() => {
+    for (const s of live.splice(0)) s.destroy();
+  });
+  afterAll(() => {
+    backend.destroy();
+  });
+
+  async function make(patch: Partial<Settings>, w: number, h: number, agents: number) {
+    const sim = await backend.createSim({ ...defaultSettings(), ...patch }, w, h, agents);
+    live.push(sim);
+    return sim;
+  }
+
+  describe('diffusion and decay', () => {
+    it('apply a periodic 3×3 mean, then × (1 − decay) (Jones 2010, p. 132)', async () => {
+      const [w, h] = [32, 16];
+      const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
+      const sim = await make({ layout: 'empty', strains }, w, h, 1);
+      const trail = Float32Array.from({ length: w * h * 4 }, (_, i) => ((i * 7919) % 101) / 10);
+      sim.writeTrail(trail);
+      sim.run(1);
+      const out = await sim.readTrail();
+      let maxErr = 0;
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++)
+          for (let c = 0; c < 4; c++) {
+            let s = 0;
+            for (let dy = -1; dy <= 1; dy++)
+              for (let dx = -1; dx <= 1; dx++) s += trail[(((y + dy + h) % h) * w + ((x + dx + w) % w)) * 4 + c] ?? 0;
+            maxErr = Math.max(maxErr, Math.abs((s / 9) * 0.9 - (out[(y * w + x) * 4 + c] ?? 0)));
+          }
+      expect(maxErr).toBeLessThan(1e-5);
+    });
+
+    it('balance mass with deposits: Σ trail′ = keep · (Σ trail + deposit · Σ counts)', async () => {
+      const sim = await make({ density: 0.5 }, 64, 64, 2048);
+      sim.run(10);
+      const before = total(lane(await sim.readTrail()));
+      sim.run(1);
+      const after = total(lane(await sim.readTrail()));
+      const moved = total(lane(await sim.readCounts()));
+      expect(moved).toBe(2048);
+      const expected = 0.9 * (before + 5 * moved);
+      expect(Math.abs(after - expected) / expected).toBeLessThan(1e-5);
+    });
+  });
+
+  describe('agent rule (Jones 2010, Fig. 3)', () => {
+    const RA = 30;
+    // Agent at the centre of a 64² grid, heading +x. SO 9, SA 45°: sensor cells F (41,32), FL (38,26), FR (38,38).
+    async function turn(f: number, fl: number, fr: number) {
+      const [w, h] = [64, 64];
+      const strains = [{ ...defaultStrain(0), sensorAngle: 45, rotationAngle: RA, sensorOffset: 9 }];
+      const sim = await make({ layout: 'empty', strains }, w, h, 1);
+      const trail = new Float32Array(w * h * 4);
+      for (const [x, y, v] of [
+        [41, 32, f],
+        [38, 26, fl],
+        [38, 38, fr],
+      ] as const)
+        trail[(y * w + x) * 4] = v;
+      sim.writeTrail(trail);
+      sim.writeAgent(0, { x: 32.5, y: 32.5, heading: 0, bits: 4 });
+      sim.run(1);
+      const [a] = await sim.readAgents();
+      if (!a) throw new Error('no agent');
+      return { ...a, deg: Math.round((a.heading * 180) / Math.PI) % 360 };
+    }
+
+    it('keeps the heading when the front sensor is strongest', async () => {
+      expect((await turn(10, 1, 1)).deg).toBe(0);
+    });
+    it('turns right by RA toward a stronger right sensor', async () => {
+      expect((await turn(1, 1, 10)).deg).toBe(RA);
+    });
+    it('turns left by RA toward a stronger left sensor', async () => {
+      expect((await turn(1, 10, 1)).deg).toBe(360 - RA);
+    });
+    it('turns randomly left or right when the front is weakest', async () => {
+      expect([RA, 360 - RA]).toContain((await turn(1, 10, 10)).deg);
+    });
+    it('keeps the heading when all sensors are equal', async () => {
+      expect((await turn(0, 0, 0)).deg).toBe(0);
+    });
+    it('moves one step along the new heading', async () => {
+      const a = await turn(1, 1, 10);
+      expect(a.x).toBeCloseTo(32.5 + Math.cos((RA * Math.PI) / 180), 3);
+      expect(a.y).toBeCloseTo(32.5 + Math.sin((RA * Math.PI) / 180), 3);
+    });
+
+    it('is blocked by a wall: no move, no deposit, new random heading', async () => {
+      const sim = await make({ layout: 'empty' }, 64, 64, 1);
+      sim.paint({ kind: 'wall', from: [33.5, 32.5], to: [33.5, 32.5], radius: 1.2 });
+      sim.writeAgent(0, { x: 32.5, y: 32.5, heading: 0, bits: 4 });
+      sim.run(1);
+      const [a] = await sim.readAgents();
+      expect(a?.x).toBe(32.5);
+      expect(a?.y).toBe(32.5);
+      expect(a?.heading).not.toBe(0);
+      expect(total(await sim.readCounts())).toBe(0);
+    });
+  });
+
+  describe('environment', () => {
+    it('paints food, light and walls, and erases them', async () => {
+      const sim = await make({ layout: 'empty' }, 64, 64, 1);
+      sim.paint({ kind: 'food', from: [10, 10], to: [20, 10], radius: 3 });
+      sim.paint({ kind: 'light', from: [40, 40], to: [40, 40], radius: 6 });
+      sim.paint({ kind: 'wall', from: [10, 50], to: [50, 50], radius: 1.5 });
+      const env = await sim.readEnv();
+      const at = (x: number, y: number, ch: number) => env[(y * 64 + x) * 4 + ch] ?? 0;
+      expect(at(15, 10, 1)).toBe(255); // food
+      expect(at(40, 40, 2)).toBeGreaterThan(200); // light, soft edge
+      expect(at(30, 50, 0)).toBe(255); // wall
+      expect(at(5, 30, 1) + at(5, 30, 0)).toBe(0);
+      sim.paint({ kind: 'erase', from: [15, 10], to: [15, 10], radius: 2 });
+      expect((await sim.readEnv())[(10 * 64 + 15) * 4 + 1]).toBe(0);
+    });
+  });
+
+  describe('determinism and collisions', () => {
+    it('gives identical agents and trails for one seed, different ones for another', async () => {
+      const run = async (seed: number) => {
+        const sim = await make({ density: 1, seed }, 64, 64, 4096);
+        sim.run(30);
+        return [await sim.readAgents(), Array.from(await sim.readTrail())];
+      };
+      expect(await run(42)).toEqual(await run(42));
+      expect(await run(43)).not.toEqual(await run(42));
+    });
+
+    it('collision mode keeps at most one agent per cell and loses none (ADR 0008)', async () => {
+      const [w, h, n] = [64, 64, 2048];
+      const sim = await make({ collisions: true, density: 0.5 }, w, h, n);
+      sim.run(40);
+      const agents = await sim.readAgents();
+      const cells = agents
+        .filter((a) => a.bits & 4)
+        .map((a) => (((Math.floor(a.y) % h) + h) % h) * w + (((Math.floor(a.x) % w) + w) % w));
+      expect(cells).toHaveLength(n);
+      expect(new Set(cells).size).toBe(n);
+    });
+  });
+
+  describe('pattern formation', () => {
+    // Mean length of runs of below-mean cells along rows and columns: the typical lacuna width.
+    function lacunaWidth(t: Float64Array, w: number, h: number) {
+      const m = total(t) / t.length;
+      let runs = 0;
+      let cells = 0;
+      const scan = (get: (i: number) => number, n: number) => {
+        let run = 0;
+        for (let i = 0; i < n; i++) {
+          if (get(i) < m) run++;
+          else if (run > 0) {
+            runs++;
+            cells += run;
+            run = 0;
+          }
+        }
+      };
+      for (let y = 0; y < h; y++) scan((x) => t[y * w + x] ?? 0, w);
+      for (let x = 0; x < w; x++) scan((y) => t[y * w + x] ?? 0, h);
+      return cells / Math.max(1, runs);
+    }
+
+    // Autocorrelation half width: the typical thickness of the paths.
+    function halfWidth(t: Float64Array, w: number, h: number) {
+      const m = total(t) / t.length;
+      const v = total(t.map((x) => (x - m) ** 2)) / t.length;
+      for (let r = 1; r < w / 2; r++) {
+        let c = 0;
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            const a = (t[y * w + x] ?? 0) - m;
+            c += a * ((t[y * w + ((x + r) % w)] ?? 0) - m) + a * ((t[((y + r) % h) * w + x] ?? 0) - m);
+          }
+        if (c / (2 * t.length * v) < 0.5) return r;
+      }
+      return w / 2;
+    }
+
+    // Jones 2010, Fig. 10: %p 15, SA 45, RA 45, collisions, 500 steps on a 200² lattice.
+    async function grow(sensorOffset: number) {
+      const [size, density] = [200, 0.15];
+      const strain = { ...defaultStrain(0), sensorOffset, sensorAngle: 45, rotationAngle: 45 };
+      const sim = await make(
+        { density, seed: 3, collisions: true, strains: [strain] },
+        size,
+        size,
+        Math.round(density * size * size),
+      );
+      sim.run(500);
+      const t = lane(await sim.readTrail());
+      return { sensorOffset, lacuna: lacunaWidth(t, size, size), half: halfWidth(t, size, size) };
+    }
+
+    // Slow on SwiftShader (CPU), hence the long timeout.
+    it(
+      'forms networks whose scale grows with the sensor offset (Jones 2010, Fig. 10)',
+      { timeout: 240_000 },
+      async () => {
+        const runs = [];
+        for (const so of [3, 9, 15, 25]) runs.push(await grow(so));
+        console.info('pattern scale', runs);
+        for (let i = 1; i < runs.length; i++) {
+          expect(runs[i]?.lacuna).toBeGreaterThan(runs[i - 1]?.lacuna ?? Infinity);
+          expect(runs[i]?.half).toBeGreaterThanOrEqual(runs[i - 1]?.half ?? Infinity);
+        }
+        expect(runs.at(-1)?.lacuna).toBeGreaterThan(2 * (runs[0]?.lacuna ?? Infinity));
+      },
+    );
+  });
+});
