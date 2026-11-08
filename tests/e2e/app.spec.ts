@@ -58,6 +58,8 @@ test('fits a shared link to the device memory before the first allocation', asyn
     Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
   });
   await page.goto(await smallScene({ resolution: 2048, density: 1 }));
+  // The notice appears before the first allocation and stays 7 s; the first steps on SwiftShader take longer.
+  await expect(page.getByRole('status')).toContainText('Lowered the grid to', { timeout: 60_000 });
   await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
   const sim = await page.evaluate(() => {
     const e = globalThis.physarum;
@@ -66,7 +68,6 @@ test('fits a shared link to the device memory before the first allocation', asyn
   });
   expect(sim.grid).toBeLessThan(2048);
   expect(estimateBytes(sim.width, sim.height, sim.agents)).toBeLessThanOrEqual(memoryBudget(0.25));
-  await expect(page.getByRole('status')).toContainText('Lowered the grid to');
   // The panel shows the grid that the engine runs (startup tuning may lower it further).
   const select = page.getByLabel('Grid (cells on the long side)');
   await expect
