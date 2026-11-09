@@ -1,7 +1,7 @@
-// Scene name, scene card, grouped presets and Learn → Scenes.
+// Scene name, scene card, grouped presets, the one-agent-per-cell switch and Learn → Scenes.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openSmallScene, watchErrors } from './helpers';
+import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 const serious = async (page: Page, include?: string) => {
   const axe = new AxeBuilder({ page });
@@ -105,6 +105,73 @@ test('hiding and showing the panel keeps the scene', async ({ page }) => {
   await expect(card(page).getByRole('heading', { name: 'Turing spots' })).toBeVisible();
 });
 
+test('switching one agent per cell restarts the population, and its help opens', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openSmallScene(page);
+  await page.locator('canvas').click();
+  await page.keyboard.press('Space');
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.paused)).toBe(true);
+  expect(await page.evaluate(() => globalThis.physarum?.sim.step)).toBeGreaterThan(0);
+  const help = page.getByRole('button', { name: 'About One agent per cell' });
+  await help.click();
+  await expect(help).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#rule-help')).toContainText('Switching the rule restarts the population.');
+  const rule = page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' });
+  await rule.check();
+  await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.step)).toBe(0);
+  await page.locator('canvas').click();
+  await page.keyboard.press('.');
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.step)).toBe(1);
+  await rule.uncheck();
+  await page.waitForFunction(() => globalThis.physarum?.settings.collisions === false);
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.step)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('switching the rule off in a Jones scene explains the collapse', async ({ page }) => {
+  await openSmallScene(page);
+  await preset(page).selectOption('spots');
+  await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
+  await page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' }).uncheck();
+  await expect(page.getByRole('status')).toContainText('Without one agent per cell');
+  await expect(card(page).getByText('changed', { exact: true })).toBeVisible();
+});
+
+test('without the rule in this browser, Jones scenes load with the switch off and one notice', async ({ page }) => {
+  test.slow(); // waits for the notice to hide
+  const errors = watchErrors(page);
+  // WebGL2 without EXT_float_blend cannot run one agent per cell (ADR 0003, ADR 0008).
+  await page.addInitScript(() => {
+    const proto = WebGL2RenderingContext.prototype;
+    const original = Object.getOwnPropertyDescriptor(proto, 'getExtension')?.value as (
+      this: WebGL2RenderingContext,
+      name: string,
+    ) => unknown;
+    Object.defineProperty(proto, 'getExtension', {
+      value(this: WebGL2RenderingContext, name: string) {
+        return name === 'EXT_float_blend' ? null : original.call(this, name);
+      },
+    });
+  });
+  await page.goto((await smallScene()).replace('/#', '/?backend=webgl2#'));
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  expect(await page.evaluate(() => globalThis.physarum?.backend.supportsCollisions)).toBe(false);
+  const rule = page.getByRole('checkbox', { name: /^One agent per cell/ });
+  await preset(page).selectOption('spots');
+  await expect(page.getByRole('status')).toContainText('cannot run one agent per cell');
+  await expect(rule).not.toBeChecked();
+  await expect(rule).toBeDisabled();
+  await expect(card(page).getByText('changed', { exact: true })).toBeHidden();
+  await expect(page.getByRole('status')).toBeHidden({ timeout: 20_000 });
+  await preset(page).selectOption('shortest-path');
+  await expect(card(page).getByRole('heading', { name: 'Shortest path' })).toBeVisible();
+  await expect(rule).not.toBeChecked();
+  await page.waitForTimeout(500);
+  await expect(page.getByRole('status')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('Learn → Scenes loads a scene, and the panel shows it', async ({ page }) => {
   const errors = watchErrors(page);
   await openSmallScene(page);
@@ -146,6 +213,7 @@ test.describe('on a 375 × 812 phone', () => {
     await card(page).getByRole('button', { name: 'Jones 2010, Fig. 18' }).click();
     await card(page).getByText('About this scene').click();
     await expect(card(page).getByText('Why these settings')).toBeVisible();
+    await page.getByRole('button', { name: 'About One agent per cell' }).click();
     expect(await noSideways(page, '.panel')).toEqual({ page: true, inside: true, scroll: true });
     await page.getByRole('button', { name: 'Learn', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Learn' });

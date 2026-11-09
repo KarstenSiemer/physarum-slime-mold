@@ -1,6 +1,6 @@
 import type { Engine } from '../engine/engine';
 import { defaultSettings, type Settings } from '../model/params';
-import { presetById, type Preset } from '../model/presets';
+import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
 import { modelChanged } from '../model/scene';
 
 export const TOOLS = [
@@ -79,24 +79,39 @@ export const app = $state<AppState>({
 });
 
 /**
- * Makes `p` the current scene with fresh settings, capped to the grid this device runs. The caller hands
- * the settings and the environment to the engine.
+ * Makes `p` the current scene with fresh settings, capped to what this device runs (grid size, the
+ * one-agent-per-cell rule). The caller hands the settings and the environment to the engine.
  */
 export function setScene(p: Preset) {
   const s = p.settings();
   s.resolution = Math.min(s.resolution, app.maxResolution);
+  if (!app.canCollide) s.collisions = false;
   const base = structuredClone(s);
   app.settings = s;
   app.scene = p.id;
   app.sceneBase = base;
 }
 
+let ruleNoticeShown = false;
+
 /** Loads a preset (capped to the device's grid size) with its food, light and walls. */
 export function loadPreset(id: string) {
   const p = presetById(id);
   if (!p) return;
   setScene(p);
+  // Once per page load: this backend runs the rule-based scenes without the rule.
+  if (!app.canCollide && !ruleNoticeShown && usesRule(p)) {
+    ruleNoticeShown = true;
+    showNotice(RULE_MISSING_NOTICE, 12_000);
+  }
   void engine?.load($state.snapshot(app.settings), p.env);
+}
+
+/** The backend cannot run one agent per cell: the switch shows it off, and that is no change to the scene. */
+export function ruleUnavailable() {
+  app.canCollide = false;
+  app.settings.collisions = false;
+  if (app.sceneBase) app.sceneBase.collisions = false;
 }
 
 /**
@@ -117,10 +132,10 @@ export function openLearn(tab: LearnTab) {
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Shows a short message for a few seconds. */
-export function showNotice(text: string) {
+export function showNotice(text: string, ms = 7000) {
   app.notice = text;
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => (app.notice = ''), 7000);
+  noticeTimer = setTimeout(() => (app.notice = ''), ms);
 }
 
 let engine: Engine | undefined;

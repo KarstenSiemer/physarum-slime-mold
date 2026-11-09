@@ -10,7 +10,16 @@
   import Panel from './ui/Panel.svelte';
   import SceneLabel from './ui/SceneLabel.svelte';
   import { constrain, RESOLUTIONS } from './model/params';
-  import { app, getEngine, setEngine, setScene, showNotice, TOOLS, type Tool } from './ui/state.svelte';
+  import {
+    app,
+    getEngine,
+    ruleUnavailable,
+    setEngine,
+    setScene,
+    showNotice,
+    TOOLS,
+    type Tool,
+  } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
 
   let canvas: HTMLCanvasElement;
@@ -47,8 +56,7 @@
           engine.destroy();
           return;
         }
-        app.canCollide = engine.backend.supportsCollisions;
-        if (!app.canCollide) app.settings.collisions = false;
+        if (!engine.backend.supportsCollisions) ruleUnavailable();
         engine.onError = fail;
         setEngine(engine);
         Object.assign(globalThis, { physarum: engine });

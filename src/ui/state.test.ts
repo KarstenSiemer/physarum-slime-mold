@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { app, loadPreset, sceneChanged } from './state.svelte';
+import { app, loadPreset, ruleUnavailable, sceneChanged } from './state.svelte';
 
-// One app state per module: the tests run in order.
+// One app state per module: the tests run in order, and the last one takes the rule away.
 describe('the current scene', () => {
   beforeAll(() => {
     vi.useFakeTimers(); // notices hide themselves after a few seconds
@@ -33,5 +33,19 @@ describe('the current scene', () => {
     app.settings.resolution = 512; // the user's choice
     expect(sceneChanged()).toBe(true);
     app.maxResolution = 4096;
+  });
+
+  it('keeps the rule off without the backend feature, and says so once per page load', () => {
+    ruleUnavailable();
+    loadPreset('spots');
+    expect(app.settings.collisions).toBe(false);
+    expect(sceneChanged()).toBe(false);
+    expect(app.notice).toMatch(/cannot run one agent per cell/);
+    app.notice = '';
+    loadPreset('network');
+    expect(app.settings.collisions).toBe(false);
+    expect(app.notice).toBe('');
+    loadPreset('three-strains'); // made without the rule: no notice either
+    expect(app.notice).toBe('');
   });
 });

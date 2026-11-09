@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { globalSpec, strainSpec, type Spec } from '../model/params';
+  import { collisionsHelp, globalSpec, strainSpec } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
@@ -17,7 +17,11 @@
     app.learn = false;
   }
 
-  const specs: Spec[] = [...Object.values(strainSpec), ...Object.values(globalSpec)];
+  const specs: { label: string; help: string; ref?: string }[] = [
+    ...Object.values(strainSpec),
+    ...Object.values(globalSpec),
+    collisionsHelp,
+  ];
 
   // Each scene's strains with the numbers of its own settings (not the live ones).
   const sceneStrains = new Map(

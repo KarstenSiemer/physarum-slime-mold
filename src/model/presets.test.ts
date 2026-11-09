@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { constrain, MAX_STRAINS, sanitize, type Settings } from './params';
-import { GROUPS, PRESETS, presetById, sourceKind, sourceText, START, usesRule, type Preset } from './presets';
+import {
+  GROUPS,
+  PRESETS,
+  presetById,
+  RULE_MISSING_NOTICE,
+  ruleOffNotice,
+  sourceKind,
+  sourceText,
+  START,
+  usesRule,
+  type Preset,
+} from './presets';
 
 const preset = (id: string): Preset => {
   const p = presetById(id);
@@ -169,8 +180,9 @@ describe('presets', () => {
       expect(sentences, `${p.id}: sentences in about`).toBeGreaterThanOrEqual(2);
       expect(sentences, `${p.id}: sentences in about`).toBeLessThanOrEqual(4);
       expect(p.watch !== undefined, p.id).toBe(p.group === 'experiments');
-      for (const t of texts(p)) expect(t, p.id).not.toMatch(/—/);
+      for (const t of [...texts(p), ruleOffNotice(p)]) expect(t, p.id).not.toMatch(/—/);
     }
+    expect(RULE_MISSING_NOTICE).not.toMatch(/—/);
   });
 
   it('only mention numbers that match the settings', () => {
@@ -215,5 +227,11 @@ describe('presets', () => {
     expect(sourceKind(preset('maze'))).toBe('nakagaki');
     expect(sourceKind(preset('light'))).toBe('app');
     expect(sourceKind(preset('dunes'))).toBe('fogleman');
+  });
+
+  it('warn about the collapse only where the strain follows its own trail', () => {
+    expect(ruleOffNotice(preset('network'))).toMatch(/straight lines/);
+    expect(ruleOffNotice(preset('steiner'))).toMatch(/straight lines/);
+    for (const id of ['spots', 'stripes', 'wound']) expect(ruleOffNotice(preset(id)), id).not.toMatch(/lines/);
   });
 });

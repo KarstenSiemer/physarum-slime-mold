@@ -392,6 +392,21 @@ export const presetById = (id: string) => PRESETS.find((p) => p.id === id);
 /** True for scenes made for Jones' one-agent-per-cell rule. */
 export const usesRule = (p: Preset) => p.settings().collisions;
 
+/** Shown once per page load when a scene made for the rule loads on a backend without it. */
+export const RULE_MISSING_NOTICE =
+  'This browser cannot run one agent per cell (it lacks the GPU feature EXT_float_blend). Jones’ scenes run without the rule here: his networks contract into a few lines, and other patterns can look different.';
+
+/**
+ * Shown when the user switches the rule off in a scene made for it. The collapse is measured for the
+ * Transport network (ADR 0008); a repelling pattern still forms without the rule, so it gets the milder text.
+ */
+export function ruleOffNotice(p: Preset): string {
+  const attracted = (p.settings().strains[0]?.attraction[0] ?? 0) > 0;
+  return attracted
+    ? 'Without one agent per cell, agents pile up in the same cells and Jones’ networks contract: the Transport network ends as a few straight lines within a few thousand steps. Tick the box to restart with the rule.'
+    : 'Without one agent per cell, several agents can share a cell. Jones made this pattern with the rule, so it can turn out different. Tick the box to restart with the rule.';
+}
+
 export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {

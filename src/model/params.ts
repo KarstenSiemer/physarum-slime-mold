@@ -202,6 +202,13 @@ export const globalSpec = {
 
 export type GlobalKey = keyof typeof globalSpec;
 
+/** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */
+export const collisionsHelp = {
+  label: 'One agent per cell',
+  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. Switching the rule restarts the population. Turning it on caps Agents per cell at 1.',
+  ref: 'Jones 2010, p. 133 and 135',
+} as const;
+
 export interface Settings extends Record<GlobalKey, number> {
   seed: number;
   resolution: number;

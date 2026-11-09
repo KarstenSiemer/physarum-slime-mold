@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     BOUNDARIES,
+    collisionsHelp,
     globalSpec,
     LAYOUTS,
     MAX_STRAINS,
@@ -9,12 +10,12 @@
     STYLES,
     type Strain,
   } from '../model/params';
-  import { GROUPS, PRESETS } from '../model/presets';
+  import { GROUPS, PRESETS, presetById, ruleOffNotice, usesRule } from '../model/presets';
   import Matrix from './Matrix.svelte';
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
-  import { app, getEngine, loadPreset } from './state.svelte';
+  import { app, getEngine, loadPreset, showNotice } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
   const s = $derived(app.settings);
@@ -40,6 +41,8 @@
     agents: 'Agents only',
   };
 
+  let ruleHelp = $state(false);
+
   // A new strain copies strain A of the scene: the defaults are Jones' values without the rule, which collapse.
   function addStrain() {
     const first = s.strains[0];
@@ -50,6 +53,13 @@
     s.strains.splice(i, 1);
     for (const st of s.strains) st.attraction = [...st.attraction.slice(0, i), ...st.attraction.slice(i + 1), -1];
     app.strain = Math.min(app.strain, s.strains.length - 1);
+  }
+
+  // The engine restarts the population on every switch, so the rule holds for every cell (ADR 0008).
+  function setRule(on: boolean) {
+    s.collisions = on;
+    const scene = presetById(app.scene);
+    if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene), 12_000);
   }
 </script>
 
@@ -93,10 +103,34 @@
         {#each RESOLUTIONS as r (r)}<option value={r}>{r}</option>{/each}
       </select>
     </label>
-    <label class="check" title={app.canCollide ? undefined : 'This browser lacks the GPU feature (EXT_float_blend).'}>
-      <input type="checkbox" bind:checked={s.collisions} disabled={!app.canCollide} />
-      <span>One agent per cell (Jones 2010){app.canCollide ? '' : ': not available here'}</span>
-    </label>
+    <div class="check">
+      <label>
+        <input
+          type="checkbox"
+          checked={s.collisions && app.canCollide}
+          disabled={!app.canCollide}
+          onchange={(e) => {
+            setRule(e.currentTarget.checked);
+          }}
+        />
+        <span>One agent per cell (Jones 2010){app.canCollide ? '' : ': not available here'}</span>
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={ruleHelp}
+        aria-controls="rule-help"
+        aria-label="About {collisionsHelp.label}"
+        onclick={() => (ruleHelp = !ruleHelp)}>?</button
+      >
+    </div>
+    {#if ruleHelp}
+      <p class="helptext" id="rule-help">
+        {collisionsHelp.help}
+        {#if !app.canCollide}Not available in this browser: it lacks the GPU feature EXT_float_blend.{/if}
+        <cite>{collisionsHelp.ref}</cite>
+      </p>
+    {/if}
   </Section>
 
   <Section title="Strains" open>
@@ -161,8 +195,35 @@
   }
   .check {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     margin: 8px 0;
+  }
+  .check label {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  /* WCAG 2.2 target size (2.5.8): at least 24 × 24 px. */
+  .help {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .helptext {
+    margin: -2px 0 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  cite {
+    display: block;
+    font-style: normal;
+    color: var(--accent);
+    opacity: 0.8;
   }
 </style>
