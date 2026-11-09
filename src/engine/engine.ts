@@ -8,8 +8,9 @@ import { WebGpuBackend } from './webgpu';
 
 const MAX_STEPS_PER_FRAME = 16;
 
-// Changes that need a new population. Switching one agent per cell restarts it too: agents stacked without the
-// rule would stay stacked for thousands of steps, and a collapsed network would carry over (ADR 0008).
+// Changes that need a new population.
+// Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
+// thousands of steps, and a collapsed network would carry over (ADR 0008).
 const RESET_KEYS = ['seed', 'layout', 'boundary', 'collisions'] as const;
 
 /** Picks WebGPU, or WebGL2 when WebGPU is missing or `?backend=webgl2` (ADR 0003). */
