@@ -1,0 +1,46 @@
+# Self-hosted Renovate with a GitHub App token (docs/adr/0015-renovate.md).
+# Skipped until the repository variable RENOVATE_CLIENT_ID exists.
+name: Renovate
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: renovate
+
+jobs:
+  renovate:
+    name: renovate
+    if: vars.RENOVATE_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: renovate # holds the App key; restrict it to main
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RENOVATE_CLIENT_ID }}
+          private-key: ${{ secrets.RENOVATE_PRIVATE_KEY }}
+          # Narrow the token to what Renovate needs (docs.renovatebot.com/modules/platform/github).
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write # dependency dashboard
+          permission-workflows: write # update pinned action digests
+          permission-statuses: write # minimum-release-age status
+          permission-checks: write
+          permission-administration: read # read branch rules for auto-merge
+          permission-vulnerability-alerts: read
+      - uses: renovatebot/github-action@1c0cf989c02653fba0efe7ca5772338860ca71dc # v46.3.12
+        with:
+          token: ${{ steps.app.outputs.token }}
+          # Pinned by version and digest; Renovate proposes updates for review (customManagers in renovate.json).
+          # Docker Hub, not GHCR: only Docker Hub gives release dates, so the 3-day release age applies.
+          renovate-image: docker.io/renovate/renovate:44.219.0@sha256:7ae452492cd2393dbb8d401c6a3e7569bb7e6b5a7d2783739a6e4af576fd248a
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_PLATFORM_COMMIT: enabled
+          RENOVATE_ONBOARDING: 'false'
