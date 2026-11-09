@@ -10,7 +10,7 @@
     "npm": ">=11.10"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --config vite.config.ts",
     "build": "vite build",
     "preview": "vite preview --port 4173 --strictPort",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",

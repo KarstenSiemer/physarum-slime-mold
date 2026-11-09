@@ -33,6 +33,15 @@ GPU checks use invariants, not long exact trajectories:
 
 ## Consequences
 
-- CI runs real WGSL on SwiftShader; scenes in CI tests stay small (≤ 256² cells, ≤ 64 k
-  agents) for speed.
-- Real-GPU coverage (Metal) comes from the local loop; performance numbers never gate CI.
+- CI runs real WGSL on SwiftShader, so CI scenes stay small: the model tests in
+  `sim.gpu.test.ts` use at most 200² cells and 6000 agents, `engine.gpu.test.ts` and the e2e
+  tests (1280 × 720 viewport) 512 × 288 cells.
+- Real-GPU coverage (Metal) comes from the local loop. CI asserts no performance numbers (the
+  planned steps/s report is local only), but its time limits fail a run that SwiftShader makes
+  too slow (next bullet).
+- The Fig. 10 test (200², 2000 WebGPU steps) took 102 to over 240 s on GitHub runners, on
+  identical code; CI was not profiled. The old 240 s timeout failed the first CI run on `main`
+  (2026-11-09); the timeout is now 600 s. On SwiftShader on macOS a step of this test takes
+  19 ms with the tiled diffuse pass and 4.1 ms without the tile. On Metal (M3 Pro) the tile
+  saves about 25 % of the diffuse pass and about 4 % of an app-like step, so the app keeps it
+  ([webgpu-platform](../knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)).

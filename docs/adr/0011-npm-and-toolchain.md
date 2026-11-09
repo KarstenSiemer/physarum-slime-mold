@@ -34,6 +34,21 @@ TypeScript stays on **6.0.x**: TypeScript 7.0.2 shipped on 2026-11-08, but
 `typescript-eslint` 8.72 accepts `<6.1.0` and `svelte-check` 4.7 accepts `^5 || ^6`
 (`npm view … peerDependencies`). Renovate's major-update PR shows when the ecosystem is ready.
 
+`npm run dev` names its config file: `vite --config vite.config.ts`. Vite restarts the dev
+server when `vite.config.ts` or `svelte.config.js` changes or disappears, for example during a
+`git checkout`. Without `--config`, a restart that finds no config file runs on without plugins.
+That server no longer reacts when `vite.config.ts` comes back, and without the Svelte plugin
+nothing watches `svelte.config.js`. Every `.svelte` request then fails with "Failed to parse
+source for import analysis" until the server restarts for another reason, by hand or after a
+`.env` change (Vite 8.3.6 `dist/node/chunks/node.js:37942–37951` and `:25381`,
+vite-plugin-svelte 7.3.1 `src/utils/watch.js:64–66`). With `--config`, the missing file fails
+the restart and Vite keeps the running server (`node.js:25192–25205`). The restored file then
+restarts it. A restart request during a running restart is not lost: Vite runs one more
+restart afterwards (`node.js:24905–24924`). Verified on 2026-11-09: both files removed and
+restored after 0, 30 and 300 ms, two runs each. Without the flag, 300 ms left the server without
+plugins in both runs. With the flag, every run ended on the restored config. The rebase onto
+the old `main` (no project files) on 2026-11-08 broke the dev server this way.
+
 ## Consequences
 
 - New releases are invisible for 3 days, including fixes; Renovate's vulnerability PRs

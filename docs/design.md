@@ -47,15 +47,18 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 
 ### Buffers and textures
 
-| Resource           | Format                                           | Size                   | Use                                                   |
-| ------------------ | ------------------------------------------------ | ---------------------- | ----------------------------------------------------- |
-| `agents`           | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N               | `meta`: strain (2 bit), alive (1 bit)                 |
-| `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H           | chemoattractant per strain                            |
-| `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H            | food attractant (r), light repellent (g)              |
-| `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H           | agents that moved into the cell this step, per strain |
-| `env`              | storage `u32` per cell                           | 4 B × W × H            | packed bytes: wall, food, light                       |
-| `occ[2]`, `claims` | storage `u32` per cell                           | only in collision mode | occupancy and move claims                             |
-| `params`           | uniform                                          | < 1 KiB                | all parameters, packed from `params.ts`               |
+| Resource           | Format                                           | Size             | Use                                                   |
+| ------------------ | ------------------------------------------------ | ---------------- | ----------------------------------------------------- |
+| `agents`           | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N         | `meta`: strain (2 bit), alive (1 bit)                 |
+| `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
+| `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
+| `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | agents that moved into the cell this step, per strain |
+| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall, food, light                       |
+| `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
+| `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
+
+`occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
+with float blending).
 
 `rgba32float` and not `rgba16float`: with half floats `x · (1 − 0.0001)` rounds back to `x`,
 so the small decay values from Jones Fig. 12 would stop working.
@@ -74,8 +77,10 @@ so the small decay values from Jones Fig. 12 would stop working.
    heading and calls `atomicMin(claims[target], key)` with a unique per-step key (bijective
    hash of the agent index). Pass 2b moves the winners. Free target = empty at step start.
    Deterministic: integer atomics and unique keys.
-4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory), repeated
-   `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
+4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
+   tile saves about 25 % of this pass, see
+   [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
+   repeated `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
    3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
    `scent` with `food · 255 · wProj` and `light · 255 · wLight` as sources.
 

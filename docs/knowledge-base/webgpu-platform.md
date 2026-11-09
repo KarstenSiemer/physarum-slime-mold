@@ -55,6 +55,38 @@ Facts learned:
   the app's engine was still not ready after 10 minutes. Chromium's compositor drew no frame
   after the first 9 s, so its GPU process was busy; the cause inside it was not measured.
 
+## SwiftShader and the tiled diffuse pass (measured 2026-11-09)
+
+- In new headless mode (`channel: 'chromium'`), `--use-webgpu-adapter=swiftshader` selects
+  SwiftShader instead of Metal on macOS: `google swiftshader` with `isFallbackAdapter: true`.
+- The diffuse pass (`diffuse.wgsl`) loads a 16 × 16 tile with a 1-cell halo into workgroup
+  memory and waits at `workgroupBarrier()`. For comparison, a plain variant let each invocation
+  load its own 3 × 3 neighbourhood: same math and summation order, no workgroup memory, no
+  barrier. After 200 steps (200 × 200 cells, 6000 agents, collisions) both gave identical trails
+  for wrap, box and dish, on SwiftShader and on Metal.
+- Setup: Apple M3 Pro, macOS 26.6.2, Chromium 156.0.8078.4 (Playwright 1.64.1), Vitest browser
+  mode. Time per step: N steps after 5 warm-up steps, from the first submit to
+  `device.queue.onSubmittedWorkDone()`, divided by N (N = 60 on SwiftShader, 200 or 300 on
+  Metal). Two rounds each. An "empty, 1 agent" step runs the diffuse pass, a pass for one agent
+  and two buffer clears.
+
+  | Adapter     | Scene                                           | Tiled        | Plain      |
+  | ----------- | ----------------------------------------------- | ------------ | ---------- |
+  | SwiftShader | 200 × 200, empty, 1 agent                       | 16.3–16.5 ms | 2.7–2.8 ms |
+  | SwiftShader | 200 × 200, Fig. 10 (collisions, 6000 agents)    | 18.1–19.9 ms | 4.1 ms     |
+  | Metal       | 1536 × 1024, empty, 1 agent                     | 1.9–2.1 ms   | 2.7–2.8 ms |
+  | Metal       | 2048 × 2048, empty, 1 agent                     | 5.0–5.2 ms   | 6.7–6.8 ms |
+  | Metal       | 1536 × 1024, 1.57 million agents, no collisions | 12.3–12.5 ms | 13.0 ms    |
+
+- On Metal the tile saves about 25 % of an "empty, 1 agent" step and about 4 % of the step with
+  1.57 million agents, so the app keeps it. Other GPUs were not measured.
+- One command buffer for 100 steps instead of one per step (timed to `readTrail()`) changed
+  little on SwiftShader: 18.6 against 19.0 ms per step.
+- CI (Linux x86-64 SwiftShader) was not profiled, so the share of the tile in the CI time is
+  unknown. There the Fig. 10 test (2000 WebGPU steps) took 102, 204, 213 and over 240 s on
+  identical code (2026-11-08 and 09). Its WebGL2 run, which has no workgroup tile, took 31 to
+  69 s. The test's timeout is now 600 s (ADR 0010).
+
 ## Feature availability (web3dsurvey share of WebGPU devices)
 
 | Feature                                      | Chrome | Safari 26–27                 | Firefox         |
