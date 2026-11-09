@@ -57,6 +57,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Mobile layout check (375 × 812: settings closed, one toolbar row, no sideways scroll, error box fits)
 - [x] Scene card (source, summary, what to watch, strains from the live settings, why), scene name over the canvas, presets in groups, Learn → Scenes; preset unit tests check the texts against the settings (2026-11-09)
 - [x] One agent per cell: help, notice when switched off in a scene made for it, restart on every switch, kept off without `EXT_float_blend` (2026-11-09)
+- [ ] Dish scenes alike on every screen shape: food positions relative to the dish, and agents counted in the dish rather than the grid. Today Shortest path and Steiner tree end differently on a tall screen (a thick lens, a long bridge; measured on WebGPU on a 118 × 256 grid, 2026-11-10), and one food of Shrinking plasmodium lies outside the dish there; their texts say so
 
 ## M5 Quality and reach
 

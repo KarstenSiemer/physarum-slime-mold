@@ -64,7 +64,7 @@ test('the scene card shows after choosing a preset', async ({ page }) => {
   await preset(page).selectOption('shortest-path');
   await expect(card(page).getByRole('heading', { name: 'Shortest path' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Scene: Shortest path/ })).toBeVisible();
-  await expect(card(page)).toContainText('the network shrinks to one short path');
+  await expect(card(page)).toContainText('the network contracts into one band between them');
   await expect(card(page)).toContainText('What to watch:');
   // The source chip explains Jones 2010.
   const chip = card(page).getByRole('button', { name: 'Jones 2010, Fig. 18' });

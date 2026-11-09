@@ -206,11 +206,11 @@ PRESETS.push(
     name: 'Shortest path',
     group: 'experiments',
     source: 'Jones 2010, Fig. 18',
-    summary: 'Two food sources in a dish: the network shrinks to one short path between them.',
+    summary: 'Two food sources in a dish: the network contracts into one band between them.',
     watch:
-      'A loose network forms, snags on both food sources, then contracts until one short path joins them, like the real slime mold between two oat flakes. In some runs a side branch to the rim stays for a long time.',
+      'A loose network forms, snags on both food sources, then contracts into one band between them, like the real slime mold between two oat flakes. On a tall screen the foods sit closer, and the band stays a thick lens. In some runs a side branch to the rim stays for a long time.',
     about:
-      'Several hundred agents in a round dish with two food sources. Food releases a scent that spreads and fades like the trail, so the network snags on both foods. Then it contracts like a soap film until one band joins them. The band is several cells wide, because only one agent fits in a cell.',
+      'Several hundred agents in a round dish with two food sources. Food releases a scent that spreads and fades like the trail, so the network snags on both foods. Then it contracts like a soap film until one band joins them. The band stays many cells wide, because only one agent fits in a cell.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 18 (p. 145): 2 % of cells hold an agent, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. On grid 256 the dish is smaller than Jones’ 200 × 200 lattice, so a run takes a few thousand steps.',
     settings: () =>
@@ -227,7 +227,7 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 19',
     summary: 'Four food sources: the network shrinks to a short tree that joins them all.',
     watch:
-      'A loose network wraps around the four food sources, then contracts. It usually ends as two three-way junctions joined by a short bridge, where the paths meet at about 120°, as soap films do (Plateau’s laws).',
+      'A loose network wraps around the four food sources, then contracts. On a wide screen it usually ends as two three-way junctions joined by a short bridge, where paths meet at about 120° as in soap films (Plateau’s laws). On a tall screen the foods sit in a tall rectangle, and the bridge is long.',
     about:
       'The same setup with four food sources and fewer agents. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
