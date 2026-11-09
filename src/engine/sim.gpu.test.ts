@@ -249,10 +249,12 @@ describe.each(Object.entries(BACKENDS))('%s', (_, create) => {
       return { sensorOffset, lacuna: lacunaWidth(t, size, size), half: halfWidth(t, size, size) };
     }
 
-    // Slow on SwiftShader (CPU), hence the long timeout.
+    // 2000 WebGPU steps on SwiftShader (CPU) took 102 to over 240 s on GitHub runners (not profiled). On macOS
+    // SwiftShader a step of this test takes 19 ms with the tiled diffuse pass and 4.1 ms without the tile; the
+    // tile stays because Metal runs it faster (docs/knowledge-base/webgpu-platform.md).
     it(
       'forms networks whose scale grows with the sensor offset (Jones 2010, Fig. 10)',
-      { timeout: 240_000 },
+      { timeout: 600_000 },
       async () => {
         const runs = [];
         for (const so of [3, 9, 15, 25]) runs.push(await grow(so));

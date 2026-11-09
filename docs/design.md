@@ -74,8 +74,10 @@ so the small decay values from Jones Fig. 12 would stop working.
    heading and calls `atomicMin(claims[target], key)` with a unique per-step key (bijective
    hash of the agent index). Pass 2b moves the winners. Free target = empty at step start.
    Deterministic: integer atomics and unique keys.
-4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory), repeated
-   `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
+4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
+   tile saves about 25 % of this pass, see
+   [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
+   repeated `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
    3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
    `scent` with `food · 255 · wProj` and `light · 255 · wLight` as sources.
 
