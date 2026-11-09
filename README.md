@@ -69,11 +69,11 @@ pre-commit install   # hooks for commit and push
 
 Tests:
 
-| Command            | What                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------- |
-| `npm test`         | unit tests (parameters, presets and their texts, URL parsing with fuzzing, packing, colors) |
-| `npm run test:gpu` | shaders compile; every model rule on **both** backends, mass balance, determinism, Fig. 10  |
-| `npm run test:e2e` | the built app in Chromium: boot, WebGL2 fallback, tools, presets, keyboard, axe a11y scan   |
+| Command            | What                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `npm test`         | unit tests (parameters, presets and their texts, URL parsing with fuzzing, packing, colors, levels) |
+| `npm run test:gpu` | shaders compile; every model rule on **both** backends, mass balance, determinism, Fig. 10          |
+| `npm run test:e2e` | the built app in Chromium: boot, WebGL2 fallback, tools, presets, keyboard, axe a11y scan           |
 
 GPU tests use the real GPU locally and SwiftShader on GPU-less CI.
 
