@@ -6,12 +6,17 @@ import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
+import sortWgsl from './shaders/sort.wgsl?raw';
 import { diffusePlan, type Diffuse } from './sizing';
 import { EnvKind, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
 const GROUP = 256;
 const TILE = 16;
+/** Steps between two spatial sorts of the agents. Measured: their locality halves about 150 steps after a sort. */
+const SORT_INTERVAL = 32;
+/** Cells per side of a sort tile (sort.wgsl SHIFT). */
+const SORT_TILE = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -25,7 +30,16 @@ export class Simulation implements Sim {
   private readonly paramData = new ArrayBuffer(PARAMS_BYTES);
   private readonly params: GPUBuffer;
   private readonly brush: GPUBuffer;
-  readonly agentBuffer: GPUBuffer;
+  /** Two agent buffers: the sort writes into the other one (ping-pong, no copy back). */
+  private readonly agentBuffers: Pair<GPUBuffer>;
+  /** Which agent buffer is current. Every bind group that holds one has it in its cache key. */
+  private agentParity: Bit = 0;
+  /** Agents per sort tile, then offsets and cursors (sort.wgsl). */
+  private readonly tiles: GPUBuffer;
+  /** The new agent for writeAgent() (agents.wgsl `replace`). */
+  private readonly replacement: GPUBuffer;
+  /** Sort the agents by position every this many steps; 0 never (measurements and tests). */
+  sortInterval = SORT_INTERVAL;
   readonly trail: Pair<GPUTexture>;
   readonly scent: Pair<GPUTexture>;
   private readonly trailViews: Pair<GPUTextureView>;
@@ -51,7 +65,13 @@ export class Simulation implements Sim {
     const buffer = (size: number, usage: number) => device.createBuffer({ size, usage });
     this.params = buffer(PARAMS_BYTES, UNIFORM | COPY_DST);
     this.brush = buffer(32, UNIFORM | COPY_DST);
-    this.agentBuffer = buffer(agents * AGENT_BYTES, STORAGE | COPY_SRC | COPY_DST);
+    this.agentBuffers = [
+      buffer(agents * AGENT_BYTES, STORAGE | COPY_SRC | COPY_DST),
+      buffer(agents * AGENT_BYTES, STORAGE | COPY_SRC | COPY_DST),
+    ];
+    const tiles = Math.ceil(width / SORT_TILE) * Math.ceil(height / SORT_TILE);
+    this.tiles = buffer(tiles * 4, STORAGE | COPY_DST);
+    this.replacement = buffer(AGENT_BYTES, UNIFORM | COPY_DST);
     this.counts = buffer(cells * 16, STORAGE | COPY_SRC | COPY_DST);
     this.env = buffer(cells * 4, STORAGE | COPY_SRC | COPY_DST);
     this.stats = buffer(16, STORAGE | COPY_SRC | COPY_DST);
@@ -87,6 +107,11 @@ export class Simulation implements Sim {
     return { trail: this.trail[this.parity], scent: this.scent[this.parity] };
   }
 
+  /** The agent buffer that holds the current state, in sort order (ids in `bits`, ADR 0005). */
+  get agentBuffer(): GPUBuffer {
+    return this.agentBuffers[this.agentParity];
+  }
+
   /** Applies new parameters. Grid size and agent count need a new Simulation instead. */
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
@@ -97,6 +122,7 @@ export class Simulation implements Sim {
   reset() {
     this.step = 0;
     this.parity = 0;
+    this.agentParity = 0;
     this.writeParams();
     const enc = this.device.createCommandEncoder();
     for (const t of [...this.trail, ...this.scent]) {
@@ -109,7 +135,10 @@ export class Simulation implements Sim {
     enc.clearBuffer(this.counts);
     const pass = enc.beginComputePass();
     pass.setPipeline(this.kernels.init);
-    pass.setBindGroup(0, this.bind('init', this.kernels.init, [this.params, this.agentBuffer, null, null, this.env]));
+    pass.setBindGroup(
+      0,
+      this.bind(`init${this.agentParity}`, this.kernels.init, [this.params, this.agentBuffer, null, null, this.env]),
+    );
     pass.dispatchWorkgroups(...this.groups);
     pass.end();
     this.device.queue.submit([enc.finish()]);
@@ -164,14 +193,23 @@ export class Simulation implements Sim {
     return Array.from(counts.slice(0, this.settings.strains.length));
   }
 
+  /** Agents in id order, whatever order the sort left them in; `bits` without the id. */
   async readAgents(): Promise<AgentState[]> {
     const v = new DataView(await readBuffer(this.device, this.agentBuffer));
-    return Array.from({ length: this.agents }, (_, i) => ({
-      x: v.getFloat32(i * AGENT_BYTES, true),
-      y: v.getFloat32(i * AGENT_BYTES + 4, true),
-      heading: v.getFloat32(i * AGENT_BYTES + 8, true),
-      bits: v.getUint32(i * AGENT_BYTES + 12, true),
-    }));
+    const out = new Array<AgentState | undefined>(this.agents);
+    for (let k = 0; k < this.agents; k++) {
+      const bits = v.getUint32(k * AGENT_BYTES + 12, true);
+      const id = bits >>> 3;
+      // The sort moves agents and must never lose or duplicate one.
+      if (id >= this.agents || out[id]) throw new Error(`Agent ids are not a permutation (slot ${k}, id ${id}).`);
+      out[id] = {
+        x: v.getFloat32(k * AGENT_BYTES, true),
+        y: v.getFloat32(k * AGENT_BYTES + 4, true),
+        heading: v.getFloat32(k * AGENT_BYTES + 8, true),
+        bits: bits & 7,
+      };
+    }
+    return out as AgentState[];
   }
 
   readTrail(): Promise<Float32Array> {
@@ -186,14 +224,28 @@ export class Simulation implements Sim {
     return new Uint8Array(await readBuffer(this.device, this.env));
   }
 
+  /**
+   * Replaces the agent with id `index` (as readAgents() orders them), wherever the sort has put it. The id
+   * stays, so ids remain unique: `a.bits` sets only the strain and the alive bit.
+   */
   writeAgent(index: number, a: AgentState) {
+    if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
     const b = new ArrayBuffer(AGENT_BYTES);
     const v = new DataView(b);
     v.setFloat32(0, a.x, true);
     v.setFloat32(4, a.y, true);
     v.setFloat32(8, a.heading, true);
-    v.setUint32(12, a.bits, true);
-    this.device.queue.writeBuffer(this.agentBuffer, index * AGENT_BYTES, b);
+    v.setUint32(12, ((a.bits & 7) | (index << 3)) >>> 0, true);
+    this.device.queue.writeBuffer(this.replacement, 0, b);
+    const k = this.kernels;
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(k.replace);
+    const resources = [this.params, this.agentBuffer, null, null, null, null, null, null, null, null, this.replacement];
+    pass.setBindGroup(0, this.bind(`replace${this.agentParity}`, k.replace, resources));
+    pass.dispatchWorkgroups(...this.groups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   writeTrail(data: Float32Array) {
@@ -205,7 +257,8 @@ export class Simulation implements Sim {
 
   destroy() {
     for (const t of [...this.trail, ...this.scent]) t.destroy();
-    for (const b of [this.params, this.brush, this.agentBuffer, this.counts, this.env, this.stats]) b.destroy();
+    for (const b of [this.params, this.brush, ...this.agentBuffers, this.tiles, this.replacement]) b.destroy();
+    for (const b of [this.counts, this.env, this.stats]) b.destroy();
     this.collision?.occ.forEach((b) => {
       b.destroy();
     });
@@ -220,6 +273,8 @@ export class Simulation implements Sim {
   private encodeStep(enc: GPUCommandEncoder) {
     const k = this.kernels;
     const p = this.parity;
+    const sort = this.sortInterval > 0 && this.step % this.sortInterval === 0;
+    if (sort) enc.clearBuffer(this.tiles);
     enc.clearBuffer(this.counts);
     enc.clearBuffer(this.stats);
     const col = this.settings.collisions ? this.ensureCollision() : undefined;
@@ -229,12 +284,22 @@ export class Simulation implements Sim {
       enc.clearBuffer(col.occ[flip(q)]);
     }
     const pass = enc.beginComputePass();
+    if (sort) this.encodeSort(pass);
+    const a = this.agentParity;
     const [trail, scent] = [this.trailViews[p], this.scentViews[p]];
     if (!col) {
       pass.setPipeline(k.move);
       pass.setBindGroup(
         0,
-        this.bind(`move${p}`, k.move, [this.params, this.agentBuffer, trail, scent, this.env, this.counts, this.stats]),
+        this.bind(`move${p}${a}`, k.move, [
+          this.params,
+          this.agentBuffer,
+          trail,
+          scent,
+          this.env,
+          this.counts,
+          this.stats,
+        ]),
       );
       pass.dispatchWorkgroups(...this.groups);
     } else {
@@ -242,7 +307,7 @@ export class Simulation implements Sim {
       pass.setPipeline(k.claim);
       pass.setBindGroup(
         0,
-        this.bind(`claim${p}${q}`, k.claim, [
+        this.bind(`claim${p}${q}${a}`, k.claim, [
           this.params,
           this.agentBuffer,
           trail,
@@ -258,7 +323,7 @@ export class Simulation implements Sim {
       pass.setPipeline(k.settle);
       pass.setBindGroup(
         0,
-        this.bind(`settle${q}`, k.settle, [
+        this.bind(`settle${q}${a}`, k.settle, [
           this.params,
           this.agentBuffer,
           null,
@@ -283,6 +348,26 @@ export class Simulation implements Sim {
     }
     pass.end();
     this.parity = d;
+  }
+
+  /**
+   * Counting sort of the agents by 8 × 8 tile of their cell (sort.wgsl), from the current agent buffer into
+   * the other one, which then becomes current. The tiles buffer must be cleared before the pass.
+   */
+  private encodeSort(pass: GPUComputePassEncoder) {
+    const k = this.kernels.sort;
+    const a = this.agentParity;
+    const [from, to] = [this.agentBuffers[a], this.agentBuffers[flip(a)]];
+    pass.setPipeline(k.countTiles);
+    pass.setBindGroup(0, this.bind(`countTiles${a}`, k.countTiles, [this.params, from, null, this.tiles]));
+    pass.dispatchWorkgroups(...this.groups);
+    pass.setPipeline(k.scanTiles);
+    pass.setBindGroup(0, this.bind('scanTiles', k.scanTiles, [this.params, null, null, this.tiles]));
+    pass.dispatchWorkgroups(1);
+    pass.setPipeline(k.scatter);
+    pass.setBindGroup(0, this.bind(`scatter${a}`, k.scatter, [this.params, from, to, this.tiles]));
+    pass.dispatchWorkgroups(...this.groups);
+    this.agentParity = flip(a);
   }
 
   private diffuseBind(p: Bit) {
@@ -356,7 +441,9 @@ class Kernels {
     readonly claim: GPUComputePipeline,
     readonly settle: GPUComputePipeline,
     readonly occupy: GPUComputePipeline,
+    readonly replace: GPUComputePipeline,
     readonly paint: GPUComputePipeline,
+    readonly sort: Record<'countTiles' | 'scanTiles' | 'scatter', GPUComputePipeline>,
     readonly diffuseLayout: GPUBindGroupLayout,
     private readonly variants: Map<string, GPUComputePipeline>,
   ) {}
@@ -413,15 +500,32 @@ class Kernels {
           ] as const,
       ),
     );
-    const [init, move, claim, settle, occupy, paint] = await Promise.all([
+    const sort = module(sortWgsl);
+    const [init, move, claim, settle, occupy, replace, paint, countTiles, scanTiles, scatter] = await Promise.all([
       compute(module(initWgsl), 'init'),
       compute(agents, 'advance'),
       compute(agents, 'claim'),
       compute(agents, 'settle'),
       compute(agents, 'occupy'),
+      compute(agents, 'replace'),
       compute(module(paintWgsl), 'paint'),
+      compute(sort, 'countTiles'),
+      compute(sort, 'scanTiles'),
+      compute(sort, 'scatter'),
     ]);
-    return new Kernels(init, move, claim, settle, occupy, paint, diffuseLayout, new Map(await variants));
+    const sorting = { countTiles, scanTiles, scatter };
+    return new Kernels(
+      init,
+      move,
+      claim,
+      settle,
+      occupy,
+      replace,
+      paint,
+      sorting,
+      diffuseLayout,
+      new Map(await variants),
+    );
   }
 }
 

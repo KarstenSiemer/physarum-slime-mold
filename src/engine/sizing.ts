@@ -25,7 +25,10 @@ export function diffusePlan(passes: number): Diffuse[] {
   return Array.from({ length: passes }, (_, i) => ({ first: i === 0, last: i === passes - 1, blur: true }));
 }
 
-/** GPU bytes per grid cell (trail, scent, counts, environment, collisions, bloom) and per agent (WebGL2 keeps two copies). */
+/**
+ * GPU bytes per grid cell (trail, scent, counts, environment, collisions, bloom) and per agent (two copies on
+ * both backends: WebGL2 ping-pongs its agent texture, WebGPU sorts into its second agent buffer).
+ */
 const BYTES_PER_CELL = 84; // incl. collision buffers (12) and the bloom chain (~2.7)
 const BYTES_PER_AGENT = 32;
 

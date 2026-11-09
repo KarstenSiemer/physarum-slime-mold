@@ -8,6 +8,7 @@ import { Simulation } from './sim';
 import { equilibrium } from './sizing';
 import type { Backend, View } from './types';
 
+// The agent id has 24 bits (ADR 0005, shaders/common.wgsl).
 const MAX_AGENTS = 2 ** 24;
 
 /** The primary backend: compute shaders, integer atomics, GPU histogram (ADR 0002). */

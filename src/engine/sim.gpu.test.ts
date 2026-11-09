@@ -3,6 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
+import { readBuffer } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -11,6 +12,7 @@ import histogramWgsl from './shaders/histogram.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
+import sortWgsl from './shaders/sort.wgsl?raw';
 import type { Backend, Sim } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -26,6 +28,7 @@ describe('WGSL', () => {
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
       paint: common + paintWgsl,
+      sort: common + sortWgsl,
       render: renderWgsl,
       bloom: bloomWgsl,
       histogram: histogramWgsl,
@@ -35,6 +38,65 @@ describe('WGSL', () => {
       expect(info.messages.map((m) => `${name}:${m.lineNum}: ${m.type}: ${m.message}`)).toEqual([]);
     }
     backend.destroy();
+  });
+});
+
+// The agent buffer is sorted by position now and then, into the other of two buffers (shaders/sort.wgsl);
+// the model must not notice (ADR 0005). Random streams and claim keys follow the agent id, not the slot.
+describe('agent sort', () => {
+  let backend: WebGpuBackend;
+  beforeAll(async () => {
+    backend = await WebGpuBackend.create(document.createElement('canvas'));
+  });
+  afterAll(() => {
+    backend.destroy();
+  });
+
+  async function run(collisions: boolean, sortInterval: number, steps = 120) {
+    const strains = [0, 1, 2].map((i) => defaultStrain(i));
+    const settings = { ...defaultSettings(), seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+    const sim = await backend.createSim(settings, 96, 80, collisions ? 3840 : 15360);
+    sim.sortInterval = sortInterval;
+    sim.run(steps);
+    const out = { agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) };
+    sim.destroy();
+    return out;
+  }
+
+  // Interval 1: a sort every step (even count); 8: 15 sorts, so the run ends on the other buffer; 32: the app's.
+  it.each([false, true])('gives the same agents and trails as unsorted runs (collisions %s)', async (collisions) => {
+    const unsorted = await run(collisions, 0);
+    for (const interval of [1, 8, 32]) {
+      const sorted = await run(collisions, interval);
+      expect(sorted.trail, `sort every ${interval} steps`).toEqual(unsorted.trail);
+      expect(sorted.agents, `sort every ${interval} steps`).toEqual(unsorted.agents);
+    }
+  });
+
+  it('really reorders the buffer, and keeps every id once', async () => {
+    const settings = { ...defaultSettings(), seed: 7, density: 2, strains: [defaultStrain(0)] };
+    const sim = await backend.createSim(settings, 96, 80, 15360);
+    sim.run(33); // two sorts: steps 0 and 32
+    const raw = new Uint32Array(await readBuffer(sim.device, sim.agentBuffer));
+    const ids = Array.from({ length: sim.agents }, (_, k) => (raw[k * 4 + 3] ?? 0) >>> 3);
+    expect(new Set(ids).size).toBe(sim.agents);
+    expect(ids.filter((id, k) => id !== k).length).toBeGreaterThan(sim.agents / 2);
+    sim.destroy();
+  });
+
+  it('writes an agent by id after sorting, without creating a duplicate id', async () => {
+    const settings = { ...defaultSettings(), seed: 7, density: 1, strains: [defaultStrain(0), defaultStrain(1)] };
+    const sim = await backend.createSim(settings, 64, 64, 4096);
+    sim.run(40);
+    const before = await sim.readAgents();
+    sim.writeAgent(1234, { x: 10.5, y: 20.5, heading: 1, bits: 4 | 1 });
+    const after = await sim.readAgents(); // throws if an id is missing or doubled
+    expect(after[1234]).toEqual({ x: 10.5, y: 20.5, heading: 1, bits: 5 });
+    expect(after.filter((_, i) => i !== 1234)).toEqual(before.filter((_, i) => i !== 1234));
+    expect(() => {
+      sim.writeAgent(4096, { x: 0, y: 0, heading: 0, bits: 4 });
+    }).toThrow(RangeError);
+    sim.destroy();
   });
 });
 

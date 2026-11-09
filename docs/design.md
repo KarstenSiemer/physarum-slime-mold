@@ -49,7 +49,7 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 
 | Resource           | Format                                           | Size             | Use                                                   |
 | ------------------ | ------------------------------------------------ | ---------------- | ----------------------------------------------------- |
-| `agents`           | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N         | `meta`: strain (2 bit), alive (1 bit)                 |
+| `agents[2]`        | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N each    | `meta`: strain (2 bit), alive (1 bit), id (24 bit)    |
 | `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
 | `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | agents that moved into the cell this step, per strain |
@@ -74,8 +74,8 @@ so the small decay values from Jones Fig. 12 would stop working.
    - **move** by SS; wrap (periodic) or block (closed box, dish, wall);
    - blocked: random new heading, no deposit. Success: `atomicAdd(counts[cell][strain], 1)`.
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the
-   heading and calls `atomicMin(claims[target], key)` with a unique per-step key (bijective
-   hash of the agent index). Pass 2b moves the winners. Free target = empty at step start.
+   heading and calls `atomicMax(claims[target], key)` with a unique per-step key (bijective
+   hash of the agent id). Pass 2b moves the winners. Free target = empty at step start.
    Deterministic: integer atomics and unique keys.
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
    tile saves about 25 % of this pass, see
@@ -84,8 +84,11 @@ so the small decay values from Jones Fig. 12 would stop working.
    3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
    `scent` with `food · 255 · wProj` and `light · 255 · wLight` as sources.
 
-All random numbers come from a PCG hash of `(seed, step, agent index)`. The whole step is
-deterministic on one GPU: integer atomics make the deposit order-independent.
+All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
+deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
+counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each
+other on the grid run together and hit the cache (ADR 0005). The model reads only the id, never
+the buffer slot.
 
 ### Initial layouts
 
