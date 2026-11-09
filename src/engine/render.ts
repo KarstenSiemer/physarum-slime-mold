@@ -27,6 +27,8 @@ export interface Frame {
 }
 
 export const VIEW_BYTES = 144;
+/** Filterable everywhere, unlike 32-bit floats. */
+const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 
 /** Fills `struct View` (render.wgsl) — also the std140 `View` block of the WebGL2 renderer. */
 export function packView(
@@ -53,11 +55,23 @@ export function packView(
   fl.set([settings.bloom, black, 0, 0], 32);
 }
 
+interface Groups {
+  group: GPUBindGroup;
+  /** The gel height pass (`heightField` in render.wgsl). */
+  heights: GPUBindGroup;
+  bloom: GPUTextureView;
+  sampler: GPUSampler;
+}
+
 export class Renderer {
   private readonly pipeline: GPURenderPipeline;
+  private readonly heightPipeline: GPURenderPipeline;
+  private readonly heightSampler: GPUSampler;
   private readonly uniform: GPUBuffer;
   private readonly data = new ArrayBuffer(VIEW_BYTES);
-  private readonly groups = new Map<GPUTexture, { group: GPUBindGroup; bloom: GPUTextureView; sampler: GPUSampler }>();
+  private readonly groups = new Map<GPUTexture, Groups>();
+  /** Gel height field: one texel per cell plus a one-cell border (render.wgsl `heightField`). */
+  private heights: { texture: GPUTexture; view: GPUTextureView } | undefined;
   private frame = 0;
   overlays = true;
 
@@ -72,6 +86,12 @@ export class Renderer {
       vertex: { module, entryPoint: 'vs' },
       fragment: { module, entryPoint: 'fs', targets: [{ format }] },
     });
+    this.heightPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module, entryPoint: 'vs' },
+      fragment: { module, entryPoint: 'heightField', targets: [{ format: HEIGHT_FORMAT }] },
+    });
+    this.heightSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     this.uniform = device.createBuffer({ size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
@@ -105,23 +125,43 @@ export class Renderer {
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
     const trail = f.sim.current.trail;
+    const heights = this.heightsFor(trail);
     let cached = this.groups.get(trail);
     if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {
+      const view = trail.createView();
       const group = this.device.createBindGroup({
         layout: this.pipeline.getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: { buffer: this.uniform } },
-          { binding: 1, resource: trail.createView() },
+          { binding: 1, resource: view },
           { binding: 2, resource: { buffer: f.sim.env } },
           { binding: 3, resource: { buffer: f.sim.counts } },
           { binding: 4, resource: f.bloom },
           { binding: 5, resource: f.sampler },
+          { binding: 6, resource: heights },
+          { binding: 7, resource: this.heightSampler },
         ],
       });
-      cached = { group, bloom: f.bloom, sampler: f.sampler };
+      const heightGroup = this.device.createBindGroup({
+        layout: this.heightPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.uniform } },
+          { binding: 1, resource: view },
+        ],
+      });
+      cached = { group, heights: heightGroup, bloom: f.bloom, sampler: f.sampler };
       this.groups.set(trail, cached);
     }
     const enc = this.device.createCommandEncoder();
+    // The gel style samples its height field five times per pixel: once per frame at grid
+    // resolution here, instead of five full trail filters per pixel.
+    if (f.settings.style === 'gel') {
+      const pre = enc.beginRenderPass({ colorAttachments: [{ view: heights, loadOp: 'clear', storeOp: 'store' }] });
+      pre.setPipeline(this.heightPipeline);
+      pre.setBindGroup(0, cached.heights);
+      pre.draw(3);
+      pre.end();
+    }
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
@@ -132,6 +172,22 @@ export class Renderer {
     this.device.queue.submit([enc.finish()]);
   }
 
+  /** The gel height field for a trail of this size, made anew when the size changes. */
+  private heightsFor(trail: GPUTexture): GPUTextureView {
+    const [width, height] = [trail.width + 2, trail.height + 2];
+    if (this.heights?.texture.width !== width || this.heights.texture.height !== height) {
+      this.heights?.texture.destroy();
+      const texture = this.device.createTexture({
+        size: [width, height],
+        format: HEIGHT_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.heights = { texture, view: texture.createView() };
+      this.groups.clear();
+    }
+    return this.heights.view;
+  }
+
   /** Bind groups hold textures of one Simulation; drop them when it is replaced. */
   forget() {
     this.groups.clear();
@@ -139,5 +195,6 @@ export class Renderer {
 
   destroy() {
     this.uniform.destroy();
+    this.heights?.texture.destroy();
   }
 }

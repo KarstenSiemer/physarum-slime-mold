@@ -28,6 +28,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   private readonly viewData = new ArrayBuffer(VIEW_BYTES);
   private bloomChain: Target[] = [];
   private sampleTarget: Target | undefined;
+  /** Gel height field: one texel per cell plus a one-cell border (height.frag). */
+  private heights: Target | undefined;
   private frame = 0;
   private gain = 0;
   private black = 0;
@@ -135,6 +137,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   destroy() {
     for (const t of this.bloomChain) destroyTarget(this.gl, t);
     if (this.sampleTarget) destroyTarget(this.gl, this.sampleTarget);
+    if (this.heights) destroyTarget(this.gl, this.heights);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
@@ -195,6 +198,16 @@ export class WebGl2Backend implements Backend<GlSim> {
     packView(this.viewData, width, height, view, exposure, black, s, this.frame, true);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
+    const heights = this.heightsFor(sim);
+    // The gel style samples its height field five times per pixel: once per frame at grid
+    // resolution here, instead of five full trail filters per pixel.
+    if (s.style === 'gel') {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, heights.fbo);
+      gl.viewport(0, 0, heights.width, heights.height);
+      gl.useProgram(this.prog.height.program);
+      textures(gl, this.prog.height.program, { trail: sim.currentTrail.texture });
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
     const p = this.prog.render;
@@ -204,8 +217,19 @@ export class WebGl2Backend implements Backend<GlSim> {
       env: sim.envTexture,
       counts: sim.countsTexture,
       bloom: bloom.texture,
+      heights: heights.texture,
     });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** The gel height field for this grid size, made anew when the size changes. */
+  private heightsFor(sim: GlSim): Target {
+    const [w, h] = [sim.width + 2, sim.height + 2];
+    if (this.heights?.width !== w || this.heights.height !== h) {
+      if (this.heights) destroyTarget(this.gl, this.heights);
+      this.heights = target(this.gl, w, h, this.gl.R16F, true);
+    }
+    return this.heights;
   }
 
   /** Glow chain (bloom.frag); returns level 0, or an empty one when the glow is off. */

@@ -45,7 +45,7 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
   moves the remainder from the stencil into the color; a full-screen pass writes 256 · carry +
   remainder into an `RGBA32F` texture. Exact up to 2048 · 256 = 524 288 agents per cell and
   strain; beyond that the carry stops growing. It costs a second point pass, 20 B more per cell
-  (104 instead of 84) and halves the largest grid side.
+  (106 instead of 86) and halves the largest grid side.
 - Diffusion, decay and scents: one fragment pass with two render targets.
 - Collisions (ADR 0008): claims with `MAX` blending of unique float keys (< 2²⁴, exact in
   float32); needs `EXT_float_blend`, otherwise the switch is disabled.

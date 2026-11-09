@@ -26,12 +26,12 @@ export function diffusePlan(passes: number): Diffuse[] {
 }
 
 /**
- * GPU bytes per grid cell: trail 32, scent 16, counts 16, environment 4, collision buffers 12 and the
- * bloom chain about 2.7. WebGL2 without float blending has no collision buffers but 32 B of counting
- * panels with a stencil (gl/sim.ts deposit()).
+ * GPU bytes per grid cell: trail 32, scent 16, counts 16, environment 4, collision buffers 12, the
+ * bloom chain about 2.7 and the gel height field about 2. WebGL2 without float blending has no
+ * collision buffers but 32 B of counting panels with a stencil (gl/sim.ts deposit()).
  */
-export const BYTES_PER_CELL = 84;
-export const BYTES_PER_CELL_HALF_FLOAT = 104;
+export const BYTES_PER_CELL = 86;
+export const BYTES_PER_CELL_HALF_FLOAT = 106;
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 const BYTES_PER_AGENT = 32;
 

@@ -1,6 +1,7 @@
 // WebGL2 resources, counting and readback in a real browser (ADR 0003, ADR 0010).
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../../model/params';
+import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
 import { compile } from './programs';
@@ -163,6 +164,6 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
 
 it('the backend reports the memory and grid limits of its counting path', () => {
   const backend = WebGl2Backend.create(document.createElement('canvas'));
-  expect(backend.bytesPerCell).toBe(backend.supportsCollisions ? 84 : 104);
+  expect(backend.bytesPerCell).toBe(backend.supportsCollisions ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT);
   backend.destroy();
 });

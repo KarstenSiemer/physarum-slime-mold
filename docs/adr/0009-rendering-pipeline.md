@@ -36,6 +36,15 @@ Measured in the gallery loop (`npm run gallery`, contact sheets reviewed by eye)
    levels, added per strain before the tone curve, strength 0–2 (default 1).
 4. Styles: _glow_ (dark background), _gel_ (height-field normals, wet specular highlight),
    _paper_ (Beer–Lambert ink on white, like the paper's figures), _agents_ (agent counts).
+   The gel lighting reads the height at five points per pixel. A pass before the main pass
+   writes it once per frame at grid resolution, with a one-cell border, into an `r16float`
+   texture (filterable everywhere): the summed trail above the black level times the exposure.
+   That value is affine in the trail, so hardware bilinear filtering of it gives what filtering
+   the trail first gave; only the exponential and the clamp at zero come after the lookup. Before,
+   each of the five reads ran the full manual trail filter (4 to 16 `rgba32float` loads).
+   Compared in one page at the same state, fit, 2× and 6× zoom, device pixel ratio 1 and 2: at
+   most 1 of 255 per channel apart on WebGPU (mean below 0.01), at most 2 on WebGL2; on the
+   M3 Pro the gel frame cost 7.4–9.3 ms before and 1.7–2.3 ms after (glow: 1.3–1.8 ms).
 5. Strain palette: gold, cyan, coral, violet at similar lightness; OKLCH helper for new colors.
 
 Not done: HDR canvas output (`rgba16float` + extended tone mapping exists only in Chrome 129+;
