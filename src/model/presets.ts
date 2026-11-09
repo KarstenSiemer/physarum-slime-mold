@@ -55,8 +55,13 @@ function fogleman(rows: number[][], perStrainDensity: number): Settings {
   });
 }
 
+// Jones' Table 1 (p. 134) with one agent per cell. The experiments place their food, light and walls in
+// fractions of this grid, so its size stays 512 here; scenes that need another grid set it themselves.
 const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
   settings({ resolution: 512, density: 0.15, collisions: true, strains: strains([patch]), ...extra });
+
+// Grid 1024 shows about four times as many holes as 512, and without glow they stay dark (decided 2026-11-09).
+const network = { resolution: 1024, bloom: 0 } satisfies Partial<Settings>;
 
 export const PRESETS: Preset[] = [
   {
@@ -102,14 +107,14 @@ export const PRESETS: Preset[] = [
     name: 'Transport network',
     blurb: 'Jones’ default: a network that never stops changing (RA > SA).',
     ref: 'Jones 2010, Fig. 4',
-    settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }),
+    settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network),
   },
   {
     id: 'hexagons',
     name: 'Minimizing network',
     blurb: 'RA = SA: cycles close until a near-hexagonal mesh remains.',
     ref: 'Jones 2010, Fig. 5',
-    settings: () => jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }),
+    settings: () => jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network),
   },
   {
     id: 'spots',
