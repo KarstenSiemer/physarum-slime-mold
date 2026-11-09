@@ -1,11 +1,11 @@
 <script lang="ts">
   import {
     BOUNDARIES,
-    defaultStrain,
     globalSpec,
     LAYOUTS,
     MAX_STRAINS,
     RESOLUTIONS,
+    strainLike,
     STYLES,
     type Strain,
   } from '../model/params';
@@ -42,8 +42,10 @@
   let preset = $state('');
   const chosen = $derived(PRESETS.find((p) => p.id === preset));
 
+  // A new strain copies strain A of the scene: the defaults are Jones' values without the rule, which collapse.
   function addStrain() {
-    s.strains.push(defaultStrain(s.strains.length));
+    const first = s.strains[0];
+    if (first) s.strains.push(strainLike($state.snapshot(first), s.strains.length));
   }
 
   function removeStrain(i: number) {

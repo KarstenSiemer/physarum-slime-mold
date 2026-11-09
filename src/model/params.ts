@@ -231,6 +231,22 @@ export function defaultStrain(index: number, count = MAX_STRAINS): Strain {
   };
 }
 
+/**
+ * A strain for slot `index` with the numbers of `base` (strain A of the scene) and the color of its slot.
+ * It weighs its own trail as `base` weighs its own, and every other trail as `base` weighs the trail in
+ * slot `index`, so the new strain and the others treat each other alike. The defaults of defaultStrain()
+ * are Jones' values without the one-agent-per-cell rule, which contract into a few lines.
+ */
+export function strainLike(base: Strain, index: number): Strain {
+  const self = base.attraction[0] ?? 1;
+  const other = base.attraction[index] ?? -1;
+  return {
+    ...base,
+    color: PALETTE[index % PALETTE.length] ?? '#ffffff',
+    attraction: Array.from({ length: MAX_STRAINS }, (_, j) => (j === index ? self : other)),
+  };
+}
+
 export function defaultSettings(): Settings {
   return {
     seed: 1,

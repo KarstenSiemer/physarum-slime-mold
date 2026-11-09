@@ -5,10 +5,12 @@ import {
   globalSpec,
   MAX_STRAINS,
   sanitize,
+  strainLike,
   strainSpec,
   type Settings,
   type Spec,
 } from './params';
+import { presetById } from './presets';
 
 const inRange = (v: number, s: Spec) => v >= s.min && v <= s.max;
 
@@ -98,5 +100,31 @@ describe('sanitize (untrusted input)', () => {
       return Object.fromEntries(keys.map((k) => [k, value(depth + 1)]));
     };
     for (let i = 0; i < 500; i++) expect(() => sanitize(value(0))).not.toThrow();
+  });
+});
+
+describe('strainLike (Add strain)', () => {
+  const first = (id: string) => {
+    const a = presetById(id)?.settings().strains[0];
+    if (!a) throw new Error(`no preset ${id}`);
+    return a;
+  };
+
+  it('copies the numbers of strain A and takes the color of its slot', () => {
+    const a = first('three-strains');
+    const d = strainLike(a, 3);
+    expect({ ...d, color: a.color, attraction: a.attraction }).toEqual(a);
+    expect(d.color).toBe('#9b7fe6');
+  });
+
+  it('weighs the trails as strain A does, so the new strain and the others treat each other alike', () => {
+    // A follows itself and flees the others with −0.7; the new strain does the same.
+    expect(strainLike(first('three-strains'), 3).attraction).toEqual([-0.7, -0.7, -0.7, 1]);
+    // Two strains: A ignores slot 2, so a third strain ignores A and B and follows itself.
+    expect(strainLike(first('two-strains'), 2).attraction).toEqual([0, 0, 1, 0]);
+    // Jones' single strain: A flees every other slot (−1), as a new strain then flees A.
+    expect(strainLike(first('network'), 1).attraction).toEqual([-1, 1, -1, -1]);
+    // Chemorepulsion: a new strain flees its own trail too and ignores A, as A ignores it.
+    expect(strainLike(first('spots'), 1).attraction).toEqual([0, -1, 0, 0]);
   });
 });
