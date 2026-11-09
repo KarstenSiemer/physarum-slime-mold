@@ -1,6 +1,6 @@
 # 0011: npm and toolchain versions
 
-- Status: accepted
+- Status: accepted; revised 2026-11-09 (lockfiles of the audit skill)
 - Date: 2026-11-08
 
 ## Context
@@ -11,8 +11,9 @@ install scripts. Every window closed within about three days. Node 25+ no longer
 Corepack. Node 26.13 is LTS and bundles npm 11.20.
 
 Verified on 2026-11-08: npm 11.19 has `min-release-age` (days), `ignore-scripts` and
-`allow-git` (`npm help config`). Trail of Bits' `supply-chain-risk-auditor` skill reads only
-`package-lock.json`.
+`allow-git` (`npm help config`). Trail of Bits' `supply-chain-risk-auditor` skill reads npm's
+`package-lock.json` or `npm-shrinkwrap.json`. It detects `pnpm-lock.yaml` and `yarn.lock`, but
+does not read them (checked 2026-11-09: `collect.py:71` and `:1301`).
 
 ## Options
 

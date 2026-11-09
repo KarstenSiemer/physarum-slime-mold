@@ -68,9 +68,11 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Renovate GitHub App, variable `RENOVATE_CLIENT_ID`, secret `RENOVATE_PRIVATE_KEY` in the environment `renovate` (owner, ADR 0015); the first run with a token (2026-11-09) opened PRs #3 and #4 and the Dependency Dashboard #5
 - [x] Commit on a branch, PR, CI green (needs owner OK)
 - [x] `scripts/github-setup.sh codeql` after the first merge, once CodeQL has analysed `main` (ADR 0014); ruleset `codeql` active since 2026-11-09
-- [ ] CodeQL default setup also analyses `python` since 2026-11-09 (vendored `.claude/skills/` scripts, open high alerts 9–11): name the languages in `codeql`, or dismiss the alerts with reasons (owner decision)
+- [x] CodeQL default setup also analyses `python` since 2026-11-09 (vendored `.claude/skills/` scripts): `python` stays (owner decision, ADR 0014), both script modes name the languages, high alerts 9–11 dismissed as "won't fix" with reasons
+- [ ] Report the findings in the vendored `supply-chain-risk-auditor` to Trail of Bits: private vulnerability report (token handling) and public issue (ReDoS, URL checks) (owner)
 - [x] Ruleset `code owners`: `require_last_push_approval` off since 2026-11-09 (owner decision, ADR 0014). It required an approval on every pull request and kept Renovate PR #3 (`.node-version`, no code owner) blocked with all required checks green; after the change, auto-merge merged PR #3
 - [x] Code owner review with 0 required approvals (ADR 0014): after the change, Renovate PR #4 (`.pre-commit-config.yaml`) stayed blocked with all required checks green and a review request to the owner; GitHub reports no errors in `.github/CODEOWNERS`
+- [x] The owner's own PRs to code-owned paths need no bypass: the PR #7 merge passed ruleset `code owners` without a review (rule suite 5003859265, ADR 0014)
 - [x] Site live at <https://karstensiemer.github.io/physarum-slime-mold/>, no custom domain (ADR 0018)
 
 ## Later (not in scope now)

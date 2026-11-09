@@ -9,8 +9,8 @@ re-reading the diff.
 |---|---|---|---|
 | `security-audit` | Whole-repo audit: client-side, resource exhaustion, supply chain, CI | [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill) (`c1c8a8c`) | MIT |
 | `gha-security-review` | GitHub Actions: injection, triggers, tokens, poisoning | [getsentry/skills](https://github.com/getsentry/skills) (`e94f222`) | Apache-2.0 |
-| `sharp-edges` | Dangerous APIs and footguns, incl. JavaScript/TypeScript | [trailofbits/skills](https://github.com/trailofbits/skills) (`e4dd0bb`) | CC-BY-SA-4.0 |
-| `supply-chain-risk-auditor` | npm dependency risk from `package-lock.json` | [trailofbits/skills](https://github.com/trailofbits/skills) (`e4dd0bb`) | CC-BY-SA-4.0 |
+| `sharp-edges` | Dangerous APIs and footguns, incl. JavaScript/TypeScript | [trailofbits/skills](https://github.com/trailofbits/skills/tree/e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff/plugins/sharp-edges/skills/sharp-edges) (`e4dd0bb`) | CC-BY-SA-4.0 |
+| `supply-chain-risk-auditor` | Dependency risk of npm, PyPI and Go projects; for npm from `package-lock.json` (not `pnpm-lock.yaml`, `yarn.lock`) | [trailofbits/skills](https://github.com/trailofbits/skills/tree/e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff/plugins/supply-chain-risk-auditor/skills/supply-chain-risk-auditor) (`e4dd0bb`) | CC-BY-SA-4.0 |
 | `openai-security-best-practices` | Web frontend security practices | [trailofbits/skills-curated](https://github.com/trailofbits/skills-curated) (`6d05be4`) | Apache-2.0 |
 | `svelte-core-bestpractices` | Correct Svelte 5 code | [sveltejs/ai-tools](https://github.com/sveltejs/ai-tools) (`d3e755b`) | MIT |
 
