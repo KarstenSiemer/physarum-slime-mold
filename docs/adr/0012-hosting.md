@@ -1,6 +1,6 @@
 # 0012: Hosting on GitHub Pages at physarum.karstensiemer.de
 
-- Status: accepted (DNS step pending, owner action)
+- Status: superseded by [0018](0018-hosting-at-github-io.md)
 - Date: 2026-11-08
 
 ## Context

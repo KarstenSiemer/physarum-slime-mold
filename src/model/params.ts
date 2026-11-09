@@ -261,7 +261,7 @@ const obj = (v: unknown): Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
 /**
- * Builds valid Settings from untrusted input (URL, storage). Only known keys are read,
+ * Builds valid Settings from untrusted input (the URL). Only known keys are read,
  * numbers are clamped to their spec, everything else falls back to the default.
  */
 export function sanitize(input: unknown): Settings {
