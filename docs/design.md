@@ -74,7 +74,7 @@ so the small decay values from Jones Fig. 12 would stop working.
    - **move** by SS; wrap (periodic) or block (closed box, dish, wall);
    - blocked: random new heading, no deposit. Success: `atomicAdd(counts[cell][strain], 1)`.
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the
-   heading and calls `atomicMin(claims[target], key)` with a unique per-step key (bijective
+   heading and calls `atomicMax(claims[target], key)` with a unique per-step key (bijective
    hash of the agent index). Pass 2b moves the winners. Free target = empty at step start.
    Deterministic: integer atomics and unique keys.
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
@@ -97,13 +97,13 @@ deterministic on one GPU: integer atomics make the deposit order-independent.
 | Area                | Controls                                                                                                         |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Playback            | play/pause, single step, speed (steps per frame), reset, new seed                                                |
-| Scene               | preset gallery, agent count (density readout), resolution, layout, boundary (wrap, box, dish)                    |
+| Scene               | presets in groups, scene card, agent count (density readout), resolution, layout, boundary (wrap, box, dish)     |
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |
 | Environment         | collisions (Jones), diffusion passes, food strength (wProj), scent decay, shrinkage                              |
 | Tools               | pan/zoom, inoculate (selected strain), food, light, wall, erase, cut; brush size                                 |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
-| Learn               | what Physarum is, the six sub-steps, parameter help, guided experiments from the paper                           |
+| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |
 | Share               | URL with full state, PNG export                                                                                  |
 
 Guided experiments (each sets a preset, an environment and a text that says what to watch):

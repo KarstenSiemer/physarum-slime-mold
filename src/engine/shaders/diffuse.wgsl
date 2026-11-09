@@ -38,7 +38,8 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
         t += vec4f(counts[c]) * P.deposit;
         let e = envOf(env[c]);
         s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
-        // Cut tool: the wound loses its chemicals (Jones 2010, Sec. 4.3).
+        // Cut tool: the wound also loses its chemicals. This app's choice: Jones 2010 (Sec. 4.3,
+        // p. 148) only removes the agents from the wound and places them elsewhere.
         if (P.tool.w == 2.0 && distance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z) {
           t = vec4f(0.0);
           s = vec2f(0.0);

@@ -54,6 +54,8 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] URL state (deflated, validated, bomb-safe) and PNG export
 - [x] Keyboard shortcuts, touch pinch/pan, axe scan clean, startup auto-tune of grid size
 - [x] Mobile layout check (375 × 812: settings closed, one toolbar row, no sideways scroll, error box fits)
+- [x] Scene card (source, summary, what to watch, strains from the live settings, why), scene name over the canvas, presets in groups, Learn → Scenes; preset unit tests check the texts against the settings (2026-11-09)
+- [x] One agent per cell: help, notice when switched off in a scene made for it, restart on every switch, kept off without `EXT_float_blend` (2026-11-09)
 
 ## M5 Quality and reach
 

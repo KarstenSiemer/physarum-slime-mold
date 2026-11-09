@@ -16,11 +16,13 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
   rotation angle, step size, deposit, decay, random turns, population, diffusion.
 - Paint **food** (attracts), **light** (repels), **walls**, inoculate agents, or **cut** a
   wound and watch it heal.
-- Run **experiments from the paper**: shortest path, Steiner tree, shrinking plasmodium, wound
-  healing, light avoidance, a maze.
+- Run **experiments**: shortest path, Steiner tree, shrinking plasmodium and wound healing from
+  the paper, plus light avoidance and a maze.
+- Read what each scene shows: where its settings come from, what to watch, and why it uses them.
 - Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the exact
   state as a link.
-- Learn: the biology, the six steps of the model, every control, with references.
+- Learn: the biology, the paper behind the model and its six steps, every control and every
+  scene, with references.
 
 | Steiner tree (Jones 2010, Fig. 19)       | Cyclones (Fogleman's two-species preset) |
 | ---------------------------------------- | ---------------------------------------- |
@@ -67,11 +69,11 @@ pre-commit install   # hooks for commit and push
 
 Tests:
 
-| Command            | What                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------ |
-| `npm test`         | unit tests (parameters, URL parsing with fuzzing, packing, colors, levels)                 |
-| `npm run test:gpu` | shaders compile; every model rule on **both** backends, mass balance, determinism, Fig. 10 |
-| `npm run test:e2e` | the built app in Chromium: boot, WebGL2 fallback, tools, presets, keyboard, axe a11y scan  |
+| Command            | What                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `npm test`         | unit tests (parameters, presets and their texts, URL parsing with fuzzing, packing, colors) |
+| `npm run test:gpu` | shaders compile; every model rule on **both** backends, mass balance, determinism, Fig. 10  |
+| `npm run test:e2e` | the built app in Chromium: boot, WebGL2 fallback, tools, presets, keyboard, axe a11y scan   |
 
 GPU tests use the real GPU locally and SwiftShader on GPU-less CI.
 
