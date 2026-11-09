@@ -25,6 +25,8 @@
   let canvas: HTMLCanvasElement;
   let unsupported = $state(false);
   let ready = $state(false);
+  /** Height of the header, scene name and notice; the phone panel starts below them. */
+  let topHeight = $state(72);
 
   onMount(() => {
     const life = new AbortController();
@@ -289,7 +291,7 @@
 
 <svelte:window {onkeydown} />
 
-<main class="app" class:hide={app.hideUi} class:with-panel={app.panel}>
+<main class="app" class:hide={app.hideUi} class:with-panel={app.panel} style:--top-height="{topHeight}px">
   <canvas
     bind:this={canvas}
     class="tool-{app.tool}"
@@ -302,7 +304,7 @@
   ></canvas>
 
   <!-- One column, so the scene name never covers a notice: header, scene name, notice. -->
-  <div class="top ui">
+  <div class="top ui" bind:clientHeight={topHeight}>
     <header class="brand">
       <h1>Physarum</h1>
       <button type="button" onclick={() => (app.learn = true)}>Learn</button>
@@ -374,7 +376,6 @@
     top: 12px;
     left: 12px;
     right: 12px;
-    z-index: 1; /* notices stay readable over the settings panel on phones */
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -478,9 +479,9 @@
     }
   }
   @media (max-width: 720px) {
-    /* Below the header and the scene name: 12 + 36 + 8 + 28 px, measured in Chromium. */
+    /* Below the header, the scene name and a notice, so none of them covers the panel's controls. */
     .panel-wrap {
-      top: 92px;
+      top: calc(12px + var(--top-height) + 8px);
       left: 8px;
       right: 8px;
       bottom: 64px;

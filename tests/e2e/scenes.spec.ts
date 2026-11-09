@@ -302,6 +302,32 @@ for (const viewport of [
 test.describe('on a 375 × 812 phone', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
+  test('the scene name opens the card, and the panel starts below the name and any notice', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openSmallScene(page);
+    const label = page.getByRole('button', { name: /^Scene: / });
+    await label.click();
+    await expect(card(page)).toBeVisible();
+    await preset(page).selectOption('spots');
+    await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
+    await page.getByRole('button', { name: 'Hide settings' }).click();
+    await expect(card(page)).toBeHidden();
+    // The scene name opens the settings at the card, with About this scene open.
+    await label.click();
+    await expect(card(page).getByRole('heading', { name: 'Turing spots' })).toBeInViewport();
+    await expect(card(page).getByText('Why these settings')).toBeVisible();
+    const panel = page.locator('#settings');
+    const below = async (above: Locator) => (await box(panel)).y - ((await box(above)).y + (await box(above)).height);
+    expect(await below(label)).toBeGreaterThanOrEqual(0);
+    // A notice pushes the panel down instead of covering the preset list and the card.
+    await page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' }).uncheck();
+    const notice = page.getByRole('status');
+    await expect(notice).toContainText('Without one agent per cell');
+    await expect.poll(() => below(notice)).toBeGreaterThanOrEqual(0);
+    expect(overlap(await box(label), await box(notice))).toBe(false);
+    expect(errors).toEqual([]);
+  });
+
   const noSideways = (page: Page, selector: string) =>
     page.evaluate((sel) => {
       const el = document.querySelector(sel);
