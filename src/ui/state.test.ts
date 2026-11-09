@@ -55,6 +55,16 @@ describe('the current scene', () => {
     expect(app.notice).toBe('');
   });
 
+  it('gives the notice for a scene chosen before the engine found the rule missing', async () => {
+    const { app, loadPreset, ruleUnavailable, sceneChanged } = await fresh();
+    loadPreset('maze'); // the panel works while the engine starts
+    expect(app.settings.collisions).toBe(true);
+    ruleUnavailable();
+    expect(app.settings.collisions).toBe(false);
+    expect(sceneChanged()).toBe(false);
+    expect(app.notice).toMatch(/cannot run one agent per cell/);
+  });
+
   it('points the inoculate tool at a strain the new scene has', async () => {
     const { app, loadPreset } = await fresh();
     loadPreset('dot-grid');

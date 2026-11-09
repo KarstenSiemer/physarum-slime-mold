@@ -49,7 +49,8 @@
         // The engine lowers the grid when the device cannot hold it, also for the first allocation.
         const engine = await Engine.create(canvas, $state.snapshot(app.settings), (message, resolution) => {
           app.maxResolution = Math.min(app.maxResolution, resolution);
-          app.settings.resolution = resolution;
+          // A scene chosen meanwhile may ask for less than the grid this message is about.
+          app.settings.resolution = Math.min(app.settings.resolution, resolution);
           showNotice(message);
         });
         if (life.signal.aborted) {
@@ -60,7 +61,9 @@
         engine.onError = fail;
         setEngine(engine);
         Object.assign(globalThis, { physarum: engine });
-        if (!fromUrl && start) await engine.load($state.snapshot(app.settings), start.env);
+        // The panel works before the engine exists, so a preset may have been chosen meanwhile, and the settings
+        // effect below does not run again for the new engine: load what the state holds now, with its environment.
+        await engine.load($state.snapshot(app.settings), presetById(app.scene)?.env ?? []);
         engine.paused = app.paused;
         engine.start();
         ready = true;

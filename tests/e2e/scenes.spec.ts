@@ -94,6 +94,18 @@ test('the scene card shows after choosing a preset', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+/** Wall, food and light cells and a checksum of the environment the engine holds. */
+const environment = (page: Page) =>
+  page.evaluate(async () => {
+    const env = (await globalThis.physarum?.sim.readEnv()) ?? new Uint8Array();
+    const n = [0, 0, 0, 0];
+    env.forEach((v, i) => {
+      if (i % 4 < 3 && v > 0) n[i % 4] = (n[i % 4] ?? 0) + 1;
+      n[3] = ((n[3] ?? 0) * 31 + v) % 2 ** 31;
+    });
+    return n;
+  });
+
 test('the panel shows the density the Steiner tree runs, not a rounded one', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('steiner');
@@ -105,6 +117,32 @@ test('the panel shows the density the Steiner tree runs, not a rounded one', asy
   await density.press('Enter');
   await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.013);
   await expect(density).toHaveValue('0.013');
+});
+
+test('a preset chosen while the engine starts is the one that runs', async ({ page }) => {
+  const errors = watchErrors(page);
+  // A slow GPU start: the panel already works, the engine does not exist yet. The small memory budget keeps the
+  // start scene small on SwiftShader in CI.
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
+    const gpu = navigator.gpu as GPU | undefined;
+    if (!gpu) return;
+    const request = gpu.requestAdapter.bind(gpu);
+    gpu.requestAdapter = (options) =>
+      new Promise((resolve) => setTimeout(() => void request(options).then(resolve), 3000));
+  });
+  // A shared link first: from its address, '/' is a new page load, not a jump within the page.
+  for (const url of [await smallScene(), '/']) {
+    await page.goto(url);
+    await preset(page).selectOption('maze');
+    expect(await page.evaluate(() => globalThis.physarum === undefined), url).toBe(true);
+    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+    const s = await page.evaluate(() => globalThis.physarum?.settings);
+    expect([s?.boundary, s?.density, s?.collisions], url).toEqual(['box', 0.12, true]);
+    expect((await environment(page))[0], `${url}: wall cells`).toBeGreaterThan(100);
+    await expect(page.getByRole('button', { name: /^Scene: Maze/ })).toBeVisible();
+  }
+  expect(errors).toEqual([]);
 });
 
 test('hiding and showing the panel keeps the scene', async ({ page }) => {

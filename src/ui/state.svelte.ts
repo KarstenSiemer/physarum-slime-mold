@@ -103,24 +103,32 @@ export function setScene(p: Preset) {
 
 let ruleNoticeShown = false;
 
+/** Once per page load: this backend runs the current scene, made for the rule, without it. */
+function noteMissingRule() {
+  const p = presetById(app.scene);
+  if (app.canCollide || ruleNoticeShown || !p || !usesRule(p)) return;
+  ruleNoticeShown = true;
+  showNotice(RULE_MISSING_NOTICE, 12_000);
+}
+
 /** Loads a preset (capped to the device's grid size) with its food, light and walls. */
 export function loadPreset(id: string) {
   const p = presetById(id);
   if (!p) return;
   setScene(p);
-  // Once per page load: this backend runs the rule-based scenes without the rule.
-  if (!app.canCollide && !ruleNoticeShown && usesRule(p)) {
-    ruleNoticeShown = true;
-    showNotice(RULE_MISSING_NOTICE, 12_000);
-  }
+  noteMissingRule();
   void engine?.load($state.snapshot(app.settings), p.env);
 }
 
-/** The backend cannot run one agent per cell: the switch shows it off, and that is no change to the scene. */
+/**
+ * The backend cannot run one agent per cell: the switch shows it off, and that is no change to the scene. A scene
+ * chosen while the engine started gets its notice here.
+ */
 export function ruleUnavailable() {
   app.canCollide = false;
   app.settings.collisions = false;
   if (app.sceneBase) app.sceneBase.collisions = false;
+  noteMissingRule();
 }
 
 /** Adds a strain that copies strain A: the defaults are Jones' values without the rule, which collapse. */
