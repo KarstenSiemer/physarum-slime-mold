@@ -1,11 +1,10 @@
 <script lang="ts">
   import { globalSpec, strainSpec, type Spec } from '../model/params';
-  import { PRESETS } from '../model/presets';
-  import { app, loadPreset } from './state.svelte';
+  import { GROUPS, PRESETS } from '../model/presets';
+  import { letter, strainNumbers } from '../model/scene';
+  import { app, LEARN_TABS, loadPreset } from './state.svelte';
 
   let dialog: HTMLDialogElement;
-  const TABS = ['Physarum', 'The model', 'Controls', 'Experiments', 'About'] as const;
-  let tab = $state<(typeof TABS)[number]>('Physarum');
 
   $effect(() => {
     if (app.learn && !dialog.open) dialog.showModal();
@@ -20,12 +19,21 @@
 
   const specs: Spec[] = [...Object.values(strainSpec), ...Object.values(globalSpec)];
 
+  // Each scene's strains with the numbers of its own settings (not the live ones).
+  const sceneStrains = new Map(
+    PRESETS.map((p) => {
+      const s = p.settings();
+      return [p.id, s.strains.map((st, i) => ({ color: st.color, text: strainNumbers(s, i, p.env) }))] as const;
+    }),
+  );
+  let details = $state<Record<string, boolean>>({});
+
   function onTabKey(e: KeyboardEvent) {
     const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const i = (TABS.indexOf(tab) + step + TABS.length) % TABS.length;
-    tab = TABS[i] ?? tab;
+    const i = (LEARN_TABS.indexOf(app.learnTab) + step + LEARN_TABS.length) % LEARN_TABS.length;
+    app.learnTab = LEARN_TABS[i] ?? app.learnTab;
     document.getElementById(`learn-tab-${i}`)?.focus();
   }
 </script>
@@ -37,21 +45,27 @@
   </header>
   <!-- Tabs pattern (WAI-ARIA APG): roving tabindex, arrow keys move between tabs. -->
   <div class="tabs" role="tablist" aria-label="Topics" tabindex="-1" onkeydown={onTabKey}>
-    {#each TABS as t, i (t)}
+    {#each LEARN_TABS as t, i (t)}
       <button
         type="button"
         role="tab"
         id="learn-tab-{i}"
-        aria-selected={tab === t}
+        aria-selected={app.learnTab === t}
         aria-controls="learn-panel"
-        tabindex={tab === t ? 0 : -1}
-        onclick={() => (tab = t)}>{t}</button
+        tabindex={app.learnTab === t ? 0 : -1}
+        onclick={() => (app.learnTab = t)}>{t}</button
       >
     {/each}
   </div>
 
-  <div class="tabpanel" role="tabpanel" tabindex="0" id="learn-panel" aria-labelledby="learn-tab-{TABS.indexOf(tab)}">
-    {#if tab === 'Physarum'}
+  <div
+    class="tabpanel"
+    role="tabpanel"
+    tabindex="0"
+    id="learn-panel"
+    aria-labelledby="learn-tab-{LEARN_TABS.indexOf(app.learnTab)}"
+  >
+    {#if app.learnTab === 'Physarum'}
       <p>
         <em>Physarum polycephalum</em>, the “many-headed slime”, is a slime mold. Its feeding stage is one giant cell
         with many nuclei: a yellow sheet that can grow larger than a hand. It has no brain and no nerves.
@@ -66,7 +80,7 @@
         It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food
         runs out, it shrinks onto the remaining food sources.
       </p>
-    {:else if tab === 'The model'}
+    {:else if app.learnTab === 'The model'}
       <p>
         Jeff Jones (2010) imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of the
         cell. The agents leave a chemical trail and follow it. Every step has six parts:
@@ -93,7 +107,7 @@
         follows or flees the trails of the others (an idea from Michael Fogleman’s version). Food and light add their
         own scents.
       </p>
-    {:else if tab === 'Controls'}
+    {:else if app.learnTab === 'Controls'}
       <dl>
         {#each specs as spec (spec.label)}
           <dt>{spec.label}</dt>
@@ -106,23 +120,57 @@
         Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, H hide panels, L this
         dialog.
       </p>
-    {:else if tab === 'Experiments'}
-      <p>Each experiment loads settings from the paper. Watch what the text describes.</p>
-      <ul class="experiments">
-        {#each PRESETS as p (p.id)}
-          <li>
-            <button
-              type="button"
-              onclick={() => {
-                run(p.id);
-              }}>{p.name}</button
-            >
-            <span
-              >{p.watch ?? p.blurb}{#if p.ref}<cite> {p.ref}</cite>{/if}</span
-            >
-          </li>
-        {/each}
-      </ul>
+    {:else if app.learnTab === 'Scenes'}
+      <p>
+        Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
+        figure in his paper, on a grid shaped like your screen. Fogleman 2020 scenes are his saved settings. The others
+        were made for this app.
+      </p>
+      {#each GROUPS as g (g.id)}
+        <h3>{g.label}</h3>
+        <ul class="scenes">
+          {#each PRESETS.filter((p) => p.group === g.id) as p (p.id)}
+            <li class="scene">
+              <div class="head">
+                <h4>{p.name}</h4>
+                <span class="chip">{p.source}</span>
+              </div>
+              <p>{p.summary}</p>
+              <div class="actions">
+                <button
+                  type="button"
+                  onclick={() => {
+                    run(p.id);
+                  }}>Load<span class="sr-only"> {p.name}</span></button
+                >
+                <button
+                  type="button"
+                  class="ghost"
+                  aria-expanded={details[p.id] === true}
+                  aria-controls="details-{p.id}"
+                  onclick={() => (details[p.id] = !details[p.id])}
+                  >Details<span class="sr-only"> of {p.name}</span></button
+                >
+              </div>
+              {#if details[p.id]}
+                <div class="details" id="details-{p.id}">
+                  {#if p.watch}<p><strong>What to watch:</strong> {p.watch}</p>{/if}
+                  <p>{p.about}</p>
+                  <ul class="strains" aria-label="Strains">
+                    {#each sceneStrains.get(p.id) ?? [] as st, i (i)}
+                      <li>
+                        <span class="dot" style:--c={st.color} aria-hidden="true"></span>
+                        <span><strong>{letter(i)}</strong> {p.strainRoles[i]}: {st.text}.</span>
+                      </li>
+                    {/each}
+                  </ul>
+                  <p><strong>Why these settings:</strong> {p.why}</p>
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/each}
     {:else}
       <p>
         Model: J. Jones, “Characteristics of Pattern Formation and Evolution in Approximations of Physarum Transport
@@ -173,6 +221,14 @@
   h2 {
     margin: 0;
   }
+  h3 {
+    margin: 18px 0 8px;
+    font-size: 14px;
+  }
+  h4 {
+    margin: 0;
+    font-size: 14px;
+  }
   .tabs {
     display: flex;
     flex-wrap: wrap;
@@ -194,17 +250,72 @@
     font-style: normal;
     color: var(--accent);
   }
-  .experiments {
+  /* Two columns where they fit, one on phones (a card needs about 280 px). */
+  .scenes {
     list-style: none;
+    margin: 0;
     padding: 0;
     display: grid;
-    gap: 10px;
-  }
-  .experiments li {
-    display: grid;
-    grid-template-columns: 170px 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
     gap: 10px;
     align-items: start;
+  }
+  .scene {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .scene p {
+    margin: 6px 0;
+  }
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: baseline;
+  }
+  .chip {
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--accent);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .details {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .details strong {
+    color: var(--fg);
+  }
+  .strains {
+    list-style: none;
+    margin: 6px 0;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .strains li {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--c);
   }
   a {
     color: var(--accent);

@@ -4,18 +4,18 @@
   import { Engine } from './engine/engine';
   import { GpuUnavailableError } from './engine/gpu';
   import { AgentToolKind } from './engine/pack';
-  import { presetById } from './model/presets';
+  import { presetById, START } from './model/presets';
   import { decodeSettings, encodeSettings } from './model/url';
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
+  import SceneLabel from './ui/SceneLabel.svelte';
   import { constrain, RESOLUTIONS } from './model/params';
-  import { app, getEngine, setEngine, showNotice, TOOLS, type Tool } from './ui/state.svelte';
+  import { app, getEngine, setEngine, setScene, showNotice, TOOLS, type Tool } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
 
   let canvas: HTMLCanvasElement;
   let unsupported = $state(false);
   let ready = $state(false);
-  const START = 'three-strains';
 
   onMount(() => {
     const life = new AbortController();
@@ -35,7 +35,7 @@
       const fromUrl = location.hash.startsWith('#s=') ? await decodeSettings(location.hash.slice(3)) : undefined;
       const start = presetById(START);
       if (fromUrl) app.settings = fromUrl;
-      else if (start) app.settings = start.settings();
+      else if (start) setScene(start);
       try {
         // The engine lowers the grid when the device cannot hold it, also for the first allocation.
         const engine = await Engine.create(canvas, $state.snapshot(app.settings), (message, resolution) => {
@@ -278,7 +278,7 @@
 
 <svelte:window {onkeydown} />
 
-<main class="app" class:hide={app.hideUi}>
+<main class="app" class:hide={app.hideUi} class:with-panel={app.panel}>
   <canvas
     bind:this={canvas}
     class="tool-{app.tool}"
@@ -290,13 +290,20 @@
     {onwheel}
   ></canvas>
 
-  <header class="brand ui">
-    <h1>Physarum</h1>
-    <button type="button" onclick={() => (app.learn = true)}>Learn</button>
-    <button type="button" aria-expanded={app.panel} aria-controls="settings" onclick={() => (app.panel = !app.panel)}>
-      {app.panel ? 'Hide settings' : 'Settings'}
-    </button>
-  </header>
+  <!-- One column, so the scene name never covers a notice: header, scene name, notice. -->
+  <div class="top ui">
+    <header class="brand">
+      <h1>Physarum</h1>
+      <button type="button" onclick={() => (app.learn = true)}>Learn</button>
+      <button type="button" aria-expanded={app.panel} aria-controls="settings" onclick={() => (app.panel = !app.panel)}>
+        {app.panel ? 'Hide settings' : 'Settings'}
+      </button>
+    </header>
+    <SceneLabel />
+    {#if app.notice}
+      <p class="notice" role="status">{app.notice}</p>
+    {/if}
+  </div>
 
   {#if app.panel}
     <div class="panel-wrap ui" id="settings"><Panel /></div>
@@ -308,10 +315,6 @@
     {app.stats.fps.toFixed(0)} fps · {app.stats.stepsPerSecond.toFixed(0)} steps/s · step {app.stats.step}
     {#if app.stats.alive.length}· {fmt(app.stats.alive.reduce((a, b) => a + b, 0))} agents{/if}
   </p>
-
-  {#if app.notice}
-    <p class="notice ui" role="status">{app.notice}</p>
-  {/if}
 
   {#if app.error}
     <div class="error" role="alert">
@@ -354,20 +357,45 @@
   .hide .ui {
     display: none;
   }
-  .brand {
+  /* Header, scene name and notice share one column, so none of them covers another. */
+  .top {
     position: absolute;
     top: 12px;
     left: 12px;
+    right: 12px;
+    z-index: 1; /* notices stay readable over the settings panel on phones */
     display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 8px;
+    pointer-events: none;
+  }
+  .top > :global(*) {
+    pointer-events: auto;
+  }
+  /* Glass like the toolbar groups: readable over bright trails and the light paper style. */
+  .brand {
+    display: flex;
+    gap: 2px;
     align-items: center;
+    padding: 3px 3px 3px 12px;
+    border-radius: 10px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
+  .brand button {
+    border: 0;
+    background: transparent;
+  }
+  .brand button:hover {
+    background: rgba(255, 255, 255, 0.1);
   }
   h1 {
-    margin: 0 6px 0 0;
+    margin: 0 8px 0 0;
     font-size: 17px;
     font-weight: 650;
     letter-spacing: 0.04em;
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
   }
   .panel-wrap {
     position: absolute;
@@ -407,10 +435,9 @@
     pointer-events: none;
   }
   .notice {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    translate: -50% 0;
+    align-self: center;
+    box-sizing: border-box;
+    max-width: min(560px, 100%);
     margin: 0;
     padding: 8px 14px;
     border-radius: 10px;
@@ -420,6 +447,7 @@
   }
   .error {
     position: absolute;
+    z-index: 2;
     left: 50%;
     top: 50%;
     translate: -50% -50%;
@@ -432,17 +460,23 @@
     background: #23110f;
     border: 1px solid #5a2a22;
   }
+  /* Beside the open panel, the column ends at the panel, so notices center over the free canvas. */
+  @media (min-width: 721px) {
+    .with-panel .top {
+      right: 364px;
+    }
+  }
   @media (max-width: 720px) {
+    /* Below the header and the scene name: 12 + 36 + 8 + 28 px, measured in Chromium. */
     .panel-wrap {
-      top: 56px;
+      top: 92px;
       left: 8px;
       right: 8px;
       bottom: 64px;
       width: auto;
     }
     .notice {
-      top: 52px;
-      width: calc(100vw - 32px);
+      width: 100%;
     }
     .stats {
       display: none;

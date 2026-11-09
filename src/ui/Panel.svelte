@@ -9,8 +9,9 @@
     STYLES,
     type Strain,
   } from '../model/params';
-  import { PRESETS } from '../model/presets';
+  import { GROUPS, PRESETS } from '../model/presets';
   import Matrix from './Matrix.svelte';
+  import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
   import { app, getEngine, loadPreset } from './state.svelte';
@@ -39,9 +40,6 @@
     agents: 'Agents only',
   };
 
-  let preset = $state('');
-  const chosen = $derived(PRESETS.find((p) => p.id === preset));
-
   // A new strain copies strain A of the scene: the defaults are Jones' values without the rule, which collapse.
   function addStrain() {
     const first = s.strains[0];
@@ -56,29 +54,26 @@
 </script>
 
 <aside class="panel" aria-label="Simulation settings">
-  <Section title="Scene" open>
+  <Section title="Scene" bind:open={app.sceneSection}>
     <label class="field">
       <span>Preset</span>
       <select
-        bind:value={preset}
-        onchange={() => {
-          loadPreset(preset);
+        value={app.scene}
+        onchange={(e) => {
+          loadPreset(e.currentTarget.value);
         }}
       >
-        <option value="" disabled>Choose a preset…</option>
-        {#each PRESETS.filter((p) => !p.experiment) as p (p.id)}
-          <option value={p.id}>{p.name}{p.ref ? ` (${p.ref})` : ''}</option>
+        {#if !app.scene}<option value="" disabled>Choose a preset…</option>{/if}
+        {#each GROUPS as g (g.id)}
+          <optgroup label={g.label}>
+            {#each PRESETS.filter((p) => p.group === g.id) as p (p.id)}
+              <option value={p.id}>{p.name}</option>
+            {/each}
+          </optgroup>
         {/each}
-        <optgroup label="Experiments">
-          {#each PRESETS.filter((p) => p.experiment) as p (p.id)}
-            <option value={p.id}>{p.name}{p.ref ? ` (${p.ref})` : ''}</option>
-          {/each}
-        </optgroup>
       </select>
     </label>
-    {#if chosen}
-      <p class="blurb">{chosen.watch ?? chosen.blurb}</p>
-    {/if}
+    <SceneCard />
     <label class="field">
       <span>Start layout</span>
       <select bind:value={s.layout}>
@@ -169,10 +164,5 @@
     gap: 8px;
     align-items: center;
     margin: 8px 0;
-  }
-  .blurb {
-    margin: -2px 0 8px;
-    color: var(--muted);
-    font-size: 12px;
   }
 </style>
