@@ -116,11 +116,11 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     const { gl, prog } = context();
     const strains = [0, 1, 2].map((i) => defaultStrain(i));
     // One cell on a periodic grid: every agent moves into it.
-    const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0 }), 1, 1, 300_000, floatBlend);
+    const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0 }), 1, 1, 100_000, floatBlend);
     sim.run(1);
     const counts = Array.from(await sim.readCounts());
     const expected = alivePerStrain(await sim.readAgents(), 3);
-    expect(expected.every((n) => n > 90_000)).toBe(true);
+    expect(expected.every((n) => n > 30_000)).toBe(true); // over 100 carries of 256 each
     expect(counts).toEqual([...expected, 0]);
     // The deposit uses these counts: trail = keep · deposit · count after one step from zero.
     const trail = Array.from(await sim.readTrail());
@@ -132,8 +132,8 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     const { canvas, syncReads } = countingCanvas();
     const { gl, prog } = context(canvas);
     const strains = [0, 1].map((i) => defaultStrain(i));
-    const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0.002 }), 64, 64, 100_000, floatBlend);
-    sim.run(50); // some agents die
+    const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0.004 }), 64, 64, 40_000, floatBlend);
+    sim.run(20); // some agents die
     syncReads.length = 0;
     const pending = sim.alive();
     let settled = false;
@@ -143,7 +143,8 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     const alive = await pending;
     expect(syncReads).toEqual([]);
     const expected = alivePerStrain(await sim.readAgents(), 2);
-    expect(expected[0]).toBeLessThan(50_000);
+    expect(expected[0]).toBeLessThan(20_000);
+    expect(expected[0]).toBeGreaterThan(2048); // a single half-float pixel would stop there
     expect(alive).toEqual(expected);
     sim.destroy();
   });

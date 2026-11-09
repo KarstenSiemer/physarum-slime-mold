@@ -13,6 +13,7 @@ import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import type { Simulation } from './sim';
 import type { Backend, Sim } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -41,79 +42,24 @@ describe('WGSL', () => {
   });
 });
 
-// The agent buffer is sorted by position now and then, into the other of two buffers (shaders/sort.wgsl);
-// the model must not notice (ADR 0005). Random streams and claim keys follow the agent id, not the slot.
-describe('agent sort', () => {
-  let backend: WebGpuBackend;
-  beforeAll(async () => {
-    backend = await WebGpuBackend.create(document.createElement('canvas'));
-  });
-  afterAll(() => {
-    backend.destroy();
-  });
-
-  async function run(collisions: boolean, sortInterval: number, steps = 120) {
-    const strains = [0, 1, 2].map((i) => defaultStrain(i));
-    const settings = { ...defaultSettings(), seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
-    const sim = await backend.createSim(settings, 96, 80, collisions ? 3840 : 15360);
-    sim.sortInterval = sortInterval;
-    sim.run(steps);
-    const out = { agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) };
-    sim.destroy();
-    return out;
-  }
-
-  // Interval 1: a sort every step (even count); 8: 15 sorts, so the run ends on the other buffer; 32: the app's.
-  it.each([false, true])('gives the same agents and trails as unsorted runs (collisions %s)', async (collisions) => {
-    const unsorted = await run(collisions, 0);
-    for (const interval of [1, 8, 32]) {
-      const sorted = await run(collisions, interval);
-      expect(sorted.trail, `sort every ${interval} steps`).toEqual(unsorted.trail);
-      expect(sorted.agents, `sort every ${interval} steps`).toEqual(unsorted.agents);
-    }
-  });
-
-  it('really reorders the buffer, and keeps every id once', async () => {
-    const settings = { ...defaultSettings(), seed: 7, density: 2, strains: [defaultStrain(0)] };
-    const sim = await backend.createSim(settings, 96, 80, 15360);
-    sim.run(33); // two sorts: steps 0 and 32
-    const raw = new Uint32Array(await readBuffer(sim.device, sim.agentBuffer));
-    const ids = Array.from({ length: sim.agents }, (_, k) => (raw[k * 4 + 3] ?? 0) >>> 3);
-    expect(new Set(ids).size).toBe(sim.agents);
-    expect(ids.filter((id, k) => id !== k).length).toBeGreaterThan(sim.agents / 2);
-    sim.destroy();
-  });
-
-  it('writes an agent by id after sorting, without creating a duplicate id', async () => {
-    const settings = { ...defaultSettings(), seed: 7, density: 1, strains: [defaultStrain(0), defaultStrain(1)] };
-    const sim = await backend.createSim(settings, 64, 64, 4096);
-    sim.run(40);
-    const before = await sim.readAgents();
-    sim.writeAgent(1234, { x: 10.5, y: 20.5, heading: 1, bits: 4 | 1 });
-    const after = await sim.readAgents(); // throws if an id is missing or doubled
-    expect(after[1234]).toEqual({ x: 10.5, y: 20.5, heading: 1, bits: 5 });
-    expect(after.filter((_, i) => i !== 1234)).toEqual(before.filter((_, i) => i !== 1234));
-    expect(() => {
-      sim.writeAgent(4096, { x: 0, y: 0, heading: 0, bits: 4 });
-    }).toThrow(RangeError);
-    sim.destroy();
-  });
-});
-
 const BACKENDS = {
   webgpu: (c: HTMLCanvasElement): Promise<Backend> => WebGpuBackend.create(c),
   // Creating the backend compiles and links every GLSL program; errors throw here.
   webgl2: (c: HTMLCanvasElement): Promise<Backend> => Promise.resolve(WebGl2Backend.create(c)),
 };
 
-describe.each(Object.entries(BACKENDS))('%s', (_, create) => {
+// One backend per API for all model tests: on SwiftShader (CI) a WebGPU device with its pipelines takes
+// tens of seconds to start.
+describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   let backend: Backend;
   const live: Sim[] = [];
 
   beforeAll(async () => {
     backend = await create(document.createElement('canvas'));
     console.info('backend', backend.description);
-  });
+    // The first simulation compiles the pipelines: here, under a long timeout, and not in the first test.
+    (await backend.createSim(defaultSettings(), 16, 16, 1)).destroy();
+  }, 180_000);
   afterEach(() => {
     for (const s of live.splice(0)) s.destroy();
   });
@@ -329,4 +275,103 @@ describe.each(Object.entries(BACKENDS))('%s', (_, create) => {
       },
     );
   });
+
+  // The gel style's height field (render.wgsl `heightField`, gl/glsl/height.frag, ADR 0009): a blob of trail
+  // around one cell, seen at 8 px per cell (one bilinear lookup per height) and at 1.5 cells per px (four
+  // taps), must sit on that cell, across the wrap seam too.
+  describe('gel height field', () => {
+    const SIZE = 192;
+
+    /** Centre of the pixels the gel draws (anything clearly away from the background), in canvas pixels. */
+    function blobCentre(img: ImageData) {
+      const bg = [img.data[0] ?? 0, img.data[1] ?? 0, img.data[2] ?? 0];
+      let [n, sx, sy] = [0, 0, 0];
+      for (let y = 0; y < img.height; y++)
+        for (let x = 0; x < img.width; x++) {
+          const i = (y * img.width + x) * 4;
+          const d = Math.abs((img.data[i] ?? 0) - (bg[0] ?? 0)) + Math.abs((img.data[i + 1] ?? 0) - (bg[1] ?? 0));
+          if (d > 40) [n, sx, sy] = [n + 1, sx + x + 0.5, sy + y + 0.5];
+        }
+      return { pixels: n, x: sx / n, y: sy / n };
+    }
+
+    it.each([
+      ['wrap', 5, 9, 1 / 8],
+      ['wrap', 0, 0, 1 / 8],
+      ['wrap', 0, 0, 1.5],
+      ['box', 0, 13, 1 / 8],
+      ['box', 40, 3, 1 / 8],
+      ['box', 30, 20, 1.5],
+    ] as const)('is drawn in place (%s, cell %i, %i, scale %f)', async (boundary, cx, cy, scale) => {
+      const [w, h] = [64, 48];
+      const patch: Partial<Settings> = { style: 'gel', boundary, layout: 'empty', strains: [defaultStrain(0)] };
+      const sim = await make(patch, w, h, 1);
+      const trail = new Float32Array(w * h * 4);
+      for (let dy = -8; dy <= 8; dy++)
+        for (let dx = -8; dx <= 8; dx++) {
+          const [x, y] = [cx + dx, cy + dy];
+          if (boundary !== 'wrap' && (x < 0 || y < 0 || x >= w || y >= h)) continue;
+          trail[((((y % h) + h) % h) * w + (((x % w) + w) % w)) * 4] = 400 * Math.exp(-(dx * dx + dy * dy) / 8);
+        }
+      sim.writeTrail(trail);
+      const view = { center: [cx + 0.5, cy + 0.5] as [number, number], scale };
+      const img = await backend.capture(sim, { ...defaultSettings(), ...patch }, view, SIZE, SIZE);
+      const c = blobCentre(img);
+      expect(c.pixels).toBeGreaterThan(30);
+      // A closed arena cuts the blob at its edge: only check the axes it does not cut. A lookup one cell
+      // off moves the centre by 8 px at 8 px per cell.
+      const tolerance = scale < 1 ? 1.5 : 0.75;
+      if (boundary === 'wrap' || (cx > 8 && cx < w - 9)) expect(Math.abs(c.x - SIZE / 2)).toBeLessThan(tolerance);
+      if (boundary === 'wrap' || (cy > 8 && cy < h - 9)) expect(Math.abs(c.y - SIZE / 2)).toBeLessThan(tolerance);
+    });
+  });
+
+  // WebGPU sorts the agent buffer by position now and then, into the other of two buffers (shaders/sort.wgsl);
+  // the model must not notice (ADR 0005). Random streams and claim keys follow the agent id, not the slot.
+  if (kind === 'webgpu')
+    describe('agent sort', () => {
+      // 72 steps: sorting every 1, 8 or 32 steps makes 72, 9 or 3 sorts, so runs end on either buffer.
+      async function run(collisions: boolean, sortInterval: number, steps = 72) {
+        const strains = [0, 1, 2].map((i) => defaultStrain(i));
+        const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+        const sim = (await make(patch, 64, 48, collisions ? 1536 : 6144)) as Simulation;
+        sim.sortInterval = sortInterval;
+        sim.run(steps);
+        return { agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) };
+      }
+
+      it.each([false, true])(
+        'gives the same agents and trails as unsorted runs (collisions %s)',
+        async (collisions) => {
+          const unsorted = await run(collisions, 0);
+          for (const interval of [1, 8, 32]) {
+            const sorted = await run(collisions, interval);
+            expect(sorted.trail, `sort every ${interval} steps`).toEqual(unsorted.trail);
+            expect(sorted.agents, `sort every ${interval} steps`).toEqual(unsorted.agents);
+          }
+        },
+      );
+
+      it('really reorders the buffer, and keeps every id once', async () => {
+        const sim = (await make({ seed: 7, density: 2, strains: [defaultStrain(0)] }, 96, 80, 15360)) as Simulation;
+        sim.run(33); // two sorts: steps 0 and 32
+        const raw = new Uint32Array(await readBuffer(sim.device, sim.agentBuffer));
+        const ids = Array.from({ length: sim.agents }, (_, k) => (raw[k * 4 + 3] ?? 0) >>> 3);
+        expect(new Set(ids).size).toBe(sim.agents);
+        expect(ids.filter((id, k) => id !== k).length).toBeGreaterThan(sim.agents / 2);
+      });
+
+      it('writes an agent by id after sorting, without creating a duplicate id', async () => {
+        const sim = await make({ seed: 7, density: 1, strains: [defaultStrain(0), defaultStrain(1)] }, 64, 64, 4096);
+        sim.run(40);
+        const before = await sim.readAgents();
+        sim.writeAgent(1234, { x: 10.5, y: 20.5, heading: 1, bits: 4 | 1 });
+        const after = await sim.readAgents(); // throws if an id is missing or doubled
+        expect(after[1234]).toEqual({ x: 10.5, y: 20.5, heading: 1, bits: 5 });
+        expect(after.filter((_, i) => i !== 1234)).toEqual(before.filter((_, i) => i !== 1234));
+        expect(() => {
+          sim.writeAgent(4096, { x: 0, y: 0, heading: 0, bits: 4 });
+        }).toThrow(RangeError);
+      });
+    });
 });
