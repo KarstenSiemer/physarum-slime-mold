@@ -76,8 +76,9 @@ function fogleman(rows: number[][], perStrainDensity: number): Settings {
   });
 }
 
-// Jones' Table 1 (p. 134) with one agent per cell. The experiments place their food, light and walls in
-// fractions of this grid, so its size stays 512 here; scenes that need another grid set it themselves.
+// Jones' model: Table 1 (p. 134), 15 % of cells with an agent as in Fig. 4 and 5, and his rule of one agent per
+// cell (p. 133). The experiments place their food, light and walls in fractions of this grid, so its size stays
+// 512 here; scenes that need another grid set it themselves.
 const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
   settings({ resolution: 512, density: 0.15, collisions: true, strains: strains([patch]), ...extra });
 
@@ -153,9 +154,9 @@ export const PRESETS: Preset[] = [
     source: 'Jones 2010, Fig. 4',
     summary: 'Jones’ standard model: a network that keeps rebuilding itself.',
     about:
-      'The setting Jones used for most of his paper. Within a few hundred steps, randomly placed agents form a mesh of trails. Small loops shrink and vanish, bigger holes grow, and now and then a new branch sprouts across a hole, so the network never settles (Fig. 4 shows steps 2 to 4,151). The trails look grainy, as in Jones’ figures: in every step most agents are blocked and turn at random.',
+      'Jones’ default setting (p. 134–135). Within a few hundred steps, randomly placed agents form a mesh of trails. Small loops shrink and vanish, bigger holes grow, and now and then a new branch sprouts across a hole, so the network never settles (Fig. 4 shows steps 2 to 4,151). The trails look grainy, as in Jones’ figures: in every step most agents are blocked and turn at random.',
     strainRoles: ['Jones’ standard agent'],
-    why: 'Jones’ defaults (Table 1, p. 134): 15 % of cells hold an agent, one agent per cell, one blur pass, edges that wrap around. The rotation angle is larger than the sensor angle, which keeps the network changing (p. 135). Blocked agents turn at random, and these turns let new branches take hold; without the rule the network contracts into a few lines. Grid 1024 and no glow keep the holes small and dark.',
+    why: 'Jones’ defaults: Table 1 (p. 134) with one blur pass and wrapping edges, 15 % of cells holding an agent (Fig. 4) and his rule of one agent per cell (p. 133). A rotation angle above the sensor angle keeps the network changing (p. 135). Blocked agents turn at random, and these turns let new branches take hold; without the rule the network contracts into a few lines. Grid 1024 and no glow keep the holes small and dark.',
     settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network),
   },
   {
@@ -165,9 +166,9 @@ export const PRESETS: Preset[] = [
     source: 'Jones 2010, Fig. 5',
     summary: 'Equal angles: loops close one by one until a simple mesh is left.',
     about:
-      'Jones’ model with the sensor angle raised to 45°, equal to the rotation angle. It starts like the transport network, but new branches do not last: small loops close, the other holes grow, and the network contracts like a soap film. On Jones’ 200 × 200 grid it ends as a near-hexagonal mesh after about 31,000 steps (Fig. 5). This grid holds far more holes, so the mesh keeps coarsening for longer.',
+      'Jones’ model with the sensor angle raised to 45°, equal to the rotation angle. New branches do not last: small loops close, the other holes grow, and the network contracts like a soap film. On Jones’ 200 × 200 grid it ends after about 31,000 steps as a simple network whose copies, side by side, approximate a hexagonal tiling (Fig. 5). This grid holds far more holes, so the mesh keeps coarsening for longer.',
     strainRoles: ['Jones’ agent with equal angles'],
-    why: 'Only the sensor angle differs from Jones’ defaults. With equal angles an agent turns exactly toward where its side sensor was, so its sensors stay on the trail and new branches do not last (p. 135). Everything else is Table 1: 15 % of cells hold an agent, one agent per cell, one blur pass. Grid 1024 and no glow keep the holes small and dark.',
+    why: 'Only the sensor angle differs from Jones’ defaults. With equal angles an agent turns exactly toward where its side sensor was, so its sensors stay on the trail and new branches do not last (p. 135). The rest is as for Fig. 5: 15 % of cells hold an agent (p. 136), one blur pass (Table 1) and one agent per cell (p. 133). Grid 1024 and no glow keep the holes small and dark.',
     settings: () => jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network),
   },
   {
@@ -334,7 +335,7 @@ PRESETS.push(
     source: 'Fogleman 2020',
     summary: 'Two species: one builds a coarse honeycomb, the other spins vortices inside it.',
     about:
-      'One of Michael Fogleman’s saved settings for his version with several species (2020). The yellow strain builds large polygonal cells, and the cyan strain gathers into spinning spirals inside them. Each strain flees the other’s trail. It runs like his original: 4 agents per cell per strain, two blur passes and no one-agent-per-cell rule.',
+      'One of Michael Fogleman’s saved settings for his version with several species (2020). Strain A builds large polygonal cells, and strain B gathers into spinning spirals inside them. Each strain flees the other’s trail. It runs like his original: 4 agents per cell per strain, two blur passes and no one-agent-per-cell rule.',
     strainRoles: ['Builds large polygonal cells', 'Spins into spirals inside the cells'],
     why: FOGLEMAN_WHY,
     settings: () =>

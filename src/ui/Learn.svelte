@@ -83,8 +83,10 @@
       </p>
       <p>
         It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food
-        runs out, it shrinks onto the remaining food sources. In the simulation the network shrinks onto food only with
-        Shrinkage turned on, as in the scene Shrinking plasmodium.
+        runs out, it shrinks onto the remaining food sources. In the simulation food never runs out. With Shrinkage
+        turned on, agents die off and a full sheet shrinks onto the food, as in the scene Shrinking plasmodium. A
+        network with few agents contracts between the food sources even without it, as in Shortest path and Steiner
+        tree.
       </p>
     {:else if app.learnTab === 'The model'}
       <p>
