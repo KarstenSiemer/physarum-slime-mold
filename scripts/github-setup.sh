@@ -61,8 +61,8 @@ JSON
   echo "Ruleset main: pull requests, linear history, required checks"
   # integration_id 15368 = GitHub Actions; only Actions can report these checks. build is required too:
   # verify needs build, and a job skipped after a failed dependency would count as passed.
-  # Unattributed commits (author email not linked to a GitHub account) need one human approval; the
-  # owner's commits and Renovate's App commits are attributed. GitHub's default, set explicitly.
+  # require_extra_approval_for_unattributed_changes is GitHub's default, set explicitly. It requires one
+  # more approval for a Copilot PR that is not attributed to a person; with 0 approvals it has no effect.
   ruleset main <<'JSON'
 {
   "name": "main",
@@ -105,6 +105,8 @@ JSON
   # A pull request runs the workflow files it contains, so green checks prove nothing about a PR that edits
   # them. Changes to the files in .github/CODEOWNERS need the owner's approval. Admins may bypass this
   # ruleset only through a pull request, so the owner can merge their own PRs; the checks above still apply.
+  # A new push that changes the diff dismisses the approval. require_last_push_approval is false, because it
+  # requires an approval on every PR, also on PRs without code-owned files (ADR 0014).
   echo "Ruleset code owners: owner review for CI, Renovate, npm and hook settings"
   ruleset "code owners" <<'JSON'
 {
@@ -120,7 +122,7 @@ JSON
         "required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": true,
-        "require_last_push_approval": true,
+        "require_last_push_approval": false,
         "require_extra_approval_for_unattributed_changes": true,
         "required_review_thread_resolution": false,
         "allowed_merge_methods": ["squash"]

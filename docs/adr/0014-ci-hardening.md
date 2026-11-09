@@ -1,7 +1,7 @@
 # 0014: CI workflows and their hardening
 
-- Status: accepted (code-owner test pending, owner action); revised 2026-11-08 after the GitHub
-  Actions and supply-chain audits
+- Status: accepted; revised 2026-11-08 after the GitHub Actions and supply-chain audits, and
+  2026-11-09 (ruleset `code owners`)
 - Date: 2026-11-08
 
 ## Context
@@ -65,13 +65,23 @@ reporting, CodeQL default setup, and:
   after a failed dependency counts as passed. Conversation resolution is off: on a public
   repository anyone can open a review thread and would block every Renovate PR with it.
 - Ruleset `code owners`: changes to the paths in `.github/CODEOWNERS` (workflows, Renovate
-  config, `.npmrc`, pre-commit config, scripts) need the owner's approval, also after the last
-  push. A pull request runs the workflow files it contains, so a PR that edits them can make its
-  own checks pass; the binding to app 15368 does not prevent that. Admins may bypass this ruleset
-  only through a pull request, so the owner can merge their own PRs while the checks of ruleset
-  `main` still apply. Per GitHub's rules documentation, code owner review applies with an
-  approval count of 0, so npm updates still merge without a review. Check it once with a test PR
-  that touches `.github/`.
+  config, `.npmrc`, pre-commit config, scripts) need the owner's approval. A change of the diff
+  after the approval, for example a new push, dismisses the approval. A pull request runs the
+  workflow files it contains, so a PR that edits them can make its own checks pass; the binding
+  to app 15368 does not prevent that. Admins may bypass this ruleset only through a pull
+  request, so the owner can merge their own PRs while the checks of ruleset `main` still apply.
+- Ruleset `code owners` does not require an approval of the last push
+  (`require_last_push_approval: false`, owner decision of 2026-11-09). Per the
+  [rules documentation][rules], that option requires an approval from someone other than the
+  person who pushed last. With 0 required approvals it still blocked pull requests without
+  code-owned files: Renovate PR #3 (`.node-version`) waited with all required checks green.
+  The same documentation calls the dismissal of stale approvals the safer protection against
+  unapproved content in an approved pull request.
+- Checked on 2026-11-09 after the change: auto-merge merged PR #3 without a review. Renovate
+  PR #4 (`.pre-commit-config.yaml`) stayed blocked with all required checks green and a review
+  request to the owner, and GitHub reports no errors in `.github/CODEOWNERS`. So code owner
+  review applies with an approval count of 0, and updates without code-owned files merge
+  without a review.
 - CodeQL default setup (`settings`) names its languages (`javascript-typescript`, `actions`),
   because `main` held no code before the first merge; pull requests are scanned from then on.
   `scripts/github-setup.sh codeql` switches to the languages that GitHub detects on `main`. On
@@ -82,11 +92,10 @@ reporting, CodeQL default setup, and:
   required code scanning tool has no analysis, and ruleset `main` has no bypass, so this gate is
   added only once `main` has a CodeQL analysis.
 - Both rulesets set `require_extra_approval_for_unattributed_changes: true`. GitHub applied
-  this default when the script ran on 2026-11-08, and the script now writes it explicitly. A
-  commit whose author email is not linked to a GitHub account needs one human approval. The
-  owner's commits (`karsten.siemer@aetherize.com`, linked) and Renovate's commits through its
-  GitHub App are attributed. If Renovate PRs ever wait for an approval for this reason, set it
-  to `false` in ruleset `main`.
+  this default when the script ran on 2026-11-08, and the script now writes it explicitly. Per
+  the [rules documentation][rules] (checked 2026-11-09), this public-preview option requires one
+  more approval for a pull request that Copilot opens without attribution to a person. With 0
+  required approvals it has no effect.
 - The script can run again: rulesets are created or updated by name.
 
 ## Consequences
@@ -94,5 +103,8 @@ reporting, CodeQL default setup, and:
 - Required check names are job names (`build`, `verify`, `zizmor`, `dependency-review`); renaming a
   job breaks the ruleset.
 - `verify` starts after `build`, so a run takes about one `npm ci` and build longer.
-- Residual risk: an npm update PR that passes the checks merges without review (ADR 0015).
+- Residual risk: a Renovate PR with auto-merge and without code-owned files (npm packages,
+  `.node-version`) merges without review once the checks pass (ADR 0015).
 - CodeQL does not read `.svelte` files; logic lives in `.ts`, and ESLint checks components.
+
+[rules]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
