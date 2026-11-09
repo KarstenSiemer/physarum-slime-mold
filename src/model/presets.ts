@@ -103,9 +103,9 @@ export const PRESETS: Preset[] = [
     source: 'Made for this app',
     summary: 'Three rival strains start in one disc and weave their networks around each other.',
     about:
-      'The start scene. Three strains begin as slices of one disc. Each follows its own trail and steers away from the other two, so their networks wind around each other instead of merging. It works like the GPU versions of Sage Jenson and Michael Fogleman: several agents per cell and no one-agent-per-cell rule, which gives thin, sharp filaments.',
+      'The start scene. Three strains begin as slices of one disc. Each follows its own trail and steers away from the other two, so their networks wind around each other instead of merging. It works like the versions of Sage Jenson and Michael Fogleman: several agents per cell and no one-agent-per-cell rule, which gives thin, sharp filaments.',
     strainRoles: ['One of three equal rivals', 'The same settings as A', 'The same settings as A'],
-    why: 'Chosen for this app, not taken from a paper. As in Fogleman’s version, 3 agents per cell share the grid and the trail gets two blur passes. Decay 0.6 removes most of the trail every step, so a path lasts only while agents keep walking it. Sensor distance 18 sets the size of the mesh (Jones, Fig. 10). A weight of −0.7 on the other strains’ trails keeps the networks apart.',
+    why: 'Chosen for this app, not taken from a paper. As in Fogleman’s version, agents share cells (3 agents per cell) and the trail gets two blur passes. Decay 0.6 removes most of the trail every step, so a path lasts only while agents keep walking it. Sensor distance 18 sets the size of the mesh (Jones, Fig. 10). A weight of −0.7 on the other strains’ trails keeps the networks apart.',
     settings: () =>
       settings({
         density: 3,
@@ -211,7 +211,7 @@ PRESETS.push(
     about:
       'Several hundred agents in a round dish with two food sources. Food releases a scent that spreads and fades like the trail, so the network snags on both foods. Then it contracts like a soap film until one band joins them. The band is several cells wide, because only one agent fits in a cell.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 18 (p. 145): 2 % of cells hold an agent, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. On grid 256 the dish is a little smaller than Jones’ 200 × 200 lattice, so a run takes a few thousand steps.',
+    why: 'Jones’ values for Fig. 18 (p. 145): 2 % of cells hold an agent, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. On grid 256 the dish is smaller than Jones’ 200 × 200 lattice, so a run takes a few thousand steps.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
