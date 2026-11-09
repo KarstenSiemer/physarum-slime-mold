@@ -117,7 +117,7 @@ describe('strainLike (Add strain)', () => {
     expect(d.color).toBe('#9b7fe6');
   });
 
-  it('weighs the trails as strain A does, so the new strain and the others treat each other alike', () => {
+  it('weighs the trails as strain A does, while the other strains keep their weight for its slot', () => {
     // A follows itself and flees the others with −0.7; the new strain does the same.
     expect(strainLike(first('three-strains'), 3).attraction).toEqual([-0.7, -0.7, -0.7, 1]);
     // Two strains: A ignores slot 2, so a third strain ignores A and B and follows itself.
@@ -126,5 +126,9 @@ describe('strainLike (Add strain)', () => {
     expect(strainLike(first('network'), 1).attraction).toEqual([-1, 1, -1, -1]);
     // Chemorepulsion: a new strain flees its own trail too and ignores A, as A ignores it.
     expect(strainLike(first('spots'), 1).attraction).toEqual([0, -1, 0, 0]);
+    // Fogleman: each strain flees all others with its own factor. A third strain copies A's factor 1.45,
+    // while B keeps fleeing it with its own 0.46.
+    expect(strainLike(first('cyclones'), 2).attraction).toEqual([-1.4512, -1.4512, 1, -1.4512]);
+    expect(presetById('cyclones')?.settings().strains[1]?.attraction[2]).toBe(-0.46232897);
   });
 });

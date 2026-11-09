@@ -241,8 +241,10 @@ export function defaultStrain(index: number, count = MAX_STRAINS): Strain {
 /**
  * A strain for slot `index` with the numbers of `base` (strain A of the scene) and the color of its slot.
  * It weighs its own trail as `base` weighs its own, and every other trail as `base` weighs the trail in
- * slot `index`, so the new strain and the others treat each other alike. The defaults of defaultStrain()
- * are Jones' values without the one-agent-per-cell rule, which contract into a few lines.
+ * slot `index`. The other strains keep the weight their rows already hold for slot `index`: in Fogleman's
+ * scenes each strain flees all others with its own factor, so there the new strain and the others can flee
+ * each other with different weights. The defaults of defaultStrain() are Jones' values without the
+ * one-agent-per-cell rule, which contract into a few lines.
  */
 export function strainLike(base: Strain, index: number): Strain {
   const self = base.attraction[0] ?? 1;
