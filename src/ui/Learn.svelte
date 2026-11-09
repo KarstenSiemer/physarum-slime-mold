@@ -88,8 +88,24 @@
       </p>
     {:else if app.learnTab === 'The model'}
       <p>
-        Jeff Jones (2010) imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of the
-        cell. The agents leave a chemical trail and follow it. Every step has six parts:
+        The model comes from a research paper: Jeff Jones, “Characteristics of Pattern Formation and Evolution in
+        Approximations of Physarum Transport Networks”, <em>Artificial Life</em>, 2010. Jones worked at the Centre for
+        Unconventional Computing of the University of the West of England in Bristol. This app calls the paper Jones
+        2010.
+      </p>
+      <p>
+        Jones showed that thousands of simple agents build networks like the slime mold’s without any plan: each agent
+        only follows a chemical trail and adds to it. He mapped which settings give networks, sheets, spots or stripes,
+        and showed how food turns a network into short paths between the food.
+      </p>
+      <p>
+        Sage Jenson’s GPU version (2019) and Michael Fogleman’s version with several species (2020) build on the same
+        rules, and this app draws on all three. A scene marked “Jones 2010, Fig. 4” uses the settings of figure 4 of the
+        paper, on a grid shaped like your screen.
+      </p>
+      <p>
+        Like the paper, the app imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of
+        the cell. The agents leave a chemical trail and follow it. Every step has six parts:
       </p>
       <ol>
         <li>
@@ -99,14 +115,19 @@
           <strong>Rotate.</strong> Front strongest: keep going. Front weakest: turn left or right at random. Otherwise: turn
           toward the stronger side.
         </li>
-        <li><strong>Move</strong> one step forward. In Jones’ original, only one agent may sit in each cell.</li>
+        <li>
+          <strong>Move</strong> one step forward. In Jones’ original, only one agent may sit in each cell (the switch One
+          agent per cell).
+        </li>
         <li><strong>Deposit</strong> some trail after a successful move.</li>
         <li><strong>Diffuse:</strong> the trail spreads to the 8 neighbor cells (a 3 × 3 average).</li>
         <li><strong>Decay:</strong> a fixed fraction of the trail disappears.</li>
       </ol>
       <p>
         No agent knows the network. The network appears because trails attract agents, and agents strengthen trails.
-        Diffusion and decay keep it from collapsing into dots.
+        With Jones’ settings, diffusion and decay alone do not keep it from collapsing into lines; his rule of one agent
+        per cell does. A blocked agent turns to a random direction, and these turns start new branches (p. 135). Without
+        the rule, agents pile up in the same cells and the network contracts into a few lines.
       </p>
       <p>
         Here, several strains can share the dish. Each strain has its own trail. A table sets how strongly each strain
