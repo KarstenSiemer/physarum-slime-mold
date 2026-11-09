@@ -35,7 +35,17 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
 
 - Agents live in `RGBA32F` textures, updated by a full-screen fragment pass (ping-pong).
 - Deposit: agents are drawn as 1-pixel points into a counts texture with additive blending.
-  Counts are integers, so blending order does not change the result (deterministic).
+  Counts are integers, so blending order does not change the result (deterministic). With
+  `EXT_float_blend` the texture is `RGBA32F`, exact to 2²⁴ agents per cell.
+- Without `EXT_float_blend` only half floats blend, and they count exactly to 2048 (11
+  significant bits), while condensed networks gather more agents of one strain in a cell (up to
+  about 12 700 in the default scene). So each (cell, strain) gets its own pixel in four panels of
+  the grid size, with an 8-bit stencil (`deposit()` in `src/engine/gl/sim.ts`). A first point
+  pass counts the agents modulo 256 in the stencil and adds a carry for every 256th; a second
+  moves the remainder from the stencil into the color; a full-screen pass writes 256 · carry +
+  remainder into an `RGBA32F` texture. Exact up to 2048 · 256 = 524 288 agents per cell and
+  strain; beyond that the carry stops growing. It costs a second point pass, 20 B more per cell
+  (104 instead of 84) and halves the largest grid side.
 - Diffusion, decay and scents: one fragment pass with two render targets.
 - Collisions (ADR 0008): claims with `MAX` blending of unique float keys (< 2²⁴, exact in
   float32); needs `EXT_float_blend`, otherwise the switch is disabled.

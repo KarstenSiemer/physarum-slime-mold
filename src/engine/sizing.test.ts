@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { defaultSettings } from '../model/params';
-import { estimateBytes, fitResolution, memoryBudget, type Limits } from './sizing';
+import {
+  BYTES_PER_CELL,
+  BYTES_PER_CELL_HALF_FLOAT,
+  estimateBytes,
+  fitResolution,
+  gridSize,
+  memoryBudget,
+  type Limits,
+} from './sizing';
 
 const roomy: Limits = { maxAgents: 2 ** 24, maxBufferBytes: 2 ** 30, maxGridSide: 8192, budget: memoryBudget(8) };
 
@@ -21,6 +29,15 @@ describe('memory budget', () => {
 
   it('keeps settings that fit', () => {
     expect(fitResolution(defaultSettings(), 16 / 10, roomy)).toBe(1536);
+  });
+
+  it('counts the bytes per cell of the backend', () => {
+    const s = defaultSettings();
+    const [w, h] = gridSize(s.resolution, 16 / 10);
+    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at 84 B per cell
+    expect(fitResolution(s, 16 / 10, { ...roomy, budget })).toBe(s.resolution);
+    const halfFloat = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL_HALF_FLOAT };
+    expect(fitResolution(s, 16 / 10, halfFloat)).toBeLessThan(s.resolution);
   });
 
   it('respects the per-buffer and texture-size limits of small devices', () => {

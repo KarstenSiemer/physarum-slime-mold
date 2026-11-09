@@ -92,8 +92,8 @@ export class Engine {
   fit(s: Settings): Settings {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
-    const { maxAgents, maxBufferBytes, maxGridSide } = this.backend;
-    const limits = { maxAgents, maxBufferBytes, maxGridSide, budget: memoryBudget(memory) };
+    const { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell } = this.backend;
+    const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, budget: memoryBudget(memory) };
     return constrain({
       ...s,
       resolution: fitResolution(s, aspect, limits),

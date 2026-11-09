@@ -28,6 +28,8 @@ export interface Target {
   width: number;
   height: number;
   format: number;
+  /** Depth and stencil buffer, if the target has one (stencilTarget()). */
+  depthStencil?: WebGLRenderbuffer;
 }
 
 const FORMATS: Record<number, [number, number]> = {
@@ -59,6 +61,23 @@ export function target(gl: GL, width: number, height: number, format: number, li
   return { texture, fbo, width, height, format };
 }
 
+/** A target with an 8-bit stencil (in a depth-stencil renderbuffer, the most widely supported kind). */
+export function stencilTarget(gl: GL, width: number, height: number, format: number): Target {
+  const t = target(gl, width, height, format);
+  const depthStencil = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depthStencil);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, depthStencil);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteRenderbuffer(depthStencil);
+    destroyTarget(gl, t);
+    throw new Error(`Stencil target ${width}×${height} is incomplete (status 0x${status.toString(16)})`);
+  }
+  return { ...t, depthStencil };
+}
+
 export function clear(gl: GL, t: Target) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
   gl.viewport(0, 0, t.width, t.height);
@@ -69,6 +88,7 @@ export function clear(gl: GL, t: Target) {
 export function destroyTarget(gl: GL, t: Target) {
   gl.deleteTexture(t.texture);
   gl.deleteFramebuffer(t.fbo);
+  if (t.depthStencil) gl.deleteRenderbuffer(t.depthStencil);
 }
 
 /** Reads a whole target (rows from y = 0). */

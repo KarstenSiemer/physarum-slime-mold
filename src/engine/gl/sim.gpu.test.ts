@@ -84,32 +84,49 @@ function alivePerStrain(agents: AgentState[], strains: number) {
   return n;
 }
 
-it('frees every texture and framebuffer of a half-built simulation', async () => {
-  const { canvas, live, failAt } = countingCanvas();
-  const backend = WebGl2Backend.create(canvas);
-  const before = { ...live };
-  let failures = 0;
-  // Fail the 1st, 2nd, ... render target until the simulation is complete.
-  for (let n = 1; n < 64; n++) {
-    failAt(n);
-    let sim;
-    try {
-      sim = await backend.createSim(defaultSettings(), 64, 32, 100);
-    } catch {
-      failures++;
-      expect(live, `failed at render target ${n}`).toEqual(before);
-      continue;
-    }
-    sim.destroy();
-    expect(live).toEqual(before);
-    break;
-  }
-  failAt(Infinity);
-  expect(failures).toBeGreaterThanOrEqual(9); // agents ×2, trail ×2, scent ×2, counts, env, tally (+ collisions ×3)
-  backend.destroy();
-});
-
 describe.each(PATHS)('float blending %s', (floatBlend) => {
+  it('frees every texture, framebuffer and renderbuffer of a half-built simulation', () => {
+    const { canvas, live, failAt } = countingCanvas();
+    const { gl, prog } = context(canvas);
+    const before = { ...live };
+    let failures = 0;
+    // Fail the 1st, 2nd, ... render target until the simulation is complete.
+    for (let n = 1; n < 64; n++) {
+      failAt(n);
+      let sim;
+      try {
+        sim = new GlSim(gl, prog, defaultSettings(), 64, 32, 100, floatBlend);
+      } catch {
+        failures++;
+        expect(live, `failed at render target ${n}`).toEqual(before);
+        continue;
+      }
+      sim.destroy();
+      expect(live).toEqual(before);
+      break;
+    }
+    failAt(Infinity);
+    // agents ×2, trail ×2, scent ×2, counts, env, tally; then collisions ×3 or the counting panels (×2 checks)
+    expect(failures).toBeGreaterThanOrEqual(floatBlend ? 12 : 11);
+  });
+
+  // Half floats count exactly to 2048 only; condensed networks hold thousands of agents per cell.
+  it('counts deposits exactly far above 2048 agents per cell and strain', async () => {
+    const { gl, prog } = context();
+    const strains = [0, 1, 2].map((i) => defaultStrain(i));
+    // One cell on a periodic grid: every agent moves into it.
+    const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0 }), 1, 1, 300_000, floatBlend);
+    sim.run(1);
+    const counts = Array.from(await sim.readCounts());
+    const expected = alivePerStrain(await sim.readAgents(), 3);
+    expect(expected.every((n) => n > 90_000)).toBe(true);
+    expect(counts).toEqual([...expected, 0]);
+    // The deposit uses these counts: trail = keep · deposit · count after one step from zero.
+    const trail = Array.from(await sim.readTrail());
+    for (let s = 0; s < 3; s++) expect(trail[s] ?? 0).toBeCloseTo(0.9 * 5 * (expected[s] ?? 0), -1);
+    sim.destroy();
+  });
+
   it('counts alive agents exactly, without a synchronous readback', async () => {
     const { canvas, syncReads } = countingCanvas();
     const { gl, prog } = context(canvas);
@@ -142,4 +159,10 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     expect(done).toBe(true);
     sim.destroy();
   });
+});
+
+it('the backend reports the memory and grid limits of its counting path', () => {
+  const backend = WebGl2Backend.create(document.createElement('canvas'));
+  expect(backend.bytesPerCell).toBe(backend.supportsCollisions ? 84 : 104);
+  backend.destroy();
 });

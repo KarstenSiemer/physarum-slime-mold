@@ -63,6 +63,8 @@ export interface Backend<S extends Sim = Sim> {
   readonly maxBufferBytes: number;
   /** Largest grid side (texture dimension limit). */
   readonly maxGridSide: number;
+  /** GPU bytes per grid cell, for the memory estimate (sizing.ts). */
+  readonly bytesPerCell: number;
   readonly supportsCollisions: boolean;
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;

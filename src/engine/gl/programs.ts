@@ -1,6 +1,7 @@
 import agentsFrag from './glsl/agents.frag?raw';
 import bloomFrag from './glsl/bloom.frag?raw';
 import common from './glsl/common.glsl?raw';
+import countsFrag from './glsl/counts.frag?raw';
 import diffuseFrag from './glsl/diffuse.frag?raw';
 import fullscreen from './glsl/fullscreen.vert?raw';
 import initFrag from './glsl/init.frag?raw';
@@ -26,6 +27,7 @@ export interface Program {
 export interface Programs {
   agents: Program;
   points: Program;
+  counts: Program;
   init: Program;
   diffuse: Program;
   paint: Program;
@@ -56,6 +58,7 @@ export function compile(gl: GL): Programs {
     init: sim(initFrag),
     diffuse: sim(diffuseFrag),
     paint: sim(paintFrag),
+    counts: sim(countsFrag),
     points: wrap(gl, program(gl, V + common + pointsVert, V + common + pointsFrag)),
     render: plain(renderFrag),
     bloom: plain(bloomFrag),

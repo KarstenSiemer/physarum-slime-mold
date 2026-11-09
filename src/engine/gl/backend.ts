@@ -3,7 +3,7 @@ import { at } from '../at';
 import { levels } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
-import { equilibrium } from '../sizing';
+import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
 import type { Backend, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
 import { compile, VIEW_BINDING, type Programs } from './programs';
@@ -22,6 +22,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly maxAgents: number;
   readonly maxBufferBytes: number;
   readonly maxGridSide: number;
+  readonly bytesPerCell: number;
   private readonly prog: Programs;
   private readonly viewUbo: WebGLBuffer;
   private readonly viewData = new ArrayBuffer(VIEW_BYTES);
@@ -46,7 +47,16 @@ export class WebGl2Backend implements Backend<GlSim> {
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     // Claim keys must stay below 2^24 (exact in float32); memory stays moderate on weaker GPUs.
     this.maxAgents = Math.min(2 ** 22, 2048 * maxTex);
-    this.maxGridSide = maxTex;
+    // Without float blending the counting panels (gl/sim.ts deposit()) are twice the grid on each side.
+    const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+    const side = Math.min(
+      maxTex,
+      gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
+      viewport[0] ?? 0,
+      viewport[1] ?? 0,
+    );
+    this.maxGridSide = floatBlend ? maxTex : Math.floor(side / 2);
+    this.bytesPerCell = floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT;
     this.maxBufferBytes = maxTex * maxTex * 16;
     this.description = `WebGL2 · ${String(gl.getParameter(gl.RENDERER))}`;
     this.lost = new Promise((resolve) => {
