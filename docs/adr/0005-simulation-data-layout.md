@@ -11,10 +11,10 @@ decay values down to 0.0001 (Fig. 12).
 
 The GPU runs agents in buffer order. Once the network spreads over the grid, neighbours in the
 buffer sit far apart on the grid, and nearly every sensor read and deposit misses the cache. In
-the default scene (4 million agents, Apple M3 Pro) the agent pass grew from about 3 ms to about
-20 ms per step by step 3000. The same agents reordered by 8 × 8 tile took 2.7 to 2.9 ms. Atomic
-contention was not the cause: contended deposits as a separate pass cost about 1 ms
-([webgpu-platform](../knowledge-base/webgpu-platform.md#cost-per-pass-on-metal-measured-2026-11-09)).
+the default scene (4 million agents, Apple M3 Pro) the agent pass in init order took 6.2 ms per
+step at step 0 and 14.8 to 16.6 ms from step 3000 on. The same agents in 8 × 8 tile order took
+2.5 to 3.0 ms. Atomic contention was not the cause: contended deposits as a separate pass cost
+about 1 ms ([webgpu-platform](../knowledge-base/webgpu-platform.md#cost-per-pass-on-metal-measured-2026-11-10)).
 
 ## Options
 

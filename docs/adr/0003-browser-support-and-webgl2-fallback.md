@@ -38,8 +38,9 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
   Counts are integers, so blending order does not change the result (deterministic). With
   `EXT_float_blend` the texture is `RGBA32F`, exact to 2²⁴ agents per cell.
 - Without `EXT_float_blend` only half floats blend, and they count exactly to 2048 (11
-  significant bits), while condensed networks gather more agents of one strain in a cell (up to
-  about 12 700 in the default scene). So each (cell, strain) gets its own pixel in four panels of
+  significant bits), while condensed networks gather more agents of one strain in a cell (in the
+  default scene up to 29 083 at step 600, sampled every 50 steps on WebGPU; on WebGL2 at a 768
+  grid 2269). So each (cell, strain) gets its own pixel in four panels of
   the grid size, with an 8-bit stencil (`deposit()` in `src/engine/gl/sim.ts`). A first point
   pass counts the agents modulo 256 in the stencil and adds a carry for every 256th; a second
   moves the remainder from the stencil into the color; a full-screen pass writes 256 · carry +

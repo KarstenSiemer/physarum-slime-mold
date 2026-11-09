@@ -87,6 +87,59 @@ Facts learned:
   identical code (2026-11-08 and 09). Its WebGL2 run, which has no workgroup tile, took 31 to
   69 s. The test's timeout is now 600 s (ADR 0010).
 
+## Cost per pass on Metal (measured 2026-11-10)
+
+- Setup: Apple M3 Pro (18-core GPU), macOS 26.6.2, Chromium 156.0.8078.4 (Playwright 1.64.1) in
+  new headless mode with the flags of `tests/browser.ts`, production builds served locally,
+  viewport 1280 × 720. Default scene (three strains): grid 1536 × 864, 3 981 312 agents,
+  diffusion 2, seed fixed by a seeded `Math.random`. Another session used the GPU at times, so
+  every comparison ran paired in one page at the same simulation state.
+- Compute passes: timestamp queries, one pass per dispatch while measuring. They agree with wall
+  time (the research found within about 5 %).
+- Render passes: wall time only. Metal render-pass timestamps over-count: for the 10 render
+  passes of one frame they summed to 50.3 ms, against 2.2 ms of wall time (the research saw
+  about 10×).
+
+GPU time per step, ms. "Init order" is the agent buffer in id order, the layout of `main` before
+the sort (ADR 0005); "sorted" is the app's sort every 32 steps, its cost included.
+
+| Step | Step, init order | Step, sorted | Agent pass, init order | Agent pass, sorted | Diffusion (2 passes) | Sort, per step |
+| ---- | ---------------- | ------------ | ---------------------- | ------------------ | -------------------- | -------------- |
+| 0    | 7.6              | 4.7          | 6.2                    | 2.8                | 2.0–2.5              | 0.07           |
+| 1000 | 11.0             | 4.8          | 7.8                    | 2.5                | 2.0–2.2              | 0.07           |
+| 3000 | 17.3             | 5.2          | 14.8                   | 3.0                | 2.1–2.4              | 0.06           |
+| 5000 | 20.4             | 5.4          | 16.6                   | 3.0                | 2.4–2.5              | 0.06           |
+
+- One sort at 4 million agents: count 0.5–0.7 ms, prefix sum 0.06 ms, scatter 1.1–1.5 ms
+  (medians at steps 0 to 5000). It moves about 190 MB, close to what the memory bandwidth
+  allows. A variant with one atomic per run of equal tiles instead of one per agent was not
+  faster. A frame with a sort took 1.4–2.4 ms longer at 1280 × 720 and 1.7–4.2 ms at
+  3024 × 1890 (wall time, one step and a draw).
+- Draw: 2.2 ms per frame with bloom at 1280 × 720; the main render pass alone 1.35 ms (glow),
+  1.7 ms (gel). At 2560 × 1600: glow 1.8 ms, gel 2.25 ms, and the gel before its height pass
+  (ADR 0009) 8.0 ms.
+- The largest number of agents of one strain that moved into one cell in a step: 29 083 at step
+  600 (sampled every 50 steps), about 4100 at step 1000 and 800 to 950 from step 3000 on.
+- The research (2026-11-09, same machine, without the sort) measured the agent pass at 3.1 ms at
+  step 100 and 20–21 ms at steps 3000 to 4000; a second measurement found the late values 30 to
+  45 % lower. Late, memory-bound timings swing between runs, which is why only paired numbers
+  count here.
+
+Real frame loop, 60 s per run, headless (rAF at 60 Hz), `main` before these changes against
+after them:
+
+| Scene                                 | Canvas      | Before: fps, steps/s, steps per frame | Before: longest frame | After: fps, steps/s, steps per frame | After: longest frame |
+| ------------------------------------- | ----------- | ------------------------------------- | --------------------- | ------------------------------------ | -------------------- |
+| Default, density 3                    | 1280 × 720  | 11.6, 66, 5.7 (last 30 s: 4.5 fps)    | 267 ms                | 60.0, 120, 2.0                       | 16.8 ms              |
+| Default, density 3, startup check off | 3024 × 1890 | 8.8, 63, 7.2 (last 30 s: 3.9 fps)     | 300 ms                | 60.0, 117, 1.95                      | 33 ms                |
+| Default, density 1                    | 1280 × 720  | 36.2, 118, 3.3 (last 30 s: 18 fps)    | 133 ms                | 60.0, 120, 2.0                       | 16.8 ms              |
+| Cyclones (1024 × 576, 4.7 million)    | 1280 × 720  | 4.5, 52, 11.6                         | 417 ms                | 60.0, 103, 1.7                       | 33 ms                |
+
+WebGL2 (`?backend=webgl2`, same machine): `alive()` used to block the main thread for 92–190 ms
+per call at 1 million agents and 590–620 ms at 4 million (median). It now takes 0.1–0.2 ms and
+resolves 11 ms (1 million) or 180–190 ms (4 million) later, without blocking. At 1 million agents
+the frame rate went from 28–51 to 59–60 fps.
+
 ## Feature availability (web3dsurvey share of WebGPU devices)
 
 | Feature                                      | Chrome | Safari 26–27                 | Firefox         |
