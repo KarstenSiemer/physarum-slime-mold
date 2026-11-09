@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { presetById, sourceKind, sourceText } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, loadPreset, openLearn, sceneChanged, type LearnTab } from './state.svelte';
@@ -6,11 +7,19 @@
   const scene = $derived(presetById(app.scene));
   const changed = $derived(sceneChanged());
   let sourceOpen = $state(false);
+  let heading = $state<HTMLHeadingElement>();
 
   // Each strain keeps the role it had in the scene, also after an earlier strain was removed.
   function role(i: number): string {
     const origin = app.strainOrigin[i] ?? -1;
     return (origin >= 0 ? scene?.strainRoles[origin] : undefined) ?? 'Added strain';
+  }
+
+  // Reload scene removes its own button, so the focus moves to the card's heading instead of the page.
+  async function reload(id: string) {
+    loadPreset(id);
+    await tick();
+    heading?.focus();
   }
 
   // Where "More in Learn" leads for each kind of source.
@@ -25,7 +34,7 @@
 <section id="scene-card" class="card" aria-label="Scene">
   {#if scene}
     <header>
-      <h3>{scene.name}</h3>
+      <h3 bind:this={heading} tabindex="-1">{scene.name}</h3>
       {#if changed}<span class="tag">changed</span>{/if}
     </header>
     <div class="chips">
@@ -61,7 +70,7 @@
         <button
           type="button"
           onclick={() => {
-            loadPreset(scene.id);
+            void reload(scene.id);
           }}>Reload scene</button
         >
       </p>

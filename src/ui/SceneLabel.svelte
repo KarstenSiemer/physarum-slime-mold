@@ -35,6 +35,10 @@
     backdrop-filter: blur(14px) saturate(140%);
     text-align: left;
   }
+  /* The label sits on the canvas: a ring outside it would vanish on the light paper style, so it goes on its glass. */
+  .scene-label:focus-visible {
+    outline-offset: -2px;
+  }
   .name {
     overflow: hidden;
     text-overflow: ellipsis;

@@ -97,6 +97,7 @@
           type="checkbox"
           checked={s.collisions && app.canCollide}
           disabled={!app.canCollide}
+          aria-describedby={ruleHelp ? 'rule-help' : undefined}
           onchange={(e) => {
             setRule(e.currentTarget.checked);
           }}

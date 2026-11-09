@@ -235,6 +235,8 @@
     box-sizing: border-box;
     width: min(720px, calc(100vw - 32px));
     max-height: min(80vh, 760px);
+    /* The header (about 43 px) sticks to the top: a control that gets focus scrolls into view below it. */
+    scroll-padding-top: 56px;
     padding: 0 20px 20px;
     border: 1px solid var(--line);
     border-radius: 16px;

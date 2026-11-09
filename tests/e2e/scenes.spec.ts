@@ -1,6 +1,7 @@
 // Scene name, scene card, grouped presets, the one-agent-per-cell switch and Learn → Scenes.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { PRESETS } from '../../src/model/presets';
 import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 const serious = async (page: Page, include?: string) => {
@@ -145,6 +146,24 @@ test('a preset chosen while the engine starts is the one that runs', async ({ pa
   expect(errors).toEqual([]);
 });
 
+test('the scene name shows its focus ring on its own glass, readable on every style', async ({ page }) => {
+  await openSmallScene(page);
+  await page.getByRole('button', { name: 'Hide settings' }).focus();
+  await page.keyboard.press('Tab');
+  const label = page.getByRole('button', { name: /^Scene: / });
+  await expect(label).toBeFocused();
+  const ring = await label.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      visible: el.matches(':focus-visible'),
+      style: cs.outlineStyle,
+      outside: parseFloat(cs.outlineOffset) + parseFloat(cs.outlineWidth),
+    };
+  });
+  // The ring ends at the label's edge: it lies on the label's glass, not on the canvas.
+  expect(ring).toEqual({ visible: true, style: 'solid', outside: 0 });
+});
+
 test('hiding and showing the panel keeps the scene', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('spots');
@@ -168,6 +187,9 @@ test('switching one agent per cell restarts the population, and its help opens',
   await expect(help).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#rule-help')).toContainText('Switching the rule restarts the population.');
   const rule = page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' });
+  // Like the sliders, the switch names its open help as its description.
+  await expect(rule).toHaveAttribute('aria-describedby', 'rule-help');
+  await expect(rule).toHaveAccessibleDescription(/Jones’ rule: a cell holds at most one agent/);
   await rule.check();
   await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
   await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.step)).toBe(0);
@@ -241,6 +263,41 @@ test('Learn → Scenes loads a scene, and the panel shows it', async ({ page }) 
   await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
   expect(errors).toEqual([]);
 });
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`Learn → Scenes keeps the focused button below its sticky header (${viewport.width} px)`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openSmallScene(page);
+    await page.getByRole('button', { name: 'Learn', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Learn' });
+    await dialog.getByRole('tab', { name: 'Scenes' }).click();
+    // From the last scene back to the first, as a keyboard user goes back with Shift+Tab.
+    await dialog.getByRole('button', { name: 'Details of Dot grid' }).focus();
+    const covered: string[] = [];
+    let stops = 0;
+    for (;;) {
+      const stop = await page.evaluate(() => {
+        const el = document.activeElement;
+        const head = document.querySelector('dialog header')?.getBoundingClientRect();
+        if (!(el instanceof HTMLElement) || !head) throw new Error('no focus or no header');
+        return {
+          name: el.textContent.trim(),
+          inScenes: el.closest('.scenes') !== null,
+          covered: el.getBoundingClientRect().top < head.bottom,
+        };
+      });
+      if (!stop.inScenes) break;
+      stops++;
+      if (stop.covered) covered.push(stop.name);
+      await page.keyboard.press('Shift+Tab');
+    }
+    expect(stops).toBe(2 * PRESETS.length); // Load and Details of every scene
+    expect(covered).toEqual([]);
+  });
+}
 
 test.describe('on a 375 × 812 phone', () => {
   test.use({ viewport: { width: 375, height: 812 } });
