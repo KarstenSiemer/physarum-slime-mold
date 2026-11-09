@@ -7,11 +7,10 @@
   const changed = $derived(sceneChanged());
   let sourceOpen = $state(false);
 
-  // Roles belong to the scene's strains; after a strain was removed they no longer match their letters.
-  function role(i: number): string | undefined {
-    const roles = scene?.strainRoles ?? [];
-    if (app.settings.strains.length < roles.length) return undefined;
-    return roles[i] ?? 'Added strain';
+  // Each strain keeps the role it had in the scene, also after an earlier strain was removed.
+  function role(i: number): string {
+    const origin = app.strainOrigin[i] ?? -1;
+    return (origin >= 0 ? scene?.strainRoles[origin] : undefined) ?? 'Added strain';
   }
 
   // Where "More in Learn" leads for each kind of source.
@@ -72,13 +71,11 @@
       <p>{scene.about}</p>
       <ul class="strains" aria-label="Strains">
         {#each app.settings.strains as st, i (i)}
-          {@const r = role(i)}
           <li>
             <span class="dot" style:--c={st.color} aria-hidden="true"></span>
             <span
               ><strong>{letter(i)}</strong>
-              {#if r}{r}:{/if}
-              {strainNumbers(app.settings, i, scene.env)}.</span
+              {role(i)}: {strainNumbers(app.settings, i, scene.env)}.</span
             >
           </li>
         {/each}

@@ -1,5 +1,5 @@
 import type { Engine } from '../engine/engine';
-import { defaultSettings, type Settings } from '../model/params';
+import { defaultSettings, MAX_STRAINS, strainLike, type Settings } from '../model/params';
 import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
 import { modelChanged } from '../model/scene';
 
@@ -32,6 +32,11 @@ export interface AppState {
   scene: string;
   /** The settings the scene loaded with, to tell whether a model parameter changed since. */
   sceneBase: Settings | undefined;
+  /**
+   * For each strain, its index in the loaded scene, or −1 for a strain added since. Removing a strain moves the
+   * later ones up a letter, so the scene card finds each strain's role here.
+   */
+  strainOrigin: number[];
   /** Settings → Scene is open (kept while the panel is hidden). */
   sceneSection: boolean;
   /** "About this scene" in the scene card is open. */
@@ -61,6 +66,7 @@ export const app = $state<AppState>({
   settings: defaultSettings(),
   scene: '',
   sceneBase: undefined,
+  strainOrigin: [],
   sceneSection: true,
   sceneAbout: false,
   tool: 'pan',
@@ -90,6 +96,9 @@ export function setScene(p: Preset) {
   app.settings = s;
   app.scene = p.id;
   app.sceneBase = base;
+  app.strainOrigin = s.strains.map((_, i) => i);
+  // The inoculate tool places the selected strain, and a scene with fewer strains has no such strain.
+  app.strain = Math.min(app.strain, s.strains.length - 1);
 }
 
 let ruleNoticeShown = false;
@@ -112,6 +121,27 @@ export function ruleUnavailable() {
   app.canCollide = false;
   app.settings.collisions = false;
   if (app.sceneBase) app.sceneBase.collisions = false;
+}
+
+/** Adds a strain that copies strain A: the defaults are Jones' values without the rule, which collapse. */
+export function addStrain() {
+  const s = app.settings;
+  const first = s.strains[0];
+  if (!first || s.strains.length >= MAX_STRAINS) return;
+  s.strains.push(strainLike($state.snapshot(first), s.strains.length));
+  app.strainOrigin.push(-1);
+}
+
+/** Removes strain `i`; the strains after it move up a letter, and so do their trail weights. */
+export function removeStrain(i: number) {
+  const s = app.settings;
+  if (s.strains.length < 2 || i < 0 || i >= s.strains.length) return;
+  s.strains.splice(i, 1);
+  for (const st of s.strains) st.attraction = [...st.attraction.slice(0, i), ...st.attraction.slice(i + 1), -1];
+  app.strainOrigin.splice(i, 1);
+  // The inoculate tool keeps its strain when an earlier one goes.
+  if (i < app.strain) app.strain--;
+  app.strain = Math.min(app.strain, s.strains.length - 1);
 }
 
 /**

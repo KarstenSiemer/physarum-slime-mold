@@ -1,5 +1,5 @@
 // Texts about a scene that come from its settings, and the check whether the user changed them.
-import { MAX_STRAINS, strainSpec, type Settings, type Strain, type StrainKey } from './params';
+import { strainSpec, type Settings, type Strain, type StrainKey } from './params';
 import type { EnvShape } from './presets';
 
 export const letter = (i: number) => 'ABCD'[i] ?? String(i + 1);
@@ -72,21 +72,26 @@ export function strainNumbers(s: Settings, i: number, env: readonly EnvShape[] =
 const NOT_MODEL = new Set<keyof Settings>(['seed', 'style', 'exposure', 'bloom', 'speed', 'strains']);
 const STRAIN_KEYS = Object.keys(strainSpec) as StrainKey[];
 
-function sameStrain(a: Strain, b: Strain): boolean {
+/** Same numbers, and the same weights on the trails of the `n` strains that exist. */
+function sameStrain(a: Strain, b: Strain, n: number): boolean {
   return (
     STRAIN_KEYS.every((k) => a[k] === b[k]) &&
-    Array.from({ length: MAX_STRAINS }, (_, j) => j).every((j) => (a.attraction[j] ?? 0) === (b.attraction[j] ?? 0))
+    Array.from({ length: n }, (_, j) => j).every((j) => (a.attraction[j] ?? 0) === (b.attraction[j] ?? 0))
   );
 }
 
-/** True when a model parameter differs. Look, speed, strain colors and the seed do not count. */
+/**
+ * True when a model parameter differs. Look, speed, strain colors and the seed do not count, and neither do
+ * weights on the trails of strains that do not exist: the GPU never gets them (packParams in engine/pack.ts).
+ */
 export function modelChanged(current: Settings, base: Settings): boolean {
   for (const k of Object.keys(base) as (keyof Settings)[]) {
     if (!NOT_MODEL.has(k) && current[k] !== base[k]) return true;
   }
-  if (current.strains.length !== base.strains.length) return true;
+  const n = current.strains.length;
+  if (n !== base.strains.length) return true;
   return current.strains.some((st, i) => {
     const b = base.strains[i];
-    return b === undefined || !sameStrain(st, b);
+    return b === undefined || !sameStrain(st, b, n);
   });
 }

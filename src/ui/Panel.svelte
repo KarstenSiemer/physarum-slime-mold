@@ -6,7 +6,6 @@
     LAYOUTS,
     MAX_STRAINS,
     RESOLUTIONS,
-    strainLike,
     STYLES,
     type Strain,
   } from '../model/params';
@@ -15,7 +14,7 @@
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
-  import { app, getEngine, loadPreset, showNotice } from './state.svelte';
+  import { addStrain, app, getEngine, loadPreset, removeStrain, showNotice } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
   const s = $derived(app.settings);
@@ -42,18 +41,6 @@
   };
 
   let ruleHelp = $state(false);
-
-  // A new strain copies strain A of the scene: the defaults are Jones' values without the rule, which collapse.
-  function addStrain() {
-    const first = s.strains[0];
-    if (first) s.strains.push(strainLike($state.snapshot(first), s.strains.length));
-  }
-
-  function removeStrain(i: number) {
-    s.strains.splice(i, 1);
-    for (const st of s.strains) st.attraction = [...st.attraction.slice(0, i), ...st.attraction.slice(i + 1), -1];
-    app.strain = Math.min(app.strain, s.strains.length - 1);
-  }
 
   // The engine restarts the population on every switch, so agents stacked without the rule do not stay
   // stacked (ADR 0008).

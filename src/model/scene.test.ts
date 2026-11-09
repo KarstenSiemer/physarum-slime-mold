@@ -85,7 +85,18 @@ describe('modelChanged', () => {
     expect(changed((s) => (s.diffusion = 2))).toBe(true);
     expect(changed((s) => (s.scentDecay = 0.01))).toBe(true);
     expect(changed((_, a) => (a.sensorOffset = 10))).toBe(true);
-    expect(changed((_, a) => (a.attraction = [1, 0, 0, 0]))).toBe(true);
+    expect(changed((_, a) => (a.attraction = [0.5, -1, -1, -1]))).toBe(true);
     expect(changed((s, a) => s.strains.push(structuredClone(a)))).toBe(true);
+  });
+
+  it('ignores weights on the trails of strains that do not exist, as the GPU never gets them', () => {
+    const { s: base } = settingsOf('three-strains');
+    const s = structuredClone(base);
+    for (const st of s.strains) st.attraction[3] = -1; // Remove strain writes this into the freed slot
+    expect(modelChanged(s, base)).toBe(false);
+    const a = s.strains[0];
+    if (!a) throw new Error('no strain');
+    a.attraction[2] = 0;
+    expect(modelChanged(s, base)).toBe(true);
   });
 });
