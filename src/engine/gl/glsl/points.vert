@@ -1,10 +1,11 @@
 // One point per agent into a per-cell target, combined by blending (gl/sim.ts):
 // kind 0 deposit (moved agents, additive, one lane per strain), 1 claims (MAX of keys),
-// 2 occupancy (additive), 3 tally of alive agents per strain into a 1 × 1 target.
+// 2 occupancy (additive), 3 tally of alive agents per strain (additive, see below).
 
 uniform sampler2D agents;
 uniform int agentWidth;
 uniform int kind;
+uniform int tallySide; // kind 3: side of the square tally target
 
 flat out vec4 value;
 
@@ -28,8 +29,12 @@ void main() {
       c = cellOf(a.xy);
       value = vec4(1.0);
     } else if (kind == 3) {
+      // Agent i adds 1 to its strain's lane of pixel i mod n² (n = tallySide). Spread like this, no
+      // pixel sums more than 2^24 / n² agents: 1024 for n = 128, exact even in half floats.
+      int n = tallySide;
+      int k = i % (n * n);
       value[s] = 1.0;
-      gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+      gl_Position = vec4((vec2(k % n, k / n) + 0.5) / float(n) * 2.0 - 1.0, 0.0, 1.0);
       return;
     }
   }

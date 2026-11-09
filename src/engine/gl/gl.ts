@@ -84,6 +84,55 @@ export function readTarget(gl: GL, t: Target): Float32Array | Uint8Array {
   return out;
 }
 
+/**
+ * Resolves once the GPU has run every command issued so far: a fence, polled without blocking. A fence
+ * cannot signal within the task that made it (WebGL 2.0 spec, 5.27), so polling starts in the next task.
+ * Resolves false if the context is lost.
+ */
+export function fence(gl: GL): Promise<boolean> {
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (!sync || gl.isContextLost()) {
+        resolve(false);
+        return;
+      }
+      const status = gl.clientWaitSync(sync, 0, 0);
+      if (status === gl.TIMEOUT_EXPIRED) {
+        setTimeout(poll, 1);
+        return;
+      }
+      gl.deleteSync(sync);
+      resolve(status !== gl.WAIT_FAILED);
+    };
+    setTimeout(poll, 0);
+  });
+}
+
+/**
+ * Reads a float target without stalling the main thread: the GPU copies it into a pixel-pack buffer,
+ * and the CPU reads that buffer once a fence says the copy is done.
+ */
+export async function readTargetAsync(gl: GL, t: Target): Promise<Float32Array> {
+  const out = new Float32Array(t.width * t.height * 4);
+  const pbo = gl.createBuffer();
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+  gl.bufferData(gl.PIXEL_PACK_BUFFER, out.byteLength, gl.STREAM_READ);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.FLOAT, 0);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  try {
+    if (!(await fence(gl))) throw new Error('The WebGL context was lost.');
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    return out;
+  } finally {
+    gl.deleteBuffer(pbo);
+  }
+}
+
 /** Uploads texels into a target (rows from y = 0). */
 export function writeTarget(gl: GL, t: Target, x: number, y: number, w: number, h: number, data: ArrayBufferView) {
   const [format, type] = FORMATS[t.format] ?? [gl.RGBA, gl.FLOAT];

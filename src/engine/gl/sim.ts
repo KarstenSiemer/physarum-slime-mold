@@ -5,7 +5,9 @@ import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
 import {
   clear,
   destroyTarget,
+  fence,
   readTarget,
+  readTargetAsync,
   target,
   textures,
   uniformBlock,
@@ -19,6 +21,8 @@ type Pair<T> = [T, T];
 type Bit = 0 | 1;
 const flip = (b: Bit): Bit => (b === 0 ? 1 : 0);
 const AGENT_ROW = 2048;
+/** Side of the alive tally target (points.vert kind 3): 128² pixels keep every pixel sum exact. */
+const TALLY_SIDE = 128;
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -32,7 +36,7 @@ export class GlSim implements Sim {
   private readonly scent: Pair<Target>;
   private readonly counts: Target;
   private readonly env: Target;
-  private readonly tally: Target | undefined;
+  private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
   private a: Bit = 0;
@@ -65,7 +69,7 @@ export class GlSim implements Sim {
       // Counts are small integers: exact in half floats too, which blend without EXT_float_blend.
       this.counts = t(width, height, floatBlend ? gl.RGBA32F : gl.RGBA16F);
       this.env = t(width, height, gl.RGBA8);
-      this.tally = floatBlend ? t(1, 1, gl.RGBA32F) : undefined;
+      this.tally = t(TALLY_SIDE, TALLY_SIDE, floatBlend ? gl.RGBA32F : gl.RGBA16F);
       // Collisions need float blending. Allocated now, so a failure is freed below; the budget counts them.
       if (floatBlend) {
         const r = () => t(width, height, gl.R32F);
@@ -151,20 +155,26 @@ export class GlSim implements Sim {
     clear(this.gl, this.env);
   }
 
-  finish(): Promise<void> {
-    return Promise.resolve();
+  /** Resolves when the GPU has finished all work issued so far (a fence, polled without blocking). */
+  async finish(): Promise<void> {
+    await fence(this.gl);
   }
 
-  alive(): Promise<number[]> {
-    if (!this.tally) return Promise.resolve([]);
+  /**
+   * Alive agents per strain. The GPU sums them into a 128² target, which is read back asynchronously
+   * and summed on the CPU, so the main thread never waits for the GPU. Exact up to 2^24 agents with
+   * 32- or 16-bit float blending (points.vert kind 3).
+   */
+  async alive(): Promise<number[]> {
     const gl = this.gl;
+    const strains = this.settings.strains.length;
     this.writeParams();
     clear(gl, this.tally);
     this.points(3, this.tally, gl.FUNC_ADD);
-    const px = new Float32Array(4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.tally.fbo);
-    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
-    return Promise.resolve(Array.from(px.slice(0, this.settings.strains.length), Math.round));
+    const px = await readTargetAsync(gl, this.tally);
+    const sums = [0, 0, 0, 0];
+    for (let i = 0; i < px.length; i += 4) for (let s = 0; s < 4; s++) sums[s] = (sums[s] ?? 0) + (px[i + s] ?? 0);
+    return sums.slice(0, strains).map(Math.round);
   }
 
   readAgents(): Promise<AgentState[]> {
@@ -191,10 +201,12 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.env) as Uint8Array);
   }
 
+  /** Agent `index` is its texel: WebGL2 never reorders agents, so the slot is the id (ADR 0005). */
   writeAgent(index: number, a: AgentState) {
+    if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
     const x = index % this.agentWidth;
     const y = Math.floor(index / this.agentWidth);
-    writeTarget(this.gl, this.agentsTex[this.a], x, y, 1, 1, new Float32Array([a.x, a.y, a.heading, a.bits]));
+    writeTarget(this.gl, this.agentsTex[this.a], x, y, 1, 1, new Float32Array([a.x, a.y, a.heading, a.bits & 7]));
   }
 
   writeTrail(data: Float32Array) {
@@ -203,8 +215,7 @@ export class GlSim implements Sim {
 
   destroy() {
     const gl = this.gl;
-    const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env];
-    if (this.tally) all.push(this.tally);
+    const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.tally];
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
@@ -284,6 +295,7 @@ export class GlSim implements Sim {
     textures(gl, p.program, { agents: agents.texture });
     gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
     gl.uniform1i(p.loc('kind'), kind);
+    gl.uniform1i(p.loc('tallySide'), TALLY_SIDE);
     this.blend(equation);
     gl.drawArrays(gl.POINTS, 0, this.agents);
     gl.disable(gl.BLEND);

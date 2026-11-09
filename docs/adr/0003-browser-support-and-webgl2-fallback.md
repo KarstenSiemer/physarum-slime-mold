@@ -1,6 +1,6 @@
 # 0003: Browser support and a WebGL2 fallback
 
-- Status: accepted
+- Status: accepted (revised 2026-11-09: fences, readback without stalls, exact counts)
 - Date: 2026-11-08
 
 ## Context
@@ -41,6 +41,15 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
   float32); needs `EXT_float_blend`, otherwise the switch is disabled.
 - Needs `EXT_color_buffer_float`. Without WebGL2 and that extension, the page explains which
   browsers work.
+- `finish()` puts a fence (`fenceSync`) into the command stream and polls it with
+  `clientWaitSync(…, 0)` from timers; a fence cannot signal within the task that made it. So the
+  frame budget (`src/engine/budget.ts`) sees on WebGL2 too when the GPU falls behind.
+- Readback without stalls: `alive()` sums the alive agents per strain into a 128 × 128 target
+  (agent _i_ into pixel _i_ mod 16 384, so at most 1024 per pixel for 2²⁴ agents, exact in half
+  floats too), copies it into a pixel-pack buffer and reads that after a fence; the CPU adds the
+  pixels. The auto-levels sample grid uses the same readback. Before, `alive()` drew every agent
+  into one pixel and called a synchronous `readPixels`, which blocked the main thread for about
+  87 ms twice per second at 1 million agents.
 
 The engine picks WebGPU when `requestAdapter()` returns an adapter and the device starts;
 otherwise WebGL2. `?backend=webgl2` forces the fallback for testing.

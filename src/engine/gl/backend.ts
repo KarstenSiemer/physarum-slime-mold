@@ -5,7 +5,7 @@ import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
 import { equilibrium } from '../sizing';
 import type { Backend, View } from '../types';
-import { clear, destroyTarget, target, textures, uniformBlock, type GL, type Target } from './gl';
+import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
 import { compile, VIEW_BINDING, type Programs } from './programs';
 import { GlSim } from './sim';
 
@@ -30,6 +30,10 @@ export class WebGl2Backend implements Backend<GlSim> {
   private frame = 0;
   private gain = 0;
   private black = 0;
+  /** The auto-levels measurement whose readback is still on its way. */
+  private measuring: Promise<void> | undefined;
+  /** Counts forget() calls: a readback of a replaced simulation must not change the new levels. */
+  private generation = 0;
 
   private constructor(
     private readonly gl: GL,
@@ -89,7 +93,7 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
-    if (measure && this.frame % 15 === 0) this.measure(sim, this.gain === 0 ? 1 : 0.25);
+    if (measure && this.frame % 15 === 0 && !this.measuring) void this.measure(sim, this.gain === 0 ? 1 : 0.25);
     this.encode(sim, settings, view, gl.drawingBufferWidth, gl.drawingBufferHeight);
     this.frame++;
   }
@@ -109,13 +113,13 @@ export class WebGl2Backend implements Backend<GlSim> {
   }
 
   settle(sim: GlSim): Promise<void> {
-    this.measure(sim, 1);
-    return Promise.resolve();
+    return this.measure(sim, 1);
   }
 
   forget() {
     this.gain = 0;
     this.black = 0;
+    this.generation++;
   }
 
   destroy() {
@@ -124,9 +128,19 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.gl.deleteBuffer(this.viewUbo);
   }
 
-  /** Auto levels from a grid of trail samples (no compute shaders in WebGL2). */
-  private measure(sim: GlSim, blend: number) {
+  /**
+   * Auto levels from a grid of trail samples (no compute shaders in WebGL2), read back without blocking.
+   * Waits for a measurement that is still running, so `blend` 1 (settle) always gets its own.
+   */
+  private async measure(sim: GlSim, blend: number): Promise<void> {
+    while (this.measuring) await this.measuring;
+    this.measuring = this.sample(sim, blend).finally(() => (this.measuring = undefined));
+    return this.measuring;
+  }
+
+  private async sample(sim: GlSim, blend: number) {
     const gl = this.gl;
+    const generation = this.generation;
     const h = Math.max(1, Math.round((SAMPLES * sim.height) / sim.width));
     if (this.sampleTarget?.height !== h) {
       if (this.sampleTarget) destroyTarget(gl, this.sampleTarget);
@@ -140,8 +154,13 @@ export class WebGl2Backend implements Backend<GlSim> {
     textures(gl, p.program, { trail: sim.currentTrail.texture });
     gl.uniform2f(p.loc('outSize'), t.width, t.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    const px = new Float32Array(t.width * t.height * 4);
-    gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.FLOAT, px);
+    let px: Float32Array;
+    try {
+      px = await readTargetAsync(gl, t);
+    } catch {
+      return; // context lost: nothing to measure
+    }
+    if (generation !== this.generation) return;
     const bins = new Array<number>(BINS).fill(0);
     for (let i = 0; i < px.length; i += 4) {
       const v = px[i] ?? 0;
