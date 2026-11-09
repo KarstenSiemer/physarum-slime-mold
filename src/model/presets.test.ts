@@ -48,7 +48,7 @@ describe('presets', () => {
     for (const p of PRESETS.filter((x) => x.group === 'fogleman')) expect(p.source).toBe('Fogleman 2020');
   });
 
-  it('Jones scenes run with one agent per cell, so at most one agent per cell', () => {
+  it('Jones scenes run with one agent per cell and a density of at most 1', () => {
     const jones = PRESETS.filter((p) => sourceKind(p) === 'jones');
     expect(jones.map((p) => p.id)).toEqual([
       'network',

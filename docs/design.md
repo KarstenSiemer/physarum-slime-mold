@@ -90,7 +90,9 @@ deterministic on one GPU: integer atomics make the deposit order-independent.
 ### Initial layouts
 
 `mixed` (uniform), `bands` (strains side by side), `sectors`, `colonies` (one disc per strain),
-`ring`, `center`, `empty` (paint with the inoculate tool). Collision mode seeds unique cells.
+`ring`, `center`, `empty` (paint with the inoculate tool). In collision mode the mixed layout
+seeds distinct cells; the other layouts, agents moved out of walls or the dish, and rare rounding
+can start with shared cells (ADR 0008).
 
 ## 4. Interaction
 

@@ -31,7 +31,8 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 
 - [x] `model/params.ts` schema + `sanitize()` + fuzz tests
 - [x] Device setup with raised limits; device-loss message
-- [x] Init pass with 7 layouts; unique cells in collision mode
+- [x] Init pass with 7 layouts; distinct cells in collision mode for the mixed layout
+- [ ] Collision mode: every agent on a free cell from the first step, in every layout, also when it moves out of a wall or the dish, and without rounding into the next cell (`init.wgsl`, ADR 0008)
 - [x] Agent pass (Jones rule), shrinkage, inoculate and cut tools
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)
 - [x] Collision mode (claims, ADR 0008)

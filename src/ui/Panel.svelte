@@ -55,7 +55,8 @@
     app.strain = Math.min(app.strain, s.strains.length - 1);
   }
 
-  // The engine restarts the population on every switch, so the rule holds for every cell (ADR 0008).
+  // The engine restarts the population on every switch, so agents stacked without the rule do not stay
+  // stacked (ADR 0008).
   function setRule(on: boolean) {
     s.collisions = on;
     const scene = presetById(app.scene);

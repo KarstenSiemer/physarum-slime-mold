@@ -66,7 +66,7 @@ async function crowding(engine: Engine): Promise<number> {
   return Math.max(...cells.values());
 }
 
-it('switching one agent per cell restarts the population, so the rule holds for every cell (ADR 0008)', async () => {
+it('switching one agent per cell restarts the population, so agents stacked without the rule do not carry over (ADR 0008)', async () => {
   const canvas = document.createElement('canvas');
   canvas.width = 160;
   canvas.height = 100;
