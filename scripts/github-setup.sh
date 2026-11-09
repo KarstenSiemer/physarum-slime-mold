@@ -21,6 +21,13 @@ ruleset() {
   fi
 }
 
+# CodeQL default setup with the languages of ADR 0014 (python: the vendored .claude/skills/ scripts). Both
+# modes call it, so a second run of either mode keeps the same languages.
+codeql_setup() {
+  gh api -X PATCH "repos/$REPO/code-scanning/default-setup" -f state=configured -f query_suite=extended \
+    -f 'languages[]=actions' -f 'languages[]=javascript-typescript' -f 'languages[]=python' >/dev/null
+}
+
 settings() {
   echo "Merge settings: squash only, auto-merge (Renovate), delete merged branches"
   gh api -X PATCH "repos/$REPO" \
@@ -35,10 +42,9 @@ settings() {
   gh api -X PUT "repos/$REPO/vulnerability-alerts"
   gh api -X PUT "repos/$REPO/private-vulnerability-reporting"
 
-  # Languages are named because main may not contain code yet; pull requests are scanned from now on.
-  echo "CodeQL default setup (JavaScript/TypeScript and Actions)"
-  if ! gh api -X PATCH "repos/$REPO/code-scanning/default-setup" -f state=configured -f query_suite=extended \
-    -f 'languages[]=javascript-typescript' -f 'languages[]=actions' >/dev/null; then
+  # Before the first push main has no code: on 2026-11-08 this call started no analysis. codeql repeats it.
+  echo "CodeQL default setup (Actions, JavaScript/TypeScript, Python)"
+  if ! codeql_setup; then
     echo "  CodeQL default setup failed; run '$0 codeql' after the first merge." >&2
   fi
 
@@ -103,8 +109,9 @@ JSON
 JSON
 
   # A pull request runs the workflow files it contains, so green checks prove nothing about a PR that edits
-  # them. Changes to the files in .github/CODEOWNERS need the owner's approval. Admins may bypass this
-  # ruleset only through a pull request, so the owner can merge their own PRs; the checks above still apply.
+  # them. Changes to the files in .github/CODEOWNERS need the owner's approval; the owner's own PRs pass
+  # without one (ADR 0014). Admins may bypass this ruleset only through a pull request, in case GitHub
+  # starts to require the documented code owner approval. Ruleset main has no bypass, so its checks apply.
   # A new push that changes the diff dismisses the approval. require_last_push_approval is false, because it
   # requires an approval on every PR, also on PRs without code-owned files (ADR 0014).
   echo "Ruleset code owners: owner review for CI, Renovate, npm and hook settings"
@@ -138,8 +145,8 @@ JSON
 # The gate blocks every merge while the required tool has no analysis, and ruleset main has no bypass,
 # so it is added only once main has a CodeQL analysis.
 codeql() {
-  echo "CodeQL default setup (languages detected on main)"
-  gh api -X PATCH "repos/$REPO/code-scanning/default-setup" -f state=configured -f query_suite=extended >/dev/null
+  echo "CodeQL default setup (Actions, JavaScript/TypeScript, Python)"
+  codeql_setup
   if [ -z "$(gh api "repos/$REPO/code-scanning/analyses?tool_name=CodeQL&ref=refs/heads/main&per_page=1" --jq '.[0].id' 2>/dev/null)" ]; then
     echo "No CodeQL analysis of main yet. Wait until the first one finishes, then run: $0 codeql" >&2
     exit 1

@@ -1,7 +1,7 @@
 # 0014: CI workflows and their hardening
 
 - Status: accepted; revised 2026-11-08 after the GitHub Actions and supply-chain audits, and
-  2026-11-09 (ruleset `code owners`)
+  2026-11-09 (ruleset `code owners`, CodeQL languages)
 - Date: 2026-11-08
 
 ## Context
@@ -68,8 +68,12 @@ reporting, CodeQL default setup, and:
   config, `.npmrc`, pre-commit config, scripts) need the owner's approval. A change of the diff
   after the approval, for example a new push, dismisses the approval. A pull request runs the
   workflow files it contains, so a PR that edits them can make its own checks pass; the binding
-  to app 15368 does not prevent that. Admins may bypass this ruleset only through a pull
-  request, so the owner can merge their own PRs while the checks of ruleset `main` still apply.
+  to app 15368 does not prevent that. The owner's own pull requests pass this ruleset without a
+  review: GitHub's rule evaluation of the PR #7 merge (`scripts/`, rule suite 5003859265) shows
+  `pass`, although the [rules documentation][rules] requires the code owner's approval. Admins
+  may bypass this ruleset only through a pull request. The bypass stays in case GitHub enforces
+  the documented approval: the owner, the only code owner, cannot approve their own pull
+  requests. Ruleset `main` has no bypass, so its checks always apply.
 - Ruleset `code owners` does not require an approval of the last push
   (`require_last_push_approval: false`, owner decision of 2026-11-09). Per the
   [rules documentation][rules], that option requires an approval from someone other than the
@@ -82,11 +86,23 @@ reporting, CodeQL default setup, and:
   request to the owner, and GitHub reports no errors in `.github/CODEOWNERS`. So code owner
   review applies with an approval count of 0, and updates without code-owned files merge
   without a review.
-- CodeQL default setup (`settings`) names its languages (`javascript-typescript`, `actions`),
-  because `main` held no code before the first merge; pull requests are scanned from then on.
-  `scripts/github-setup.sh codeql` switches to the languages that GitHub detects on `main`. On
-  2026-11-09 these include `python` (the vendored `.claude/skills/` scripts) with 3 open high
-  alerts (9–11). PRs #3 and #4 passed the CodeQL check while these alerts were open.
+- CodeQL default setup analyses `actions`, `javascript-typescript` and `python`. Both modes of
+  the script name these languages, so a second run of either mode keeps them. The call in
+  `settings` on 2026-11-08, before the first push, started no analysis. The first CodeQL run
+  followed `scripts/github-setup.sh codeql` on 2026-11-09. That call named no languages, and
+  GitHub then analysed every detected language, also `python` (the vendored `.claude/skills/`
+  scripts).
+- `python` stays (owner decision of 2026-11-09). The vendored `supply-chain-risk-auditor`
+  scripts run with the owner's GitHub token (`gh auth token`), so CodeQL keeps checking them: a
+  flaw in a later upstream version then raises an alert. CodeQL found 3 high alerts in them: a
+  ReDoS (9, `collect.py:500`) and two incomplete URL checks (10 and 11, `sources.py:406` and
+  `:551`). Alerts 10 and 11 cannot send a request or the token to another host: every request
+  with the token goes to the literal `https://api.github.com`. Alert 9 only costs CPU time and
+  needs a crafted `go.mod` in an audited project. The alerts are dismissed as "won't fix" with
+  these reasons, because the copy stays byte-identical to upstream (ADR 0017). The owner
+  reports the findings to Trail of Bits. Merge protection counts an alert only if all its lines
+  are in the pull request diff, so PRs #3 and #4 passed the CodeQL check while these alerts
+  were open.
 - Ruleset `codeql` (`scripts/github-setup.sh codeql`, after the first merge): blocks merges with
   new CodeQL errors or high and critical security alerts. GitHub blocks every merge while a
   required code scanning tool has no analysis, and ruleset `main` has no bypass, so this gate is
