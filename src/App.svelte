@@ -132,19 +132,22 @@
   }
 
   let last = { t: performance.now(), frames: 0, step: 0 };
+  let counting = false;
   async function updateStats() {
     const e = getEngine();
-    if (!e || e.busy) return;
-    const now = performance.now();
-    const dt = (now - last.t) / 1000;
-    const alive = await e.sim.alive().catch(() => app.stats.alive);
-    app.stats = {
-      fps: (e.frames - last.frames) / dt,
-      stepsPerSecond: Math.max(0, e.sim.step - last.step) / dt,
-      step: e.sim.step,
-      alive,
-    };
-    last = { t: now, frames: e.frames, step: e.sim.step };
+    // The alive count waits for the GPU, which can take longer than the 500 ms interval under load. So
+    // time, frames and steps are read together before it, and two counts never overlap.
+    if (!e || e.busy || counting) return;
+    const now = { t: performance.now(), frames: e.frames, step: e.sim.step };
+    const dt = (now.t - last.t) / 1000;
+    const rates = { fps: (now.frames - last.frames) / dt, stepsPerSecond: Math.max(0, now.step - last.step) / dt };
+    last = now;
+    counting = true;
+    const alive = await e.sim
+      .alive()
+      .catch(() => app.stats.alive)
+      .finally(() => (counting = false));
+    app.stats = { ...rates, step: now.step, alive };
     if (!app.paused) autoTune();
   }
 
