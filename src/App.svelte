@@ -8,9 +8,10 @@
   import { decodeSettings, encodeSettings } from './model/url';
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
-  import { constrain, RESOLUTIONS } from './model/params';
+  import { constrain } from './model/params';
   import { app, getEngine, setEngine, showNotice, TOOLS, type Tool } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
+  import { GridTuner } from './ui/tune';
 
   let canvas: HTMLCanvasElement;
   let unsupported = $state(false);
@@ -103,19 +104,21 @@
     }, 400);
   });
 
-  // Startup check: lower the grid (at most twice) while the frame rate stays below 40 fps.
-  let tuneAt = performance.now() + 3000;
-  let tunes = 0;
-  function autoTune() {
-    if (tunes >= 2 || performance.now() < tuneAt || document.visibilityState !== 'visible') return;
-    tuneAt = performance.now() + 3000;
-    tunes++;
-    const i = RESOLUTIONS.indexOf(app.settings.resolution as (typeof RESOLUTIONS)[number]);
-    const lower = RESOLUTIONS[i - 1];
-    if (app.stats.fps >= 40 || lower === undefined || lower < 512) {
-      tunes = 2;
-      return;
-    }
+  // Startup check: in the first 15 s of active time, lower the grid (at most twice, not below 512 cells)
+  // while the frame rate stays below 40 fps or the steps per second below 3/4 of the speed (ui/tune.ts).
+  const tuner = new GridTuner();
+  function autoTune(e: Engine) {
+    const lower = tuner.tick({
+      now: performance.now(),
+      active: document.visibilityState === 'visible' && !app.paused && !e.busy,
+      run: e.restarts,
+      frames: e.frames,
+      steps: e.sim.step,
+      speed: app.settings.speed,
+      resolution: app.settings.resolution,
+      picked: app.gridPicked,
+    });
+    if (lower === undefined) return;
     app.maxResolution = lower;
     app.settings.resolution = lower;
     showNotice(`Lowered the grid to ${lower} cells for smooth playback. Change it under Scene → Grid.`);
@@ -135,9 +138,11 @@
   let counting = false;
   async function updateStats() {
     const e = getEngine();
+    if (!e) return;
+    if (tuner.running) autoTune(e); // also while rebuilding: that time must not count
     // The alive count waits for the GPU, which can take longer than the 500 ms interval under load. So
     // time, frames and steps are read together before it, and two counts never overlap.
-    if (!e || e.busy || counting) return;
+    if (e.busy || counting) return;
     const now = { t: performance.now(), frames: e.frames, step: e.sim.step };
     const dt = (now.t - last.t) / 1000;
     const rates = { fps: (now.frames - last.frames) / dt, stepsPerSecond: Math.max(0, now.step - last.step) / dt };
@@ -148,7 +153,6 @@
       .catch(() => app.stats.alive)
       .finally(() => (counting = false));
     app.stats = { ...rates, step: now.step, alive };
-    if (!app.paused) autoTune();
   }
 
   // Pointer input: pan, pinch, paint and agent tools.

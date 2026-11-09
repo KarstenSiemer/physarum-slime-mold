@@ -35,6 +35,8 @@ export class Engine {
   frames = 0;
   /** Steps per frame from the speed and from what the GPU keeps up with (budget.ts). */
   readonly budget = new FrameBudget();
+  /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
+  restarts = 0;
   private pendingTool: AgentTool | undefined;
   private readonly strokes: Stroke[] = [];
   private raf = 0;
@@ -150,6 +152,7 @@ export class Engine {
       this.sim.update(this.settings);
       this.sim.reset();
       this.backend.forget();
+      this.restarts++;
     })().finally(() => (this.rebuilding = undefined));
     return this.rebuilding;
   }
@@ -158,6 +161,7 @@ export class Engine {
     if (this.rebuilding) return; // the new simulation starts fresh anyway
     this.sim.reset();
     this.backend.forget();
+    this.restarts++;
   }
 
   /** Removes food, light and walls (a new simulation has none anyway). */

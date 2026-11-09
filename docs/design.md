@@ -44,7 +44,11 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises
   by 1/8 (to at most 16). A slow GPU then lowers the simulation speed instead of the frame rate,
   and steps it could not run are dropped, not caught up later.
-- A startup check lowers the grid (at most twice) while the frame rate stays below 40 fps.
+- A startup check (`src/ui/tune.ts`) lowers the grid one step, at most twice and not below 512
+  cells, when over a window of at least 2 s the frame rate is below 40 fps or the steps per
+  second are below 3/4 of the speed. It counts only active time (tab visible, not paused, no
+  rebuild), decides at 3, 6, 10 and 15 s of it, restarts its window after a reset or rebuild, and
+  never lowers a grid the user picked.
 
 ## 3. Simulation on the GPU
 

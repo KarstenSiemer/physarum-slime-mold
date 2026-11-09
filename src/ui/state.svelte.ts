@@ -37,6 +37,8 @@ export interface AppState {
   notice: string;
   /** Largest grid this device runs smoothly (lowered by the startup check in App.svelte). */
   maxResolution: number;
+  /** The user picked a grid in the panel; the startup check never lowers it then. */
+  gridPicked: boolean;
   /** The backend supports one agent per cell (WebGL2 needs EXT_float_blend). */
   canCollide: boolean;
   stats: Stats;
@@ -55,6 +57,7 @@ export const app = $state<AppState>({
   error: '',
   notice: '',
   maxResolution: 4096,
+  gridPicked: false,
   canCollide: true,
   stats: { fps: 0, stepsPerSecond: 0, step: 0, alive: [] },
 });

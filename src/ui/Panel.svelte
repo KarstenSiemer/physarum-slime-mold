@@ -92,7 +92,7 @@
     <Slider spec={globalSpec.density} bind:value={s.density} id="density" live={false} />
     <label class="field">
       <span>Grid (cells on the long side)</span>
-      <select bind:value={s.resolution}>
+      <select bind:value={s.resolution} onchange={() => (app.gridPicked = true)}>
         {#each RESOLUTIONS as r (r)}<option value={r}>{r}</option>{/each}
       </select>
     </label>
