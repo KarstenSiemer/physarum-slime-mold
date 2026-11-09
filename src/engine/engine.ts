@@ -1,12 +1,11 @@
 import { constrain, RESOLUTIONS, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
+import { FrameBudget } from './budget';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { fitResolution, gridSize, memoryBudget } from './sizing';
 import type { Backend, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
-
-const MAX_STEPS_PER_FRAME = 16;
 
 // Changes that need a new population.
 const RESET_KEYS = ['seed', 'layout', 'boundary'] as const;
@@ -34,8 +33,8 @@ export class Engine {
   paused = false;
   /** Frames drawn since start; the UI derives frames per second from it. */
   frames = 0;
-  private accumulator = 0;
-  private last = 0;
+  /** Steps per frame from the speed and from what the GPU keeps up with (budget.ts). */
+  readonly budget = new FrameBudget();
   private pendingTool: AgentTool | undefined;
   private readonly strokes: Stroke[] = [];
   private raf = 0;
@@ -219,18 +218,16 @@ export class Engine {
     cancelAnimationFrame(this.raf);
   }
 
-  /** One frame: queued strokes, as many steps as the speed asks for, then one render. */
+  /**
+   * One frame: queued strokes, as many steps as the speed asks for and the GPU keeps up with, then one
+   * render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
+   * simulation speed instead of the frame rate.
+   */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
-    const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
-    this.last = now;
     for (const s of this.strokes.splice(0)) this.sim.paint(s);
-    let steps = forceSteps ?? 0;
-    if (forceSteps === undefined && !this.paused) {
-      this.accumulator = Math.min(this.accumulator + dt * this.settings.speed, MAX_STEPS_PER_FRAME);
-      steps = Math.floor(this.accumulator);
-      this.accumulator -= steps;
-    }
+    const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
+    let steps = forceSteps ?? planned;
     // A held tool while paused still needs one step to act.
     if (this.pendingTool && steps === 0) steps = 1;
     if (steps > 0) {
@@ -239,6 +236,11 @@ export class Engine {
     }
     this.backend.draw(this.sim, this.settings, this.view, true);
     this.frames++;
+    this.budget.submitted();
+    const done = () => {
+      this.budget.done(performance.now());
+    };
+    this.sim.finish().then(done, done);
   }
 
   /** The current frame as pixels, rendered offscreen at canvas size. */

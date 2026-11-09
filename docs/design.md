@@ -38,7 +38,12 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   text, paper reference. UI controls, URL validation and GPU uniform packing all read it.
 - `engine/types.ts` defines the `Backend` and `Sim` interfaces. Both backends pass the same GPU
   test suite (`src/engine/sim.gpu.test.ts`).
-- One rAF loop: apply queued tool strokes → run _k_ simulation steps → render one frame.
+- One rAF loop: apply queued tool strokes → run _k_ simulation steps → render one frame. _k_
+  follows the speed, within a budget of steps per frame that the GPU keeps up with
+  (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
+  quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises
+  by 1/8 (to at most 16). A slow GPU then lowers the simulation speed instead of the frame rate,
+  and steps it could not run are dropped, not caught up later.
 - A startup check lowers the grid (at most twice) while the frame rate stays below 40 fps.
 
 ## 3. Simulation on the GPU
