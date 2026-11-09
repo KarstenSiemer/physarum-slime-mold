@@ -53,3 +53,48 @@ it('steps the grid down after an out-of-memory error, also back to the old size'
   expect(engine.sim.width).toBe(512);
   engine.destroy();
 });
+
+/** The largest number of living agents in one cell. */
+async function crowding(engine: Engine): Promise<number> {
+  const { width } = engine.sim;
+  const cells = new Map<number, number>();
+  for (const a of await engine.sim.readAgents()) {
+    if ((a.bits & 4) === 0) continue;
+    const c = Math.floor(a.y) * width + Math.floor(a.x);
+    cells.set(c, (cells.get(c) ?? 0) + 1);
+  }
+  return Math.max(...cells.values());
+}
+
+it('switching one agent per cell restarts the population, so the rule holds for every cell (ADR 0008)', async () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 160;
+  canvas.height = 100;
+  const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, density: 0.5, seed: 3 });
+  engine.frame(performance.now(), 30);
+  expect(engine.sim.step).toBe(30);
+  expect(await crowding(engine)).toBeGreaterThan(1); // without the rule agents share cells
+  await engine.apply({ ...engine.settings, collisions: true });
+  expect(engine.sim.step).toBe(0);
+  expect(await crowding(engine)).toBe(1);
+  engine.frame(performance.now(), 30);
+  expect(await crowding(engine)).toBe(1);
+  await engine.apply({ ...engine.settings, collisions: false });
+  expect(engine.sim.step).toBe(0);
+  engine.destroy();
+});
+
+it('does not restart when a backend without the rule keeps it off', async () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 160;
+  canvas.height = 100;
+  const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, density: 0.5 });
+  // WebGL2 without EXT_float_blend (ADR 0003): the engine runs every scene without the rule.
+  (engine.backend as { supportsCollisions: boolean }).supportsCollisions = false;
+  engine.frame(performance.now(), 10);
+  await engine.apply({ ...engine.settings, collisions: true });
+  await engine.apply({ ...engine.settings, collisions: true, foodStrength: 0.1 });
+  expect(engine.settings.collisions).toBe(false);
+  expect(engine.sim.step).toBe(10);
+  engine.destroy();
+});
