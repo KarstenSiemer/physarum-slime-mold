@@ -94,6 +94,19 @@ test('the scene card shows after choosing a preset', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('the panel shows the density the Steiner tree runs, not a rounded one', async ({ page }) => {
+  await openSmallScene(page);
+  await preset(page).selectOption('steiner');
+  await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.012);
+  const density = page.getByRole('spinbutton', { name: 'Agents per cell value' });
+  await expect(density).toHaveValue('0.012');
+  // A typed value keeps its digits too.
+  await density.fill('0.013');
+  await density.press('Enter');
+  await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.013);
+  await expect(density).toHaveValue('0.013');
+});
+
 test('hiding and showing the panel keeps the scene', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('spots');

@@ -278,6 +278,25 @@ export function defaultSettings(): Settings {
 }
 
 const clamp = (v: number, s: Spec) => Math.min(s.max, Math.max(s.min, v));
+
+/** Decimals of a spec's step: 0.05 gives 2. */
+const stepDecimals = (s: Spec) => Math.min(5, Math.max(0, -Math.floor(Math.log10(s.step))));
+
+/**
+ * A value as a slider or its number field takes it. A log range spans orders of magnitude, so it keeps 3
+ * significant digits: its step of 0.01 would turn the Steiner tree's density of 0.012 into 0.01. A linear range
+ * snaps to its step.
+ */
+export function snap(v: number, s: Spec): number {
+  const r = s.log ? Number(v.toPrecision(3)) : Number((Math.round(v / s.step) * s.step).toFixed(stepDecimals(s)));
+  return clamp(r, s);
+}
+
+/** A value as the number field shows it: 3 significant digits on a log range, the step's decimals otherwise. */
+export function fieldText(v: number, s: Spec): string {
+  return s.log ? String(Number(v.toPrecision(3))) : v.toFixed(stepDecimals(s));
+}
+
 const num = (v: unknown, fallback: number, s: Spec) =>
   typeof v === 'number' && Number.isFinite(v) ? clamp(v, s) : fallback;
 const oneOf = <T extends string>(v: unknown, list: readonly T[], fallback: T): T =>
