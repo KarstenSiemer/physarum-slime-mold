@@ -146,6 +146,8 @@
 
 <style>
   dialog {
+    /* The width includes padding and border: content-box sizing made it 385 px wide on a 375 px phone. */
+    box-sizing: border-box;
     width: min(720px, calc(100vw - 32px));
     max-height: min(80vh, 760px);
     padding: 0 20px 20px;
