@@ -206,14 +206,14 @@ PRESETS.push(
     id: 'steiner',
     experiment: true,
     name: 'Steiner tree',
-    blurb: 'Four food sources at the corners of a square.',
+    blurb: 'Four food sources in a dish.',
     watch:
-      'The network shortens until it joins all four foods with the least material. Paths meet in threes at about 120°, like soap films (Plateau’s laws).',
+      'A loose network wraps around the four food sources, then contracts. It usually ends as two three-way junctions joined by a short bridge, where the paths meet at about 120°, as soap films do (Plateau’s laws).',
     ref: 'Jones 2010, Fig. 19',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
-        { resolution: 256, density: 0.02, boundary: 'dish', foodStrength: 0.01 },
+        { resolution: 256, density: 0.012, boundary: 'dish', foodStrength: 0.01 },
       ),
     env: [food(0.4, 0.37, 0.02), food(0.6, 0.37, 0.02), food(0.4, 0.63, 0.02), food(0.6, 0.63, 0.02)],
   },
