@@ -145,7 +145,7 @@ export const globalSpec = {
   },
   foodStrength: {
     label: 'Food strength',
-    help: 'Weight of food projected into the scent field per step (wProj). Higher values tighten the network around food.',
+    help: 'Scent that each food cell releases per step (wProj): 255 × this value. The scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths leading in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
     min: 0,
     max: 0.5,
     step: 0.005,
@@ -160,7 +160,7 @@ export const globalSpec = {
   },
   scentDecay: {
     label: 'Scent decay',
-    help: 'Fraction of the food and light scent that disappears every step.',
+    help: 'Fraction of the food and light scent that disappears every step. Lower values spread the scent farther, but they also make it much stronger: at 0.001, food keeps pulling in more of the network.',
     min: 0.001,
     max: 0.9,
     step: 0.001,

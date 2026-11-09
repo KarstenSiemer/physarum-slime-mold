@@ -78,11 +78,13 @@
         Still, it finds food and connects food sources with an efficient network of tubes. Inside, the cell squeezes its
         liquid back and forth about every two minutes (shuttle streaming). Tubes that carry much flow grow thicker;
         tubes with little flow fade. In experiments it found the shortest way through a maze (Nakagaki 2000) and built a
-        network like the Tokyo rail system (Tero 2010).
+        network like the Tokyo rail system (Tero 2010). The model in this app has no flow, so its tubes do not grow
+        thicker with use.
       </p>
       <p>
         It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food
-        runs out, it shrinks onto the remaining food sources.
+        runs out, it shrinks onto the remaining food sources. In the simulation the network shrinks onto food only with
+        Shrinkage turned on, as in the scene Shrinking plasmodium.
       </p>
     {:else if app.learnTab === 'The model'}
       <p>
@@ -110,6 +112,14 @@
         Here, several strains can share the dish. Each strain has its own trail. A table sets how strongly each strain
         follows or flees the trails of the others (an idea from Michael Fogleman’s version). Food and light add their
         own scents.
+      </p>
+      <p>
+        Food releases a scent that spreads and fades like the trail. In Jones 2010 the food goes into the trail map
+        itself; here it has a scent of its own, so a strain that flees other strains is not repelled by food. The scent
+        fades within a few cells, so an agent notices food only when a sensor comes close. In a dense network, food
+        becomes a hub with paths leading in, and the rest of the network goes on as before. A whole network reorganizes
+        around food only when agents are few and the network contracts, as in Shortest path and Steiner tree, or when
+        agents die off, as in Shrinking plasmodium.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>
