@@ -69,8 +69,8 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Commit on a branch, PR, CI green (needs owner OK)
 - [x] `scripts/github-setup.sh codeql` after the first merge, once CodeQL has analysed `main` (ADR 0014); ruleset `codeql` active since 2026-11-09
 - [ ] CodeQL default setup also analyses `python` since 2026-11-09 (vendored `.claude/skills/` scripts, open high alerts 9–11): name the languages in `codeql`, or dismiss the alerts with reasons (owner decision)
-- [ ] Ruleset `code owners` sets `require_last_push_approval`, so every pull request needs an approval: Renovate PR #3 (`.node-version`, no code owner) stayed blocked with all checks green on 2026-11-09. Decide on the setting (owner, ADR 0014)
-- [ ] One test PR that touches `.github/`: GitHub must ask for the code owner's review (ADR 0014)
+- [x] Ruleset `code owners`: `require_last_push_approval` off since 2026-11-09 (owner decision, ADR 0014). It required an approval on every pull request and kept Renovate PR #3 (`.node-version`, no code owner) blocked with all required checks green; after the change, auto-merge merged PR #3
+- [x] Code owner review with 0 required approvals (ADR 0014): after the change, Renovate PR #4 (`.pre-commit-config.yaml`) stayed blocked with all required checks green and a review request to the owner; GitHub reports no errors in `.github/CODEOWNERS`
 - [x] Site live at <https://karstensiemer.github.io/physarum-slime-mold/>, no custom domain (ADR 0018)
 
 ## Later (not in scope now)

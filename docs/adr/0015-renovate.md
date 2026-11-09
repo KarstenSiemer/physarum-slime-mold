@@ -95,6 +95,7 @@ Owner setup:
 - Renovate does not age-check lockfile-only updates; `min-release-age` in `.npmrc` covers
   transitive versions during its `npm install`.
 - Renovate does not age-check `pin` updates (docs at 44.219.0, issue #40288), so their
-  `renovate/stability-days` status stays pending. The status is not a required check. For
+  `renovate/stability-days` status stays pending. The status is not a required check: on
+  2026-11-09, auto-merge merged pin PR #3 while the status was still pending. For
   minor and patch updates, Renovate creates no branch before the release age
   (`internalChecksFilter=strict`, the default).
