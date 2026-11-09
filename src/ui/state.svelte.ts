@@ -28,7 +28,7 @@ export interface Stats {
 
 export interface AppState {
   settings: Settings;
-  /** Id of the loaded preset; empty for settings from a shared link. */
+  /** Id of the loaded preset; empty for settings from the page address (a shared link or a reload). */
   scene: string;
   /** The settings the scene loaded with, to tell whether a model parameter changed since. */
   sceneBase: Settings | undefined;

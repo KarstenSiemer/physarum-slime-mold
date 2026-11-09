@@ -58,9 +58,9 @@ for (const viewport of [
 test('the scene card shows after choosing a preset', async ({ page }) => {
   const errors = watchErrors(page);
   await openSmallScene(page);
-  // A shared link names no scene.
-  await expect(page.getByRole('button', { name: /^Scene: Settings from a link/ })).toBeVisible();
-  await expect(card(page)).toContainText('shared link');
+  // The page address names no scene: a shared link, and also a reload.
+  await expect(page.getByRole('button', { name: /^Scene: Custom settings/ })).toBeVisible();
+  await expect(card(page)).toContainText('These settings came from the page address');
   await preset(page).selectOption('shortest-path');
   await expect(card(page).getByRole('heading', { name: 'Shortest path' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Scene: Shortest path/ })).toBeVisible();

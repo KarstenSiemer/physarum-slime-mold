@@ -18,7 +18,7 @@
 
 <button type="button" class="scene-label" title="About this scene" onclick={show}>
   <span class="sr-only">Scene:</span>
-  <span class="name">{scene?.name ?? 'Settings from a link'}</span>
+  <span class="name">{scene?.name ?? 'Custom settings'}</span>
   {#if changed}<span class="tag">changed</span>{/if}
 </button>
 
