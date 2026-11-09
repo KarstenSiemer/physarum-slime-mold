@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# GitHub repository settings (docs/adr/0012-hosting.md, 0014-ci-hardening.md, 0015-renovate.md).
+# GitHub repository settings (docs/adr/0014-ci-hardening.md, 0015-renovate.md, 0018-hosting-at-github-io.md).
 # Every mode can run again; rulesets are updated by name.
 # Usage:
 #   scripts/github-setup.sh settings   # before the first push: merge rules, security features, CodeQL,
 #                                      # Pages source, environments limited to main, rulesets
 #   scripts/github-setup.sh codeql     # after the first merge: CodeQL merge gate (needs an analysis of main)
-#   scripts/github-setup.sh domain     # custom domain + HTTPS; only after the DNS records exist
 set -euo pipefail
 
 REPO="${REPO:-KarstenSiemer/physarum-slime-mold}"
-DOMAIN="${DOMAIN:-physarum.karstensiemer.de}"
 
 # Creates or updates the ruleset with this name from the JSON on stdin.
 ruleset() {
@@ -167,21 +165,10 @@ JSON
   echo "Done."
 }
 
-domain() {
-  echo "Custom domain $DOMAIN (DNS: CNAME ${DOMAIN%%.*} → ${REPO%%/*}.github.io.)"
-  gh api -X PUT "repos/$REPO/pages" -f cname="$DOMAIN"
-  echo "Waiting for the certificate can take up to an hour. Then run: $0 https"
-}
-
-https() {
-  gh api "repos/$REPO/pages/health" || true
-  gh api -X PUT "repos/$REPO/pages" -F https_enforced=true
-}
-
 case "${1:-}" in
-  settings | codeql | domain | https) "$1" ;;
+  settings | codeql) "$1" ;;
   *)
-    echo "usage: $0 settings|codeql|domain|https" >&2
+    echo "usage: $0 settings|codeql" >&2
     exit 2
     ;;
 esac

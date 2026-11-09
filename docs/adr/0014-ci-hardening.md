@@ -1,7 +1,7 @@
 # 0014: CI workflows and their hardening
 
-- Status: accepted (repository settings pending, owner action); revised 2026-11-08 after the
-  GitHub Actions and supply-chain audits
+- Status: accepted (code-owner test pending, owner action); revised 2026-11-08 after the GitHub
+  Actions and supply-chain audits
 - Date: 2026-11-08
 
 ## Context
@@ -74,6 +74,9 @@ reporting, CodeQL default setup, and:
   that touches `.github/`.
 - CodeQL default setup (`settings`) names its languages (`javascript-typescript`, `actions`),
   because `main` held no code before the first merge; pull requests are scanned from then on.
+  `scripts/github-setup.sh codeql` switches to the languages that GitHub detects on `main`. On
+  2026-11-09 these include `python` (the vendored `.claude/skills/` scripts) with 3 open high
+  alerts (9–11). PRs #3 and #4 passed the CodeQL check while these alerts were open.
 - Ruleset `codeql` (`scripts/github-setup.sh codeql`, after the first merge): blocks merges with
   new CodeQL errors or high and critical security alerts. GitHub blocks every merge while a
   required code scanning tool has no analysis, and ruleset `main` has no bypass, so this gate is

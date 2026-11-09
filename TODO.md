@@ -64,12 +64,14 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 
 ## M6 Release
 
-- [ ] `scripts/github-setup.sh settings` before the first push of the workflows: it limits the environments `renovate` and `github-pages` to `main` (a job would create them unprotected) and adds both rulesets (owner)
-- [ ] Renovate GitHub App, variable `RENOVATE_CLIENT_ID`, secret `RENOVATE_PRIVATE_KEY` in the environment `renovate` (owner, ADR 0015)
-- [ ] Commit on a branch, PR, CI green (needs owner OK)
-- [ ] `scripts/github-setup.sh codeql` after the first merge, once CodeQL has analysed `main` (ADR 0014)
+- [x] `scripts/github-setup.sh settings` before the first push of the workflows: it limits the environments `renovate` and `github-pages` to `main` (a job would create them unprotected) and adds both rulesets (owner)
+- [x] Renovate GitHub App, variable `RENOVATE_CLIENT_ID`, secret `RENOVATE_PRIVATE_KEY` in the environment `renovate` (owner, ADR 0015); the first run with a token (2026-11-09) opened PRs #3 and #4 and the Dependency Dashboard #5
+- [x] Commit on a branch, PR, CI green (needs owner OK)
+- [x] `scripts/github-setup.sh codeql` after the first merge, once CodeQL has analysed `main` (ADR 0014); ruleset `codeql` active since 2026-11-09
+- [ ] CodeQL default setup also analyses `python` since 2026-11-09 (vendored `.claude/skills/` scripts, open high alerts 9–11): name the languages in `codeql`, or dismiss the alerts with reasons (owner decision)
+- [ ] Ruleset `code owners` sets `require_last_push_approval`, so every pull request needs an approval: Renovate PR #3 (`.node-version`, no code owner) stayed blocked with all checks green on 2026-11-09. Decide on the setting (owner, ADR 0014)
 - [ ] One test PR that touches `.github/`: GitHub must ask for the code owner's review (ADR 0014)
-- [ ] DNS at OMCnet: TXT verification + `physarum CNAME karstensiemer.github.io.`, then `github-setup.sh domain` and `https` (owner)
+- [x] Site live at <https://karstensiemer.github.io/physarum-slime-mold/>, no custom domain (ADR 0018)
 
 ## Later (not in scope now)
 
@@ -77,3 +79,4 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - Growth and death (Jones 2011), oscillation (Jones 2012), MCPM steering
 - Tracer agent with path history (shuttle streaming, Jones Fig. 7); video recording
 - Sensor width > 1 and sensitivity threshold `sMin`
+- Custom domain `physarum.karstensiemer.de` (steps in `knowledge-base/github-pages.md`)

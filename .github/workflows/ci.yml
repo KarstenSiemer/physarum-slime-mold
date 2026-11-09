@@ -1,4 +1,4 @@
-# Build, verify, and deploy main to GitHub Pages. See docs/adr/0012-hosting.md and 0014-ci-hardening.md.
+# Build, verify, and deploy main to GitHub Pages. See docs/adr/0018-hosting-at-github-io.md and 0014-ci-hardening.md.
 name: CI
 
 on:

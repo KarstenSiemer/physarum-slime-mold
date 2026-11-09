@@ -27,7 +27,7 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    (`style.setProperty`, `style.cssText`) and is allowed by `style-src 'self'`; static
    `style="…"` attributes are not used because they would be inline styles.
 2. **No HTML from strings**: ESLint `svelte/no-at-html-tags` is an error; no `innerHTML`.
-3. **Untrusted input** (URL, storage) goes through `sanitize()` in `src/model/params.ts`: only
+3. **Untrusted input** (the URL) goes through `sanitize()` in `src/model/params.ts`: only
    known keys, numbers clamped to their spec, enums checked, colors matched by regex, at most
    4 strains. Agent count is capped by the device's buffer limit. Unit tests fuzz it.
 4. **Resource limits for hostile links**: `Engine.fit()` runs before every allocation, the
@@ -51,4 +51,4 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
 
 - Browsers without Trusted Types (check per release) ignore the directive; the other layers
   still apply.
-- A CSP delivered by `<meta>` cannot set `frame-ancestors` or reporting (ADR 0012).
+- A CSP delivered by `<meta>` cannot set `frame-ancestors` or reporting (ADR 0018).

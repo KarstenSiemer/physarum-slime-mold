@@ -6,7 +6,7 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 
 ![Three strains weave their networks](docs/images/hero.jpg)
 
-**Live:** <https://physarum.karstensiemer.de> (after DNS setup; see [Deployment](#deployment))
+**Live:** <https://karstensiemer.github.io/physarum-slime-mold/>
 
 ## What you can do
 
@@ -38,7 +38,7 @@ and decays. Strong trails attract more agents, which strengthen the trail: a net
 - Rendering: auto levels from a GPU histogram, glow (bloom), dithering against banding.
 
 Details: [design](docs/design.md), [decisions (ADRs)](docs/adr/),
-[knowledge base](docs/knowledge-base/) (paper notes, variants, GPU facts).
+[knowledge base](docs/knowledge-base/) (paper notes, variants, GPU and GitHub Pages facts).
 
 ## Browser support
 
@@ -77,9 +77,9 @@ GPU tests use the real GPU locally and SwiftShader on GPU-less CI.
 
 ## Deployment
 
-GitHub Actions builds, tests and deploys to GitHub Pages from `main`. One-time owner steps are
-in [ADR 0012](docs/adr/0012-hosting.md) and `scripts/github-setup.sh`; Renovate needs a GitHub
-App ([ADR 0015](docs/adr/0015-renovate.md)).
+GitHub Actions builds, tests and deploys to GitHub Pages from `main`
+([ADR 0018](docs/adr/0018-hosting-at-github-io.md)). One-time repository settings are in
+`scripts/github-setup.sh`; Renovate needs a GitHub App ([ADR 0015](docs/adr/0015-renovate.md)).
 
 ## Credits
 

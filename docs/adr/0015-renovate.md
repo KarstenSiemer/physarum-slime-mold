@@ -1,7 +1,7 @@
 # 0015: Dependency updates with Renovate
 
-- Status: accepted (GitHub App pending, owner action); revised 2026-11-08 after the GitHub
-  Actions audit
+- Status: accepted; revised 2026-11-08 after the GitHub Actions audit and 2026-11-09 after a
+  check of the App permissions
 - Date: 2026-11-08
 
 ## Context
@@ -23,6 +23,15 @@ The user wants updates as pull requests that merge themselves when the tests pas
   passes the age gate at once.
 - `renovatebot/github-action` v46.3.12 runs `ghcr.io/renovatebot/renovate:44` (a floating tag)
   unless `renovate-image` holds a full reference (`src/docker.ts` at 1c0cf98).
+- Renovate's App permissions (`lib/modules/platform/github/readme.md` at 44.219.0, checked
+  2026-11-09): Checks, Commit statuses, Contents, Issues, Merge queues, Pull requests,
+  Workflows: read & write. Administration, Dependabot alerts, Metadata: read. Members
+  (organization permission): read.
+- With Administration, Renovate reads classic branch protection (`index.ts:400–413` at
+  44.219.0). `main` has none, and Renovate treats a 403 there like a 404 (`index.ts:924–945`).
+  A Renovate code comment ties the allowed merge methods to Administration (`index.ts:674`),
+  but GitHub's REST docs require Contents read and write for merge settings. Renovate reads
+  rulesets with Metadata read access (`index.ts:415–436`).
 
 ## Options
 
@@ -64,7 +73,11 @@ Owner setup:
 
 1. Create a GitHub App (no webhook) with repository permissions: Contents, Pull requests,
    Issues, Workflows, Commit statuses, Checks: read & write; Administration, Dependabot
-   alerts: read. Install it on this repository only.
+   alerts, Metadata: read. Leave out Merge queues (`main` has no merge queue) and Members (an
+   organization permission); Renovate ran without them on 2026-11-09. Install the App on this
+   repository only. After a change of the permissions, accept them under Settings →
+   Applications → Installed GitHub Apps. Until then, the installation keeps the old
+   permissions (GitHub Docs).
 2. Repository settings from ADR 0014 (`scripts/github-setup.sh settings`): auto-merge, the
    rulesets, and the environment `renovate` limited to `main`.
 3. Repository variable `RENOVATE_CLIENT_ID`; secret `RENOVATE_PRIVATE_KEY` in the environment
@@ -81,3 +94,7 @@ Owner setup:
   a review.
 - Renovate does not age-check lockfile-only updates; `min-release-age` in `.npmrc` covers
   transitive versions during its `npm install`.
+- Renovate does not age-check `pin` updates (docs at 44.219.0, issue #40288), so their
+  `renovate/stability-days` status stays pending. The status is not a required check. For
+  minor and patch updates, Renovate creates no branch before the release age
+  (`internalChecksFilter=strict`, the default).
