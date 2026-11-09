@@ -37,7 +37,10 @@ export class AutoExposure {
   private readonly pipeline: GPUComputePipeline;
   private readonly bins: GPUBuffer;
   private readonly readback: GPUBuffer;
-  private pending = false;
+  /** The measurement whose readback is still on its way. */
+  private pending: Promise<void> | undefined;
+  /** Counts reset() calls: a readback of a replaced simulation must not change the new levels. */
+  private generation = 0;
   private frame = 0;
   /** Linear gain from trail units to radiance, applied after subtracting `black`. */
   gain = 0;
@@ -64,10 +67,18 @@ export class AutoExposure {
     return this.gain;
   }
 
-  /** Measures now; `blend` 1 jumps to the result (exports, tests), smaller values smooth. */
+  /**
+   * Measures now; `blend` 1 jumps to the result (exports, tests), smaller values smooth. Waits for a
+   * measurement that is still running, so `blend` 1 always gets its own.
+   */
   async measure(trail: GPUTexture, blend = 1): Promise<void> {
-    if (this.pending) return;
-    this.pending = true;
+    while (this.pending) await this.pending;
+    this.pending = this.sample(trail, blend).finally(() => (this.pending = undefined));
+    return this.pending;
+  }
+
+  private async sample(trail: GPUTexture, blend: number) {
+    const generation = this.generation;
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.bins);
     const pass = enc.beginComputePass();
@@ -91,20 +102,19 @@ export class AutoExposure {
       await this.readback.mapAsync(GPUMapMode.READ);
       const l = levels(new Uint32Array(this.readback.getMappedRange()), cells);
       this.readback.unmap();
-      if (l) {
+      if (l && generation === this.generation) {
         this.gain += (l.gain - this.gain) * blend;
         this.black += (l.black - this.black) * blend;
       }
     } catch {
       // device lost or buffer destroyed: nothing to measure
-    } finally {
-      this.pending = false;
     }
   }
 
   reset() {
     this.gain = 0;
     this.black = 0;
+    this.generation++;
   }
 
   destroy() {
