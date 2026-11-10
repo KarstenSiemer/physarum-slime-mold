@@ -214,6 +214,21 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
     switch from the dish to the box, outlines that a dish stroke had continued past the rim stood
     where `env` held nothing (60 cells of food and 34 of walls in a test), food that a dish eraser
     had left outside the rim vanished from the picture, and light painted before went missing.
+    `refresh` also holds each byte from below: a cell that `env` does not hold keeps at least the
+    byte of d cells outside, with the nearest cell of its layer in the arena d cells away
+    (`floorByte` in `paint.wgsl`; the dish counts). The outline runs between the two cells, so it
+    lies at most d cells away. Strokes keep every byte at least this high, because the distance to
+    a segment changes by at most d between two cells d apart. Only cells that the old boundary did
+    not count can lie below it. Before, after a switch to an arena that counts more cells (from a
+    box to the periodic grid, or from the dish to a box or to the periodic grid), the cells across
+    the edge of the periodic grid and outside the old rim of the dish kept the byte of 4 cells or
+    more outside next to walls and food (856 wall cells of the Maze at x = 0 after a switch from
+    the box to the periodic grid). The renderer then drew the outline there from a step: at 8
+    cells per pixel, walls up to 77 levels and food up to 193 levels from a reference painted
+    under the new arena (review, 2026-11-10, both backends). The search of 3 rings doubles the
+    cost of `refresh`, once per change of boundary: at 3072 × 1920 with food and walls, 14.5 to
+    15.4 ms instead of 7.6 to 7.9 ms on WebGPU and 20.9 to 22.9 ms instead of 11.5 to 11.8 ms on
+    WebGL2 (M3 Pro, paired in one page, load average 6).
 
 11. **Many strokes in one call.** A replay of the edit list (ADR 0019) paints up to 100,000 strokes
     in one call of `Sim.paint`, and one call gives the bytes of one call per stroke and of one call
@@ -353,7 +368,8 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   erasers and strokes across the edges (wrap, box, dish), also under brushes wider than a small
   periodic grid, and cells outside the dish keep their bytes; the bytes match a CPU model of all
   strokes within 1, and the shadow byte matches `env`; after every change of boundary the bytes
-  follow `env` again; food lies below the trail and shows through the gel's thick trail; presence
+  follow `env` again, no nearer to an outline and no farther from it than the cells of `env`
+  allow; food lies below the trail and shows through the gel's thick trail; presence
   shows an agent on food and only there; the agents style shows blocked agents in collision mode;
   the outline of a food disc lies on the brush circle; the lit bevel of a round wall has no seams,
   and the ridge of a thin wall no beads; the trail runs along a slanted wall without a saw tooth
@@ -371,7 +387,8 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   with a wall whose shadow falls across the edge of the periodic grid; sweep strokes that later
   strokes cleared (ADR 0019), also over frames, and replay what is left on another grid; and load
   presets on the same grid and on new ones. After each, the outlines stay on the side of `env` with
-  its light and shadow, and each replay gives the bytes of one call per edit. The rebuilt Maze
+  its light and shadow, no byte lies farther from an outline than the nearest cell of its layer
+  allows, and each replay gives the bytes of one call per edit. The rebuilt Maze
   draws its walls and food from the outlines. A new simulation that replays food, light or walls
   counts as painted and draws with the variant of item 9 that has the environment code; after a
   Clear, or with an eraser alone, it draws without. Each was checked with a deliberate mutation of

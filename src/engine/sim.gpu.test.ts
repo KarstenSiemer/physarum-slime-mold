@@ -978,6 +978,20 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       return 0;
     }
 
+    /**
+     * The byte that a cell may hold at least for a layer the environment does not hold there (paint.wgsl `floorByte`):
+     * the byte of d cells outside, with the nearest cell of the layer in the arena d cells away.
+     */
+    function floorBound(env: Uint8Array, boundary: string, w: number, h: number, x: number, y: number, ch: number) {
+      let near = Infinity;
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++) {
+          const c = dx === 0 && dy === 0 ? -1 : cellAt(boundary, w, h, x + dx, y + dy);
+          if (c >= 0 && (env[c * 4 + ch] ?? 0) >= 128) near = Math.min(near, Math.hypot(dx, dy));
+        }
+      return Math.round((Math.min(1, Math.max(-1, -near / SHAPE_RANGE)) * 0.5 + 0.5) * 255);
+    }
+
     /** Bytes of arena cells without their layer that lie above the hold of `env` (holdBound()). */
     async function overHold(sim: Sim, boundary: string, label: string) {
       const [env, shape] = [await sim.readEnv(), await sim.readShape()];
@@ -1181,7 +1195,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // The boundary can change while `env` stays (Engine.apply: update, then reset). A dish counts only the cells
     // inside it and the periodic grid has neighbours across its edges, so after the change `shape` is held to
-    // `env` again: signs, light, the walls' shadow, and no outline nearer than the cells of `env` allow.
+    // `env` again: signs, light, the walls' shadow, and no outline nearer or farther than the cells of `env` allow.
+    // Farther: a wall along the right edge of a box, or a wall or food that the dish clipped at its rim, has cells
+    // beside it that the old boundary did not count, with bytes of 4 cells or more outside.
     it.each([
       ['dish', 'box'],
       ['box', 'dish'],
@@ -1233,6 +1249,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const [env, shape] = [await sim.readEnv(), await sim.readShape()];
       const isWall = (i: number) => (env[i * 4] ?? 0) >= 128;
       const wrong: string[] = [];
+      const bounded = [0, 0];
       for (let y = 0; y < H; y++)
         for (let x = 0; x < W; x++) {
           if (!inArena(to, W, H, x, y)) continue;
@@ -1246,9 +1263,15 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             if (e >= 128 !== s >= 128) wrong.push(`${ch ? 'food' : 'wall'} at ${x},${y}: env ${e}, outline ${s}`);
             else if (e < 128 && s > holdBound(env, to, W, H, x, y, ch))
               wrong.push(`${ch ? 'food' : 'wall'} at ${x},${y}: outline ${s} nearer than env allows`);
+            else if (e < 128 && s < floorBound(env, to, W, H, x, y, ch))
+              wrong.push(`${ch ? 'food' : 'wall'} at ${x},${y}: outline ${s} farther than env allows`);
+            if (e < 128 && floorBound(env, to, W, H, x, y, ch) > 0) bounded[ch] = (bounded[ch] ?? 0) + 1;
           }
         }
       expect(wrong).toEqual([]);
+      // The cells that the lower bound is about, beside the cells of each layer.
+      expect(bounded[0]).toBeGreaterThan(20);
+      expect(bounded[1]).toBeGreaterThan(20);
     });
 
     /**

@@ -345,8 +345,8 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
 
   /**
    * Cells of the arena where the renderer's outlines (ADR 0009) disagree with `env`: wall or food on the other side
-   * of the outline, another light, or a drop shadow more than 1 off the share of wall cells under its cone
-   * (paint.wgsl `shadowByte`).
+   * of the outline, an outline farther than the nearest cell of its layer (paint.wgsl `floorByte`), another light,
+   * or a drop shadow more than 1 off the share of wall cells under its cone (paint.wgsl `shadowByte`).
    */
   async function disagreements(engine: Engine) {
     const { sim, settings } = engine;
@@ -354,18 +354,31 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     const { width: w, height: h } = sim;
     const { boundary } = settings;
     const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1;
-    const isWall = (x: number, y: number) => {
+    const holds = (x: number, y: number, ch: number) => {
       if (boundary === 'wrap') [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
       else if (x < 0 || y < 0 || x >= w || y >= h || (boundary === 'dish' && !inDish(x, y))) return false;
-      return (env[(y * w + x) * 4] ?? 0) >= 128;
+      return (env[(y * w + x) * 4 + ch] ?? 0) >= 128;
+    };
+    const isWall = (x: number, y: number) => holds(x, y, 0);
+    // The byte of d cells outside, with the nearest cell of the layer d cells away.
+    const floor = (x: number, y: number, ch: number) => {
+      let near = Infinity;
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++)
+          if ((dx || dy) && holds(x + dx, y + dy, ch)) near = Math.min(near, Math.hypot(dx, dy));
+      return Math.round((Math.min(1, Math.max(-1, -near / 4)) * 0.5 + 0.5) * 255);
     };
     const wrong: string[] = [];
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         if (boundary === 'dish' && !inDish(x, y)) continue;
         const i = (y * w + x) * 4;
-        for (const ch of [0, 1])
-          if ((env[i + ch] ?? 0) >= 128 !== (shape[i + ch] ?? 0) >= 128) wrong.push(`layer ${ch} at ${x},${y}`);
+        for (const ch of [0, 1]) {
+          const [e, s] = [env[i + ch] ?? 0, shape[i + ch] ?? 0];
+          if (e >= 128 !== s >= 128) wrong.push(`layer ${ch} at ${x},${y}`);
+          else if (e < 128 && s < floor(x, y, ch))
+            wrong.push(`layer ${ch} at ${x},${y}: ${s} below ${floor(x, y, ch)}`);
+        }
         if (shape[i + 2] !== env[i + 2]) wrong.push(`light at ${x},${y}`);
         const [sx, sy] = [x + 0.5 - 1.08, y + 0.5 - 1.44];
         let [sum, all] = [0, 0];

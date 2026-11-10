@@ -163,6 +163,45 @@ fn held(b: u32, q: vec2i, shift: u32) -> u32 {
   return heldBy(b, false, holdByte(q, shift));
 }
 
+// No cell of the layer within 3 rings: more than any squared distance (dx² + dy²) there, which is at most 18.
+const NONE = 32u;
+
+// The smallest byte that a cell may hold for a layer that `env` does not hold there, with n the squared distance
+// (nearestCells()) to the nearest cell of the layer, d = √n cells away between the cell centres: the outline runs
+// between the two cells, so it lies at most d cells away. Strokes keep every byte at least this high, because the
+// distance to a segment changes by at most d between two cells d apart. A change of boundary does not: the cells that
+// the old boundary did not count (across the edges of the periodic grid, outside the rim of the dish) can lie next to
+// cells of a layer with the byte of 4 cells or more outside.
+fn floorByte(n: u32) -> u32 {
+  if (n == NONE) { return 0u; }
+  return distanceByte(-sqrt(f32(n)));
+}
+
+// The squared distances (wall, food) from cell q to the nearest cell of each layer that `env` holds in the arena (the
+// dish counts), up to 3 rings away: the nearest cell lies in the first ring that has one (k √2 < k + 1 for k ≤ 2), and
+// from 4 cells on floorByte() is 0.
+fn nearestCells(q: vec2i) -> vec2u {
+  let middle = 0.5 * vec2f(f32(W()), f32(H()));
+  var n = vec2u(NONE);
+  for (var k = 1; k <= 3; k++) {
+    var m = vec2u(NONE);
+    for (var dy = -k; dy <= k; dy++) {
+      // The rows at ±k whole, the rows between only at ±k.
+      let stride = select(2 * k, 1, abs(dy) == k);
+      for (var dx = -k; dx <= k; dx += stride) {
+        let i = gridIndex(q, vec2i(dx, dy));
+        if (i < 0 || (P.cfg.z == 2u && distance(vec2f(q + vec2i(dx, dy)) + 0.5, middle) > dishRadius())) { continue; }
+        let e = env[i];
+        let r = u32(dx * dx + dy * dy);
+        if ((e & 0xffu) >= WALL_BYTE) { m.x = min(m.x, r); }
+        if (((e >> 8u) & 0xffu) >= WALL_BYTE) { m.y = min(m.y, r); }
+      }
+    }
+    n = select(n, m, n == vec2u(NONE));
+  }
+  return n;
+}
+
 // Whether this segment paints cell q + d of the grid, by the rule of `paint`: the cell wrapped into the periodic
 // grid, or a cell of a closed arena (the dish counts), whose centre lies within the radius. q + d less than a grid.
 fn paints(q: vec2i, d: vec2i) -> bool {
@@ -402,14 +441,17 @@ fn outline(
 }
 
 // Holds every byte of the arena to `env` under the current boundary, after the boundary changed: the
-// distances, the light and the shadow follow `env` again where the old boundary counted other cells.
+// distances, the light and the shadow follow `env` again where the old boundary counted other cells. A byte lies
+// no nearer an outline than the cells of `env` allow (held()), and no farther (floorByte()).
 @compute @workgroup_size(16, 16)
 fn refresh(@builtin(global_invocation_id) gid: vec3u) {
   let q = vec2i(gid.xy);
   if (any(gid.xy >= vec2u(W(), H())) || cellAt(q) < 0) { return; }
   let c = q.y * i32(W()) + q.x;
   let old = shape[c];
-  let wall = held(old & 0xffu, q, 0u);
-  let food = held((old >> 8u) & 0xffu, q, 8u);
+  // floorByte() is at most 96 (one cell) and at most the hold, so the maximum keeps the bytes held.
+  let n = nearestCells(q);
+  let wall = max(held(old & 0xffu, q, 0u), floorByte(n.x));
+  let food = max(held((old >> 8u) & 0xffu, q, 8u), floorByte(n.y));
   shape[c] = wall | (food << 8u) | (env[c] & 0xff0000u) | (shadowByte(q, vec2i(-1)) << 24u);
 }

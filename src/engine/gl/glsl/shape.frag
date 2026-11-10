@@ -121,6 +121,36 @@ float held(float b, ivec2 c, int layer) {
   return v == 0.0 ? 0.0 : min(v, holdByte(c, layer));
 }
 
+const float NONE = 32.0; // no cell of the layer within 3 rings (see `nearestCells` in paint.wgsl)
+
+// The smallest byte that a cell may hold for a layer `env` does not hold there (see `floorByte` in paint.wgsl).
+float floorByte(float n) {
+  return n == NONE ? 0.0 : distanceByte(-sqrt(n));
+}
+
+// The squared distances (wall, food) from cell c to the nearest cell of each layer that `env` holds in the arena, up
+// to 3 rings away (see `nearestCells` in paint.wgsl).
+vec2 nearestCells(ivec2 c) {
+  vec2 middle = 0.5 * vec2(W(), H());
+  vec2 n = vec2(NONE);
+  for (int k = 1; k <= 3; k++) {
+    vec2 m = vec2(NONE);
+    for (int dy = -k; dy <= k; dy++) {
+      int stride = abs(dy) == k ? 1 : 2 * k;
+      for (int dx = -k; dx <= k; dx += stride) {
+        ivec2 q = gridCell(c, ivec2(dx, dy));
+        if (q.x < 0 || (P.cfg.z == 2u && distance(vec2(c + ivec2(dx, dy)) + 0.5, middle) > dishRadius())) continue;
+        vec4 e = texelFetch(env, q, 0) * 255.0;
+        float r = float(dx * dx + dy * dy);
+        if (e.r >= 127.5) m.x = min(m.x, r);
+        if (e.g >= 127.5) m.y = min(m.y, r);
+      }
+    }
+    n = mix(n, m, equal(n, vec2(NONE)));
+  }
+  return n;
+}
+
 // The drop shadow at cell c, 0…255 (see shadowByte in paint.wgsl).
 float shadowByte(ivec2 c) {
   vec2 x = vec2(c) + 0.5 - SHADOW;
@@ -150,7 +180,9 @@ void main() {
   vec4 e = texelFetch(env, c, 0);
   if (op == 3) {
     vec4 o = texelFetch(old, c - tile, 0) * 255.0;
-    result = vec4(held(round(o.r), c, 0), held(round(o.g), c, 1), round(e.b * 255.0), shadowByte(c)) / 255.0;
+    vec2 n = nearestCells(c);
+    vec2 v = max(vec2(held(round(o.r), c, 0), held(round(o.g), c, 1)), vec2(floorByte(n.x), floorByte(n.y)));
+    result = vec4(v, round(e.b * 255.0), shadowByte(c)) / 255.0;
     return;
   }
   if (op == 2) {

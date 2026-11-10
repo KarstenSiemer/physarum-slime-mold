@@ -467,7 +467,8 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   strokes longer than the grid and for brushes larger than it. It also checks that one call gives
   the bytes of `env` and of the outlines of one call per stroke and per segment (ADR 0009).
   `engine.gpu.test.ts` checks on both backends that the outlines stay on the side of `env` at every
-  cell of the arena, with its light and shadow: after sweeps, also one that completes over frames,
+  cell of the arena, with its light and shadow and no farther from a cell of their layer than it
+  allows: after sweeps, also one that completes over frames,
   after a replay of the swept list on another grid, after switches between the dish, a box and the
   periodic grid, after a Clear and after preset loads on the same grid and on new ones. Each such
   replay gives the bytes of one call per edit. A new simulation that replays food, light or walls
