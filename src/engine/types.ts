@@ -1,4 +1,4 @@
-import type { Settings } from '../model/params';
+import type { Boundary, Settings } from '../model/params';
 import type { AgentTool } from './pack';
 
 export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3 } as const;
@@ -10,6 +10,8 @@ export interface Stroke {
   from: [number, number];
   to: [number, number];
   radius: number;
+  /** The boundary to paint under: it decides whether the stroke wraps around the edges. Default: the current one. */
+  boundary?: Boundary;
 }
 
 /** Pan and zoom: `center` is the grid position at the canvas center, `scale` is cells per pixel. */
@@ -35,7 +37,8 @@ export interface Sim {
   update(settings: Settings): void;
   reset(): void;
   run(steps: number, tool?: AgentTool): void;
-  paint(stroke: Stroke): void;
+  /** Paints brush strokes in order: the only way food, light and walls reach a simulation. */
+  paint(strokes: readonly Stroke[]): void;
   clearEnvironment(): void;
   destroy(): void;
   /** Resolves when all submitted GPU work is done. */

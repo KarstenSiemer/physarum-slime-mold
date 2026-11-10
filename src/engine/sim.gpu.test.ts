@@ -5,6 +5,7 @@ import { hexToLinear } from '../model/color';
 import { BOUNDARIES, defaultSettings, defaultStrain, LAYOUTS, STYLES, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
 import { AgentToolKind } from './pack';
+import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND } from './render';
 import agentsWgsl from './shaders/agents.wgsl?raw';
@@ -17,7 +18,7 @@ import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import type { Simulation } from './sim';
-import type { Backend, Sim, View } from './types';
+import type { Backend, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const lane = (a: Float32Array, l = 0) => Float64Array.from({ length: a.length / 4 }, (_, i) => a[i * 4 + l] ?? 0);
@@ -246,7 +247,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     it('is blocked by a wall: no move, no deposit, new random heading', async () => {
       const sim = await make({ layout: 'empty' }, 64, 64, 1);
-      sim.paint({ kind: 'wall', from: [33.5, 32.5], to: [33.5, 32.5], radius: 1.2 });
+      sim.paint([{ kind: 'wall', from: [33.5, 32.5], to: [33.5, 32.5], radius: 1.2 }]);
       sim.writeAgent(0, { x: 32.5, y: 32.5, heading: 0, bits: 4 });
       sim.run(1);
       const [a] = await sim.readAgents();
@@ -269,7 +270,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 3 }];
       const beyond = async (painted: boolean) => {
         const sim = await make({ layout: 'empty', strains }, w, h, n);
-        if (painted) sim.paint({ kind: 'wall', from: [wall + 0.5, 0], to: [wall + 0.5, h], radius: 0.5 });
+        if (painted) sim.paint([{ kind: 'wall', from: [wall + 0.5, 0], to: [wall + 0.5, h], radius: 0.5 }]);
         for (let i = 0; i < n; i++) {
           const x = (wall - 3 + (i % 3) + 0.25 + (0.5 * ((i * 7) % 11)) / 11 + w) % w;
           const heading = ((((i * 37) % 121) - 60) * Math.PI) / 180;
@@ -315,17 +316,83 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   describe('environment', () => {
     it('paints food, light and walls, and erases them', async () => {
       const sim = await make({ layout: 'empty' }, 64, 64, 1);
-      sim.paint({ kind: 'food', from: [10, 10], to: [20, 10], radius: 3 });
-      sim.paint({ kind: 'light', from: [40, 40], to: [40, 40], radius: 6 });
-      sim.paint({ kind: 'wall', from: [10, 50], to: [50, 50], radius: 1.5 });
+      sim.paint([{ kind: 'food', from: [10, 10], to: [20, 10], radius: 3 }]);
+      sim.paint([{ kind: 'light', from: [40, 40], to: [40, 40], radius: 6 }]);
+      sim.paint([{ kind: 'wall', from: [10, 50], to: [50, 50], radius: 1.5 }]);
       const env = await sim.readEnv();
       const at = (x: number, y: number, ch: number) => env[(y * 64 + x) * 4 + ch] ?? 0;
       expect(at(15, 10, 1)).toBe(255); // food
       expect(at(40, 40, 2)).toBeGreaterThan(200); // light, soft edge
       expect(at(30, 50, 0)).toBe(255); // wall
       expect(at(5, 30, 1) + at(5, 30, 0)).toBe(0);
-      sim.paint({ kind: 'erase', from: [15, 10], to: [15, 10], radius: 2 });
+      sim.paint([{ kind: 'erase', from: [15, 10], to: [15, 10], radius: 2 }]);
       expect((await sim.readEnv())[(10 * 64 + 15) * 4 + 1]).toBe(0);
+    });
+
+    /** Bytes that differ from the CPU reference (light, a soft edge rounded to 8 bits from float32, by more than 1). */
+    function unlike(env: Uint8Array, ref: Uint8Array) {
+      const wrong: string[] = [];
+      for (let i = 0; i < ref.length; i++) {
+        const tolerance = i % 4 === 2 ? 1 : 0;
+        if (Math.abs((env[i] ?? 0) - (ref[i] ?? 0)) > tolerance)
+          wrong.push(`cell ${Math.floor(i / 4)} byte ${i % 4}: ${env[i] ?? '-'} ≠ ${ref[i] ?? '-'}`);
+      }
+      return wrong;
+    }
+
+    // The engine tests in Node paint with this CPU reference (engine-env.test.ts), so it must match both shaders.
+    // WebGL2 scissors each stroke to its cells (brush.ts): the strokes cross the edges of the grid. One call with
+    // every stroke must paint what one call per stroke paints.
+    it('paints like the CPU reference, across the edges and under each stroke’s own boundary', async () => {
+      const [w, h] = [48, 32];
+      const strokes: Stroke[] = [
+        { kind: 'wall', from: [2.31, 3.13], to: [40.72, 29.41], radius: 0.75 },
+        { kind: 'food', from: [46.63, 16.21], to: [46.63, 16.21], radius: 3.33, boundary: 'wrap' }, // wraps to x = 0
+        { kind: 'light', from: [24.23, 1.17], to: [30.41, 1.17], radius: 5.23, boundary: 'wrap' }, // and to the bottom
+        { kind: 'food', from: [0.37, 0.41], to: [0.37, 0.41], radius: 4.11, boundary: 'wrap' }, // into all four corners
+        { kind: 'erase', from: [20.13, 15.37], to: [22.61, 17.93], radius: 1.91 },
+        { kind: 'food', from: [5.43, 30.61], to: [9.37, 30.61], radius: 4.27 }, // clipped by the box
+        { kind: 'wall', from: [30.23, 20.31], to: [44.17, 9.23], radius: 2.21, boundary: 'dish' },
+      ];
+      const ref = new Uint8Array(w * h * 4);
+      const margin = { min: Infinity };
+      for (const s of strokes) paintReference(ref, w, h, s, 'box', margin);
+      // No cell centre within 0.001 cells of a brush edge, where float32 could round it the other way.
+      expect(margin.min).toBeGreaterThan(1e-3);
+      const one = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      for (const s of strokes) one.paint([s]);
+      const all = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      all.paint(strokes);
+      for (const sim of [one, all]) {
+        const env = await sim.readEnv();
+        expect(unlike(env, ref)).toEqual([]);
+        // The strokes reach every corner and both sides of the wrap seam.
+        for (const c of [0, w - 1, (h - 1) * w, h * w - 1]) expect(env[c * 4 + 1], `corner cell ${c}`).toBe(255);
+      }
+    });
+
+    // WebGPU paints 4096 strokes per submission: 5000 strokes cross that edge. Strokes that pass a cell centre
+    // within float32 rounding of their edge are drawn again.
+    it('paints 5000 strokes in one call like the CPU reference', async () => {
+      const [w, h] = [64, 48];
+      let seed = 3;
+      const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+      const kinds = ['food', 'wall', 'light', 'erase'] as const;
+      const ref = new Uint8Array(w * h * 4);
+      const strokes: Stroke[] = [];
+      while (strokes.length < 5000) {
+        const [x, y] = [rnd() * w, rnd() * h];
+        const kind = kinds[strokes.length % 4] ?? 'food';
+        const s: Stroke = { kind, from: [x, y], to: [x + 2 * rnd(), y + 2 * rnd()], radius: 0.75 + 2 * rnd() };
+        const margin = { min: Infinity };
+        paintReference(new Uint8Array(w * h * 4), w, h, s, 'wrap', margin);
+        if (margin.min < 1e-3) continue;
+        paintReference(ref, w, h, s, 'wrap');
+        strokes.push(s);
+      }
+      const sim = await make({ layout: 'empty' }, w, h, 1);
+      sim.paint(strokes);
+      expect(unlike(await sim.readEnv(), ref)).toEqual([]);
     });
 
     // One threshold in every shader that reads walls (isWall in common.wgsl and common.glsl): a wall byte of
@@ -433,7 +500,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       'starts every agent of the %s layout in a %s on a free cell of its own',
       async (layout, boundary) => {
         const sim = await make({ layout, boundary, collisions: true, seed: 5 }, 64, 48, 20);
-        sim.paint({ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 });
+        sim.paint([{ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 }]);
         sim.reset();
         expect(await starts(sim, boundary)).toEqual({ alive: 20, shared: 0, blocked: 0 });
       },
@@ -697,7 +764,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         };
         const sim = (await make(patch, 61, 45, collisions ? 1001 : 5003)) as Simulation;
         sim.sortInterval = sortInterval;
-        sim.paint({ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 });
+        sim.paint([{ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 }]);
         sim.run(20);
         sim.run(1, { kind: AgentToolKind.inoculate, x: 30, y: 22, radius: 8, strain: 1, revive: 0.5, teleport: 0.3 });
         sim.run(15);

@@ -1,4 +1,5 @@
-import type { Settings } from '../../model/params';
+import type { Boundary, Settings } from '../../model/params';
+import { scissorRects } from '../brush';
 import { packParams, PARAMS_BYTES, START_ROUNDS, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
@@ -24,6 +25,13 @@ const flip = (b: Bit): Bit => (b === 0 ? 1 : 0);
 const AGENT_ROW = 2048;
 /** Side of the alive tally target (points.vert kind 3): 128² pixels keep every pixel sum exact. */
 const TALLY_SIDE = 128;
+/** Channels a brush writes: erase and walls all, food only green, light only blue (the maximum of old and new). */
+const MASKS: Record<number, [boolean, boolean, boolean, boolean]> = {
+  [EnvKind.erase]: [true, true, true, true],
+  [EnvKind.wall]: [true, true, true, true],
+  [EnvKind.food]: [false, true, false, false],
+  [EnvKind.light]: [false, false, true, false],
+};
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -173,25 +181,46 @@ export class GlSim implements Sim {
     }
   }
 
-  paint(stroke: Stroke) {
+  /**
+   * Paints brush strokes in order. Every draw is scissored to the cells its brush can reach (brush.ts), and the
+   * parameters, color mask and blending change only where the boundary or the kind of brush changes.
+   */
+  paint(strokes: readonly Stroke[]) {
+    if (strokes.length === 0) return;
     const gl = this.gl;
-    this.writeParams();
-    const kind = EnvKind[stroke.kind];
-    if (kind === EnvKind.wall) this.walls = true;
-    const mask: Record<number, [boolean, boolean, boolean, boolean]> = {
-      0: [true, true, true, true],
-      1: [true, true, true, true],
-      2: [false, true, false, false],
-      3: [false, false, true, false],
-    };
-    const [r, g, b, a] = mask[kind] ?? [true, true, true, true];
-    gl.colorMask(r, g, b, a);
-    if (kind === EnvKind.light) this.blend(gl.MAX);
-    this.pass(this.prog.paint, this.env, {}, { kind }, (p) => {
+    const p = this.prog.paint;
+    let boundary: Boundary | undefined;
+    let kind = -1;
+    for (const stroke of strokes) {
+      const b = stroke.boundary ?? this.settings.boundary;
+      if (b !== boundary) {
+        this.writeParams(undefined, 0, b);
+        boundary = b;
+      }
+      if (kind === -1) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.env.fbo);
+        gl.viewport(0, 0, this.width, this.height);
+        gl.useProgram(p.program);
+        gl.enable(gl.SCISSOR_TEST);
+      }
+      const k = EnvKind[stroke.kind];
+      if (k !== kind) {
+        gl.colorMask(...(MASKS[k] ?? [true, true, true, true]));
+        if (k === EnvKind.light) this.blend(gl.MAX);
+        else gl.disable(gl.BLEND);
+        gl.uniform1i(p.loc('kind'), k);
+        kind = k;
+      }
+      if (k === EnvKind.wall) this.walls = true;
       gl.uniform2f(p.loc('from'), ...stroke.from);
       gl.uniform2f(p.loc('to'), ...stroke.to);
       gl.uniform1f(p.loc('radius'), stroke.radius);
-    });
+      for (const r of scissorRects(stroke, this.width, this.height, b === 'wrap')) {
+        gl.scissor(...r);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+    }
+    gl.disable(gl.SCISSOR_TEST);
     gl.colorMask(true, true, true, true);
     gl.disable(gl.BLEND);
   }
@@ -274,8 +303,10 @@ export class GlSim implements Sim {
     gl.deleteBuffer(this.ubo);
   }
 
-  private writeParams(tool?: AgentTool, round = 0) {
+  /** `boundary` replaces the current one for a brush stroke (Stroke.boundary); the next step writes it back. */
+  private writeParams(tool?: AgentTool, round = 0, boundary = this.settings.boundary) {
     const gl = this.gl;
+    const s = boundary === this.settings.boundary ? this.settings : { ...this.settings, boundary };
     const rt = {
       width: this.width,
       height: this.height,
@@ -286,7 +317,7 @@ export class GlSim implements Sim {
       round,
     };
     gl.bindBufferBase(gl.UNIFORM_BUFFER, PARAMS_BINDING, this.ubo);
-    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(this.settings, rt, this.paramData)));
+    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(s, rt, this.paramData)));
   }
 
   private encodeStep() {

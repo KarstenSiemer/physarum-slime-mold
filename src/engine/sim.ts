@@ -1,4 +1,4 @@
-import type { Settings } from '../model/params';
+import { BOUNDARIES, type Settings } from '../model/params';
 import { packParams, PARAMS_BYTES, START_ROUNDS, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
@@ -13,6 +13,8 @@ import { EnvKind, type AgentState, type Sim, type Stroke } from './types';
 const AGENT_BYTES = 16;
 const GROUP = 256;
 const TILE = 16;
+/** Brush strokes per submission (paint()): 4096 slots of 256 bytes. */
+const BRUSH_CHUNK = 4096;
 /** Steps between two spatial sorts of the agents. Measured: their locality halves about 150 steps after a sort. */
 const SORT_INTERVAL = 32;
 /** Cells per side of a sort tile (sort.wgsl SHIFT). */
@@ -29,7 +31,11 @@ export class Simulation implements Sim {
   private settings: Settings;
   private readonly paramData = new ArrayBuffer(PARAMS_BYTES);
   private readonly params: GPUBuffer;
-  private readonly brush: GPUBuffer;
+  /** The parameters once per boundary, for brush strokes (paint()): a stroke picks its boundary by offset. */
+  private readonly paintParams: GPUBuffer;
+  /** Brush strokes, one per uniform offset step (paint()). */
+  private readonly brushes: GPUBuffer;
+  private readonly offsetStep: number;
   /** Two agent buffers: the sort writes into the other one (ping-pong, no copy back). */
   private readonly agentBuffers: Pair<GPUBuffer>;
   /** Which agent buffer is current. Every bind group that holds one has it in its cache key. */
@@ -48,6 +54,7 @@ export class Simulation implements Sim {
   readonly env: GPUBuffer;
   readonly stats: GPUBuffer;
   private collision?: { occ: Pair<GPUBuffer>; claims: GPUBuffer };
+  private paintGroup?: GPUBindGroup;
   /** A wall was painted since the last clear: moves then check every cell they cross (agents.wgsl clearPath). */
   private walls = false;
   private readonly groups: [number, number];
@@ -66,7 +73,9 @@ export class Simulation implements Sim {
     const cells = width * height;
     const buffer = (size: number, usage: number) => device.createBuffer({ size, usage });
     this.params = buffer(PARAMS_BYTES, UNIFORM | COPY_DST);
-    this.brush = buffer(32, UNIFORM | COPY_DST);
+    this.offsetStep = device.limits.minUniformBufferOffsetAlignment;
+    this.paintParams = buffer(BOUNDARIES.length * this.paramsStep, UNIFORM | COPY_DST);
+    this.brushes = buffer(BRUSH_CHUNK * this.offsetStep, UNIFORM | COPY_DST);
     this.agentBuffers = [
       buffer(agents * AGENT_BYTES, STORAGE | COPY_SRC | COPY_DST),
       buffer(agents * AGENT_BYTES, STORAGE | COPY_SRC | COPY_DST),
@@ -190,27 +199,67 @@ export class Simulation implements Sim {
     }
   }
 
-  paint(stroke: Stroke) {
-    const { from: a, to: b, radius: r } = stroke;
-    const x0 = Math.floor(Math.min(a[0], b[0]) - r);
-    const y0 = Math.floor(Math.min(a[1], b[1]) - r);
-    const w = Math.ceil(Math.max(a[0], b[0]) + r) - x0 + 1;
-    const h = Math.ceil(Math.max(a[1], b[1]) + r) - y0 + 1;
-    const data = new ArrayBuffer(32);
-    new Float32Array(data).set([...a, ...b]);
-    new Int32Array(data).set([x0, y0], 4);
-    new Float32Array(data)[6] = r;
-    new Uint32Array(data)[7] = EnvKind[stroke.kind];
-    this.device.queue.writeBuffer(this.brush, 0, data);
-    if (stroke.kind === 'wall') this.walls = true;
-    this.writeParams();
-    const enc = this.device.createCommandEncoder();
-    const pass = enc.beginComputePass();
-    pass.setPipeline(this.kernels.paint);
-    pass.setBindGroup(0, this.bind('paint', this.kernels.paint, [this.params, this.env, this.brush]));
-    pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
-    pass.end();
-    this.device.queue.submit([enc.finish()]);
+  /** Bytes per copy of the parameters in paintParams: PARAMS_BYTES rounded up to the offset step. */
+  private get paramsStep() {
+    return Math.ceil(PARAMS_BYTES / this.offsetStep) * this.offsetStep;
+  }
+
+  /**
+   * Paints brush strokes in order, BRUSH_CHUNK per submission. Each dispatch picks its brush and its boundary's
+   * parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
+   */
+  paint(strokes: readonly Stroke[]) {
+    if (strokes.length === 0) return;
+    const step = this.offsetStep;
+    const params = new ArrayBuffer(BOUNDARIES.length * this.paramsStep);
+    BOUNDARIES.forEach((boundary, i) => {
+      const rt = { width: this.width, height: this.height, agents: this.agents, step: this.step };
+      new Uint8Array(params, i * this.paramsStep, PARAMS_BYTES).set(
+        new Uint8Array(packParams({ ...this.settings, boundary }, rt)),
+      );
+    });
+    this.device.queue.writeBuffer(this.paintParams, 0, params);
+    this.paintGroup ??= this.device.createBindGroup({
+      layout: this.kernels.paintLayout,
+      entries: [
+        { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
+        { binding: 1, resource: { buffer: this.env } },
+        { binding: 2, resource: { buffer: this.brushes, size: 32 } },
+      ],
+    });
+    for (let first = 0; first < strokes.length; first += BRUSH_CHUNK) {
+      const chunk = strokes.slice(first, first + BRUSH_CHUNK);
+      const data = new ArrayBuffer(chunk.length * step);
+      const f = new Float32Array(data);
+      const i32 = new Int32Array(data);
+      const u = new Uint32Array(data);
+      const boxes = chunk.map((stroke, j) => {
+        const { from: a, to: b, radius: r } = stroke;
+        const x0 = Math.floor(Math.min(a[0], b[0]) - r);
+        const y0 = Math.floor(Math.min(a[1], b[1]) - r);
+        const w = Math.ceil(Math.max(a[0], b[0]) + r) - x0 + 1;
+        const h = Math.ceil(Math.max(a[1], b[1]) + r) - y0 + 1;
+        const o = (j * step) / 4;
+        f.set([...a, ...b], o);
+        i32.set([x0, y0], o + 4);
+        f[o + 6] = r;
+        u[o + 7] = EnvKind[stroke.kind];
+        if (stroke.kind === 'wall') this.walls = true;
+        return [Math.ceil(w / TILE), Math.ceil(h / TILE)] as const;
+      });
+      this.device.queue.writeBuffer(this.brushes, 0, data);
+      const enc = this.device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      pass.setPipeline(this.kernels.paint);
+      chunk.forEach((stroke, j) => {
+        const boundary = BOUNDARIES.indexOf(stroke.boundary ?? this.settings.boundary);
+        pass.setBindGroup(0, this.paintGroup, [boundary * this.paramsStep, j * step]);
+        const [gx, gy] = boxes[j] ?? [0, 0];
+        pass.dispatchWorkgroups(gx, gy);
+      });
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+    }
   }
 
   clearEnvironment() {
@@ -298,7 +347,8 @@ export class Simulation implements Sim {
 
   destroy() {
     for (const t of [...this.trail, ...this.scent]) t.destroy();
-    for (const b of [this.params, this.brush, ...this.agentBuffers, this.tiles, this.replacement]) b.destroy();
+    for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
+      b.destroy();
     for (const b of [this.counts, this.env, this.stats]) b.destroy();
     this.collision?.occ.forEach((b) => {
       b.destroy();
@@ -306,7 +356,9 @@ export class Simulation implements Sim {
     this.collision?.claims.destroy();
   }
 
-  private writeParams(tool?: AgentTool, round = 0) {
+  /** `boundary` replaces the current one for a brush stroke (Stroke.boundary); the next step writes it back. */
+  private writeParams(tool?: AgentTool, round = 0, boundary = this.settings.boundary) {
+    const s = boundary === this.settings.boundary ? this.settings : { ...this.settings, boundary };
     const rt = {
       width: this.width,
       height: this.height,
@@ -316,7 +368,7 @@ export class Simulation implements Sim {
       walls: this.walls,
       round,
     };
-    this.device.queue.writeBuffer(this.params, 0, packParams(this.settings, rt, this.paramData));
+    this.device.queue.writeBuffer(this.params, 0, packParams(s, rt, this.paramData));
   }
 
   private encodeStep(enc: GPUCommandEncoder) {
@@ -496,6 +548,7 @@ class Kernels {
     readonly paint: GPUComputePipeline,
     readonly sort: Record<'countTiles' | 'scanTiles' | 'scatter', GPUComputePipeline>,
     readonly diffuseLayout: GPUBindGroupLayout,
+    readonly paintLayout: GPUBindGroupLayout,
     private readonly variants: Map<string, GPUComputePipeline>,
   ) {}
 
@@ -531,6 +584,14 @@ class Kernels {
         { binding: 6, visibility: C, buffer: { type: 'read-only-storage' } },
       ],
     });
+    // Brush strokes pick their brush and their boundary's parameters by dynamic offset (Simulation.paint).
+    const paintLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+        { binding: 1, visibility: C, buffer: { type: 'storage' } },
+        { binding: 2, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+      ],
+    });
     const diffuseModule = module(diffuseWgsl);
     const layout = device.createPipelineLayout({ bindGroupLayouts: [diffuseLayout] });
     const plans = [0, 1, 2, 3, 4].flatMap(diffusePlan);
@@ -563,7 +624,10 @@ class Kernels {
         compute(agents, 'settle'),
         compute(agents, 'occupy'),
         compute(agents, 'replace'),
-        compute(module(paintWgsl), 'paint'),
+        device.createComputePipelineAsync({
+          layout: device.createPipelineLayout({ bindGroupLayouts: [paintLayout] }),
+          compute: { module: module(paintWgsl), entryPoint: 'paint' },
+        }),
         compute(sort, 'countTiles'),
         compute(sort, 'scanTiles'),
         compute(sort, 'scatter'),
@@ -581,6 +645,7 @@ class Kernels {
       paint,
       sorting,
       diffuseLayout,
+      paintLayout,
       new Map(await variants),
     );
   }

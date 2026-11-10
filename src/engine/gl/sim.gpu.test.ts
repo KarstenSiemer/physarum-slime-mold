@@ -282,10 +282,10 @@ it('never blends into a 32-bit float target without float blending', async () =>
     for (const diffusion of [0, 1, 2]) {
       const settings = settingsWith({ boundary, diffusion, strains, shrink: 0.001 });
       const sim = await backend.createSim(settings, 48, 32, 3000);
-      sim.paint({ kind: 'food', from: [10, 10], to: [20, 12], radius: 3 });
-      sim.paint({ kind: 'light', from: [30, 20], to: [30, 20], radius: 4 });
-      sim.paint({ kind: 'wall', from: [5, 25], to: [40, 25], radius: 1 });
-      sim.paint({ kind: 'erase', from: [20, 25], to: [20, 25], radius: 2 });
+      sim.paint([{ kind: 'food', from: [10, 10], to: [20, 12], radius: 3 }]);
+      sim.paint([{ kind: 'light', from: [30, 20], to: [30, 20], radius: 4 }]);
+      sim.paint([{ kind: 'wall', from: [5, 25], to: [40, 25], radius: 1 }]);
+      sim.paint([{ kind: 'erase', from: [20, 25], to: [20, 25], radius: 2 }]);
       sim.run(3, { kind: AgentToolKind.inoculate, x: 24, y: 16, radius: 6, strain: 1, revive: 0.5, teleport: 0.3 });
       sim.run(2, { kind: AgentToolKind.cut, x: 12, y: 12, radius: 4, strain: 0, revive: 0, teleport: 0 });
       const view = { center: [24, 16] as [number, number], scale: 0.5 };
