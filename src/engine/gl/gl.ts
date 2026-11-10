@@ -108,23 +108,36 @@ export function readTarget(gl: GL, t: Target): Float32Array | Uint8Array {
  * Resolves once the GPU has run every command issued so far: a fence, polled without blocking. A fence
  * cannot signal within the task that made it (WebGL 2.0 spec, 5.27), so polling starts in the next task.
  * Resolves false if the context is lost.
+ *
+ * The polls run about 1 ms apart. A chain of timers that each start the next is clamped to 4 ms after
+ * five levels (HTML timer rules); in Chromium that made the polls 5 ms apart from about 7 ms on, so the
+ * frame budget saw the GPU finish up to 5 ms late. Each poll's timer therefore starts from a message
+ * task, which keeps its nesting level at 1.
  */
 export function fence(gl: GL): Promise<boolean> {
   const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
   gl.flush();
   return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    const finish = (ok: boolean) => {
+      port1.close();
+      resolve(ok);
+    };
     const poll = () => {
       if (!sync || gl.isContextLost()) {
-        resolve(false);
+        finish(false);
         return;
       }
       const status = gl.clientWaitSync(sync, 0, 0);
       if (status === gl.TIMEOUT_EXPIRED) {
-        setTimeout(poll, 1);
+        port2.postMessage(undefined);
         return;
       }
       gl.deleteSync(sync);
-      resolve(status !== gl.WAIT_FAILED);
+      finish(status !== gl.WAIT_FAILED);
+    };
+    port1.onmessage = () => {
+      setTimeout(poll, 1);
     };
     setTimeout(poll, 0);
   });

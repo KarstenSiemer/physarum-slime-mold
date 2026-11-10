@@ -4,6 +4,7 @@ import { defaultSettings, defaultStrain, type Settings } from '../../model/param
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
+import { fence } from './gl';
 import { compile } from './programs';
 import { GlSim } from './sim';
 
@@ -161,6 +162,29 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     expect(done).toBe(true);
     sim.destroy();
   });
+});
+
+it('polls a fence about once per millisecond, not every 4 ms like nested timers', async () => {
+  const { gl } = context();
+  // The fence reads as unsignalled for its first 20 polls, as if the GPU were busy.
+  const polls: number[] = [];
+  const busy = new Proxy(gl, {
+    get(t, key) {
+      if (key === 'clientWaitSync')
+        return (sync: WebGLSync, flags: number, timeout: number) => {
+          polls.push(performance.now());
+          return polls.length <= 20 ? t.TIMEOUT_EXPIRED : t.clientWaitSync(sync, flags, timeout);
+        };
+      const v: unknown = Reflect.get(t, key);
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+    },
+  });
+  expect(await fence(busy)).toBe(true);
+  expect(polls.length).toBeGreaterThan(20);
+  // From the sixth poll on, nested timers are clamped to at least 4 ms (HTML timer rules).
+  const gaps = polls.slice(6).map((t, i) => t - (polls[i + 5] ?? t));
+  const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+  expect(median).toBeLessThan(3.5);
 });
 
 it('the backend reports the memory and grid limits of its counting path', () => {
