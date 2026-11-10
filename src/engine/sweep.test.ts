@@ -173,6 +173,65 @@ describe('the sweep at the rim', () => {
     ];
     expect([...sweep(new Placement(w, h, list))]).toEqual([]);
   });
+
+  // A dish erase clears no cell beyond the rim, and a box or a periodic edit paints cells there too. So one stroke
+  // covers such an edit only when the edit's reach lies inside the rim, not only its ends (inside(), mutant VM11).
+  it('keeps a box or periodic edit across the rim under a dish erase that holds both its ends', () => {
+    const [w, h] = [512, 320]; // the dish: radius 159 around (256, 160)
+    const beyond = (c: number) => Math.hypot((c % w) + 0.5 - w / 2, Math.floor(c / w) + 0.5 - h / 2) > 159;
+    for (const arena of ['box', 'wrap'] as const) {
+      const list = [
+        fromStroke({ kind: 'food', from: [412.5, 160.5], to: [412.5, 160.5], radius: 4 }, [w, h], arena),
+        fromStroke({ kind: 'erase', from: [410.5, 160.5], to: [410.5, 160.5], radius: 7 }, [w, h], 'dish'),
+      ];
+      // The food's centre lies 156.5 cells from the dish's centre, and its brush reaches 160.5 cells. The erase clears
+      // every cell of it inside the rim. The 6 cells beyond the rim keep their food.
+      const env = replay(list, w, h);
+      const food = [...Array(w * h).keys()].filter((c) => (env[4 * c + 1] ?? 0) > 0);
+      expect([food.length, food.every(beyond)], arena).toEqual([6, true]);
+      expect([...sweep(new Placement(w, h, list))], arena).toEqual([]);
+    }
+  });
+});
+
+// boxOf() cuts a box at the edge of a closed grid, and on a periodic grid a box across an edge spans all columns. Such
+// a box starts at column 0, and its stroke can paint that column. So Placement.reaches() must count it for a row whose
+// runs end in column 0 (mutant RE1).
+describe('the sweep at the edge of the grid', () => {
+  it('deletes an edit in column 0 that strokes whose boxes start at column 0 clear completely', () => {
+    const [w, h] = [512, 320];
+    for (const arena of ['box', 'wrap'] as const) {
+      const dab = (kind: EnvTool, at: [number, number], radius: number) =>
+        fromStroke({ kind, from: at, to: at, radius }, [w, h], arena);
+      // In rows 97 and 103 the food paints only column 0. The first erase leaves those cells and (0, 98), (0, 102)
+      // open, and the last two erases clear them. On the periodic grid the food also paints cells across the left
+      // edge: one more erase clears them.
+      const strokes = [
+        dab('food', [0.5, 100.5], 3),
+        dab('erase', [3.5, 100.5], 3.5),
+        ...(arena === 'wrap' ? [dab('erase', [509.5, 100.5], 3.5)] : []),
+        dab('erase', [0.5, 97.5], 2),
+        dab('erase', [0.5, 103.5], 2),
+      ];
+      const all = new Placement(w, h, strokes);
+      expect(
+        strokes.map((_, i) => all.box(i)[0]),
+        arena,
+      ).toEqual(strokes.map(() => 0));
+      for (const tiles of [undefined, 0]) {
+        const list: EnvEdit[] = [];
+        const placement = new Placement(w, h, [], tiles);
+        for (const e of strokes) {
+          list.push(e);
+          placement.push(e);
+          const gone = sweep(placement);
+          compact(list, gone);
+          placement.remove(gone);
+        }
+        expect(list, `${arena}, tiles from edit ${tiles ?? 'INDEXED'}`).toEqual([]);
+      }
+    }
+  });
 });
 
 // Rule 2 looks at the erases over an edit that went: a box that only touches the erase's box holds no cell of it

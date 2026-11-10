@@ -880,6 +880,43 @@ describe('the sweep', () => {
     expect(await pair(['food', 'box', 3], ['erase', 'box', 3], long)).toEqual([]);
   });
 
+  // The sweep remembers a cell that an edit leaves open, and skips the edit while a new stroke leaves that cell open.
+  // A stroke with the edit's segment and radius clears a cell on the edge of the edit's brush, but judged with SLACK,
+  // that cell stays open under it. So the same-segment rule must come before the remembered cell (mutant SS7).
+  it('deletes a stroke under a later one with its segment, also after an erase left a cell of it open', async () => {
+    const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
+    const open = () => (engine as unknown as { placement: Placement }).placement.open(0);
+    const dab = (kind: Stroke['kind'], at: [number, number], radius: number) => {
+      engine.paint({ kind, from: at, to: at, radius });
+    };
+    dab('food', [100.5, 100.5], 5);
+    // Over the food's right part. The sweep remembers the cell (95, 100), exactly 5 cells left of the food's centre.
+    dab('erase', [104.5, 100.5], 3);
+    expect([edits(engine).map((e) => e.kind), open()]).toEqual([['food', 'erase'], 100 * 512 + 95]);
+    // The food's own brush clears every cell of it, (95, 100) too: the food goes, and both erases with it.
+    dab('erase', [100.5, 100.5], 5);
+    expect(edits(engine)).toEqual([]);
+  });
+
+  // A radius a hair smaller: 5 − 5e-7 is 4.9999995 in float32 too, less than the distance of the 12 cells that lie
+  // exactly 5 cells from the centre. The erase leaves their food, so the food stays in the list (mutant VM8).
+  it('keeps a stroke under a later one with its segment and a radius a hair smaller, which leaves its edge cells', async () => {
+    const at: [number, number] = [200.5, 160.5];
+    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
+    engine.paint({ kind: 'food', from: at, to: at, radius: 5 });
+    engine.frame(0, 0);
+    engine.paint({ kind: 'erase', from: at, to: at, radius: 5 - 5e-7 });
+    engine.frame(0, 0);
+    expect(Math.fround(5 - 5e-7)).toBeLessThan(5);
+    expect(foodNear(sim(), at, 5)).toBe(12);
+    expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
+    // A new simulation paints the list again: the 12 cells keep their food.
+    const first = sim();
+    await engine.apply({ ...engine.settings, density: 0.3 });
+    expect(sim()).not.toBe(first);
+    expect(foodNear(sim(), at, 5)).toBe(12);
+  });
+
   // Spread into Math.min, V8 throws from about 125,000 arguments: an erase over 130,000 edits threw out of
   // Engine.paint and stayed unswept (review of ADR 0019).
   it('sweeps an erase over 130,000 edits', async () => {
