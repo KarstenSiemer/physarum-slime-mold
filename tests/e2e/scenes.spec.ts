@@ -110,19 +110,29 @@ const environment = (page: Page) =>
 test('Reload scene restores food, light and walls, and keeps the focus in the card', async ({ page }) => {
   const errors = watchErrors(page);
   await openSmallScene(page);
+  // Paused, a frame only draws: on SwiftShader in CI that keeps input and reads of the environment fast.
+  await page.getByRole('button', { name: 'Pause' }).click();
   await preset(page).selectOption('maze');
-  await page.waitForFunction(() => globalThis.physarum?.settings.boundary === 'box');
+  // The engine takes the scene's settings first, builds the new grid and then paints the walls. On
+  // SwiftShader in CI the build takes seconds, and reading the environment meanwhile found no walls.
+  await page.waitForFunction(
+    () => globalThis.physarum?.settings.boundary === 'box' && !globalThis.physarum.busy,
+    undefined,
+    { timeout: 60_000 },
+  );
+  await expect.poll(async () => (await environment(page))[0], { timeout: 60_000 }).toBeGreaterThan(100);
   const scene = await environment(page);
-  expect(scene[0], 'wall cells').toBeGreaterThan(100);
   expect(scene[1], 'food cells').toBeGreaterThan(10);
   // Food painted by hand is not part of the scene.
   await page.getByRole('radio', { name: 'Food' }).click();
   const canvas = await box(page.locator('canvas'));
   await page.mouse.move(canvas.x + canvas.width * 0.3, canvas.y + canvas.height * 0.5);
   await page.mouse.down();
-  await page.mouse.move(canvas.x + canvas.width * 0.4, canvas.y + canvas.height * 0.5, { steps: 5 });
+  await page.mouse.move(canvas.x + canvas.width * 0.4, canvas.y + canvas.height * 0.5, { steps: 2 });
   await page.mouse.up();
-  await expect.poll(async () => (await environment(page))[1]).toBeGreaterThan(scene[1] ?? 0);
+  // Strokes are painted in the next frame, and on SwiftShader a frame and a read of the environment can each
+  // take a second: wait longer than expect.poll's default of 5 s.
+  await expect.poll(async () => (await environment(page))[1], { timeout: 30_000 }).toBeGreaterThan(scene[1] ?? 0);
   const angle = page.getByRole('spinbutton', { name: 'Sensor angle value' });
   await angle.fill('30');
   await angle.press('Enter');
@@ -130,7 +140,7 @@ test('Reload scene restores food, light and walls, and keeps the focus in the ca
   await card(page).getByRole('button', { name: 'Reload scene' }).focus();
   await page.keyboard.press('Enter');
   await expect(card(page).getByRole('heading', { name: 'Maze' })).toBeFocused();
-  await expect.poll(() => environment(page)).toEqual(scene);
+  await expect.poll(() => environment(page), { timeout: 30_000 }).toEqual(scene);
   expect(errors).toEqual([]);
 });
 
