@@ -39,14 +39,17 @@ Measured in the gallery loop (`npm run gallery`, contact sheets reviewed by eye)
    The gel lighting reads the height at five points per pixel. A pass before the main pass
    writes it once per frame at grid resolution, with a one-cell border, into an `r16float`
    texture (filterable everywhere): the summed trail above the black level times the exposure.
-   The border makes the texture two texels larger than the grid, so both backends report the
-   texture size limit minus 2 as their largest grid side.
    That value is affine in the trail, so hardware bilinear filtering of it gives what filtering
    the trail first gave; only the exponential and the clamp at zero come after the lookup. Before,
-   each of the five reads ran the full manual trail filter (4 to 16 `rgba32float` loads).
-   Compared in one page at the same state, fit, 2× and 6× zoom, device pixel ratio 1 and 2: at
-   most 1 of 255 per channel apart on WebGPU (mean below 0.01), at most 2 on WebGL2; on the
-   M3 Pro the gel frame cost 7.4–9.3 ms before and 1.7–2.3 ms after (glow: 1.3–1.8 ms).
+   each of the five reads ran the full manual trail filter (4 to 16 `rgba32float` loads). The
+   border makes the texture two texels larger than the grid, so both backends report the texture
+   size limit minus 2 as their largest grid side.
+   Compared with the old shader at the same state (identical trails, levels and dither), in
+   over 100 views on WebGPU and WebGL2: wrap, box and dish boundaries; fit, 2×, 6×, the largest
+   zoom and zoomed out to 3 cells per pixel; device pixel ratio 1 and 2, up to 2560 × 1440. At
+   most 2 of 255 per channel apart (at single pixels), mean below 0.02. A GPU test compares the
+   gel with a CPU evaluation of the old shader (`src/engine/sim.gpu.test.ts`). On the M3 Pro the
+   gel frame cost 7.4–9.3 ms before and 1.7–2.3 ms after (glow: 1.3–1.8 ms).
 5. Strain palette: gold, cyan, coral, violet at similar lightness; OKLCH helper for new colors.
 
 Not done: HDR canvas output (`rgba16float` + extended tone mapping exists only in Chrome 129+;
