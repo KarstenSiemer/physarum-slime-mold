@@ -131,6 +131,38 @@ describe('food, light and walls of the scene', () => {
   });
 });
 
+describe('the scene flag', () => {
+  // loadPreset resets it: a scene chosen after a Clear before the engine exists is that scene unchanged (mutant ST1 of
+  // the review of ADR 0019).
+  it('is clear for a preset chosen after a Clear before the engine exists', async () => {
+    const { clearEnvironment, loadPreset, sceneChanged } = await fresh();
+    loadPreset('maze');
+    clearEnvironment();
+    expect(sceneChanged()).toBe(true);
+    loadPreset('steiner');
+    expect(sceneChanged()).toBe(false);
+  });
+
+  // The list is judged in the scene's own arena, not the one on screen (mutant ST3).
+  it('is clear after a stroke and its erase in another arena, back in the scene arena', async () => {
+    const { app, loadPreset, sceneChanged, setEngine, startScene } = await fresh();
+    loadPreset('steiner'); // a dish scene
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    app.settings.boundary = 'box';
+    await engine.apply(structuredClone(app.settings));
+    engine.paint({ kind: 'food', from: [20, 20], to: [20, 20], radius: 4 });
+    expect(sceneChanged()).toBe(true);
+    engine.paint({ kind: 'erase', from: [20, 20], to: [20, 20], radius: 9 });
+    app.settings.boundary = 'dish';
+    await engine.apply(structuredClone(app.settings));
+    expect(sceneChanged()).toBe(false);
+    setEngine(undefined);
+  });
+});
+
 describe('adding and removing strains', () => {
   it('keeps the scene index of every strain, so each keeps its role', async () => {
     const { app, addStrain, loadPreset, removeStrain } = await fresh();
