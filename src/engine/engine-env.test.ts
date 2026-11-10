@@ -1,7 +1,7 @@
 // The engine keeps food, light and walls across new simulations (ADR 0019), checked in Node with a CPU backend
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, type Settings } from '../model/params';
+import { defaultSettings, type Boundary, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
@@ -729,9 +729,10 @@ describe('the sweep', () => {
     const dab = (kind: Stroke['kind'], radius: number, at: [number, number] = [100.5, 100.5]) => {
       engine.paint({ kind, from: at, to: at, radius });
     };
-    // Four cells lie exactly 3 cells from the centre. Painted, but cleared only within the erase's last 0.005 cells.
+    // Four cells lie exactly 3 cells from the food's centre. An erase a hair beside it, with a segment of its own,
+    // paints them, but clears them only within its last 0.005 cells.
     dab('food', 3);
-    dab('erase', 3.005);
+    dab('erase', 3.005, [100.5001, 100.5]);
     expect(edits(engine)).toHaveLength(2);
     engine.clearEnvironment();
     // Not painted by the food on the CPU, but within SLACK of its brush, and not cleared.
@@ -752,6 +753,57 @@ describe('the sweep', () => {
     dab('food', 2);
     dab('erase', 3.005, [105.5, 100.5]);
     expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
+  });
+
+  // Both paint passes decide every cell of every kind by the same distance and `d > radius` (paint.wgsl, paint.frag):
+  // a later stroke with the same segment, at least the radius and an arena that holds the edit's clears every cell the
+  // edit paints, also the cells exactly on the brush's edge, where SLACK alone kept both (review of ADR 0019: an Erase
+  // click on a Food click with the same brush kept both in 13 of 24 trials).
+  it('deletes a stroke that a later one with the same segment, at least its radius and an arena that holds it clears', async () => {
+    const at: [number, number] = [200.5, 160.5]; // inside the dish of 512 × 320; 12 cells lie exactly 5 cells away
+    type Segment = [[number, number], [number, number]];
+    const pair = async (
+      [sk, sb, rs]: [Stroke['kind'], Boundary, number],
+      [ck, cb, rc]: [Stroke['kind'], Boundary, number],
+      [from, to]: Segment = [at, at],
+      [cfrom, cto]: Segment = [from, to],
+    ) => {
+      const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: sb }, []);
+      engine.paint({ kind: sk, from, to, radius: rs });
+      if (cb !== sb) await engine.apply({ ...engine.settings, boundary: cb });
+      engine.paint({ kind: ck, from: cfrom, to: cto, radius: rc });
+      return edits(engine).map((e) => e.kind);
+    };
+    // The kinds: an erase clears every kind, a wall food and light.
+    expect(await pair(['food', 'box', 5], ['erase', 'box', 5])).toEqual([]);
+    expect(await pair(['wall', 'box', 5], ['erase', 'box', 5])).toEqual([]);
+    expect(await pair(['light', 'box', 5], ['erase', 'box', 5])).toEqual([]);
+    expect(await pair(['food', 'box', 5], ['wall', 'box', 5])).toEqual(['wall']);
+    expect(await pair(['light', 'box', 5], ['wall', 'box', 5.3])).toEqual(['wall']);
+    expect(await pair(['wall', 'box', 5], ['wall', 'box', 5])).toEqual(['wall', 'wall']);
+    // A segment whose band edge lies on the centres of two rows of cells.
+    const band: Segment = [
+      [180.5, 160.5],
+      [220.5, 160.5],
+    ];
+    expect(await pair(['food', 'box', 3], ['erase', 'box', 3], band)).toEqual([]);
+    // A dab at the band's start shares its start, not its segment.
+    expect(await pair(['food', 'box', 3], ['erase', 'box', 30], band, [band[0], band[0]])).toEqual(['food', 'erase']);
+    // A smaller radius leaves the edge cells.
+    expect(await pair(['food', 'box', 5], ['erase', 'box', 4.999])).toEqual(['food', 'erase']);
+    // Arenas: a box or a periodic erase holds a dish edit, a periodic one a box edit; not the other way round.
+    expect(await pair(['food', 'dish', 5], ['erase', 'box', 5])).toEqual([]);
+    expect(await pair(['food', 'dish', 5], ['erase', 'wrap', 5])).toEqual([]);
+    expect(await pair(['food', 'box', 5], ['erase', 'wrap', 5])).toEqual([]);
+    expect(await pair(['food', 'box', 5], ['erase', 'dish', 5])).toEqual(['food', 'erase']);
+    expect(await pair(['food', 'wrap', 5], ['erase', 'box', 5])).toEqual(['food', 'erase']);
+    // A periodic stroke longer than half the grid is painted in parts, each its own segment.
+    const long: Segment = [
+      [10.5, 160.5],
+      [300.5, 160.5],
+    ];
+    expect(await pair(['food', 'box', 3], ['erase', 'wrap', 3], long)).toEqual(['food', 'erase']);
+    expect(await pair(['food', 'box', 3], ['erase', 'box', 3], long)).toEqual([]);
   });
 
   // Spread into Math.min, V8 throws from about 125,000 arguments: an erase over 130,000 edits threw out of

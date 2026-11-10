@@ -2,7 +2,7 @@
 // completely on the grid on screen leave the list, so an erased food stays gone on every screen shape. Deleting them
 // changes no byte on that grid: an erase writes all four bytes of a cell and a wall writes [255, 0, 0, 0], so after
 // the stroke that cleared a cell, it holds what that stroke and later ones wrote, and none of them reads the edit.
-import { joinRuns, reachOf, Rows, segmentDistance, SLACK, someCell } from './brush';
+import { joinRuns, paintedAsIs, reachOf, Rows, segmentDistance, SLACK, someCell } from './brush';
 import { strokeOn, type EnvEdit, type Painted } from './environment';
 import type { EnvTool } from './types';
 
@@ -348,6 +348,23 @@ export class Placement {
   }
 }
 
+/**
+ * Whether stroke `C`, recorded after `S`, clears every cell that S paints, exactly: the same segment on this grid,
+ * bit for bit, a radius of at least S's and an arena that holds S's. Both paint passes decide every cell of every
+ * kind by the same distance to the segment and `d > radius` (shaders/paint.wgsl, gl/glsl/paint.frag), so C's distance
+ * to a cell is S's, or less where a periodic C also measures its copies, and its float32 radius is at least S's.
+ * Light paints only within its radius. A periodic C over a closed arena's S must be painted as it is
+ * (paintedAsIs()), so that its segment is S's.
+ */
+export function coversExactly(C: Painted | undefined, S: Painted, w: number, h: number): boolean {
+  if (!C || !clears(C.kind, S.kind) || C.radius < S.radius) return false;
+  const [a, b, p, q] = [C.from, C.to, S.from, S.to];
+  if (a[0] !== p[0] || a[1] !== p[1] || b[0] !== q[0] || b[1] !== q[1]) return false;
+  if (C.boundary === S.boundary) return true;
+  if (C.boundary === 'wrap') return paintedAsIs(C, w, h, true);
+  return C.boundary === 'box' && S.boundary === 'dish';
+}
+
 /** HAIR of brush.ts for a distance of `r` cells: Rows.runs() moves an edge of that radius by it. */
 const hair = (r: number) => 1e-9 * (1 + Math.abs(r));
 
@@ -416,7 +433,8 @@ function meet(a: readonly number[], na: number, b: readonly number[], nb: number
 /**
  * The indices of the edits to delete after the last one of `placement`, a stroke that clears, was recorded on its
  * grid. The GPU computes in float32, so every judgement keeps SLACK: the cells of an edit count with its brush and
- * the dish's rim moved out by it, the cells a clearing stroke surely clears with both moved in.
+ * the dish's rim moved out by it, the cells a clearing stroke surely clears with both moved in. A stroke with the same
+ * segment, a radius at least as large and an arena that holds the edit's clears it exactly (coversExactly()).
  *
  * 1. An older food, light or wall edit goes when every cell it paints is cleared by a stroke recorded after it: an
  *    erase clears every kind, a wall food and light. An edit that paints no cell of this grid is kept: the grid cannot
@@ -480,7 +498,7 @@ export function sweep(placement: Placement): Set<number> {
       placement.setOpen(i, PAINTS_NONE);
       continue;
     }
-    if (inside(S, X, w, h)) {
+    if (coversExactly(X, S, w, h) || inside(S, X, w, h)) {
       drop(i);
       continue;
     }
@@ -497,6 +515,10 @@ export function sweep(placement: Placement): Set<number> {
       },
       i + 1,
     );
+    if (by.some((j) => coversExactly(strokes[j], S, w, h))) {
+      drop(i);
+      continue;
+    }
     // A row through S's start is wide, and in a dense list often open: it comes first. The rows before the cursor are
     // known to be cleared and stay so; the visit goes on from there.
     const cursor = placement.cursor(i);

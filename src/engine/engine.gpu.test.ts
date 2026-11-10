@@ -281,6 +281,66 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     engine.destroy();
   });
 
+  // A later erase or wall with an edit's own segment and at least its radius clears every cell the edit paints, by
+  // the same distance and comparison in both passes (sweep.ts coversExactly): the sweep deletes the edit without
+  // SLACK. Each edit is painted before the stroke over it, and brush edges lie exactly on cell centres.
+  it('lose a stroke under a later one with its segment, with brush edges on cell centres', async () => {
+    const { engine } = await load('three-strains', { resolution: 512, boundary: 'box' }, [320, 200]);
+    expect([engine.sim.width, engine.sim.height]).toEqual([512, 320]);
+    const list = () => (engine as unknown as { edits: EnvEdit[] }).edits;
+    const twice = (
+      s: Stroke['kind'],
+      c: Stroke['kind'],
+      from: [number, number],
+      to: [number, number],
+      r: number,
+      rc = r,
+    ) => {
+      engine.paint({ kind: s, from, to, radius: r });
+      engine.frame(performance.now(), 0);
+      engine.paint({ kind: c, from, to, radius: rc });
+      engine.frame(performance.now(), 0);
+    };
+    // 12 cells lie exactly 5 cells from a cell centre, and two rows exactly 3 cells from a segment along a row.
+    twice('food', 'erase', [100.5, 100.5], [100.5, 100.5], 5);
+    twice('wall', 'erase', [130.5, 100.5], [130.5, 100.5], 5);
+    twice('light', 'erase', [160.5, 100.5], [160.5, 100.5], 5);
+    twice('food', 'erase', [180.5, 140.5], [220.5, 140.5], 3);
+    // A wall clears food and light; the wall stays (its radius has no cell within 1e-3 cells of its edge).
+    twice('food', 'wall', [190.5, 100.5], [190.5, 100.5], 5, 5.3);
+    twice('light', 'wall', [220.5, 100.5], [220.5, 100.5], 5, 5.3);
+    // A box erase over a dish food, a periodic erase over a box food.
+    await engine.apply({ ...engine.settings, boundary: 'dish' });
+    engine.paint({ kind: 'food', from: [300.5, 160.5], to: [300.5, 160.5], radius: 5 });
+    engine.frame(performance.now(), 0);
+    await engine.apply({ ...engine.settings, boundary: 'box' });
+    twice('food', 'erase', [340.5, 160.5], [340.5, 160.5], 5);
+    engine.paint({ kind: 'erase', from: [300.5, 160.5], to: [300.5, 160.5], radius: 5 });
+    engine.frame(performance.now(), 0);
+    engine.paint({ kind: 'food', from: [380.5, 160.5], to: [380.5, 160.5], radius: 5 });
+    engine.frame(performance.now(), 0);
+    await engine.apply({ ...engine.settings, boundary: 'wrap' });
+    engine.paint({ kind: 'erase', from: [380.5, 160.5], to: [380.5, 160.5], radius: 5 });
+    engine.frame(performance.now(), 0);
+    expect(list().map((e) => e.kind)).toEqual(['wall', 'wall']);
+    const check = async () => {
+      const { width: w, height: h } = engine.sim;
+      const expected = new Uint8Array(w * h * 4);
+      const margin = { min: Infinity };
+      for (const e of list()) {
+        const s = strokeOn(e, w, h);
+        if (s) paintReference(expected, w, h, s, e.boundary, margin);
+      }
+      expect(margin.min).toBeGreaterThan(1e-3);
+      expect(cells(expected, 0)).toBeGreaterThan(30);
+      expect(differing(await engine.sim.readEnv(), expected)).toBe(0);
+    };
+    await check();
+    await engine.apply({ ...engine.settings, resolution: 256 });
+    await check();
+    engine.destroy();
+  });
+
   // Every alive agent on its own free cell from the first step (ADR 0008), in the scenes with walls or a dish. An
   // agent that finds no free cell in the claim rounds starts dead: in the full dish of Shrinking plasmodium one in
   // a few runs out of a hundred (ADR 0019).

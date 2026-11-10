@@ -109,6 +109,7 @@ describe('the sweep', () => {
       // Every other sequence keeps the index of tiles from the first edit on (the engine from INDEXED on).
       const tiles = seed % 2 ? 0 : undefined;
       let placement = new Placement(w, h, list, tiles);
+      let prev: Stroke | undefined;
       for (let op = 0; op < 36; op++) {
         const r = rand();
         if (r < 0.08) {
@@ -116,15 +117,23 @@ describe('the sweep', () => {
           spots = spotsOf(rand, w, h);
           full = list.slice();
           placement = new Placement(w, h, list, tiles);
+          prev = undefined;
           continue;
         }
         if (r < 0.16) {
           arena = pick(BOUNDARIES);
           continue;
         }
-        const s = strokeNear(rand, spots, w, h, arena);
+        // Now and then an erase or a wall over the last stroke's own segment, with at least its radius: the sweep
+        // deletes what it covers without SLACK (coversExactly()), and that too must change no byte.
+        const again = prev && rand() < 0.2;
+        const s =
+          prev && again
+            ? { ...prev, kind: pick(['erase', 'wall'] as const), radius: prev.radius + pick([0, 0, 0.5]) }
+            : strokeNear(rand, spots, w, h, arena);
         const stroke = { ...s, radius: Math.max(MIN_RADIUS, s.radius) };
         if (!paintsCell(stroke, w, h, arena)) continue;
+        prev = stroke;
         const edit = fromStroke(stroke, [w, h], arena);
         list.push(edit);
         full.push(edit);
