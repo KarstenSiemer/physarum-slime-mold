@@ -86,12 +86,23 @@ function rowSpan(y: number, a: Point, b: Point, reach: number): [number, number]
 }
 
 /**
+ * A place in the order in which someCell() visits a stroke's cells: `part` −1 for the cells under the two ends, else
+ * the part of the stroke, and the row and column there.
+ */
+export interface Cursor {
+  part: number;
+  y: number;
+  x: number;
+}
+
+/**
  * Whether `test` holds for a cell that a stroke paints on a `w` × `h` grid, under the stroke's boundary or else
  * `boundary`, like Array.prototype.some: it stops at the first such cell. A cell is painted by the rule of the paint
  * passes: a cell of the arena whose centre lies within the radius of the segment, on a periodic grid of its nearest
  * copy, and for light one whose byte is at least 1. `slack` moves the edge of the brush and the rim of a dish out by
  * that many cells, or in if it is negative. The cells under the two ends come first, and those come again later.
  * Rows are visited where they cross the stroke, so a long diagonal stroke costs its own cells, not its bounding box.
+ * With a `cursor`, the visit starts there (after the two end cells) and the cursor moves to the cell where it stops.
  */
 export function someCell(
   stroke: Stroke,
@@ -100,58 +111,74 @@ export function someCell(
   boundary: Boundary,
   slack: number,
   test: (cell: number) => boolean,
+  cursor?: Cursor,
 ): boolean {
   const { kind, radius: r } = stroke;
   const under = stroke.boundary ?? boundary;
   const reach = r + Math.max(0, slack);
+  const start = cursor ?? { part: -1, y: 0, x: 0 };
+  const stop = (part: number, y: number, x: number) => {
+    if (cursor) [cursor.part, cursor.y, cursor.x] = [part, y, x];
+    return true;
+  };
   const at = (x: number, y: number, a: Point, b: Point) => {
     const c = cellIndex(x, y, w, h, under, slack);
     return c >= 0 && reaches(kind, segmentDistance(x + 0.5, y + 0.5, a, b), r, slack) && test(c);
   };
-  // Every cell whose centre lies within reach of the segment in rows y0 to y1 and columns x0 to x1.
-  const rows = (a: Point, b: Point, [x0, y0, x1, y1]: [number, number, number, number]) => {
-    for (let y = y0; y <= y1; y++) {
+  /** The first row of part `part`, and the first column of its row `y`, from the cursor on. */
+  const firstRow = (part: number, y0: number) => (part === start.part ? Math.max(y0, start.y) : y0);
+  const firstCol = (part: number, y: number, x0: number) =>
+    part === start.part && y === start.y ? Math.max(x0, start.x) : x0;
+  const { from: a, to: b } = stroke;
+  if (at(Math.floor(a[0]), Math.floor(a[1]), a, b) || at(Math.floor(b[0]), Math.floor(b[1]), a, b))
+    return stop(-1, 0, 0);
+  if (under !== 'wrap') {
+    const y1 = Math.min(h - 1, Math.ceil(Math.max(a[1], b[1]) + reach));
+    for (let y = firstRow(0, Math.max(0, Math.floor(Math.min(a[1], b[1]) - reach))); y <= y1; y++) {
       const span = rowSpan(y + 0.5, a, b, reach);
       if (!span) continue;
-      for (let x = Math.max(x0, Math.floor(span[0] - 0.5)); x <= Math.min(x1, Math.ceil(span[1] - 0.5)); x++)
-        if (at(x, y, a, b)) return true;
+      for (
+        let x = firstCol(0, y, Math.max(0, Math.floor(span[0] - 0.5)));
+        x <= Math.min(w - 1, Math.ceil(span[1] - 0.5));
+        x++
+      )
+        if (at(x, y, a, b)) return stop(0, y, x);
     }
     return false;
-  };
-  const { from: a, to: b } = stroke;
-  if (at(Math.floor(a[0]), Math.floor(a[1]), a, b) || at(Math.floor(b[0]), Math.floor(b[1]), a, b)) return true;
-  if (under !== 'wrap') {
-    const y0 = Math.max(0, Math.floor(Math.min(a[1], b[1]) - reach));
-    return rows(a, b, [0, y0, w - 1, Math.min(h - 1, Math.ceil(Math.max(a[1], b[1]) + reach))]);
   }
   // As the paint passes do: parts that start inside the grid and span at most half of it, each over a box of one
   // period at most (paintBox()).
-  for (const part of paintSegments(stroke, w, h, true)) {
-    const box = paintBox(part, w, h, true);
-    if (!box) continue;
+  const parts = paintSegments(stroke, w, h, true);
+  for (let k = Math.max(0, start.part); k < parts.length; k++) {
+    const part = parts[k];
+    const box = part && paintBox(part, w, h, true);
+    if (!part || !box) continue;
     const [bx, by, bw, bh] = box;
     const [p, q] = [part.from, part.to];
     if (bw < w && bh < h) {
       // The box holds the part and its brush once, so no two copies reach the same cell: the distance to the part
       // in the box's own coordinates is the distance to the nearest copy, and those coordinates wrap into the grid.
-      const inBox = (x: number, y: number) =>
-        reaches(kind, segmentDistance(x + 0.5, y + 0.5, p, q), r, slack) && test(cellIndex(x, y, w, h, 'wrap'));
-      for (let y = by; y < by + bh; y++) {
+      for (let y = firstRow(k, by); y < by + bh; y++) {
         const span = rowSpan(y + 0.5, p, q, reach);
         if (!span) continue;
-        for (let x = Math.max(bx, Math.floor(span[0] - 0.5)); x <= Math.min(bx + bw - 1, Math.ceil(span[1] - 0.5)); x++)
-          if (inBox(x, y)) return true;
+        for (
+          let x = firstCol(k, y, Math.max(bx, Math.floor(span[0] - 0.5)));
+          x <= Math.min(bx + bw - 1, Math.ceil(span[1] - 0.5));
+          x++
+        )
+          if (reaches(kind, segmentDistance(x + 0.5, y + 0.5, p, q), r, slack) && test(cellIndex(x, y, w, h, 'wrap')))
+            return stop(k, y, x);
       }
       continue;
     }
     // A brush that spans the grid: every cell of the box, with the distance to the nearest copy one period around.
-    for (let j = 0; j < bh; j++)
-      for (let i = 0; i < bw; i++) {
+    for (let j = firstRow(k, 0); j < bh; j++)
+      for (let i = firstCol(k, j, 0); i < bw; i++) {
         const [x, y] = [(((bx + i) % w) + w) % w, (((by + j) % h) + h) % h];
         let d = segmentDistance(x + 0.5, y + 0.5, p, q);
         for (let oy = -1; oy <= 1; oy++)
           for (let ox = -1; ox <= 1; ox++) d = Math.min(d, segmentDistance(x + 0.5 + ox * w, y + 0.5 + oy * h, p, q));
-        if (reaches(kind, d, r, slack) && test(y * w + x)) return true;
+        if (reaches(kind, d, r, slack) && test(y * w + x)) return stop(k, j, i);
       }
   }
   return false;

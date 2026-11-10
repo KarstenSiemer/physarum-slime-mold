@@ -9,6 +9,7 @@ import {
   segmentDistance,
   SLACK,
   someCell,
+  type Cursor,
 } from './brush';
 import { MIN_RADIUS } from './environment';
 import { paintReference } from './paint-reference';
@@ -334,6 +335,53 @@ describe('someCell', () => {
         [...visited].sort((x, y) => x - y),
         JSON.stringify([s, w, h]),
       ).toEqual([...painted].sort((x, y) => x - y));
+    }
+  });
+
+  // The sweep (sweep.ts) goes on where its last visit of a stroke stopped: the cells before stay cleared.
+  it('goes on from a cursor where an earlier visit stopped, in the same order', () => {
+    let seed = 7;
+    const rand = () => {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      return (seed >>> 0) / 2 ** 32;
+    };
+    for (let k = 0; k < 300; k++) {
+      const [w, h] = k % 2 ? [48, 30] : [31, 47];
+      const boundary: Boundary = (['box', 'dish', 'wrap'] as const)[k % 3] ?? 'box';
+      const a: [number, number] = [rand() * 1.4 * w - 0.2 * w, rand() * 1.4 * h - 0.2 * h];
+      const long = rand() < 0.3 ? 2 * w : 15;
+      const b: [number, number] = [a[0] + (rand() * 2 - 1) * long, a[1] + (rand() * 2 - 1) * long];
+      const s: Stroke = { kind: 'food', from: a, to: b, radius: rand() < 0.1 ? 40 : MIN_RADIUS + rand() * 6, boundary };
+      const all: number[] = [];
+      someCell(s, w, h, boundary, SLACK, (c) => {
+        all.push(c);
+        return false;
+      });
+      if (all.length < 4) continue;
+      const stopAt = 2 + Math.floor(rand() * (all.length - 2));
+      const cursor: Cursor = { part: -1, y: 0, x: 0 };
+      let n = 0;
+      someCell(s, w, h, boundary, SLACK, () => n++ === stopAt, cursor);
+      const rest: number[] = [];
+      someCell(
+        s,
+        w,
+        h,
+        boundary,
+        SLACK,
+        (c) => {
+          rest.push(c);
+          return false;
+        },
+        cursor,
+      );
+      // The cells under the two ends come first again, then the visit goes on from the cell where it stopped.
+      const ends = rest.length - (all.length - stopAt);
+      expect(ends).toBeGreaterThanOrEqual(0);
+      expect(ends).toBeLessThanOrEqual(2);
+      expect(rest, JSON.stringify([s, w, h, stopAt])).toEqual([...all.slice(0, ends), ...all.slice(stopAt)]);
     }
   });
 });

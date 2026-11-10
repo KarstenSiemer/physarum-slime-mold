@@ -2,7 +2,7 @@
 // completely on the grid on screen leave the list, so an erased food stays gone on every screen shape. Deleting them
 // changes no byte on that grid: an erase writes all four bytes of a cell and a wall writes [255, 0, 0, 0], so after
 // the stroke that cleared a cell, it holds what that stroke and later ones wrote, and none of them reads the edit.
-import { cellIndex, paintSegments, reaches, segmentDistance, SLACK, someCell } from './brush';
+import { cellIndex, paintSegments, reaches, segmentDistance, SLACK, someCell, type Cursor } from './brush';
 import { strokeOn, type EnvEdit, type Painted } from './environment';
 import type { EnvTool, Stroke } from './types';
 
@@ -32,8 +32,11 @@ export function compact(list: unknown[], gone: ReadonlySet<number>) {
   list.length = n;
 }
 
-/** Per edit in Placement: x0, y0, x1, y1 of its box, then the cell it leaves open (OPEN_UNKNOWN, PAINTS_NONE). */
-const STRIDE = 5;
+/**
+ * Per edit in Placement: x0, y0, x1, y1 of its box, the cell it leaves open (or OPEN_UNKNOWN, PAINTS_NONE) and
+ * where someCell() found that cell (its Cursor: part, row, column).
+ */
+const STRIDE = 8;
 const OPEN_UNKNOWN = -1;
 /** The edit paints no cell of the grid: the sweep keeps it there. */
 const PAINTS_NONE = -2;
@@ -43,7 +46,8 @@ const PAINTS_NONE = -2;
  * (strokeOn(), undefined outside the grid), the box of cells it can reach, and a cell it paints that no stroke
  * recorded after it clears, as the last sweep found it. Cleared cells stay cleared (a stroke that clears goes only
  * when later strokes cover its cells, and an erase stays while an older edit paints its cells), so that cell stays
- * open until a new clearing stroke covers it, and the next sweep needs to look at the edit only then. The numbers
+ * open until a new clearing stroke covers it: the next sweep looks at the edit only then, and goes on from that cell,
+ * since every cell the visit passed before it stays cleared too. The numbers
  * sit in one typed array, so that finding the edits near a stroke is one quick pass, also over 100,000 edits.
  */
 export class Placement {
@@ -75,7 +79,7 @@ export class Placement {
       grown.set(this.data);
       this.data = grown;
     }
-    this.data.set([...(s ? boxOf(s, this.w, this.h) : [0, 0, 0, 0]), OPEN_UNKNOWN], STRIDE * i);
+    this.data.set([...(s ? boxOf(s, this.w, this.h) : [0, 0, 0, 0]), OPEN_UNKNOWN, -1, 0, 0], STRIDE * i);
   }
 
   /** Keeps the edits whose index `gone` does not hold, in order. */
@@ -121,8 +125,14 @@ export class Placement {
     return this.data[STRIDE * i + 4] ?? OPEN_UNKNOWN;
   }
 
-  setOpen(i: number, cell: number) {
-    this.data[STRIDE * i + 4] = cell;
+  /** Where the visit of edit `i` found its open cell, to go on from there. */
+  cursor(i: number): Cursor {
+    const [d, k] = [this.data, STRIDE * i];
+    return { part: d[k + 5] ?? -1, y: d[k + 6] ?? 0, x: d[k + 7] ?? 0 };
+  }
+
+  setOpen(i: number, cell: number, at: Cursor = { part: -1, y: 0, x: 0 }) {
+    this.data.set([cell, at.part, at.y, at.x], STRIDE * i + 4);
   }
 }
 
@@ -225,19 +235,29 @@ export function sweep(placement: Placement): Set<number> {
       .near(hull(candidates.map((c) => placement.box(c))))
       .filter((j) => kind(j) === 'erase' || kind(j) === 'wall');
     const by = clearing.filter((j) => j > i && clears(kind(j), kind(i)) && placement.overlaps(i, j));
-    let [any, hit, left] = [false, by[0] ?? -1, OPEN_UNKNOWN];
-    someCell(S, w, h, S.boundary, SLACK, (c) => {
-      any = true;
-      const [x, y] = cellOf(c);
-      // The stroke that cleared the last cell usually clears the next one too.
-      if (paints(hit, x, y, -SLACK)) return false;
-      const other = by.find((j) => j !== hit && paints(j, x, y, -SLACK));
-      if (other !== undefined) hit = other;
-      else left = c;
-      return other === undefined;
-    });
+    // Cells the last visit passed before its open cell stay cleared: go on from there.
+    const at = placement.cursor(i);
+    let [any, hit, left] = [known >= 0, by[0] ?? -1, OPEN_UNKNOWN];
+    someCell(
+      S,
+      w,
+      h,
+      S.boundary,
+      SLACK,
+      (c) => {
+        any = true;
+        const [x, y] = cellOf(c);
+        // The stroke that cleared the last cell usually clears the next one too.
+        if (paints(hit, x, y, -SLACK)) return false;
+        const other = by.find((j) => j !== hit && paints(j, x, y, -SLACK));
+        if (other !== undefined) hit = other;
+        else left = c;
+        return other === undefined;
+      },
+      at,
+    );
     if (!any) placement.setOpen(i, PAINTS_NONE);
-    else if (left >= 0) placement.setOpen(i, left);
+    else if (left >= 0) placement.setOpen(i, left, at);
     else gone.add(i);
   }
 
