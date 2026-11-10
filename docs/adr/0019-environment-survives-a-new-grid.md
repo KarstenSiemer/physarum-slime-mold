@@ -448,11 +448,16 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   `sim.gpu.test.ts` checks that copy against both backends, in one call and one call per stroke,
   across the edges, under other boundaries, on copies of the grid two and three periods away, for
   strokes longer than the grid and for brushes larger than it. It also checks that one call gives
-  the bytes of `env` and of the outlines of one call per stroke and per segment (ADR 0009), and
-  `engine.gpu.test.ts` that a replay on another grid and an arena switch keep the outlines on the
-  side of `env` and the simulation counted as painted (`hasEnvironment`), which the CPU backend
-  follows too. `someCell`, which `paintsCell` and the sweep use, visits exactly the cells that copy
-  paints (1,500 random strokes, `brush.test.ts`).
+  the bytes of `env` and of the outlines of one call per stroke and per segment (ADR 0009).
+  `engine.gpu.test.ts` checks on both backends that the outlines stay on the side of `env` at every
+  cell of the arena, with its light and shadow: after sweeps, also one that completes over frames,
+  after a replay of the swept list on another grid, after switches between the dish, a box and the
+  periodic grid, after a Clear and after preset loads on the same grid and on new ones. Each such
+  replay gives the bytes of one call per edit. A new simulation that replays food, light or walls
+  counts as painted (`hasEnvironment`) and draws with the render pass that has the environment
+  code; after a Clear, or with an eraser alone, it draws without. The CPU backend follows
+  `hasEnvironment` too. `someCell`, which `paintsCell` and the sweep use, visits exactly the cells
+  that copy paints (1,500 random strokes, `brush.test.ts`).
 - In the built app on both backends (the scripts of the review of the fourth draft): Shrinking
   plasmodium on 800 × 800, switched to a closed box, keeps all 8 foods on 1280 × 800, byte for byte
   as the box chosen there directly (6 foods before); the Maze through the dish, 800 × 800, the box

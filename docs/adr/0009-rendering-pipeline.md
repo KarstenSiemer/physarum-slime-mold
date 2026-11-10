@@ -358,7 +358,12 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   one kind, kinds that change at one place, strokes across the edges and longer than half the
   grid) and for 300 strokes under mixed boundaries; erasers leave no byte nearer than `env`
   allows; the outlines follow an environment written as bytes. The engine tests replay the Maze
-  on another grid and switch Shrinking plasmodium from the dish to a box and back, and the
-  outlines stay on the side of `env` with its light and shadow; the rebuilt simulation counts as
-  painted and draws its walls and food from the outlines. Each was checked with a deliberate
-  mutation of the code it guards.
+  on another grid; switch Shrinking plasmodium from the dish to a box, the periodic grid and back,
+  with a wall whose shadow falls across the edge of the periodic grid; sweep strokes that later
+  strokes cleared (ADR 0019), also over frames, and replay what is left on another grid; and load
+  presets on the same grid and on new ones. After each, the outlines stay on the side of `env` with
+  its light and shadow, and each replay gives the bytes of one call per edit. The rebuilt Maze
+  draws its walls and food from the outlines. A new simulation that replays food, light or walls
+  counts as painted and draws with the variant of item 9 that has the environment code; after a
+  Clear, or with an eraser alone, it draws without. Each was checked with a deliberate mutation of
+  the code it guards.
