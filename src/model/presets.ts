@@ -1,6 +1,9 @@
 import { defaultSettings, defaultStrain, MAX_STRAINS, type Settings, type Strain } from './params';
 
-/** Food, light or a wall, in fractions of the grid (position) and of its short side (radius). */
+/**
+ * Food, light or a wall in the canonical frame (engine/environment.ts): positions from the grid's centre and the
+ * radius, all in units of the grid's short side, on a landscape grid; a portrait grid turns the frame by 90°.
+ */
 export interface EnvShape {
   kind: 'food' | 'light' | 'wall';
   at: [number, number];
@@ -77,14 +80,16 @@ function fogleman(rows: number[][], perStrainDensity: number): Settings {
 }
 
 // Jones' model: Table 1 (p. 134), 15 % of cells with an agent as in Fig. 4 and 5, and his rule of one agent per
-// cell (p. 133). The experiments place their food, light and walls in fractions of this grid, so its size stays
-// 512 here; scenes that need another grid set it themselves.
+// cell (p. 133). Sensor offset and step size are in cells, so the grid sets the scale of the model: 512 here;
+// scenes that need another grid set it themselves.
 const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
   settings({ resolution: 512, density: 0.15, collisions: true, strains: strains([patch]), ...extra });
 
 // Grid 1024 shows about four times as many holes as 512, and without glow they stay dark (decided 2026-11-09).
 const network = { resolution: 1024, bloom: 0 } satisfies Partial<Settings>;
 
+// Food, light and walls in the canonical frame: x from −0.8 to 0.8 spans a 16:10 window, y from −0.5 to 0.5 its
+// height. The values place every shape where the fractions of the grid used before 2026-11-10 put it on 16:10.
 const food = (x: number, y: number, r = 0.012): EnvShape => ({ kind: 'food', at: [x, y], r });
 const wall = (x1: number, y1: number, x2: number, y2: number): EnvShape => ({
   kind: 'wall',
@@ -218,7 +223,7 @@ PRESETS.push(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { resolution: 256, density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
-    env: [food(0.32, 0.5, 0.02), food(0.68, 0.5, 0.02)],
+    env: [food(-0.288, 0, 0.02), food(0.288, 0, 0.02)],
   },
   {
     id: 'steiner',
@@ -237,7 +242,8 @@ PRESETS.push(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { resolution: 256, density: 0.012, boundary: 'dish', foodStrength: 0.01 },
       ),
-    env: [food(0.4, 0.37, 0.02), food(0.6, 0.37, 0.02), food(0.4, 0.63, 0.02), food(0.6, 0.63, 0.02)],
+    // A square with the corners as far from the centre as the 0.32 × 0.26 rectangle of before.
+    env: [food(-0.145, -0.145, 0.02), food(0.145, -0.145, 0.02), food(-0.145, 0.145, 0.02), food(0.145, 0.145, 0.02)],
   },
   {
     id: 'shrinking',
@@ -257,14 +263,14 @@ PRESETS.push(
         { density: 0.5, boundary: 'dish', foodStrength: 0.05, shrink: 0.00025 },
       ),
     env: [
-      food(0.5, 0.5),
-      food(0.38, 0.32),
-      food(0.62, 0.3),
-      food(0.33, 0.62),
-      food(0.66, 0.66),
-      food(0.5, 0.78),
-      food(0.27, 0.45),
-      food(0.73, 0.47),
+      food(0, 0),
+      food(-0.192, -0.18),
+      food(0.192, -0.2),
+      food(-0.272, 0.12),
+      food(0.256, 0.16),
+      food(0, 0.28),
+      food(-0.368, -0.05),
+      food(0.368, -0.03),
     ],
   },
   {
@@ -295,7 +301,7 @@ PRESETS.push(
     strainRoles: ['Jones’ standard agent, flees light'],
     why: 'The network uses Jones’ values for Fig. 4 with one agent per cell. The light is this app’s simplification: a spreading repellent with strength 0.2. Jones 2010 has no light.',
     settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, { lightStrength: 0.2 }),
-    env: [{ kind: 'light', at: [0.5, 0.5], r: 0.16 }],
+    env: [{ kind: 'light', at: [0, 0], r: 0.16 }],
   },
   {
     id: 'maze',
@@ -315,13 +321,13 @@ PRESETS.push(
         { density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001 },
       ),
     env: [
-      wall(0.25, 0.0, 0.25, 0.7),
-      wall(0.5, 0.3, 0.5, 1.0),
-      wall(0.75, 0.0, 0.75, 0.7),
-      wall(0.25, 0.7, 0.4, 0.7),
-      wall(0.6, 0.3, 0.75, 0.3),
-      food(0.1, 0.1, 0.018),
-      food(0.9, 0.9, 0.018),
+      wall(-0.4, -0.5, -0.4, 0.2),
+      wall(0, -0.2, 0, 0.5),
+      wall(0.4, -0.5, 0.4, 0.2),
+      wall(-0.4, 0.2, -0.16, 0.2),
+      wall(0.16, -0.2, 0.4, -0.2),
+      food(-0.64, -0.4, 0.018),
+      food(0.64, 0.4, 0.018),
     ],
   },
 );

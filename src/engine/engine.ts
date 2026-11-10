@@ -1,6 +1,7 @@
 import { constrain, RESOLUTIONS, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget } from './budget';
+import { fromShape, strokeOn } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { fitResolution, gridSize, memoryBudget } from './sizing';
@@ -82,13 +83,7 @@ export class Engine {
     }
     this.sim.clearEnvironment();
     const { width: w, height: h } = this.sim;
-    const m = Math.min(w, h);
-    this.sim.paint(
-      env.map((e) => {
-        const to = e.to ?? e.at;
-        return { kind: e.kind, from: [e.at[0] * w, e.at[1] * h], to: [to[0] * w, to[1] * h], radius: e.r * m };
-      }),
-    );
+    this.sim.paint(env.flatMap((e) => strokeOn(fromShape(e, this.settings.boundary), w, h) ?? []));
   }
 
   /** Called with the new grid when the engine had to lower it to fit the device. */
