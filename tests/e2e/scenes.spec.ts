@@ -107,6 +107,33 @@ const environment = (page: Page) =>
     return n;
   });
 
+test('Reload scene restores food, light and walls, and keeps the focus in the card', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openSmallScene(page);
+  await preset(page).selectOption('maze');
+  await page.waitForFunction(() => globalThis.physarum?.settings.boundary === 'box');
+  const scene = await environment(page);
+  expect(scene[0], 'wall cells').toBeGreaterThan(100);
+  expect(scene[1], 'food cells').toBeGreaterThan(10);
+  // Food painted by hand is not part of the scene.
+  await page.getByRole('radio', { name: 'Food' }).click();
+  const canvas = await box(page.locator('canvas'));
+  await page.mouse.move(canvas.x + canvas.width * 0.3, canvas.y + canvas.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(canvas.x + canvas.width * 0.4, canvas.y + canvas.height * 0.5, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await environment(page))[1]).toBeGreaterThan(scene[1] ?? 0);
+  const angle = page.getByRole('spinbutton', { name: 'Sensor angle value' });
+  await angle.fill('30');
+  await angle.press('Enter');
+  // By keyboard: the button goes away with the change, and the focus stays in the card.
+  await card(page).getByRole('button', { name: 'Reload scene' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(card(page).getByRole('heading', { name: 'Maze' })).toBeFocused();
+  await expect.poll(() => environment(page)).toEqual(scene);
+  expect(errors).toEqual([]);
+});
+
 test('the panel shows the density the Steiner tree runs, not a rounded one', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('steiner');
@@ -118,6 +145,31 @@ test('the panel shows the density the Steiner tree runs, not a rounded one', asy
   await density.press('Enter');
   await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.013);
   await expect(density).toHaveValue('0.013');
+});
+
+test('More in Learn opens the topic for the source of the scene', async ({ page }) => {
+  // A small memory budget keeps the Fogleman scene small on SwiftShader in CI.
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
+  });
+  await openSmallScene(page);
+  const dialog = page.getByRole('dialog', { name: 'Learn' });
+  for (const [id, source, tab] of [
+    ['spots', 'Jones 2010, Fig. 16 (top)', 'The model'],
+    ['dunes', 'Fogleman 2020', 'About'],
+    ['maze', 'Nakagaki et al. 2000', 'Physarum'],
+    ['three-strains', 'Made for this app', 'Scenes'],
+  ] as const) {
+    await preset(page).selectOption(id);
+    const chip = card(page).getByRole('button', { name: source, exact: true });
+    if ((await chip.getAttribute('aria-expanded')) !== 'true') await chip.click();
+    const more = card(page).getByRole('button', { name: 'More in Learn' });
+    await more.click();
+    await expect(dialog.getByRole('tab', { name: tab, exact: true }), id).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(more).toBeFocused();
+  }
 });
 
 test('a preset chosen while the engine starts is the one that runs', async ({ page }) => {
