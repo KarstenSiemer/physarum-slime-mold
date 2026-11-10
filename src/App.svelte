@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { at } from './engine/at';
   import { Engine } from './engine/engine';
+  import { MIN_RADIUS } from './engine/environment';
   import { GpuUnavailableError } from './engine/gpu';
   import { AgentToolKind } from './engine/pack';
   import { presetById, START } from './model/presets';
@@ -192,10 +193,14 @@
   const brushCells = (e: Engine) => app.brush * (canvas.width / canvas.clientWidth) * e.view.scale;
   const painting = (t: Tool) => t === 'food' || t === 'light' || t === 'wall' || t === 'erase';
 
+  // A drag records a segment only once the pointer has moved half a brush radius, and paints exactly what it records:
+  // every new grid paints all segments again (ADR 0019), and a slow drag would otherwise add one per pointer event.
   function paintTo(e: Engine, p: [number, number]) {
     if (!painting(app.tool)) return;
     const g = e.toGrid(...p);
-    e.paint({ kind: app.tool, from: lastGrid ?? g, to: g, radius: brushCells(e) });
+    const radius = Math.max(MIN_RADIUS, brushCells(e));
+    if (lastGrid && Math.hypot(g[0] - lastGrid[0], g[1] - lastGrid[1]) < radius / 2) return;
+    e.paint({ kind: app.tool, from: lastGrid ?? g, to: g, radius });
     lastGrid = g;
   }
 
