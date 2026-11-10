@@ -45,6 +45,9 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
   moved to a random spot without a check, and rounding pushed an agent into the next cell.
   Shrinking plasmodium then started with 19,563 shared cells on 512 × 288 (seed 7); now every
   scene with the rule starts with none, on both backends.
+- A move across the wrap seam keeps the agent in the cell it claimed: wrapped in f32, a position a
+  hair below 0 rounded up to x = W, into cell 0, while WebGPU counted the agent in cell W − 1, and a
+  second agent could enter cell 0 (fixed on 2026-11-10, ADR 0019).
 - Jones' attraction networks need the rule. Without it, agents pile up and the Fig. 4 network
   contracts into a few straight lines that wrap around the edges, usually within 2,000 to
   8,000 steps (measured on 2026-11-09 on WebGPU and WebGL2 and in two CPU ports). Jones ties

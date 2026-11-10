@@ -41,7 +41,8 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
 - Food, light and walls are a list of edits in the engine: preset shapes and painted strokes, each
   with the boundary it was painted under. Every new simulation (new grid, density or arena) paints
   the whole list before it places its agents; on another grid an edit goes through a frame of the
-  short side, turned on a portrait grid (ADR 0019).
+  short side, turned on a portrait grid (ADR 0019). A stroke on a copy of a periodic grid, which the
+  view shows around the grid, is kept where the copy shows it, inside the grid.
 - One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a

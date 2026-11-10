@@ -63,7 +63,12 @@ Option 1 with the canonical frame.
   simulation paints the whole list (`flushEnv()`, line 240) before it places its agents
   (`rebuild()`, line 180; `load()`, line 104). A frame paints the edits added since. "Clear" empties
   the list, also during a rebuild; a preset load replaces it. `Engine.paint` before the first
-  simulation exists drops the stroke: no grid is on screen yet.
+  simulation exists drops the stroke: no grid is on screen yet. On a periodic grid the view shows
+  copies of the grid around it, and a stroke on a copy paints the grid where the copy shows it. So
+  `fromStroke` moves such a stroke by whole periods until it starts inside the grid. Before, its
+  raw coordinates lay beside the grid, and every other grid skipped it as outside: 131 food cells
+  painted left of a 512 × 320 grid were none on 1024 × 640 (CPU engine test; the GPU engine test
+  failed the same way on both backends).
 - **Mapping** (`strokeOn`, `src/engine/environment.ts`). On the grid an edit was made on, it is
   painted with its original coordinates, byte for byte. On another grid it goes through the
   canonical frame: landscape, origin at the grid's centre, unit the grid's short side. A portrait
@@ -81,7 +86,7 @@ Option 1 with the canonical frame.
 - **Replay cost.** `Sim.paint` takes a list and is the only way the engine puts an edit into a
   simulation (`Sim.writeEnv` is for tests). WebGPU
   paints up to 4096 strokes per submission: each dispatch picks its brush and its boundary's
-  parameters by dynamic offset (`src/engine/sim.ts`, `paint()` at line 212). WebGL2 scissors every
+  parameters by dynamic offset (`src/engine/sim.ts`, `paint()` at line 213). WebGL2 scissors every
   paint draw to the stroke's bounding box grown by one cell, split at the edges of a periodic grid
   (`src/engine/brush.ts`), and changes parameters, color mask and blending only where the boundary
   or the kind of brush changes. Measured on an M3 Pro, paired in one page, grid 1536 × 864, strokes
@@ -97,12 +102,32 @@ Option 1 with the canonical frame.
   WebGL2. Without the scissor, WebGL2 painted 1,000 strokes one call each in 70.1 ms, with it in
   6.5 ms: every stroke was a pass over the whole grid.
 
+- **Strokes far out, long strokes and large brushes.** On a periodic grid both paint passes measure
+  a cell's distance to the stroke and to its copies one period away. That finds the nearest copy
+  for a segment that starts inside the grid and spans at most half of it along each axis, so both
+  backends paint a stroke as such segments (`paintSegments` in `src/engine/brush.ts`): a longer
+  one is cut, and each part moved by whole periods. A zoomed-out view shows many copies, and a
+  fast drag there gives a stroke longer than the grid. Before, WebGL2 painted nothing for a stroke
+  two periods away while WebGPU did. WebGPU dispatches over the segment's box cut to the grid, or
+  to one period on a periodic grid (`paintBox`), so a brush larger than the grid costs one pass
+  over the grid: a brush mapped from grid 256 to 2048 (radius 15,360 cells) took 53.5 ms on a
+  periodic grid and 12.1 ms in a box, now 0.6 and 0.4 ms (M3 Pro, paired). Where a brush stays
+  inside the grid, WebGPU skips the copies. Paired against the code before, 100,000 strokes in one
+  call took 208.4 against 198.5 ms on WebGPU and 53.1 against 50.4 ms on WebGL2 on a periodic
+  grid, 192.2 against 181.5 and 49.9 against 47.8 ms in a box.
+
 - **Growth.** A drag records a segment only once the pointer has moved half a brush radius from
   the end of the last one, and paints exactly what it records (`paintTo` in `src/App.svelte`).
   Before, it recorded one stroke per pointer event: 59.8 per second at 300 px/s and 60.3 at 30 px/s
   (Playwright on the built app, Chrome at 60 Hz, brush 18 px). With the rule 29.8 and 3.4. A kept
   edit takes about 160 bytes (Node heap). Three minutes of fast painting now record about 5,400
   edits: under 1 MB, repainted in about 20 ms on this machine.
+- **A drag across a new grid.** The drag keeps the end of its last segment in canvas pixels and
+  reads it in the grid on screen when the next segment starts (`BrushDrag` in `src/ui/drag.ts`).
+  When a new grid is built during a drag (the startup check lowers the grid in the first
+  seconds), the next segment runs along the pointer's path. Before, it ran from the last point in
+  cells of the old grid to the pointer in cells of the new one: a food drag along one row left
+  7,003 food cells far off that row (unit test with the CPU engine).
 - **Agents in a dish** (`agentCount`, `src/engine/sizing.ts`): density times the square of the
   grid's short side, as Jones counts his population %p over a square lattice that his dish fills
   (p. 134; p. 147: %p 50 on 300 × 300 is 45,000 agents). A box or a periodic grid counts all its
@@ -116,7 +141,14 @@ Option 1 with the canonical frame.
   rounds; the mixed layout on a grid without walls and dish needs one (its first draw is a
   permutation of the grid, `startRounds` in `src/engine/pack.ts`). An agent without a free cell after
   the last round starts dead. A placed position is clamped below the next cell (`inCell`). Without
-  the rule, an agent in a wall or outside the dish draws again in its region, up to 32 times.
+  the rule, an agent in a wall or outside the dish draws again in its region, up to 32 times. In
+  the full dish of Shrinking plasmodium (64 %) the rounds rarely leave one agent without a cell: on
+  WebGPU in 1 of 61 seeds on 512 × 288 and in 4 of 61 on 512 × 512, one agent each time. WebGL2
+  rounds its floats otherwise and gives other seeds (seed 21 on 512 × 512, not on 512 × 288).
+- **The wrap seam.** A move that ended a hair below x = 0 was wrapped to x = W in f32, which lies in
+  cell 0, while WebGPU counted the move and its occupancy in cell W − 1. Another agent could then
+  enter cell 0, two agents in one cell (older than this ADR). `wrapPos` in `common.wgsl` and
+  `common.glsl` now keeps a position below W and H: in cell W − 1 on both backends.
 - **Wall jumps.** A move checks every cell the segment from the agent to its destination enters
   (`clearPath` in `agents.wgsl` and `agents.frag`): a supercover walk, where a segment that passes
   within 0.001 cells of a grid corner counts both cells beside the corner. `advance`, `claim` and
@@ -132,8 +164,9 @@ Option 1 with the canonical frame.
 
 - The Maze survives the owner's grid change on both backends, byte for byte when the old grid
   comes back (GPU and e2e tests). On the base commit the e2e test fails.
-- Start placement on the shipped scenes, both backends, 16:9 and 9:19.5: every scene with the rule
-  starts with 0 dead agents, 0 agents in a wall and 0 shared cells. Shortest path now starts with
+- Start placement on the shipped scenes, both backends, 16:9 and 9:19.5 (seed 7): every scene with
+  the rule starts with 0 dead agents, 0 agents in a wall and 0 shared cells; with other seeds
+  Shrinking plasmodium rarely has one dead agent (above). Shortest path now starts with
   415 / 278 agents (737 / 604 before), Steiner tree with 415 / 278 (442 / 362), Shrinking
   plasmodium with 41,472 / 27,848 (73,728 / 60,416), 64 % of the dish as in the paper.
 - Cost of the claim rounds, a reset with the rule against one without, paired, M3 Pro: Shrinking on
@@ -148,19 +181,28 @@ Option 1 with the canonical frame.
 - On WebGPU (M3 Pro, 16:9 and 9:19.5, 5 to 10 seeds): Shortest path ends as one band in 4 of 5 wide and 5
   of 5 tall runs by step 12,000; Steiner tree as two three-way junctions joined by a short bridge in
   10 of 10 runs; Shrinking plasmodium in the same network in 7 of 10 wide and 9 of 10 tall runs, the
-  others tear a hole beside the middle food early. The scene texts say so.
+  others tear a hole beside the middle food early. The scene texts say so. On 512 × 288, seeds 21
+  to 23 and 31 to 42, a hole of 2,500 to 7,400 cells opened by step 1,000 or 2,800 in 3 of 15 runs
+  at density 0.5, in none at 0.6 (77 % of the dish) and in none with the old count of 73,728
+  agents. Jones' %p 50 is 0.5, so a higher density is an open owner decision (TODO.md).
 - The Maze's food sources lie 0.64 short sides from the centre along the long side. On a window
   between square and about 1.25:1 (either way up) they lie outside the grid and are skipped: on
   512 × 512 and 512 × 427 the Maze has no food, on 512 × 410 only 12 food cells. From 1.3:1 on both are
   there, whole from 4:3 on. Moving them inward would change the Maze on every other screen, so it is
   an open owner decision (TODO.md).
-- Maze walls are 0.008 short sides thick in radius: 5 cells across at 512 × 288, 5 to 6 at
-  512 × 320, 3 to 4 at 236 × 512. The sensor distance of 7 reaches across them. At step 10,000 (16:9,
-  3 seeds) the trail 1 to 3 cells beside a wall was 1.5 to 2.6 times the mean of open cells, and a
-  path ran within 3 cells of a wall on both sides along 7 to 20 % of the walls' rows.
+- Maze walls are 0.008 short sides thick in radius: 4 to 5 cells across at 512 × 288 (the middle
+  wall 4, the outer walls 5), 5 to 6 at 512 × 320, 3 to 4 at 236 × 512. The sensor distance of 7
+  reaches across them. At step 10,000 (16:9, 3 seeds) the trail 1 to 3 cells beside a wall was 1.5
+  to 2.6 times the mean of open cells, and a path ran within 3 cells of a wall on both sides along
+  7 to 20 % of the walls' rows. A path of trail from food to food (open cells whose 3 × 3 mean
+  trail is above the mean of open cells, seeds 31 to 42) held in 12, 10, 7 and 5 of 12 runs at
+  steps 2,000, 5,000, 10,000 and 15,000 on 16:9, and in 7, 5, 4 and 1 of 12 on 9:19.5. The scene
+  text says that it breaks in most runs.
 - Tests: the engine runs in Node with a CPU backend that paints with `paint-reference.ts`, the CPU
   copy of the paint shaders (`engine-env.test.ts`); `sim.gpu.test.ts` checks that copy against both
-  backends, in one call and one call per stroke, across the edges and under other boundaries.
+  backends, in one call and one call per stroke, across the edges, under other boundaries, on copies
+  of the grid two and three periods away, for strokes longer than the grid and for brushes larger
+  than it.
 - If a later model changes the environment on the GPU (food that gets eaten), the edit list no
   longer describes it, and that part needs a readback for a new grid.
 - Shared links still carry only the settings, not the edits (owner decision D8, its own pull

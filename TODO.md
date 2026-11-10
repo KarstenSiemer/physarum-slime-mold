@@ -61,6 +61,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] One agent per cell: help, notice when switched off in a scene made for it, restart on every switch, kept off without `EXT_float_blend` (2026-11-09)
 - [x] Dish scenes alike on every screen shape: food, light and walls in a frame of the short side, turned on a tall screen, and a dish's agents counted over the square of its short side. Shortest path ends as one band and Steiner tree as two junctions joined by a short bridge on wide and tall screens alike, and all eight foods of Shrinking plasmodium lie in the dish (WebGPU, 16:9 and 9:19.5, 5 to 10 seeds, 2026-11-10); the texts say what the GPU shows
 - [ ] Maze on a near-square window (between 1:1 and about 1.25:1, either way up): its two food sources lie outside the grid there and are skipped (ADR 0019). Moving them inward changes the Maze on every other screen (owner decision)
+- [ ] Shrinking plasmodium at Jones' %p 50 (0.5, 64 % of the dish) tears a hole beside the middle food in 3 of 15 runs on 512 × 288; at 0.6 (77 %) and with the old count of 73,728 agents in none (ADR 0019, 2026-11-10). Keep Jones' value with the text that says so, or raise the density (owner decision)
 
 ## M5 Quality and reach
 
