@@ -34,9 +34,10 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    first one included (`Engine.create`). It lowers the grid until the estimated GPU memory fits
    a budget of one eighth of the device memory hint, at most 1 GiB (512 MiB when unknown), and
    until the largest buffer fits the device's per-buffer and texture-size limits. Estimate:
-   86 B per cell (WebGPU: trail 32, scent 16, counts 16, environment 4, collision buffers 12,
-   bloom chain about 2.7, gel height field about 2; WebGL2 with float blending the same or less,
-   without it 106 B: no collision buffers, but 32 B of counting panels, ADR 0003) and 32 B per
+   90 B per cell (WebGPU: trail 32, scent 16, counts 16, environment 4, outline distances 4,
+   collision buffers 12, bloom chain about 2.7, gel height field about 2; WebGL2 with float
+   blending the same or less, without it 110 B: no collision buffers, but 32 B of counting
+   panels, ADR 0003) and 32 B per
    agent. A rebuild frees the old simulation before it allocates the new one, so memory never
    holds two. Allocations run inside a WebGPU `out-of-memory` error scope (WebGL2:
    `OUT_OF_MEMORY`); a failure frees the partial allocation and steps the grid down instead of

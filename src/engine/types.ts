@@ -4,6 +4,12 @@ import type { AgentTool } from './pack';
 export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3 } as const;
 export type EnvTool = keyof typeof EnvKind;
 
+/**
+ * Cells: the renderer's outline distances are clamped to ± this (SHAPE_RANGE in paint.wgsl, render.wgsl,
+ * gl/glsl/shape.frag and gl/glsl/render.frag), so a stroke updates them this far beyond its radius.
+ */
+export const SHAPE_RANGE = 4;
+
 /** A brush stroke on the environment, in grid cells. */
 export interface Stroke {
   kind: EnvTool;
@@ -52,6 +58,13 @@ export interface Sim {
   readCounts(): Promise<Float32Array>;
   /** Wall, food, light, unused per cell (0–255). */
   readEnv(): Promise<Uint8Array>;
+  /**
+   * For the renderer: the signed distance to the wall and to the food outline (0–255, 128 and up inside,
+   * ±SHAPE_RANGE cells at 0 and 255), the light as in `readEnv()`, and the drop shadow of the walls (0–255).
+   */
+  readShape(): Promise<Uint8Array>;
+  /** False until something other than the eraser is painted after the last clear of the environment. */
+  readonly hasEnvironment: boolean;
   writeAgent(index: number, a: AgentState): void;
   writeTrail(data: Float32Array): void;
   /**

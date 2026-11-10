@@ -47,6 +47,13 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Auto levels from a GPU histogram (black 65th, white 99th percentile)
 - [x] Bloom (thresholded dual filter in trail space)
 - [x] Overlays for food, light, walls; pan and zoom
+- [x] Food and walls with smooth outlines at any zoom: food below the trail and seen through the gel, walls as lit ridges with a drop shadow and the trail up to them, agents on food and blocked agents shown in collision mode, nothing left after erasing at any zoom, every cell centre drawn as `env` holds it, outlines that follow `env` after a change of boundary (ADR 0009, 2026-11-10)
+- [x] Outlines in every replay of the edit list: one call of `Sim.paint` writes `env` and the outlines with the bytes of one call per stroke, on both backends; 100,000 strokes in 0.44 to 0.85 s on WebGPU and 0.15 to 0.52 s on WebGL2 (M3 Pro), an eraser holds its whole outline box (ADR 0009 item 11, ADR 0019, 2026-11-10)
+- [x] Outlines beside the edge of a box and the rim of the dish: a stroke's distance counts only as far as the cells it paints allow, so a drag that runs on outside a box draws no line along the edge, an eraser there carves no food it does not erase, and a stroke that paints no cell changes no outline byte, on both backends; both backends outline the same cells, also for a stroke longer than a closed arena (ADR 0009 items 1 and 2, 2026-11-10)
+- [ ] How much food shows through the gel style's trail (`GEL_CLEAR` 0.6 in render.wgsl and render.frag), or whether only its outline shows above the trail instead (owner, ADR 0009 item 4)
+- [ ] A replay of 100,000 strokes whose kind changes with every stroke at one place takes 4.8 to 4.9 s on WebGL2 (0.10 s without outlines; ADR 0019): every stroke is a run of outlines of its own. Look again only if real edit lists do this
+- [ ] On WebGL2 a drag of a wide eraser or wall whose outline box reaches far past the brush costs more than PR 3 alone: radius 1,000 cells on 3072 × 1920, 3.80 against 2.91 ms per stroke for erasers and 3.90 against 2.99 ms for walls (M3 Pro; in every other case at most 0.22 ms above PR 3 alone, mostly below it, ADR 0009). A subtraction holds every byte of its outline box, and WebGL2 searches 5 rings of `env` at each cell there that holds no layer. The bytes it can change lie within 7.07 cells of the brush; holding only those needs the same rule for the hold over the union of a run of outlines, which one draw cannot test per cell. Accept, or change the rule (owner)
+- [ ] WebGPU outlines with six pipelines (paint.wgsl override constants `TILED`, `CORE`, `OWN_SEARCH`; ADR 0009 item 11): replays of walls and erasers as fast as before the review fixes of the join, but a new device on SwiftShader (the CI image) takes 16.2 to 16.8 s to build instead of 9.4 to 10.4 s (Metal: no change). One pipeline builds as fast as before, and makes those replays 10 to 14 % slower. Keep six, or go back to one (owner, ADR 0010)
 - [ ] HDR canvas when supported (optional)
 
 ## M4 Interface
@@ -70,6 +77,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Security review and audits with four skills (sharp edges, supply chain, web security, GitHub Actions); findings verified and fixed or accepted with reasons in ADRs 0011, 0013–0017
 - [x] Performance numbers on Metal (timestamp queries for compute passes, wall time for render passes) → `knowledge-base/webgpu-platform.md`
 - [x] README (usage, development, architecture, credits, images from the gallery)
+- [ ] The e2e waits for a started app (60 s: `tests/e2e/helpers.ts:31` and the waits in `app.spec.ts` and `scenes.spec.ts`) reach their limit in the CI image when the host is busy: in a review run of the joined branch beside other test containers and GPU measurements, "the Maze keeps its walls and food when the grid changes" failed at 60.1 and 63.7 s, and in a run side by side with PR 2 alone the longest waits were 58.8 s against 55.4 s. The join does not change them (median 23.1 against 21.3 s there). Raise the limit, or shorten SwiftShader's start-up (owner, ADR 0010)
 
 ## M6 Release
 

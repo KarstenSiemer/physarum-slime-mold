@@ -1,8 +1,8 @@
 import type { Boundary, Settings } from '../../model/params';
-import { paintSegments, scissorRects } from '../brush';
+import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
 import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
-import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
+import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
   clear,
   destroyTarget,
@@ -32,6 +32,43 @@ const MASKS: Record<number, [boolean, boolean, boolean, boolean]> = {
   [EnvKind.food]: [false, true, false, false],
   [EnvKind.light]: [false, false, true, false],
 };
+/** Side of the tiles syncShape() copies the outline target in: 1 MiB at a time. */
+const REFRESH_TILE = 512;
+
+/** Cells of some rectangles. */
+const area = (rects: readonly Rect[]) => rects.reduce((sum, [, , w, h]) => sum + w * h, 0);
+
+/** About the cells deep in a segment, where its subtraction writes 0 (SHAPE_RANGE cells inside its brush). */
+function core({ from: a, to: b, radius }: Stroke) {
+  const rho = Math.max(radius - SHAPE_RANGE, 0);
+  return 2 * rho * Math.hypot(b[0] - a[0], b[1] - a[1]) + Math.PI * rho * rho;
+}
+
+/** A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation. */
+type OutlineDraw = [number, [boolean, boolean, boolean, boolean], 'MAX' | 'MIN' | null];
+/**
+ * How shape.frag applies a run's segments of a kind to the outline target: per segment over its outline box the
+ * union (op 0, MAX blending) or the subtraction (op 1, MIN blending); then, once per cell of the union of the
+ * segments' boxes, the hold of the subtracted layers (op 4, MIN blending) and the light and the shadow (op 2). The
+ * hold, the light and the shadow depend only on `env` after the run, so overlapping boxes need them once.
+ */
+const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDraw; run: OutlineDraw[] }> = {
+  erase: {
+    segment: [[1, [true, true, false, false], 'MIN']],
+    hold: [4, [true, true, false, false], 'MIN'],
+    run: [[2, [false, false, true, true], null]],
+  },
+  wall: {
+    segment: [
+      [0, [true, false, false, false], 'MAX'],
+      [1, [false, true, false, false], 'MIN'],
+    ],
+    hold: [4, [false, true, false, false], 'MIN'],
+    run: [[2, [false, false, true, true], null]],
+  },
+  food: { segment: [[0, [false, true, false, false], 'MAX']], run: [] },
+  light: { segment: [], run: [[2, [false, false, true, false], null]] },
+};
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -47,6 +84,25 @@ export class GlSim implements Sim {
   /** Without float blending: one panel per strain with a stencil, for exact counts (deposit()). */
   private readonly panels: Target | undefined;
   private readonly env: Target;
+  /** Distances to the painted outlines, the light and the walls' drop shadow, for the renderer only (shape.frag). */
+  private readonly shape: Target;
+  /**
+   * False until something other than the eraser is painted after the last clear; the renderer then skips the
+   * environment.
+   */
+  hasEnvironment = false;
+  /**
+   * The boundary under which every byte of the outline target is held to `env`. After a change of boundary, or after
+   * strokes painted under another boundary (then undefined), syncShape() holds it again before its next use.
+   */
+  private shapeHeld: Boundary | undefined;
+  /** Where the outlines of the run that paint() draws next lie (brush.ts). */
+  private readonly pending: PendingOutlines;
+  /**
+   * Whether walls, food and light were painted since the last clear: without them their bytes are all 0 (the
+   * shadow too, without walls). A pass cannot read the bytes it changes, so it would compute them all anew.
+   */
+  private readonly layers = [false, false, false];
   private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
@@ -66,6 +122,8 @@ export class GlSim implements Sim {
     private readonly floatBlend: boolean,
   ) {
     this.settings = settings;
+    this.shapeHeld = settings.boundary;
+    this.pending = new PendingOutlines(width, height);
     this.agentWidth = Math.min(agents, AGENT_ROW);
     const agentHeight = Math.ceil(agents / this.agentWidth);
     const made: Target[] = [];
@@ -88,6 +146,7 @@ export class GlSim implements Sim {
         this.panels = p;
       }
       this.env = t(width, height, gl.RGBA8);
+      this.shape = t(width, height, gl.RGBA8);
       this.tally = t(TALLY_SIDE, TALLY_SIDE, floatBlend ? gl.RGBA32F : gl.RGBA16F);
       // Collisions need float blending. Allocated now, so a failure is freed below; the budget counts them.
       if (floatBlend) {
@@ -115,12 +174,17 @@ export class GlSim implements Sim {
     return this.trail[this.p];
   }
 
-  get envTexture(): WebGLTexture {
-    return this.env.texture;
-  }
-
   get countsTexture(): WebGLTexture {
     return this.counts.texture;
+  }
+
+  get shapeTexture(): WebGLTexture {
+    return this.shape.texture;
+  }
+
+  /** Agents per cell after the last step, kept in collision mode only; none without float blending. */
+  get occupancyTexture(): WebGLTexture | undefined {
+    return this.collision?.occ[this.q].texture;
   }
 
   update(settings: Settings) {
@@ -185,53 +249,118 @@ export class GlSim implements Sim {
   /**
    * Paints brush strokes in order, as segments that the pass paints exactly (brush.ts paintSegments). Every draw is
    * scissored to the cells its segment can reach (scissorRects), and the parameters, color mask and blending change
-   * only where the boundary or the kind of brush changes.
+   * only where the boundary or the kind of brush changes. The outlines (shape.frag) follow in runs: the paint draws
+   * of a run of segments, then their outline draws, so the render target changes twice per run and not twice per
+   * segment. A run ends where the boundary changes or a segment of another kind meets it (brush.ts
+   * PendingOutlines). Within a run the outlines give the bytes of one segment after another (ADR 0009), so one call
+   * paints what one call per stroke paints.
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
+    // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
+    if (this.shapeHeld !== undefined) this.syncShape();
     const gl = this.gl;
     const p = this.prog.paint;
+    const run: { segment: Stroke; kind: EnvTool; rects: Rect[] }[] = [];
     let boundary: Boundary | undefined;
-    let kind = -1;
+    let kind = -1; // the kind the paint state is set for; -1: the env target is not bound
+    let foreign = false;
+    const drawRun = () => {
+      if (run.length === 0) return;
+      this.drawOutlines(run);
+      run.length = 0;
+      this.pending.clear();
+      kind = -1;
+    };
     for (const stroke of strokes) {
       const b = stroke.boundary ?? this.settings.boundary;
-      if (b !== boundary) {
-        this.writeParams(undefined, 0, b);
-        boundary = b;
-      }
-      if (kind === -1) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.env.fbo);
-        gl.viewport(0, 0, this.width, this.height);
-        gl.useProgram(p.program);
-        gl.enable(gl.SCISSOR_TEST);
-      }
+      const wrap = b === 'wrap';
       const k = EnvKind[stroke.kind];
-      if (k !== kind) {
-        gl.colorMask(...(MASKS[k] ?? [true, true, true, true]));
-        if (k === EnvKind.light) this.blend(gl.MAX);
-        else gl.disable(gl.BLEND);
-        gl.uniform1i(p.loc('kind'), k);
-        kind = k;
-      }
+      if (b !== this.settings.boundary) foreign = true;
       if (k === EnvKind.wall) this.walls = true;
-      gl.uniform1f(p.loc('radius'), stroke.radius);
-      for (const segment of paintSegments(stroke, this.width, this.height, b === 'wrap')) {
+      if (k !== EnvKind.erase) {
+        this.hasEnvironment = true;
+        this.layers[k - 1] = true;
+      }
+      for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
+        const rects = scissorRects(segment, this.width, this.height, wrap);
+        if (rects.length === 0) continue; // outside a closed arena: no cell to paint or outline
+        const reach = outlineRects(segment, this.width, this.height, wrap);
+        if (b !== boundary || this.pending.meets(reach, k, wrap)) {
+          drawRun(); // with the parameters of its own boundary
+          if (b !== boundary) {
+            this.writeParams(undefined, 0, b);
+            boundary = b;
+          }
+        }
+        if (kind === -1) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, this.env.fbo);
+          gl.viewport(0, 0, this.width, this.height);
+          gl.useProgram(p.program);
+          gl.enable(gl.SCISSOR_TEST);
+        }
+        if (k !== kind) {
+          gl.colorMask(...(MASKS[k] ?? [true, true, true, true]));
+          if (k === EnvKind.light) this.blend(gl.MAX);
+          else gl.disable(gl.BLEND);
+          gl.uniform1i(p.loc('kind'), k);
+          kind = k;
+        }
+        gl.uniform1f(p.loc('radius'), segment.radius);
         gl.uniform2f(p.loc('from'), ...segment.from);
         gl.uniform2f(p.loc('to'), ...segment.to);
-        for (const r of scissorRects(segment, this.width, this.height, b === 'wrap')) {
+        for (const r of rects) {
           gl.scissor(...r);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
+        run.push({ segment, kind: stroke.kind, rects: reach });
+        this.pending.add(reach, k, wrap);
       }
     }
+    drawRun();
     gl.disable(gl.SCISSOR_TEST);
     gl.colorMask(true, true, true, true);
     gl.disable(gl.BLEND);
+    if (foreign) this.shapeHeld = undefined;
   }
 
   clearEnvironment() {
     clear(this.gl, this.env);
+    clear(this.gl, this.shape);
     this.walls = false;
+    this.hasEnvironment = false;
+    this.shapeHeld = this.settings.boundary;
+    this.layers.fill(false);
+  }
+
+  /**
+   * Holds the outline target to `env` under the current boundary (shape.frag op 3, see Simulation.syncShape()), once
+   * after the boundary changed or after strokes under another boundary. Op 3 reads the bytes before from a copy,
+   * made one tile at a time so the copy stays small.
+   */
+  syncShape() {
+    if (this.shapeHeld === this.settings.boundary) return;
+    this.shapeHeld = this.settings.boundary;
+    if (!this.hasEnvironment) return; // nothing painted: the target holds only zeros, under every boundary
+    const gl = this.gl;
+    this.writeParams();
+    const [tw, th] = [Math.min(this.width, REFRESH_TILE), Math.min(this.height, REFRESH_TILE)];
+    const copy = target(gl, tw, th, gl.RGBA8);
+    gl.enable(gl.SCISSOR_TEST);
+    for (let y = 0; y < this.height; y += th)
+      for (let x = 0; x < this.width; x += tw) {
+        const [w, h] = [Math.min(tw, this.width - x), Math.min(th, this.height - y)];
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.shape.fbo);
+        gl.bindTexture(gl.TEXTURE_2D, copy.texture);
+        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, x, y, w, h);
+        gl.scissor(x, y, w, h);
+        this.pass(this.prog.shape, this.shape, { env: this.env.texture, old: copy.texture }, { op: 3 }, (p) => {
+          gl.uniform2i(p.loc('tile'), x, y);
+        });
+      }
+    gl.disable(gl.SCISSOR_TEST);
+    destroyTarget(gl, copy);
   }
 
   /** Resolves when the GPU has finished all work issued so far (a fence, polled without blocking). */
@@ -280,6 +409,11 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.env) as Uint8Array);
   }
 
+  readShape(): Promise<Uint8Array> {
+    this.syncShape();
+    return Promise.resolve(readTarget(this.gl, this.shape) as Uint8Array);
+  }
+
   /** Agent `index` is its texel: WebGL2 never reorders agents, so the slot is the id (ADR 0005). */
   writeAgent(index: number, a: AgentState) {
     if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
@@ -292,19 +426,88 @@ export class GlSim implements Sim {
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
 
+  /**
+   * For tests. The outline target cannot know the distances of an environment written as bytes: it is cleared, and
+   * its next use holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow
+   * `env`.
+   */
   writeEnv(data: Uint8Array) {
     writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
-    this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
+    clear(this.gl, this.shape);
+    const any = (channel: number) => data.some((v, i) => i % 4 === channel && v > 0);
+    this.walls = any(0);
+    [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
+    this.hasEnvironment = this.layers.some(Boolean);
+    this.shapeHeld = undefined;
   }
 
   destroy() {
     const gl = this.gl;
-    const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.tally];
+    const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
     if (this.panels) all.push(this.panels);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
     gl.deleteBuffer(this.ubo);
+  }
+
+  /**
+   * Draws the outlines of a run of segments that paint() has applied to `env` (shape.frag), kind by kind
+   * (OUTLINE_DRAWS): in a run, segments of different kinds have boxes that do not meet (PendingOutlines), so their
+   * draws touch other cells. Scissors cut every draw to the grid in a closed arena and split it where it crosses the
+   * edge of the periodic grid. The Params block holds the run's boundary.
+   */
+  private drawOutlines(run: readonly { segment: Stroke; kind: EnvTool; rects: readonly Rect[] }[]) {
+    const gl = this.gl;
+    const sp = this.prog.shape;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shape.fbo);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(sp.program);
+    // `old` (op 3) is never read here, but its unit must not hold the target: a frame binds it there.
+    textures(gl, sp.program, { env: this.env.texture, old: this.env.texture });
+    gl.enable(gl.SCISSOR_TEST);
+    const [walls, food, light] = this.layers;
+    const draw = ([op, all, equation]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
+      // Only the layers that hold anything: a subtraction of food or walls, the light and the shadow.
+      const mask: [boolean, boolean, boolean, boolean] =
+        op === 1 || op === 4
+          ? [all[0] && !!walls, all[1] && !!food, false, false]
+          : [all[0], all[1], all[2] && !!light, all[3] && !!walls];
+      if (!mask.some(Boolean)) return;
+      gl.colorMask(...mask);
+      if (equation) this.blend(gl[equation]);
+      else gl.disable(gl.BLEND);
+      gl.uniform1i(sp.loc('op'), op);
+      gl.uniform1i(sp.loc('hold'), Number(hold));
+      gl.uniform1i(sp.loc('core'), Number(core));
+      gl.uniform2i(sp.loc('layers'), Number(mask[0]), Number(mask[1]));
+      for (const r of rects) {
+        gl.scissor(...r);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+    };
+    const byKind: Partial<Record<EnvTool, (typeof run)[number][]>> = {};
+    for (const item of run) (byKind[item.kind] ??= []).push(item);
+    for (const [kind, items] of Object.entries(byKind) as [EnvTool, (typeof run)[number][]][]) {
+      const { segment, hold, run: after } = OUTLINE_DRAWS[kind];
+      // The rectangles of one segment do not overlap (outlineRects): they are their own union.
+      const union = () => (items.length === 1 ? (items[0]?.rects ?? []) : unionRects(items.flatMap((i) => i.rects)));
+      const cells = hold || after.length > 0 ? union() : [];
+      // The hold once per cell of the union, or with each segment's subtraction, without the cells it set to 0,
+      // whichever searches fewer cells: a drag's boxes overlap, a single large eraser is mostly such cells. Then an
+      // eraser's light and shadow per segment too, where its deep cells cost nothing.
+      const each = !!hold && items.reduce((sum, i) => sum + area(i.rects) - core(i.segment), 0) < area(cells);
+      const late = each && kind === 'erase';
+      for (const { segment: s, rects } of items) {
+        gl.uniform2f(sp.loc('from'), ...s.from);
+        gl.uniform2f(sp.loc('to'), ...s.to);
+        gl.uniform1f(sp.loc('radius'), s.radius);
+        for (const d of segment) draw(d, rects, each && d[0] === 1);
+        if (late) for (const d of after) draw(d, rects, false, true);
+      }
+      if (hold && !each) draw(hold, cells);
+      if (!late) for (const d of after) draw(d, cells);
+    }
   }
 
   /** `boundary` replaces the current one for a brush stroke (Stroke.boundary); the next step writes it back. */

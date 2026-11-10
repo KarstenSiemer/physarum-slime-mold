@@ -53,4 +53,11 @@ Option 3, plus:
 - Food, light and walls exist only on the GPU, so the engine keeps every edit since the last
   "Clear" or preset load and paints them all again on every new simulation, on a new grid through
   the canonical frame of the arena it was painted in. A stroke that later strokes cleared completely
-  on the grid on screen leaves the list (ADR 0019).
+  on the grid on screen leaves the list (ADR 0019). Such a replay writes the renderer's outlines
+  with `env` (next item).
+- The simulation reads `env`, one byte per layer and cell. How food, light and walls look is the
+  renderer's business (ADR 0009, amendment 2026-11-10): the brush also writes distances to the
+  outlines that only the renderer reads, so outlines are smooth at any zoom while a cell stays
+  food or wall exactly when its centre lies within the brush. Food is drawn below the trail. A
+  dish paints no `env` outside itself, and when the boundary changes `env` stays as it is: the
+  outlines follow it under the new boundary (ADR 0009, item 10).

@@ -121,6 +121,19 @@ the sort (ADR 0005); "sorted" is the app's sort every 32 steps, its cost include
 - Draw: 2.2 ms per frame with bloom at 1280 × 720; the main render pass alone 1.35 ms (glow),
   1.7 ms (gel). At 2560 × 1600: glow 1.8 ms, gel 2.25 ms, and the gel before its height pass
   (ADR 0009) 8.0 ms.
+- Food, light and walls (ADR 0009, amendment 2026-11-10), paired in one page against the render
+  pass before it, at the same state, 2560 × 1600, median of the paired differences of 21 rounds of
+  20 passes (wall time), two runs: with nothing painted the pass costs less, 0.015–0.19 ms on
+  WebGPU and 0.025–0.115 ms on WebGL2, because it no longer reads `env` per pixel. With the walls
+  and food of Maze, Shortest path or Shrinking plasmodium it costs 0.115–0.275 ms more fitted and
+  0.24–0.35 ms more zoomed 6× onto food (WebGL2: 0.11–0.40 and 0.22–0.36 ms). Presence adds at
+  most 0.05 ms. The brush's outline pass adds 0.025–0.3 ms per stroke of radius 60 to 400 cells
+  (WebGL2 0.025–0.58 ms).
+- Integer remainders are slow in shaders on Metal: wrapping each of the 3 × 3 cells around a
+  pixel with `((c % s) + s) % s` (two remainders per axis and cell) cost 1.3 ms per frame at
+  2560 × 1600 in the Transport network (1024 grid). Wrapping the middle cell once and its
+  neighbours with comparisons cost 0.1 ms. The outline pass, which looks up to 120 cells of `env`
+  around a cell, went from 127 to 71 ms for 4096 batched strokes the same way.
 - The largest number of agents of one strain that moved into one cell in a step: 29 083 at step
   600 (sampled every 50 steps), about 4100 at step 1000 and 800 to 950 from step 3000 on.
 - The research (2026-11-09, same machine, without the sort) measured the agent pass at 3.1 ms at
@@ -155,6 +168,54 @@ the main thread for 90–93 ms per call at 1 million agents (median; 42–43 fps
 4 million (1.8 fps). Now a call takes 0.1–0.3 ms and resolves 7–8 ms (1 million) or 158–161 ms
 (4 million) later, without blocking; at 1 million agents the frame loop runs at 60 fps and
 120 steps/s, at 4 million at 46–48 fps with one step per frame.
+
+## Many small passes (measured 2026-11-10)
+
+Same machine (M3 Pro, Metal), Chromium of Playwright 1.65.0, paired in one page with the GPU shared
+with other work. The replay of ADR 0019 paints up to 100,000 brush segments in one call, each with
+an outline (ADR 0009, item 11).
+
+- WebGPU runs the dispatches of a compute pass one after another. A paint dispatch over a box of
+  about 26 × 26 cells took 2.9 µs, an outline dispatch that returned at once 2.0 µs more (20,000
+  segments, grid 1536 × 864). So two dispatches per segment cost about 0.5 s per 100,000 segments
+  before any work in them.
+- Loads in a loop with early exits run one after another: the outline pass searched up to 5 rings
+  of `env` (120 cells per layer) and the cone of the shadow (25 cells) for each cell, and took
+  12.5 µs per dispatch. Loading the 16 × 16 cells of a workgroup and 5 cells around them into
+  workgroup memory once, and taking the nearest cell of a layer from a Chebyshev distance along
+  the rows and then the columns of that tile, gave the same bytes and made a replay of 100,000
+  strokes 0.73 s instead of 1.49 s.
+- WebGL2 (ANGLE on Metal): a draw into the target that the last draw used costs little (PR 2
+  painted 100,000 scissored strokes in 0.06 s), but a draw into another target that reads the one
+  before as a texture costs about 55 µs for the change and back. So WebGL2 draws the outlines of a
+  run of segments after the paint draws of the run, and combines them with `MIN` and `MAX` blending,
+  which give the same bytes in any order.
+- Timing single strokes: the fence that `finish()` polls resolves in steps of about 1 ms, and a wait
+  for the GPU costs about 0.12 ms on WebGL2 and 0.04 to 0.09 ms on WebGPU before any work. So a
+  stroke is timed as 32 calls at different places along a drag, each as a frame paints it, and one
+  wait after them. In blocks of 16 strokes with a wait each, PR 2's paint alone came out at 3.4 to
+  3.8 ms per stroke at every radius and grid: the cost of the block, not of the stroke (review,
+  2026-11-10). `EXT_disjoint_timer_query_webgl2` around every draw gave 11 to 28 ms per draw for
+  strokes that take 1 to 4 ms in all: the queries change how ANGLE submits the draws.
+- A condition that is the same for a whole pipeline is best an override constant. The outline pass
+  of WebGPU with run-time tests for the tile, the core of a wide eraser and the search of a stroke's
+  own cells took 10 to 14 % longer for replays of walls and erasers than the pass before those
+  tests; as six pipelines with the conditions fixed, 3 % less to 1 % more (ADR 0009, item 11). The
+  search, which never runs on the periodic grid, made every dispatch slower by its registers alone.
+- On the periodic grid both paint passes measure a cell against the 9 copies of its segment once
+  the brush reaches past an edge. Measuring only the copies whose box, grown by the reach, holds
+  the cell (one or two per axis) made large brushes no faster on either backend (within 3 % at a
+  radius of 1,000 cells, paired against the code before), and 7 to 37 % slower at 1,920 cells: the
+  loop with bounds per cell costs more than the distances it saves. The 9 copies stay.
+- SwiftShader (the CI image) runs workgroup barriers on the CPU: a GPU test that paints 5000
+  strokes in one call took 0.53 to 0.69 s with the outline pass reading `env` directly and 2.41 to
+  3.37 s with workgroup memory (three runs each). Workgroup memory pays off on a real GPU only.
+  With food and light outlined without it, the test took 1.44 to 1.62 s on WebGPU (1.93 to 1.96 s
+  before, in the same containers), and 4.65 to 5.18 s on WebGL2 (3.21 to 3.45 s), where SwiftShader
+  runs the larger fragment shader of the outlines on the CPU.
+- SwiftShader compiles a compute pipeline in about 1.3 s when it holds the outline pass: a new
+  WebGPU device with every pipeline and a first simulation took 16.2 to 16.8 s with six outline
+  pipelines and 9.4 to 10.4 s with one. On Metal both took 6 to 18 ms, with Chrome's shader cache.
 
 ## Feature availability (web3dsurvey share of WebGPU devices)
 

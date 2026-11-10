@@ -5,8 +5,10 @@ import { presetById } from '../model/presets';
 import { Engine } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
+import type { GlSim } from './gl/sim';
 import { OutOfMemoryError } from './gpu';
 import { paintReference } from './paint-reference';
+import type { Simulation } from './sim';
 import type { Backend, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -338,6 +340,114 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     await check();
     await engine.apply({ ...engine.settings, resolution: 256 });
     await check();
+    engine.destroy();
+  });
+
+  /**
+   * Cells of the arena where the renderer's outlines (ADR 0009) disagree with `env`: wall or food on the other side
+   * of the outline, another light, or a drop shadow more than 1 off the share of wall cells under its cone
+   * (paint.wgsl `shadowByte`).
+   */
+  async function disagreements(engine: Engine) {
+    const { sim, settings } = engine;
+    const [env, shape] = [await sim.readEnv(), await sim.readShape()];
+    const { width: w, height: h } = sim;
+    const { boundary } = settings;
+    const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1;
+    const isWall = (x: number, y: number) => {
+      if (boundary === 'wrap') [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
+      else if (x < 0 || y < 0 || x >= w || y >= h || (boundary === 'dish' && !inDish(x, y))) return false;
+      return (env[(y * w + x) * 4] ?? 0) >= 128;
+    };
+    const wrong: string[] = [];
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        if (boundary === 'dish' && !inDish(x, y)) continue;
+        const i = (y * w + x) * 4;
+        for (const ch of [0, 1])
+          if ((env[i + ch] ?? 0) >= 128 !== (shape[i + ch] ?? 0) >= 128) wrong.push(`layer ${ch} at ${x},${y}`);
+        if (shape[i + 2] !== env[i + 2]) wrong.push(`light at ${x},${y}`);
+        const [sx, sy] = [x + 0.5 - 1.08, y + 0.5 - 1.44];
+        let [sum, all] = [0, 0];
+        for (let dy = -2; dy <= 2; dy++)
+          for (let dx = -2; dx <= 2; dx++) {
+            const [kx, ky] = [Math.floor(sx) + dx, Math.floor(sy) + dy];
+            const weight = Math.max(1 - Math.hypot(kx + 0.5 - sx, ky + 0.5 - sy) / 1.5, 0);
+            all += weight;
+            if (isWall(kx, ky)) sum += weight;
+          }
+        if (Math.abs((shape[i + 3] ?? 0) - Math.round((sum / all) * 255)) > 1) wrong.push(`shadow at ${x},${y}`);
+      }
+    return wrong;
+  }
+
+  /** Overwrites the renderer's outlines with zeros: far outside every outline, no light, no shadow. */
+  function blankOutlines(engine: Engine) {
+    const sim = engine.sim;
+    const zeros = new Uint8Array(sim.width * sim.height * 4);
+    if (kind === 'webgpu') {
+      const s = sim as Simulation;
+      s.device.queue.writeBuffer(s.shape, 0, zeros);
+    } else {
+      const gl = (engine.backend as unknown as { gl: WebGL2RenderingContext }).gl;
+      gl.bindTexture(gl.TEXTURE_2D, (sim as GlSim).shapeTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, sim.width, sim.height, gl.RGBA, gl.UNSIGNED_BYTE, zeros);
+    }
+  }
+
+  /** The largest difference of one channel between two captures. */
+  const maxDiff = (a: ImageData, b: ImageData) =>
+    a.data.reduce((m, v, i) => (i % 4 === 3 ? m : Math.max(m, Math.abs(v - (b.data[i] ?? 0)))), 0);
+
+  // Every new simulation replays the edits through Sim.paint, which writes `env` and the outlines together.
+  it('replay the outlines with env on another grid, and draw them with the environment pass', async () => {
+    const { engine } = await load('maze');
+    expect(engine.sim.hasEnvironment).toBe(true);
+    expect(await disagreements(engine)).toEqual([]);
+    await engine.apply({ ...engine.settings, resolution: 768 });
+    expect(engine.sim.width).toBe(768);
+    expect(engine.sim.hasEnvironment).toBe(true);
+    expect(await disagreements(engine)).toEqual([]);
+    // The renderer of the rebuilt simulation reads the outlines: without them the walls and the food are gone.
+    const drawn = await engine.capture();
+    blankOutlines(engine);
+    expect(maxDiff(drawn, await engine.capture())).toBeGreaterThan(40);
+    engine.clearEnvironment();
+    expect(engine.sim.hasEnvironment).toBe(false);
+    expect((await engine.sim.readShape()).every((v) => v === 0)).toBe(true);
+    engine.destroy();
+  });
+
+  // A switch between the dish and a box builds a new simulation and anchors every edit to the grid on screen
+  // (ADR 0019); edits painted under the dish keep its clip, and the outlines follow `env` under the arena on screen.
+  it('keep the outlines on the side of env across an arena switch from the dish to a box and back', async () => {
+    const { engine } = await load('shrinking');
+    const [w, h] = [engine.sim.width, engine.sim.height];
+    const rim = Math.min(w, h) / 2 - 1;
+    const strokes: Stroke[] = [
+      // Across the rim: the dish clips it, and its shadow falls on cells outside the dish, which a box shows.
+      { kind: 'wall', from: [w * 0.5 + rim - 20, h * 0.5 - 4], to: [w * 0.5 + rim + 20, h * 0.5 - 4], radius: 2.2 },
+      { kind: 'wall', from: [w * 0.5 - 30, h * 0.5], to: [w * 0.5 + 30, h * 0.5 + 12], radius: 2.2 },
+      { kind: 'food', from: [w * 0.5 + 60, h * 0.5 - 70], to: [w * 0.5 + 140, h * 0.5 - 90], radius: 9 },
+      { kind: 'erase', from: [w * 0.5, h * 0.5 + 4], to: [w * 0.5 + 4, h * 0.5 + 6], radius: 5 },
+      { kind: 'light', from: [w * 0.5 - 60, h * 0.5 + 50], to: [w * 0.5 - 60, h * 0.5 + 50], radius: 7 },
+    ];
+    for (const s of strokes) engine.paint(s);
+    engine.frame(performance.now(), 0);
+    expect(await disagreements(engine)).toEqual([]);
+    for (const boundary of ['box', 'dish'] as const) {
+      const before = engine.sim;
+      await engine.apply({ ...engine.settings, boundary });
+      expect(engine.sim).not.toBe(before);
+      expect(engine.sim.hasEnvironment).toBe(true);
+      expect(await disagreements(engine), boundary).toEqual([]);
+      // Under the box: food across the corner of the grid, which the dish later leaves outside.
+      if (boundary === 'box') {
+        engine.paint({ kind: 'food', from: [6, 6], to: [30, 12], radius: 6 });
+        engine.frame(performance.now(), 0);
+        expect(await disagreements(engine)).toEqual([]);
+      }
+    }
     engine.destroy();
   });
 

@@ -2,11 +2,14 @@
 // paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and simulates nothing else.
 import type { Settings } from '../model/params';
 import { paintReference } from './paint-reference';
+import { BYTES_PER_CELL } from './sizing';
 import type { Backend, Sim, Stroke } from './types';
 
 export class CpuSim implements Sim {
   step = 0;
   readonly env: Uint8Array;
+  /** As on both GPU backends: false until something other than the eraser is painted after the last clear. */
+  hasEnvironment = false;
   /** Calls in order, to check that the environment is painted before the agents are placed. */
   readonly calls: string[] = [];
 
@@ -30,12 +33,14 @@ export class CpuSim implements Sim {
   paint(strokes: readonly Stroke[]) {
     for (const s of strokes) {
       this.calls.push('paint');
+      if (s.kind !== 'erase') this.hasEnvironment = true;
       paintReference(this.env, this.width, this.height, s, this.settings.boundary);
     }
   }
   clearEnvironment() {
     this.calls.push('clear');
     this.env.fill(0);
+    this.hasEnvironment = false;
   }
   destroy() {
     this.calls.push('destroy');
@@ -58,6 +63,19 @@ export class CpuSim implements Sim {
   readEnv() {
     return Promise.resolve(this.env.slice());
   }
+  /**
+   * No outline distances on the CPU: 128 where `env` holds a wall or food (the side of the outline), else 0, and the
+   * light of `env`. No drop shadow. The engine tests here check the environment, not the picture.
+   */
+  readShape() {
+    const shape = new Uint8Array(this.env.length);
+    for (let i = 0; i < this.env.length; i += 4) {
+      shape[i] = (this.env[i] ?? 0) >= 128 ? 128 : 0;
+      shape[i + 1] = (this.env[i + 1] ?? 0) >= 128 ? 128 : 0;
+      shape[i + 2] = this.env[i + 2] ?? 0;
+    }
+    return Promise.resolve(shape);
+  }
   writeAgent() {
     // agents are not simulated here
   }
@@ -66,6 +84,7 @@ export class CpuSim implements Sim {
   }
   writeEnv(data: Uint8Array) {
     this.env.set(data);
+    this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
   }
 }
 
@@ -75,7 +94,7 @@ export class CpuBackend implements Backend<CpuSim> {
   readonly maxAgents = 2 ** 24;
   readonly maxBufferBytes = 2 ** 30;
   readonly maxGridSide = 8192;
-  bytesPerCell = 86;
+  bytesPerCell = BYTES_PER_CELL; // as the WebGPU backend
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);
   /** Runs before the next allocation only: a test can hold it or make it fail. */

@@ -1,5 +1,6 @@
 import agentsFrag from './glsl/agents.frag?raw';
 import bloomFrag from './glsl/bloom.frag?raw';
+import brushGlsl from './glsl/brush.glsl?raw';
 import common from './glsl/common.glsl?raw';
 import countsFrag from './glsl/counts.frag?raw';
 import diffuseFrag from './glsl/diffuse.frag?raw';
@@ -12,6 +13,7 @@ import pointsFrag from './glsl/points.frag?raw';
 import pointsVert from './glsl/points.vert?raw';
 import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
+import shapeFrag from './glsl/shape.frag?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import { bindBlock, program, type GL } from './gl';
 
@@ -35,8 +37,10 @@ export interface Programs {
   init: Program;
   diffuse: Program;
   paint: Program;
-  render: Program;
-  height: Program;
+  shape: Program;
+  /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
+  render: [Program, Program];
+  height: [Program, Program];
   bloom: Program;
   sample: Program;
 }
@@ -58,12 +62,16 @@ function wrap(gl: GL, p: WebGLProgram): Program {
 export function compile(gl: GL): Programs {
   const sim = (frag: string) => wrap(gl, program(gl, V + common + fullscreen, V + common + frag));
   const plain = (frag: string) => wrap(gl, program(gl, V + 'precision highp float;\n' + fullscreen, V + frag));
-  const view = (frag: string) => plain(viewGlsl + frag);
+  const view = (frag: string): [Program, Program] => [
+    plain('#define ENV 0\n' + viewGlsl + frag),
+    plain('#define ENV 1\n' + viewGlsl + frag),
+  ];
   return {
     agents: sim(agentsFrag),
     init: sim(initFrag),
     diffuse: sim(diffuseFrag),
-    paint: sim(paintFrag),
+    paint: sim(brushGlsl + paintFrag),
+    shape: sim(brushGlsl + shapeFrag),
     counts: sim(countsFrag),
     fill: plain(fillFrag),
     points: wrap(gl, program(gl, V + common + pointsVert, V + common + pointsFrag)),
