@@ -582,6 +582,33 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(await starts(sim, 'wrap')).toEqual({ alive: Math.round(0.2 * 512 * 288), shared: 0, blocked: 0 });
     });
 
+    // A move that ends a hair left of x = 0 on the periodic grid: wrapped in float32, its position rounded up to
+    // x = W, in cell 0, while WebGPU counted the move and the occupancy in cell W − 1 (wrapPos in common.wgsl and
+    // common.glsl). Agent 1 then walked into cell 0 as well.
+    it('keeps an agent that crosses the wrap seam inside the grid, in the cell its move counted', async () => {
+      const [w, h] = [512, 8];
+      const straight = { sensorAngle: 0, sensorOffset: 1, randomTurn: 0 };
+      const strains = [
+        { ...defaultStrain(0), ...straight, stepSize: 0.500001 },
+        { ...defaultStrain(1), ...straight, stepSize: 1 },
+      ];
+      const sim = await make({ layout: 'empty', strains }, w, h, 2);
+      sim.writeAgent(0, { x: 0.5, y: 0.5, heading: Math.PI, bits: 4 });
+      sim.writeAgent(1, { x: 2.5, y: 0.5, heading: Math.PI, bits: 4 | 1 });
+      // The occupancy is built from the agents written above when the rule is switched on.
+      sim.update({ ...defaultSettings(), layout: 'empty', strains, collisions: true });
+      const cells = async () => (await sim.readAgents()).map((a) => Math.floor(a.y) * w + Math.floor(a.x));
+      sim.run(1);
+      const [a] = await sim.readAgents();
+      expect(a?.x).toBeLessThan(w);
+      const counts = await sim.readCounts();
+      const counted = Array.from({ length: w * h }, (_, c) => c).filter((c) => (counts[c * 4] ?? 0) > 0);
+      expect(counted).toEqual([w - 1]);
+      expect(await cells()).toEqual([w - 1, 1]);
+      sim.run(1);
+      expect(await cells()).toEqual([w - 1, 0]);
+    });
+
     it('places the same agents again for the same seed', async () => {
       const place = async () => {
         const sim = await make({ layout: 'center', boundary: 'dish', collisions: true, seed: 9 }, 64, 48, 30);

@@ -64,9 +64,11 @@ fn dir(a: f32) -> vec2f {
   return vec2f(cos(w), sin(w));
 }
 
+// A position wrapped into the periodic grid, below W and H. A position a hair below 0 would round up to W in f32,
+// in cell 0, while cellOf() of the unwrapped position is cell W − 1: the largest f32 below W keeps it in that cell.
 fn wrapPos(p: vec2f) -> vec2f {
   let size = vec2f(f32(W()), f32(H()));
-  return p - size * floor(p / size);
+  return min(p - size * floor(p / size), bitcast<vec2f>(bitcast<vec2u>(size) - 1u));
 }
 
 fn dishRadius() -> f32 { return 0.5 * f32(min(W(), H())) - 1.0; }

@@ -55,9 +55,10 @@ vec2 dir(float a) {
   return vec2(cos(w), sin(w));
 }
 
+// Wrapped below W and H, so that a position a hair below 0 stays in cell W − 1 (wrapPos in common.wgsl).
 vec2 wrapPos(vec2 p) {
   vec2 size = vec2(W(), H());
-  return p - size * floor(p / size);
+  return min(p - size * floor(p / size), uintBitsToFloat(floatBitsToUint(size) - 1u));
 }
 
 float dishRadius() { return 0.5 * float(min(W(), H())) - 1.0; }
