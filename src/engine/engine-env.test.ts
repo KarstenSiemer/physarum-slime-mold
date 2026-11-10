@@ -1,8 +1,10 @@
 // The engine keeps food, light and walls across new simulations (ADR 0019), checked in Node with a CPU backend
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it } from 'vitest';
+import { drawingOf } from '../model/link';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
+import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
@@ -1039,5 +1041,68 @@ describe('strokes on whole steps', () => {
       'box',
     );
     expect(differing(sim().env, expected)).toBe(0);
+  });
+});
+
+// A shared link holds the edit list exactly (docs/adr/0021): on the sender's grid it paints the sender's bytes, and on
+// another grid what the sender's list paints there.
+describe('a shared link', () => {
+  /** mulberry32: a seeded random source, so a failure repeats. */
+  const random = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+  };
+
+  it("paints the sender's bytes on the sender's grid and the sender's list on other grids", async () => {
+    const r = random(11);
+    const kinds = ['food', 'light', 'wall', 'erase'] as const;
+    for (let trial = 0; trial < 4; trial++) {
+      const c = canvas();
+      const sender = await engineWith(maze.settings(), mazeEnv, c);
+      // Strokes of every kind, across the edges, in the box, the dish and the periodic grid, on two grids, with sweeps.
+      for (let i = 0; i < 120; i++) {
+        if (i === 40) await sender.engine.apply({ ...sender.engine.settings, boundary: 'dish' });
+        if (i === 60) await sender.engine.apply({ ...sender.engine.settings, resolution: 768 });
+        if (i === 80) await sender.engine.apply({ ...sender.engine.settings, boundary: 'wrap' });
+        const [w, h] = [sender.sim().width, sender.sim().height];
+        const from: [number, number] = [r() * w * 1.2 - 0.1 * w, r() * h * 1.2 - 0.1 * h];
+        const to: [number, number] = r() < 0.3 ? from : [from[0] + (r() - 0.5) * 80, from[1] + (r() - 0.5) * 80];
+        const kind = kinds[Math.floor(r() * kinds.length)] ?? 'food';
+        sender.engine.paint({ kind, from, to, radius: 0.5 + r() * 14 });
+        if (i % 7 === 0) sender.engine.frame(0, 0);
+      }
+      sender.engine.frame(0, 0);
+      const list = sender.engine.envList();
+      const { hash, dropped } = await encodeLink(sender.engine.settings, drawingOf(list, 'maze', mazeEnv, 'box', [0]));
+      expect(dropped).toBe(false);
+      const link = await decodeLink(hash);
+      const d = link?.drawing;
+      if (!link || !d) throw new Error('no drawing in the link');
+      const rc = canvas();
+      const receiver = await Engine.create(rc, link.settings, undefined, new CpuBackend());
+      await receiver.load(
+        link.settings,
+        mazeEnv.filter((_, i) => d.shapes[i]),
+        'box',
+        d.strokes,
+      );
+      expect(receiver.envList()).toEqual(list);
+      const env = () => (receiver.sim as CpuSim).env;
+      expect([receiver.sim.width, receiver.sim.height]).toEqual([sender.sim().width, sender.sim().height]);
+      expect(differing(env(), sender.sim().env), `trial ${trial}, the sender's grid`).toBe(0);
+      // Another screen shape and grid for both: a square, then a phone turned upright.
+      for (const [width, height, resolution] of [
+        [1000, 1000, 512],
+        [1000, 1600, 256],
+      ] as const) {
+        for (const x of [c, rc]) [x.width, x.height] = [width, height];
+        await sender.engine.apply({ ...sender.engine.settings, resolution });
+        await receiver.apply({ ...receiver.settings, resolution });
+        expect(differing(env(), sender.sim().env), `trial ${trial}, ${width} × ${height}`).toBe(0);
+        expect(count(env(), 0) + count(env(), 1) + count(env(), 2)).toBeGreaterThan(0);
+      }
+    }
   });
 });
