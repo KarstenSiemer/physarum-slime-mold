@@ -18,7 +18,8 @@ export interface Window {
   steps: number;
   /**
    * Steps the speed asked for (FrameBudget.requested): speed times frame interval, summed per frame, so a
-   * speed change inside the window counts from when it happened; at most 16 per frame, the frame loop's limit.
+   * speed change inside the window counts from when it happened; at most 16 per frame, the frame loop's
+   * limit, and without the steps the budget held back while it was still rising on an idle GPU.
    */
   requested: number;
 }
