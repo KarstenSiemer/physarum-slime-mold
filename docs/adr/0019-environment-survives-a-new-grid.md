@@ -139,7 +139,10 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   on 512 × 288, one on the periodic grid and one in the dish, lie 82 cells apart on 512 × 512 and on
   top of each other again on 512 × 288. A dish food erased in part in a box is whole on a square
   screen, where the erase lies beside it, and erased in part again back on 16:10. The sweep covers
-  what matters most: what was erased completely stays gone.
+  what matters most: what was erased completely stays gone. A periodic edit wraps around the grid's
+  edges in a dish too: a food dab at the far left of a 1024 × 640 periodic grid, beside the dish
+  after a switch, lies inside the 1024 × 1024 dish of a square screen at its place, and its part
+  across the edge at the opposite rim (26 of its 1,624 cells, built app, both backends).
 - **The sweep** (`sweep` in `src/engine/sweep.ts`, line 204, after every recorded erase or wall;
   `Engine.sweep` at line 288). On the grid on screen: (1) an older food, light or wall edit is
   deleted when every cell it paints is cleared by a stroke recorded after it: an erase clears every
@@ -355,6 +358,13 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   across the edges, under other boundaries, on copies of the grid two and three periods away, for
   strokes longer than the grid and for brushes larger than it. `someCell`, which `paintsCell` and
   the sweep use, visits exactly the cells that copy paints (1,500 random strokes, `brush.test.ts`).
+- In the built app on both backends (the scripts of the review of the fourth draft): Shrinking
+  plasmodium on 800 × 800, switched to a closed box, keeps all 8 foods on 1280 × 800, byte for byte
+  as the box chosen there directly (6 foods before); the Maze through the dish, 800 × 800, the box
+  and 1280 × 800 again is byte for byte the Maze (6,128 wall and 212 food bytes differed before),
+  without "changed" on the card; and a food erased with the Erase tool after a switch to the box on
+  1280 × 720 stays gone on 800 × 800, with the bytes of the scene without that food and 7 edits in
+  the list.
 - The sweep judges on the grid on screen only. An edit that lies outside that grid or paints no cell
   there stays, also under a complete erase there. And an erase that went because it clears nothing
   there any more no longer erases what it reached only on another grid: there, a part of another
