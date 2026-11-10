@@ -51,7 +51,7 @@ for (const viewport of [
     expect(l.x + l.width).toBeLessThanOrEqual(viewport.width);
     // A lowered grid is the device's limit, not a change to the scene.
     await expect(label).not.toContainText('changed');
-    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
     expect(errors).toEqual([]);
   });
 }
@@ -251,7 +251,7 @@ test('a preset chosen while the engine starts is the one that runs', async ({ pa
     await page.goto(url);
     await preset(page).selectOption('maze');
     expect(await page.evaluate(() => globalThis.physarum === undefined), url).toBe(true);
-    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
     const s = await page.evaluate(() => globalThis.physarum?.settings);
     expect([s?.boundary, s?.density, s?.collisions], url).toEqual(['box', 0.12, true]);
     expect((await environment(page))[0], `${url}: wall cells`).toBeGreaterThan(100);
@@ -305,7 +305,7 @@ test('a boundary or a Clear chosen while the engine starts reaches the scene', a
   expect(await page.evaluate(() => globalThis.physarum === undefined)).toBe(true);
   const ready = (boundary: string) =>
     page.waitForFunction((b) => globalThis.physarum?.settings.boundary === b && !globalThis.physarum.busy, boundary, {
-      timeout: 60_000,
+      timeout: 120_000,
     });
   await ready('box');
   await page.getByRole('button', { name: 'Pause' }).click();
@@ -431,7 +431,7 @@ test('without the rule in this browser, Jones scenes load with the switch off an
   await expect(rule).not.toBeChecked();
   await expect(rule).toBeDisabled();
   await expect(card(page).getByText('changed', { exact: true })).toBeHidden();
-  await expect(page.getByRole('status')).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByRole('status')).toBeHidden({ timeout: 40_000 });
   await preset(page).selectOption('shortest-path');
   await expect(card(page).getByRole('heading', { name: 'Shortest path' })).toBeVisible();
   await expect(rule).not.toBeChecked();

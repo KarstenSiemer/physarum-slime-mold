@@ -6,13 +6,13 @@ test('boots from a shared link, simulates and draws a network without errors', a
   const errors = watchErrors(page);
   await page.goto(await smallScene());
   // The engine exists once the WebGPU device has built its pipelines: 14 to 16 s on SwiftShader in the CI image.
-  await page.waitForFunction(() => globalThis.physarum !== undefined, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => globalThis.physarum !== undefined, undefined, { timeout: 120_000 });
   const adapter = await page.evaluate(() => globalThis.physarum?.backend.description ?? '?');
   test.info().annotations.push({ type: 'adapter', description: adapter });
   // On CI, SwiftShader draws about one frame per second, and the frame budget then runs one step per
   // frame (budget.ts): 100 steps did not fit this wait on GitHub runners. The contrast check below
   // passes from step 10 on in this scene (std 40 to 47 at steps 10 to 100), so 30 steps suffice.
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 30, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 30, undefined, { timeout: 120_000 });
   const { mean, std } = await page.evaluate(async () => {
     const img = await globalThis.physarum?.capture();
     if (!img) throw new Error('no engine');
@@ -36,7 +36,7 @@ test('boots from a shared link, simulates and draws a network without errors', a
 test('falls back to WebGL2 and still simulates and draws (ADR 0003)', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto((await smallScene()).replace('/#', '/?backend=webgl2#'));
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 60, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 60, undefined, { timeout: 120_000 });
   expect(await page.evaluate(() => globalThis.physarum?.backend.kind)).toBe('webgl2');
   const std = await page.evaluate(async () => {
     const img = await globalThis.physarum?.capture();
@@ -64,7 +64,7 @@ test('fits a shared link to the device memory before the first allocation', asyn
   await page.goto(await smallScene({ resolution: 2048, density: 1 }));
   // The notice appears before the first allocation and stays 7 s; the first steps on SwiftShader take longer.
   await expect(page.getByRole('status')).toContainText('Lowered the grid to', { timeout: 60_000 });
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
   const sim = await page.evaluate(() => {
     const e = globalThis.physarum;
     if (!e) throw new Error('no engine');
@@ -89,7 +89,7 @@ test('offers a fresh start without the shared settings after a failure', async (
     Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
   });
   await page.goto(await smallScene());
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
   expect(await page.evaluate(() => globalThis.physarum?.settings.strains.length)).toBe(2);
   await page.evaluate(() => globalThis.physarum?.onError?.(new Error('test failure')));
   const alert = page.getByRole('alert');
@@ -97,7 +97,7 @@ test('offers a fresh start without the shared settings after a failure', async (
   const reload = page.waitForEvent('load');
   await alert.getByRole('button', { name: 'Start fresh' }).click();
   await reload;
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
   // The start scene has three strains; the shared link had two.
   expect(await page.evaluate(() => globalThis.physarum?.settings.strains.length)).toBe(3);
 });

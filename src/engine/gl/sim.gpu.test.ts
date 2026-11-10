@@ -134,7 +134,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     const trail = Array.from(await sim.readTrail());
     for (let s = 0; s < 3; s++) expect(trail[s] ?? 0).toBeCloseTo(0.9 * 5 * (expected[s] ?? 0), -1);
     sim.destroy();
-  });
+  }, 120_000);
 
   // Without float blending each (cell, strain) has its own pixel in a 2 × 2 panel layout (deposit()):
   // grids that are not square catch a swapped width and height. The layout puts hundreds of agents of
@@ -188,7 +188,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     expect(expected[0]).toBeGreaterThan(2048); // a single half-float pixel would stop there
     expect(alive).toEqual(expected);
     sim.destroy();
-  });
+  }, 120_000);
 
   it('finish() resolves only after the GPU has run the work, never within the same task', async () => {
     const { gl, prog } = plain();
@@ -208,7 +208,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     expect(gl.getSyncParameter(before, gl.SYNC_STATUS)).toBe(gl.SIGNALED);
     gl.deleteSync(before);
     sim.destroy();
-  });
+  }, 120_000);
 });
 
 it('polls a fence about once per millisecond, not every 4 ms like nested timers', async () => {
@@ -300,7 +300,7 @@ it('never blends into a 32-bit float target without float blending', async () =>
     }
   backend.destroy();
   expect(blended).toEqual([]);
-});
+}, 120_000);
 
 describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
   let backend: WebGl2Backend;

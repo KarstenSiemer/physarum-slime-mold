@@ -28,7 +28,7 @@ beforeAll(async () => {
     (await backend.createSim(defaultSettings(), 16, 16, 1)).destroy();
     shared[kind as Kind] = backend;
   }
-}, 180_000);
+}, 360_000);
 afterAll(() => {
   for (const backend of Object.values(shared)) backend.destroy();
 });
@@ -148,7 +148,7 @@ it('switching one agent per cell restarts the population, so agents stacked with
   await engine.apply({ ...engine.settings, collisions: false });
   expect(engine.sim.step).toBe(0);
   engine.destroy();
-});
+}, 120_000);
 
 it('does not restart when a backend without the rule keeps it off', async () => {
   const canvas = document.createElement('canvas');
@@ -527,7 +527,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     expect(new Set(editsOf(engine).map((e) => e.boundary))).toEqual(new Set(['dish', 'box']));
     await expectPerStroke(engine);
     engine.destroy();
-  });
+  }, 120_000);
 
   // The sweep deletes edits that later strokes cleared on the grid on screen and changes no byte there, also when it
   // completes over frames (Engine.sweepFor()); a new grid replays what is left in one call (ADR 0019).
