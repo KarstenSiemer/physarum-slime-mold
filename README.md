@@ -37,7 +37,9 @@ and decays. Strong trails attract more agents, which strengthen the trail: a net
 - Simulation: WebGPU compute shaders (WGSL) with integer atomics; deterministic for a seed.
   Optional one-agent-per-cell rule as in the paper, with a deterministic GPU claim method.
 - Fallback: a WebGL2 backend with the same model for browsers without WebGPU.
-- Rendering: auto levels from a GPU histogram, glow (bloom), dithering against banding.
+- Rendering: auto levels from a GPU histogram, glow (bloom), dithering against banding. Food
+  and walls keep smooth outlines at any zoom: the brush also stores distances to their outlines,
+  which only the renderer reads.
 
 Details: [design](docs/design.md), [decisions (ADRs)](docs/adr/),
 [knowledge base](docs/knowledge-base/) (paper notes, variants, GPU and GitHub Pages facts).

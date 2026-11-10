@@ -1,5 +1,5 @@
-import { BOUNDARIES, type Settings } from '../model/params';
-import { paintBox, paintSegments, type Rect } from './brush';
+import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
+import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
 import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
@@ -9,13 +9,17 @@ import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import { diffusePlan, type Diffuse } from './sizing';
-import { EnvKind, type AgentState, type Sim, type Stroke } from './types';
+import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
 const GROUP = 256;
 const TILE = 16;
 /** Brush segments per submission (paint()): 4096 slots of 256 bytes. */
 const BRUSH_CHUNK = 4096;
+/** One brush slot as paint.wgsl `Brush` reads it: the segment, its paint box and its outline box. */
+const BRUSH_BYTES = 48;
+/** The narrowest eraser with a workgroup of 16 × 16 cells more than 4.05 cells inside it (paint.wgsl eraserCore). */
+const CORE_RADIUS = 10.61 + SHAPE_RANGE + 0.05;
 /** Steps between two spatial sorts of the agents. Measured: their locality halves about 150 steps after a sort. */
 const SORT_INTERVAL = 32;
 /** Cells per side of a sort tile (sort.wgsl SHIFT). */
@@ -53,6 +57,18 @@ export class Simulation implements Sim {
   private readonly scentViews: Pair<GPUTextureView>;
   readonly counts: GPUBuffer;
   readonly env: GPUBuffer;
+  /** Outline distances, light and the walls' shadow, for the renderer only (paint.wgsl `outline`). */
+  private readonly shapeBuffer: GPUBuffer;
+  /**
+   * False until something other than the eraser is painted after the last clear; the renderer then skips the
+   * environment.
+   */
+  hasEnvironment = false;
+  /**
+   * The boundary under which every byte of `shape` is held to `env`. After a change of boundary, or after strokes
+   * painted under another boundary (then undefined), syncShape() holds it again before its next use.
+   */
+  private shapeHeld: Boundary | undefined;
   readonly stats: GPUBuffer;
   private collision?: { occ: Pair<GPUBuffer>; claims: GPUBuffer };
   private paintGroup?: GPUBindGroup;
@@ -70,6 +86,7 @@ export class Simulation implements Sim {
     readonly agents: number,
   ) {
     this.settings = settings;
+    this.shapeHeld = settings.boundary;
     const { STORAGE, COPY_SRC, COPY_DST, UNIFORM } = GPUBufferUsage;
     const cells = width * height;
     const buffer = (size: number, usage: number) => device.createBuffer({ size, usage });
@@ -86,6 +103,7 @@ export class Simulation implements Sim {
     this.replacement = buffer(AGENT_BYTES, UNIFORM | COPY_DST);
     this.counts = buffer(cells * 16, STORAGE | COPY_SRC | COPY_DST);
     this.env = buffer(cells * 4, STORAGE | COPY_SRC | COPY_DST);
+    this.shapeBuffer = buffer(cells * 4, STORAGE | COPY_SRC | COPY_DST);
     this.stats = buffer(16, STORAGE | COPY_SRC | COPY_DST);
     const texture = (format: GPUTextureFormat) =>
       device.createTexture({
@@ -122,6 +140,36 @@ export class Simulation implements Sim {
   /** The agent buffer that holds the current state, in sort order (ids in `bits`, ADR 0005). */
   get agentBuffer(): GPUBuffer {
     return this.agentBuffers[this.agentParity];
+  }
+
+  /** Agents per cell after the last step. Kept up to date only in collision mode, where the renderer reads it. */
+  get occupancy(): GPUBuffer {
+    return this.ensureCollision().occ[this.occParity];
+  }
+
+  /** Outline distances, light and the walls' shadow for the renderer; call syncShape() before reading it. */
+  get shape(): GPUBuffer {
+    return this.shapeBuffer;
+  }
+
+  /**
+   * Holds `shape` to `env` under the current boundary (paint.wgsl `refresh`), once after the boundary changed or
+   * after strokes under another boundary (ADR 0019 replays each edit under its own): a dish counts fewer cells than
+   * the box or the periodic grid, and the periodic grid has neighbours across its edges. Called before every
+   * readback and frame, and by paint() after a change of boundary; it does nothing while `shape` is held.
+   */
+  syncShape() {
+    if (this.shapeHeld === this.settings.boundary) return;
+    this.shapeHeld = this.settings.boundary;
+    if (!this.hasEnvironment) return; // nothing painted: `shape` holds only zeros, under every boundary
+    this.writeParams();
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.kernels.refresh);
+    pass.setBindGroup(0, this.bind('refresh', this.kernels.refresh, [this.params, this.env, null, this.shapeBuffer]));
+    pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   /** Applies new parameters. Grid size and agent count need a new Simulation instead. */
@@ -209,9 +257,15 @@ export class Simulation implements Sim {
   /**
    * Paints brush strokes in order, BRUSH_CHUNK segments per submission. Each dispatch picks its brush and its
    * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
+   * Every segment's paint dispatch is followed by its outline dispatch over its outline box (brush.ts outlineBox),
+   * in the same compute pass: each dispatch sees the writes of the one before, so the outline reads `env` as it is
+   * after its segment (paint.wgsl `outline`), as one call per stroke does.
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
+    // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
+    if (this.shapeHeld !== undefined) this.syncShape();
     const step = this.offsetStep;
     const params = new ArrayBuffer(BOUNDARIES.length * this.paramsStep);
     BOUNDARIES.forEach((boundary, i) => {
@@ -226,23 +280,32 @@ export class Simulation implements Sim {
       entries: [
         { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
         { binding: 1, resource: { buffer: this.env } },
-        { binding: 2, resource: { buffer: this.brushes, size: 32 } },
+        { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
+        { binding: 3, resource: { buffer: this.shapeBuffer } },
       ],
     });
-    // Every stroke as segments the pass paints exactly, each with the box of cells it can reach (brush.ts).
+    // Every stroke as segments the pass paints exactly, each with the box of cells it can reach and the box of
+    // cells its outline updates (brush.ts).
     const segments: Stroke[] = [];
     const boxes: Rect[] = [];
+    const reaches: Rect[] = [];
     const offsets: number[] = [];
+    const own: boolean[] = [];
+    let foreign = false;
     for (const stroke of strokes) {
       const boundary = stroke.boundary ?? this.settings.boundary;
       const wrap = boundary === 'wrap';
       if (stroke.kind === 'wall') this.walls = true;
+      if (stroke.kind !== 'erase') this.hasEnvironment = true;
+      if (boundary !== this.settings.boundary) foreign = true;
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const box = paintBox(segment, this.width, this.height, wrap);
         if (!box) continue;
         segments.push(segment);
         boxes.push(box);
+        reaches.push(outlineBox(segment, this.width, this.height, wrap) ?? box);
         offsets.push(BOUNDARIES.indexOf(boundary) * this.paramsStep);
+        own.push(!ownHeldEverywhere(segment, this.width, this.height, boundary));
       }
     }
     for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
@@ -253,31 +316,42 @@ export class Simulation implements Sim {
       const u = new Uint32Array(data);
       chunk.forEach(({ from, to, radius, kind }, j) => {
         const [x, y] = boxes[first + j] ?? [0, 0];
+        const [rx, ry, rw, rh] = reaches[first + j] ?? [0, 0, 0, 0];
         const o = (j * step) / 4;
         [f[o], f[o + 1], f[o + 2], f[o + 3]] = [from[0], from[1], to[0], to[1]];
         [i32[o + 4], i32[o + 5]] = [x, y];
         f[o + 6] = radius;
         u[o + 7] = EnvKind[kind];
+        [i32[o + 8], i32[o + 9], u[o + 10], u[o + 11]] = [rx, ry, rw, rh];
       });
       this.device.queue.writeBuffer(this.brushes, 0, data);
       const enc = this.device.createCommandEncoder();
       const pass = enc.beginComputePass();
-      pass.setPipeline(this.kernels.paint);
       chunk.forEach((_, j) => {
         const [, , w, h] = boxes[first + j] ?? [0, 0, 0, 0];
+        const [, , rw, rh] = reaches[first + j] ?? [0, 0, 0, 0];
+        pass.setPipeline(this.kernels.paint);
         pass.setBindGroup(0, this.paintGroup, [offsets[first + j] ?? 0, j * step]);
         pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
+        // Same layout: the bind group and its offsets stay. The eraser and walls load a tile of `env`; most segments
+        // need no search of their own cells.
+        pass.setPipeline(this.kernels.outline[outlineVariant(chunk[j], own[first + j] ?? true)]);
+        pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
       });
       pass.end();
       this.device.queue.submit([enc.finish()]);
     }
+    if (foreign) this.shapeHeld = undefined;
   }
 
   clearEnvironment() {
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
+    enc.clearBuffer(this.shapeBuffer);
     this.device.queue.submit([enc.finish()]);
     this.walls = false;
+    this.hasEnvironment = false;
+    this.shapeHeld = this.settings.boundary;
   }
 
   finish(): Promise<void> {
@@ -320,6 +394,11 @@ export class Simulation implements Sim {
     return new Uint8Array(await readBuffer(this.device, this.env));
   }
 
+  async readShape(): Promise<Uint8Array> {
+    this.syncShape();
+    return new Uint8Array(await readBuffer(this.device, this.shapeBuffer));
+  }
+
   /**
    * Replaces the agent with id `index` (as readAgents() orders them), wherever the sort has put it. The id
    * stays, so ids remain unique: `a.bits` sets only the strain and the alive bit.
@@ -351,16 +430,25 @@ export class Simulation implements Sim {
     ]);
   }
 
+  /**
+   * For tests. `shape` cannot know the distances of an environment written as bytes: it is cleared, and its next use
+   * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`.
+   */
   writeEnv(data: Uint8Array) {
     this.device.queue.writeBuffer(this.env, 0, data);
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.shapeBuffer);
+    this.device.queue.submit([enc.finish()]);
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
+    this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
+    this.shapeHeld = undefined;
   }
 
   destroy() {
     for (const t of [...this.trail, ...this.scent]) t.destroy();
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
-    for (const b of [this.counts, this.env, this.stats]) b.destroy();
+    for (const b of [this.counts, this.env, this.shapeBuffer, this.stats]) b.destroy();
     this.collision?.occ.forEach((b) => {
       b.destroy();
     });
@@ -557,6 +645,9 @@ class Kernels {
     readonly occupy: GPUComputePipeline,
     readonly replace: GPUComputePipeline,
     readonly paint: GPUComputePipeline,
+    /** The outline pass, by outlineVariant(). */
+    readonly outline: Readonly<Record<OutlineVariant, GPUComputePipeline>>,
+    readonly refresh: GPUComputePipeline,
     readonly sort: Record<'countTiles' | 'scanTiles' | 'scatter', GPUComputePipeline>,
     readonly diffuseLayout: GPUBindGroupLayout,
     readonly paintLayout: GPUBindGroupLayout,
@@ -595,12 +686,14 @@ class Kernels {
         { binding: 6, visibility: C, buffer: { type: 'read-only-storage' } },
       ],
     });
-    // Brush strokes pick their brush and their boundary's parameters by dynamic offset (Simulation.paint).
+    // Brush strokes pick their brush and their boundary's parameters by dynamic offset (Simulation.paint), in the
+    // paint and the outline pass alike.
     const paintLayout = device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
         { binding: 1, visibility: C, buffer: { type: 'storage' } },
         { binding: 2, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+        { binding: 3, visibility: C, buffer: { type: 'storage' } },
       ],
     });
     const diffuseModule = module(diffuseWgsl);
@@ -625,24 +718,53 @@ class Kernels {
     );
     const sort = module(sortWgsl);
     const start = module(initWgsl);
-    const [init, claimStart, settleStart, move, claim, settle, occupy, replace, paint, countTiles, scanTiles, scatter] =
-      await Promise.all([
-        compute(start, 'init'),
-        compute(start, 'claimStart'),
-        compute(start, 'settleStart'),
-        compute(agents, 'advance'),
-        compute(agents, 'claim'),
-        compute(agents, 'settle'),
-        compute(agents, 'occupy'),
-        compute(agents, 'replace'),
-        device.createComputePipelineAsync({
-          layout: device.createPipelineLayout({ bindGroupLayouts: [paintLayout] }),
-          compute: { module: module(paintWgsl), entryPoint: 'paint' },
-        }),
-        compute(sort, 'countTiles'),
-        compute(sort, 'scanTiles'),
-        compute(sort, 'scatter'),
-      ]);
+    const brush = module(paintWgsl);
+    const paintPipeline = (entryPoint: string, constants?: Record<string, number>) =>
+      device.createComputePipelineAsync({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [paintLayout] }),
+        compute: { module: brush, entryPoint, ...(constants ? { constants } : {}) },
+      });
+    const [
+      init,
+      claimStart,
+      settleStart,
+      move,
+      claim,
+      settle,
+      occupy,
+      replace,
+      paint,
+      coreOwn,
+      coreHeld,
+      tiledOwn,
+      tiledHeld,
+      untiledOwn,
+      untiledHeld,
+      refresh,
+      countTiles,
+      scanTiles,
+      scatter,
+    ] = await Promise.all([
+      compute(start, 'init'),
+      compute(start, 'claimStart'),
+      compute(start, 'settleStart'),
+      compute(agents, 'advance'),
+      compute(agents, 'claim'),
+      compute(agents, 'settle'),
+      compute(agents, 'occupy'),
+      compute(agents, 'replace'),
+      paintPipeline('paint'),
+      paintPipeline('outline'),
+      paintPipeline('outline', { OWN_SEARCH: 0 }),
+      paintPipeline('outline', { CORE: 0 }),
+      paintPipeline('outline', { CORE: 0, OWN_SEARCH: 0 }),
+      paintPipeline('outline', { TILED: 0, CORE: 0 }),
+      paintPipeline('outline', { TILED: 0, CORE: 0, OWN_SEARCH: 0 }),
+      compute(brush, 'refresh'),
+      compute(sort, 'countTiles'),
+      compute(sort, 'scanTiles'),
+      compute(sort, 'scatter'),
+    ]);
     const sorting = { countTiles, scanTiles, scatter };
     return new Kernels(
       init,
@@ -654,12 +776,32 @@ class Kernels {
       occupy,
       replace,
       paint,
+      { coreOwn, coreHeld, tiledOwn, tiledHeld, untiledOwn, untiledHeld },
+      refresh,
       sorting,
       diffuseLayout,
       paintLayout,
       new Map(await variants),
     );
   }
+}
+
+type OutlineVariant = `${'core' | 'tiled' | 'untiled'}${'Own' | 'Held'}`;
+
+/**
+ * Which pipeline of the outline pass a segment takes (Kernels.outline): the eraser and walls with the tile of `env`
+ * (paint.wgsl TILED), a wide eraser also with its core (CORE), food and light without the tile; each with the search
+ * of the segment's own cells where some cell may need it (OWN_SEARCH, brush.ts ownHeldEverywhere()).
+ */
+function outlineVariant(segment: Stroke | undefined, own: boolean): OutlineVariant {
+  const kind = segment?.kind ?? 'food';
+  const base =
+    kind === 'erase' && (segment?.radius ?? 0) >= CORE_RADIUS
+      ? 'core'
+      : kind === 'erase' || kind === 'wall'
+        ? 'tiled'
+        : 'untiled';
+  return `${base}${own ? 'Own' : 'Held'}`;
 }
 
 function variantKey(v: Diffuse) {

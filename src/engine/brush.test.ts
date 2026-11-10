@@ -2,18 +2,24 @@ import { describe, expect, it } from 'vitest';
 import type { Boundary } from '../model/params';
 import {
   lightByte,
+  outlineBox,
+  outlineRects,
+  ownHeldEverywhere,
   paintBox,
   paintsCell,
   paintSegments,
+  PendingOutlines,
   Rows,
   scissorRects,
   segmentDistance,
   SLACK,
   someCell,
+  unionRects,
+  type Rect,
 } from './brush';
 import { MIN_RADIUS } from './environment';
 import { paintReference } from './paint-reference';
-import type { EnvTool, Stroke } from './types';
+import { EnvKind, type EnvTool, type Stroke } from './types';
 
 const stroke = (from: [number, number], to: [number, number], radius: number): Stroke => ({
   kind: 'food',
@@ -41,8 +47,15 @@ describe('scissorRects', () => {
     expect(scissorRects(stroke([-9, 10], [-6, 10], 2), 64, 48, false)).toEqual([]);
   });
 
-  it('takes the whole axis when the stroke is wider than the grid', () => {
+  it('takes the whole axis when the stroke is wider than a periodic grid', () => {
     expect(scissorRects(stroke([-10, 5], [80, 5], 1), 64, 48, true)).toEqual([[0, 3, 64, 4]]);
+  });
+
+  // A closed arena has no cells beyond its edges: a box wider than the grid is cut as any other (paintBox()).
+  it('cuts a stroke wider than a closed arena at its edges, and is empty for one that lies beside it', () => {
+    expect(scissorRects(stroke([30, 24], [200, 24], 1), 64, 48, false)).toEqual([[28, 22, 36, 4]]);
+    expect(scissorRects(stroke([70, 10], [200, 10], 1), 64, 48, false)).toEqual([]);
+    expect(scissorRects(stroke([32, -100], [32, -60], 30), 64, 48, false)).toEqual([]);
   });
 
   // Every cell the reference paints lies in a rectangle, also across the edges.
@@ -519,6 +532,163 @@ describe('cells with SLACK', () => {
     for (const boundary of ['box', 'wrap'] as const) {
       expect(new Rows(s, 200, 200, boundary).runs(101, -SLACK, false, out)).toBe(0);
       expect(new Rows(s, 200, 200, boundary).runs(101, -SLACK, true, out)).toBe(1);
+    }
+  });
+});
+
+// WebGPU outlines a segment without the search of its own cells where this holds (sim.ts paint()): the GPU tests
+// check the bytes; here the rule itself.
+describe('ownHeldEverywhere', () => {
+  it('holds on the periodic grid, for a segment inside a box and for a brush inside the dish', () => {
+    expect(ownHeldEverywhere(stroke([-5, -5], [70, 50], 0.75), 64, 48, 'wrap')).toBe(true);
+    expect(ownHeldEverywhere(stroke([10, 10], [20, 10], 0.74), 64, 48, 'wrap')).toBe(false); // thinner than 0.75
+    expect(ownHeldEverywhere(stroke([0, 0], [64, 48], 3), 64, 48, 'box')).toBe(true); // the corners still count
+    expect(ownHeldEverywhere(stroke([10, 10], [64.1, 10], 3), 64, 48, 'box')).toBe(false);
+    // The dish of 64 × 48 has radius 23 around (32, 24): the brush must stay inside it.
+    expect(ownHeldEverywhere(stroke([32, 24], [32 + 19.9, 24], 3), 64, 48, 'dish')).toBe(true);
+    expect(ownHeldEverywhere(stroke([32, 24], [32 + 20.1, 24], 3), 64, 48, 'dish')).toBe(false);
+  });
+});
+
+describe('outlineBox', () => {
+  // The outline pass holds every byte of this box to `env` after a subtraction (ADR 0009): it must hold every cell
+  // within 5 rings (Chebyshev, paint.wgsl HOLD_RINGS) of a cell the brush paints, and every cell within SHAPE_RANGE
+  // (4 cells) of the brush.
+  it('holds every cell within 5 rings of a painted cell', () => {
+    const [w, h] = [40, 30];
+    let seed = 7;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    const missing: string[] = [];
+    for (let t = 0; t < 300; t++) {
+      const wrap = t % 2 === 0;
+      const from: [number, number] = [rnd() * w, rnd() * h];
+      const s = stroke(from, [from[0] + 6 * rnd() - 3, from[1] + 6 * rnd() - 3], 0.75 + 6 * rnd());
+      const env = new Uint8Array(w * h * 4);
+      paintReference(env, w, h, s, wrap ? 'wrap' : 'box');
+      const [bx, by, bw, bh] = outlineBox(s, w, h, wrap) ?? [0, 0, 0, 0];
+      const inside = (v: number, lo: number, n: number, size: number) =>
+        wrap ? (((v - lo) % size) + size) % size < n : v >= lo && v < lo + n;
+      for (let c = 0; c < w * h; c++) {
+        if (!env[c * 4 + 1]) continue;
+        const [x, y] = [c % w, Math.floor(c / w)];
+        for (let dy = -5; dy <= 5; dy++)
+          for (let dx = -5; dx <= 5; dx++) {
+            const [qx, qy] = [x + dx, y + dy];
+            if (!wrap && (qx < 0 || qy < 0 || qx >= w || qy >= h)) continue;
+            if (!inside(qx, bx, bw, w) || !inside(qy, by, bh, h)) missing.push(`stroke ${t}: ${qx}, ${qy}`);
+          }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  // WebGL2 draws the outline over these rectangles and WebGPU over the box: the same cells, also for a stroke
+  // longer than a closed arena or beside it, where the box is cut or undefined.
+  it.each([
+    ['across a corner', stroke([1.2, 46.3], [3.4, 44.1], 2.5)],
+    ['longer than the grid', stroke([30, 24], [200, 24], 1)],
+    ['wider than the grid', stroke([32, 24], [32, 24], 90)],
+    ['beside the grid', stroke([75, 10], [200, 10], 1)],
+  ])('gives the scissor rectangles of the same cells (outlineRects, %s)', (_, s) => {
+    for (const wrap of [true, false]) {
+      const cells = (rects: Rect[]) =>
+        new Set(
+          rects.flatMap(([x, y, w, h]) =>
+            Array.from({ length: w * h }, (_, i) => `${x + (i % w)},${y + Math.floor(i / w)}`),
+          ),
+        );
+      const [bx, by, bw, bh] = outlineBox(s, 64, 48, wrap) ?? [0, 0, 0, 0];
+      const wrapped = Array.from({ length: bw * bh }, (_, i) => {
+        const [x, y] = [bx + (i % bw), by + Math.floor(i / bw)];
+        return wrap ? `${((x % 64) + 64) % 64},${((y % 48) + 48) % 48}` : `${x},${y}`;
+      }).filter((k) => wrap || k.split(',').every((v, a) => Number(v) >= 0 && Number(v) < (a ? 48 : 64)));
+      expect(cells(outlineRects(s, 64, 48, wrap)), wrap ? 'periodic' : 'closed').toEqual(new Set(wrapped));
+    }
+  });
+});
+
+describe('unionRects', () => {
+  it('covers every cell of the rectangles once', () => {
+    let seed = 3;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    for (let t = 0; t < 500; t++) {
+      const rects = Array.from({ length: Math.floor(rnd() * 12) }, (): Rect => [
+        Math.floor(rnd() * 30),
+        Math.floor(rnd() * 30),
+        Math.floor(rnd() * 12),
+        Math.floor(rnd() * 12),
+      ]);
+      const want = new Set<string>();
+      for (const [x, y, w, h] of rects)
+        for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) want.add(`${x + i},${y + j}`);
+      const seen = new Map<string, number>();
+      for (const [x, y, w, h] of unionRects(rects))
+        for (let i = 0; i < w; i++)
+          for (let j = 0; j < h; j++) seen.set(`${x + i},${y + j}`, (seen.get(`${x + i},${y + j}`) ?? 0) + 1);
+      expect([...seen.values()].every((v) => v === 1)).toBe(true);
+      expect(new Set(seen.keys())).toEqual(want);
+    }
+  });
+
+  it('joins overlapping boxes of a drag into few rectangles', () => {
+    const drag = Array.from({ length: 50 }, (_, i): Rect => [10 + 4 * i, 20, 30, 30]);
+    expect(unionRects(drag)).toEqual([[10, 20, 226, 30]]);
+  });
+});
+
+describe('PendingOutlines', () => {
+  const { food, wall, erase } = EnvKind;
+
+  // Buckets of 16 × 16 cells: a box meets the pending boxes of other kinds in its buckets, so a box that meets one
+  // always meets, and a box far from all of them never does.
+  it('meets a segment of another kind whose box shares a bucket with a pending box', () => {
+    const p = new PendingOutlines(64, 48);
+    p.add([[20, 20, 10, 10]], food, false);
+    expect(p.meets([[20, 20, 10, 10]], food, false)).toBe(false); // the same kind never meets
+    expect(p.meets([[28, 28, 4, 4]], wall, false)).toBe(true); // overlaps the box
+    expect(p.meets([[30, 30, 2, 2]], wall, false)).toBe(true); // beside it, in the same bucket
+    expect(p.meets([[34, 20, 4, 4]], wall, false)).toBe(false); // beside it, in other buckets
+    expect(p.meets([[50, 40, 4, 4]], erase, false)).toBe(false); // far away
+    p.clear();
+    expect(p.meets([[20, 20, 10, 10]], wall, false)).toBe(false);
+  });
+
+  it('wraps a box on a periodic grid, and cuts it on a closed one', () => {
+    const p = new PendingOutlines(64, 48);
+    p.add([[62, 46, 4, 4]], food, true); // wraps into the corner at 0, 0
+    expect(p.meets([[0, 0, 2, 2]], wall, true)).toBe(true);
+    p.clear();
+    p.add([[62, 46, 4, 4]], food, false);
+    expect(p.meets([[0, 0, 2, 2]], wall, false)).toBe(false);
+  });
+
+  // Every cell that a box overlaps lies in a bucket that meets() checks: random boxes that overlap always meet.
+  it('meets every box that overlaps a pending box of another kind', () => {
+    let seed = 5;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    for (let t = 0; t < 500; t++) {
+      const wrap = t % 2 === 0;
+      const p = new PendingOutlines(64, 48);
+      const box = (): Rect => [
+        Math.floor(rnd() * 80) - 8,
+        Math.floor(rnd() * 60) - 6,
+        1 + Math.floor(rnd() * 20),
+        1 + Math.floor(rnd() * 20),
+      ];
+      const [a, b] = [box(), box()];
+      const cells = (r: Rect) => {
+        const out = new Set<string>();
+        for (let i = 0; i < r[2]; i++)
+          for (let j = 0; j < r[3]; j++) {
+            const [x, y] = [r[0] + i, r[1] + j];
+            if (wrap) out.add(`${(((x % 64) + 64) % 64).toString()},${(((y % 48) + 48) % 48).toString()}`);
+            else if (x >= 0 && y >= 0 && x < 64 && y < 48) out.add(`${x.toString()},${y.toString()}`);
+          }
+        return out;
+      };
+      const overlap = [...cells(a)].some((c) => cells(b).has(c));
+      p.add([a], food, wrap);
+      if (overlap) expect(p.meets([b], wall, wrap), `${a.join(' ')} / ${b.join(' ')}`).toBe(true);
     }
   });
 });

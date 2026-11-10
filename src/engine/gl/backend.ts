@@ -192,35 +192,38 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target) {
     const gl = this.gl;
+    sim.syncShape();
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
     const exposure = (agents ? 0.4 / s.density : this.gain || fallback) * 2 ** s.exposure;
     const black = agents ? 0 : this.black;
     const bloom = this.runBloom(sim, s, exposure, black);
-    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true);
+    // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
+    const occ = s.collisions ? sim.occupancyTexture : undefined;
+    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
     const heights = this.heightsFor(sim);
+    // Without food, light or walls the environment code would only cost time: the variant without it
+    // draws the same pixels.
+    const variant = sim.hasEnvironment ? 1 : 0;
+    // A sampler that the program never reads still needs a texture: the counts stand in for the occupancy.
+    const cells = { trail: sim.currentTrail.texture, shape: sim.shapeTexture, occ: occ ?? sim.countsTexture };
     // The gel style samples its height field five times per pixel: once per frame at grid
     // resolution here, instead of five full trail filters per pixel.
     if (s.style === 'gel') {
+      const h = this.prog.height[variant];
       gl.bindFramebuffer(gl.FRAMEBUFFER, heights.fbo);
       gl.viewport(0, 0, heights.width, heights.height);
-      gl.useProgram(this.prog.height.program);
-      textures(gl, this.prog.height.program, { trail: sim.currentTrail.texture });
+      gl.useProgram(h.program);
+      textures(gl, h.program, cells);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    const p = this.prog.render;
+    const p = this.prog.render[variant];
     gl.useProgram(p.program);
-    textures(gl, p.program, {
-      trail: sim.currentTrail.texture,
-      env: sim.envTexture,
-      counts: sim.countsTexture,
-      bloom: bloom.texture,
-      heights: heights.texture,
-    });
+    textures(gl, p.program, { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 

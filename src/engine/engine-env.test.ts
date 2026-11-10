@@ -455,6 +455,34 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, coarse)).toBe(0);
   });
 
+  // The renderer draws food, light and walls only while Sim.hasEnvironment is true (ADR 0009, item 9): every new
+  // simulation that replays any of them must say so, and Clear ends it.
+  it('mark every new simulation that replays food, light or walls as painted, and none after Clear', async () => {
+    const { engine, sim } = await engineWith(maze.settings());
+    expect(sim().hasEnvironment).toBe(true);
+    const first = sim();
+    await engine.apply({ ...engine.settings, resolution: 1024 });
+    expect(sim()).not.toBe(first);
+    expect(sim().hasEnvironment).toBe(true);
+    await engine.apply({ ...engine.settings, boundary: 'dish' });
+    expect(sim().hasEnvironment).toBe(true);
+    engine.clearEnvironment();
+    expect(sim().hasEnvironment).toBe(false);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect(sim().hasEnvironment).toBe(false);
+    // An eraser alone leaves nothing to draw, also when a new simulation replays it.
+    engine.paint({ kind: 'erase', from: [250, 160], to: [270, 160], radius: 5 });
+    engine.frame(0, 0);
+    expect(sim().hasEnvironment).toBe(false);
+    await engine.apply({ ...engine.settings, resolution: 256 });
+    expect(sim().hasEnvironment).toBe(false);
+    engine.paint({ kind: 'light', from: [120, 80], to: [120, 80], radius: 4 });
+    engine.frame(0, 0);
+    expect(sim().hasEnvironment).toBe(true);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect(sim().hasEnvironment).toBe(true);
+  });
+
   it('do not throw when a stroke comes before the first simulation, which has nothing to paint on', async () => {
     const backend = new CpuBackend();
     // No grid is on screen yet: the engine as Engine.create makes it, before the first allocation.

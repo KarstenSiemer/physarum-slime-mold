@@ -114,8 +114,9 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
       break;
     }
     failAt(Infinity);
-    // agents ×2, trail ×2, scent ×2, counts, env, tally; then collisions ×3 or the counting panels (×2 checks)
-    expect(failures).toBeGreaterThanOrEqual(floatBlend ? 12 : 11);
+    // agents ×2, trail ×2, scent ×2, counts, env, outlines, tally; then collisions ×3 or the counting
+    // panels (×2 checks)
+    expect(failures).toBeGreaterThanOrEqual(floatBlend ? 13 : 12);
   });
 
   // Half floats count exactly to 2048 only; condensed networks hold thousands of agents per cell.

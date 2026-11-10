@@ -160,8 +160,9 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   and an arena that holds the edit's (the same one; a box or a periodic one over a dish edit; a
   periodic one painted as it is over a box edit) clears every cell the edit paints (`coversExactly`,
   line 365). Both paint passes decide every cell of every kind by the same distance to the segment
-  and `d > radius` (`paint.wgsl` lines 49 and 50, `paint.frag` line 28; a periodic stroke takes the
-  smaller distance to a copy), and light paints only within its radius. Before, an Erase click on a
+  and `d > radius` (`paint.wgsl` lines 62 and 63, `paint.frag` lines 11 and 12 with
+  `strokeDistance` in `brush.glsl` line 22; a periodic stroke takes the smaller distance to a
+  copy), and light paints only within its radius. Before, an Erase click on a
   Food click with the same brush kept both in 13 of 24 trials (a Wall click in 8 of 16, the
   keyboard's 3 then 6 in 2 of 10), the card said "changed", and after a switch from the dish to the
   box such a dab came back on a square screen in 3 of 10 trials (review of the fifth draft); now in
@@ -277,13 +278,14 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   from it, so a 0.75 brush paints every such cell: painted walls stay closed on any grid, also where
   they run diagonally (a unit test samples 400 random segments: no gap at 0.75, gaps at 0.45).
 - **Replay cost.** `Sim.paint` takes a list and is the only way the engine puts an edit into a
-  simulation (`Sim.writeEnv` is for tests). WebGPU
-  paints up to 4096 strokes per submission: each dispatch picks its brush and its boundary's
-  parameters by dynamic offset (`src/engine/sim.ts`, `paint()` at line 213). WebGL2 scissors every
-  paint draw to the stroke's bounding box grown by one cell, split at the edges of a periodic grid
-  (`src/engine/brush.ts`), and changes parameters, color mask and blending only where the boundary
-  or the kind of brush changes. Measured on an M3 Pro, paired in one page, grid 1536 × 864, strokes
-  of radius 10 cells and 4 cells long, until the GPU finished:
+  simulation (`Sim.writeEnv` is for tests). It writes `env` and the renderer's outlines together
+  (ADR 0009, item 11). WebGPU paints up to 4096 strokes per submission: each dispatch picks its
+  brush and its boundary's parameters by dynamic offset (`src/engine/sim.ts`, `paint()` at line
+  264). WebGL2 scissors every paint draw to the stroke's bounding box grown by one cell, split at
+  the edges of a periodic grid (`src/engine/brush.ts`), and changes parameters, color mask and
+  blending only where the boundary or the kind of brush changes. Measured without the outlines on
+  an M3 Pro, paired in one page, grid 1536 × 864, strokes of radius 10 cells and 4 cells long,
+  until the GPU finished:
 
   | Strokes | WebGPU, one call per stroke | WebGPU, one call | WebGL2, one call per stroke | WebGL2, one call |
   | ------- | --------------------------- | ---------------- | --------------------------- | ---------------- |
@@ -294,6 +296,56 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   The JavaScript part of one call took 0.4, 4.0 and 37 ms on WebGPU and 0.5, 4.8 and 48 ms on
   WebGL2. Without the scissor, WebGL2 painted 1,000 strokes one call each in 70.1 ms, with it in
   6.5 ms: every stroke was a pass over the whole grid.
+
+  With the outlines (2026-11-10), each call against PR 2 alone (a5631bc) and the joined branch before
+  the review fixes (3a961ce), their whole engines on the same grid, paired in one page, grid
+  1536 × 864, until the GPU finished, the median of 5 rounds in each of three runs on the M3 Pro
+  (runs where other work held the GPU left out). "One drag" is the drag of the table above, its
+  kind changing every 50 strokes (food, wall, light, eraser). "Drags" are 20 to 200 segments of one
+  kind each at random places, radius 3 to 30 cells, half a radius long, across the edges. A
+  "session" is drags of one kind each, 50 to 300 segments of radius 4 to 40, some circling one spot.
+  "Random places" are strokes of radius 10, 4 cells long, a random kind each. "One kind" is the drag
+  with a single kind. The last row is the worst case: a kind that changes with every stroke of a
+  drag, so every stroke is a run of outlines of its own on WebGL2 (ADR 0009, item 11).
+
+  | Strokes in one call             | WebGPU, PR 2 | WebGPU, before | WebGPU, now | WebGL2, PR 2 | WebGL2, before | WebGL2, now    |
+  | ------------------------------- | ------------ | -------------- | ----------- | ------------ | -------------- | -------------- |
+  | 1,000, one drag                 | 3.7–4.4 ms   | 9.1–10.4 ms    | 8.7–9.4 ms  | 3.9–4.0 ms   | 6.8–7.0 ms     | 5.5–5.8 ms     |
+  | 10,000, one drag                | 23–25 ms     | 74–75 ms       | 68–69 ms    | 6.8–7.4 ms   | 27–28 ms       | 24–25 ms       |
+  | 100,000, one drag               | 192–194 ms   | 680–681 ms     | 605–610 ms  | 50–51 ms     | 234–241 ms     | 216–219 ms     |
+  | 100,000, drags                  | 215–220 ms   | 735–736 ms     | 654–655 ms  | 59–63 ms     | 267–278 ms     | 175–182 ms     |
+  | 100,000, a session              | 219–238 ms   | 784–822 ms     | 697–728 ms  | 62–63 ms     | 347–384 ms     | 184–197 ms     |
+  | 100,000, random places          | 208–212 ms   | 763–787 ms     | 711–717 ms  | 86–90 ms     | 533–558 ms     | 491–516 ms     |
+  | 100,000, one kind: food         | 193–204 ms   | 593–619 ms     | 436–473 ms  | 49–55 ms     | 604–639 ms     | 180–190 ms     |
+  | 100,000, one kind: walls        | 190–205 ms   | 786–842 ms     | 785–845 ms  | 49–51 ms     | 609–627 ms     | 226–232 ms     |
+  | 100,000, one kind: eraser       | 190–199 ms   | 588–629 ms     | 581–611 ms  | 50–51 ms     | 530–545 ms     | 146–149 ms     |
+  | 100,000, a kind for each stroke | 190–202 ms   | 694–732 ms     | 691–731 ms  | 103–105 ms   | 4,811–4,834 ms | 4,782–4,885 ms |
+
+  The JavaScript part of one call took 0.7, 4.7 and 87 to 92 ms on WebGPU (one drag); on WebGL2 it
+  is most of the time, because its calls wait for the GPU. Before the outlines had workgroup memory
+  on WebGPU and runs on WebGL2, an outline right after every segment's paint took 1.49 to 1.81 s on
+  WebGPU and 5.81 to 6.32 s on WebGL2 for 100,000 strokes. The review fixes made WebGL2 faster: the
+  union of a run's boxes is marked as bits (46 instead of 479 ms in Node for the boxes of one drag),
+  food skips it, and a large eraser's hold, light and shadow are drawn per segment. WebGPU outlines
+  food and light without a tile of `env`, and a condition fixed per segment chooses one of six
+  pipelines (ADR 0009, item 11).
+
+  Again after the rebase onto the final PR 2 (2026-11-10): this branch against PR 2 alone
+  (01059ae), paired in one page, until the GPU finished, the median of 5 rounds (3 for a kind for
+  each stroke) in each of two runs, with other work on the host (load average 5 to 7). The join
+  before the rebase (30b2007) took the same in the same page, within 3 %. The load made every
+  column 30 to 60 % slower than in the table above. On WebGPU the branch took 3.0 to 3.6 times as
+  long as PR 2 alone, as above; on WebGL2 2.9 to 7.6 times (above 2.9 to 5.7), and 58 to 65 times
+  for a kind for each stroke (above 46). There most of the time is JavaScript that waits for the
+  GPU, and the load slowed it most.
+
+  | 100,000 strokes in one call | WebGPU, PR 2 (01059ae) | WebGPU, branch | WebGL2, PR 2 (01059ae) | WebGL2, branch |
+  | --------------------------- | ---------------------- | -------------- | ---------------------- | -------------- |
+  | One drag                    | 284–292 ms             | 893–927 ms     | 55–59 ms               | 318–319 ms     |
+  | Drags                       | 327–357 ms             | 994–1,056 ms   | 68–70 ms               | 198–202 ms     |
+  | A session                   | 328–358 ms             | 1,017–1,081 ms | 70–75 ms               | 220–227 ms     |
+  | Random places               | 313–325 ms             | 1,069–1,100 ms | 96–98 ms               | 718–725 ms     |
+  | A kind for each stroke      | 282–296 ms             | 1,022–1,044 ms | 111–124 ms             | 7,212–7,240 ms |
 
 - **Strokes far out, long strokes and large brushes.** On a periodic grid both paint passes measure
   a cell's distance to the stroke and to its copies one period away. That finds the nearest copy
@@ -413,8 +465,18 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   copy of the paint shaders (`cpu-backend.ts`; `engine-env.test.ts`, `sweep.test.ts`);
   `sim.gpu.test.ts` checks that copy against both backends, in one call and one call per stroke,
   across the edges, under other boundaries, on copies of the grid two and three periods away, for
-  strokes longer than the grid and for brushes larger than it. `someCell`, which `paintsCell` and
-  the sweep use, visits exactly the cells that copy paints (1,500 random strokes, `brush.test.ts`).
+  strokes longer than the grid and for brushes larger than it. It also checks that one call gives
+  the bytes of `env` and of the outlines of one call per stroke and per segment (ADR 0009).
+  `engine.gpu.test.ts` checks on both backends that the outlines stay on the side of `env` at every
+  cell of the arena, with its light and shadow and no farther from a cell of their layer than it
+  allows: after sweeps, also one that completes over frames,
+  after a replay of the swept list on another grid, after switches between the dish, a box and the
+  periodic grid, after a Clear and after preset loads on the same grid and on new ones. Each such
+  replay gives the bytes of one call per edit. A new simulation that replays food, light or walls
+  counts as painted (`hasEnvironment`) and draws with the render pass that has the environment
+  code; after a Clear, or with an eraser alone, it draws without. The CPU backend follows
+  `hasEnvironment` too. `someCell`, which `paintsCell` and the sweep use, visits exactly the cells
+  that copy paints (1,500 random strokes, `brush.test.ts`).
 - In the built app on both backends (the scripts of the review of the fourth draft): Shrinking
   plasmodium on 800 × 800, switched to a closed box, keeps all 8 foods on 1280 × 800, byte for byte
   as the box chosen there directly (6 foods before); the Maze through the dish, 800 × 800, the box
