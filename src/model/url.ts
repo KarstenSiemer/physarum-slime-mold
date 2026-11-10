@@ -67,6 +67,8 @@ export async function decodeSettings(encoded: string): Promise<Settings | undefi
 export interface Link {
   settings: Settings;
   drawing?: Drawing;
+  /** The link has a drawing (`e`) that this app cannot read: the settings load alone, and the app says so. */
+  drawingLost?: true;
 }
 
 /**
@@ -103,7 +105,7 @@ export async function encodeLink(settings: Settings, drawing?: Drawing): Promise
 /**
  * Untrusted input: the hash of a shared link without its '#'. Undefined unless it holds valid settings (`s`). A
  * drawing (`e`) that is malformed, names an unknown scene or exceeds the caps is left out: the settings load alone, as
- * from a link that holds only settings.
+ * from a link that holds only settings, and `drawingLost` is true.
  */
 export async function decodeLink(hash: string): Promise<Link | undefined> {
   if (hash.length > MAX_HASH) return undefined;
@@ -116,8 +118,9 @@ export async function decodeLink(hash: string): Promise<Link | undefined> {
   const settings = s === undefined ? undefined : await decodeSettings(s);
   if (!settings) return undefined;
   const e = parts.get('e');
-  const drawing = e === undefined ? undefined : await decodeDrawing(e, settings.strains.length);
-  return drawing ? { settings, drawing } : { settings };
+  if (e === undefined) return { settings };
+  const drawing = await decodeDrawing(e, settings.strains.length);
+  return drawing ? { settings, drawing } : { settings, drawingLost: true };
 }
 
 /** The `e` part, with each strain's origin checked against the settings: one per strain, else none known. */

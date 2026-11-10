@@ -30,7 +30,7 @@ export interface Stats {
 
 export interface AppState {
   settings: Settings;
-  /** Id of the loaded preset; empty for settings from a link that names no scene (url.ts, docs/adr/0021). */
+  /** Id of the loaded preset; empty for settings from a link that names no scene this app can read (docs/adr/0021). */
   scene: string;
   /** The settings the scene loaded with, to tell whether a model parameter changed since. */
   sceneBase: Settings | undefined;
@@ -162,12 +162,14 @@ export function clearEnvironment() {
  * Opens a shared link (url.ts decodeLink()) before the engine exists: its settings, and the scene and the food, light
  * and walls it names, which startScene() then loads. The scene card compares the settings with the scene's, within
  * what this device runs (sceneChanged(), ruleUnavailable()), and the drawing with the scene's shapes. A link that
- * names no scene loads as before: its settings, its strokes if it has any, and no scene text.
+ * names no scene loads as before: its settings, its strokes if it has any, and no scene text. So does a link whose
+ * drawing this app cannot read, and a notice says so.
  */
-export function openLink({ settings, drawing }: Link) {
+export function openLink({ settings, drawing, drawingLost }: Link) {
   app.settings = settings;
   linkDrawing = drawing;
   app.envVersion++;
+  if (drawingLost) showNotice('This app cannot read the scene and drawing in this link, so only its settings load.');
   const p = drawing && presetById(drawing.scene);
   if (!p) return;
   app.scene = p.id;

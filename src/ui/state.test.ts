@@ -323,7 +323,20 @@ describe('a shared link', () => {
     const settings = { ...defaultSettings(), boundary: 'dish' as const };
     openLink({ settings });
     expect(app.scene).toBe('');
+    expect(app.notice).toBe('');
     expect(sceneChanged()).toBe(false);
+    expect(currentDrawing()).toEqual({ scene: '', origins: [], shapes: [], strokes: [] });
+    const { calls, engine } = loads();
+    await startScene(engine);
+    expect(calls).toEqual([[0, 0, undefined]]);
+  });
+
+  it('with a drawing this app cannot read loads the settings alone, and says so', async () => {
+    const { app, currentDrawing, openLink, startScene } = await fresh();
+    const settings = { ...defaultSettings(), boundary: 'dish' as const };
+    openLink({ settings, drawingLost: true });
+    expect(app.notice).toBe('This app cannot read the scene and drawing in this link, so only its settings load.');
+    expect(app.scene).toBe('');
     expect(currentDrawing()).toEqual({ scene: '', origins: [], shapes: [], strokes: [] });
     const { calls, engine } = loads();
     await startScene(engine);

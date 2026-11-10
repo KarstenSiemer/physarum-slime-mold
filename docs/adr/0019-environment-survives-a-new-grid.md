@@ -98,7 +98,7 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   edges). Every new simulation paints the whole list (`flushEnv()`, line 363) before it places its
   agents (`rebuild()`, line 201; `load()`). A frame paints the edits added since. "Clear" empties
   the list, also during a rebuild; a preset load replaces it. At startup the engine loads once what
-  the panel holds (`startScene` in `src/ui/state.svelte.ts`, line 185): the panel's settings, and
+  the panel holds (`startScene` in `src/ui/state.svelte.ts`, line 187): the panel's settings, and
   the scene's shapes in the scene's own arena, or none after a Clear before the engine existed; for
   a shared link, the shapes it kept and its strokes (ADR 0021). Before, a second step applied a copy of the settings taken before the load and could undo a
   setting changed during it on WebGPU. `Engine.paint` before the first simulation exists drops the

@@ -1,7 +1,7 @@
 // Shared links hold the scene with its food, light and walls (docs/adr/0021). The Maze runs on grid 512, which the
 // startup check does not lower, and is small enough for SwiftShader in CI (ADR 0010).
 import { expect, test, type Page } from '@playwright/test';
-import { openSmallScene, watchErrors } from './helpers';
+import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 const card = (page: Page) => page.getByRole('region', { name: 'Scene', exact: true });
 
@@ -98,8 +98,22 @@ test('a link with settings only loads them alone: no food, light or walls, and n
   const errors = watchErrors(page);
   await openSmallScene(page); // a link from before links held a drawing
   expect((await settled(() => environment(page))).cells).toEqual([0, 0, 0]);
-  await expect(card(page)).toContainText('These settings came from a link that names no scene');
+  await expect(card(page)).toContainText('These settings came from a link that names no scene this app can read');
   // With no scene and no stroke, the address holds the settings alone.
+  expect(await settled(() => address(page))).toMatch(/^#s=[\w-]+$/);
+  expect(errors).toEqual([]);
+});
+
+test('a link with a drawing this app cannot read: a notice, and the settings load alone', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto(`${await smallScene()}&e=AAAA`);
+  await expect(page.getByRole('status')).toHaveText(
+    'This app cannot read the scene and drawing in this link, so only its settings load.',
+  );
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  expect((await settled(() => environment(page))).cells).toEqual([0, 0, 0]);
+  await expect(card(page)).toContainText('These settings came from a link that names no scene this app can read');
+  // The address keeps the settings and leaves out the part it could not read.
   expect(await settled(() => address(page))).toMatch(/^#s=[\w-]+$/);
   expect(errors).toEqual([]);
 });

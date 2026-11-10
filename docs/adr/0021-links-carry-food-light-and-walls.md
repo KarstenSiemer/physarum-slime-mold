@@ -58,7 +58,7 @@ does not fit.
   sender's, sign of zero included. `Engine.load` (line 119) takes a link's strokes after the scene's
   shapes; `Engine.envList` (line 146) gives the list to the link.
 - **Address.** `#s=<settings>&e=<drawing>` (`encodeLink` and `decodeLink` in `src/model/url.ts`,
-  lines 93 and 108). `s` is the settings as before. `e` is the bytes below, deflated (deflate-raw)
+  lines 95 and 110). `s` is the settings as before. `e` is the bytes below, deflated (deflate-raw)
   and in base64url. `MAX_HASH` (8,192 characters) holds for the whole hash and `MAX_JSON` (64 KiB)
   for each inflated part. A link without a scene and without a stroke has no `e`: it is a link of
   the old form. A link of the old form opens as before: the settings, no food, light or walls and no
@@ -89,8 +89,10 @@ does not fit.
   `MIN_RADIUS` to 16,384 cells (a brush on screen stays below 2,000), and no byte after the last
   stroke. `decodeLink` gives each strain no scene role (−1) when the origins do not match the
   settings' strains. A broken `e` part leaves out the drawing: the settings load alone, as from a
-  link of the old form. Unknown parts of the hash are ignored, and the parts go into a `Map`, so
-  `__proto__` is a key like any other.
+  link of the old form, and `decodeLink` sets `drawingLost`. `openLink` then shows the notice "This
+  app cannot read the scene and drawing in this link, so only its settings load.", and the scene
+  card says that the link names no scene this app can read. Unknown parts of the hash are ignored,
+  and the parts go into a `Map`, so `__proto__` is a key like any other.
 - **Caps** (`src/model/link.ts`, lines 20 and 26; the encoder and the decoder check the same,
   `Budget`). At most `MAX_STROKES` = 4,096 strokes, refused before the first stroke is read. At most
   `MAX_WORK` = 64 passes over 4,096 × 4,096 cells of paint work, by `workOf` (line 56), a bound for
@@ -111,14 +113,14 @@ does not fit.
   `app.envVersion` (`src/ui/state.svelte.ts`), and so do a preset load, a Clear before the engine
   exists and an opened link. App.svelte (line 125) starts its 400 ms timer again on every change of
   the settings or that count, as it does for the settings, and reads the list when the timer fires
-  (`currentDrawing`, `src/ui/state.svelte.ts`, line 202): a drag that records many segments gives
+  (`currentDrawing`, `src/ui/state.svelte.ts`, line 204): a drag that records many segments gives
   one encoding when it rests. Only the latest encoding writes the address. Before the engine exists,
   the drawing is what the engine will load. The address is written only after it was read at
   startup: before, a decoding slower than 400 ms let the first run write the default settings to the
   address until the next run.
 - **Startup.** App.svelte (line 55) decodes the link once; `openLink` (`src/ui/state.svelte.ts`,
-  line 167) sets the settings, the scene and its own settings, the origins and the scene flag, and
-  keeps the drawing for `startScene` (line 185). The device's limits reach the scene's settings as
+  line 168) sets the settings, the scene and its own settings, the origins and the scene flag, and
+  keeps the drawing for `startScene` (line 187). The device's limits reach the scene's settings as
   for a preset load: `sceneChanged` caps their grid and `ruleUnavailable` turns their rule off. That
   loads once: the link's settings, the shapes the link kept and its strokes, with no second apply.
   A preset load or a Clear before the engine exists drops the drawing. After the load,
@@ -180,8 +182,8 @@ when it opens.
 - Every stroke moves by at most 1/32 of a cell when it is painted. Tests that put a cell within
   `SLACK` (0.01 cells) of a brush's edge use values on the steps (ADR 0019).
 - A link names the scene's shapes by their order. If a later version changes a preset's shapes, a
-  link made before paints the new shapes; with another number of shapes, the drawing is left out and
-  the settings load alone.
+  link made before paints the new shapes; with another number of shapes, the drawing is left out,
+  the settings load alone and the notice says so.
 - A drawing too large for a link is dropped as a whole, and the sender sees one notice. Owner items
   (TODO.md): whether that notice is enough, or the app should show it where the user copies a link;
   and whether the caps (4,096 strokes, 64 passes) are right for weaker GPUs.

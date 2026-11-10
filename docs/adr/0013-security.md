@@ -33,9 +33,9 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    A link's scene with its food, light and walls (`e`, ADR 0021) goes through `unpackDrawing()`
    in `src/model/link.ts`, which never throws: it gives a drawing only when every number is finite
    and in range, the kinds and arenas come from their fixed sets and the scene's id names a
-   preset, and else undefined, and the settings then load alone. The hash's parts go into a `Map`.
-   Unit tests fuzz it with random, truncated and changed bytes and hashes, huge counts, NaN and
-   Infinity, and `__proto__` and `constructor` keys.
+   preset, and else undefined, and the settings then load alone with a notice. The hash's parts go
+   into a `Map`. Unit tests fuzz it with random, truncated and changed bytes and hashes, huge
+   counts, NaN and Infinity, and `__proto__` and `constructor` keys.
 4. **Resource limits for hostile links**: `Engine.fit()` runs before every allocation, the
    first one included (`Engine.create`). It lowers the grid until the estimated GPU memory fits
    a budget of one eighth of the device memory hint, at most 1 GiB (512 MiB when unknown), and

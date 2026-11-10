@@ -160,10 +160,10 @@ describe('URL links with food, light and walls', () => {
       for (const e of link.drawing.strokes)
         for (const v of [...e.from, ...e.to, e.radius]) expect(Number.isFinite(v)).toBe(true);
     }
-    // The settings part alone still loads when the drawing part is broken.
+    // The settings part alone still loads when the drawing part is broken, and the link says it lost its drawing.
     const [settingsPart = ''] = good.hash.split('&');
-    expect(await decodeLink(`${settingsPart}&e=AAAA`)).toEqual({ settings: s });
-    expect(await decodeLink(`${settingsPart}&e=`)).toEqual({ settings: s });
+    expect(await decodeLink(`${settingsPart}&e=AAAA`)).toEqual({ settings: s, drawingLost: true });
+    expect(await decodeLink(`${settingsPart}&e=`)).toEqual({ settings: s, drawingLost: true });
     // Too long, or no settings.
     expect(await decodeLink(`${good.hash}&x=${'A'.repeat(8192)}`)).toBeUndefined();
     expect(await decodeLink(good.hash.split('&')[1] ?? '')).toBeUndefined();
