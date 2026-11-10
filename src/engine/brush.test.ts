@@ -5,11 +5,11 @@ import {
   paintBox,
   paintsCell,
   paintSegments,
+  Rows,
   scissorRects,
   segmentDistance,
   SLACK,
   someCell,
-  type Cursor,
 } from './brush';
 import { MIN_RADIUS } from './environment';
 import { paintReference } from './paint-reference';
@@ -337,51 +337,188 @@ describe('someCell', () => {
       ).toEqual([...painted].sort((x, y) => x - y));
     }
   });
+});
 
-  // The sweep (sweep.ts) goes on where its last visit of a stroke stopped: the cells before stay cleared.
-  it('goes on from a cursor where an earlier visit stopped, in the same order', () => {
-    let seed = 7;
-    const rand = () => {
-      seed ^= seed << 13;
-      seed ^= seed >>> 17;
-      seed ^= seed << 5;
-      return (seed >>> 0) / 2 ** 32;
-    };
-    for (let k = 0; k < 300; k++) {
-      const [w, h] = k % 2 ? [48, 30] : [31, 47];
-      const boundary: Boundary = (['box', 'dish', 'wrap'] as const)[k % 3] ?? 'box';
-      const a: [number, number] = [rand() * 1.4 * w - 0.2 * w, rand() * 1.4 * h - 0.2 * h];
-      const long = rand() < 0.3 ? 2 * w : 15;
-      const b: [number, number] = [a[0] + (rand() * 2 - 1) * long, a[1] + (rand() * 2 - 1) * long];
-      const s: Stroke = { kind: 'food', from: a, to: b, radius: rand() < 0.1 ? 40 : MIN_RADIUS + rand() * 6, boundary };
-      const all: number[] = [];
-      someCell(s, w, h, boundary, SLACK, (c) => {
-        all.push(c);
-        return false;
-      });
-      if (all.length < 4) continue;
-      const stopAt = 2 + Math.floor(rand() * (all.length - 2));
-      const cursor: Cursor = { part: -1, y: 0, x: 0 };
-      let n = 0;
-      someCell(s, w, h, boundary, SLACK, () => n++ === stopAt, cursor);
-      const rest: number[] = [];
-      someCell(
-        s,
-        w,
-        h,
-        boundary,
-        SLACK,
-        (c) => {
-          rest.push(c);
-          return false;
-        },
-        cursor,
+/**
+ * The cells a stroke paints with `slack`, cell by cell over its bounding box, wrapped on a periodic grid: the rule of
+ * the paint passes written apart from brush.ts (review of ADR 0019).
+ */
+function bruteCells(s: Stroke, w: number, h: number, under: Boundary, slack: number): Set<number> {
+  const out = new Set<number>();
+  const r = s.radius;
+  const reach = r + Math.max(0, slack) + 1;
+  const [a, b] = [s.from, s.to];
+  const R = Math.min(w, h) / 2 - 1 + slack;
+  for (let y = Math.floor(Math.min(a[1], b[1]) - reach); y <= Math.ceil(Math.max(a[1], b[1]) + reach); y++)
+    for (let x = Math.floor(Math.min(a[0], b[0]) - reach); x <= Math.ceil(Math.max(a[0], b[0]) + reach); x++) {
+      let [cx, cy] = [x, y];
+      if (under === 'wrap') [cx, cy] = [((x % w) + w) % w, ((y % h) + h) % h];
+      else if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      else if (under === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > R) continue;
+      const [abx, aby] = [b[0] - a[0], b[1] - a[1]];
+      const t = Math.min(
+        1,
+        Math.max(0, ((x + 0.5 - a[0]) * abx + (y + 0.5 - a[1]) * aby) / Math.max(abx * abx + aby * aby, 1e-6)),
       );
-      // The cells under the two ends come first again, then the visit goes on from the cell where it stopped.
-      const ends = rest.length - (all.length - stopAt);
-      expect(ends).toBeGreaterThanOrEqual(0);
-      expect(ends).toBeLessThanOrEqual(2);
-      expect(rest, JSON.stringify([s, w, h, stopAt])).toEqual([...all.slice(0, ends), ...all.slice(stopAt)]);
+      const d = Math.hypot(x + 0.5 - a[0] - t * abx, y + 0.5 - a[1] - t * aby);
+      const u = Math.min(1, Math.max(0, (d - slack - r) / (0.3 * r - r)));
+      if (s.kind === 'light' ? Math.floor(0.5 + 255 * u * u * (3 - 2 * u)) >= 1 : d <= r + slack) out.add(cy * w + cx);
+    }
+  return out;
+}
+
+/** The distance from a light stroke at which its byte falls to 0, by bisection on lightByte(). */
+function litEdge(r: number) {
+  let [lo, hi] = [0.3 * r, r];
+  for (let k = 0; k < 80; k++) [lo, hi] = lightByte((lo + hi) / 2, r) >= 1 ? [(lo + hi) / 2, hi] : [lo, (lo + hi) / 2];
+  return lo;
+}
+
+/**
+ * Random strokes near the edges, the periodic seam and the rim, on cell centres and corners, with radii on and a hair
+ * beside a cell's distance and the light threshold, long ones and brushes larger than the grid.
+ */
+function* edgeStrokes(n: number, seed: number) {
+  const rand = () => {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    return (seed >>> 0) / 2 ** 32;
+  };
+  const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
+  const grids = [
+    [37, 61],
+    [61, 37],
+    [64, 40],
+    [41, 41],
+    [237, 512],
+    [33, 17],
+  ] as const;
+  for (let k = 0; k < n; k++) {
+    const [w, h] = pick(grids);
+    const under = pick(['box', 'dish', 'wrap'] as const);
+    const kind = pick(['food', 'light', 'wall', 'erase'] as const);
+    const R0 = Math.min(w, h) / 2 - 1;
+    const q = rand();
+    let at: [number, number];
+    if (q < 0.3) {
+      const phi = rand() * 2 * Math.PI;
+      const rho = R0 + (rand() * 2 - 1) * 3;
+      at = [w / 2 + rho * Math.cos(phi), h / 2 + rho * Math.sin(phi)];
+    } else if (q < 0.6) at = [pick([0, w, -0.5, w + 0.5, -w, 2 * w]) + (rand() * 2 - 1) * 3, rand() * h];
+    else at = [rand() * 3 * w - w, rand() * 3 * h - h];
+    if (rand() < 0.4) at = [Math.floor(at[0]) + pick([0, 0.5]), Math.floor(at[1]) + pick([0, 0.5])];
+    // Brushes larger than the grid on the small grids only: the brute force walks their box.
+    let r = rand() < 0.1 && w * h < 4000 ? rand() * 2 * Math.max(w, h) : MIN_RADIUS + rand() * 6;
+    if (rand() < 0.3) r = Math.max(MIN_RADIUS, Math.round(r)) + pick([0, 0.005, -0.005, 0.01, -0.01, 0.0101, -0.0099]);
+    // Light whose byte falls to 0 a hair beside a cell centre's distance.
+    if (kind === 'light' && rand() < 0.5)
+      r = (Math.round(r) + pick([0, 0.5])) / (litEdge(1000) / 1000) + pick([0, 1e-4, -1e-4, 0.006, -0.006]);
+    const len =
+      rand() < 0.2 ? rand() * 3 * Math.min(w, h) : rand() < 0.4 ? 0.01 + rand() * 10 : rand() < 0.1 ? rand() * 1e-3 : 0;
+    const ang = rand() * 2 * Math.PI;
+    const s: Stroke = { kind, from: at, to: [at[0] + len * Math.cos(ang), at[1] + len * Math.sin(ang)], radius: r };
+    yield { s, w, h, under };
+  }
+}
+
+describe('cells with SLACK', () => {
+  // The sweep judges an edit's cells with its brush and rim moved out by SLACK and a clearing stroke's with both moved
+  // in (review of ADR 0019: without a slack of its own, light's margin went untested, mutant BR1; so did someCell's
+  // scan range widened by a positive slack, BR4).
+  it('someCell visits exactly the cells of the rule, with the edge moved out and in by SLACK', () => {
+    let lit = 0;
+    for (const { s, w, h, under } of edgeStrokes(3000, 4242)) {
+      for (const slack of [SLACK, -SLACK]) {
+        const visited = new Set<number>();
+        someCell(s, w, h, under, slack, (c) => {
+          visited.add(c);
+          return false;
+        });
+        const want = bruteCells(s, w, h, under, slack);
+        expect(
+          [...visited].sort((x, y) => x - y),
+          JSON.stringify([s, w, h, under, slack]),
+        ).toEqual([...want].sort((x, y) => x - y));
+        if (s.kind === 'light' && want.size !== bruteCells(s, w, h, under, 0).size) lit++;
+      }
+    }
+    // SLACK decides cells of light strokes often enough to mean something.
+    expect(lit).toBeGreaterThan(50);
+  }, 60_000);
+
+  // Rows: per row the runs of cells, with every edge moved out (outer) or in by a hair of float64 rounding. Outer runs
+  // hold every cell of the rule and inner runs only such cells, and neither is off by more than 1e-5 cells.
+  it('Rows gives every row as runs that hold the cells of the rule, and only those within 1e-5 cells of it', () => {
+    let rows = 0;
+    for (const { s, w, h, under } of edgeStrokes(1500, 99)) {
+      const runs = new Rows(s, w, h, under);
+      const [dx, dy] = [s.to[0] - s.from[0], s.to[1] - s.from[1]];
+      // Both passes measure a segment shorter than 1e-3 cells from a point near its start: inner runs take its disc.
+      const tiny = dx * dx + dy * dy < 1e-6 && (dx !== 0 || dy !== 0);
+      for (const slack of [SLACK, -SLACK]) {
+        const [cells, wider, narrower] = [
+          bruteCells(s, w, h, under, slack),
+          bruteCells(s, w, h, under, slack + 1e-5),
+          bruteCells(s, w, h, under, slack - (tiny ? 2e-3 : 1e-5)),
+        ];
+        for (const outer of [true, false]) {
+          const got = new Set<number>();
+          for (let y = 0; y < h; y++) {
+            const out: number[] = [];
+            const n = runs.runs(y, slack, outer, out);
+            for (let k = 0; k < n; k++) {
+              const [x0, x1] = [out[2 * k] ?? 0, out[2 * k + 1] ?? 0];
+              // Sorted and apart, inside the grid.
+              expect(x0 >= 0 && x1 < w && x0 <= x1 && (k === 0 || x0 > (out[2 * k - 1] ?? 0) + 1)).toBe(true);
+              for (let x = x0; x <= x1; x++) got.add(y * w + x);
+            }
+            rows++;
+          }
+          const where = JSON.stringify([s, w, h, under, slack, outer]);
+          const [holds, within] = outer ? [cells, wider] : [narrower, cells];
+          expect(
+            [...holds].filter((c) => !got.has(c)),
+            where,
+          ).toEqual([]);
+          expect(
+            [...got].filter((c) => !within.has(c)),
+            where,
+          ).toEqual([]);
+        }
+      }
+    }
+    expect(rows).toBeGreaterThan(100_000);
+  }, 60_000);
+
+  // Runs move each edge by a hair of float64 rounding, out for an edit's cells and in for a clearing stroke's: a cell on
+  // the edge, or a hair beyond it, counts only outward (mutants IV3, IV3b).
+  it('Rows counts a cell on the edge of the brush, or a hair beyond it, only in the outer runs', () => {
+    // 2.99 + SLACK and 3.01 - SLACK are exactly 3 in float64.
+    expect([2.99 + SLACK, 3.01 - SLACK]).toEqual([3, 3]);
+    const out: number[] = [];
+    const dab = (y: number, r: number): Stroke => ({ kind: 'erase', from: [100.5, y], to: [100.5, y], radius: r });
+    // The cell (100, 103) lies exactly 3 cells from (100.5, 100.5), which someCell() counts both ways.
+    expect(new Rows(dab(100.5, 2.99), 200, 200, 'box').runs(103, SLACK, true, out)).toBe(1);
+    expect(new Rows(dab(100.5, 3.01), 200, 200, 'box').runs(103, -SLACK, false, out)).toBe(0);
+    // The cell (100, 97) lies 3 + 1e-10 cells from (100.5, 100.5 + 1e-10): beyond the narrowed brush.
+    const beyond = dab(100.5 + 1e-10, 3.01);
+    expect(someCell(beyond, 200, 200, 'box', -SLACK, (c) => c === 97 * 200 + 100)).toBe(false);
+    expect(new Rows(beyond, 200, 200, 'box').runs(97, -SLACK, false, out)).toBe(0);
+    expect(new Rows(beyond, 200, 200, 'box').runs(97, -SLACK, true, out)).toBe(1);
+  });
+
+  // Both passes measure a segment shorter than 1e-3 cells from a point between its start and the nearest point
+  // (segmentDistance()): 1.85e-8 cells farther than the segment for the cell (100, 101) here (mutant IV7).
+  it('Rows narrows a segment shorter than 1e-3 cells to the disc around its start', () => {
+    const s: Stroke = { kind: 'erase', from: [100.4997115, 100.5], to: [100.5002885, 100.5], radius: 1.01 + 1e-8 };
+    const d = segmentDistance(100.5, 101.5, s.from, s.to);
+    expect(d - 1).toBeGreaterThan(1.8e-8);
+    expect(d).toBeGreaterThan(s.radius - SLACK);
+    const out: number[] = [];
+    for (const boundary of ['box', 'wrap'] as const) {
+      expect(new Rows(s, 200, 200, boundary).runs(101, -SLACK, false, out)).toBe(0);
+      expect(new Rows(s, 200, 200, boundary).runs(101, -SLACK, true, out)).toBe(1);
     }
   });
 });

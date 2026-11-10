@@ -378,6 +378,41 @@ describe('food, light and walls on a new simulation', () => {
     expect(paintedFirst(sim().calls)).toBe(true);
   });
 
+  // The scene card follows the list through onEdits (state.svelte.ts): a load replaces the list (mutant EN11).
+  it('report a preset load to onEdits', async () => {
+    const { engine } = await engineWith(maze.settings());
+    let calls = 0;
+    engine.onEdits = () => calls++;
+    await engine.load(three.settings(), []);
+    expect(calls).toBe(1);
+    await engine.load(maze.settings(), mazeEnv);
+    expect([calls, engine.matches(mazeEnv, 'box')]).toEqual([2, true]);
+  });
+
+  // A load starts the sweep's placement over: the list of the same length on the same grid is another list
+  // (mutant EN7).
+  it('are judged by the sweep as loaded, after a load of as many shapes', async () => {
+    const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, [
+      { kind: 'food', at: [-0.5, 0], r: 0.02 },
+    ]);
+    await engine.load(engine.settings, [{ kind: 'food', at: [0.5, 0], r: 0.02 }]);
+    // Over all of the second food (at 416, 160 on 512 × 320, radius 6.4).
+    engine.paint({ kind: 'erase', from: [416, 160], to: [416, 160], radius: 10 });
+    expect(edits(engine)).toEqual([]);
+  });
+
+  // Engine.matches: the scene's shapes in the scene's arena, and no stroke for a shape (mutants EN9, EN10).
+  it('match a scene only with its own shapes in its own arena', async () => {
+    const shape = { kind: 'food' as const, at: [0, 0] as [number, number], r: 0.75 };
+    const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, [shape]);
+    expect([engine.matches([shape], 'box'), engine.matches([shape], 'dish')]).toEqual([true, false]);
+    // A stroke with the shape's numbers, in cells: at the grid's corner with radius 0.75.
+    engine.clearEnvironment();
+    engine.paint({ kind: 'food', from: [0, 0], to: [0, 0], radius: 0.75 });
+    expect(edits(engine)).toHaveLength(1);
+    expect(engine.matches([shape], 'box')).toBe(false);
+  });
+
   it('are replaced by a preset load, also one chosen during a rebuild', async () => {
     const { engine, backend, sim } = await engineWith(three.settings(), []);
     engine.paint({ kind: 'wall', from: [10, 10], to: [500, 10], radius: 4 });
@@ -691,8 +726,8 @@ describe('the sweep', () => {
   // The GPU computes in float32: a cell this close to the edge of a brush may go either way there.
   it('deletes a stroke only when its cells lie inside the clearing strokes by SLACK', async () => {
     const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
-    const dab = (kind: Stroke['kind'], radius: number) => {
-      engine.paint({ kind, from: [100.5, 100.5], to: [100.5, 100.5], radius });
+    const dab = (kind: Stroke['kind'], radius: number, at: [number, number] = [100.5, 100.5]) => {
+      engine.paint({ kind, from: at, to: at, radius });
     };
     // Four cells lie exactly 3 cells from the centre. Painted, but cleared only within the erase's last 0.005 cells.
     dab('food', 3);
@@ -706,5 +741,117 @@ describe('the sweep', () => {
     // Cleared well inside.
     dab('erase', 3.2);
     expect(edits(engine)).toHaveLength(0);
+    // An erase along the food's middle row clears its rows 98 to 102; the cells (100, 97) and (100, 103) lie exactly 3
+    // cells from the food's centre, outside every row the erase clears: both stay.
+    dab('food', 3);
+    engine.paint({ kind: 'erase', from: [90.5, 100.5], to: [110.5, 100.5], radius: 2.9 });
+    expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
+    engine.clearEnvironment();
+    // An erase that reaches the food's cell (102, 100) only within SLACK of its own edge still erases it on the GPU:
+    // it stays as long as the food does.
+    dab('food', 2);
+    dab('erase', 3.005, [105.5, 100.5]);
+    expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
+  });
+
+  // Spread into Math.min, V8 throws from about 125,000 arguments: an erase over 130,000 edits threw out of
+  // Engine.paint and stayed unswept (review of ADR 0019).
+  it('sweeps an erase over 130,000 edits', async () => {
+    const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
+    let seed = 3;
+    const rand = () => {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      return (seed >>> 0) / 2 ** 32;
+    };
+    for (let k = 0; k < 130_000; k++) {
+      const p: [number, number] = [8 + rand() * 496, 8 + rand() * 304];
+      engine.paint({ kind: 'food', from: p, to: p, radius: 1.5 });
+    }
+    expect(edits(engine)).toHaveLength(130_000);
+    engine.paint({ kind: 'erase', from: [256, 160], to: [256, 160], radius: 400 });
+    expect(edits(engine)).toHaveLength(0);
+  }, 60_000);
+
+  // Rule 2 looks at the erases over an edit that went, not at every erase nearby: an erase that clears nothing only on
+  // this screen shape stays for the others (deviation 3 of the review of ADR 0019, mutant SW17), until an edit under it
+  // goes there.
+  it('keeps an erase that clears nothing only on this screen shape until an edit under it goes there', async () => {
+    const c = canvas();
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinkingEnv, c);
+    await engine.apply({ ...engine.settings, boundary: 'box' });
+    // Over a part of food 6 here; on a square screen the box's frame puts it 67 cells beside the food.
+    engine.paint({ kind: 'erase', from: [food6[0] - 3, food6[1]], to: [food6[0] - 3, food6[1]], radius: 2 });
+    engine.frame(0, 0);
+    const erased = foodNear(sim(), food6, 5);
+    const whole = await engineWith(shrinking.settings(), shrinkingEnv, canvas());
+    await whole.engine.apply({ ...whole.engine.settings, boundary: 'box' });
+    expect(erased).toBeLessThan(foodNear(whole.sim(), food6, 5));
+    const square = async () => {
+      [c.width, c.height] = [1000, 1000];
+      await engine.apply({ ...engine.settings, density: engine.settings.density === 0.2 ? 0.25 : 0.2 });
+    };
+    const wide = async () => {
+      [c.width, c.height] = [1600, 1000];
+      await engine.apply({ ...engine.settings, density: 0.45 });
+    };
+    await square();
+    // There the erase lies at (135.24, 230.4) with radius 3.2: its box spans columns 131 to 139. Two dabs on both sides
+    // of it, and one erase over both: their boxes span it, but neither box meets its box (the right one starts at
+    // column 140). First where the erase's tile of the index holds nothing that stays, then with a food in it 20 cells
+    // beside the erase.
+    const y = fromFrame([-0.05, -0.05], [512, 512], 'box')[1];
+    const beside = () => {
+      for (const x of [food6[0] - 15, 144.5]) engine.paint({ kind: 'food', from: [x, y], to: [x, y], radius: 3 });
+      engine.paint({ kind: 'erase', from: [food6[0] - 15, y], to: [144.5, y], radius: 5 });
+    };
+    beside();
+    expect(edits(engine)).toHaveLength(9);
+    engine.paint({ kind: 'food', from: [155, 250], to: [155, 250], radius: 2 });
+    beside();
+    expect(edits(engine)).toHaveLength(10);
+    await wide();
+    expect(foodNear(sim(), food6, 5)).toBe(erased);
+    // A newer food over the erase there, erased completely, goes: now an edit under the erase went, and the erase,
+    // which clears nothing there, goes too. Back here food 6 is whole again.
+    await square();
+    engine.paint({ kind: 'food', from: [food6[0] - 3, y], to: [food6[0] - 3, y], radius: 2 });
+    engine.paint({ kind: 'erase', from: [food6[0] - 3, y], to: [food6[0] - 3, y], radius: 4 });
+    expect(edits(engine)).toHaveLength(9);
+    await wide();
+    expect(foodNear(sim(), food6, 5)).toBe(foodNear(whole.sim(), food6, 5));
+  });
+
+  // Only older edits keep an erase: a newer food over it does not (mutant SW12). Kept, the erase would erase what it
+  // reaches only on another screen shape, here food 6 on a square one.
+  it('deletes an erase over an edit that went when only a newer edit lies under it', async () => {
+    const c = canvas();
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinkingEnv, c);
+    await engine.apply({ ...engine.settings, boundary: 'box' });
+    // On a square screen x stays and y spreads by 1.6 about the centre, in the box's frame and the dish's: at x = 67.6
+    // these strokes lie over food 6 there, 70 cells beside it here.
+    const x = fromFrame([-0.368, 0], [512, 512], 'dish')[0];
+    const dab = (kind: Stroke['kind'], y: number, radius: number) => {
+      engine.paint({ kind, from: [x, y], to: [x, y], radius });
+    };
+    dab('food', 147, 3);
+    dab('erase', 143.5, 2); // over the top of that food
+    dab('food', 140, 2); // over the top of the erase
+    dab('erase', 148.5, 4.6); // over all of the first food, beside the second
+    const kept = edits(engine);
+    expect(kept.map((e) => e.kind)).toEqual([...shrinkingEnv.map(() => 'food'), 'food']);
+    [c.width, c.height] = [1000, 1000];
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    const fresh = await engineWith(shrinking.settings(), shrinkingEnv, canvas(1000, 1000));
+    await fresh.engine.apply({ ...fresh.engine.settings, boundary: 'box' });
+    const newer = kept.at(-1);
+    if (!newer) throw new Error('no newer food');
+    const s = strokeOn(newer, 512, 512);
+    if (!s) throw new Error('outside');
+    fresh.engine.paint(s);
+    fresh.engine.frame(0, 0);
+    engine.frame(0, 0);
+    expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 });

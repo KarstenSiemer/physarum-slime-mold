@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Boundary } from '../model/params';
 import { presetById } from '../model/presets';
-import { paintsCell } from './brush';
+import { paintsCell, SLACK } from './brush';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
@@ -97,7 +97,7 @@ describe('the sweep', () => {
       const rand = rng(seed);
       const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
       let [w, h] = pick(GRIDS);
-      let arena = pick(BOUNDARIES);
+      let arena: Boundary = pick(BOUNDARIES);
       let spots = spotsOf(rand, w, h);
       // A scene's shapes, in the frame of its arena.
       const scene = pick(['maze', 'shrinking', 'steiner', 'light', 'three-strains'] as const);
@@ -106,14 +106,16 @@ describe('the sweep', () => {
       /** Every stroke since the grid on screen changed: the sweep may change other grids, not this one. */
       let full = list.slice();
       // Kept in step with the list as the engine keeps it, with the open cells it remembers between sweeps.
-      let placement = new Placement(w, h, list);
+      // Every other sequence keeps the index of tiles from the first edit on (the engine from INDEXED on).
+      const tiles = seed % 2 ? 0 : undefined;
+      let placement = new Placement(w, h, list, tiles);
       for (let op = 0; op < 36; op++) {
         const r = rand();
         if (r < 0.08) {
           [w, h] = pick(GRIDS);
           spots = spotsOf(rand, w, h);
           full = list.slice();
-          placement = new Placement(w, h, list);
+          placement = new Placement(w, h, list, tiles);
           continue;
         }
         if (r < 0.16) {
@@ -130,7 +132,7 @@ describe('the sweep', () => {
         if (edit.kind === 'erase' || edit.kind === 'wall') {
           const gone = sweep(placement);
           // A fresh placement, without the cells that earlier sweeps found open, deletes the same edits.
-          if (op % 3 === 0) expect([...sweep(new Placement(w, h, list))]).toEqual([...gone]);
+          if (op % 3 === 0) expect([...sweep(new Placement(w, h, list, 2 - (tiles ?? 2)))]).toEqual([...gone]);
           deleted += gone.size;
           compact(list, gone);
           placement.remove(gone);
@@ -146,6 +148,41 @@ describe('the sweep', () => {
     expect(deleted).toBeGreaterThan(800);
     expect(kept).toBeGreaterThan(800);
   }, 120_000);
+});
+
+// Clearing strokes count their cells with the rim moved in by SLACK and a hair of float64 rounding more: on a 652 × 652
+// dish the centre of cell (373, 4) lies 1.5e-7 cells inside the rim moved in by SLACK, within that hair (2026-11-10, a
+// search of grids up to 2,100 cells found no cell within the hair on the other side, where the per-cell rule would
+// count it otherwise). The edit stays (mutant IV4).
+describe('the sweep at the rim', () => {
+  it('keeps an edit whose cell lies within a hair inside the rim moved in, under an erase there', () => {
+    const [w, h] = [652, 652];
+    expect(Math.min(w, h) / 2 - 1 - SLACK - Math.hypot(373.5 - w / 2, 4.5 - h / 2)).toBeLessThan(2e-7);
+    const list = [
+      fromStroke({ kind: 'food', from: [373.5, 4.5], to: [373.5, 4.5], radius: MIN_RADIUS }, [w, h], 'dish'),
+      fromStroke({ kind: 'erase', from: [374, 6], to: [374, 6], radius: 4 }, [w, h], 'dish'),
+    ];
+    expect([...sweep(new Placement(w, h, list))]).toEqual([]);
+  });
+});
+
+// Rule 2 looks at the erases over an edit that went: a box that only touches the erase's box holds no cell of it
+// (boxes are grown by a cell), in the pass over the list and in the tiles alike (mutant TL4).
+describe('the sweep beside an erase', () => {
+  it('keeps an erase that clears nothing between two edits that went, whose boxes touch its box', () => {
+    const [w, h] = [128, 128];
+    const dab = (kind: EnvTool, x: number, radius: number, to = x) =>
+      fromStroke({ kind, from: [x, 20.5], to: [to, 20.5], radius }, [w, h], 'box');
+    // Boxes: the erase's columns 16 to 24, the foods' 7 to 15 and 25 to 33.
+    const list = [dab('erase', 20.5, 3), dab('food', 11.5, 3), dab('food', 29.5, 3), dab('erase', 11.5, 5, 29.5)];
+    for (const tiles of [undefined, 0]) {
+      const placement = new Placement(w, h, list, tiles);
+      expect([placement.box(0)[0], placement.box(0)[2], placement.box(1)[2], placement.box(2)[0]]).toEqual([
+        16, 25, 16, 25,
+      ]);
+      expect([...sweep(placement)].sort()).toEqual([1, 2, 3]);
+    }
+  });
 });
 
 // The same rule through the engine: the CPU simulation holds every stroke painted since it was built, the engine's

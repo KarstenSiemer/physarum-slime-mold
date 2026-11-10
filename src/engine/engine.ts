@@ -307,8 +307,11 @@ export class Engine {
     if (this.painted === this.edits.length) return;
     const { width, height } = this.sim;
     const strokes = this.edits.slice(this.painted).map((e) => strokeOn(e, width, height));
-    // A new simulation maps every edit onto the grid on screen: the sweep keeps them instead of mapping them again.
-    if (this.painted === 0 && this.viewGrid?.[0] === width && this.viewGrid[1] === height) {
+    // A new simulation maps every edit onto the grid on screen: the sweep keeps them instead of mapping them again. On
+    // the same grid it keeps its placement, and with it what earlier sweeps found.
+    const kept = this.placement;
+    const same = kept?.w === width && kept.h === height && kept.length === this.edits.length;
+    if (this.painted === 0 && this.viewGrid?.[0] === width && this.viewGrid[1] === height && !same) {
       this.placement = new Placement(width, height);
       for (const s of strokes) this.placement.add(s);
     }

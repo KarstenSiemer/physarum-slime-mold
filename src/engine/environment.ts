@@ -105,7 +105,7 @@ function mapped(e: EnvEdit, [w, h]: Point): Painted {
   const { kind, boundary } = e;
   if (e.grid?.[0] === w && e.grid[1] === h) return { kind, from: e.from, to: e.to, radius: e.radius, boundary };
   const [from, to] = e.grid ? [toFrame(e.from, e.grid, boundary), toFrame(e.to, e.grid, boundary)] : [e.from, e.to];
-  const r = e.grid ? e.radius / Math.min(...e.grid) : e.radius;
+  const r = e.grid ? e.radius / Math.min(e.grid[0], e.grid[1]) : e.radius;
   return {
     kind,
     from: fromFrame(from, [w, h], boundary),
