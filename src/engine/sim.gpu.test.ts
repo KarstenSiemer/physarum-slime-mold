@@ -310,6 +310,67 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         ]),
       ).toEqual([11, 2]); // the destination is free, the way is not
       expect(await move([[12, 2]])).toEqual([11, 2]); // the segment touches this wall cell at its corner
+      expect(await move([[11, 1]])).toEqual([11, 2]); // and this one: float32 walks into the other one first
+    });
+
+    // Both cells beside the corner count, in every diagonal direction: float32 rounding decides which of them a
+    // plain walk enters, so each one alone must block (agents.wgsl and agents.frag clearPath, CORNER).
+    it('counts both cells beside a corner the move passes, in every diagonal direction', async () => {
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: Math.SQRT2 }];
+      const results: string[] = [];
+      for (const [sx, sy] of [
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+      ] as const) {
+        for (const side of [
+          [11 + sx, 2],
+          [11, 2 + sy],
+        ] as const) {
+          const sim = await make({ layout: 'empty', strains }, 32, 32, 1);
+          const env = new Uint8Array(32 * 32 * 4);
+          env[(side[1] * 32 + side[0]) * 4] = 255;
+          sim.writeEnv(env);
+          sim.writeAgent(0, { x: 11.5, y: 2.5, heading: Math.atan2(sy, sx), bits: 4 });
+          sim.run(1);
+          const [a] = await sim.readAgents();
+          results.push(`${sx},${sy} wall ${side.join(',')}: ${Math.floor(a?.x ?? -1)},${Math.floor(a?.y ?? -1)}`);
+        }
+      }
+      expect(results).toEqual([
+        '1,-1 wall 12,2: 11,2',
+        '1,-1 wall 11,1: 11,2',
+        '1,1 wall 12,2: 11,2',
+        '1,1 wall 11,3: 11,2',
+        '-1,1 wall 10,2: 11,2',
+        '-1,1 wall 11,3: 11,2',
+        '-1,-1 wall 10,2: 11,2',
+        '-1,-1 wall 11,1: 11,2',
+      ]);
+    });
+
+    // The longest step the panel allows: a move of 8 cells enters up to 13 cells, so the wall can be the fourth
+    // or a later one on the way (the walk loop in clearPath runs up to 24 cells).
+    it('never lets a step of 8 cells cross a one-cell wall, also where the wall is far along the move', async () => {
+      const [w, h, n, wall] = [64, 40, 128, 32];
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 8 }];
+      const beyond = async (painted: boolean) => {
+        const sim = await make({ layout: 'empty', strains }, w, h, n);
+        if (painted) sim.paint([{ kind: 'wall', from: [wall + 0.5, 0], to: [wall + 0.5, h], radius: 0.5 }]);
+        for (let i = 0; i < n; i++) {
+          // 4 to 7 cells before the wall, off the cell centres, heading up to 60° off +x.
+          const x = wall - 7 + (i % 4) + 0.1 + (0.8 * ((i * 7) % 11)) / 11;
+          const heading = ((((i * 37) % 121) - 60) * Math.PI) / 180;
+          sim.writeAgent(i, { x, y: 4.3 + 0.25 * Math.floor(i / 4), heading, bits: 4 });
+        }
+        sim.run(1);
+        const agents = await sim.readAgents();
+        expect(agents.every((a) => a.bits & 4)).toBe(true);
+        return agents.filter((a) => a.x >= wall).length;
+      };
+      expect(await beyond(false)).toBeGreaterThan(40);
+      expect(await beyond(true)).toBe(0);
     });
   });
 
@@ -581,6 +642,54 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const sim = await make({ collisions: true, seed: 7 }, 512, 288, Math.round(0.2 * 512 * 288));
       expect(await starts(sim, 'wrap')).toEqual({ alive: Math.round(0.2 * 512 * 288), shared: 0, blocked: 0 });
     });
+
+    // Every strain draws again in its own region: its band, its sector, its colony (init.wgsl and init.frag start()).
+    it.each(['bands', 'sectors', 'colonies'] as const)(
+      'keeps every strain of the %s layout in its own region when its agents draw again',
+      async (layout) => {
+        const [w, h] = [64, 48];
+        const m = Math.min(w, h);
+        const strains = [1, 0.5, 0.75].map((share, i) => ({ ...defaultStrain(i), share }));
+        const sim = await make({ layout, strains, collisions: true, seed: 11 }, w, h, 108);
+        sim.paint([{ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 }]);
+        sim.reset();
+        const inside = (x: number, y: number, s: number) => {
+          const [dx, dy] = [x - w / 2, y - h / 2];
+          if (layout === 'bands') return x >= (s / 3) * w - 1e-3 && x <= ((s + 1) / 3) * w + 1e-3;
+          if (layout === 'sectors') {
+            // How far past the start of its own sector the angle lies, in sectors (3 make a turn).
+            const past = ((((Math.atan2(dy, dx) / (2 * Math.PI)) * 3 - s) % 3) + 3) % 3;
+            return Math.hypot(dx, dy) <= 0.45 * m + 1e-3 && (past <= 1 + 1e-3 || past >= 3 - 1e-3);
+          }
+          const c = (s / 3) * 2 * Math.PI - Math.PI / 2;
+          return Math.hypot(dx - 0.28 * m * Math.cos(c), dy - 0.28 * m * Math.sin(c)) <= 0.1 * m + 1e-3;
+        };
+        const agents = await sim.readAgents();
+        const strayed = agents.filter((a) => a.bits & 4 && !inside(a.x, a.y, a.bits & 3));
+        expect(strayed).toEqual([]);
+        expect(await starts(sim, 'wrap')).toEqual({ alive: 108, shared: 0, blocked: 0 });
+      },
+    );
+
+    // Without the rule an agent may share a cell, but one that drew a wall or a cell outside the dish draws again
+    // in its region, up to 32 times (init.wgsl and init.frag, ROUNDS). The wall covers about half the centre spot.
+    it.each([
+      ['center', 'box'],
+      ['mixed', 'dish'],
+    ] as const)(
+      'starts the %s layout in a %s without the rule on open cells of its region',
+      async (layout, boundary) => {
+        const [w, h] = [64, 48];
+        const sim = await make({ layout, boundary, seed: 13 }, w, h, 300);
+        sim.paint([{ kind: 'wall', from: [0, 24], to: [64, 24], radius: 1.5 }]);
+        sim.reset();
+        const s = await starts(sim, boundary);
+        expect([s.alive, s.blocked]).toEqual([300, 0]);
+        if (layout === 'center')
+          for (const a of await sim.readAgents())
+            expect(Math.hypot(a.x - w / 2, a.y - h / 2)).toBeLessThanOrEqual(0.08 * 48 + 1e-3);
+      },
+    );
 
     // A move that ends a hair left of x = 0 on the periodic grid: wrapped in float32, its position rounded up to
     // x = W, in cell 0, while WebGPU counted the move and the occupancy in cell W − 1 (wrapPos in common.wgsl and
