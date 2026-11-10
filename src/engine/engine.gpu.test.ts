@@ -5,8 +5,10 @@ import { presetById } from '../model/presets';
 import { Engine } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
+import type { GlSim } from './gl/sim';
 import { OutOfMemoryError } from './gpu';
 import { paintReference } from './paint-reference';
+import type { Simulation } from './sim';
 import type { Backend, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -338,6 +340,282 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     await check();
     await engine.apply({ ...engine.settings, resolution: 256 });
     await check();
+    engine.destroy();
+  });
+
+  /**
+   * Cells of the arena where the renderer's outlines (ADR 0009) disagree with `env`: wall or food on the other side
+   * of the outline, an outline farther than the nearest cell of its layer (paint.wgsl `floorByte`), another light,
+   * or a drop shadow more than 1 off the share of wall cells under its cone (paint.wgsl `shadowByte`).
+   */
+  async function disagreements(engine: Engine) {
+    const { sim, settings } = engine;
+    const [env, shape] = [await sim.readEnv(), await sim.readShape()];
+    const { width: w, height: h } = sim;
+    const { boundary } = settings;
+    const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1;
+    const holds = (x: number, y: number, ch: number) => {
+      if (boundary === 'wrap') [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
+      else if (x < 0 || y < 0 || x >= w || y >= h || (boundary === 'dish' && !inDish(x, y))) return false;
+      return (env[(y * w + x) * 4 + ch] ?? 0) >= 128;
+    };
+    const isWall = (x: number, y: number) => holds(x, y, 0);
+    // The byte of d cells outside, with the nearest cell of the layer d cells away.
+    const floor = (x: number, y: number, ch: number) => {
+      let near = Infinity;
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++)
+          if ((dx || dy) && holds(x + dx, y + dy, ch)) near = Math.min(near, Math.hypot(dx, dy));
+      return Math.round((Math.min(1, Math.max(-1, -near / 4)) * 0.5 + 0.5) * 255);
+    };
+    const wrong: string[] = [];
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        if (boundary === 'dish' && !inDish(x, y)) continue;
+        const i = (y * w + x) * 4;
+        for (const ch of [0, 1]) {
+          const [e, s] = [env[i + ch] ?? 0, shape[i + ch] ?? 0];
+          if (e >= 128 !== s >= 128) wrong.push(`layer ${ch} at ${x},${y}`);
+          else if (e < 128 && s < floor(x, y, ch))
+            wrong.push(`layer ${ch} at ${x},${y}: ${s} below ${floor(x, y, ch)}`);
+        }
+        if (shape[i + 2] !== env[i + 2]) wrong.push(`light at ${x},${y}`);
+        const [sx, sy] = [x + 0.5 - 1.08, y + 0.5 - 1.44];
+        let [sum, all] = [0, 0];
+        for (let dy = -2; dy <= 2; dy++)
+          for (let dx = -2; dx <= 2; dx++) {
+            const [kx, ky] = [Math.floor(sx) + dx, Math.floor(sy) + dy];
+            const weight = Math.max(1 - Math.hypot(kx + 0.5 - sx, ky + 0.5 - sy) / 1.5, 0);
+            all += weight;
+            if (isWall(kx, ky)) sum += weight;
+          }
+        if (Math.abs((shape[i + 3] ?? 0) - Math.round((sum / all) * 255)) > 1) wrong.push(`shadow at ${x},${y}`);
+      }
+    return wrong;
+  }
+
+  /** The engine's edit list (ADR 0019). */
+  const editsOf = (engine: Engine) => (engine as unknown as { edits: EnvEdit[] }).edits;
+
+  /**
+   * Expects the simulation's `env` and outlines to be the bytes of the edit list painted one call per edit on a new
+   * simulation of the same grid and settings: a replay paints the list in one call of Sim.paint (Engine.flushEnv()).
+   */
+  async function expectPerStroke(engine: Engine) {
+    const { width: w, height: h } = engine.sim;
+    const sim = await engine.backend.createSim(engine.settings, w, h, 1);
+    for (const e of editsOf(engine)) {
+      const s = strokeOn(e, w, h);
+      if (s) sim.paint([s]);
+    }
+    const [env, shape] = [await sim.readEnv(), await sim.readShape()];
+    sim.destroy();
+    expect(differing(await engine.sim.readEnv(), env)).toBe(0);
+    expect(differing(await engine.sim.readShape(), shape)).toBe(0);
+  }
+
+  /** Runs `fn` while `proto[key]` also records its first argument in `used`, and restores it after. */
+  async function recording(proto: object, key: string, used: Set<unknown>, fn: () => Promise<unknown>) {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+    const original = descriptor?.value as ((this: unknown, ...args: unknown[]) => unknown) | undefined;
+    if (!descriptor || !original) throw new Error(`no ${key}`);
+    Object.defineProperty(proto, key, {
+      ...descriptor,
+      value(this: unknown, ...args: unknown[]) {
+        used.add(args[0]);
+        return original.apply(this, args);
+      },
+    });
+    try {
+      await fn();
+    } finally {
+      Object.defineProperty(proto, key, descriptor);
+    }
+  }
+
+  /** Whether a capture draws with the variant of the render pass that has the environment code (ADR 0009, item 9). */
+  async function drawsEnv(engine: Engine): Promise<boolean> {
+    const used = new Set<unknown>();
+    let variants: readonly unknown[];
+    if (kind === 'webgpu') {
+      await recording(GPURenderPassEncoder.prototype, 'setPipeline', used, () => engine.capture());
+      variants = (engine.backend as unknown as { renderer: { pipelines: readonly unknown[] } }).renderer.pipelines;
+    } else {
+      await recording(WebGL2RenderingContext.prototype, 'useProgram', used, () => engine.capture());
+      const { render } = (engine.backend as unknown as { prog: { render: readonly { program: WebGLProgram }[] } }).prog;
+      variants = render.map((p) => p.program);
+    }
+    const [without, withEnv] = [used.has(variants[0]), used.has(variants[1])];
+    expect(without !== withEnv).toBe(true);
+    return withEnv;
+  }
+
+  /** Overwrites the renderer's outlines with zeros: far outside every outline, no light, no shadow. */
+  function blankOutlines(engine: Engine) {
+    const sim = engine.sim;
+    const zeros = new Uint8Array(sim.width * sim.height * 4);
+    if (kind === 'webgpu') {
+      const s = sim as Simulation;
+      s.device.queue.writeBuffer(s.shape, 0, zeros);
+    } else {
+      const gl = (engine.backend as unknown as { gl: WebGL2RenderingContext }).gl;
+      gl.bindTexture(gl.TEXTURE_2D, (sim as GlSim).shapeTexture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, sim.width, sim.height, gl.RGBA, gl.UNSIGNED_BYTE, zeros);
+    }
+  }
+
+  /** The largest difference of one channel between two captures. */
+  const maxDiff = (a: ImageData, b: ImageData) =>
+    a.data.reduce((m, v, i) => (i % 4 === 3 ? m : Math.max(m, Math.abs(v - (b.data[i] ?? 0)))), 0);
+
+  // Every new simulation replays the edits through Sim.paint, which writes `env` and the outlines together.
+  it('replay the outlines with env on another grid, and draw them with the environment pass', async () => {
+    const { engine } = await load('maze');
+    expect(engine.sim.hasEnvironment).toBe(true);
+    expect(await disagreements(engine)).toEqual([]);
+    await engine.apply({ ...engine.settings, resolution: 768 });
+    expect(engine.sim.width).toBe(768);
+    expect(engine.sim.hasEnvironment).toBe(true);
+    expect(await disagreements(engine)).toEqual([]);
+    // The renderer of the rebuilt simulation reads the outlines: without them the walls and the food are gone.
+    const drawn = await engine.capture();
+    blankOutlines(engine);
+    expect(maxDiff(drawn, await engine.capture())).toBeGreaterThan(40);
+    engine.clearEnvironment();
+    expect(engine.sim.hasEnvironment).toBe(false);
+    expect((await engine.sim.readShape()).every((v) => v === 0)).toBe(true);
+    engine.destroy();
+  });
+
+  // A switch between the dish and a box builds a new simulation, which paints every edit through the frame of the
+  // arena it was painted in (ADR 0019); edits painted under the dish keep its clip, and the outlines follow `env` under
+  // the arena on screen. A switch between a box and the periodic grid keeps the simulation and its `env`.
+  it('keep the outlines on the side of env across arena switches from the dish to a box and back', async () => {
+    const { engine } = await load('shrinking');
+    const [w, h] = [engine.sim.width, engine.sim.height];
+    const rim = Math.min(w, h) / 2 - 1;
+    const strokes: Stroke[] = [
+      // Across the rim: the dish clips it, and its shadow falls on cells outside the dish, which a box shows.
+      { kind: 'wall', from: [w * 0.5 + rim - 20, h * 0.5 - 4], to: [w * 0.5 + rim + 20, h * 0.5 - 4], radius: 2.2 },
+      { kind: 'wall', from: [w * 0.5 - 30, h * 0.5], to: [w * 0.5 + 30, h * 0.5 + 12], radius: 2.2 },
+      { kind: 'food', from: [w * 0.5 + 60, h * 0.5 - 70], to: [w * 0.5 + 140, h * 0.5 - 90], radius: 9 },
+      { kind: 'erase', from: [w * 0.5, h * 0.5 + 4], to: [w * 0.5 + 4, h * 0.5 + 6], radius: 5 },
+      { kind: 'light', from: [w * 0.5 - 60, h * 0.5 + 50], to: [w * 0.5 - 60, h * 0.5 + 50], radius: 7 },
+    ];
+    for (const s of strokes) engine.paint(s);
+    engine.frame(performance.now(), 0);
+    expect(await disagreements(engine)).toEqual([]);
+    for (const boundary of ['box', 'wrap', 'box', 'dish'] as const) {
+      const before = engine.sim;
+      const rebuilt = (boundary === 'dish') !== (engine.settings.boundary === 'dish');
+      await engine.apply({ ...engine.settings, boundary });
+      expect(engine.sim !== before).toBe(rebuilt);
+      expect(engine.sim.hasEnvironment).toBe(true);
+      expect(await disagreements(engine), boundary).toEqual([]);
+      // Under the box: food across the corner of the grid, which the dish later leaves outside, and a wall along the
+      // right edge, whose shadow falls across that edge onto the left one on the periodic grid (paint.wgsl
+      // `shadowByte`: the cone lies up and to the left of a cell).
+      if (boundary === 'box' && rebuilt) {
+        engine.paint({ kind: 'food', from: [6, 6], to: [30, 12], radius: 6 });
+        engine.paint({ kind: 'wall', from: [w - 1.5, 40], to: [w - 1.5, h - 40], radius: 2.2 });
+        engine.frame(performance.now(), 0);
+        expect(await disagreements(engine)).toEqual([]);
+      }
+    }
+    // The last switch replayed edits of the dish and of the box in one call: the bytes of one call per edit.
+    expect(new Set(editsOf(engine).map((e) => e.boundary))).toEqual(new Set(['dish', 'box']));
+    await expectPerStroke(engine);
+    engine.destroy();
+  });
+
+  // The sweep deletes edits that later strokes cleared on the grid on screen and changes no byte there, also when it
+  // completes over frames (Engine.sweepFor()); a new grid replays what is left in one call (ADR 0019).
+  it('keep the outlines on the side of env after sweeps, also over frames, and on a new grid', async () => {
+    const { engine } = await load('three-strains', { resolution: 512, boundary: 'box' }, [320, 200]);
+    expect([engine.sim.width, engine.sim.height]).toEqual([512, 320]);
+    const paint = (kind: Stroke['kind'], from: [number, number], to: [number, number], radius: number) => {
+      engine.paint({ kind, from, to, radius });
+      engine.frame(performance.now(), 0);
+    };
+    // Food erased completely: both go. A wall erased in part: all stay. Light under a wall that covers every lit
+    // cell: the light goes.
+    paint('food', [60.31, 60.73], [80.17, 64.29], 4.37);
+    paint('erase', [70.23, 62.41], [70.23, 62.41], 16.13);
+    paint('wall', [120.41, 40.27], [220.71, 52.93], 2.61);
+    paint('erase', [150.33, 44.17], [170.29, 47.31], 5.23);
+    paint('light', [300.43, 80.37], [300.43, 80.37], 6.11);
+    paint('wall', [300.29, 80.13], [301.17, 80.63], 8.31);
+    paint('food', [400.37, 200.23], [420.61, 210.47], 5.41);
+    expect(engine.swept).toBe(true);
+    expect(editsOf(engine).map((e) => e.kind)).toEqual(['wall', 'erase', 'wall', 'food']);
+    expect(await disagreements(engine)).toEqual([]);
+    // Food dabs in one frame, then an eraser over most of them: its sweep waits for the frames after the stroke.
+    let seed = 7;
+    const rand = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    for (let k = 0; k < 400; k++) {
+      const at: [number, number] = [20 + rand() * 200, 120 + rand() * 180];
+      engine.paint({ kind: 'food', from: at, to: at, radius: 2 + rand() * 4 });
+    }
+    engine.frame(performance.now(), 0);
+    engine.paint({ kind: 'erase', from: [120.3, 210.7], to: [120.3, 210.7], radius: 80.3 });
+    expect(engine.swept).toBe(false);
+    const waiting = editsOf(engine).length;
+    engine.frame(performance.now(), 0);
+    expect(await disagreements(engine)).toEqual([]);
+    while (!engine.swept) engine.frame(performance.now(), 0);
+    expect(editsOf(engine).length).toBeLessThan(waiting - 100);
+    expect(await disagreements(engine)).toEqual([]);
+    await engine.apply({ ...engine.settings, resolution: 256 });
+    expect(engine.sim.width).toBe(256);
+    expect(await disagreements(engine)).toEqual([]);
+    await expectPerStroke(engine);
+    engine.destroy();
+  });
+
+  // A preset load puts the scene's shapes in place of every edit: on the same grid the simulation clears its
+  // environment and paints them in one call, on another grid or under the dish a new simulation paints them.
+  it('keep the outlines on the side of env after a preset load, on the same grid and on a new one', async () => {
+    const { engine } = await load('network', { resolution: 512, density: 0.12 });
+    engine.paint({ kind: 'food', from: [100.3, 100.7], to: [160.1, 120.4], radius: 9.3 });
+    engine.paint({ kind: 'wall', from: [300.2, 40.6], to: [310.4, 240.3], radius: 3.1 });
+    engine.frame(performance.now(), 0);
+    for (const id of ['maze', 'light', 'shrinking']) {
+      const p = presetById(id);
+      if (!p) throw new Error(`no preset ${id}`);
+      const before = engine.sim;
+      await engine.load({ ...p.settings(), seed: 5, resolution: 512 }, p.env ?? []);
+      // The Maze runs on the grid and the density of before (512, 0.12): no new simulation.
+      expect(engine.sim === before, id).toBe(id === 'maze');
+      expect(engine.sim.hasEnvironment).toBe(true);
+      expect(await disagreements(engine), id).toEqual([]);
+      await expectPerStroke(engine);
+    }
+    engine.destroy();
+  });
+
+  // The renderer draws food, light and walls only with the pass that has the environment code (ADR 0009, item 9).
+  it('count every new simulation that replays food, light or walls as painted and draw it with the environment pass', async () => {
+    const { engine } = await load('network', { resolution: 256 });
+    expect([engine.sim.hasEnvironment, await drawsEnv(engine)]).toEqual([false, false]);
+    for (const k of ['food', 'light', 'wall'] as const) {
+      engine.paint({ kind: k, from: [100.3, 70.2], to: [110.4, 72.1], radius: 4.2 });
+      engine.frame(performance.now(), 0);
+      const before = engine.sim;
+      await engine.apply({ ...engine.settings, resolution: engine.settings.resolution === 256 ? 512 : 256 });
+      expect(engine.sim).not.toBe(before);
+      expect(engine.sim.hasEnvironment, k).toBe(true);
+      expect(await drawsEnv(engine), k).toBe(true);
+      expect(await disagreements(engine), k).toEqual([]);
+      engine.clearEnvironment();
+      expect(engine.sim.hasEnvironment, k).toBe(false);
+      expect(await drawsEnv(engine), k).toBe(false);
+      expect((await engine.sim.readShape()).every((v) => v === 0)).toBe(true);
+    }
+    // An eraser alone leaves nothing to draw, also on a new simulation.
+    engine.paint({ kind: 'erase', from: [100.3, 70.2], to: [110.4, 72.1], radius: 4.2 });
+    engine.frame(performance.now(), 0);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect([engine.sim.hasEnvironment, await drawsEnv(engine)]).toEqual([false, false]);
     engine.destroy();
   });
 

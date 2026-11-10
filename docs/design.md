@@ -46,7 +46,10 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   wall, the edits that later strokes cleared completely on the grid on screen leave the list (the
   sweep, ADR 0019). A stroke on a copy of a periodic grid, which the view shows around the grid, is
   kept where the copy shows it, inside the grid. The scene card counts food, light and walls that
-  differ from the scene's as a change.
+  differ from the scene's as a change. `Sim.paint` takes the edits that the simulation does not
+  hold yet in one call and writes `env` and the renderer's outlines together: WebGPU outlines each
+  segment right after its paint, WebGL2 a run of segments after the run's paint, with the bytes of
+  one segment after another (ADR 0009, item 11).
 - One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
@@ -80,11 +83,20 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
 | `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | agents that moved into the cell this step, per strain |
 | `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light         |
+| `shape`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: outline distances, light, wall shadow  |
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
-with float blending).
+with float blending). `shape` is written by the brush next to `env`: the signed distances to the
+wall and food outlines (±4 cells), the light and the drop shadow of the walls. Only the renderer
+reads it, so outlines are smooth at any zoom while the model stays cell-exact (ADR 0009). Its
+bytes are held to `env`: inside exactly where `env` holds the wall or food, and no outline nearer
+than the cells of `env` allow, so nothing of an erased stroke stays. A stroke's distance counts
+only as far as the cells it paints allow, so a stroke beside the edge of a box or the rim of the
+dish changes no outline where it paints no cell. After a change of boundary,
+and after a replay of edits painted under another boundary, they are held to `env` again under
+the boundary on screen.
 
 `rgba32float` and not `rgba16float`: with half floats `x · (1 − 0.0001)` rounds back to `x`,
 so the small decay values from Jones Fig. 12 would stop working.
@@ -157,6 +169,13 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
 - Gel relief style: trail as a height field, normals from finite differences, wet specular
   highlight; yellow plasmodium on dark agar.
 - Paper style: dark trails on white, like the figures in Jones 2010.
+- Food and walls (ADR 0009): outlines rebuilt from distances with a smooth spline, one pixel of
+  anti-aliasing at any zoom, every cell centre on the side of the outline that `env` holds. Food
+  is an oat flake below the trail (grain, a lit rim), which also shows through the gel style's
+  trail; walls are bevelled ridges lit like the gel, with a soft drop shadow, and the trail goes
+  on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
+  (they deposit nothing, Jones 2010, p. 133), and the agents style also shows the agents that
+  stayed put. Without anything painted the render pass runs without this code.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.

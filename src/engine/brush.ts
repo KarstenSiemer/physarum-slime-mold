@@ -1,6 +1,6 @@
 import type { Boundary } from '../model/params';
 import { periods } from './environment';
-import type { EnvTool, Stroke } from './types';
+import { SHAPE_RANGE, type EnvTool, type Stroke } from './types';
 
 type Point = [number, number];
 
@@ -402,17 +402,42 @@ export function paintBox({ from: a, to: b, radius: r }: Stroke, w: number, h: nu
 }
 
 /**
- * The cells a brush stroke can paint, as rectangles inside a `w` × `h` grid: the stroke's bounding box grown by
- * one cell, cut at the grid's edges, or with `wrap` split at them and continued on the other side. WebGL2 scissors
- * the paint pass to them (gl/sim.ts), so a stroke costs fragments for its own cells and not for the whole grid.
+ * Whether the outline pass needs no search of a segment's own cells anywhere (shaders/paint.wgsl `ownHeld`): with a
+ * radius of 0.75 cells or more, on the periodic grid, in a box for a segment inside the grid, and in the dish for a
+ * brush inside the dish (both are convex, so the ends decide). There every cell's byte is at most the hold of the
+ * cells the segment paints, and WebGPU outlines the segment with a pipeline without the search (sim.ts paint()).
+ */
+export function ownHeldEverywhere({ from, to, radius }: Stroke, w: number, h: number, boundary: Boundary): boolean {
+  if (radius < 0.75) return false;
+  if (boundary === 'wrap') return true;
+  if (boundary === 'box') return [from, to].every(([x, y]) => x >= 0 && y >= 0 && x <= w && y <= h);
+  const rim = 0.5 * Math.min(w, h) - 1 - radius;
+  return [from, to].every(([x, y]) => Math.hypot(x - w / 2, y - h / 2) <= rim);
+}
+
+/**
+ * The cells the outline pass of a segment from paintSegments() updates (shaders/paint.wgsl `outline`): its paint
+ * box grown by SHAPE_RANGE, cut to the grid on a closed arena and to one period on a periodic grid. It holds every
+ * cell within SHAPE_RANGE of the segment's brush and every cell whose HOLD_RINGS rings (5, paint.wgsl) hold a cell
+ * the segment paints, so every byte whose distance or hold the segment can change. Undefined like paintBox().
+ */
+export function outlineBox(segment: Stroke, w: number, h: number, wrap: boolean): Rect | undefined {
+  return paintBox({ ...segment, radius: segment.radius + SHAPE_RANGE }, w, h, wrap);
+}
+
+/**
+ * The cells a brush stroke can paint, as rectangles inside a `w` × `h` grid: the cells of paintBox(). The stroke's
+ * bounding box grown by one cell is cut at the grid's edges, or with `wrap` split at them and continued on the other
+ * side, at most one period per axis. WebGL2 scissors the paint pass to them (gl/sim.ts), so a stroke costs fragments
+ * for its own cells and not for the whole grid, and it skips a stroke outside a closed arena as WebGPU does.
  */
 export function scissorRects({ from: a, to: b, radius: r }: Stroke, w: number, h: number, wrap: boolean): Rect[] {
   const span = (lo: number, hi: number, n: number): [number, number][] => {
-    if (hi - lo >= n) return [[0, n]];
     if (!wrap) {
       const [s, e] = [Math.max(0, lo), Math.min(n, hi)];
       return e > s ? [[s, e]] : [];
     }
+    if (hi - lo >= n) return [[0, n]];
     const s = ((lo % n) + n) % n;
     const e = s + hi - lo;
     return e <= n
@@ -425,4 +450,152 @@ export function scissorRects({ from: a, to: b, radius: r }: Stroke, w: number, h
   const xs = span(Math.floor(Math.min(a[0], b[0]) - r) - 1, Math.ceil(Math.max(a[0], b[0]) + r) + 1, w);
   const ys = span(Math.floor(Math.min(a[1], b[1]) - r) - 1, Math.ceil(Math.max(a[1], b[1]) + r) + 1, h);
   return xs.flatMap(([x0, x1]) => ys.map(([y0, y1]): Rect => [x0, y0, x1 - x0, y1 - y0]));
+}
+
+/** The cells of outlineBox() as scissor rectangles (gl/sim.ts): split at the edges of a periodic grid. */
+export function outlineRects(segment: Stroke, w: number, h: number, wrap: boolean): Rect[] {
+  return scissorRects({ ...segment, radius: segment.radius + SHAPE_RANGE }, w, h, wrap);
+}
+
+/** The bits of unionRects(), kept between calls: a row of 32-bit words per cell row of the union's bounding box. */
+let unionBits = new Uint32Array(0);
+
+/** The runs of set bits of `words` words from `offset`: [first, end) bit indices. Bits past the union are 0. */
+function bitRuns(bits: Uint32Array, offset: number, words: number): [number, number][] {
+  const out: [number, number][] = [];
+  let start = -1;
+  for (let k = 0; k < words; k++) {
+    const v = bits[offset + k] ?? 0;
+    if (v === (start < 0 ? 0 : 0xffffffff)) continue; // a whole word that neither starts nor ends a run
+    for (let i = 0; i < 32; i++) {
+      const on = (v >>> i) & 1;
+      if (on && start < 0) start = 32 * k + i;
+      else if (!on && start >= 0) {
+        out.push([start, 32 * k + i]);
+        start = -1;
+      }
+    }
+  }
+  if (start >= 0) out.push([start, 32 * words]);
+  return out;
+}
+
+/**
+ * The cells of some rectangles as rectangles that do not overlap: each cell of the union once (gl/sim.ts draws the
+ * hold, the light and the shadow of a run of outlines once per cell). Bands of rows that hold the same cells, each
+ * with its spans of cells. The rectangles are marked as bits over their bounding box, so the cost grows with their
+ * cells, not with how much they overlap (a replay's drags overlap many times).
+ */
+export function unionRects(rects: readonly Rect[]): Rect[] {
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [x, y, w, h] of rects)
+    if (w > 0 && h > 0) [x0, y0, x1, y1] = [Math.min(x0, x), Math.min(y0, y), Math.max(x1, x + w), Math.max(y1, y + h)];
+  if (x0 >= x1) return [];
+  const [words, rows] = [(x1 - x0 + 31) >>> 5, y1 - y0];
+  if (unionBits.length < words * rows) unionBits = new Uint32Array(words * rows);
+  const bits = unionBits;
+  bits.fill(0, 0, words * rows);
+  for (const [x, y, w, h] of rects) {
+    if (w <= 0 || h <= 0) continue;
+    const [a, b] = [x - x0, x + w - x0 - 1]; // the first and the last bit
+    const [first, last] = [a >>> 5, b >>> 5];
+    const [head, tail] = [(0xffffffff << (a & 31)) >>> 0, 0xffffffff >>> (31 - (b & 31))];
+    for (let row = y - y0; row < y - y0 + h; row++) {
+      const o = row * words;
+      if (first === last) bits[o + first] = ((bits[o + first] ?? 0) | (head & tail)) >>> 0;
+      else {
+        bits[o + first] = ((bits[o + first] ?? 0) | head) >>> 0;
+        bits.fill(0xffffffff, o + first + 1, o + last);
+        bits[o + last] = ((bits[o + last] ?? 0) | tail) >>> 0;
+      }
+    }
+  }
+  const out: Rect[] = [];
+  const same = (r: number, s: number) => {
+    for (let k = 0; k < words; k++) if (bits[r * words + k] !== bits[s * words + k]) return false;
+    return true;
+  };
+  let top = 0;
+  for (let row = 1; row <= rows; row++) {
+    if (row < rows && same(row, top)) continue;
+    for (const [s, e] of bitRuns(bits, top * words, words)) out.push([x0 + s, y0 + top, e - s, row - top]);
+    top = row;
+  }
+  return out;
+}
+
+/** Cells per side of a bucket of PendingOutlines. */
+const BUCKET = 16;
+
+/** Buckets [first, last] that cover cells lo … hi − 1 of an axis of `n` cells: wrapped on a periodic grid, else cut. */
+function bucketSpans(lo: number, hi: number, n: number, wrap: boolean): [number, number][] {
+  let cells: [number, number][];
+  if (!wrap) cells = [[Math.max(0, lo), Math.min(n, hi)]];
+  else if (hi - lo >= n) cells = [[0, n]];
+  else {
+    const s = ((lo % n) + n) % n;
+    const e = s + hi - lo;
+    cells =
+      e <= n
+        ? [[s, e]]
+        : [
+            [s, n],
+            [0, e - n],
+          ];
+  }
+  return cells.filter(([s, e]) => e > s).map(([s, e]) => [Math.floor(s / BUCKET), Math.floor((e - 1) / BUCKET)]);
+}
+
+/**
+ * The outlines that WebGL2 has not drawn yet (gl/sim.ts paint()), by kind of brush, in buckets of 16 × 16 cells of a
+ * `width` × `height` grid. WebGL2 draws the outlines of a run of segments after the run's paint draws: one switch of
+ * render target per run instead of two per segment. A new segment of another kind ends the run when its outline box
+ * meets the outline box of a segment of the run (meets()). Boxes that do not meet change no cell that the other
+ * reads or writes: a segment's outline box holds every cell within 5 rings (HOLD_RINGS) of a cell it paints
+ * (outlineBox()), and the outline of a cell reads `env` only within 5 rings of it (the holds; the shadow within 3).
+ * Segments of one kind may meet, because their outlines give the same bytes after the run's paint as after each
+ * segment's (ADR 0009). The buckets make meets() err on the side of meeting: a run then ends earlier, never later.
+ */
+export class PendingOutlines {
+  private readonly kinds: Uint8Array;
+  private readonly columns: number;
+  private readonly touched: number[] = [];
+
+  constructor(
+    private readonly width: number,
+    private readonly height: number,
+  ) {
+    this.columns = Math.ceil(width / BUCKET);
+    this.kinds = new Uint8Array(this.columns * Math.ceil(height / BUCKET));
+  }
+
+  /** Whether the outline rectangles of a segment of `kind` (EnvKind) meet a pending segment of another kind. */
+  meets(rects: readonly Rect[], kind: number, wrap: boolean): boolean {
+    const others = 0xff & ~(1 << kind);
+    for (const [x, y, w, h] of rects)
+      for (const [x0, x1] of bucketSpans(x, x + w, this.width, wrap))
+        for (const [y0, y1] of bucketSpans(y, y + h, this.height, wrap))
+          for (let by = y0; by <= y1; by++)
+            for (let bx = x0; bx <= x1; bx++) if ((this.kinds[by * this.columns + bx] ?? 0) & others) return true;
+    return false;
+  }
+
+  /** Adds a pending segment of `kind`: its outline rectangles. */
+  add(rects: readonly Rect[], kind: number, wrap: boolean) {
+    for (const [x, y, w, h] of rects)
+      for (const [x0, x1] of bucketSpans(x, x + w, this.width, wrap))
+        for (const [y0, y1] of bucketSpans(y, y + h, this.height, wrap))
+          for (let by = y0; by <= y1; by++)
+            for (let bx = x0; bx <= x1; bx++) {
+              const b = by * this.columns + bx;
+              if (!this.kinds[b]) this.touched.push(b);
+              this.kinds[b] = (this.kinds[b] ?? 0) | (1 << kind);
+            }
+  }
+
+  /** Forgets every pending segment (their outlines are drawn). */
+  clear() {
+    for (const b of this.touched) this.kinds[b] = 0;
+    this.touched.length = 0;
+  }
 }

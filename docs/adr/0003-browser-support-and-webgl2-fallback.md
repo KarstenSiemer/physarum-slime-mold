@@ -46,11 +46,11 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
   carry for every 256th. Eight full-screen passes, one per stencil bit, add 2^b to the color where
   bit b is set, which copies the remainder. A last full-screen pass writes 256 · carry + remainder
   into an `RGBA32F` texture. Exact up to 2048 · 256 = 524 288 agents per cell and strain; beyond
-  that the carry stops growing. It costs 20 B more per cell (106 instead of 86) and halves the
-  largest grid side. Paired in one page on the M3 Pro (default scene, steps 330 to 400, four
-  grids with 0.66 to 4.2 million agents), a step took 0.6 to 1.0 times as long as with the
-  inexact half-float counts used before; a second point pass in place of the eight bit passes
-  took 1.05 to 1.8 times as long.
+  that the carry stops growing. It costs 20 B more per cell (110 B instead of 90 B, the outline
+  distances of ADR 0009 included) and halves the largest grid side. Paired in one page on the
+  M3 Pro (default scene, steps 330 to 400, four grids with 0.66 to 4.2 million agents), a step
+  took 0.6 to 1.0 times as long as with the inexact half-float counts used before; a second point
+  pass in place of the eight bit passes took 1.05 to 1.8 times as long.
 - Diffusion, decay and scents: one fragment pass with two render targets.
 - Collisions (ADR 0008): claims with `MAX` blending of unique float keys (< 2²⁴, exact in
   float32); needs `EXT_float_blend`, otherwise the switch is disabled.
