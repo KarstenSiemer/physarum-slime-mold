@@ -18,6 +18,7 @@
     setEngine,
     setScene,
     showNotice,
+    startScene,
     TOOLS,
     type Tool,
   } from './ui/state.svelte';
@@ -68,9 +69,7 @@
         Object.assign(globalThis, { physarum: engine });
         // The panel works before the engine exists, so a preset may have been chosen meanwhile, and the settings
         // effect below does not run again for the new engine: load what the state holds now, with its environment.
-        // The shapes are in the frame of the scene's own arena, also if its boundary was changed meanwhile.
-        const scene = presetById(app.scene);
-        await engine.load($state.snapshot(app.settings), scene?.env ?? [], scene?.settings().boundary);
+        await startScene(engine);
         engine.paused = app.paused;
         engine.start();
         ready = true;

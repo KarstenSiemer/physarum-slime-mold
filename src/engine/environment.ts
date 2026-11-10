@@ -19,17 +19,12 @@ export interface EnvEdit {
   to: Point;
   radius: number;
   /**
-   * The grid the edit was painted on (width, height): positions and radius are in its cells. Without it, they are
-   * in the canonical frame of `frame` (toFrame()): a preset's shapes.
+   * The grid the edit was painted on or anchored to (width, height): positions and radius are in its cells. Without
+   * it, they are in the canonical frame of the arena on screen (toFrame()): a preset's shapes.
    */
   grid?: Point;
   /** The boundary it was painted under: whether the stroke wrapped around the edges. */
   boundary: Boundary;
-  /**
-   * The list's arena, whose canonical frame maps the edit to another grid. Every edit since the last Clear or preset
-   * load has the same one (Engine), so edits that lie on top of each other on one grid do so on every grid.
-   */
-  frame: Boundary;
 }
 
 /** Whole periods of `n` to subtract from `v` so that it lies in [0, n). */
@@ -39,17 +34,12 @@ export function periods(v: number, n: number): number {
 }
 
 /**
- * An edit from a stroke painted on a `grid` (cells) under `boundary`, unless the stroke names its own, in a list
- * whose arena is `frame`. On a periodic grid the view shows copies of the grid around it, and a stroke on a copy
- * paints the grid where the copy shows it. So the stroke is moved by whole periods until it starts inside the grid:
- * the same cells there, and on another grid the canonical frame of the list's arena finds it where it was painted.
+ * An edit from a stroke painted on a `grid` (cells) under `boundary`, unless the stroke names its own. On a periodic
+ * grid the view shows copies of the grid around it, and a stroke on a copy paints the grid where the copy shows it.
+ * So the stroke is moved by whole periods until it starts inside the grid: the same cells there, and on another grid
+ * the canonical frame finds it where it was painted instead of beside the grid.
  */
-export function fromStroke(
-  s: Stroke,
-  grid: Point,
-  boundary: Boundary,
-  frame: Boundary = s.boundary ?? boundary,
-): EnvEdit {
+export function fromStroke(s: Stroke, grid: Point, boundary: Boundary): EnvEdit {
   const under = s.boundary ?? boundary;
   let { from, to } = s;
   if (under === 'wrap') {
@@ -59,12 +49,12 @@ export function fromStroke(
       [to[0] - dx, to[1] - dy],
     ];
   }
-  return { kind: s.kind, from, to, radius: s.radius, grid, boundary: under, frame };
+  return { kind: s.kind, from, to, radius: s.radius, grid, boundary: under };
 }
 
-/** An edit from a preset's shape, painted under `boundary`. The shape is in the canonical frame of the preset's own arena, `frame`. */
-export function fromShape(e: EnvShape, boundary: Boundary, frame: Boundary = boundary): EnvEdit {
-  return { kind: e.kind, from: e.at, to: e.to ?? e.at, radius: e.r, boundary, frame };
+/** An edit from a preset's shape, painted under `boundary`: the preset's arena, in whose canonical frame it is. */
+export function fromShape(e: EnvShape, boundary: Boundary): EnvEdit {
+  return { kind: e.kind, from: e.at, to: e.to ?? e.at, radius: e.r, boundary };
 }
 
 /** Long side over short side of the canonical frame of a box or a periodic grid: presets are laid out for 16:10. */
@@ -101,30 +91,52 @@ export function fromFrame([u, v]: Point, [w, h]: Point, boundary: Boundary): Poi
 }
 
 /**
- * The edit as a stroke on a `width` × `height` grid, or undefined if it lies completely outside that grid (it stays
- * in the list for other grids). On the grid it was painted on, it is the stroke as painted, byte for byte. On
- * another grid it goes through the canonical frame of the list's arena (EnvEdit.frame). The radius scales with the
- * short side in every arena, so a dab stays round, with a radius of at least MIN_RADIUS.
+ * The edit on a `w` × `h` grid through the canonical frame of `arena`: on the grid the edit has, its own coordinates.
+ * The radius scales with the short side in every arena, so a dab stays round. No MIN_RADIUS and no skipping here.
  */
-export function strokeOn(e: EnvEdit, width: number, height: number): Stroke | undefined {
-  const grid: Point = [width, height];
-  const { kind, boundary, frame } = e;
-  if (e.grid?.[0] === width && e.grid[1] === height)
-    return { kind, from: e.from, to: e.to, radius: e.radius, boundary };
-  const [from, to] = e.grid ? [toFrame(e.from, e.grid, frame), toFrame(e.to, e.grid, frame)] : [e.from, e.to];
+function mapped(e: EnvEdit, [w, h]: Point, arena: Boundary): Stroke {
+  const { kind, boundary } = e;
+  if (e.grid?.[0] === w && e.grid[1] === h) return { kind, from: e.from, to: e.to, radius: e.radius, boundary };
+  const [from, to] = e.grid ? [toFrame(e.from, e.grid, arena), toFrame(e.to, e.grid, arena)] : [e.from, e.to];
   const r = e.grid ? e.radius / Math.min(...e.grid) : e.radius;
-  const stroke: Stroke = {
+  return {
     kind,
-    from: fromFrame(from, grid, frame),
-    to: fromFrame(to, grid, frame),
-    radius: Math.max(MIN_RADIUS, r * Math.min(width, height)),
+    from: fromFrame(from, [w, h], arena),
+    to: fromFrame(to, [w, h], arena),
+    radius: r * Math.min(w, h),
     boundary,
   };
-  const [a, b] = [stroke.from, stroke.to];
+}
+
+/**
+ * The edit as a stroke on a `width` × `height` grid whose arena on screen is `arena`, with a radius of at least
+ * MIN_RADIUS. On the grid the edit has, it is the stroke as painted, byte for byte; on another grid the canonical
+ * frame of `arena` maps it. Under the periodic boundary the stroke is moved by whole periods into the grid, as
+ * fromStroke() does, because such a grid has no outside. Any other stroke that lies completely outside the grid is
+ * undefined: it paints nothing there and stays in the list for other grids.
+ */
+export function strokeOn(e: EnvEdit, width: number, height: number, arena: Boundary): Stroke | undefined {
+  const s = mapped(e, [width, height], arena);
+  s.radius = Math.max(MIN_RADIUS, s.radius);
+  const [a, b] = [s.from, s.to];
+  if (s.boundary === 'wrap') {
+    const [dx, dy] = [periods(a[0], width), periods(a[1], height)];
+    return { ...s, from: [a[0] - dx, a[1] - dy], to: [b[0] - dx, b[1] - dy] };
+  }
   const outside =
-    Math.max(a[0], b[0]) + stroke.radius < 0 ||
-    Math.min(a[0], b[0]) - stroke.radius > width ||
-    Math.max(a[1], b[1]) + stroke.radius < 0 ||
-    Math.min(a[1], b[1]) - stroke.radius > height;
-  return outside ? undefined : stroke;
+    Math.max(a[0], b[0]) + s.radius < 0 ||
+    Math.min(a[0], b[0]) - s.radius > width ||
+    Math.max(a[1], b[1]) + s.radius < 0 ||
+    Math.min(a[1], b[1]) - s.radius > height;
+  return outside ? undefined : s;
+}
+
+/**
+ * The edit in cells of a `width` × `height` grid whose arena on screen is `arena`. strokeOn() gives the same stroke
+ * for it on that grid as for the edit, under any arena, so Engine.apply anchors every edit when the arena on screen
+ * changes its frame. The radius keeps its exact value, so a finer grid later gets back a thin stroke.
+ */
+export function anchor(e: EnvEdit, width: number, height: number, arena: Boundary): EnvEdit {
+  const { from, to, radius } = mapped(e, [width, height], arena);
+  return { kind: e.kind, from, to, radius, grid: [width, height], boundary: e.boundary };
 }

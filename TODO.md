@@ -33,7 +33,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Device setup with raised limits; device-loss message
 - [x] Init pass with 7 layouts; distinct cells in collision mode for the mixed layout
 - [x] Collision mode: every agent on a free cell from the first step, in every layout, also when it moves out of a wall or the dish, and without rounding into the next cell: claim rounds after init, every scene with the rule starts with no shared cell on both backends (ADR 0008, ADR 0019, 2026-11-10)
-- [x] Food, light and walls survive a new grid, density, arena and the out-of-memory step-down: an edit list painted on every new simulation, on another grid through the canonical frame of the list's arena: a dish's short side, or the stretched grid of a box or a periodic grid (ADR 0019, 2026-11-10)
+- [x] Food, light and walls survive a new grid, density, arena and the out-of-memory step-down: an edit list painted on every new simulation, on another grid through the canonical frame of the arena on screen: a dish's short side, or the stretched grid of a box or a periodic grid (ADR 0019, 2026-11-10)
 - [x] Moves check every cell they cross for walls; one wall threshold (byte 128) in WGSL and GLSL (ADR 0019, 2026-11-10)
 - [x] Agent pass (Jones rule), shrinkage, inoculate and cut tools
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Settings } from '../model/params';
+import type { EnvShape } from '../model/presets';
 
 // A fresh module per test: the app state and the once-per-page-load notice live in the module.
 async function fresh() {
@@ -113,5 +115,52 @@ describe('adding and removing strains', () => {
       removeStrain(app.settings.strains.length - 1);
       expect(sceneChanged(), id).toBe(false);
     }
+  });
+});
+
+// App.svelte calls startScene() once the engine exists; the panel works before that.
+describe('the start of the engine', () => {
+  type Call = [string, string, number];
+  const recorder = () => {
+    const calls: Call[] = [];
+    const engine = {
+      load: (s: Settings, env: readonly EnvShape[] = []) => {
+        calls.push(['load', s.boundary, env.length]);
+        return Promise.resolve();
+      },
+      apply: (s: Settings) => {
+        calls.push(['apply', s.boundary, 0]);
+        return Promise.resolve();
+      },
+    };
+    return { calls, engine };
+  };
+
+  it("loads a scene's shapes under its own arena, then the boundary chosen meanwhile", async () => {
+    const { app, loadPreset, startScene } = await fresh();
+    loadPreset('steiner');
+    app.settings.boundary = 'box';
+    const { calls, engine } = recorder();
+    await startScene(engine);
+    expect(calls).toEqual([
+      ['load', 'dish', 4],
+      ['apply', 'box', 0],
+    ]);
+  });
+
+  it('starts without the shapes after a Clear before the engine existed, until a preset is chosen', async () => {
+    const { clearEnvironment, loadPreset, startScene } = await fresh();
+    loadPreset('maze');
+    clearEnvironment();
+    const first = recorder();
+    await startScene(first.engine);
+    expect(first.calls).toEqual([['load', 'box', 0]]);
+    loadPreset('steiner');
+    const second = recorder();
+    await startScene(second.engine);
+    expect(second.calls).toEqual([
+      ['load', 'dish', 4],
+      ['apply', 'dish', 0],
+    ]);
   });
 });

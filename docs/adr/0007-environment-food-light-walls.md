@@ -52,4 +52,4 @@ Option 3, plus:
 - One more `rg32float` ping-pong pair and one more fetch per sensor.
 - Food, light and walls exist only on the GPU, so the engine keeps every edit since the last
   "Clear" or preset load and paints them all again on every new simulation, on a new grid through
-  the canonical frame of the list's arena (ADR 0019).
+  the canonical frame of the arena on screen (ADR 0019).

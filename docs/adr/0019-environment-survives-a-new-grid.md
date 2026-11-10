@@ -59,48 +59,63 @@ For an edit on another grid than the one it was painted on:
    it was painted under. The review of the second draft found that edits then come apart after an
    arena switch: in Shrinking plasmodium switched to a box, an erase over a food missed that food
    on a square screen, and the food came back.
-5. **A canonical frame per arena, one arena per edit list**: option 4, but every edit since the
-   last Clear or preset load uses the list's arena.
+5. A canonical frame per arena, one arena per edit list: option 4, but every edit since the last
+   Clear or preset load uses the list's arena, the preset's or the first stroke's. The review of the
+   third draft found that the list's arena is then a state the user cannot see. After a dish preset
+   was switched to a box, a wall drawn across the whole box no longer reached its ends on a wider
+   screen, and a dab that painted nothing beside the dish appeared inside it on another grid.
+6. **The canonical frame of the arena on screen**: every edit maps through the frame of the arena
+   the simulation runs in now. When the arena changes its frame, every edit is first anchored to
+   the cells of the grid on screen, where it lies as before.
 
 ## Decision
 
-Option 1 with option 5.
+Option 1 with option 6.
 
 - **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or preset
   load: preset shapes in the canonical frame of the preset's own arena (`fromShape`), strokes in the
-  cells of the grid the view shows (`fromStroke`, `paint()` at line 234), each with the boundary it
+  cells of the grid the view shows (`fromStroke`, `paint()` at line 249), each with the boundary it
   was painted under (`Stroke.boundary`; both backends write it into the parameters of the paint
-  pass). Every new simulation paints the whole list (`flushEnv()`, line 243) before it places its
-  agents (`rebuild()`, line 181; `load()`, line 105). A frame paints the edits added since. "Clear"
-  empties the list, also during a rebuild; a preset load replaces it. `Engine.paint` before the
-  first simulation exists drops the stroke: no grid is on screen yet. On a periodic grid the view
-  shows copies of the grid around it, and a stroke on a copy paints the grid where the copy shows
-  it. So `fromStroke` moves such a stroke by whole periods until it starts inside the grid. Before,
-  its raw coordinates lay beside the grid, and every other grid skipped it as outside: 131 food
-  cells painted left of a 512 × 320 grid were none on 1024 × 640 (CPU engine test; the GPU engine
-  test failed the same way on both backends).
+  pass). Every new simulation paints the whole list (`flushEnv()`, line 257) before it places its
+  agents (`rebuild()`, line 183; `load()`, line 107). A frame paints the edits added since. "Clear"
+  empties the list, also during a rebuild; a preset load replaces it. A Clear before the engine
+  exists waits for it, and the engine then starts without the scene's shapes (`clearEnvironment` and
+  `startScene` in `src/ui/state.svelte.ts`). `Engine.paint` before the first simulation exists drops
+  the stroke: no grid is on screen yet. So does it with a stroke that paints no cell, beside a box
+  or outside the dish (`paintsCell` in `src/engine/brush.ts`, the rule of the paint passes): it
+  changes nothing on screen, and on another grid or arena it must not either. On a periodic grid the
+  view shows copies of the grid around it, and a stroke on a copy paints the grid where the copy
+  shows it. So `fromStroke` moves such a stroke by whole periods until it starts inside the grid.
+  Before, its raw coordinates lay beside the grid, and every other grid skipped it as outside: 131
+  food cells painted left of a 512 × 320 grid were none on 1024 × 640 (CPU engine test; the GPU
+  engine test failed the same way on both backends).
 - **Mapping** (`strokeOn`, `src/engine/environment.ts`). On the grid an edit was made on, it is
   painted with its original coordinates, byte for byte. On another grid it goes through the
-  canonical frame of the list's arena (`EnvEdit.frame`, `toFrame` and `fromFrame`): landscape,
-  origin at the grid's centre. A dish is the circle on the grid's short side, so its frame has the
+  canonical frame of the arena on screen (`toFrame` and `fromFrame`): landscape, origin at the
+  grid's centre. A dish is the circle on the grid's short side, so its frame has the
   short side as the unit on both axes: a similarity transform, circles stay circles and a food
   source keeps its area relative to the dish. A box and a periodic grid are the arena themselves,
   so their frame stretches with the grid: the long side spans 1.6 units (`FRAME_ASPECT`; presets
   are laid out for 16:10) and the short side 1, and a shape keeps its place relative to the edges.
   In every arena the radius scales with the short side, so a dab stays round. On a 16:10 grid the
   frames are the same. A portrait grid (height above width) turns the frame by 90° clockwise, so a
-  layout along the long side of a wide screen stays along the long side of a tall one.
-- **The list's arena.** After a preset load it is the preset's own arena, also when the settings
-  hold another boundary (one chosen while the engine started, `App.svelte`). After a Clear, or a
-  preset without shapes, it is the arena of the first stroke. An arena switch does not change it,
-  so edits that lie on top of each other on one grid do so on every grid: in Shrinking plasmodium
-  switched to a box, an erase over a food stays on that food on a square screen. In return, after a
-  switch from a dish preset to a box, strokes near the ends of the long side can lie beside a
-  narrower grid, and after a switch from a box preset to a dish, strokes in the dish stretch with
-  the grid.
+  layout along the long side of a wide screen stays along the long side of a tall one. A stroke
+  under the periodic boundary is moved by whole periods into the grid instead of skipped: such a
+  grid has no outside, and its paint pass wraps a stroke that lies partly outside anyway.
+- **The arena on screen.** When the arena changes its frame (the dish against a box or a periodic
+  grid), `Engine.apply` anchors every edit to the cells of the grid on screen through the frame of
+  the arena before (`anchorEdits`, `anchor` in `src/engine/environment.ts`). So every edit keeps
+  its place on screen, edits that lie on top of each other stay so, and a new screen shape then
+  moves them all through the frame of the new arena. In Shrinking plasmodium switched to a box, an
+  erase over a food stays on that food on a square screen, and a wall drawn across the box reaches
+  both ends on a wider one. The anchor keeps the exact radius, so a thin stroke anchored on a coarse
+  grid comes back thin on a fine one. A grid used before the switch is then reached through the new
+  frame, so its old bytes come back only where both frames agree, as on 16:10. A preset loads under
+  its own arena. At startup, a boundary chosen in the panel before the engine existed then applies
+  as a switch on screen (`startScene`).
 - **What a new screen shape changes.** An edit that lies completely outside the new grid is
   skipped and kept for other grids: in a dish's frame when the screen narrows, in a box's frame
-  for a stroke beside the grid or a dab over its long edge. In a box's or a periodic grid's frame
+  for a dab over its long edge. In a box's or a periodic grid's frame
   the positions stretch with the grid while the radius follows the short side. So a line changes
   its angle, and along the long side a gap between two painted walls narrows against the walls on
   a squarer screen and widens on a wider one: two walls of radius 6 with 8 open cells between them

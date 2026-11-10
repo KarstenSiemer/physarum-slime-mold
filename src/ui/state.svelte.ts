@@ -120,7 +120,30 @@ export function loadPreset(id: string) {
   if (!p) return;
   setScene(p);
   noteMissingRule();
+  clearedBeforeStart = false;
   void engine?.load($state.snapshot(app.settings), p.env);
+}
+
+/** Clear was pressed before the engine existed: the engine starts without the scene's shapes (startScene()). */
+let clearedBeforeStart = false;
+
+/** Removes food, light and walls. The panel works before the engine exists, so a Clear then waits for the start. */
+export function clearEnvironment() {
+  if (engine) engine.clearEnvironment();
+  else clearedBeforeStart = true;
+}
+
+/**
+ * The first load of a new engine (App.svelte): what the state holds now, because the panel works before the engine
+ * exists. A scene's shapes are in the canonical frame of its own arena, so they load under that arena, and then the
+ * panel's settings apply: a boundary chosen meanwhile anchors them as a switch on screen does (Engine.apply).
+ */
+export async function startScene(e: Pick<Engine, 'load' | 'apply'>) {
+  const settings = $state.snapshot(app.settings);
+  const p = presetById(app.scene);
+  if (!p?.env || clearedBeforeStart) return e.load(settings, []);
+  await e.load({ ...settings, boundary: p.settings().boundary }, p.env);
+  await e.apply(settings);
 }
 
 /**

@@ -1,21 +1,8 @@
 // CPU mirror of shaders/paint.wgsl and gl/glsl/paint.frag, for tests only. sim.gpu.test.ts checks it against both
 // backends; the engine tests in Node paint with it (engine-env.test.ts).
 import type { Boundary } from '../model/params';
+import { cellIndex, segmentDistance } from './brush';
 import { EnvKind, type Stroke } from './types';
-
-function segmentDistance(px: number, py: number, a: [number, number], b: [number, number]) {
-  const [abx, aby] = [b[0] - a[0], b[1] - a[1]];
-  const t = Math.min(1, Math.max(0, ((px - a[0]) * abx + (py - a[1]) * aby) / Math.max(abx * abx + aby * aby, 1e-6)));
-  return Math.hypot(px - a[0] - t * abx, py - a[1] - t * aby);
-}
-
-/** Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (common.wgsl `cellAt`). */
-export function cellIndex(x: number, y: number, w: number, h: number, boundary: Boundary) {
-  if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
-  if (x < 0 || y < 0 || x >= w || y >= h) return -1;
-  if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > Math.min(w, h) / 2 - 1) return -1;
-  return y * w + x;
-}
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));

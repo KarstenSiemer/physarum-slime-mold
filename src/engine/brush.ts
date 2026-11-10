@@ -1,5 +1,46 @@
+import type { Boundary } from '../model/params';
 import { periods } from './environment';
 import type { Stroke } from './types';
+
+/** Distance from (px, py) to the segment from `a` to `b`, as the paint passes measure it. */
+export function segmentDistance(px: number, py: number, a: [number, number], b: [number, number]) {
+  const [abx, aby] = [b[0] - a[0], b[1] - a[1]];
+  const t = Math.min(1, Math.max(0, ((px - a[0]) * abx + (py - a[1]) * aby) / Math.max(abx * abx + aby * aby, 1e-6)));
+  return Math.hypot(px - a[0] - t * abx, py - a[1] - t * aby);
+}
+
+/** Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (common.wgsl `cellAt`). */
+export function cellIndex(x: number, y: number, w: number, h: number, boundary: Boundary) {
+  if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
+  if (x < 0 || y < 0 || x >= w || y >= h) return -1;
+  if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > Math.min(w, h) / 2 - 1) return -1;
+  return y * w + x;
+}
+
+/**
+ * Whether a stroke paints at least one cell of a `w` × `h` grid under `boundary`: a cell of the arena whose centre
+ * lies within the radius of the segment, the rule of the paint passes. Under the periodic boundary every brush of
+ * MIN_RADIUS (environment.ts) or more paints: every point lies within 0.71 cells of a cell centre.
+ */
+export function paintsCell(stroke: Stroke, w: number, h: number, boundary: Boundary): boolean {
+  const { from: a, to: b, radius: r } = stroke;
+  const under = stroke.boundary ?? boundary;
+  if (under === 'wrap') return true;
+  const [ax, ay] = [Math.floor(a[0]), Math.floor(a[1])];
+  if (cellIndex(ax, ay, w, h, under) >= 0 && segmentDistance(ax + 0.5, ay + 0.5, a, b) <= r) return true;
+  const [x0, x1] = [
+    Math.max(0, Math.floor(Math.min(a[0], b[0]) - r)),
+    Math.min(w - 1, Math.ceil(Math.max(a[0], b[0]) + r)),
+  ];
+  const [y0, y1] = [
+    Math.max(0, Math.floor(Math.min(a[1], b[1]) - r)),
+    Math.min(h - 1, Math.ceil(Math.max(a[1], b[1]) + r)),
+  ];
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++)
+      if (cellIndex(x, y, w, h, under) >= 0 && segmentDistance(x + 0.5, y + 0.5, a, b) <= r) return true;
+  return false;
+}
 
 /** A rectangle of cells: x, y, width, height (rows from y = 0, as gl.scissor takes them). */
 export type Rect = [number, number, number, number];

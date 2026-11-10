@@ -14,7 +14,7 @@
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
-  import { addStrain, app, getEngine, loadPreset, removeStrain, showNotice } from './state.svelte';
+  import { addStrain, app, clearEnvironment, loadPreset, removeStrain, showNotice } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
   const s = $derived(app.settings);
@@ -150,7 +150,7 @@
     <Slider spec={globalSpec.lightStrength} bind:value={s.lightStrength} id="light" />
     <Slider spec={globalSpec.scentDecay} bind:value={s.scentDecay} id="scent" />
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
-    <button type="button" onclick={() => getEngine()?.clearEnvironment()}>Clear food, light and walls</button>
+    <button type="button" onclick={clearEnvironment}>Clear food, light and walls</button>
   </Section>
 
   <Section title="Look">

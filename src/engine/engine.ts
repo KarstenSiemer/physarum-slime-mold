@@ -1,7 +1,8 @@
 import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget } from './budget';
-import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
+import { paintsCell } from './brush';
+import { anchor, fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
@@ -81,6 +82,7 @@ export class Engine {
   async apply(next: Settings) {
     const prev = this.settings;
     this.settings = this.supported(next);
+    this.anchorEdits(prev.boundary);
     if (this.rebuilding || this.needsRebuild()) return this.rebuild();
     const shares = (s: Settings) => s.strains.map((st) => st.share).join();
     this.sim.update(this.settings);
@@ -92,11 +94,11 @@ export class Engine {
   /**
    * Loads a preset: its settings, its food, light and walls in place of every earlier edit, then a fresh
    * population, placed after the walls so that no agent starts inside one. The shapes are in the canonical frame of
-   * `arena`, the preset's own arena; the settings can hold another boundary (one chosen while the engine started).
+   * the settings' boundary, the preset's own arena.
    */
-  async load(settings: Settings, env: readonly EnvShape[] = [], arena: Boundary = settings.boundary) {
+  async load(settings: Settings, env: readonly EnvShape[] = []) {
     this.settings = this.supported(settings);
-    this.edits = env.map((e) => fromShape(e, this.settings.boundary, arena));
+    this.edits = env.map((e) => fromShape(e, this.settings.boundary));
     this.painted = 0;
     // A new simulation paints the edits itself, before it places the agents.
     if (this.needsRebuild()) return this.rebuild();
@@ -193,6 +195,18 @@ export class Engine {
     this.restarts++;
   }
 
+  /**
+   * Edits go through the canonical frame of the arena on screen (strokeOn()). When the arena changes its frame (the
+   * dish against a box or a periodic grid), every edit is anchored to the cells of the grid on screen, where it lies
+   * as before: so the edits keep their place on screen and stay together, and a new screen shape moves them all by
+   * the frame of the new arena.
+   */
+  private anchorEdits(was: Boundary) {
+    if ((was === 'dish') === (this.settings.boundary === 'dish') || !this.viewGrid) return;
+    const [w, h] = this.viewGrid;
+    this.edits = this.edits.map((e) => anchor(e, w, h, was));
+  }
+
   /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */
   clearEnvironment() {
     this.edits = [];
@@ -229,21 +243,22 @@ export class Engine {
   /**
    * A brush stroke in cells of the grid on screen (toGrid()); the next frame paints it. It is kept with that grid:
    * during a rebuild the view still shows the old grid, and the new one gets the stroke where it was drawn. Before
-   * the first simulation exists no grid is on screen, so the stroke is dropped.
+   * the first simulation exists no grid is on screen, so the stroke is dropped. So is a stroke that paints no cell,
+   * beside a box or outside the dish: it changes nothing on screen, and on another grid or arena it must not either.
    */
   paint(stroke: Stroke) {
     if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;
     const s = { ...stroke, radius: Math.max(MIN_RADIUS, stroke.radius) };
-    // One canonical frame for the whole list (EnvEdit.frame): the preset's arena, or the arena of the first stroke.
-    const arena = this.edits[0]?.frame ?? this.settings.boundary;
-    this.edits.push(fromStroke(s, this.viewGrid, this.settings.boundary, arena));
+    if (!paintsCell(s, ...this.viewGrid, this.settings.boundary)) return;
+    this.edits.push(fromStroke(s, this.viewGrid, this.settings.boundary));
   }
 
   /** Paints the edits the current simulation does not hold yet, mapped to its grid, in one call. */
   private flushEnv() {
     if (this.painted === this.edits.length) return;
     const { width, height } = this.sim;
-    const strokes = this.edits.slice(this.painted).flatMap((e) => strokeOn(e, width, height) ?? []);
+    const arena = this.settings.boundary;
+    const strokes = this.edits.slice(this.painted).flatMap((e) => strokeOn(e, width, height, arena) ?? []);
     this.painted = this.edits.length;
     this.sim.paint(strokes);
   }
