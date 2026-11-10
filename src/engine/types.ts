@@ -61,7 +61,7 @@ export interface Backend<S extends Sim = Sim> {
   readonly maxAgents: number;
   /** Largest single buffer or texture in bytes (one 16-byte texel per cell must fit). */
   readonly maxBufferBytes: number;
-  /** Largest grid side (texture dimension limit). */
+  /** Largest grid side it can draw: the texture size limit less the gel height field's border. */
   readonly maxGridSide: number;
   /** GPU bytes per grid cell, for the memory estimate (sizing.ts). */
   readonly bytesPerCell: number;
