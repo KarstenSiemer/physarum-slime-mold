@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain } from '../model/params';
-import { packParams, PARAM_SLOTS, PARAMS_BYTES, STEP_OFFSET, strainEnds } from './pack';
+import { packParams, PARAM_SLOTS, PARAMS_BYTES, START_ROUNDS, startRounds, STEP_OFFSET, strainEnds } from './pack';
 
 const wgsl = readFileSync(new URL('./shaders/common.wgsl', import.meta.url), 'utf8');
 
@@ -42,6 +42,16 @@ describe('Params layout', () => {
     ];
     expect(extra({})).toEqual([4, 0, 0, 0]);
     expect(extra({ walls: true, round: 7 })).toEqual([4, 1, 7, 0]);
+  });
+});
+
+describe('startRounds', () => {
+  it('is one round where the grid permutation gives every agent a free cell, all rounds elsewhere', () => {
+    expect(startRounds({ layout: 'mixed', boundary: 'wrap' }, false)).toBe(1);
+    expect(startRounds({ layout: 'mixed', boundary: 'box' }, false)).toBe(1);
+    expect(startRounds({ layout: 'mixed', boundary: 'dish' }, false)).toBe(START_ROUNDS);
+    expect(startRounds({ layout: 'mixed', boundary: 'wrap' }, true)).toBe(START_ROUNDS);
+    expect(startRounds({ layout: 'center', boundary: 'wrap' }, false)).toBe(START_ROUNDS);
   });
 });
 

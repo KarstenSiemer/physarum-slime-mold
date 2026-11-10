@@ -1,5 +1,5 @@
 import { BOUNDARIES, type Settings } from '../model/params';
-import { packParams, PARAMS_BYTES, START_ROUNDS, type AgentTool } from './pack';
+import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -160,7 +160,7 @@ export class Simulation implements Sim {
   }
 
   /**
-   * One agent per cell from the first step (ADR 0008): START_ROUNDS claim rounds after init (init.wgsl). Each
+   * One agent per cell from the first step (ADR 0008): claim rounds after init (init.wgsl, startRounds()). Each
    * round needs its number in the parameters, so it is a submission of its own.
    */
   private placeOnFreeCells() {
@@ -171,7 +171,8 @@ export class Simulation implements Sim {
     const resources = [this.params, this.agentBuffer, null, null, this.env, null, null, occ, col.claims];
     const claim = this.bind(`claimStart${this.agentParity}${q}`, k.claimStart, resources);
     const settle = this.bind(`settleStart${this.agentParity}${q}`, k.settleStart, resources);
-    for (let round = 0; round < START_ROUNDS; round++) {
+    const rounds = startRounds(this.settings, this.walls);
+    for (let round = 0; round < rounds; round++) {
       this.writeParams(undefined, round);
       const enc = this.device.createCommandEncoder();
       if (round === 0) enc.clearBuffer(occ);

@@ -34,6 +34,14 @@ const slot = (name: (typeof PARAM_SLOTS)[number]) => {
  */
 export const START_ROUNDS = 32;
 
+/**
+ * Claim rounds for a start: the mixed layout on a grid without walls and dish gives every agent a free cell of its
+ * own in the first round (a permutation of the grid), so one round does.
+ */
+export function startRounds(s: Pick<Settings, 'layout' | 'boundary'>, walls: boolean): number {
+  return s.layout === 'mixed' && s.boundary !== 'dish' && !walls ? 1 : START_ROUNDS;
+}
+
 /** Agent-pass tools (`Params.tool.w`). */
 export const AgentToolKind = { inoculate: 1, cut: 2 } as const;
 

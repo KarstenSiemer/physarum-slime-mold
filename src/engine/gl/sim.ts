@@ -1,6 +1,6 @@
 import type { Boundary, Settings } from '../../model/params';
 import { scissorRects } from '../brush';
-import { packParams, PARAMS_BYTES, START_ROUNDS, type AgentTool } from '../pack';
+import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
 import {
@@ -147,7 +147,7 @@ export class GlSim implements Sim {
   }
 
   /**
-   * One agent per cell from the first step (ADR 0008), as in sim.ts: START_ROUNDS claim rounds after init. A round
+   * One agent per cell from the first step (ADR 0008), as in sim.ts: claim rounds after init (startRounds()). A round
    * counts the cells taken so far, lets every waiting agent claim its cell (points.vert kind 5, MAX blending) and
    * settles the claims (init.frag).
    */
@@ -155,7 +155,8 @@ export class GlSim implements Sim {
     const gl = this.gl;
     const col = this.ensureCollision();
     const occ = col.occ[flip(this.q)];
-    for (let round = 0; round < START_ROUNDS; round++) {
+    const rounds = startRounds(this.settings, this.walls);
+    for (let round = 0; round < rounds; round++) {
       this.writeParams(undefined, round);
       clear(gl, occ);
       this.points(2, occ, gl.FUNC_ADD);
@@ -167,7 +168,7 @@ export class GlSim implements Sim {
         occ: occ.texture,
         claims: col.claims.texture,
       };
-      const mode = round === START_ROUNDS - 1 ? 2 : 1;
+      const mode = round === rounds - 1 ? 2 : 1;
       this.pass(this.prog.init, this.agentsTex[flip(this.a)], textures, { agentWidth: this.agentWidth, mode });
       this.a = flip(this.a);
     }
