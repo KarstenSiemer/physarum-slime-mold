@@ -48,6 +48,8 @@ export class Simulation implements Sim {
   readonly env: GPUBuffer;
   readonly stats: GPUBuffer;
   private collision?: { occ: Pair<GPUBuffer>; claims: GPUBuffer };
+  /** A wall was painted since the last clear: moves then check every cell they cross (agents.wgsl clearPath). */
+  private walls = false;
   private readonly groups: [number, number];
   private readonly bindCache = new Map<string, GPUBindGroup>();
 
@@ -168,6 +170,7 @@ export class Simulation implements Sim {
     new Float32Array(data)[6] = r;
     new Uint32Array(data)[7] = EnvKind[stroke.kind];
     this.device.queue.writeBuffer(this.brush, 0, data);
+    if (stroke.kind === 'wall') this.walls = true;
     this.writeParams();
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
@@ -182,6 +185,7 @@ export class Simulation implements Sim {
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
     this.device.queue.submit([enc.finish()]);
+    this.walls = false;
   }
 
   finish(): Promise<void> {
@@ -257,6 +261,7 @@ export class Simulation implements Sim {
 
   writeEnv(data: Uint8Array) {
     this.device.queue.writeBuffer(this.env, 0, data);
+    this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
   }
 
   destroy() {
@@ -270,7 +275,14 @@ export class Simulation implements Sim {
   }
 
   private writeParams(tool?: AgentTool) {
-    const rt = { width: this.width, height: this.height, agents: this.agents, step: this.step, tool };
+    const rt = {
+      width: this.width,
+      height: this.height,
+      agents: this.agents,
+      step: this.step,
+      tool,
+      walls: this.walls,
+    };
     this.device.queue.writeBuffer(this.params, 0, packParams(this.settings, rt, this.paramData));
   }
 

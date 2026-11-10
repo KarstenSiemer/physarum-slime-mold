@@ -42,6 +42,8 @@ export class GlSim implements Sim {
   private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
+  /** A wall was painted since the last clear: moves then check every cell they cross (agents.frag clearPath). */
+  private walls = false;
   private a: Bit = 0;
   private p: Bit = 0;
   private q: Bit = 0;
@@ -142,6 +144,7 @@ export class GlSim implements Sim {
     const gl = this.gl;
     this.writeParams();
     const kind = EnvKind[stroke.kind];
+    if (kind === EnvKind.wall) this.walls = true;
     const mask: Record<number, [boolean, boolean, boolean, boolean]> = {
       0: [true, true, true, true],
       1: [true, true, true, true],
@@ -162,6 +165,7 @@ export class GlSim implements Sim {
 
   clearEnvironment() {
     clear(this.gl, this.env);
+    this.walls = false;
   }
 
   /** Resolves when the GPU has finished all work issued so far (a fence, polled without blocking). */
@@ -224,6 +228,7 @@ export class GlSim implements Sim {
 
   writeEnv(data: Uint8Array) {
     writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
+    this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
   }
 
   destroy() {
@@ -238,7 +243,14 @@ export class GlSim implements Sim {
 
   private writeParams(tool?: AgentTool) {
     const gl = this.gl;
-    const rt = { width: this.width, height: this.height, agents: this.agents, step: this.step, tool };
+    const rt = {
+      width: this.width,
+      height: this.height,
+      agents: this.agents,
+      step: this.step,
+      tool,
+      walls: this.walls,
+    };
     gl.bindBufferBase(gl.UNIFORM_BUFFER, PARAMS_BINDING, this.ubo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(this.settings, rt, this.paramData)));
   }

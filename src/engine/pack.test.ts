@@ -34,6 +34,15 @@ describe('Params layout', () => {
     expect([...f.slice(11 * 4, 11 * 4 + 4)]).toEqual([1, -1, 0, 0]); // attraction row 0, unused lanes 0
     expect([...f.slice(12 * 4, 12 * 4 + 4)]).toEqual([-1, 1, 0, 0]);
   });
+
+  it('packs the layout and the walls flag into extra', () => {
+    const s = { ...defaultSettings(), layout: 'ring' as const };
+    const extra = (walls = false) => [
+      ...new Uint32Array(packParams(s, { width: 8, height: 8, agents: 1, step: 0, walls })).slice(19 * 4),
+    ];
+    expect(extra()).toEqual([4, 0, 0, 0]);
+    expect(extra(true)).toEqual([4, 1, 0, 0]);
+  });
 });
 
 describe('strainEnds', () => {

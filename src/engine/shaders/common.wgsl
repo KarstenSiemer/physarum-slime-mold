@@ -17,7 +17,7 @@ struct Params {
   tool: vec4f,           // x, y (cells), radius, kind (0 none, 1 inoculate, 2 cut)
   tool2: vec4f,          // strain, revive probability (dead agents), teleport probability (alive), unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
-  extra: vec4u,          // layout, unused, unused, unused
+  extra: vec4u,          // layout, walls (1 if the environment may hold walls), unused, unused
 }
 
 struct Agent {

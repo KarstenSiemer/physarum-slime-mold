@@ -19,6 +19,52 @@ const uint BLOCK = 3u;
 
 bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
+bool wallAt(ivec2 c) {
+  int i = cellAt(c);
+  return i >= 0 && isWall(texelFetch(env, cellCoord(i), 0));
+}
+
+const float CORNER = 1e-3;
+
+// False if a move from p to q passes through a wall; mirrors clearPath in agents.wgsl.
+bool clearPath(vec2 p, vec2 q) {
+  if (P.extra.y == 0u) return true;
+  ivec2 c = ivec2(floor(p));
+  ivec2 end = ivec2(floor(q));
+  if (abs(end.x - c.x) + abs(end.y - c.y) < 2) return true;
+  vec2 d = q - p;
+  ivec2 s = ivec2(sign(d));
+  float len = length(d);
+  vec2 t = vec2(2.0);
+  vec2 dt = vec2(2.0);
+  if (s.x != 0) {
+    t.x = (float(c.x) + (d.x > 0.0 ? 1.0 : 0.0) - p.x) / d.x;
+    dt.x = 1.0 / abs(d.x);
+  }
+  if (s.y != 0) {
+    t.y = (float(c.y) + (d.y > 0.0 ? 1.0 : 0.0) - p.y) / d.y;
+    dt.y = 1.0 / abs(d.y);
+  }
+  for (int k = 0; k < 24; k++) {
+    bool needX = c.x != end.x;
+    bool needY = c.y != end.y;
+    if (!needX && !needY) break;
+    if (needX && needY && abs(t.x - t.y) * len < CORNER) {
+      if (wallAt(c + ivec2(s.x, 0)) || wallAt(c + ivec2(0, s.y))) return false;
+      c += s;
+      t += dt;
+    } else if (needX && (!needY || t.x < t.y)) {
+      c.x += s.x;
+      t.x += dt.x;
+    } else {
+      c.y += s.y;
+      t.y += dt.y;
+    }
+    if (c != end && wallAt(c)) return false;
+  }
+  return true;
+}
+
 float sense(vec2 p, int s) {
   int c = cellOf(p);
   if (!habitable(c)) return BLOCKED;
@@ -87,7 +133,9 @@ bool lifecycle(inout vec4 a, uint i) {
 
 bool vacant(int c) { return texelFetch(occ, cellCoord(c), 0).r < 0.5; }
 
-bool canClaim(vec4 a, int c) { return habitable(c) && c != cellOf(a.xy) && vacant(c); }
+bool canClaim(vec4 a, int c) {
+  return habitable(c) && c != cellOf(a.xy) && vacant(c) && clearPath(a.xy, destination(a));
+}
 
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy);
@@ -103,7 +151,7 @@ void main() {
       uint rng = rngSeed(i, STEER);
       float h = steer(a, s, rng);
       vec2 p = a.xy + P.stepSize[s] * dir(h);
-      if (habitable(cellOf(p))) {
+      if (habitable(cellOf(p)) && clearPath(a.xy, p)) {
         a.xy = wrapPos(p);
         a.z = h;
         a.w += float(MOVED);

@@ -46,6 +46,8 @@ export interface Runtime {
   agents: number;
   step: number;
   tool?: AgentTool | undefined;
+  /** The environment may hold walls: moves then check every cell they cross (agents.wgsl `clearPath`). */
+  walls?: boolean;
 }
 
 /** Exclusive end index of each strain's agents, proportional to the population shares. */
@@ -89,7 +91,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
     f.set([t.strain, t.revive, t.teleport, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
-  u[slot('extra')] = LAYOUTS.indexOf(s.layout);
+  u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0], slot('extra'));
   return buf;
 }
 

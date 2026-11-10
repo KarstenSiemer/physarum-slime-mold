@@ -21,7 +21,7 @@ layout(std140) uniform Params {
   vec4 tool;           // x, y, radius, kind (0 none, 1 inoculate, 2 cut)
   vec4 tool2;          // strain, revive probability, teleport probability, unused
   uvec4 strainEnd;
-  uvec4 extra;         // layout
+  uvec4 extra;         // layout, walls (1 if the environment may hold walls)
 } P;
 
 const float PI = 3.14159265358979;

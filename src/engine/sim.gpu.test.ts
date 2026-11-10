@@ -255,6 +255,61 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(a?.heading).not.toBe(0);
       expect(total(await sim.readCounts())).toBe(0);
     });
+
+    // A step longer than a wall is thick must not jump it: a move checks every cell it crosses (clearPath in
+    // agents.wgsl and agents.frag). A one-cell wall in column `wall`, 96 agents in the three columns before it,
+    // heading up to 60° off +x; column 1 makes the moves cross the wrap seam.
+    it.each([
+      [24, false],
+      [24, true],
+      [1, false],
+      [1, true],
+    ])('never lets a step of 3 cells cross a one-cell wall (column %i, collisions %s)', async (wall, collisions) => {
+      const [w, h, n] = [48, 32, 96];
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 3 }];
+      const beyond = async (painted: boolean) => {
+        const sim = await make({ layout: 'empty', strains }, w, h, n);
+        if (painted) sim.paint({ kind: 'wall', from: [wall + 0.5, 0], to: [wall + 0.5, h], radius: 0.5 });
+        for (let i = 0; i < n; i++) {
+          const x = (wall - 3 + (i % 3) + 0.25 + (0.5 * ((i * 7) % 11)) / 11 + w) % w;
+          const heading = ((((i * 37) % 121) - 60) * Math.PI) / 180;
+          sim.writeAgent(i, { x, y: Math.floor(i / 3) + 0.5, heading, bits: 4 });
+        }
+        // The occupancy is built from the agents written above when the rule is switched on.
+        if (collisions) sim.update({ ...defaultSettings(), layout: 'empty', strains, collisions: true });
+        sim.run(1);
+        const agents = await sim.readAgents();
+        expect(agents.every((a) => a.bits & 4)).toBe(true);
+        // Columns from the wall on, in the direction of the moves.
+        return agents.filter((a) => (Math.floor(a.x) - wall + w) % w < w / 2).length;
+      };
+      expect(await beyond(false)).toBeGreaterThan(20); // without the wall, many moves end at or past its column
+      expect(await beyond(true)).toBe(0);
+    });
+
+    it('cannot slip through two wall cells that touch at a corner, nor touch a wall at a corner', async () => {
+      // A move from (11.5, 2.5) to (12.5, 1.5) passes exactly through the grid corner (12, 2).
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: Math.SQRT2 }];
+      const move = async (walls: [number, number][]) => {
+        const sim = await make({ layout: 'empty', strains }, 32, 32, 1);
+        const env = new Uint8Array(32 * 32 * 4);
+        for (const [x, y] of walls) env[(y * 32 + x) * 4] = 255;
+        sim.writeEnv(env);
+        sim.writeAgent(0, { x: 11.5, y: 2.5, heading: -Math.PI / 4, bits: 4 });
+        sim.run(1);
+        const [a] = await sim.readAgents();
+        return [Math.floor(a?.x ?? -1), Math.floor(a?.y ?? -1)];
+      };
+      expect(await move([])).toEqual([12, 1]);
+      expect(await move([[13, 13]])).toEqual([12, 1]); // a wall elsewhere turns the walk on
+      expect(
+        await move([
+          [11, 1],
+          [12, 2],
+        ]),
+      ).toEqual([11, 2]); // the destination is free, the way is not
+      expect(await move([[12, 2]])).toEqual([11, 2]); // the segment touches this wall cell at its corner
+    });
   });
 
   describe('environment', () => {
