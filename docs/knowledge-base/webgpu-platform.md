@@ -92,8 +92,11 @@ Facts learned:
 - Setup: Apple M3 Pro (18-core GPU), macOS 26.6.2, Chromium 156.0.8078.4 (Playwright 1.64.1) in
   new headless mode with the flags of `tests/browser.ts`, production builds served locally,
   viewport 1280 × 720. Default scene (three strains): grid 1536 × 864, 3 981 312 agents,
-  diffusion 2, seed fixed by a seeded `Math.random`. Another session used the GPU at times, so
-  every comparison ran paired in one page at the same simulation state.
+  diffusion 2, seed fixed by a seeded `Math.random`. Other sessions used the GPU throughout (46
+  to 98 % device utilisation with the page idle, from `ioreg`), so every comparison ran paired:
+  in one page at the same simulation state, or, for the frame loop and `alive()`, with both
+  builds alternating in one browser page (base, new, new, base), each run from step 0 with the
+  same seed.
 - Compute passes: timestamp queries, one pass per dispatch while measuring. They agree with wall
   time (the research found within about 5 %).
 - Render passes: wall time only. Metal render-pass timestamps over-count: for the 10 render
@@ -125,20 +128,25 @@ the sort (ADR 0005); "sorted" is the app's sort every 32 steps, its cost include
   45 % lower. Late, memory-bound timings swing between runs, which is why only paired numbers
   count here.
 
-Real frame loop, 60 s per run, headless (rAF at 60 Hz), `main` before these changes against
-after them:
+Real frame loop, 60 s per run, headless (rAF at 60 Hz): `main` (79b6679) against this branch,
+alternating in one browser page as above, two runs of each. The page reports itself hidden, so
+neither build's startup check changes the grid. A fifth series, the default scene at
+1280 × 720 with the check on, gave the same numbers, and the branch kept its grid.
 
-| Scene                                 | Canvas      | Before: fps, steps/s, steps per frame | Before: longest frame | After: fps, steps/s, steps per frame | After: longest frame |
-| ------------------------------------- | ----------- | ------------------------------------- | --------------------- | ------------------------------------ | -------------------- |
-| Default, density 3                    | 1280 × 720  | 11.6, 66, 5.7 (last 30 s: 4.5 fps)    | 267 ms                | 60.0, 120, 2.0                       | 16.8 ms              |
-| Default, density 3, startup check off | 3024 × 1890 | 8.8, 63, 7.2 (last 30 s: 3.9 fps)     | 300 ms                | 60.0, 117, 1.95                      | 33 ms                |
-| Default, density 1                    | 1280 × 720  | 36.2, 118, 3.3 (last 30 s: 18 fps)    | 133 ms                | 60.0, 120, 2.0                       | 16.8 ms              |
-| Cyclones (1024 × 576, 4.7 million)    | 1280 × 720  | 4.5, 52, 11.6                         | 417 ms                | 60.0, 103, 1.7                       | 33 ms                |
+| Scene                              | Canvas      | `main`: fps, steps/s, steps per frame      | `main`: longest frame | Branch: fps, steps/s, steps per frame | Branch: longest frame |
+| ---------------------------------- | ----------- | ------------------------------------------ | --------------------- | ------------------------------------- | --------------------- |
+| Default, density 3 (4.0 million)   | 1280 × 720  | 13.4, 74, 5.5 (last 30 s: 7.5 fps)         | 233 ms                | 60.0, 120, 2.0                        | 16.8 ms               |
+| Default, density 3 (4.4 million)   | 3024 × 1890 | 10.8–10.9, 66, 6.1 (last 30 s: 6 fps)      | 250 ms                | 60.0, 120, 2.0                        | 16.8 ms               |
+| Default, density 1 (1.3 million)   | 1280 × 720  | 46–48, 120, 2.5–2.6 (last 30 s: 38–40 fps) | 67 ms                 | 60.0, 120, 2.0                        | 16.8 ms               |
+| Cyclones (1024 × 576, 4.7 million) | 1280 × 720  | 6.6–6.7, 79–80, 11.9                       | 367–383 ms            | 60.0, 120, 2.0                        | 16.8 ms               |
 
-WebGL2 (`?backend=webgl2`, same machine): `alive()` used to block the main thread for 92–190 ms
-per call at 1 million agents and 590–620 ms at 4 million (median). It now takes 0.1–0.2 ms and
-resolves 11 ms (1 million) or 180–190 ms (4 million) later, without blocking. At 1 million agents
-the frame rate went from 28–51 to 59–60 fps.
+On `main`, 300 to 620 frames per run took longer than 20 ms; on the branch none did.
+
+WebGL2 (`?backend=webgl2`, same machine, paired as above, 16 calls per run): `alive()` blocked
+the main thread for 90–93 ms per call at 1 million agents (median; 42–43 fps) and 570–575 ms at
+4 million (1.8 fps). Now a call takes 0.1–0.3 ms and resolves 7–8 ms (1 million) or 158–161 ms
+(4 million) later, without blocking; at 1 million agents the frame loop runs at 60 fps and
+120 steps/s, at 4 million at 46–48 fps with one step per frame.
 
 ## Feature availability (web3dsurvey share of WebGPU devices)
 
