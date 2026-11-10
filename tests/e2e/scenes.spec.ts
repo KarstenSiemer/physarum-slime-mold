@@ -144,6 +144,45 @@ test('Reload scene restores food, light and walls, and keeps the focus in the ca
   expect(errors).toEqual([]);
 });
 
+// Owner report: load the Maze, change the grid, and the walls and the food were gone (ADR 0019). Grids 512 and 256
+// keep the scene small on SwiftShader in CI (ADR 0010).
+test('the Maze keeps its walls and food when the grid changes, and gets them back unchanged', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openSmallScene(page);
+  // Paused, a frame only draws, and the startup check, which may lower the grid, waits.
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await preset(page).selectOption('maze');
+  const grid = (width: number) =>
+    page.waitForFunction(
+      (w) =>
+        globalThis.physarum?.sim.width === w &&
+        globalThis.physarum.settings.boundary === 'box' &&
+        !globalThis.physarum.busy,
+      width,
+      { timeout: 60_000 },
+    );
+  await grid(512);
+  await expect.poll(async () => (await environment(page))[0], { timeout: 60_000 }).toBeGreaterThan(100);
+  const fine = await environment(page);
+  const cellsOf = () =>
+    page.evaluate(() => (globalThis.physarum?.sim.width ?? 0) * (globalThis.physarum?.sim.height ?? 0));
+  const fineCells = await cellsOf();
+  const select = page.getByLabel('Grid (cells on the long side)');
+  await select.selectOption('256');
+  await grid(256);
+  const coarse = await environment(page);
+  const coarseCells = await cellsOf();
+  // The same share of the box, painted again on the coarser grid.
+  for (const channel of [0, 1]) {
+    const [a, b] = [(fine[channel] ?? 0) / fineCells, (coarse[channel] ?? 0) / coarseCells];
+    expect(Math.abs(b - a) / a, channel ? 'food' : 'walls').toBeLessThan(0.25);
+  }
+  await select.selectOption('512');
+  await grid(512);
+  expect(await environment(page)).toEqual(fine);
+  expect(errors).toEqual([]);
+});
+
 test('the panel shows the density the Steiner tree runs, not a rounded one', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('steiner');

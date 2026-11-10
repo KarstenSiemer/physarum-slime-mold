@@ -1,7 +1,7 @@
 import { constrain, RESOLUTIONS, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget } from './budget';
-import { fromShape, strokeOn } from './environment';
+import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { fitResolution, gridSize, memoryBudget } from './sizing';
@@ -41,7 +41,14 @@ export class Engine {
   /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
   restarts = 0;
   private pendingTool: AgentTool | undefined;
-  private readonly strokes: Stroke[] = [];
+  /** Every food, light, wall and erase edit since the last clear or preset load: each new simulation paints them. */
+  private edits: EnvEdit[] = [];
+  /** How many of `edits` the current simulation holds; the next frame paints the rest. */
+  private painted = 0;
+  /** The grid the view shows (fitView()): strokes from the canvas are in its cells, also during a rebuild. */
+  private viewGrid: [number, number] | undefined;
+  /** False from freeing a simulation until the next one exists. */
+  private live = false;
   private raf = 0;
   private rebuilding: Promise<void> | undefined;
   private built = { resolution: 0, density: 0 };
@@ -52,9 +59,17 @@ export class Engine {
     public settings: Settings,
   ) {}
 
-  /** `onAdjust` hears about grids the device could not hold (also on the first allocation). */
-  static async create(canvas: HTMLCanvasElement, settings: Settings, onAdjust?: Adjust): Promise<Engine> {
-    const engine = new Engine(await createBackend(canvas), canvas, settings);
+  /**
+   * `onAdjust` hears about grids the device could not hold (also on the first allocation). `backend` replaces the
+   * automatic choice (tests: WebGL2 in the browser, a CPU backend in Node).
+   */
+  static async create(
+    canvas: HTMLCanvasElement,
+    settings: Settings,
+    onAdjust?: Adjust,
+    backend?: Backend,
+  ): Promise<Engine> {
+    const engine = new Engine(backend ?? (await createBackend(canvas)), canvas, settings);
     engine.onAdjust = onAdjust;
     engine.settings = engine.supported(settings);
     await engine.rebuild();
@@ -73,17 +88,20 @@ export class Engine {
     if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
   }
 
-  /** Loads a preset: its settings, a fresh population and its food, light and walls. */
+  /**
+   * Loads a preset: its settings, its food, light and walls in place of every earlier edit, then a fresh
+   * population, placed after the walls so that no agent starts inside one.
+   */
   async load(settings: Settings, env: readonly EnvShape[] = []) {
     this.settings = this.supported(settings);
-    if (this.needsRebuild()) await this.rebuild();
-    else {
-      this.sim.update(this.settings);
-      this.reset();
-    }
+    this.edits = env.map((e) => fromShape(e, this.settings.boundary));
+    this.painted = 0;
+    // A new simulation paints the edits itself, before it places the agents.
+    if (this.needsRebuild()) return this.rebuild();
+    this.sim.update(this.settings);
     this.sim.clearEnvironment();
-    const { width: w, height: h } = this.sim;
-    this.sim.paint(env.flatMap((e) => strokeOn(fromShape(e, this.settings.boundary), w, h) ?? []));
+    this.flushEnv();
+    this.reset();
   }
 
   /** Called with the new grid when the engine had to lower it to fit the device. */
@@ -120,7 +138,8 @@ export class Engine {
 
   /**
    * New buffers for the current resolution, density and canvas aspect ratio; repeats if settings moved meanwhile.
-   * The old simulation is freed first, so memory never holds two (frame() waits meanwhile).
+   * The old simulation is freed first, so memory never holds two (frame() waits meanwhile). The new one paints
+   * every edit (ADR 0019), then places its agents.
    */
   rebuild(): Promise<void> {
     this.rebuilding ??= (async () => {
@@ -129,6 +148,7 @@ export class Engine {
         const { resolution, density } = this.settings;
         const [w, h] = gridSize(resolution, this.canvas.width / Math.max(1, this.canvas.height));
         const agents = Math.max(1, Math.min(this.backend.maxAgents, Math.round(density * w * h)));
+        this.live = false;
         old?.destroy();
         old = undefined;
         this.built = { resolution: 0, density: 0 }; // nothing is built until the new one exists
@@ -146,11 +166,14 @@ export class Engine {
           continue;
         }
         old = this.sim;
+        this.live = true;
+        this.painted = 0; // a new simulation starts without food, light and walls
         this.built = { resolution, density };
         this.fitView();
       } while (this.needsRebuild());
       // Settings may have changed during the allocation (seed, layout, shares): start from them.
       this.sim.update(this.settings);
+      this.flushEnv();
       this.sim.reset();
       this.backend.forget();
       this.restarts++;
@@ -165,13 +188,16 @@ export class Engine {
     this.restarts++;
   }
 
-  /** Removes food, light and walls (a new simulation has none anyway). */
+  /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */
   clearEnvironment() {
-    if (!this.rebuilding) this.sim.clearEnvironment();
+    this.edits = [];
+    this.painted = 0;
+    if (this.live) this.sim.clearEnvironment();
   }
 
   fitView() {
     const { width, height } = this.sim;
+    this.viewGrid = [width, height];
     this.view = {
       center: [width / 2, height / 2],
       scale: Math.max(width / this.canvas.width, height / this.canvas.height),
@@ -195,8 +221,24 @@ export class Engine {
     this.view.center = [this.view.center[0] - dxPx * this.view.scale, this.view.center[1] - dyPx * this.view.scale];
   }
 
+  /**
+   * A brush stroke in cells of the grid on screen (toGrid()); the next frame paints it. It is kept with that grid:
+   * during a rebuild the view still shows the old grid, and the new one gets the stroke where it was drawn. Before
+   * the first simulation exists no grid is on screen, so the stroke is dropped.
+   */
   paint(stroke: Stroke) {
-    if ([...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite)) this.strokes.push(stroke);
+    if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;
+    const s = { ...stroke, radius: Math.max(MIN_RADIUS, stroke.radius) };
+    this.edits.push(fromStroke(s, this.viewGrid, this.settings.boundary));
+  }
+
+  /** Paints the edits the current simulation does not hold yet, mapped to its grid, in one call. */
+  private flushEnv() {
+    if (this.painted === this.edits.length) return;
+    const { width, height } = this.sim;
+    const strokes = this.edits.slice(this.painted).flatMap((e) => strokeOn(e, width, height) ?? []);
+    this.painted = this.edits.length;
+    this.sim.paint(strokes);
   }
 
   agentTool(tool: AgentTool) {
@@ -224,13 +266,13 @@ export class Engine {
   }
 
   /**
-   * One frame: queued strokes, as many steps as the speed asks for and the GPU keeps up with, then one
+   * One frame: new strokes, as many steps as the speed asks for and the GPU keeps up with, then one
    * render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
    * simulation speed instead of the frame rate.
    */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
-    this.sim.paint(this.strokes.splice(0));
+    this.flushEnv();
     const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
     let steps = forceSteps ?? planned;
     // A held tool while paused still needs one step to act.
