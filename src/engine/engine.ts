@@ -11,11 +11,11 @@ import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 /**
- * Sweep work (sweep.ts sweeping()) in the pointer handler, paint(): 256 rows are about 0.5 ms on an M3 Pro before
- * the JIT has optimized the sweep, as at the first large erase of a page. Counted in rows, not time, so a stroke's
- * sweep pauses at the same place on every machine. Each frame then goes on for FRAME_MS, which leaves room for the
- * step past it and the deletions at the end within 2 ms. A deletion changes no byte on screen, so the rest of a long
- * sweep can wait.
+ * Sweep work (sweep.ts sweeping()) in the pointer handler, paint(), counted in rows, not time, so a stroke's sweep
+ * pauses at the same place on every machine. Each frame then goes on for FRAME_MS. A step between two pauses runs to
+ * its end, and some grow with the list: at 100,000 edits an erase of radius 300 took 0.7 to 1.2 ms in paint() and
+ * frames of 2.5 to 3.5 ms, in Chromium on an M3 Pro (ADR 0019). A deletion changes no byte on screen, so the rest of
+ * a long sweep can wait.
  */
 const PAINT_ROWS = 256;
 const FRAME_MS = 1;

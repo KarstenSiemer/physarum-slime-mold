@@ -201,11 +201,15 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   cleared, so the next sweep looks at the edit again only when the new stroke covers that cell.
   Rule 2 tests the older edits under an erase row by row, stops at the first that shares a cell and
   keeps it as the erase's witness: the erase is looked at again only when its witness goes. The
-  sweep pauses after 32 rows of work: the pointer handler runs 256 rows of it (about 0.5 ms on an
-  M3 Pro before the JIT has optimized it), each frame 1 ms more, and a deletion changes no byte on
-  screen. A new grid finishes a waiting sweep first; a Clear and a preset load drop it. Measured with
-  the scripts of the review of the fifth draft (3caa152, "before"), in the same run as that draft
-  and the fourth (a5631bc, no sweep), M3 Pro with two other workflows on the GPU:
+  sweep pauses after 32 rows of work: the pointer handler runs 256 rows of it, each frame 1 ms
+  more, and a deletion changes no byte on screen. Some steps between two pauses grow with the list,
+  and each runs to its end. These are `near()` and the candidate filter at the start, the scans of
+  the tiles and `near()` in rule 2, and at the end the compaction of the list and the placement,
+  which can build the tiles again. So with a long list the pointer handler and some frames take
+  more than their share (measured below). A new grid finishes a waiting sweep first; a Clear and a
+  preset load drop it. Measured with the scripts of the review of the fifth draft (3caa152,
+  "before"), in the same run as that draft and the fourth (a5631bc, no sweep), M3 Pro with two
+  other workflows on the GPU:
 
   | Built app, 120 px brush, the second drag (Engine.paint per segment, mean / max) | a5631bc       | Before         | After         |
   | ------------------------------------------------------------------------------- | ------------- | -------------- | ------------- |
@@ -232,9 +236,21 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   | 18,000 recorded edits (13,113 kept), the same                             | 26.7 ms (63 ms)          | 0.03 ms (0.1 ms) [0.40 ms, 0.8 ms]                   |
   | One erase of radius 300 over 2,000 / 10,000 / 30,000 / 100,000 edits      | 13 / 55 / 302 / 2,053 ms | 0.3 / 0.2 / 0.4 / 0.9 ms [0.7 / 2.1 / 5.7 / 22.0 ms] |
 
-  The frames that finish such an erase take at most 1.5 ms up to 30,000 edits; with 100,000 the one
-  that ends it takes 3.4 ms, as it also compacts the list of 83,420 edits. On a new grid, where no
-  open cell is known yet, the erase over 100,000 edits takes 53.8 ms in all, over 49 frames.
+  The review of the sixth draft timed the erase of radius 300 again in two runs of the same setup
+  (timer step 0.1 ms, load average about 5 to 6). It timed three cases: after a rebuild, with a
+  kept placement, and on a new grid of 1536 × 960, where no open cell is known yet. The pointer
+  handler took 0.1 to 0.4 ms up to 10,000 edits, 0.2 to 0.7 ms at 30,000 and 0.7 to 1.2 ms at
+  100,000. The longest frame of the sweep took at most 0.4 ms at 2,000 edits and 1.0 to 2.0 ms at
+  10,000. At 30,000 edits it took 1.3 to 1.8 ms after a rebuild or with a kept placement, and 1.7
+  and 3.4 ms on the new grid. At 100,000 edits (83,420 kept) it took 2.5 to 3.5 ms in every case:
+  more than the target of 2 ms per frame, but far less than the 16.7 ms of a frame at 60 Hz. There
+  the whole sweep took 20.8 to 24.4 ms over 17 to 20 frames after a rebuild or with a kept
+  placement, and 49.7 and 54.4 ms over 45 and 50 frames on the new grid. The first erase after
+  130,000 food dabs, of radius 2,000 over all of them, took 3.9 ms in the pointer handler:
+  `near()` and the candidate filter pass over the whole list before the first pause. Its sweep took
+  53 ms over 30 frames, the two longest of 9.6 and 8.8 ms. With the largest eraser the pointer
+  handler took at most 0.8 ms per segment, up to 18,000 recorded edits. With 18,000 and one frame
+  for each segment, the longest frame took 2.6 ms in one run and 1.5 ms in the other.
 
 - **Scene changed.** The scene card shows "changed" and "Reload scene" when a model setting or the
   food, light and walls differ from the loaded scene: when the engine's list is not the scene's
