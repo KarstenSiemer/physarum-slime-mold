@@ -1,6 +1,7 @@
 // WebGL2 resources, counting and readback in a real browser (ADR 0003, ADR 0010).
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, STYLES, type Settings } from '../../model/params';
+import { BOUNDARIES, defaultSettings, defaultStrain, STYLES, type Settings } from '../../model/params';
+import { AgentToolKind } from '../pack';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
@@ -129,6 +130,30 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     sim.destroy();
   });
 
+  // Without float blending each (cell, strain) has its own pixel in a 2 × 2 panel layout (deposit()):
+  // grids that are not square catch a swapped width and height. The layout puts hundreds of agents of
+  // each strain in the central cells, so the carries count too.
+  it.each([
+    [80, 24],
+    [24, 80],
+    [72, 40],
+  ])('counts every cell and strain of a %i × %i grid exactly', async (w, h) => {
+    const { gl, prog } = context();
+    const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
+    const settings = settingsWith({ strains, layout: 'center', shrink: 0 });
+    const sim = new GlSim(gl, prog, settings, w, h, 12 * w * h, floatBlend);
+    sim.run(1);
+    // Every agent moves on a periodic grid without walls, so the counts are where the agents now are.
+    const expected = new Array<number>(w * h * 4).fill(0);
+    for (const a of await sim.readAgents()) {
+      const [x, y] = [((Math.floor(a.x) % w) + w) % w, ((Math.floor(a.y) % h) + h) % h];
+      if (a.bits & 4) expected[(y * w + x) * 4 + (a.bits & 3)] = (expected[(y * w + x) * 4 + (a.bits & 3)] ?? 0) + 1;
+    }
+    expect(Math.max(...expected)).toBeGreaterThan(256);
+    expect(Array.from(await sim.readCounts())).toEqual(expected);
+    sim.destroy();
+  });
+
   // Without float blending the stencil holds the count mod 256 and the carry its 256s (deposit()).
   it.each([1, 255, 256, 257, 511, 512, 513, 65_535, 65_537])('counts exactly in a cell with n = %i', async (n) => {
     const { gl, prog } = context();
@@ -203,10 +228,23 @@ it('polls a fence about once per millisecond, not every 4 ms like nested timers'
   expect(median).toBeLessThan(3.5);
 });
 
-/** A canvas whose WebGL2 context hides EXT_float_blend, so the backend takes the half-float path. */
-function withoutFloatBlend() {
+/**
+ * A canvas whose WebGL2 context hides EXT_float_blend, so the backend takes the half-float path, and
+ * records every blended draw into a 32-bit float color attachment. Chromium turns float blending on
+ * together with EXT_color_buffer_float, so here such a draw would work; without EXT_float_blend it
+ * fails with INVALID_OPERATION.
+ */
+function halfFloatCanvas() {
+  const blended: string[] = [];
   const canvas = document.createElement('canvas');
   const getContext = canvas.getContext.bind(canvas);
+  const float32 = (t: WebGL2RenderingContext, attachment: number) => {
+    const param = (p: number) => t.getFramebufferAttachmentParameter(t.DRAW_FRAMEBUFFER, attachment, p) as number;
+    if (param(t.FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE) === t.NONE) return false;
+    return (
+      param(t.FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE) === t.FLOAT && param(t.FRAMEBUFFER_ATTACHMENT_RED_SIZE) === 32
+    );
+  };
   canvas.getContext = ((type: string, attrs?: WebGLContextAttributes) => {
     const gl = getContext(type, attrs);
     if (!(gl instanceof WebGL2RenderingContext)) return gl;
@@ -214,16 +252,52 @@ function withoutFloatBlend() {
       get(t, key) {
         if (key === 'getExtension')
           return (name: string): unknown => (name === 'EXT_float_blend' ? null : t.getExtension(name));
+        if (key === 'drawArrays')
+          return (mode: number, first: number, count: number) => {
+            const framebuffer = t.getParameter(t.DRAW_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+            if (t.isEnabled(t.BLEND) && framebuffer)
+              for (const attachment of [t.COLOR_ATTACHMENT0, t.COLOR_ATTACHMENT1])
+                if (float32(t, attachment)) blended.push(`mode ${mode}, ${count} vertices`);
+            t.drawArrays(mode, first, count);
+          };
         const v: unknown = Reflect.get(t, key);
         return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v;
       },
     });
   }) as unknown as typeof canvas.getContext;
-  return canvas;
+  return { canvas, blended };
 }
 
+it('never blends into a 32-bit float target without float blending', async () => {
+  const { canvas, blended } = halfFloatCanvas();
+  const backend = WebGl2Backend.create(canvas);
+  expect(backend.supportsCollisions).toBe(false);
+  const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
+  for (const boundary of BOUNDARIES)
+    for (const diffusion of [0, 1, 2]) {
+      const settings = settingsWith({ boundary, diffusion, strains, shrink: 0.001 });
+      const sim = await backend.createSim(settings, 48, 32, 3000);
+      sim.paint({ kind: 'food', from: [10, 10], to: [20, 12], radius: 3 });
+      sim.paint({ kind: 'light', from: [30, 20], to: [30, 20], radius: 4 });
+      sim.paint({ kind: 'wall', from: [5, 25], to: [40, 25], radius: 1 });
+      sim.paint({ kind: 'erase', from: [20, 25], to: [20, 25], radius: 2 });
+      sim.run(3, { kind: AgentToolKind.inoculate, x: 24, y: 16, radius: 6, strain: 1, revive: 0.5, teleport: 0.3 });
+      sim.run(2, { kind: AgentToolKind.cut, x: 12, y: 12, radius: 4, strain: 0, revive: 0, teleport: 0 });
+      const view = { center: [24, 16] as [number, number], scale: 0.5 };
+      for (const style of STYLES) {
+        backend.draw(sim, { ...settings, style }, view, true);
+        await backend.capture(sim, { ...settings, style }, view, 32, 32);
+      }
+      await backend.settle(sim);
+      await sim.alive();
+      sim.destroy();
+    }
+  backend.destroy();
+  expect(blended).toEqual([]);
+});
+
 describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
-  const create = () => WebGl2Backend.create(floatBlend ? document.createElement('canvas') : withoutFloatBlend());
+  const create = () => WebGl2Backend.create(floatBlend ? document.createElement('canvas') : halfFloatCanvas().canvas);
 
   it('reports the memory and grid limits of its counting path', () => {
     const backend = create();
