@@ -251,30 +251,29 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
     SwiftShader (the CI image) a new device with its first simulation took 16.2 to 16.8 s against
     9.4 to 10.4 s with one outline pipeline (ADR 0010); on Metal 6 to 18 ms either way. One pipeline
     with the conditions as tests builds as fast as before, and its replays of walls and erasers take
-    10 to 14 % longer (TODO.md, owner). WebGL2 changes its render target from `env`
-    to `shape` and back for every run of outlines, about 55 µs each time on the M3 Pro, so it draws
-    the outlines of a run of segments after the paint draws of the run. A run ends where the
-    boundary changes, or where a segment of another kind meets it: its outline box meets the outline
-    box of a segment of the run (`PendingOutlines` in `src/engine/brush.ts`, in buckets of 16 × 16
-    cells). An outline box holds every cell within 5 rings of a cell its segment paints, and the
-    outline of a cell reads `env` only within 5 rings of it (the holds; the shadow within 3.3
-    cells). So segments of another kind whose boxes do not meet change no cell that the other reads
-    or writes. The first merge grew the boxes by 5 more cells: that ended 12 % more runs (5,545
-    against 4,934 for 100,000 strokes at random places on the periodic grid, 5,416 against 4,827 in
-    a box; review, 2026-11-10) and changed no byte. Segments of one kind may overlap: unions take
-    the maximum and subtractions the minimum, the side of the outline follows `env`, which a run of
-    one kind only grows or only shrinks, the holds of item 2 depend on the stroke alone or on `env`
-    after the run, and a subtraction holds its whole box. So the outlines give the same bytes after
-    the run's paint as after each segment's paint. In a run each segment draws its union (op 0) or
-    its subtraction
-    (op 1) over its box. Then, once per cell of the union of the run's boxes of a kind
-    (`unionRects`), op 4 draws the hold of the subtracted layers with `MIN` blending and op 2 the
-    light and the shadow. Where the hold searches fewer cells per segment, without the cells where
-    the segment's subtraction wrote 0, as for a single large eraser, op 1 takes it in the same draw
-    (`MIN` blending of both), and an eraser's light and shadow follow per segment, with no fetch deep
-    inside it. `unionRects` marks the boxes as bits over their bounding box: for the 100,000 boxes
-    of a drag it took 46 ms instead of 479 ms (Node, M3 Pro) and gave the same rectangles. Food
-    draws nothing over the union and skips it.
+    10 to 14 % longer. The owner keeps the six pipelines (2026-11-10). WebGL2 changes its render
+    target from `env` to `shape` and back for every run of outlines, about 55 µs each time on the M3
+    Pro, so it draws the outlines of a run of segments after the paint draws of the run. A run ends
+    where the boundary changes, or where a segment of another kind meets it: its outline box meets
+    the outline box of a segment of the run (`PendingOutlines` in `src/engine/brush.ts`, in buckets
+    of 16 × 16 cells). An outline box holds every cell within 5 rings of a cell its segment paints,
+    and the outline of a cell reads `env` only within 5 rings of it (the holds; the shadow within
+    3.3 cells). So segments of another kind whose boxes do not meet change no cell that the other
+    reads or writes. The first merge grew the boxes by 5 more cells: that ended 12 % more runs
+    (5,545 against 4,934 for 100,000 strokes at random places on the periodic grid, 5,416 against
+    4,827 in a box; review, 2026-11-10) and changed no byte. Segments of one kind may overlap:
+    unions take the maximum and subtractions the minimum, the side of the outline follows `env`,
+    which a run of one kind only grows or only shrinks, the holds of item 2 depend on the stroke
+    alone or on `env` after the run, and a subtraction holds its whole box. So the outlines give the
+    same bytes after the run's paint as after each segment's paint. In a run each segment draws its
+    union (op 0) or its subtraction (op 1) over its box. Then, once per cell of the union of the
+    run's boxes of a kind (`unionRects`), op 4 draws the hold of the subtracted layers with `MIN`
+    blending and op 2 the light and the shadow. Where the hold searches fewer cells per segment,
+    without the cells where the segment's subtraction wrote 0, as for a single large eraser, op 1
+    takes it in the same draw (`MIN` blending of both), and an eraser's light and shadow follow per
+    segment, with no fetch deep inside it. `unionRects` marks the boxes as bits over their bounding
+    box: for the 100,000 boxes of a drag it took 46 ms instead of 479 ms (Node, M3 Pro) and gave the
+    same rectangles. Food draws nothing over the union and skips it.
 
 ### Consequences
 
@@ -333,8 +332,8 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   that the drag erased before; without the walls painted first, an eraser there took 1.85 ms (PR 3
   alone 0.99). PR 3 held only within 4 cells of the brush, which left wrong bytes, and the bytes
   that a subtraction can change lie within 7.07 cells; holding only those would need the same
-  region for WebGL2's hold over the union of a run, which a draw cannot test per cell (TODO.md,
-  owner). Again after the rebase onto the final PR 2 (2026-11-10), paired in one page on WebGL2
+  region for WebGL2's hold over the union of a run, which a draw cannot test per cell. The owner
+  keeps the exact hold (2026-11-10). Again after the rebase onto the final PR 2 (2026-11-10), paired in one page on WebGL2
   against PR 2 alone (01059ae), radius 1,000 cells on 3072 × 1920 (periodic), median of 8 rounds,
   two runs, with other work on the host (load average 5 to 7): erasers 5.87 and 6.01 ms per stroke
   against 0.37 and 0.36 ms, walls 5.49 and 6.02 ms against 0.36 and 0.41 ms, 15 to 17 times PR 2
