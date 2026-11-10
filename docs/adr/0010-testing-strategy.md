@@ -73,3 +73,13 @@ GPU checks use invariants, not long exact trajectories:
   (28 tests) took 10.2 and 13.3 min in two runs and its base (26 tests) 9.0 min between them: every
   test needs 16 to 20 s there to start the app. The slowest was "a preset chosen while the engine
   starts", 44 to 66 s of 120 s; the boot test waits up to 60 s for the engine to exist.
+- After the review fixes of ADR 0019 (same image, 2026-11-10, one other test container on the
+  host): the GPU project (209 tests) took 192 s, Fig. 10 on WebGPU 84 s of 600 s, and no other test
+  more than 18 s (the WebGL2 counting test without float blending, 4.9 s on GitHub for the base).
+  The e2e suite (28 tests) took 7.7 min without a retry. Its waits for the started app took 11 to
+  23 s of their 60 s, and the two tests that start the app twice 32 and 33 s of 120 s. Measured
+  paired with the base in fresh containers, a new WebGPU backend and its first simulation (every
+  pipeline) took 9.3 to 10.1 s against 8.8 to 9.5 s (3 runs), and "a preset chosen while the engine
+  starts" reached step 5 after a median of 14.8 and 14.9 s against 14.4 and 15.1 s for its two page
+  loads (6 runs). The boot waits keep their 60 s; a review run beside more containers saw one of
+  them reach 60 s once, and its retry passed.
