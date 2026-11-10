@@ -34,7 +34,7 @@ describe('memory budget', () => {
   it('counts the bytes per cell of the backend', () => {
     const s = defaultSettings();
     const [w, h] = gridSize(s.resolution, 16 / 10);
-    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at 84 B per cell
+    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at BYTES_PER_CELL (86 B)
     expect(fitResolution(s, 16 / 10, { ...roomy, budget })).toBe(s.resolution);
     const halfFloat = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL_HALF_FLOAT };
     expect(fitResolution(s, 16 / 10, halfFloat)).toBeLessThan(s.resolution);

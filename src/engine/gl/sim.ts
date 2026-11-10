@@ -241,7 +241,7 @@ export class GlSim implements Sim {
 
   private encodeStep() {
     const gl = this.gl;
-    const dummy = this.counts.texture; // bound to unused samplers; never a render target here
+    const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         this.prog.agents,
