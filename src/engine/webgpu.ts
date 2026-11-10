@@ -5,15 +5,17 @@ import { AutoExposure } from './exposure';
 import { initGpu, OutOfMemoryError, type Gpu } from './gpu';
 import { Renderer, type Frame } from './render';
 import { Simulation } from './sim';
-import { equilibrium } from './sizing';
-import type { Backend, View } from './types';
+import { BYTES_PER_CELL, equilibrium } from './sizing';
+import type { Backend, Levels, View } from './types';
 
+// The agent id has 24 bits (ADR 0005, shaders/common.wgsl).
 const MAX_AGENTS = 2 ** 24;
 
 /** The primary backend: compute shaders, integer atomics, GPU histogram (ADR 0002). */
 export class WebGpuBackend implements Backend<Simulation> {
   readonly kind = 'webgpu';
   readonly supportsCollisions = true;
+  readonly bytesPerCell = BYTES_PER_CELL;
   readonly description: string;
   readonly lost: Promise<string>;
   private readonly renderer: Renderer;
@@ -49,8 +51,9 @@ export class WebGpuBackend implements Backend<Simulation> {
     return Math.min(l.maxStorageBufferBindingSize, l.maxBufferSize);
   }
 
+  /** The gel height field has a one-cell border, two texels more than the grid (render.ts). */
   get maxGridSide() {
-    return this.gpu.device.limits.maxTextureDimension2D;
+    return this.gpu.device.limits.maxTextureDimension2D - 2;
   }
 
   get maxAgents() {
@@ -86,8 +89,9 @@ export class WebGpuBackend implements Backend<Simulation> {
     return this.renderer.capture(this.frame(sim, settings, view, false), width, height);
   }
 
-  settle(sim: Simulation) {
-    return this.auto.measure(sim.current.trail);
+  async settle(sim: Simulation): Promise<Levels> {
+    await this.auto.measure(sim.current.trail);
+    return { gain: this.auto.gain, black: this.auto.black };
   }
 
   forget() {

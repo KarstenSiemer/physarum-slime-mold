@@ -25,8 +25,14 @@ export function diffusePlan(passes: number): Diffuse[] {
   return Array.from({ length: passes }, (_, i) => ({ first: i === 0, last: i === passes - 1, blur: true }));
 }
 
-/** GPU bytes per grid cell (trail, scent, counts, environment, collisions, bloom) and per agent (WebGL2 keeps two copies). */
-const BYTES_PER_CELL = 84; // incl. collision buffers (12) and the bloom chain (~2.7)
+/**
+ * GPU bytes per grid cell: trail 32, scent 16, counts 16, environment 4, collision buffers 12, the
+ * bloom chain about 2.7 and the gel height field about 2. WebGL2 without float blending has no
+ * collision buffers but 32 B of counting panels with a stencil (gl/sim.ts deposit()).
+ */
+export const BYTES_PER_CELL = 86;
+export const BYTES_PER_CELL_HALF_FLOAT = 106;
+/** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 const BYTES_PER_AGENT = 32;
 
 /** Memory budget: an eighth of the device memory hint (Chrome only), at most 1 GiB; 512 MiB if unknown. */
@@ -34,8 +40,8 @@ export function memoryBudget(deviceMemoryGb?: number): number {
   return Math.min(2 ** 30, (deviceMemoryGb ?? 4) * 2 ** 27);
 }
 
-export function estimateBytes(width: number, height: number, agents: number): number {
-  return width * height * BYTES_PER_CELL + agents * BYTES_PER_AGENT;
+export function estimateBytes(width: number, height: number, agents: number, bytesPerCell = BYTES_PER_CELL): number {
+  return width * height * bytesPerCell + agents * BYTES_PER_AGENT;
 }
 
 /**
@@ -50,6 +56,8 @@ export interface Limits {
   maxGridSide: number;
   /** Total memory budget in bytes. */
   budget: number;
+  /** GPU bytes per grid cell on this backend (default BYTES_PER_CELL). */
+  bytesPerCell?: number;
 }
 
 export function fitResolution(s: Settings, aspect: number, l: Limits): number {
@@ -57,7 +65,7 @@ export function fitResolution(s: Settings, aspect: number, l: Limits): number {
   for (const r of options.reverse()) {
     const [w, h] = gridSize(r, aspect);
     const fits =
-      estimateBytes(w, h, Math.min(l.maxAgents, s.density * w * h)) <= l.budget &&
+      estimateBytes(w, h, Math.min(l.maxAgents, s.density * w * h), l.bytesPerCell) <= l.budget &&
       w * h * 16 <= l.maxBufferBytes && // the largest per-cell buffer: 16 B (counts, trail texel)
       Math.max(w, h) <= l.maxGridSide;
     if (fits) return r;

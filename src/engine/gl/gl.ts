@@ -28,6 +28,8 @@ export interface Target {
   width: number;
   height: number;
   format: number;
+  /** Depth and stencil buffer, if the target has one (stencilTarget()). */
+  depthStencil?: WebGLRenderbuffer;
 }
 
 const FORMATS: Record<number, [number, number]> = {
@@ -59,6 +61,23 @@ export function target(gl: GL, width: number, height: number, format: number, li
   return { texture, fbo, width, height, format };
 }
 
+/** A target with an 8-bit stencil (in a depth-stencil renderbuffer, the most widely supported kind). */
+export function stencilTarget(gl: GL, width: number, height: number, format: number): Target {
+  const t = target(gl, width, height, format);
+  const depthStencil = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depthStencil);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, depthStencil);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.deleteRenderbuffer(depthStencil);
+    destroyTarget(gl, t);
+    throw new Error(`Stencil target ${width}×${height} is incomplete (status 0x${status.toString(16)})`);
+  }
+  return { ...t, depthStencil };
+}
+
 export function clear(gl: GL, t: Target) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
   gl.viewport(0, 0, t.width, t.height);
@@ -69,6 +88,7 @@ export function clear(gl: GL, t: Target) {
 export function destroyTarget(gl: GL, t: Target) {
   gl.deleteTexture(t.texture);
   gl.deleteFramebuffer(t.fbo);
+  if (t.depthStencil) gl.deleteRenderbuffer(t.depthStencil);
 }
 
 /** Reads a whole target (rows from y = 0). */
@@ -82,6 +102,68 @@ export function readTarget(gl: GL, t: Target): Float32Array | Uint8Array {
   const out = new Float32Array(t.width * t.height * 4);
   gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.FLOAT, out);
   return out;
+}
+
+/**
+ * Resolves once the GPU has run every command issued so far: a fence, polled without blocking. A fence
+ * cannot signal within the task that made it (WebGL 2.0 spec, 5.27), so polling starts in the next task.
+ * Resolves false if the context is lost.
+ *
+ * The polls run about 1 ms apart. A chain of timers that each start the next is clamped to 4 ms after
+ * five levels (HTML timer rules); in Chromium that made the polls 5 ms apart from about 7 ms on, so the
+ * frame budget saw the GPU finish up to 5 ms late. Each poll's timer therefore starts from a message
+ * task, which keeps its nesting level at 1.
+ */
+export function fence(gl: GL): Promise<boolean> {
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+  return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    const finish = (ok: boolean) => {
+      port1.close();
+      resolve(ok);
+    };
+    const poll = () => {
+      if (!sync || gl.isContextLost()) {
+        finish(false);
+        return;
+      }
+      const status = gl.clientWaitSync(sync, 0, 0);
+      if (status === gl.TIMEOUT_EXPIRED) {
+        port2.postMessage(undefined);
+        return;
+      }
+      gl.deleteSync(sync);
+      finish(status !== gl.WAIT_FAILED);
+    };
+    port1.onmessage = () => {
+      setTimeout(poll, 1);
+    };
+    setTimeout(poll, 0);
+  });
+}
+
+/**
+ * Reads a float target without stalling the main thread: the GPU copies it into a pixel-pack buffer,
+ * and the CPU reads that buffer once a fence says the copy is done.
+ */
+export async function readTargetAsync(gl: GL, t: Target): Promise<Float32Array> {
+  const out = new Float32Array(t.width * t.height * 4);
+  const pbo = gl.createBuffer();
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+  gl.bufferData(gl.PIXEL_PACK_BUFFER, out.byteLength, gl.STREAM_READ);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.FLOAT, 0);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  try {
+    if (!(await fence(gl))) throw new Error('The WebGL context was lost.');
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    return out;
+  } finally {
+    gl.deleteBuffer(pbo);
+  }
 }
 
 /** Uploads texels into a target (rows from y = 0). */

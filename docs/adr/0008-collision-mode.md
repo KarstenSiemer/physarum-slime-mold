@@ -17,9 +17,9 @@ Jones runs agents in random sequential order; a GPU runs them in parallel.
    so results are not reproducible.
 3. **Two passes with claims**: pass A computes headings and targets and calls
    `atomicMax(claims[target], key)` with a unique per-step key (a bijective hash of the agent
-   index, so priorities are random but never tie; WebGL2 uses `MAX` blending). A target is
-   free only if it was empty at the start of the step. Pass B moves the winners, deposits, and
-   writes the next occupancy with `atomicAdd`.
+   id, ADR 0005, so priorities are random but never tie; WebGL2 uses `MAX` blending). A target
+   is free only if it was empty at the start of the step. Pass B moves the winners, deposits,
+   and writes the next occupancy with `atomicAdd`.
 
 ## Decision
 

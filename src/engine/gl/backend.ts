@@ -3,9 +3,9 @@ import { at } from '../at';
 import { levels } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
-import { equilibrium } from '../sizing';
-import type { Backend, View } from '../types';
-import { clear, destroyTarget, target, textures, uniformBlock, type GL, type Target } from './gl';
+import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
+import type { Backend, Levels, View } from '../types';
+import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
 import { compile, VIEW_BINDING, type Programs } from './programs';
 import { GlSim } from './sim';
 
@@ -22,14 +22,21 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly maxAgents: number;
   readonly maxBufferBytes: number;
   readonly maxGridSide: number;
+  readonly bytesPerCell: number;
   private readonly prog: Programs;
   private readonly viewUbo: WebGLBuffer;
   private readonly viewData = new ArrayBuffer(VIEW_BYTES);
   private bloomChain: Target[] = [];
   private sampleTarget: Target | undefined;
+  /** Gel height field: one texel per cell plus a one-cell border (height.frag). */
+  private heights: Target | undefined;
   private frame = 0;
   private gain = 0;
   private black = 0;
+  /** The auto-levels measurement whose readback is still on its way. */
+  private measuring: Promise<void> | undefined;
+  /** Counts forget() calls: a readback of a replaced simulation must not change the new levels. */
+  private generation = 0;
 
   private constructor(
     private readonly gl: GL,
@@ -42,7 +49,17 @@ export class WebGl2Backend implements Backend<GlSim> {
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     // Claim keys must stay below 2^24 (exact in float32); memory stays moderate on weaker GPUs.
     this.maxAgents = Math.min(2 ** 22, 2048 * maxTex);
-    this.maxGridSide = maxTex;
+    // The gel height field has a one-cell border (heightsFor()), two texels more than the grid. Without
+    // float blending the counting panels (gl/sim.ts deposit()) are twice the grid on each side.
+    const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+    const side = Math.min(
+      maxTex,
+      gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
+      viewport[0] ?? 0,
+      viewport[1] ?? 0,
+    );
+    this.maxGridSide = Math.min(maxTex - 2, floatBlend ? maxTex : Math.floor(side / 2));
+    this.bytesPerCell = floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT;
     this.maxBufferBytes = maxTex * maxTex * 16;
     this.description = `WebGL2 · ${String(gl.getParameter(gl.RENDERER))}`;
     this.lost = new Promise((resolve) => {
@@ -89,7 +106,7 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
-    if (measure && this.frame % 15 === 0) this.measure(sim, this.gain === 0 ? 1 : 0.25);
+    if (measure && this.frame % 15 === 0 && !this.measuring) void this.measure(sim, this.gain === 0 ? 1 : 0.25);
     this.encode(sim, settings, view, gl.drawingBufferWidth, gl.drawingBufferHeight);
     this.frame++;
   }
@@ -108,25 +125,37 @@ export class WebGl2Backend implements Backend<GlSim> {
     return Promise.resolve(new ImageData(out, width, height));
   }
 
-  settle(sim: GlSim): Promise<void> {
-    this.measure(sim, 1);
-    return Promise.resolve();
+  async settle(sim: GlSim): Promise<Levels> {
+    await this.measure(sim, 1);
+    return { gain: this.gain, black: this.black };
   }
 
   forget() {
     this.gain = 0;
     this.black = 0;
+    this.generation++;
   }
 
   destroy() {
     for (const t of this.bloomChain) destroyTarget(this.gl, t);
     if (this.sampleTarget) destroyTarget(this.gl, this.sampleTarget);
+    if (this.heights) destroyTarget(this.gl, this.heights);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
-  /** Auto levels from a grid of trail samples (no compute shaders in WebGL2). */
-  private measure(sim: GlSim, blend: number) {
+  /**
+   * Auto levels from a grid of trail samples (no compute shaders in WebGL2), read back without blocking.
+   * Waits for a measurement that is still running, so `blend` 1 (settle) always gets its own.
+   */
+  private async measure(sim: GlSim, blend: number): Promise<void> {
+    while (this.measuring) await this.measuring;
+    this.measuring = this.sample(sim, blend).finally(() => (this.measuring = undefined));
+    return this.measuring;
+  }
+
+  private async sample(sim: GlSim, blend: number) {
     const gl = this.gl;
+    const generation = this.generation;
     const h = Math.max(1, Math.round((SAMPLES * sim.height) / sim.width));
     if (this.sampleTarget?.height !== h) {
       if (this.sampleTarget) destroyTarget(gl, this.sampleTarget);
@@ -140,8 +169,13 @@ export class WebGl2Backend implements Backend<GlSim> {
     textures(gl, p.program, { trail: sim.currentTrail.texture });
     gl.uniform2f(p.loc('outSize'), t.width, t.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    const px = new Float32Array(t.width * t.height * 4);
-    gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.FLOAT, px);
+    let px: Float32Array;
+    try {
+      px = await readTargetAsync(gl, t);
+    } catch {
+      return; // context lost: nothing to measure
+    }
+    if (generation !== this.generation) return;
     const bins = new Array<number>(BINS).fill(0);
     for (let i = 0; i < px.length; i += 4) {
       const v = px[i] ?? 0;
@@ -166,6 +200,16 @@ export class WebGl2Backend implements Backend<GlSim> {
     packView(this.viewData, width, height, view, exposure, black, s, this.frame, true);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
+    const heights = this.heightsFor(sim);
+    // The gel style samples its height field five times per pixel: once per frame at grid
+    // resolution here, instead of five full trail filters per pixel.
+    if (s.style === 'gel') {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, heights.fbo);
+      gl.viewport(0, 0, heights.width, heights.height);
+      gl.useProgram(this.prog.height.program);
+      textures(gl, this.prog.height.program, { trail: sim.currentTrail.texture });
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
     const p = this.prog.render;
@@ -175,8 +219,19 @@ export class WebGl2Backend implements Backend<GlSim> {
       env: sim.envTexture,
       counts: sim.countsTexture,
       bloom: bloom.texture,
+      heights: heights.texture,
     });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** The gel height field for this grid size, made anew when the size changes. */
+  private heightsFor(sim: GlSim): Target {
+    const [w, h] = [sim.width + 2, sim.height + 2];
+    if (this.heights?.width !== w || this.heights.height !== h) {
+      if (this.heights) destroyTarget(this.gl, this.heights);
+      this.heights = target(this.gl, w, h, this.gl.R16F, true);
+    }
+    return this.heights;
   }
 
   /** Glow chain (bloom.frag); returns level 0, or an empty one when the glow is off. */

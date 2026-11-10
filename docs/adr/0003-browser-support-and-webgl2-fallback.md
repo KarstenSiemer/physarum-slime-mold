@@ -1,6 +1,6 @@
 # 0003: Browser support and a WebGL2 fallback
 
-- Status: accepted
+- Status: accepted (revised 2026-11-09: fences, readback without stalls, exact counts)
 - Date: 2026-11-08
 
 ## Context
@@ -35,12 +35,40 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
 
 - Agents live in `RGBA32F` textures, updated by a full-screen fragment pass (ping-pong).
 - Deposit: agents are drawn as 1-pixel points into a counts texture with additive blending.
-  Counts are integers, so blending order does not change the result (deterministic).
+  Counts are integers, so blending order does not change the result (deterministic). With
+  `EXT_float_blend` the texture is `RGBA32F`, exact to 2²⁴ agents per cell.
+- Without `EXT_float_blend` only half floats blend, and they count exactly to 2048 (11
+  significant bits), while condensed networks gather more agents of one strain in a cell (in the
+  default scene up to 29 083 at step 600, sampled every 50 steps on WebGPU; on WebGL2 5052 to
+  15 296 at step 400 on grids from 768 × 480 to 1536 × 910). So each (cell, strain) gets its own
+  pixel in four panels of the grid size, with an 8-bit stencil (`deposit()` in
+  `src/engine/gl/sim.ts`). A point pass counts the agents modulo 256 in the stencil and adds a
+  carry for every 256th. Eight full-screen passes, one per stencil bit, add 2^b to the color where
+  bit b is set, which copies the remainder. A last full-screen pass writes 256 · carry + remainder
+  into an `RGBA32F` texture. Exact up to 2048 · 256 = 524 288 agents per cell and strain; beyond
+  that the carry stops growing. It costs 20 B more per cell (106 instead of 86) and halves the
+  largest grid side. Paired in one page on the M3 Pro (default scene, steps 330 to 400, four
+  grids with 0.66 to 4.2 million agents), a step took 0.6 to 1.0 times as long as with the
+  inexact half-float counts used before; a second point pass in place of the eight bit passes
+  took 1.05 to 1.8 times as long.
 - Diffusion, decay and scents: one fragment pass with two render targets.
 - Collisions (ADR 0008): claims with `MAX` blending of unique float keys (< 2²⁴, exact in
   float32); needs `EXT_float_blend`, otherwise the switch is disabled.
 - Needs `EXT_color_buffer_float`. Without WebGL2 and that extension, the page explains which
   browsers work.
+- `finish()` puts a fence (`fenceSync`) into the command stream and polls it with
+  `clientWaitSync(…, 0)` from timers; a fence cannot signal within the task that made it. So the
+  frame budget (`src/engine/budget.ts`) sees on WebGL2 too when the GPU falls behind. Each poll's
+  1 ms timer starts from a message task: timers that start each other are clamped to 4 ms after
+  five levels. In the app's frame loop (M3 Pro, default scene on a 768 grid with 1 million
+  agents, paired in one page) the old timer chain noticed the end of a frame's GPU work
+  4.6–5.0 ms late (median), the new polls 1.3 ms late.
+- Readback without stalls: `alive()` sums the alive agents per strain into a 128 × 128 target
+  (agent _i_ into pixel _i_ mod 16 384, so at most 1024 per pixel for 2²⁴ agents, exact in half
+  floats too), copies it into a pixel-pack buffer and reads that after a fence; the CPU adds the
+  pixels. The auto-levels sample grid uses the same readback. Before, `alive()` drew every agent
+  into one pixel and called a synchronous `readPixels`, which blocked the main thread for about
+  87 ms twice per second at 1 million agents.
 
 The engine picks WebGPU when `requestAdapter()` returns an adapter and the device starts;
 otherwise WebGL2. `?backend=webgl2` forces the fallback for testing.

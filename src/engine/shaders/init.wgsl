@@ -82,5 +82,6 @@ fn init(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
     c = cellOf(p);
   }
   let alive = c >= 0 && !isWall(env[c]) && P.extra.x != EMPTY;
-  agents[i] = Agent(wrapPos(p), heading, s | select(0u, ALIVE, alive));
+  // The slot at init becomes the agent's id for good (ADR 0005).
+  agents[i] = Agent(wrapPos(p), heading, s | select(0u, ALIVE, alive) | (i << ID_SHIFT));
 }

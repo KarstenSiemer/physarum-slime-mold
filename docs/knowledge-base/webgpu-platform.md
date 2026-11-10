@@ -87,6 +87,75 @@ Facts learned:
   identical code (2026-11-08 and 09). Its WebGL2 run, which has no workgroup tile, took 31 to
   69 s. The test's timeout is now 600 s (ADR 0010).
 
+## Cost per pass on Metal (measured 2026-11-10)
+
+- Setup: Apple M3 Pro (18-core GPU), macOS 26.6.2, Chromium 156.0.8078.4 (Playwright 1.64.1) in
+  new headless mode with the flags of `tests/browser.ts`, production builds served locally,
+  viewport 1280 × 720. Default scene (three strains): grid 1536 × 864, 3 981 312 agents,
+  diffusion 2, seed fixed by a seeded `Math.random`. Other sessions used the GPU throughout (46
+  to 98 % device utilisation with the page idle, from `ioreg`), so every comparison ran paired:
+  in one page at the same simulation state, or, for the frame loop and `alive()`, with both
+  builds alternating in one browser page (base, new, new, base), each run from step 0 with the
+  same seed.
+- Compute passes: timestamp queries, one pass per dispatch while measuring. They agree with wall
+  time (the research found within about 5 %).
+- Render passes: wall time only. Metal render-pass timestamps over-count: for the 10 render
+  passes of one frame they summed to 50.3 ms, against 2.2 ms of wall time (the research saw
+  about 10×).
+
+GPU time per step, ms. "Init order" is the agent buffer in id order, the layout of `main` before
+the sort (ADR 0005); "sorted" is the app's sort every 32 steps, its cost included.
+
+| Step | Step, init order | Step, sorted | Agent pass, init order | Agent pass, sorted | Diffusion (2 passes) | Sort, per step |
+| ---- | ---------------- | ------------ | ---------------------- | ------------------ | -------------------- | -------------- |
+| 0    | 7.6              | 4.7          | 6.2                    | 2.8                | 2.0–2.5              | 0.07           |
+| 1000 | 11.0             | 4.8          | 7.8                    | 2.5                | 2.0–2.2              | 0.07           |
+| 3000 | 17.3             | 5.2          | 14.8                   | 3.0                | 2.1–2.4              | 0.06           |
+| 5000 | 20.4             | 5.4          | 16.6                   | 3.0                | 2.4–2.5              | 0.06           |
+
+- One sort at 4 million agents: count 0.5–0.7 ms, prefix sum 0.06 ms, scatter 1.1–1.5 ms
+  (medians at steps 0 to 5000). It moves about 190 MB, close to what the memory bandwidth
+  allows. A variant with one atomic per run of equal tiles instead of one per agent was not
+  faster. A frame with a sort took 1.4–2.4 ms longer at 1280 × 720 and 1.7–4.2 ms at
+  3024 × 1890 (wall time, one step and a draw).
+- Draw: 2.2 ms per frame with bloom at 1280 × 720; the main render pass alone 1.35 ms (glow),
+  1.7 ms (gel). At 2560 × 1600: glow 1.8 ms, gel 2.25 ms, and the gel before its height pass
+  (ADR 0009) 8.0 ms.
+- The largest number of agents of one strain that moved into one cell in a step: 29 083 at step
+  600 (sampled every 50 steps), about 4100 at step 1000 and 800 to 950 from step 3000 on.
+- The research (2026-11-09, same machine, without the sort) measured the agent pass at 3.1 ms at
+  step 100 and 20–21 ms at steps 3000 to 4000; a second measurement found the late values 30 to
+  45 % lower. Late, memory-bound timings swing between runs, which is why only paired numbers
+  count here.
+
+Real frame loop, 60 s per run, headless (rAF at 60 Hz): `main` (79b6679) against this branch,
+alternating in one browser page as above, two runs of each. The page reports itself hidden, so
+neither build's startup check changes the grid. A fifth series, the default scene at
+1280 × 720 with the check on, gave the same numbers, and the branch kept its grid.
+
+| Scene                              | Canvas      | `main`: fps, steps/s, steps per frame      | `main`: longest frame | Branch: fps, steps/s, steps per frame | Branch: longest frame |
+| ---------------------------------- | ----------- | ------------------------------------------ | --------------------- | ------------------------------------- | --------------------- |
+| Default, density 3 (4.0 million)   | 1280 × 720  | 13.4, 74, 5.5 (last 30 s: 7.5 fps)         | 233 ms                | 60.0, 120, 2.0                        | 16.8 ms               |
+| Default, density 3 (4.4 million)   | 3024 × 1890 | 10.8–10.9, 66, 6.1 (last 30 s: 6 fps)      | 250 ms                | 60.0, 120, 2.0                        | 16.8 ms               |
+| Default, density 1 (1.3 million)   | 1280 × 720  | 46–48, 120, 2.5–2.6 (last 30 s: 38–40 fps) | 67 ms                 | 60.0, 120, 2.0                        | 16.8 ms               |
+| Cyclones (1024 × 576, 4.7 million) | 1280 × 720  | 6.6–6.7, 79–80, 11.9                       | 367–383 ms            | 60.0, 120, 2.0                        | 16.8 ms               |
+
+On `main`, 300 to 620 frames per run took longer than 20 ms; on the branch none did.
+
+Startup check under a browser frame cap (2026-11-10, same machine, page visible, default scene
+at 1280 × 720, 18 s per run): an init script let every animation frame wait one more vsync, so
+the page got 30 fps, as in iOS Safari's Low Power Mode. `main` and the branch before the browser
+rate counted (`src/ui/tune.ts`) both lowered the grid from 1536 to 1024 and then to 768,
+although the GPU kept up. With it, every frame started with the GPU idle (rate 30 fps), and the
+grid stayed at 1536 with 4 steps per frame, 120 steps/s. Uncapped (60 fps), no build changed the
+grid.
+
+WebGL2 (`?backend=webgl2`, same machine, paired as above, 16 calls per run): `alive()` blocked
+the main thread for 90–93 ms per call at 1 million agents (median; 42–43 fps) and 570–575 ms at
+4 million (1.8 fps). Now a call takes 0.1–0.3 ms and resolves 7–8 ms (1 million) or 158–161 ms
+(4 million) later, without blocking; at 1 million agents the frame loop runs at 60 fps and
+120 steps/s, at 4 million at 46–48 fps with one step per frame.
+
 ## Feature availability (web3dsurvey share of WebGPU devices)
 
 | Feature                                      | Chrome | Safari 26–27                 | Firefox         |

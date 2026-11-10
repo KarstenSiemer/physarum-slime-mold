@@ -1,3 +1,5 @@
 [default.extend-words]
 # "Nat. Comput." is the journal Natural Computing.
 Comput = "Comput"
+# GLSL ES 3.0 texture lookup with an explicit level of detail.
+Lod = "Lod"

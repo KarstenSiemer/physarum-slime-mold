@@ -1,12 +1,11 @@
 import { constrain, RESOLUTIONS, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
+import { FrameBudget } from './budget';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { fitResolution, gridSize, memoryBudget } from './sizing';
-import type { Backend, Sim, Stroke, View } from './types';
+import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
-
-const MAX_STEPS_PER_FRAME = 16;
 
 // Changes that need a new population.
 // Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
@@ -36,8 +35,10 @@ export class Engine {
   paused = false;
   /** Frames drawn since start; the UI derives frames per second from it. */
   frames = 0;
-  private accumulator = 0;
-  private last = 0;
+  /** Steps per frame from the speed and from what the GPU keeps up with (budget.ts). */
+  readonly budget = new FrameBudget();
+  /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
+  restarts = 0;
   private pendingTool: AgentTool | undefined;
   private readonly strokes: Stroke[] = [];
   private raf = 0;
@@ -95,8 +96,8 @@ export class Engine {
   fit(s: Settings): Settings {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
-    const { maxAgents, maxBufferBytes, maxGridSide } = this.backend;
-    const limits = { maxAgents, maxBufferBytes, maxGridSide, budget: memoryBudget(memory) };
+    const { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell } = this.backend;
+    const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, budget: memoryBudget(memory) };
     return constrain({
       ...s,
       resolution: fitResolution(s, aspect, limits),
@@ -155,6 +156,7 @@ export class Engine {
       this.sim.update(this.settings);
       this.sim.reset();
       this.backend.forget();
+      this.restarts++;
     })().finally(() => (this.rebuilding = undefined));
     return this.rebuilding;
   }
@@ -163,6 +165,7 @@ export class Engine {
     if (this.rebuilding) return; // the new simulation starts fresh anyway
     this.sim.reset();
     this.backend.forget();
+    this.restarts++;
   }
 
   /** Removes food, light and walls (a new simulation has none anyway). */
@@ -223,18 +226,16 @@ export class Engine {
     cancelAnimationFrame(this.raf);
   }
 
-  /** One frame: queued strokes, as many steps as the speed asks for, then one render. */
+  /**
+   * One frame: queued strokes, as many steps as the speed asks for and the GPU keeps up with, then one
+   * render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
+   * simulation speed instead of the frame rate.
+   */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
-    const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
-    this.last = now;
     for (const s of this.strokes.splice(0)) this.sim.paint(s);
-    let steps = forceSteps ?? 0;
-    if (forceSteps === undefined && !this.paused) {
-      this.accumulator = Math.min(this.accumulator + dt * this.settings.speed, MAX_STEPS_PER_FRAME);
-      steps = Math.floor(this.accumulator);
-      this.accumulator -= steps;
-    }
+    const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
+    let steps = forceSteps ?? planned;
     // A held tool while paused still needs one step to act.
     if (this.pendingTool && steps === 0) steps = 1;
     if (steps > 0) {
@@ -243,6 +244,11 @@ export class Engine {
     }
     this.backend.draw(this.sim, this.settings, this.view, true);
     this.frames++;
+    this.budget.submitted();
+    const done = () => {
+      this.budget.done(performance.now());
+    };
+    this.sim.finish().then(done, done);
   }
 
   /** The current frame as pixels, rendered offscreen at canvas size. */
@@ -252,7 +258,7 @@ export class Engine {
   }
 
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */
-  async settle(): Promise<void> {
+  async settle(): Promise<Levels> {
     await this.rebuilding;
     return this.backend.settle(this.sim);
   }
