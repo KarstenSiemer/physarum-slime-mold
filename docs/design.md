@@ -42,12 +42,16 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
   quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises
-  by 1/8 (to at most 16). A slow GPU then lowers the simulation speed instead of the frame rate,
-  and steps it could not run are dropped, not caught up later.
+  by 1/8 (to at most 16). It starts at 1 and stays at most one step above the steps of the last
+  frame, so it rises past the speed only while it is the limit. A slow GPU then lowers the
+  simulation speed instead of the frame rate. Steps it could not run are dropped, not caught up
+  later: after a pause in rendering (a hidden tab) or a speed raise, a frame runs at most one
+  step more than the frame before, and the steps follow a raise at 1/8 step per frame.
 - A startup check (`src/ui/tune.ts`) lowers the grid one step, at most twice and not below 512
   cells, when over a window of at least 2 s the frame rate is below 40 fps or fewer than 3/4 of
   the steps the speed asked for ran. The requested steps are summed per frame (speed times frame
-  interval, at most 16), so a speed change inside the window counts from when it happened. It
+  interval, at most 16), so a speed change inside the window counts from when it happened; steps
+  the budget held back while the GPU had time to spare (the budget still rising) do not count. It
   counts only active time (tab visible, not paused, no rebuild), decides at 3, 6, 10 and 15 s of
   it, restarts its window after a reset or rebuild, and never lowers a grid the user picked.
 
