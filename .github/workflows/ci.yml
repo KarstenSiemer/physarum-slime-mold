@@ -18,7 +18,7 @@ jobs:
   # linter, test runner or downloaded browser runs in this job. verify tests this artifact; deploy publishes it.
   build:
     name: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -43,7 +43,7 @@ jobs:
   verify:
     name: verify
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -83,7 +83,7 @@ jobs:
     name: deploy
     needs: [build, verify]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       pages: write # publish the site

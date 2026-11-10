@@ -16,7 +16,7 @@ jobs:
   renovate:
     name: renovate
     if: vars.RENOVATE_CLIENT_ID != ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: renovate # holds the App key; restrict it to main
     steps:
