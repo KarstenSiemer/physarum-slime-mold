@@ -50,7 +50,9 @@ GPU checks use invariants, not long exact trajectories:
   ([webgpu-platform](../knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)).
 - A WebGPU device on SwiftShader needs tens of seconds to compile the simulation pipelines. The
   model, sort and gel tests in `sim.gpu.test.ts` therefore share one backend per API, whose setup
-  builds a first simulation under a 180 s timeout. In the CI image
-  (`mcr.microsoft.com/playwright:v1.64.1-noble`, 4 CPUs) the GPU project took 183 s on
-  2026-11-10 (171 s before the sort and WebGL2 tests); apart from Fig. 10 no test took more than
-  36 s.
+  builds a first simulation under a 180 s timeout; the WebGL2 counting tests share one context
+  per counting path (compiling the programs takes seconds per context there). In the CI image
+  (`mcr.microsoft.com/playwright:v1.64.1-noble`, 4 CPUs) the GPU project (103 tests) took 192 s
+  on 2026-11-10 (171 s for the 30 tests before the sort and WebGL2 tests); apart from Fig. 10 no
+  test took more than 33 s. The e2e suite took 2.9 min there, its slowest test 40 s of 120 s
+  (the boot test's wait for step 100: 26 s of 60 s).
