@@ -669,6 +669,25 @@ describe('the sweep', () => {
     expect(differing(sim().env, square)).toBe(0);
   });
 
+  // A dab at the rim of the 512 × 512 dish lies beyond the rim of the 256 × 256 one, whose margin of one cell is a
+  // larger share of the dish: on that grid it paints no cell, so that grid cannot judge it either.
+  it('keeps an edit that paints no cell of the grid on screen, under an erase beside it there', async () => {
+    const c = canvas(1000, 1000);
+    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'dish' }, [], c);
+    expect([sim().width, sim().height]).toEqual([512, 512]);
+    engine.paint({ kind: 'food', from: [511.186, 270.546], to: [511.186, 270.546], radius: 0.75 });
+    engine.frame(0, 0);
+    const fine = sim().env.slice();
+    expect(count(fine, 1)).toBeGreaterThan(0);
+    await engine.apply({ ...engine.settings, resolution: 256 });
+    expect([sim().width, sim().height, count(sim().env, 1)]).toEqual([256, 256, 0]);
+    // Just inside the rim, beside the dab at (255.6, 135.3): the erase clears nothing and goes, the dab stays.
+    engine.paint({ kind: 'erase', from: [252.5, 135.3], to: [252.5, 135.3], radius: 2.5 });
+    expect(edits(engine).map((e) => e.kind)).toEqual(['food']);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect(differing(sim().env, fine)).toBe(0);
+  });
+
   // The GPU computes in float32: a cell this close to the edge of a brush may go either way there.
   it('deletes a stroke only when its cells lie inside the clearing strokes by SLACK', async () => {
     const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
