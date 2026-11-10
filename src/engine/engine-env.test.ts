@@ -278,6 +278,29 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, wide)).toBe(0);
   });
 
+  // Moved or zoomed out, the view shows copies of a periodic grid around it, and the brush paints on them.
+  it('keep a stroke painted on a copy of a periodic grid, also on other grids', async () => {
+    const { engine, sim } = await engineWith(three.settings(), []);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect([sim().width, sim().height, engine.settings.boundary]).toEqual([512, 320, 'wrap']);
+    // Left of the grid: the copy shows the grid's right edge there.
+    const copy: Stroke = { kind: 'food', from: [-30.25, 100.5], to: [-20.75, 104.5], radius: 4 };
+    engine.paint(copy);
+    engine.frame(0, 0);
+    const own = sim().env.slice();
+    const expected = new Uint8Array(512 * 320 * 4);
+    paintReference(expected, 512, 320, copy, 'wrap');
+    expect(differing(own, expected)).toBe(0);
+    await engine.apply({ ...engine.settings, resolution: 1024 });
+    const fine = new Uint8Array(1024 * 640 * 4);
+    const moved = { ...copy, from: [2 * 481.75, 201], to: [2 * 491.25, 209], radius: 8 } satisfies Stroke;
+    paintReference(fine, 1024, 640, moved, 'wrap');
+    expect(count(fine, 1)).toBeGreaterThan(3.5 * count(own, 1));
+    expect(differing(sim().env, fine)).toBe(0);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect(differing(sim().env, own)).toBe(0);
+  });
+
   it('put a stroke drawn while the new grid is allocated where it was drawn', async () => {
     const { engine, backend, sim } = await engineWith(maze.settings(), []);
     const release = hold(backend);

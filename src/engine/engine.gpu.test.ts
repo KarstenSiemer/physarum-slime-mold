@@ -5,7 +5,8 @@ import { presetById } from '../model/presets';
 import { Engine } from './engine';
 import { WebGl2Backend } from './gl/backend';
 import { OutOfMemoryError } from './gpu';
-import type { Backend } from './types';
+import { paintReference } from './paint-reference';
+import type { Backend, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const BACKENDS = {
@@ -207,6 +208,34 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     expect(differing(await engine.sim.readEnv(), coarse)).toBe(0);
     await engine.apply({ ...engine.settings, resolution: 512 });
     expect(differing(await engine.sim.readEnv(), before)).toBe(0);
+    engine.destroy();
+  });
+
+  // Zoomed out or moved, the view shows copies of a periodic grid around it, and a stroke there paints the grid
+  // where the copy shows it (fromStroke in environment.ts). Other grids must find it there too.
+  it('keep food painted on copies of a periodic grid, near and far, also on another grid', async () => {
+    const { engine } = await load('network', { resolution: 256 });
+    expect([engine.sim.width, engine.sim.height, engine.settings.boundary]).toEqual([256, 144, 'wrap']);
+    // One period left of the grid, and two periods right and up.
+    const strokes: Stroke[] = [
+      { kind: 'food', from: [-80.37, 50.21], to: [-70.13, 52.29], radius: 4.31 },
+      { kind: 'food', from: [612.43, -257.83], to: [612.43, -257.83], radius: 6.13 },
+    ];
+    for (const s of strokes) engine.paint(s);
+    engine.frame(performance.now(), 0);
+    const coarse = await engine.sim.readEnv();
+    const expected = new Uint8Array(256 * 144 * 4);
+    const margin = { min: Infinity };
+    for (const s of strokes) paintReference(expected, 256, 144, s, 'wrap', margin);
+    expect(margin.min).toBeGreaterThan(1e-3);
+    expect(differing(coarse, expected)).toBe(0);
+    // Twice the short side: four times the cells.
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    const ratio = cells(await engine.sim.readEnv(), 1) / cells(coarse, 1);
+    expect(ratio).toBeGreaterThan(3.6);
+    expect(ratio).toBeLessThan(4.4);
+    await engine.apply({ ...engine.settings, resolution: 256 });
+    expect(differing(await engine.sim.readEnv(), coarse)).toBe(0);
     engine.destroy();
   });
 

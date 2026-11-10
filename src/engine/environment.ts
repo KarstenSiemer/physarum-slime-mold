@@ -27,9 +27,29 @@ export interface EnvEdit {
   boundary: Boundary;
 }
 
-/** An edit from a stroke painted on a `grid` (cells) under `boundary`, unless the stroke names its own. */
+/** Whole periods of `n` to subtract from `v` so that it lies in [0, n). */
+export function periods(v: number, n: number): number {
+  const k = Math.floor(v / n) * n;
+  return v - k >= n ? k + n : k;
+}
+
+/**
+ * An edit from a stroke painted on a `grid` (cells) under `boundary`, unless the stroke names its own. On a periodic
+ * grid the view shows copies of the grid around it, and a stroke on a copy paints the grid where the copy shows it.
+ * So the stroke is moved by whole periods until it starts inside the grid: the same cells there, and on another grid
+ * the canonical frame finds it where it was painted instead of beside the grid.
+ */
 export function fromStroke(s: Stroke, grid: Point, boundary: Boundary): EnvEdit {
-  return { kind: s.kind, from: s.from, to: s.to, radius: s.radius, grid, boundary: s.boundary ?? boundary };
+  const under = s.boundary ?? boundary;
+  let { from, to } = s;
+  if (under === 'wrap') {
+    const [dx, dy] = [periods(from[0], grid[0]), periods(from[1], grid[1])];
+    [from, to] = [
+      [from[0] - dx, from[1] - dy],
+      [to[0] - dx, to[1] - dy],
+    ];
+  }
+  return { kind: s.kind, from, to, radius: s.radius, grid, boundary: under };
 }
 
 /** An edit from a preset's shape, which is in the canonical frame, painted under `boundary`. */

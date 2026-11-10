@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { presetById, PRESETS } from '../model/presets';
-import { fromFrame, fromShape, fromStroke, MIN_RADIUS, strokeOn, toFrame } from './environment';
+import { fromFrame, fromShape, fromStroke, MIN_RADIUS, periods, strokeOn, toFrame } from './environment';
 import { paintReference } from './paint-reference';
 import { gridSize } from './sizing';
 import type { Stroke } from './types';
@@ -56,7 +56,42 @@ describe('strokeOn', () => {
     expect(strokeOn(fromStroke(s, [512, 320], 'box'), 512, 320)).toEqual({ ...s, boundary: 'box' });
     // Also below MIN_RADIUS, and also outside the grid: on its own grid nothing is changed or dropped.
     const thin: Stroke = { kind: 'food', from: [-30, 5], to: [-20, 5], radius: 0.3 };
-    expect(strokeOn(fromStroke(thin, [512, 320], 'wrap'), 512, 320)).toEqual({ ...thin, boundary: 'wrap' });
+    expect(strokeOn(fromStroke(thin, [512, 320], 'box'), 512, 320)).toEqual({ ...thin, boundary: 'box' });
+  });
+
+  // The view shows copies of a periodic grid around it (render.wgsl), and the brush paints on them.
+  it('moves a stroke on a copy of a periodic grid into the grid, where the copy shows it', () => {
+    const copy: Stroke = { kind: 'food', from: [-30, 5], to: [-20, 5], radius: 4 };
+    const e = fromStroke(copy, [512, 320], 'wrap');
+    expect([e.from, e.to]).toEqual([
+      [482, 5],
+      [492, 5],
+    ]);
+    // Several periods away and across both edges: by whole periods, the same move for both ends.
+    const far = fromStroke({ ...copy, from: [1100.5, -650.25], to: [1090.5, -655.25] }, [512, 320], 'wrap');
+    expect([far.from, far.to]).toEqual([
+      [76.5, 309.75],
+      [66.5, 304.75],
+    ]);
+    // So another grid finds it where it was painted, instead of skipping it beside the grid.
+    const fine = strokeOn(e, 1024, 640);
+    near([...(fine?.from ?? []), ...(fine?.to ?? []), fine?.radius ?? NaN], [964, 10, 984, 10, 8]);
+    // A closed arena has no copies: a stroke beside it stays where it is, and other grids skip it.
+    expect(strokeOn(fromStroke(copy, [512, 320], 'box'), 1024, 640)).toBeUndefined();
+  });
+
+  it('finds the whole periods that put a coordinate into [0, n), also where rounding reaches n', () => {
+    for (const [v, n, k] of [
+      [0, 512, 0],
+      [511.75, 512, 0],
+      [512, 512, 512],
+      [-0.25, 512, -512],
+      [-512, 512, -512],
+      [-1e-14, 512, 0], // −1e-14 + 512 rounds to 512: no shift keeps it inside, and 0 keeps it next to the edge
+      [1536.5, 320, 1280],
+    ] as const) {
+      expect(periods(v, n), `${v} in ${n}`).toBe(k);
+    }
   });
 
   it('scales positions and the radius by the ratio of the short sides on a finer grid', () => {
