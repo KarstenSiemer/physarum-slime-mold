@@ -432,18 +432,22 @@
   .toolbar-wrap :global(.toolbar) {
     pointer-events: auto;
   }
+  /* On glass like the scene name: --muted straight on the canvas had about 2.3:1 over the paper style. */
   .stats {
     position: absolute;
-    left: 14px;
-    bottom: 58px;
+    left: 10px;
+    bottom: 56px;
     margin: 0;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: var(--glass);
+    backdrop-filter: blur(14px);
     font:
       11px/1.4 ui-monospace,
       SFMono-Regular,
       Menlo,
       monospace;
     color: var(--muted);
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
     pointer-events: none;
   }
   .notice {
