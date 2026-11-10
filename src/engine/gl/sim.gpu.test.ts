@@ -152,14 +152,21 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
 
   it('finish() resolves only after the GPU has run the work, never within the same task', async () => {
     const { gl, prog } = context();
-    const sim = new GlSim(gl, prog, defaultSettings(), 256, 256, 65_536, floatBlend);
-    sim.run(5);
+    // 300 000 agents for 10 steps: longer than a task on the GPUs we test with (Metal, SwiftShader).
+    const sim = new GlSim(gl, prog, defaultSettings(), 512, 288, 300_000, floatBlend);
+    sim.run(10);
+    const before = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!before) throw new Error('fenceSync failed');
     let done = false;
     const finished = sim.finish().then(() => (done = true));
     await microtasks();
     expect(done).toBe(false);
+    await new Promise((r) => setTimeout(r, 0));
+    // The work must still run a task later, or a finish() that never asks the GPU would pass too.
+    expect(gl.getSyncParameter(before, gl.SYNC_STATUS)).toBe(gl.UNSIGNALED);
     await finished;
-    expect(done).toBe(true);
+    expect(gl.getSyncParameter(before, gl.SYNC_STATUS)).toBe(gl.SIGNALED);
+    gl.deleteSync(before);
     sim.destroy();
   });
 });
