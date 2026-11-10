@@ -21,7 +21,7 @@ void load(ivec2 c, out vec4 t, out vec2 s, out float open) {
   if (i < 0) return;
   ivec2 q = cellCoord(i);
   vec4 e = texelFetch(env, q, 0);
-  if (e.r > 0.5) return;
+  if (isWall(e)) return;
   t = texelFetch(trailIn, q, 0);
   s = texelFetch(scentIn, q, 0).xy;
   if (first) {

@@ -32,7 +32,9 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] `model/params.ts` schema + `sanitize()` + fuzz tests
 - [x] Device setup with raised limits; device-loss message
 - [x] Init pass with 7 layouts; distinct cells in collision mode for the mixed layout
-- [ ] Collision mode: every agent on a free cell from the first step, in every layout, also when it moves out of a wall or the dish, and without rounding into the next cell (`init.wgsl`, ADR 0008)
+- [x] Collision mode: every agent on a free cell from the first step, in every layout, also when it moves out of a wall or the dish, and without rounding into the next cell: claim rounds after init, every scene with the rule starts with no shared cell on both backends (ADR 0008, ADR 0019, 2026-11-10)
+- [x] Food, light and walls survive a new grid, density, arena and the out-of-memory step-down: an edit list painted on every new simulation, on another grid through the canonical frame of the arena it was painted in: a dish's short side, or the stretched grid of a box or a periodic grid; strokes that later strokes cleared completely on the grid on screen leave the list (ADR 0019, owner decision 2026-11-10)
+- [x] Moves check every cell they cross for walls; one wall threshold (byte 128) in WGSL and GLSL (ADR 0019, 2026-11-10)
 - [x] Agent pass (Jones rule), shrinkage, inoculate and cut tools
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)
 - [x] Collision mode (claims, ADR 0008)
@@ -57,7 +59,10 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] Mobile layout check (375 × 812: settings closed, one toolbar row, no sideways scroll, error box fits)
 - [x] Scene card (source, summary, what to watch, strains from the live settings, why), scene name over the canvas, presets in groups, Learn → Scenes; preset unit tests check the texts against the settings (2026-11-09)
 - [x] One agent per cell: help, notice when switched off in a scene made for it, restart on every switch, kept off without `EXT_float_blend` (2026-11-09)
-- [ ] Dish scenes alike on every screen shape: food positions relative to the dish, and agents counted in the dish rather than the grid. Today Shortest path and Steiner tree end differently on a tall screen (a thick lens, a long bridge; measured on WebGPU on a 118 × 256 grid, 2026-11-10), and one food of Shrinking plasmodium lies outside the dish there; their texts say so
+- [x] Dish scenes alike on every screen shape: food, light and walls in a frame of the short side, turned on a tall screen, and a dish's agents counted over the square of its short side. Shortest path ends as one band and Steiner tree as two junctions joined by a short bridge on wide and tall screens alike, and all eight foods of Shrinking plasmodium lie in the dish (WebGPU, 16:9 and 9:19.5, 5 to 10 seeds, 2026-11-10); the texts say what the GPU shows
+- [x] Maze on every screen shape: a box or a periodic grid keeps its food, light and walls where they lie relative to its edges, so the Maze has both foods from 1:1 to 9:19.5 (ADR 0019, 2026-11-10)
+- [x] Scene card: food, light and walls that differ from the scene (a Clear, painting) count as a change, so Reload scene is offered (owner decision, ADR 0019, 2026-11-10)
+- [ ] Shrinking plasmodium at Jones' %p 50 (0.5, 64 % of the dish) tears a hole beside the middle food in 3 of 15 runs on 512 × 288; at 0.6 (77 %) and with the old count of 73,728 agents in none (ADR 0019, 2026-11-10). Keep Jones' value with the text that says so, or raise the density (owner decision)
 
 ## M5 Quality and reach
 

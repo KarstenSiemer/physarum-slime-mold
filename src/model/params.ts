@@ -128,7 +128,7 @@ export type Style = (typeof STYLES)[number];
 export const globalSpec = {
   density: {
     label: 'Agents per cell',
-    help: 'Population density. Jones uses 0.03–0.15 (%p 3–15) with collisions; GPU versions without collisions use 1–5.',
+    help: 'Agents per cell of the grid. In a dish it counts the cells of the square around the dish, as Jones counts his population (%p) over a square lattice that his dish fills. Jones uses 0.03–0.15 (%p 3–15) with one agent per cell; GPU versions without the rule use 1–5.',
     min: 0.01,
     max: 8,
     step: 0.01,
@@ -284,8 +284,7 @@ const stepDecimals = (s: Spec) => Math.min(5, Math.max(0, -Math.floor(Math.log10
 
 /**
  * A value as a slider or its number field takes it. A log range spans orders of magnitude, so it keeps 3
- * significant digits: its step of 0.01 would turn the Steiner tree's density of 0.012 into 0.01. A linear range
- * snaps to its step.
+ * significant digits: its step of 0.01 would turn a density of 0.012 into 0.01. A linear range snaps to its step.
  */
 export function snap(v: number, s: Spec): number {
   const r = s.log ? Number(v.toPrecision(3)) : Number((Math.round(v / s.step) * s.step).toFixed(stepDecimals(s)));

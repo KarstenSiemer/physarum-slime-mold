@@ -1,5 +1,16 @@
 import { RESOLUTIONS, type Settings } from '../model/params';
 
+/**
+ * Agents for a `width` × `height` grid: the density times the cells of the arena's square. A dish counts the square
+ * of the grid's short side, as Jones counts his population over a square lattice that the dish fills (%p, a share
+ * of the image area: Jones 2010, p. 134; 45,000 agents for %p 50 on 300 × 300, p. 147). A box or a periodic grid
+ * counts all its cells.
+ */
+export function agentCount(s: Pick<Settings, 'density' | 'boundary'>, width: number, height: number): number {
+  const cells = s.boundary === 'dish' ? Math.min(width, height) ** 2 : width * height;
+  return Math.round(s.density * cells);
+}
+
 /** Grid size for a resolution (cells on the long side) and an aspect ratio (width / height). */
 export function gridSize(resolution: number, aspect: number): [number, number] {
   return aspect >= 1
@@ -65,7 +76,7 @@ export function fitResolution(s: Settings, aspect: number, l: Limits): number {
   for (const r of options.reverse()) {
     const [w, h] = gridSize(r, aspect);
     const fits =
-      estimateBytes(w, h, Math.min(l.maxAgents, s.density * w * h), l.bytesPerCell) <= l.budget &&
+      estimateBytes(w, h, Math.min(l.maxAgents, agentCount(s, w, h)), l.bytesPerCell) <= l.budget &&
       w * h * 16 <= l.maxBufferBytes && // the largest per-cell buffer: 16 B (counts, trail texel)
       Math.max(w, h) <= l.maxGridSide;
     if (fits) return r;

@@ -52,6 +52,44 @@ test('the food tool paints food into the environment', async ({ page }) => {
   expect(foodCells).toBeGreaterThan(50);
 });
 
+// Every new grid paints all recorded strokes again (ADR 0019): a slow drag must not record one per pointer event.
+test('a slow drag records a segment only once the pointer moved half a brush radius', async ({ page }) => {
+  // Paused, a frame only draws: on SwiftShader in CI a pointer move can wait for a frame.
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await page.getByRole('radio', { name: 'Food' }).click();
+  await page.evaluate(() => {
+    const e = globalThis.physarum;
+    if (!e) throw new Error('no engine');
+    const paint = e.paint.bind(e);
+    const g = globalThis as unknown as { strokes: Parameters<typeof paint>[0][] };
+    g.strokes = [];
+    e.paint = (s) => {
+      g.strokes.push(s);
+      paint(s);
+    };
+  });
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  const [x, y] = [box.x + box.width * 0.3, box.y + box.height * 0.5];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 24; i++) await page.mouse.move(x + i, y);
+  await page.mouse.up();
+  const strokes = await page.evaluate(
+    () => (globalThis as unknown as { strokes: { from: number[]; to: number[]; radius: number }[] }).strokes,
+  );
+  // The first stroke is a dab where the drag starts; each later one is at least half a radius long.
+  const [first, ...rest] = strokes;
+  expect(first?.from).toEqual(first?.to);
+  expect(rest.length).toBeGreaterThan(0);
+  for (const s of rest)
+    expect(Math.hypot((s.to[0] ?? 0) - (s.from[0] ?? 0), (s.to[1] ?? 0) - (s.from[1] ?? 0))).toBeGreaterThanOrEqual(
+      s.radius / 2,
+    );
+  // 24 moves of one pixel, half a radius about 9 pixels: a dab and two strokes, not 25.
+  expect(strokes.length).toBeLessThan(8);
+});
+
 test('keyboard shortcuts pause, step and switch tools', async ({ page }) => {
   await page.locator('canvas').click();
   await page.keyboard.press('Space');

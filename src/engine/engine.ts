@@ -1,11 +1,24 @@
-import { constrain, RESOLUTIONS, type Settings } from '../model/params';
+import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget } from './budget';
+import { paintsCell } from './brush';
+import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
-import { fitResolution, gridSize, memoryBudget } from './sizing';
+import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
+import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
+
+/**
+ * Sweep work (sweep.ts sweeping()) in the pointer handler, paint(), counted in rows, not time, so a stroke's sweep
+ * pauses at the same place on every machine. Each frame then goes on for FRAME_MS. A step between two pauses runs to
+ * its end, and some grow with the list: at 100,000 edits an erase of radius 300 took 0.7 to 1.2 ms in paint() and
+ * frames of 2.5 to 3.5 ms, in Chromium on an M3 Pro (ADR 0019). A deletion changes no byte on screen, so the rest of
+ * a long sweep can wait.
+ */
+const PAINT_ROWS = 256;
+const FRAME_MS = 1;
 
 // Changes that need a new population.
 // Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
@@ -40,10 +53,26 @@ export class Engine {
   /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
   restarts = 0;
   private pendingTool: AgentTool | undefined;
-  private readonly strokes: Stroke[] = [];
+  /**
+   * Every food, light, wall and erase edit since the last clear or preset load, less those the sweep deleted
+   * (sweep.ts): each new simulation paints them.
+   */
+  private edits: EnvEdit[] = [];
+  /** How many of `edits` the current simulation holds; the next frame paints the rest. */
+  private painted = 0;
+  /** Every edit on the grid on screen, for the sweep: mapped once per grid and kept in step with `edits`. */
+  private placement: Placement | undefined;
+  /** The sweep that runs on `placement`, over several frames when it is long, and the clearing strokes after it. */
+  private running: Generator<number, Set<number>, void> | undefined;
+  private queue: EnvEdit[] = [];
+  /** The grid the view shows (fitView()): strokes from the canvas are in its cells, also during a rebuild. */
+  private viewGrid: [number, number] | undefined;
+  /** False from freeing a simulation until the next one exists. */
+  private live = false;
   private raf = 0;
   private rebuilding: Promise<void> | undefined;
-  private built = { resolution: 0, density: 0 };
+  /** What the current simulation was built for: its grid and agent count follow from these. */
+  private built = { resolution: 0, density: 0, dish: false };
 
   private constructor(
     readonly backend: Backend,
@@ -51,9 +80,17 @@ export class Engine {
     public settings: Settings,
   ) {}
 
-  /** `onAdjust` hears about grids the device could not hold (also on the first allocation). */
-  static async create(canvas: HTMLCanvasElement, settings: Settings, onAdjust?: Adjust): Promise<Engine> {
-    const engine = new Engine(await createBackend(canvas), canvas, settings);
+  /**
+   * `onAdjust` hears about grids the device could not hold (also on the first allocation). `backend` replaces the
+   * automatic choice (tests: WebGL2 in the browser, a CPU backend in Node).
+   */
+  static async create(
+    canvas: HTMLCanvasElement,
+    settings: Settings,
+    onAdjust?: Adjust,
+    backend?: Backend,
+  ): Promise<Engine> {
+    const engine = new Engine(backend ?? (await createBackend(canvas)), canvas, settings);
     engine.onAdjust = onAdjust;
     engine.settings = engine.supported(settings);
     await engine.rebuild();
@@ -72,25 +109,53 @@ export class Engine {
     if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
   }
 
-  /** Loads a preset: its settings, a fresh population and its food, light and walls. */
-  async load(settings: Settings, env: readonly EnvShape[] = []) {
+  /**
+   * Loads a preset: its settings, its food, light and walls in place of every earlier edit, then a fresh
+   * population, placed after the walls so that no agent starts inside one. The shapes belong to `arena`, the
+   * preset's own: they are in its canonical frame and painted in it. The simulation runs under the settings'
+   * boundary, which can be another one (chosen while the engine started).
+   */
+  async load(settings: Settings, env: readonly EnvShape[] = [], arena: Boundary = settings.boundary) {
     this.settings = this.supported(settings);
-    if (this.needsRebuild()) await this.rebuild();
-    else {
-      this.sim.update(this.settings);
-      this.reset();
-    }
+    this.edits = env.map((e) => fromShape(e, arena));
+    this.painted = 0;
+    this.placement = undefined;
+    [this.running, this.queue] = [undefined, []];
+    this.onEdits?.();
+    // A new simulation paints the edits itself, before it places the agents.
+    if (this.needsRebuild()) return this.rebuild();
+    this.sim.update(this.settings);
     this.sim.clearEnvironment();
-    const { width: w, height: h } = this.sim;
-    const m = Math.min(w, h);
-    for (const e of env) {
-      const to = e.to ?? e.at;
-      this.sim.paint({ kind: e.kind, from: [e.at[0] * w, e.at[1] * h], to: [to[0] * w, to[1] * h], radius: e.r * m });
-    }
+    this.flushEnv();
+    this.reset();
   }
 
   /** Called with the new grid when the engine had to lower it to fit the device. */
   onAdjust: Adjust | undefined;
+
+  /** Called after every change of the edit list: a recorded stroke and the sweep after it, a Clear, a load. */
+  onEdits: (() => void) | undefined;
+
+  /**
+   * Whether the edit list is exactly `env`, a scene's shapes in the canonical frame of `arena`, as load() makes it:
+   * then the food, light and walls are the scene's own, also after a stroke and an erase that the sweep took back.
+   */
+  matches(env: readonly EnvShape[], arena: Boundary): boolean {
+    return (
+      this.edits.length === env.length &&
+      env.every((shape, i) => {
+        const [e, f] = [this.edits[i], fromShape(shape, arena)];
+        return (
+          e !== undefined &&
+          e.grid === undefined &&
+          e.kind === f.kind &&
+          e.boundary === f.boundary &&
+          e.radius === f.radius &&
+          [0, 1].every((k) => e.from[k] === f.from[k] && e.to[k] === f.to[k])
+        );
+      })
+    );
+  }
 
   /** Settings this device can hold: collisions need a backend feature, memory caps the grid. */
   fit(s: Settings): Settings {
@@ -112,8 +177,11 @@ export class Engine {
     return f;
   }
 
+  /** The grid or the agent count changes: a dish counts its agents over the short side's square (agentCount()). */
   private needsRebuild() {
-    return this.settings.resolution !== this.built.resolution || this.settings.density !== this.built.density;
+    const { resolution, density, boundary } = this.settings;
+    const b = this.built;
+    return resolution !== b.resolution || density !== b.density || (boundary === 'dish') !== b.dish;
   }
 
   /** True while the simulation is being replaced; it cannot be used meanwhile. */
@@ -123,18 +191,20 @@ export class Engine {
 
   /**
    * New buffers for the current resolution, density and canvas aspect ratio; repeats if settings moved meanwhile.
-   * The old simulation is freed first, so memory never holds two (frame() waits meanwhile).
+   * The old simulation is freed first, so memory never holds two (frame() waits meanwhile). The new one paints
+   * every edit (ADR 0019), then places its agents.
    */
   rebuild(): Promise<void> {
     this.rebuilding ??= (async () => {
       let old = this.sim as Sim | undefined;
       do {
-        const { resolution, density } = this.settings;
+        const { resolution, density, boundary } = this.settings;
         const [w, h] = gridSize(resolution, this.canvas.width / Math.max(1, this.canvas.height));
-        const agents = Math.max(1, Math.min(this.backend.maxAgents, Math.round(density * w * h)));
+        const agents = Math.max(1, Math.min(this.backend.maxAgents, agentCount(this.settings, w, h)));
+        this.live = false;
         old?.destroy();
         old = undefined;
-        this.built = { resolution: 0, density: 0 }; // nothing is built until the new one exists
+        this.built = { resolution: 0, density: 0, dish: false }; // nothing is built until the new one exists
         try {
           this.sim = await this.backend.createSim(this.settings, w, h, agents);
         } catch (err) {
@@ -149,11 +219,14 @@ export class Engine {
           continue;
         }
         old = this.sim;
-        this.built = { resolution, density };
+        this.live = true;
+        this.painted = 0; // a new simulation starts without food, light and walls
+        this.built = { resolution, density, dish: boundary === 'dish' };
         this.fitView();
       } while (this.needsRebuild());
       // Settings may have changed during the allocation (seed, layout, shares): start from them.
       this.sim.update(this.settings);
+      this.flushEnv();
       this.sim.reset();
       this.backend.forget();
       this.restarts++;
@@ -168,13 +241,21 @@ export class Engine {
     this.restarts++;
   }
 
-  /** Removes food, light and walls (a new simulation has none anyway). */
+  /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */
   clearEnvironment() {
-    if (!this.rebuilding) this.sim.clearEnvironment();
+    this.edits = [];
+    this.painted = 0;
+    this.placement = undefined;
+    [this.running, this.queue] = [undefined, []];
+    if (this.live) this.sim.clearEnvironment();
+    this.onEdits?.();
   }
 
   fitView() {
     const { width, height } = this.sim;
+    // The sweeps that wait judge the grid on screen until now: they finish before it changes.
+    if ((this.viewGrid?.[0] !== width || this.viewGrid[1] !== height) && this.sweepFor()) this.onEdits?.();
+    this.viewGrid = [width, height];
     this.view = {
       center: [width / 2, height / 2],
       scale: Math.max(width / this.canvas.width, height / this.canvas.height),
@@ -198,8 +279,91 @@ export class Engine {
     this.view.center = [this.view.center[0] - dxPx * this.view.scale, this.view.center[1] - dyPx * this.view.scale];
   }
 
+  /**
+   * A brush stroke in cells of the grid on screen (toGrid()); the next frame paints it. It is kept with that grid:
+   * during a rebuild the view still shows the old grid, and the new one gets the stroke where it was drawn. Before
+   * the first simulation exists no grid is on screen, so the stroke is dropped. So is a stroke that does not clearly
+   * paint a cell (paintsCell()), such as one beside a box, outside the dish or light that rounds to 0 there: it
+   * changes nothing on screen, and on another grid or arena it must not either.
+   */
   paint(stroke: Stroke) {
-    if ([...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite)) this.strokes.push(stroke);
+    if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;
+    const s = { ...stroke, radius: Math.max(MIN_RADIUS, stroke.radius) };
+    if (!paintsCell(s, ...this.viewGrid, this.settings.boundary)) return;
+    const edit = fromStroke(s, this.viewGrid, this.settings.boundary);
+    this.edits.push(edit);
+    this.placement?.push(edit);
+    if (edit.kind === 'erase' || edit.kind === 'wall') this.queue.push(edit);
+    this.sweepFor(PAINT_ROWS);
+    this.onEdits?.();
+  }
+
+  /** False while a sweep waits for frames (sweepFor()). */
+  get swept() {
+    return !this.running && this.queue.length === 0;
+  }
+
+  /**
+   * After a stroke that clears, the sweep deletes the edits that later strokes cleared completely on the grid on
+   * screen and the erases that clear nothing there any more (sweep.ts). That changes no byte there, and an erased
+   * food stays gone on every other grid. Runs the sweeps that wait for about `rows` rows of work or until
+   * performance.now() reaches `until`, and deletes what they find; true if that was an edit. A long sweep goes on in
+   * the next frame.
+   */
+  private sweepFor(rows = Infinity, until = Infinity): boolean {
+    let [work, deleted] = [0, false];
+    while (work < rows && (until === Infinity || performance.now() < until)) {
+      if (!this.running) {
+        const edit = this.queue.shift();
+        if (!edit || !this.viewGrid) return deleted;
+        const x = this.edits.lastIndexOf(edit);
+        if (x < 0) continue; // an earlier sweep deleted it
+        const [w, h] = this.viewGrid;
+        let placement = this.placement;
+        if (placement?.w !== w || placement.h !== h || placement.length !== this.edits.length)
+          this.placement = placement = new Placement(w, h, this.edits);
+        this.running = sweeping(placement, x);
+      }
+      const step = this.running.next();
+      if (!step.done) work += step.value;
+      else {
+        this.running = undefined;
+        deleted = this.delete(step.value) || deleted;
+      }
+    }
+    return deleted;
+  }
+
+  /** Deletes the edits a sweep found: true if there was one. */
+  private delete(gone: ReadonlySet<number>): boolean {
+    if (gone.size === 0) return false;
+    // The simulation holds the first `painted` edits. One of them that goes keeps its cells there until the strokes
+    // that cleared them are painted, also when those go too: so the simulation gets every stroke recorded so far.
+    if (this.live && [...gone].some((i) => i < this.painted)) this.flushEnv();
+    this.painted -= [...gone].filter((i) => i < this.painted).length;
+    compact(this.edits, gone);
+    this.placement?.remove(gone);
+    return true;
+  }
+
+  /**
+   * Paints the edits the current simulation does not hold yet, mapped to its grid, in one call. Each goes through the
+   * canonical frame of the arena it was painted in (strokeOn()), whatever arena the simulation runs in.
+   */
+  private flushEnv() {
+    if (this.painted === this.edits.length) return;
+    const { width, height } = this.sim;
+    const strokes = this.edits.slice(this.painted).map((e) => strokeOn(e, width, height));
+    // A new simulation maps every edit onto the grid on screen: the sweep keeps them instead of mapping them again. On
+    // the same grid it keeps its placement, and with it what earlier sweeps found.
+    const kept = this.placement;
+    const same = kept?.w === width && kept.h === height && kept.length === this.edits.length;
+    if (this.painted === 0 && this.viewGrid?.[0] === width && this.viewGrid[1] === height && !same) {
+      this.placement = new Placement(width, height);
+      for (const s of strokes) this.placement.add(s);
+    }
+    this.painted = this.edits.length;
+    this.sim.paint(strokes.filter((s) => s !== undefined));
   }
 
   agentTool(tool: AgentTool) {
@@ -227,13 +391,14 @@ export class Engine {
   }
 
   /**
-   * One frame: queued strokes, as many steps as the speed asks for and the GPU keeps up with, then one
-   * render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
+   * One frame: a slice of a long sweep, new strokes, as many steps as the speed asks for and the GPU keeps up with,
+   * then one render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
    * simulation speed instead of the frame rate.
    */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
-    for (const s of this.strokes.splice(0)) this.sim.paint(s);
+    if (this.sweepFor(Infinity, performance.now() + FRAME_MS)) this.onEdits?.();
+    this.flushEnv();
     const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
     let steps = forceSteps ?? planned;
     // A held tool while paused still needs one step to act.

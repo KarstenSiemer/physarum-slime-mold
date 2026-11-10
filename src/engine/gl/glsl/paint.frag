@@ -17,6 +17,8 @@ float segmentDistance(vec2 p) {
 void main() {
   vec2 p = gl_FragCoord.xy;
   float d = segmentDistance(p);
+  // On the periodic grid: to the nearest copy, which lies one period around for a segment from brush.ts
+  // paintSegments().
   if (P.cfg.z == 0u) {
     vec2 size = vec2(W(), H());
     for (int oy = -1; oy <= 1; oy++) {

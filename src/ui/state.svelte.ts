@@ -33,6 +33,11 @@ export interface AppState {
   /** The settings the scene loaded with, to tell whether a model parameter changed since. */
   sceneBase: Settings | undefined;
   /**
+   * Food, light or walls differ from the loaded scene's shapes: after a Clear, a recorded stroke or a sweep that
+   * deleted a shape (Engine.matches). Kept in step with the engine's edit list (setEngine()).
+   */
+  envChanged: boolean;
+  /**
    * For each strain, its index in the loaded scene, or −1 for a strain added since. Removing a strain moves the
    * later ones up a letter, so the scene card finds each strain's role here.
    */
@@ -68,6 +73,7 @@ export const app = $state<AppState>({
   settings: defaultSettings(),
   scene: '',
   sceneBase: undefined,
+  envChanged: false,
   strainOrigin: [],
   sceneSection: true,
   sceneAbout: false,
@@ -120,7 +126,33 @@ export function loadPreset(id: string) {
   if (!p) return;
   setScene(p);
   noteMissingRule();
+  clearedBeforeStart = false;
+  app.envChanged = false;
   void engine?.load($state.snapshot(app.settings), p.env);
+}
+
+/** Clear was pressed before the engine existed: the engine starts without the scene's shapes (startScene()). */
+let clearedBeforeStart = false;
+
+/** Removes food, light and walls. The panel works before the engine exists, so a Clear then waits for the start. */
+export function clearEnvironment() {
+  if (engine) {
+    engine.clearEnvironment();
+    return;
+  }
+  clearedBeforeStart = true;
+  if (presetById(app.scene)?.env?.length) app.envChanged = true;
+}
+
+/**
+ * The first load of a new engine (App.svelte): what the state holds now, because the panel works before the engine
+ * exists. The simulation runs under the panel's settings, and a scene's shapes keep the scene's own arena, also when
+ * a boundary was chosen meanwhile: in its canonical frame they lie where the scene puts them. One load, so a setting
+ * changed while it builds the simulation reaches the engine through App.svelte's settings effect and stays.
+ */
+export function startScene(e: Pick<Engine, 'load'>) {
+  const env = clearedBeforeStart ? [] : (presetById(app.scene)?.env ?? []);
+  return e.load($state.snapshot(app.settings), env, app.sceneBase?.boundary);
 }
 
 /**
@@ -156,13 +188,15 @@ export function removeStrain(i: number) {
 }
 
 /**
- * True when a model parameter differs from the loaded scene. A grid the device lowered (memory, startup
- * check) is no change: the scene asks for at most `app.maxResolution`.
+ * True when a model parameter or the food, light and walls differ from the loaded scene. A grid the device lowered
+ * (memory, startup check) is no change: the scene asks for at most `app.maxResolution`.
  */
 export function sceneChanged(): boolean {
   const base = app.sceneBase;
   if (!base) return false;
-  return modelChanged(app.settings, { ...base, resolution: Math.min(base.resolution, app.maxResolution) });
+  return (
+    app.envChanged || modelChanged(app.settings, { ...base, resolution: Math.min(base.resolution, app.maxResolution) })
+  );
 }
 
 export function openLearn(tab: LearnTab) {
@@ -182,6 +216,12 @@ export function showNotice(text: string, ms = 7000) {
 let engine: Engine | undefined;
 
 export const getEngine = () => engine;
+/** Also keeps app.envChanged in step with the engine's food, light and walls: whether they are the scene's shapes. */
 export const setEngine = (e: Engine | undefined) => {
   engine = e;
+  if (!e) return;
+  e.onEdits = () => {
+    const env = presetById(app.scene)?.env ?? [];
+    app.envChanged = !e.matches(env, app.sceneBase?.boundary ?? app.settings.boundary);
+  };
 };

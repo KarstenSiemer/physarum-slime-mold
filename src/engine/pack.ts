@@ -27,6 +27,22 @@ const slot = (name: (typeof PARAM_SLOTS)[number]) => {
   return (i > PARAM_SLOTS.indexOf('attraction') ? i + 3 : i) * 4;
 };
 
+/**
+ * Claim rounds that place the agents on cells of their own with one agent per cell (init.wgsl claimStart and
+ * settleStart, gl/glsl/init.frag modes 1 and 2). ROUNDS in those shaders is another count: the draws of an agent
+ * without the rule. A CPU model of Shrinking plasmodium (0.64 agents per dish cell) placed every agent within 24
+ * rounds. On the GPU, 1 to 4 of 61 seeds left one of its agents without a free cell, to start dead (ADR 0019).
+ */
+export const START_ROUNDS = 32;
+
+/**
+ * Claim rounds for a start: the mixed layout on a grid without walls and dish gives every agent a free cell of its
+ * own in the first round (a permutation of the grid), so one round does.
+ */
+export function startRounds(s: Pick<Settings, 'layout' | 'boundary'>, walls: boolean): number {
+  return s.layout === 'mixed' && s.boundary !== 'dish' && !walls ? 1 : START_ROUNDS;
+}
+
 /** Agent-pass tools (`Params.tool.w`). */
 export const AgentToolKind = { inoculate: 1, cut: 2 } as const;
 
@@ -46,6 +62,10 @@ export interface Runtime {
   agents: number;
   step: number;
   tool?: AgentTool | undefined;
+  /** The environment may hold walls: moves then check every cell they cross (agents.wgsl `clearPath`). */
+  walls?: boolean;
+  /** The claim round of the start placement with one agent per cell (init.wgsl). */
+  round?: number;
 }
 
 /** Exclusive end index of each strain's agents, proportional to the population shares. */
@@ -89,7 +109,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
     f.set([t.strain, t.revive, t.teleport, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
-  u[slot('extra')] = LAYOUTS.indexOf(s.layout);
+  u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
   return buf;
 }
 

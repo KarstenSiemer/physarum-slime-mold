@@ -1,5 +1,6 @@
-import type { Settings } from '../../model/params';
-import { packParams, PARAMS_BYTES, type AgentTool } from '../pack';
+import type { Boundary, Settings } from '../../model/params';
+import { paintSegments, scissorRects } from '../brush';
+import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
 import {
@@ -24,6 +25,13 @@ const flip = (b: Bit): Bit => (b === 0 ? 1 : 0);
 const AGENT_ROW = 2048;
 /** Side of the alive tally target (points.vert kind 3): 128² pixels keep every pixel sum exact. */
 const TALLY_SIDE = 128;
+/** Channels a brush writes: erase and walls all, food only green, light only blue (the maximum of old and new). */
+const MASKS: Record<number, [boolean, boolean, boolean, boolean]> = {
+  [EnvKind.erase]: [true, true, true, true],
+  [EnvKind.wall]: [true, true, true, true],
+  [EnvKind.food]: [false, true, false, false],
+  [EnvKind.light]: [false, false, true, false],
+};
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -42,6 +50,8 @@ export class GlSim implements Sim {
   private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
+  /** A wall was painted since the last clear: moves then check every cell they cross (agents.frag clearPath). */
+  private walls = false;
   private a: Bit = 0;
   private p: Bit = 0;
   private q: Bit = 0;
@@ -126,8 +136,42 @@ export class GlSim implements Sim {
     this.p = 0;
     this.writeParams();
     for (const t of [...this.trail, ...this.scent, this.counts]) clear(gl, t);
-    this.pass(this.prog.init, this.agentsTex[0], { env: this.env.texture }, { agentWidth: this.agentWidth });
-    if (this.settings.collisions) this.rebuildOccupancy();
+    // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
+    const env = this.env.texture;
+    const init = { env, agentsIn: env, occ: env, claims: env };
+    this.pass(this.prog.init, this.agentsTex[0], init, { agentWidth: this.agentWidth, mode: 0 });
+    if (this.settings.collisions) {
+      this.placeOnFreeCells();
+      this.rebuildOccupancy();
+    }
+  }
+
+  /**
+   * One agent per cell from the first step (ADR 0008), as in sim.ts: claim rounds after init (startRounds()). A round
+   * counts the cells taken so far, lets every waiting agent claim its cell (points.vert kind 5, MAX blending) and
+   * settles the claims (init.frag).
+   */
+  private placeOnFreeCells() {
+    const gl = this.gl;
+    const col = this.ensureCollision();
+    const occ = col.occ[flip(this.q)];
+    const rounds = startRounds(this.settings, this.walls);
+    for (let round = 0; round < rounds; round++) {
+      this.writeParams(undefined, round);
+      clear(gl, occ);
+      this.points(2, occ, gl.FUNC_ADD);
+      clear(gl, col.claims);
+      this.points(5, col.claims, gl.MAX, this.agentsTex[this.a], [0, 0, 0, 0], { occ: occ.texture });
+      const textures = {
+        env: this.env.texture,
+        agentsIn: this.agentsTex[this.a].texture,
+        occ: occ.texture,
+        claims: col.claims.texture,
+      };
+      const mode = round === rounds - 1 ? 2 : 1;
+      this.pass(this.prog.init, this.agentsTex[flip(this.a)], textures, { agentWidth: this.agentWidth, mode });
+      this.a = flip(this.a);
+    }
   }
 
   run(steps: number, tool?: AgentTool) {
@@ -138,30 +182,56 @@ export class GlSim implements Sim {
     }
   }
 
-  paint(stroke: Stroke) {
+  /**
+   * Paints brush strokes in order, as segments that the pass paints exactly (brush.ts paintSegments). Every draw is
+   * scissored to the cells its segment can reach (scissorRects), and the parameters, color mask and blending change
+   * only where the boundary or the kind of brush changes.
+   */
+  paint(strokes: readonly Stroke[]) {
+    if (strokes.length === 0) return;
     const gl = this.gl;
-    this.writeParams();
-    const kind = EnvKind[stroke.kind];
-    const mask: Record<number, [boolean, boolean, boolean, boolean]> = {
-      0: [true, true, true, true],
-      1: [true, true, true, true],
-      2: [false, true, false, false],
-      3: [false, false, true, false],
-    };
-    const [r, g, b, a] = mask[kind] ?? [true, true, true, true];
-    gl.colorMask(r, g, b, a);
-    if (kind === EnvKind.light) this.blend(gl.MAX);
-    this.pass(this.prog.paint, this.env, {}, { kind }, (p) => {
-      gl.uniform2f(p.loc('from'), ...stroke.from);
-      gl.uniform2f(p.loc('to'), ...stroke.to);
+    const p = this.prog.paint;
+    let boundary: Boundary | undefined;
+    let kind = -1;
+    for (const stroke of strokes) {
+      const b = stroke.boundary ?? this.settings.boundary;
+      if (b !== boundary) {
+        this.writeParams(undefined, 0, b);
+        boundary = b;
+      }
+      if (kind === -1) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.env.fbo);
+        gl.viewport(0, 0, this.width, this.height);
+        gl.useProgram(p.program);
+        gl.enable(gl.SCISSOR_TEST);
+      }
+      const k = EnvKind[stroke.kind];
+      if (k !== kind) {
+        gl.colorMask(...(MASKS[k] ?? [true, true, true, true]));
+        if (k === EnvKind.light) this.blend(gl.MAX);
+        else gl.disable(gl.BLEND);
+        gl.uniform1i(p.loc('kind'), k);
+        kind = k;
+      }
+      if (k === EnvKind.wall) this.walls = true;
       gl.uniform1f(p.loc('radius'), stroke.radius);
-    });
+      for (const segment of paintSegments(stroke, this.width, this.height, b === 'wrap')) {
+        gl.uniform2f(p.loc('from'), ...segment.from);
+        gl.uniform2f(p.loc('to'), ...segment.to);
+        for (const r of scissorRects(segment, this.width, this.height, b === 'wrap')) {
+          gl.scissor(...r);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+      }
+    }
+    gl.disable(gl.SCISSOR_TEST);
     gl.colorMask(true, true, true, true);
     gl.disable(gl.BLEND);
   }
 
   clearEnvironment() {
     clear(this.gl, this.env);
+    this.walls = false;
   }
 
   /** Resolves when the GPU has finished all work issued so far (a fence, polled without blocking). */
@@ -222,6 +292,11 @@ export class GlSim implements Sim {
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
 
+  writeEnv(data: Uint8Array) {
+    writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
+    this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
+  }
+
   destroy() {
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.tally];
@@ -232,11 +307,21 @@ export class GlSim implements Sim {
     gl.deleteBuffer(this.ubo);
   }
 
-  private writeParams(tool?: AgentTool) {
+  /** `boundary` replaces the current one for a brush stroke (Stroke.boundary); the next step writes it back. */
+  private writeParams(tool?: AgentTool, round = 0, boundary = this.settings.boundary) {
     const gl = this.gl;
-    const rt = { width: this.width, height: this.height, agents: this.agents, step: this.step, tool };
+    const s = boundary === this.settings.boundary ? this.settings : { ...this.settings, boundary };
+    const rt = {
+      width: this.width,
+      height: this.height,
+      agents: this.agents,
+      step: this.step,
+      tool,
+      walls: this.walls,
+      round,
+    };
     gl.bindBufferBase(gl.UNIFORM_BUFFER, PARAMS_BINDING, this.ubo);
-    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(this.settings, rt, this.paramData)));
+    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(s, rt, this.paramData)));
   }
 
   private encodeStep() {
@@ -343,13 +428,15 @@ export class GlSim implements Sim {
     equation: number,
     agents = this.agentsTex[this.a],
     unit: [number, number, number, number] = [0, 0, 0, 0],
+    more: Record<string, WebGLTexture> = {},
   ) {
     const gl = this.gl;
     const p = this.prog.points;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
     gl.viewport(0, 0, dst.width, dst.height);
     gl.useProgram(p.program);
-    textures(gl, p.program, { agents: agents.texture });
+    // env and occ are read for kind 5 only, but bound always: an active sampler on the target is a feedback loop.
+    textures(gl, p.program, { agents: agents.texture, env: this.env.texture, occ: this.env.texture, ...more });
     gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
     gl.uniform1i(p.loc('kind'), kind);
     gl.uniform1i(p.loc('tallySide'), TALLY_SIDE);

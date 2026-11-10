@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { at } from './engine/at';
   import { Engine } from './engine/engine';
+  import { MIN_RADIUS } from './engine/environment';
   import { GpuUnavailableError } from './engine/gpu';
   import { AgentToolKind } from './engine/pack';
   import { presetById, START } from './model/presets';
@@ -17,10 +18,12 @@
     setEngine,
     setScene,
     showNotice,
+    startScene,
     TOOLS,
     type Tool,
   } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
+  import { BrushDrag } from './ui/drag';
   import { GridTuner } from './ui/tune';
 
   let canvas: HTMLCanvasElement;
@@ -66,7 +69,7 @@
         Object.assign(globalThis, { physarum: engine });
         // The panel works before the engine exists, so a preset may have been chosen meanwhile, and the settings
         // effect below does not run again for the new engine: load what the state holds now, with its environment.
-        await engine.load($state.snapshot(app.settings), presetById(app.scene)?.env ?? []);
+        await startScene(engine);
         engine.paused = app.paused;
         engine.start();
         ready = true;
@@ -174,7 +177,7 @@
   // Pointer input: pan, pinch, paint and agent tools.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- pointer bookkeeping, never rendered
   const pointers = new Map<number, [number, number]>();
-  let lastGrid: [number, number] | undefined;
+  const drag = new BrushDrag();
   let held: [number, number] | undefined;
   let pinch = 0;
 
@@ -193,10 +196,7 @@
   const painting = (t: Tool) => t === 'food' || t === 'light' || t === 'wall' || t === 'erase';
 
   function paintTo(e: Engine, p: [number, number]) {
-    if (!painting(app.tool)) return;
-    const g = e.toGrid(...p);
-    e.paint({ kind: app.tool, from: lastGrid ?? g, to: g, radius: brushCells(e) });
-    lastGrid = g;
+    if (painting(app.tool)) drag.to(e, p, app.tool, Math.max(MIN_RADIUS, brushCells(e)));
   }
 
   function onpointerdown(ev: PointerEvent) {
@@ -212,7 +212,7 @@
       return;
     }
     if (ev.button !== 0 || app.tool === 'pan') return;
-    lastGrid = undefined;
+    drag.end();
     paintTo(e, p);
     if (app.tool === 'inoculate' || app.tool === 'cut') held = p;
   }
@@ -239,7 +239,7 @@
 
   function onpointerup(ev: PointerEvent) {
     pointers.delete(ev.pointerId);
-    lastGrid = undefined;
+    drag.end();
     held = undefined;
   }
 

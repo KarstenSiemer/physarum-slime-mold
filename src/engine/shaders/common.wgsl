@@ -17,7 +17,7 @@ struct Params {
   tool: vec4f,           // x, y (cells), radius, kind (0 none, 1 inoculate, 2 cut)
   tool2: vec4f,          // strain, revive probability (dead agents), teleport probability (alive), unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
-  extra: vec4u,          // layout, unused, unused, unused
+  extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
 }
 
 struct Agent {
@@ -64,9 +64,11 @@ fn dir(a: f32) -> vec2f {
   return vec2f(cos(w), sin(w));
 }
 
+// A position wrapped into the periodic grid, below W and H. A position a hair below 0 would round up to W in f32,
+// in cell 0, while cellOf() of the unwrapped position is cell W − 1: the largest f32 below W keeps it in that cell.
 fn wrapPos(p: vec2f) -> vec2f {
   let size = vec2f(f32(W()), f32(H()));
-  return p - size * floor(p / size);
+  return min(p - size * floor(p / size), bitcast<vec2f>(bitcast<vec2u>(size) - 1u));
 }
 
 fn dishRadius() -> f32 { return 0.5 * f32(min(W(), H())) - 1.0; }
@@ -91,4 +93,6 @@ fn cellCoord(i: u32) -> vec2i { return vec2i(i32(i % W()), i32(i / W())); }
 
 // Environment bytes: x wall, y food, z light (0…1).
 fn envOf(e: u32) -> vec4f { return unpack4x8unorm(e); }
-fn isWall(e: u32) -> bool { return (e & 0xffu) != 0u; }
+// A cell is a wall when its wall byte is at least 128 (0.5). isWall in common.glsl uses the same threshold.
+const WALL_BYTE = 128u;
+fn isWall(e: u32) -> bool { return (e & 0xffu) >= WALL_BYTE; }

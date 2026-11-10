@@ -38,7 +38,16 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   text, paper reference. UI controls, URL validation and GPU uniform packing all read it.
 - `engine/types.ts` defines the `Backend` and `Sim` interfaces. Both backends pass the same GPU
   test suite (`src/engine/sim.gpu.test.ts`).
-- One rAF loop: apply queued tool strokes → run _k_ simulation steps → render one frame. _k_
+- Food, light and walls are a list of edits in the engine: preset shapes and painted strokes, each
+  with the arena it was painted in. Every new simulation (new grid, density or arena) paints the
+  whole list before it places its agents. On another grid an edit goes through the canonical frame
+  of the arena it was painted in, whatever arena runs, turned on a portrait grid: a dish keeps its
+  short side as the unit, a box or a periodic grid stretches with the grid. After every erase or
+  wall, the edits that later strokes cleared completely on the grid on screen leave the list (the
+  sweep, ADR 0019). A stroke on a copy of a periodic grid, which the view shows around the grid, is
+  kept where the copy shows it, inside the grid. The scene card counts food, light and walls that
+  differ from the scene's as a change.
+- One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
   quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises
@@ -70,7 +79,7 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 | `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
 | `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | agents that moved into the cell this step, per strain |
-| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall, food, light                       |
+| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light         |
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 
@@ -88,7 +97,8 @@ so the small decay values from Jones Fig. 12 would stop working.
    - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
      walls and outside read as −∞;
    - **rotate** with the Jones rule (exact, see knowledge base); random turn with `pCD`;
-   - **move** by SS; wrap (periodic) or block (closed box, dish, wall);
+   - **move** by SS; wrap (periodic) or block (closed box, dish, wall, also a wall cell on the
+     way);
    - blocked: random new heading, no deposit. Success: `atomicAdd(counts[cell][strain], 1)`.
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the
    heading and calls `atomicMax(claims[target], key)` with a unique per-step key (bijective
@@ -110,9 +120,10 @@ the buffer slot.
 ### Initial layouts
 
 `mixed` (uniform), `bands` (strains side by side), `sectors`, `colonies` (one disc per strain),
-`ring`, `center`, `empty` (paint with the inoculate tool). In collision mode the mixed layout
-seeds distinct cells; the other layouts, agents moved out of walls or the dish, and rare rounding
-can start with shared cells (ADR 0008).
+`ring`, `center`, `empty` (paint with the inoculate tool). An agent whose cell is a wall or outside
+the arena draws again in its layout's region. In collision mode claim rounds give every alive agent
+a cell of its own, in every layout (ADR 0008, ADR 0019). A dish counts its agents over the square of
+its short side, as Jones counts %p; a box or a periodic grid over all its cells.
 
 ## 4. Interaction
 
@@ -155,7 +166,7 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
 | Layer               | Tool                                                                                            | Runs where       |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ---------------- |
 | Types, lint, format | `tsc`, ESLint, Prettier, `svelte-check`                                                         | pre-commit, CI   |
-| Unit                | Vitest (Node): params, URL parsing (fuzz), presets, colors, RNG, CPU reference model            | pre-commit, CI   |
+| Unit                | Vitest (Node): params, URL parsing (fuzz), presets, colors, RNG, CPU reference model, engine    | pre-commit, CI   |
 | GPU                 | Vitest browser mode, Chromium + `--enable-unsafe-webgpu` (Metal locally, SwiftShader in CI)     | CI, local        |
 | E2E                 | Playwright: boot, no console errors, non-blank canvas, tools, presets, URL round trip, axe a11y | CI, local        |
 | Visual              | Playwright screenshots at fixed seed/steps, reviewed by eye; pattern metrics as asserts         | local loop       |

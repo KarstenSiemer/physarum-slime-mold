@@ -2,9 +2,10 @@
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { hexToLinear } from '../model/color';
-import { defaultSettings, defaultStrain, STYLES, type Settings } from '../model/params';
+import { BOUNDARIES, defaultSettings, defaultStrain, LAYOUTS, STYLES, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
 import { AgentToolKind } from './pack';
+import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND } from './render';
 import agentsWgsl from './shaders/agents.wgsl?raw';
@@ -17,7 +18,7 @@ import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import type { Simulation } from './sim';
-import type { Backend, Sim, View } from './types';
+import type { Backend, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const lane = (a: Float32Array, l = 0) => Float64Array.from({ length: a.length / 4 }, (_, i) => a[i * 4 + l] ?? 0);
@@ -246,7 +247,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     it('is blocked by a wall: no move, no deposit, new random heading', async () => {
       const sim = await make({ layout: 'empty' }, 64, 64, 1);
-      sim.paint({ kind: 'wall', from: [33.5, 32.5], to: [33.5, 32.5], radius: 1.2 });
+      sim.paint([{ kind: 'wall', from: [33.5, 32.5], to: [33.5, 32.5], radius: 1.2 }]);
       sim.writeAgent(0, { x: 32.5, y: 32.5, heading: 0, bits: 4 });
       sim.run(1);
       const [a] = await sim.readAgents();
@@ -255,22 +256,293 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(a?.heading).not.toBe(0);
       expect(total(await sim.readCounts())).toBe(0);
     });
+
+    // A step longer than a wall is thick must not jump it: a move checks every cell it crosses (clearPath in
+    // agents.wgsl and agents.frag). A one-cell wall in column `wall`, 96 agents in the three columns before it,
+    // heading up to 60° off +x; column 1 makes the moves cross the wrap seam.
+    it.each([
+      [24, false],
+      [24, true],
+      [1, false],
+      [1, true],
+    ])('never lets a step of 3 cells cross a one-cell wall (column %i, collisions %s)', async (wall, collisions) => {
+      const [w, h, n] = [48, 32, 96];
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 3 }];
+      const beyond = async (painted: boolean) => {
+        const sim = await make({ layout: 'empty', strains }, w, h, n);
+        if (painted) sim.paint([{ kind: 'wall', from: [wall + 0.5, 0], to: [wall + 0.5, h], radius: 0.5 }]);
+        for (let i = 0; i < n; i++) {
+          const x = (wall - 3 + (i % 3) + 0.25 + (0.5 * ((i * 7) % 11)) / 11 + w) % w;
+          const heading = ((((i * 37) % 121) - 60) * Math.PI) / 180;
+          sim.writeAgent(i, { x, y: Math.floor(i / 3) + 0.5, heading, bits: 4 });
+        }
+        // The occupancy is built from the agents written above when the rule is switched on.
+        if (collisions) sim.update({ ...defaultSettings(), layout: 'empty', strains, collisions: true });
+        sim.run(1);
+        const agents = await sim.readAgents();
+        expect(agents.every((a) => a.bits & 4)).toBe(true);
+        // Columns from the wall on, in the direction of the moves.
+        return agents.filter((a) => (Math.floor(a.x) - wall + w) % w < w / 2).length;
+      };
+      expect(await beyond(false)).toBeGreaterThan(20); // without the wall, many moves end at or past its column
+      expect(await beyond(true)).toBe(0);
+    });
+
+    it('cannot slip through two wall cells that touch at a corner, nor touch a wall at a corner', async () => {
+      // A move from (11.5, 2.5) to (12.5, 1.5) passes exactly through the grid corner (12, 2).
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: Math.SQRT2 }];
+      const move = async (walls: [number, number][]) => {
+        const sim = await make({ layout: 'empty', strains }, 32, 32, 1);
+        const env = new Uint8Array(32 * 32 * 4);
+        for (const [x, y] of walls) env[(y * 32 + x) * 4] = 255;
+        sim.writeEnv(env);
+        sim.writeAgent(0, { x: 11.5, y: 2.5, heading: -Math.PI / 4, bits: 4 });
+        sim.run(1);
+        const [a] = await sim.readAgents();
+        return [Math.floor(a?.x ?? -1), Math.floor(a?.y ?? -1)];
+      };
+      expect(await move([])).toEqual([12, 1]);
+      expect(await move([[13, 13]])).toEqual([12, 1]); // a wall elsewhere turns the walk on
+      expect(
+        await move([
+          [11, 1],
+          [12, 2],
+        ]),
+      ).toEqual([11, 2]); // the destination is free, the way is not
+      expect(await move([[12, 2]])).toEqual([11, 2]); // the segment touches this wall cell at its corner
+      expect(await move([[11, 1]])).toEqual([11, 2]); // and this one: float32 walks into the other one first
+    });
+
+    // Both cells beside the corner count, in every diagonal direction: float32 rounding decides which of them a
+    // plain walk enters, so each one alone must block (agents.wgsl and agents.frag clearPath, CORNER).
+    it('counts both cells beside a corner the move passes, in every diagonal direction', async () => {
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: Math.SQRT2 }];
+      const results: string[] = [];
+      for (const [sx, sy] of [
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+      ] as const) {
+        for (const side of [
+          [11 + sx, 2],
+          [11, 2 + sy],
+        ] as const) {
+          const sim = await make({ layout: 'empty', strains }, 32, 32, 1);
+          const env = new Uint8Array(32 * 32 * 4);
+          env[(side[1] * 32 + side[0]) * 4] = 255;
+          sim.writeEnv(env);
+          sim.writeAgent(0, { x: 11.5, y: 2.5, heading: Math.atan2(sy, sx), bits: 4 });
+          sim.run(1);
+          const [a] = await sim.readAgents();
+          results.push(`${sx},${sy} wall ${side.join(',')}: ${Math.floor(a?.x ?? -1)},${Math.floor(a?.y ?? -1)}`);
+        }
+      }
+      expect(results).toEqual([
+        '1,-1 wall 12,2: 11,2',
+        '1,-1 wall 11,1: 11,2',
+        '1,1 wall 12,2: 11,2',
+        '1,1 wall 11,3: 11,2',
+        '-1,1 wall 10,2: 11,2',
+        '-1,1 wall 11,3: 11,2',
+        '-1,-1 wall 10,2: 11,2',
+        '-1,-1 wall 11,1: 11,2',
+      ]);
+    });
+
+    // The longest step the panel allows: a move of 8 cells enters up to 13 cells, so the wall can be the fourth
+    // or a later one on the way (the walk loop in clearPath runs up to 24 cells).
+    it('never lets a step of 8 cells cross a one-cell wall, also where the wall is far along the move', async () => {
+      const [w, h, n, wall] = [64, 40, 128, 32];
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 8 }];
+      const beyond = async (painted: boolean) => {
+        const sim = await make({ layout: 'empty', strains }, w, h, n);
+        if (painted) sim.paint([{ kind: 'wall', from: [wall + 0.5, 0], to: [wall + 0.5, h], radius: 0.5 }]);
+        for (let i = 0; i < n; i++) {
+          // 4 to 7 cells before the wall, off the cell centres, heading up to 60° off +x.
+          const x = wall - 7 + (i % 4) + 0.1 + (0.8 * ((i * 7) % 11)) / 11;
+          const heading = ((((i * 37) % 121) - 60) * Math.PI) / 180;
+          sim.writeAgent(i, { x, y: 4.3 + 0.25 * Math.floor(i / 4), heading, bits: 4 });
+        }
+        sim.run(1);
+        const agents = await sim.readAgents();
+        expect(agents.every((a) => a.bits & 4)).toBe(true);
+        return agents.filter((a) => a.x >= wall).length;
+      };
+      expect(await beyond(false)).toBeGreaterThan(40);
+      expect(await beyond(true)).toBe(0);
+    });
   });
 
   describe('environment', () => {
     it('paints food, light and walls, and erases them', async () => {
       const sim = await make({ layout: 'empty' }, 64, 64, 1);
-      sim.paint({ kind: 'food', from: [10, 10], to: [20, 10], radius: 3 });
-      sim.paint({ kind: 'light', from: [40, 40], to: [40, 40], radius: 6 });
-      sim.paint({ kind: 'wall', from: [10, 50], to: [50, 50], radius: 1.5 });
+      sim.paint([{ kind: 'food', from: [10, 10], to: [20, 10], radius: 3 }]);
+      sim.paint([{ kind: 'light', from: [40, 40], to: [40, 40], radius: 6 }]);
+      sim.paint([{ kind: 'wall', from: [10, 50], to: [50, 50], radius: 1.5 }]);
       const env = await sim.readEnv();
       const at = (x: number, y: number, ch: number) => env[(y * 64 + x) * 4 + ch] ?? 0;
       expect(at(15, 10, 1)).toBe(255); // food
       expect(at(40, 40, 2)).toBeGreaterThan(200); // light, soft edge
       expect(at(30, 50, 0)).toBe(255); // wall
       expect(at(5, 30, 1) + at(5, 30, 0)).toBe(0);
-      sim.paint({ kind: 'erase', from: [15, 10], to: [15, 10], radius: 2 });
+      sim.paint([{ kind: 'erase', from: [15, 10], to: [15, 10], radius: 2 }]);
       expect((await sim.readEnv())[(10 * 64 + 15) * 4 + 1]).toBe(0);
+    });
+
+    /** Bytes that differ from the CPU reference (light, a soft edge rounded to 8 bits from float32, by more than 1). */
+    function unlike(env: Uint8Array, ref: Uint8Array) {
+      const wrong: string[] = [];
+      for (let i = 0; i < ref.length; i++) {
+        const tolerance = i % 4 === 2 ? 1 : 0;
+        if (Math.abs((env[i] ?? 0) - (ref[i] ?? 0)) > tolerance)
+          wrong.push(`cell ${Math.floor(i / 4)} byte ${i % 4}: ${env[i] ?? '-'} ≠ ${ref[i] ?? '-'}`);
+      }
+      return wrong;
+    }
+
+    // The engine tests in Node paint with this CPU reference (engine-env.test.ts), so it must match both shaders.
+    // WebGL2 scissors each stroke to its cells (brush.ts): the strokes cross the edges of the grid. One call with
+    // every stroke must paint what one call per stroke paints.
+    it('paints like the CPU reference, across the edges and under each stroke’s own boundary', async () => {
+      const [w, h] = [48, 32];
+      const strokes: Stroke[] = [
+        { kind: 'wall', from: [2.31, 3.13], to: [40.72, 29.41], radius: 0.75 },
+        { kind: 'food', from: [46.63, 16.21], to: [46.63, 16.21], radius: 3.33, boundary: 'wrap' }, // wraps to x = 0
+        { kind: 'light', from: [24.23, 1.17], to: [30.41, 1.17], radius: 5.23, boundary: 'wrap' }, // and to the bottom
+        { kind: 'food', from: [0.37, 0.41], to: [0.37, 0.41], radius: 4.11, boundary: 'wrap' }, // into all four corners
+        { kind: 'erase', from: [20.13, 15.37], to: [22.61, 17.93], radius: 1.91 },
+        { kind: 'food', from: [5.43, 30.61], to: [9.37, 30.61], radius: 4.27 }, // clipped by the box
+        { kind: 'wall', from: [30.23, 20.31], to: [44.17, 9.23], radius: 2.21, boundary: 'dish' },
+      ];
+      const ref = new Uint8Array(w * h * 4);
+      const margin = { min: Infinity };
+      for (const s of strokes) paintReference(ref, w, h, s, 'box', margin);
+      // No cell centre within 0.001 cells of a brush edge, where float32 could round it the other way.
+      expect(margin.min).toBeGreaterThan(1e-3);
+      const one = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      for (const s of strokes) one.paint([s]);
+      const all = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      all.paint(strokes);
+      for (const sim of [one, all]) {
+        const env = await sim.readEnv();
+        expect(unlike(env, ref)).toEqual([]);
+        // The strokes reach every corner and both sides of the wrap seam.
+        for (const c of [0, w - 1, (h - 1) * w, h * w - 1]) expect(env[c * 4 + 1], `corner cell ${c}`).toBe(255);
+      }
+    });
+
+    // A view zoomed out over a periodic grid shows many copies of it, and a fast drag there gives a stroke longer
+    // than the grid; a stroke mapped from a coarse grid to a fine one can be a brush larger than the grid. Both
+    // passes paint them as segments (brush.ts paintSegments), WebGPU over a box of at most one grid (paintBox).
+    it.each([
+      [
+        'far copies and strokes longer than the grid',
+        [
+          { kind: 'food', from: [-2 * 64 + 10.31, 20.73], to: [-2 * 64 + 13.17, 21.41], radius: 3.34 }, // two periods left
+          { kind: 'food', from: [40.23, 3 * 48 + 5.43], to: [40.23, 3 * 48 + 5.43], radius: 2.71 }, // three periods down
+          { kind: 'wall', from: [-70.31, 10.63], to: [140.77, -60.41], radius: 0.98 }, // over three periods
+          { kind: 'light', from: [5.31, 40.37], to: [5.31, 40.37], radius: 41.22 }, // wider than the grid
+          { kind: 'erase', from: [-20.17, 30.29], to: [100.43, 31.61], radius: 2.21 }, // longer than the grid
+          { kind: 'food', from: [33.11, 2.37], to: [-90.71, 8.13], radius: 1.28, boundary: 'box' }, // cut by the box
+        ],
+      ],
+      [
+        'brushes larger than a closed arena',
+        [
+          { kind: 'light', from: [20.17, 25.41], to: [20.17, 25.41], radius: 300.29, boundary: 'dish' },
+          { kind: 'food', from: [10.29, 10.37], to: [70.29, 10.37], radius: 130.43, boundary: 'box' },
+          { kind: 'erase', from: [-500, 5.5], to: [500, 5.5], radius: 2.21, boundary: 'box' },
+        ],
+      ],
+    ] satisfies [string, Stroke[]][])('paints %s like the CPU reference', async (_, strokes) => {
+      const [w, h] = [64, 48];
+      const ref = new Uint8Array(w * h * 4);
+      const margin = { min: Infinity };
+      for (const s of strokes) paintReference(ref, w, h, s, 'wrap', margin);
+      expect(margin.min).toBeGreaterThan(1e-3);
+      for (const split of [false, true]) {
+        const sim = await make({ layout: 'empty' }, w, h, 1);
+        if (split) for (const s of strokes) sim.paint([s]);
+        else sim.paint(strokes);
+        expect(unlike(await sim.readEnv(), ref), split ? 'one call per stroke' : 'one call').toEqual([]);
+      }
+    });
+
+    // WebGPU paints 4096 strokes per submission: 5000 strokes cross that edge. Strokes that pass a cell centre
+    // within float32 rounding of their edge are drawn again.
+    it('paints 5000 strokes in one call like the CPU reference', async () => {
+      const [w, h] = [64, 48];
+      let seed = 3;
+      const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+      const kinds = ['food', 'wall', 'light', 'erase'] as const;
+      const ref = new Uint8Array(w * h * 4);
+      const strokes: Stroke[] = [];
+      while (strokes.length < 5000) {
+        const [x, y] = [rnd() * w, rnd() * h];
+        const kind = kinds[strokes.length % 4] ?? 'food';
+        const s: Stroke = { kind, from: [x, y], to: [x + 2 * rnd(), y + 2 * rnd()], radius: 0.75 + 2 * rnd() };
+        const margin = { min: Infinity };
+        paintReference(new Uint8Array(w * h * 4), w, h, s, 'wrap', margin);
+        if (margin.min < 1e-3) continue;
+        paintReference(ref, w, h, s, 'wrap');
+        strokes.push(s);
+      }
+      const sim = await make({ layout: 'empty' }, w, h, 1);
+      sim.paint(strokes);
+      expect(unlike(await sim.readEnv(), ref)).toEqual([]);
+    });
+
+    // One threshold in every shader that reads walls (isWall in common.wgsl and common.glsl): a wall byte of
+    // 128 or more. Row 2 + k holds wall byte BYTES[k] in columns 11 to 20.
+    describe('wall bytes from 128 on are walls', () => {
+      const BYTES = [0, 1, 64, 127, 128, 129, 200, 255];
+      const [w, h] = [32, 16];
+      const env = new Uint8Array(w * h * 4);
+      BYTES.forEach((b, k) => {
+        for (let x = 11; x <= 20; x++) env[((2 + k) * w + x) * 4] = b;
+      });
+      const wall = BYTES.map((b) => b >= 128);
+
+      it('for moves', async () => {
+        // All three sensors on the next cell: they read the same value, so the agent keeps its heading.
+        const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1 }];
+        const sim = await make({ layout: 'empty', strains }, w, h, BYTES.length);
+        sim.writeEnv(env);
+        BYTES.forEach((_, k) => {
+          sim.writeAgent(k, { x: 10.5, y: 2.5 + k, heading: 0, bits: 4 });
+        });
+        sim.run(1);
+        expect((await sim.readAgents()).map((a) => Math.floor(a.x) === 10)).toEqual(wall);
+      });
+
+      it('for diffusion', async () => {
+        const sim = await make({ layout: 'empty' }, w, h, 1);
+        sim.writeEnv(env);
+        sim.writeTrail(new Float32Array(w * h * 4).fill(1));
+        sim.run(1);
+        const trail = await sim.readTrail();
+        // A wall holds no trail; an open cell keeps the mean of its open neighbours, all 1, times 1 − decay.
+        const at = BYTES.map((_, k) => trail[((2 + k) * w + 15) * 4] ?? -1);
+        expect(at.map((v) => (v === 0 ? 'wall' : Math.abs(v - 0.9) < 1e-6 ? 'open' : v))).toEqual(
+          wall.map((x) => (x ? 'wall' : 'open')),
+        );
+      });
+
+      it('for start positions', async () => {
+        const sim = await make({ layout: 'mixed', density: 8 }, w, h, 8 * w * h);
+        sim.writeEnv(env);
+        sim.reset();
+        const inRow = BYTES.map(() => 0);
+        for (const a of await sim.readAgents()) {
+          const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
+          if (a.bits & 4 && x >= 11 && x <= 20 && y >= 2 && y < 2 + BYTES.length)
+            inRow[y - 2] = (inRow[y - 2] ?? 0) + 1;
+        }
+        // 80 agents per row on average; none in a wall.
+        expect(inRow.map((n) => n > 20)).toEqual(wall.map((x) => !x));
+        expect(inRow.filter((_, k) => wall[k])).toEqual([0, 0, 0, 0]);
+      });
     });
   });
 
@@ -295,6 +567,163 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         .map((a) => (((Math.floor(a.y) % h) + h) % h) * w + (((Math.floor(a.x) % w) + w) % w));
       expect(cells).toHaveLength(n);
       expect(new Set(cells).size).toBe(n);
+    });
+
+    /** Alive agents, the cells holding more than one, and alive agents in a wall or outside the arena. */
+    async function starts(sim: Sim, boundary: Settings['boundary']) {
+      const { width: w, height: h } = sim;
+      const env = await sim.readEnv();
+      const per = new Map<number, number>();
+      let [alive, blocked] = [0, 0];
+      for (const a of await sim.readAgents()) {
+        if (!(a.bits & 4)) continue;
+        alive++;
+        const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
+        const inside =
+          x >= 0 &&
+          y >= 0 &&
+          x < w &&
+          y < h &&
+          (boundary !== 'dish' || Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1);
+        const c = y * w + x;
+        if (!inside || (env[c * 4] ?? 0) >= 128) blocked++;
+        per.set(c, (per.get(c) ?? 0) + 1);
+      }
+      return { alive, shared: [...per.values()].filter((k) => k > 1).length, blocked };
+    }
+
+    // Every layout and arena, with a wall across the middle: 20 agents fit every layout's region (the centre
+    // spot holds about 46 cells on this grid), so all of them start alive, each in a cell of its own (ADR 0008).
+    it.each(LAYOUTS.filter((l) => l !== 'empty').flatMap((l) => BOUNDARIES.map((b) => [l, b] as const)))(
+      'starts every agent of the %s layout in a %s on a free cell of its own',
+      async (layout, boundary) => {
+        const sim = await make({ layout, boundary, collisions: true, seed: 5 }, 64, 48, 20);
+        sim.paint([{ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 }]);
+        sim.reset();
+        expect(await starts(sim, boundary)).toEqual({ alive: 20, shared: 0, blocked: 0 });
+      },
+    );
+
+    it('keeps the region of a layout: the centre spot, a colony, the ring', async () => {
+      const [w, h] = [64, 48];
+      const m = Math.min(w, h);
+      for (const [layout, near, far] of [
+        ['center', 0, 0.08 * m + 1],
+        ['colonies', 0, 0.1 * m + 1],
+        ['ring', 0.3 * m - 2, 0.3 * m + 2],
+      ] as const) {
+        const sim = await make({ layout, collisions: true, seed: 5 }, w, h, 20);
+        for (const a of await sim.readAgents()) {
+          const r = Math.hypot(a.x - w / 2, a.y - h / 2);
+          expect(r, layout).toBeGreaterThanOrEqual(near);
+          expect(r, layout).toBeLessThanOrEqual(far);
+        }
+      }
+    });
+
+    // Shrinking plasmodium: 0.64 agents per dish cell, and 0.5 % more agents than the dish has free cells for.
+    it('fills a dish to 64 % with every agent on a cell of its own, and starts the rest dead when it is full', async () => {
+      const [w, h] = [64, 48];
+      const cells = Array.from({ length: w * h }, (_, c) => [c % w, Math.floor(c / w)] as const).filter(
+        ([x, y]) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1,
+      ).length;
+      const dense = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, Math.round(0.64 * cells));
+      expect(await starts(dense, 'dish')).toEqual({ alive: Math.round(0.64 * cells), shared: 0, blocked: 0 });
+      const full = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, cells + 8);
+      const s = await starts(full, 'dish');
+      expect([s.shared, s.blocked]).toEqual([0, 0]);
+      expect(s.alive).toBeGreaterThan(0.97 * cells);
+      expect(s.alive).toBeLessThanOrEqual(cells);
+    });
+
+    // An offset just below 1 rounds into the next cell from coordinate 256 on (f32): with seed 7 the old start
+    // shared one cell here. The clamp keeps every agent of the permutation in its own cell.
+    it('keeps every agent of the mixed layout inside its own cell on a 512 × 288 grid', async () => {
+      const sim = await make({ collisions: true, seed: 7 }, 512, 288, Math.round(0.2 * 512 * 288));
+      expect(await starts(sim, 'wrap')).toEqual({ alive: Math.round(0.2 * 512 * 288), shared: 0, blocked: 0 });
+    });
+
+    // Every strain draws again in its own region: its band, its sector, its colony (init.wgsl and init.frag start()).
+    it.each(['bands', 'sectors', 'colonies'] as const)(
+      'keeps every strain of the %s layout in its own region when its agents draw again',
+      async (layout) => {
+        const [w, h] = [64, 48];
+        const m = Math.min(w, h);
+        const strains = [1, 0.5, 0.75].map((share, i) => ({ ...defaultStrain(i), share }));
+        const sim = await make({ layout, strains, collisions: true, seed: 11 }, w, h, 108);
+        sim.paint([{ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 }]);
+        sim.reset();
+        const inside = (x: number, y: number, s: number) => {
+          const [dx, dy] = [x - w / 2, y - h / 2];
+          if (layout === 'bands') return x >= (s / 3) * w - 1e-3 && x <= ((s + 1) / 3) * w + 1e-3;
+          if (layout === 'sectors') {
+            // How far past the start of its own sector the angle lies, in sectors (3 make a turn).
+            const past = ((((Math.atan2(dy, dx) / (2 * Math.PI)) * 3 - s) % 3) + 3) % 3;
+            return Math.hypot(dx, dy) <= 0.45 * m + 1e-3 && (past <= 1 + 1e-3 || past >= 3 - 1e-3);
+          }
+          const c = (s / 3) * 2 * Math.PI - Math.PI / 2;
+          return Math.hypot(dx - 0.28 * m * Math.cos(c), dy - 0.28 * m * Math.sin(c)) <= 0.1 * m + 1e-3;
+        };
+        const agents = await sim.readAgents();
+        const strayed = agents.filter((a) => a.bits & 4 && !inside(a.x, a.y, a.bits & 3));
+        expect(strayed).toEqual([]);
+        expect(await starts(sim, 'wrap')).toEqual({ alive: 108, shared: 0, blocked: 0 });
+      },
+    );
+
+    // Without the rule an agent may share a cell, but one that drew a wall or a cell outside the dish draws again
+    // in its region, up to 32 times (init.wgsl and init.frag, ROUNDS). The wall covers about half the centre spot.
+    it.each([
+      ['center', 'box'],
+      ['mixed', 'dish'],
+    ] as const)(
+      'starts the %s layout in a %s without the rule on open cells of its region',
+      async (layout, boundary) => {
+        const [w, h] = [64, 48];
+        const sim = await make({ layout, boundary, seed: 13 }, w, h, 300);
+        sim.paint([{ kind: 'wall', from: [0, 24], to: [64, 24], radius: 1.5 }]);
+        sim.reset();
+        const s = await starts(sim, boundary);
+        expect([s.alive, s.blocked]).toEqual([300, 0]);
+        if (layout === 'center')
+          for (const a of await sim.readAgents())
+            expect(Math.hypot(a.x - w / 2, a.y - h / 2)).toBeLessThanOrEqual(0.08 * 48 + 1e-3);
+      },
+    );
+
+    // A move that ends a hair left of x = 0 on the periodic grid: wrapped in float32, its position rounded up to
+    // x = W, in cell 0, while WebGPU counted the move and the occupancy in cell W − 1 (wrapPos in common.wgsl and
+    // common.glsl). Agent 1 then walked into cell 0 as well.
+    it('keeps an agent that crosses the wrap seam inside the grid, in the cell its move counted', async () => {
+      const [w, h] = [512, 8];
+      const straight = { sensorAngle: 0, sensorOffset: 1, randomTurn: 0 };
+      const strains = [
+        { ...defaultStrain(0), ...straight, stepSize: 0.500001 },
+        { ...defaultStrain(1), ...straight, stepSize: 1 },
+      ];
+      const sim = await make({ layout: 'empty', strains }, w, h, 2);
+      sim.writeAgent(0, { x: 0.5, y: 0.5, heading: Math.PI, bits: 4 });
+      sim.writeAgent(1, { x: 2.5, y: 0.5, heading: Math.PI, bits: 4 | 1 });
+      // The occupancy is built from the agents written above when the rule is switched on.
+      sim.update({ ...defaultSettings(), layout: 'empty', strains, collisions: true });
+      const cells = async () => (await sim.readAgents()).map((a) => Math.floor(a.y) * w + Math.floor(a.x));
+      sim.run(1);
+      const [a] = await sim.readAgents();
+      expect(a?.x).toBeLessThan(w);
+      const counts = await sim.readCounts();
+      const counted = Array.from({ length: w * h }, (_, c) => c).filter((c) => (counts[c * 4] ?? 0) > 0);
+      expect(counted).toEqual([w - 1]);
+      expect(await cells()).toEqual([w - 1, 1]);
+      sim.run(1);
+      expect(await cells()).toEqual([w - 1, 0]);
+    });
+
+    it('places the same agents again for the same seed', async () => {
+      const place = async () => {
+        const sim = await make({ layout: 'center', boundary: 'dish', collisions: true, seed: 9 }, 64, 48, 30);
+        return sim.readAgents();
+      };
+      expect(await place()).toEqual(await place());
     });
   });
 
@@ -508,7 +937,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         };
         const sim = (await make(patch, 61, 45, collisions ? 1001 : 5003)) as Simulation;
         sim.sortInterval = sortInterval;
-        sim.paint({ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 });
+        sim.paint([{ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 }]);
         sim.run(20);
         sim.run(1, { kind: AgentToolKind.inoculate, x: 30, y: 22, radius: 8, strain: 1, revive: 0.5, teleport: 0.3 });
         sim.run(15);

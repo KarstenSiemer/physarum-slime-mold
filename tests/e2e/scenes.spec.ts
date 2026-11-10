@@ -123,7 +123,9 @@ test('Reload scene restores food, light and walls, and keeps the focus in the ca
   await expect.poll(async () => (await environment(page))[0], { timeout: 60_000 }).toBeGreaterThan(100);
   const scene = await environment(page);
   expect(scene[1], 'food cells').toBeGreaterThan(10);
-  // Food painted by hand is not part of the scene.
+  const changed = card(page).getByText('changed', { exact: true });
+  await expect(changed).toBeHidden();
+  // Painted food changes the scene (ADR 0019).
   await page.getByRole('radio', { name: 'Food' }).click();
   const canvas = await box(page.locator('canvas'));
   await page.mouse.move(canvas.x + canvas.width * 0.3, canvas.y + canvas.height * 0.5);
@@ -133,24 +135,71 @@ test('Reload scene restores food, light and walls, and keeps the focus in the ca
   // Strokes are painted in the next frame, and on SwiftShader a frame and a read of the environment can each
   // take a second: wait longer than expect.poll's default of 5 s.
   await expect.poll(async () => (await environment(page))[1], { timeout: 30_000 }).toBeGreaterThan(scene[1] ?? 0);
-  const angle = page.getByRole('spinbutton', { name: 'Sensor angle value' });
-  await angle.fill('30');
-  await angle.press('Enter');
+  await expect(changed).toBeVisible();
+  await expect(card(page)).toContainText('You changed the scene.');
   // By keyboard: the button goes away with the change, and the focus stays in the card.
   await card(page).getByRole('button', { name: 'Reload scene' }).focus();
   await page.keyboard.press('Enter');
   await expect(card(page).getByRole('heading', { name: 'Maze' })).toBeFocused();
   await expect.poll(() => environment(page), { timeout: 30_000 }).toEqual(scene);
+  await expect(changed).toBeHidden();
+  // A Clear changes the scene too, and Reload scene brings its walls and food back.
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await page.getByRole('button', { name: 'Clear food, light and walls' }).click();
+  await expect.poll(async () => (await environment(page)).slice(0, 3), { timeout: 30_000 }).toEqual([0, 0, 0]);
+  await expect(changed).toBeVisible();
+  await card(page).getByRole('button', { name: 'Reload scene' }).click();
+  await expect.poll(() => environment(page), { timeout: 30_000 }).toEqual(scene);
+  await expect(changed).toBeHidden();
   expect(errors).toEqual([]);
 });
 
-test('the panel shows the density the Steiner tree runs, not a rounded one', async ({ page }) => {
+// Owner report: load the Maze, change the grid, and the walls and the food were gone (ADR 0019). Grids 512 and 256
+// keep the scene small on SwiftShader in CI (ADR 0010).
+test('the Maze keeps its walls and food when the grid changes, and gets them back unchanged', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openSmallScene(page);
+  // Paused, a frame only draws, and the startup check, which may lower the grid, waits.
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await preset(page).selectOption('maze');
+  const grid = (width: number) =>
+    page.waitForFunction(
+      (w) =>
+        globalThis.physarum?.sim.width === w &&
+        globalThis.physarum.settings.boundary === 'box' &&
+        !globalThis.physarum.busy,
+      width,
+      { timeout: 60_000 },
+    );
+  await grid(512);
+  await expect.poll(async () => (await environment(page))[0], { timeout: 60_000 }).toBeGreaterThan(100);
+  const fine = await environment(page);
+  const cellsOf = () =>
+    page.evaluate(() => (globalThis.physarum?.sim.width ?? 0) * (globalThis.physarum?.sim.height ?? 0));
+  const fineCells = await cellsOf();
+  const select = page.getByLabel('Grid (cells on the long side)');
+  await select.selectOption('256');
+  await grid(256);
+  const coarse = await environment(page);
+  const coarseCells = await cellsOf();
+  // The same share of the box, painted again on the coarser grid.
+  for (const channel of [0, 1]) {
+    const [a, b] = [(fine[channel] ?? 0) / fineCells, (coarse[channel] ?? 0) / coarseCells];
+    expect(Math.abs(b - a) / a, channel ? 'food' : 'walls').toBeLessThan(0.25);
+  }
+  await select.selectOption('512');
+  await grid(512);
+  expect(await environment(page)).toEqual(fine);
+  expect(errors).toEqual([]);
+});
+
+test('the panel shows the density a scene runs, and a typed density is not rounded', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('steiner');
-  await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.012);
+  await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.02);
   const density = page.getByRole('spinbutton', { name: 'Agents per cell value' });
-  await expect(density).toHaveValue('0.012');
-  // A typed value keeps its digits too.
+  await expect(density).toHaveValue('0.02');
+  // The slider's step of 0.01 would make 0.01 of it: a log range keeps three significant digits.
   await density.fill('0.013');
   await density.press('Enter');
   await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.013);
@@ -182,11 +231,10 @@ test('More in Learn opens the topic for the source of the scene', async ({ page 
   }
 });
 
-test('a preset chosen while the engine starts is the one that runs', async ({ page }) => {
-  const errors = watchErrors(page);
-  // A slow GPU start: the panel already works, the engine does not exist yet. The small memory budget keeps the
-  // start scene small on SwiftShader in CI.
-  await page.addInitScript(() => {
+/** A slow GPU start: the panel already works, the engine does not exist yet. */
+const slowStart = (page: Page) =>
+  page.addInitScript(() => {
+    // The small memory budget keeps the start scene small on SwiftShader in CI.
     Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
     const gpu = navigator.gpu as GPU | undefined;
     if (!gpu) return;
@@ -194,6 +242,10 @@ test('a preset chosen while the engine starts is the one that runs', async ({ pa
     gpu.requestAdapter = (options) =>
       new Promise((resolve) => setTimeout(() => void request(options).then(resolve), 3000));
   });
+
+test('a preset chosen while the engine starts is the one that runs', async ({ page }) => {
+  const errors = watchErrors(page);
+  await slowStart(page);
   // A shared link first: from its address, '/' is a new page load, not a jump within the page.
   for (const url of [await smallScene(), '/']) {
     await page.goto(url);
@@ -205,6 +257,87 @@ test('a preset chosen while the engine starts is the one that runs', async ({ pa
     expect((await environment(page))[0], `${url}: wall cells`).toBeGreaterThan(100);
     await expect(page.getByRole('button', { name: /^Scene: Maze/ })).toBeVisible();
   }
+  expect(errors).toEqual([]);
+});
+
+/** The centres of the food sources: groups of food cells that touch. */
+const foodSources = (page: Page) =>
+  page.evaluate(async () => {
+    const sim = globalThis.physarum?.sim;
+    if (!sim) return [];
+    const [env, w, h] = [await sim.readEnv(), sim.width, sim.height];
+    const seen = new Uint8Array(w * h);
+    const centres: [number, number][] = [];
+    for (let c = 0; c < w * h; c++) {
+      if (seen[c] || !env[c * 4 + 1]) continue;
+      let [n, sx, sy] = [0, 0, 0];
+      const stack = [c];
+      seen[c] = 1;
+      for (let k = stack.pop(); k !== undefined; k = stack.pop()) {
+        const [x, y] = [k % w, Math.floor(k / w)];
+        [n, sx, sy] = [n + 1, sx + x + 0.5, sy + y + 0.5];
+        for (const [nx, ny] of [
+          [x + 1, y],
+          [x - 1, y],
+          [x, y + 1],
+          [x, y - 1],
+        ] as const) {
+          const q = ny * w + nx;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || seen[q] || !env[q * 4 + 1]) continue;
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+      centres.push([sx / n, sy / n]);
+    }
+    return centres;
+  });
+
+// App.svelte starts the engine with what the panel holds (startScene in state.svelte.ts): a scene's shapes stay in
+// the frame of the scene's own arena, and a Clear made meanwhile counts (ADR 0019).
+test('a boundary or a Clear chosen while the engine starts reaches the scene', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 800, height: 800 });
+  await slowStart(page);
+  await page.goto(await smallScene());
+  await preset(page).selectOption('steiner');
+  await page.getByLabel('Edges').selectOption('box');
+  expect(await page.evaluate(() => globalThis.physarum === undefined)).toBe(true);
+  const ready = (boundary: string) =>
+    page.waitForFunction((b) => globalThis.physarum?.settings.boundary === b && !globalThis.physarum.busy, boundary, {
+      timeout: 60_000,
+    });
+  await ready('box');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await expect.poll(async () => (await foodSources(page)).length, { timeout: 30_000 }).toBe(4);
+  // Four foods in a square: four equal sides, and diagonals √2 times as long.
+  const c = await foodSources(page);
+  const d = c.flatMap((p, i) => c.slice(i + 1).map((q) => Math.hypot(p[0] - q[0], p[1] - q[1]))).sort((x, y) => x - y);
+  const [sides, diagonals] = [d.slice(0, 4), d.slice(4)];
+  expect(Math.max(...sides) - Math.min(...sides)).toBeLessThan(0.5);
+  for (const diagonal of diagonals) expect(Math.abs(diagonal / (d[0] ?? NaN) - Math.SQRT2)).toBeLessThan(0.01);
+  // The same bytes as Steiner tree loaded in its dish and then switched to the box.
+  const started = await environment(page);
+  await card(page).getByRole('button', { name: 'Reload scene' }).click();
+  await ready('dish');
+  await page.getByLabel('Edges').selectOption('box');
+  await ready('box');
+  await expect.poll(() => environment(page), { timeout: 30_000 }).toEqual(started);
+
+  // The Maze, cleared before the engine exists: it starts without walls and food, and the card offers them back.
+  // From the shared link's address, '/' is a new page load, not a jump within the page.
+  await page.goto('/');
+  await preset(page).selectOption('maze');
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await page.getByRole('button', { name: 'Clear food, light and walls' }).click();
+  expect(await page.evaluate(() => globalThis.physarum === undefined)).toBe(true);
+  await ready('box');
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 0, undefined, { timeout: 60_000 });
+  expect((await environment(page)).slice(0, 2)).toEqual([0, 0]);
+  await expect(card(page).getByText('changed', { exact: true })).toBeVisible();
+  await card(page).getByRole('button', { name: 'Reload scene' }).click();
+  await expect.poll(async () => (await environment(page))[0], { timeout: 60_000 }).toBeGreaterThan(100);
+  expect((await environment(page))[1]).toBeGreaterThan(10);
   expect(errors).toEqual([]);
 });
 

@@ -26,6 +26,51 @@ fn index(gid: vec3u, groups: vec3u) -> u32 { return gid.x + gid.y * groups.x * 2
 
 fn habitable(c: i32) -> bool { return c >= 0 && !isWall(env[c]); }
 
+fn wallAt(c: vec2i) -> bool {
+  let i = cellAt(c);
+  return i >= 0 && isWall(env[i]);
+}
+
+// Where a segment passes closer than this to a grid corner (in cells), it touches both cells beside the corner.
+const CORNER = 1e-3;
+
+// False if a move from p to q passes through a wall: a supercover walk over every cell the segment enters
+// between its start cell and its end cell. The caller checks the end cell. A step longer than a wall is thick
+// would otherwise jump it. Skipped while the environment holds no walls.
+fn clearPath(p: vec2f, q: vec2f) -> bool {
+  if (P.extra.y == 0u) { return true; }
+  var c = vec2i(floor(p));
+  let end = vec2i(floor(q));
+  // The end cell is the start cell or beside it: there is no cell in between.
+  if (abs(end.x - c.x) + abs(end.y - c.y) < 2) { return true; }
+  let d = q - p;
+  let s = vec2i(sign(d));
+  let len = length(d);
+  // t (0 at p, 1 at q) of the next vertical and horizontal grid line, and t from one line to the next.
+  let next = vec2f(c) + select(vec2f(0.0), vec2f(1.0), d > vec2f(0.0));
+  var t = select(vec2f(2.0), (next - p) / d, s != vec2i(0));
+  let dt = select(vec2f(2.0), 1.0 / abs(d), s != vec2i(0));
+  // Every iteration enters one cell toward the end: |Δx| + |Δy| of them, at most 18 for a step of 8.
+  for (var k = 0; k < 24; k++) {
+    let needX = c.x != end.x;
+    let needY = c.y != end.y;
+    if (!needX && !needY) { break; }
+    if (needX && needY && abs(t.x - t.y) * len < CORNER) {
+      if (wallAt(c + vec2i(s.x, 0)) || wallAt(c + vec2i(0, s.y))) { return false; }
+      c += s;
+      t += dt;
+    } else if (needX && (!needY || t.x < t.y)) {
+      c.x += s.x;
+      t.x += dt.x;
+    } else {
+      c.y += s.y;
+      t.y += dt.y;
+    }
+    if (any(c != end) && wallAt(c)) { return false; }
+  }
+  return true;
+}
+
 fn sense(p: vec2f, s: u32) -> f32 {
   let c = cellOf(p);
   if (!habitable(c)) { return BLOCKED; }
@@ -118,7 +163,7 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
       let h = steer(a, s, &rng);
       let p = a.pos + P.stepSize[s] * dir(h);
       let c = cellOf(p);
-      if (habitable(c)) {
+      if (habitable(c) && clearPath(a.pos, p)) {
         a.pos = wrapPos(p);
         a.heading = h;
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
@@ -138,9 +183,9 @@ fn key(id: u32) -> u32 { return pcg(id ^ pcg(P.grid.w ^ 0x9e3779b9u ^ P.cfg.x));
 
 fn destination(a: Agent) -> vec2f { return a.pos + P.stepSize[a.bits & 3u] * dir(a.heading); }
 
-// A move needs a free target: habitable and empty at the start of the step.
+// A move needs a free target: habitable, empty at the start of the step, and no wall on the way.
 fn canClaim(a: Agent, c: i32) -> bool {
-  return habitable(c) && c != cellOf(a.pos) && occ[c] == 0u;
+  return habitable(c) && c != cellOf(a.pos) && occ[c] == 0u && clearPath(a.pos, destination(a));
 }
 
 @compute @workgroup_size(256)
