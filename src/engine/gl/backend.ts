@@ -4,7 +4,7 @@ import { levels } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
-import type { Backend, View } from '../types';
+import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
 import { compile, VIEW_BINDING, type Programs } from './programs';
 import { GlSim } from './sim';
@@ -125,8 +125,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     return Promise.resolve(new ImageData(out, width, height));
   }
 
-  settle(sim: GlSim): Promise<void> {
-    return this.measure(sim, 1);
+  async settle(sim: GlSim): Promise<Levels> {
+    await this.measure(sim, 1);
+    return { gain: this.gain, black: this.black };
   }
 
   forget() {

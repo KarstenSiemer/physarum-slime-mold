@@ -53,6 +53,15 @@ export interface Sim {
   writeTrail(data: Float32Array): void;
 }
 
+/**
+ * Auto levels: `gain` maps trail units to radiance before the exposure setting (0 until a measurement found
+ * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black.
+ */
+export interface Levels {
+  gain: number;
+  black: number;
+}
+
 /** A GPU API: creates simulations and draws them. */
 export interface Backend<S extends Sim = Sim> {
   readonly kind: 'webgpu' | 'webgl2';
@@ -72,8 +81,8 @@ export interface Backend<S extends Sim = Sim> {
   /** Draws a frame; `measure` lets auto levels sample the trail. */
   draw(sim: S, settings: Settings, view: View, measure: boolean): void;
   capture(sim: S, settings: Settings, view: View, width: number, height: number): Promise<ImageData>;
-  /** Measures auto levels now instead of smoothing over frames. */
-  settle(sim: S): Promise<void>;
+  /** Measures auto levels now instead of smoothing over frames; resolves with the levels frames now use. */
+  settle(sim: S): Promise<Levels>;
   /** Drops caches tied to a replaced simulation and restarts auto levels. */
   forget(): void;
   destroy(): void;

@@ -1,10 +1,12 @@
 // Runs in Chromium with real GPU APIs (Metal locally, SwiftShader in CI). See ADR 0010.
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { hexToLinear } from '../model/color';
 import { defaultSettings, defaultStrain, STYLES, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
 import { AgentToolKind } from './pack';
 import { readBuffer } from './readback';
+import { BACKGROUND } from './render';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -15,7 +17,7 @@ import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import type { Simulation } from './sim';
-import type { Backend, Sim } from './types';
+import type { Backend, Sim, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const lane = (a: Float32Array, l = 0) => Float64Array.from({ length: a.length / 4 }, (_, i) => a[i * 4 + l] ?? 0);
@@ -42,6 +44,97 @@ describe('WGSL', () => {
     backend.destroy();
   });
 });
+
+type Vec3 = [number, number, number];
+
+/**
+ * The gel style on the CPU, as render.wgsl drew it before its height pre-pass: every height lookup runs the
+ * full trail filter, with levels() applied to the filtered trail. Returns sRGB bytes without the dither.
+ */
+function gelReference(
+  trail: Float32Array,
+  [w, h]: [number, number],
+  settings: Settings,
+  view: View,
+  { exposure, black }: { exposure: number; black: number },
+  [cw, ch]: [number, number],
+) {
+  const wrap = settings.boundary === 'wrap';
+  const colors = settings.strains.map((st) => hexToLinear(st.color));
+  const bg = hexToLinear(BACKGROUND.gel);
+  const trailAt = (x: number, y: number, s: number) => {
+    if (wrap) [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
+    else if (x < 0 || y < 0 || x >= w || y >= h) return 0;
+    return trail[(y * w + x) * 4 + s] ?? 0;
+  };
+  const bilinear = (px: number, py: number) => {
+    const [qx, qy] = [px - 0.5, py - 0.5];
+    const [x0, y0] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - x0, qy - y0];
+    return [0, 1, 2, 3].map((s) => {
+      const a = trailAt(x0, y0, s) * (1 - fx) + trailAt(x0 + 1, y0, s) * fx;
+      const b = trailAt(x0, y0 + 1, s) * (1 - fx) + trailAt(x0 + 1, y0 + 1, s) * fx;
+      return a * (1 - fy) + b * fy;
+    });
+  };
+  const filtered = (px: number, py: number) => {
+    if (view.scale <= 1) return bilinear(px, py);
+    const o = 0.25 * view.scale;
+    const taps = [
+      bilinear(px - o, py - o),
+      bilinear(px + o, py - o),
+      bilinear(px - o, py + o),
+      bilinear(px + o, py + o),
+    ];
+    return [0, 1, 2, 3].map((s) => 0.25 * taps.reduce((sum, t) => sum + (t[s] ?? 0), 0));
+  };
+  const levels = (v: number[]) => {
+    const t = v.reduce((a, b) => a + b, 0);
+    return v.map((x) => (x * Math.max(t - black, 0)) / Math.max(t, 1e-20));
+  };
+  const height = (px: number, py: number) =>
+    1 - Math.exp(-levels(filtered(px, py)).reduce((a, b) => a + b, 0) * exposure);
+  const norm = (v: Vec3): Vec3 => {
+    const l = Math.hypot(...v);
+    return [v[0] / l, v[1] / l, v[2] / l];
+  };
+  const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const light = norm([-0.45, -0.6, 0.65]);
+  const half = norm([light[0], light[1], light[2] + 1]);
+  const srgb = (c: number) => {
+    const x = Math.min(1, Math.max(0, c));
+    return x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
+  };
+  const out = new Uint8ClampedArray(cw * ch * 4);
+  for (let y = 0; y < ch; y++)
+    for (let x = 0; x < cw; x++) {
+      const [px, py] = [
+        (x + 0.5 - cw / 2) * view.scale + view.center[0],
+        (y + 0.5 - ch / 2) * view.scale + view.center[1],
+      ];
+      let c: number[];
+      if (!wrap && (px < 0 || py < 0 || px >= w || py >= h)) c = bg.map((b) => b * 0.55);
+      else {
+        const v = levels(filtered(px, py));
+        const d = Math.max(view.scale, 0.75);
+        const hh = height(px, py);
+        const gx = height(px + d, py) - height(px - d, py);
+        const gy = height(px, py + d) - height(px, py - d);
+        const n = norm([-gx, -gy, 0.35 * d]);
+        const diffuse = Math.max(dot(n, light), 0);
+        const spec = Math.max(dot(n, half), 0) ** 48;
+        const total = v.reduce((a, b) => a + b, 0);
+        const tint = [0, 1, 2].map((k) => colors.reduce((sum, col, s) => sum + (v[s] ?? 0) * (col[k] ?? 0), 0));
+        const albedo = total > 1e-6 ? tint.map((t) => t / total) : (colors[0] ?? bg);
+        const t = Math.min(1, Math.max(0, (hh - 0.02) / 0.33));
+        const mix = t * t * (3 - 2 * t);
+        c = albedo.map((a, k) => (bg[k] ?? 0) * (1 - mix) + (a * (0.25 + 0.9 * diffuse) + 0.6 * spec * hh) * mix);
+      }
+      for (let k = 0; k < 3; k++) out[(y * cw + x) * 4 + k] = Math.round(srgb(c[k] ?? 0) * 255);
+      out[(y * cw + x) * 4 + 3] = 255;
+    }
+  return out;
+}
 
 const BACKENDS = {
   webgpu: (c: HTMLCanvasElement): Promise<Backend> => WebGpuBackend.create(c),
@@ -324,6 +417,52 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const tolerance = scale < 1 ? 1.5 : 0.75;
       if (boundary === 'wrap' || (cx > 8 && cx < w - 9)) expect(Math.abs(c.x - SIZE / 2)).toBeLessThan(tolerance);
       if (boundary === 'wrap' || (cy > 8 && cy < h - 9)) expect(Math.abs(c.y - SIZE / 2)).toBeLessThan(tolerance);
+    });
+
+    // The colours, against the CPU reference above. Every cell holds trail below the black level, which
+    // must stay background, and two blobs of two strains rise above it. Fit (one lookup per height) and
+    // zoomed out (four taps), across the wrap seam and the edge of a closed box.
+    it.each([
+      ['wrap', 16, 12, 1 / 4],
+      ['wrap', 0, 0, 1 / 8],
+      ['wrap', 32, 24, 1.5],
+      ['box', 2, 20, 1 / 4],
+      ['box', 32, 24, 1.5],
+    ] as const)('matches the reference colours (%s, centre %i, %i, scale %f)', async (boundary, cx, cy, scale) => {
+      const [w, h] = [64, 48];
+      const strains = [defaultStrain(0), defaultStrain(1)];
+      const settings: Settings = {
+        ...defaultSettings(),
+        style: 'gel',
+        boundary,
+        layout: 'empty',
+        strains,
+        exposure: 1,
+      };
+      const sim = await make(settings, w, h, 1);
+      const trail = new Float32Array(w * h * 4);
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const blob = (bx: number, by: number, r: number) => Math.exp(-((x - bx) ** 2 + (y - by) ** 2) / (2 * r * r));
+          trail[(y * w + x) * 4] = 1 + 30 * blob(14, 14, 3) + 12 * blob(3, 22, 2);
+          trail[(y * w + x) * 4 + 1] = 20 * blob(40, 28, 4);
+        }
+      sim.writeTrail(trail);
+      const levels = await backend.settle(sim);
+      expect(levels.black).toBeGreaterThan(1); // above the trail of the empty cells
+      const view = { center: [cx, cy] as [number, number], scale };
+      const img = await backend.capture(sim, settings, view, SIZE, SIZE);
+      const exposure = levels.gain * 2 ** settings.exposure;
+      const ref = gelReference(trail, [w, h], settings, view, { exposure, black: levels.black }, [SIZE, SIZE]);
+      // The dither moves a channel by at most 1, hardware filtering of the height field by at most 2.
+      let [max, sum] = [0, 0];
+      for (let i = 0; i < ref.length; i++) {
+        if (i % 4 === 3) continue;
+        const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
+        [max, sum] = [Math.max(max, d), sum + d];
+      }
+      expect(max).toBeLessThanOrEqual(3);
+      expect(sum / ((ref.length / 4) * 3)).toBeLessThan(0.75);
     });
   });
 

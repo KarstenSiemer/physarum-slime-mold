@@ -4,7 +4,7 @@ import { FrameBudget } from './budget';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { fitResolution, gridSize, memoryBudget } from './sizing';
-import type { Backend, Sim, Stroke, View } from './types';
+import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 // Changes that need a new population.
@@ -254,7 +254,7 @@ export class Engine {
   }
 
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */
-  async settle(): Promise<void> {
+  async settle(): Promise<Levels> {
     await this.rebuilding;
     return this.backend.settle(this.sim);
   }

@@ -6,7 +6,7 @@ import { initGpu, OutOfMemoryError, type Gpu } from './gpu';
 import { Renderer, type Frame } from './render';
 import { Simulation } from './sim';
 import { BYTES_PER_CELL, equilibrium } from './sizing';
-import type { Backend, View } from './types';
+import type { Backend, Levels, View } from './types';
 
 // The agent id has 24 bits (ADR 0005, shaders/common.wgsl).
 const MAX_AGENTS = 2 ** 24;
@@ -89,8 +89,9 @@ export class WebGpuBackend implements Backend<Simulation> {
     return this.renderer.capture(this.frame(sim, settings, view, false), width, height);
   }
 
-  settle(sim: Simulation) {
-    return this.auto.measure(sim.current.trail);
+  async settle(sim: Simulation): Promise<Levels> {
+    await this.auto.measure(sim.current.trail);
+    return { gain: this.auto.gain, black: this.auto.black };
   }
 
   forget() {
