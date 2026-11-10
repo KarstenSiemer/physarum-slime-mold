@@ -126,6 +126,21 @@ describe('FrameBudget', () => {
     expect(steady(c, 7, 30).slice(1)).toEqual([0, 1, 0, 1, 0, 1]);
   });
 
+  it('counts the steps the speed asked for, whatever the budget allowed', () => {
+    const b = new FrameBudget();
+    b.steps = 1;
+    steady(b, 61, 120); // the first frame has no interval, then 2 per frame are asked and 1 runs
+    expect(b.requested).toBeCloseTo(2 * 60, 6);
+    const c = new FrameBudget();
+    c.next(0, 120);
+    c.next(5000, 120); // a long gap counts as 100 ms: 12 steps
+    expect(c.requested).toBeCloseTo(12, 6);
+    const d = new FrameBudget();
+    d.next(0, 960);
+    d.next(2 * FRAME, 960); // at 30 Hz, speed 960 asks for 32 steps, but a frame runs at most 16
+    expect(d.requested).toBeCloseTo(16, 6);
+  });
+
   it('runs nothing while paused and does not catch up afterwards', () => {
     const b = new FrameBudget();
     expect(sum(steady(b, 30, 0))).toBe(0);

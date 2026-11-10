@@ -45,10 +45,11 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   by 1/8 (to at most 16). A slow GPU then lowers the simulation speed instead of the frame rate,
   and steps it could not run are dropped, not caught up later.
 - A startup check (`src/ui/tune.ts`) lowers the grid one step, at most twice and not below 512
-  cells, when over a window of at least 2 s the frame rate is below 40 fps or the steps per
-  second are below 3/4 of the speed. It counts only active time (tab visible, not paused, no
-  rebuild), decides at 3, 6, 10 and 15 s of it, restarts its window after a reset or rebuild, and
-  never lowers a grid the user picked.
+  cells, when over a window of at least 2 s the frame rate is below 40 fps or fewer than 3/4 of
+  the steps the speed asked for ran. The requested steps are summed per frame (speed times frame
+  interval, at most 16), so a speed change inside the window counts from when it happened. It
+  counts only active time (tab visible, not paused, no rebuild), decides at 3, 6, 10 and 15 s of
+  it, restarts its window after a reset or rebuild, and never lowers a grid the user picked.
 
 ## 3. Simulation on the GPU
 
@@ -108,7 +109,7 @@ the buffer slot.
 
 | Area                | Controls                                                                                                         |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Playback            | play/pause, single step, speed (steps per frame), reset, new seed                                                |
+| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                               |
 | Scene               | preset gallery, agent count (density readout), resolution, layout, boundary (wrap, box, dish)                    |
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |

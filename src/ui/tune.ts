@@ -7,7 +7,7 @@ export const MIN_WINDOW_MS = 2000;
 /** The check never lowers below this grid, and at most this often in a session. */
 export const MIN_GRID = 512;
 export const MAX_LOWERINGS = 2;
-/** Too slow: fewer frames per second than this, or fewer steps per second than this share of the speed. */
+/** Too slow: fewer frames per second than this, or fewer steps than this share of the steps the speed asked for. */
 export const MIN_FPS = 40;
 export const MIN_SPEED_SHARE = 0.75;
 
@@ -16,6 +16,11 @@ export interface Window {
   ms: number;
   frames: number;
   steps: number;
+  /**
+   * Steps the speed asked for (FrameBudget.requested): speed times frame interval, summed per frame, so a
+   * speed change inside the window counts from when it happened; at most 16 per frame, the frame loop's limit.
+   */
+  requested: number;
 }
 
 /**
@@ -23,11 +28,10 @@ export interface Window {
  * The frame budget (engine/budget.ts) keeps the frame rate up on a slow GPU and lowers the steps per
  * second instead, so both count.
  */
-export function lowerGrid(w: Window, speed: number, resolution: number, lowered: number): number | undefined {
+export function lowerGrid(w: Window, resolution: number, lowered: number): number | undefined {
   if (lowered >= MAX_LOWERINGS || w.ms < MIN_WINDOW_MS) return undefined;
   const fps = (1000 * w.frames) / w.ms;
-  const stepsPerSecond = (1000 * w.steps) / w.ms;
-  if (fps >= MIN_FPS && stepsPerSecond >= MIN_SPEED_SHARE * speed) return undefined;
+  if (fps >= MIN_FPS && w.steps >= MIN_SPEED_SHARE * w.requested) return undefined;
   const lower = [...RESOLUTIONS].reverse().find((r) => r < resolution);
   return lower !== undefined && lower >= MIN_GRID ? lower : undefined;
 }
@@ -40,10 +44,10 @@ export interface Tick {
   active: boolean;
   /** How often the simulation started over (Engine.restarts): a reset or rebuild starts a new window. */
   run: number;
-  /** Frames drawn and simulation steps so far. */
+  /** Frames drawn, simulation steps and steps the speed asked for (FrameBudget.requested), so far. */
   frames: number;
   steps: number;
-  speed: number;
+  requested: number;
   resolution: number;
   /** The user picked a grid in the panel: the check never lowers it. */
   picked: boolean;
@@ -57,7 +61,7 @@ export interface Tick {
 export class GridTuner {
   private activeMs = 0;
   private lastActive: number | undefined;
-  private start: { at: number; frames: number; steps: number; run: number } | undefined;
+  private start: { at: number; frames: number; steps: number; requested: number; run: number } | undefined;
   private next = 0;
   private lowered = 0;
   private done = false;
@@ -75,7 +79,7 @@ export class GridTuner {
       return undefined;
     }
     const restart = () => {
-      this.start = { at: this.activeMs, frames: t.frames, steps: t.steps, run: t.run };
+      this.start = { at: this.activeMs, frames: t.frames, steps: t.steps, requested: t.requested, run: t.run };
     };
     if (!t.active) {
       this.lastActive = undefined;
@@ -95,6 +99,7 @@ export class GridTuner {
       ms: this.activeMs - this.start.at,
       frames: t.frames - this.start.frames,
       steps: t.steps - this.start.steps,
+      requested: t.requested - this.start.requested,
     };
     if (w.ms < MIN_WINDOW_MS) {
       // Too short after a restart: wait for a full window, but not past the last check.
@@ -103,7 +108,7 @@ export class GridTuner {
     }
     while ((CHECKS_MS[this.next] ?? Infinity) <= this.activeMs) this.next++;
     restart();
-    const lower = lowerGrid(w, t.speed, t.resolution, this.lowered);
+    const lower = lowerGrid(w, t.resolution, this.lowered);
     if (lower !== undefined) this.lowered++;
     if (this.next >= CHECKS_MS.length || this.lowered >= MAX_LOWERINGS) this.done = true;
     return lower;

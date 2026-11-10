@@ -23,6 +23,11 @@ const SLACK = 1 / 16;
 export class FrameBudget {
   /** Steps per frame the GPU keeps up with. */
   steps: number;
+  /**
+   * Steps the speed asked for so far, before the budget (at most `max` per frame): what the startup check
+   * (ui/tune.ts) compares the steps run with, also while the speed changes.
+   */
+  requested = 0;
   /** Allowed steps not run yet, in [−SLACK, 1 − SLACK). */
   private wanted = 0;
   private inFlight = 0;
@@ -46,7 +51,9 @@ export class FrameBudget {
     if (this.inFlight >= 2) this.steps = Math.max(1, this.steps * 0.75);
     else if (this.inFlight === 0 && interval > 0 && now - this.doneAt > interval / 3)
       this.steps = Math.min(this.max, this.steps + 1 / 8);
-    this.wanted += Math.min((Math.min(interval, MAX_INTERVAL_MS) / 1000) * speed, this.steps);
+    const demand = Math.min((Math.min(interval, MAX_INTERVAL_MS) / 1000) * speed, this.max);
+    this.requested += demand;
+    this.wanted += Math.min(demand, this.steps);
     const steps = Math.floor(this.wanted + SLACK);
     this.wanted -= steps;
     return steps;
