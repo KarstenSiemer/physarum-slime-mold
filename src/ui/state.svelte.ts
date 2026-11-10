@@ -135,15 +135,13 @@ export function clearEnvironment() {
 
 /**
  * The first load of a new engine (App.svelte): what the state holds now, because the panel works before the engine
- * exists. A scene's shapes are in the canonical frame of its own arena, so they load under that arena, and then the
- * panel's settings apply: a boundary chosen meanwhile anchors them as a switch on screen does (Engine.apply).
+ * exists. The simulation runs under the panel's settings, and a scene's shapes keep the scene's own arena, also when
+ * a boundary was chosen meanwhile: in its canonical frame they lie where the scene puts them. One load, so a setting
+ * changed while it builds the simulation reaches the engine through App.svelte's settings effect and stays.
  */
-export async function startScene(e: Pick<Engine, 'load' | 'apply'>) {
-  const settings = $state.snapshot(app.settings);
-  const p = presetById(app.scene);
-  if (!p?.env || clearedBeforeStart) return e.load(settings, []);
-  await e.load({ ...settings, boundary: p.settings().boundary }, p.env);
-  await e.apply(settings);
+export function startScene(e: Pick<Engine, 'load'>) {
+  const env = clearedBeforeStart ? [] : (presetById(app.scene)?.env ?? []);
+  return e.load($state.snapshot(app.settings), env, app.sceneBase?.boundary);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Settings } from '../model/params';
+import type { Boundary, Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 
 // A fresh module per test: the app state and the once-per-page-load notice live in the module.
@@ -120,14 +120,15 @@ describe('adding and removing strains', () => {
 
 // App.svelte calls startScene() once the engine exists; the panel works before that.
 describe('the start of the engine', () => {
-  type Call = [string, string, number];
+  type Call = [string, string, number, (string | undefined)?];
   const recorder = () => {
     const calls: Call[] = [];
     const engine = {
-      load: (s: Settings, env: readonly EnvShape[] = []) => {
-        calls.push(['load', s.boundary, env.length]);
+      load: (s: Settings, env: readonly EnvShape[] = [], arena?: Boundary) => {
+        calls.push(['load', s.boundary, env.length, arena]);
         return Promise.resolve();
       },
+      // Not part of what startScene() may call: a second step there would undo a setting changed during the load.
       apply: (s: Settings) => {
         calls.push(['apply', s.boundary, 0]);
         return Promise.resolve();
@@ -136,16 +137,14 @@ describe('the start of the engine', () => {
     return { calls, engine };
   };
 
-  it("loads a scene's shapes under its own arena, then the boundary chosen meanwhile", async () => {
+  it("loads once: the panel's settings, and the scene's shapes in the scene's own arena", async () => {
     const { app, loadPreset, startScene } = await fresh();
     loadPreset('steiner');
     app.settings.boundary = 'box';
+    app.settings.speed = 3;
     const { calls, engine } = recorder();
     await startScene(engine);
-    expect(calls).toEqual([
-      ['load', 'dish', 4],
-      ['apply', 'box', 0],
-    ]);
+    expect(calls).toEqual([['load', 'box', 4, 'dish']]);
   });
 
   it('starts without the shapes after a Clear before the engine existed, until a preset is chosen', async () => {
@@ -154,13 +153,18 @@ describe('the start of the engine', () => {
     clearEnvironment();
     const first = recorder();
     await startScene(first.engine);
-    expect(first.calls).toEqual([['load', 'box', 0]]);
+    expect(first.calls).toEqual([['load', 'box', 0, 'box']]);
     loadPreset('steiner');
     const second = recorder();
     await startScene(second.engine);
-    expect(second.calls).toEqual([
-      ['load', 'dish', 4],
-      ['apply', 'dish', 0],
-    ]);
+    expect(second.calls).toEqual([['load', 'dish', 4, 'dish']]);
+  });
+
+  it('starts settings from the page address without shapes, under their own boundary', async () => {
+    const { app, startScene } = await fresh();
+    app.settings.boundary = 'dish'; // a shared link names no scene
+    const { calls, engine } = recorder();
+    await startScene(engine);
+    expect(calls).toEqual([['load', 'dish', 0, undefined]]);
   });
 });

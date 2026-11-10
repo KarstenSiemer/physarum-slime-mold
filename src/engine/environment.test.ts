@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { presetById, PRESETS } from '../model/presets';
-import { anchor, fromFrame, fromShape, fromStroke, MIN_RADIUS, periods, strokeOn, toFrame } from './environment';
+import { fromFrame, fromShape, fromStroke, MIN_RADIUS, periods, strokeOn, toFrame } from './environment';
 import { paintReference } from './paint-reference';
 import { gridSize } from './sizing';
 import type { Stroke } from './types';
@@ -71,16 +71,17 @@ describe('the canonical frame', () => {
 });
 
 describe('strokeOn', () => {
-  it('repaints an edit on its own grid exactly as painted, under any arena', () => {
-    const s: Stroke = { kind: 'wall', from: [10.1, 20.7], to: [300.3, 7.9], radius: 2.3 };
-    for (const arena of BOUNDARIES)
-      expect(strokeOn(fromStroke(s, [512, 320], 'box'), 512, 320, arena)).toEqual({ ...s, boundary: 'box' });
-    // An anchored edit can be thinner than MIN_RADIUS (anchor()): it is painted as it was painted before.
+  it('repaints an edit on its own grid exactly as painted, in every arena', () => {
+    for (const b of BOUNDARIES) {
+      const s: Stroke = { kind: 'wall', from: [10.1, 20.7], to: [300.3, 7.9], radius: 2.3 };
+      expect(strokeOn(fromStroke(s, [512, 320], b), 512, 320)).toEqual({ ...s, boundary: b });
+    }
+    // Never thinner than MIN_RADIUS, also on its own grid.
     const thin: Stroke = { kind: 'food', from: [30, 5], to: [20, 5], radius: 0.3 };
-    expect(strokeOn(fromStroke(thin, [512, 320], 'box'), 512, 320, 'box')?.radius).toBe(MIN_RADIUS);
+    expect(strokeOn(fromStroke(thin, [512, 320], 'box'), 512, 320)?.radius).toBe(MIN_RADIUS);
     // Beside a closed arena it paints nothing, also on its own grid.
     const beside: Stroke = { ...thin, from: [-30, 5], to: [-20, 5] };
-    expect(strokeOn(fromStroke(beside, [512, 320], 'box'), 512, 320, 'box')).toBeUndefined();
+    expect(strokeOn(fromStroke(beside, [512, 320], 'box'), 512, 320)).toBeUndefined();
   });
 
   // The view shows copies of a periodic grid around it (render.wgsl), and the brush paints on them.
@@ -98,10 +99,10 @@ describe('strokeOn', () => {
       [66.5, 304.75],
     ]);
     // So another grid finds it where it was painted, instead of skipping it beside the grid.
-    const fine = strokeOn(e, 1024, 640, 'wrap');
+    const fine = strokeOn(e, 1024, 640);
     near([...(fine?.from ?? []), ...(fine?.to ?? []), fine?.radius ?? NaN], [964, 10, 984, 10, 8]);
     // A closed arena has no copies: a stroke beside it stays where it is, and other grids skip it.
-    expect(strokeOn(fromStroke(copy, [512, 320], 'box'), 1024, 640, 'box')).toBeUndefined();
+    expect(strokeOn(fromStroke(copy, [512, 320], 'box'), 1024, 640)).toBeUndefined();
   });
 
   it('finds the whole periods that put a coordinate into [0, n), also where rounding reaches n', () => {
@@ -120,7 +121,7 @@ describe('strokeOn', () => {
 
   it('scales positions and the radius by the ratio of the short sides on a finer grid', () => {
     const e = fromStroke({ kind: 'food', from: [100, 50], to: [200, 60], radius: 3 }, [512, 320], 'wrap');
-    const s = strokeOn(e, 1024, 640, 'wrap');
+    const s = strokeOn(e, 1024, 640);
     near([...(s?.from ?? []), ...(s?.to ?? []), s?.radius ?? NaN], [200, 100, 400, 120, 6]);
     expect(s?.boundary).toBe('wrap');
   });
@@ -128,7 +129,7 @@ describe('strokeOn', () => {
   it('keeps shapes in a dish when the aspect ratio changes: one scale for both axes', () => {
     // 512 × 320 to 512 × 512: the short side grows from 320 to 512 cells, so every length grows by 1.6.
     const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], 'dish');
-    const s = strokeOn(e, 512, 512, 'dish');
+    const s = strokeOn(e, 512, 512);
     if (!s) throw new Error('outside');
     const length = Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]);
     expect(length).toBeCloseTo(1.6 * 50, 9);
@@ -136,36 +137,55 @@ describe('strokeOn', () => {
     near(s.from, [256 + 1.6 * (100 - 256), 256 + 1.6 * (100 - 160)]);
   });
 
-  it('maps an edit through the frame of the arena on screen and paints it under its own boundary', () => {
-    const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], 'box');
-    const s = strokeOn(e, 512, 512, 'dish');
-    near(s?.from ?? [], [256 + 1.6 * (100 - 256), 256 + 1.6 * (100 - 160)]);
-    expect(s?.boundary).toBe('box');
-    const shape = strokeOn(fromShape({ kind: 'food', at: [0.4, 0], r: 0.01 }, 'box'), 512, 512, 'dish');
-    near(shape?.from ?? [], [256 + 0.4 * 512, 256]);
+  // Each edit keeps the arena it was painted in: its frame and its cut at the rim always agree (ADR 0019).
+  it('maps every edit through the frame of the arena it was painted in, and paints it in that arena', () => {
+    const stroke: Stroke = { kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 };
+    // 512 × 320 to 512 × 512: the dish scales both axes by the short sides, a box only the short axis.
+    const dish = strokeOn(fromStroke(stroke, [512, 320], 'dish'), 512, 512);
+    near(dish?.from ?? [], [256 + 1.6 * (100 - 256), 256 + 1.6 * (100 - 160)]);
+    expect(dish?.boundary).toBe('dish');
+    const box = strokeOn(fromStroke(stroke, [512, 320], 'box'), 512, 512);
+    near(box?.from ?? [], [100, 160]);
+    expect(box?.boundary).toBe('box');
+    const shape = strokeOn(fromShape({ kind: 'food', at: [0.4, 0], r: 0.01 }, 'box'), 512, 512);
+    near(shape?.from ?? [], [256 + 0.4 * 320, 256]);
     expect(shape?.boundary).toBe('box');
   });
 
-  it('moves a stroke under the periodic boundary into the grid instead of skipping it, in any frame', () => {
-    // Painted on a periodic grid, then the dish's frame on a square grid puts it beside the grid: x = −121.6.
+  it('keeps a periodic edit at its place on the grid on every screen shape', () => {
+    // Near the left edge of 512 × 320: 20 cells of the width stay 20 cells of 512 on a square, never the other side.
     const e = fromStroke({ kind: 'food', from: [20, 160], to: [20, 160], radius: 6 }, [512, 320], 'wrap');
-    const s = strokeOn(e, 512, 512, 'dish');
-    near([...(s?.from ?? []), s?.radius ?? NaN], [256 + 1.6 * (20 - 256) + 512, 256, 9.6]);
+    const s = strokeOn(e, 512, 512);
+    near([...(s?.from ?? []), s?.radius ?? NaN], [20, 256, 9.6]);
     expect(s?.boundary).toBe('wrap');
+    // An edit that starts on the left edge: the frame may put it a hair left of the grid, and the shift by whole
+    // periods puts it back into the grid. The paint passes wrap it either way.
+    const edge = fromStroke({ kind: 'food', from: [0, 160], to: [9, 160], radius: 2 }, [512, 320], 'wrap');
+    for (const [w, h] of [
+      [768, 480],
+      [1024, 640],
+      [237, 512],
+      [511, 287],
+    ] as const) {
+      const t = strokeOn(edge, w, h);
+      for (const v of [t?.from[0] ?? NaN, t?.from[1] ?? NaN]) expect(v).toBeGreaterThanOrEqual(0);
+      expect(t?.from[0]).toBeLessThan(w);
+      expect(t?.from[1]).toBeLessThan(h);
+    }
   });
 
   it('keeps an edit of a box or a periodic grid at its place relative to the edges, its radius on the short side', () => {
     for (const b of ['box', 'wrap'] as const) {
       // 512 × 320 to 512 × 512: x keeps its fraction of the width, y of the height; the radius grows by 1.6.
       const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], b);
-      const s = strokeOn(e, 512, 512, b);
+      const s = strokeOn(e, 512, 512);
       near([...(s?.from ?? []), ...(s?.to ?? []), s?.radius ?? NaN], [100, 160, 140, 208, 8]);
       // A corner of the arena stays its corner, also on a grid turned upright. (A periodic grid moves a stroke
       // that starts on its far edge by one period: the same cells.)
       const corner = fromStroke({ kind: 'food', from: [0, 0], to: [512, 320], radius: 2 }, [512, 320], b);
-      const square = strokeOn(corner, 427, 427, b);
+      const square = strokeOn(corner, 427, 427);
       near([...(square?.from ?? []), ...(square?.to ?? [])], [0, 0, 427, 427]);
-      const tall = strokeOn(corner, 236, 512, b);
+      const tall = strokeOn(corner, 236, 512);
       const shift = b === 'wrap' ? 236 : 0;
       near([...(tall?.from ?? []), ...(tall?.to ?? [])], [236 - shift, 0, 0 - shift, 512]);
     }
@@ -174,61 +194,38 @@ describe('strokeOn', () => {
   it('turns an edit by 90° on a portrait grid and back on a landscape one', () => {
     const s: Stroke = { kind: 'food', from: [64, 160], to: [128, 160], radius: 4 };
     const e = fromStroke(s, [512, 320], 'box');
-    const tall = strokeOn(e, 320, 512, 'box');
+    const tall = strokeOn(e, 320, 512);
     // A horizontal stroke on the left of the wide grid is a vertical stroke at the top of the tall one.
     near([...(tall?.from ?? []), ...(tall?.to ?? []), tall?.radius ?? NaN], [160, 64, 160, 128, 4]);
     // Painted again from the tall grid's cells, it comes back to where it was.
-    const back = strokeOn(fromStroke(tall ?? s, [320, 512], 'box'), 512, 320, 'box');
+    const back = strokeOn(fromStroke(tall ?? s, [320, 512], 'box'), 512, 320);
     near([...(back?.from ?? []), ...(back?.to ?? [])], [64, 160, 128, 160]);
   });
 
   it('skips an edit that lies completely outside the new grid', () => {
     // 4 cells from the left edge of a 2:1 grid with a dish: outside a square grid, which is narrower in its frame.
     const e = fromStroke({ kind: 'food', from: [4, 64], to: [4, 64], radius: 3 }, [256, 128], 'dish');
-    expect(strokeOn(e, 128, 128, 'dish')).toBeUndefined();
-    expect(strokeOn(e, 512, 256, 'dish')).toBeDefined();
+    expect(strokeOn(e, 128, 128)).toBeUndefined();
+    expect(strokeOn(e, 512, 256)).toBeDefined();
     // Partly inside: painted, and the paint pass cuts the rest.
     const edge = fromStroke({ kind: 'food', from: [40, 64], to: [40, 64], radius: 30 }, [256, 128], 'dish');
-    expect(strokeOn(edge, 128, 128, 'dish')).toBeDefined();
+    expect(strokeOn(edge, 128, 128)).toBeDefined();
     // A box or a periodic grid stretches with the grid, so the same edit stays 1/64 of the width from the edge.
     for (const b of ['box', 'wrap'] as const) {
       const e2 = fromStroke({ kind: 'food', from: [4, 64], to: [4, 64], radius: 3 }, [256, 128], b);
-      const s = strokeOn(e2, 128, 128, b);
+      const s = strokeOn(e2, 128, 128);
       near(s?.from ?? [], [2, 64]);
     }
   });
 
   it('never paints thinner than MIN_RADIUS, so a wall drawn on a fine grid stays closed on a coarse one', () => {
     const e = fromStroke({ kind: 'wall', from: [10, 10], to: [400, 10], radius: 1.5 }, [1536, 960], 'box');
-    expect(strokeOn(e, 256, 160, 'box')?.radius).toBe(MIN_RADIUS);
+    expect(strokeOn(e, 256, 160)?.radius).toBe(MIN_RADIUS);
   });
 
   it('keeps the boundary an edit was painted under', () => {
     const e = fromStroke({ kind: 'light', from: [1, 1], to: [1, 1], radius: 4, boundary: 'dish' }, [64, 64], 'wrap');
-    expect(strokeOn(e, 128, 128, 'wrap')?.boundary).toBe('dish');
-  });
-});
-
-describe('anchor', () => {
-  it('gives the same stroke on its grid under any arena as the edit under the arena it was anchored in', () => {
-    const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], 'box');
-    for (const was of BOUNDARIES) {
-      const a = anchor(e, 512, 512, was);
-      expect(a.grid).toEqual([512, 512]);
-      for (const now of BOUNDARIES) expect(strokeOn(a, 512, 512, now)).toEqual(strokeOn(e, 512, 512, was));
-    }
-    // A preset's shape, which has no grid, too.
-    const shape = fromShape({ kind: 'food', at: [0.4, -0.2], r: 0.02 }, 'dish');
-    expect(strokeOn(anchor(shape, 512, 288, 'dish'), 512, 288, 'box')).toEqual(strokeOn(shape, 512, 288, 'dish'));
-  });
-
-  it('keeps the exact radius, so a thin stroke anchored on a coarse grid comes back thin on a fine one', () => {
-    const e = fromStroke({ kind: 'food', from: [400, 300], to: [420, 300], radius: 1 }, [1024, 640], 'box');
-    const a = anchor(e, 256, 160, 'box');
-    expect(a.radius).toBe(0.25);
-    expect(strokeOn(a, 256, 160, 'dish')?.radius).toBe(MIN_RADIUS);
-    near(strokeOn(a, 1024, 640, 'dish')?.from ?? [], [400, 300]);
-    expect(strokeOn(a, 1024, 640, 'dish')?.radius).toBe(1);
+    expect(strokeOn(e, 128, 128)?.boundary).toBe('dish');
   });
 });
 
@@ -265,7 +262,7 @@ describe('preset shapes in the canonical frame', () => {
   it('land on a 16:10 grid where the fractions of the grid used before put them', () => {
     const [w, h] = [512, 320];
     for (const [id, shapes] of Object.entries(before)) {
-      const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h, boundaryOf(id)));
+      const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));
       expect(now, id).toHaveLength(shapes.length);
       shapes.forEach(([x0, y0, x1, y1, r], i) => {
         const s = now[i];
@@ -287,7 +284,7 @@ describe('preset shapes in the canonical frame', () => {
     expect(arenas).toEqual(['light', 'maze']);
     for (const id of arenas)
       for (const [name, [w, h]] of Object.entries(grids)) {
-        const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h, boundaryOf(id)));
+        const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));
         // A portrait grid turns the landscape layout clockwise: the fraction (fx, fy) lands at (1 − fy, fx).
         const at = (fx: number, fy: number) => (h > w ? [w * (1 - fy), h * fx] : [w * fx, h * fy]);
         before[id]?.forEach(([x0, y0, x1, y1, r], i) => {
@@ -303,7 +300,7 @@ describe('preset shapes in the canonical frame', () => {
 
   it('give the Steiner tree a square of food on every screen shape', () => {
     for (const [name, [w, h]] of Object.entries(grids)) {
-      const c = preset('steiner').map((e) => strokeOn(fromShape(e, 'dish'), w, h, 'dish')?.from ?? [NaN, NaN]);
+      const c = preset('steiner').map((e) => strokeOn(fromShape(e, 'dish'), w, h)?.from ?? [NaN, NaN]);
       const d = (i: number, j: number) =>
         Math.hypot((c[i]?.[0] ?? 0) - (c[j]?.[0] ?? 0), (c[i]?.[1] ?? 0) - (c[j]?.[1] ?? 0));
       // Four equal sides, and diagonals √2 as long.
@@ -322,7 +319,7 @@ describe('preset shapes in the canonical frame', () => {
     for (const p of PRESETS.filter((x) => x.settings().boundary === 'dish'))
       for (const [name, [w, h]] of Object.entries(grids))
         for (const e of p.env ?? []) {
-          const s = strokeOn(fromShape(e, 'dish'), w, h, 'dish');
+          const s = strokeOn(fromShape(e, 'dish'), w, h);
           const r = Math.hypot((s?.from[0] ?? 0) - w / 2, (s?.from[1] ?? 0) - h / 2) + (s?.radius ?? 0);
           expect(r, `${p.id} on ${name}`).toBeLessThan(Math.min(w, h) / 2 - 1);
         }
@@ -330,14 +327,14 @@ describe('preset shapes in the canonical frame', () => {
 
   it('keep the layout of Shortest path and Maze along the long side of a tall screen', () => {
     const [w, h] = grids['9:19.5'];
-    const [a, b] = preset('shortest-path').map((e) => strokeOn(fromShape(e, 'dish'), w, h, 'dish')?.from ?? [NaN, NaN]);
+    const [a, b] = preset('shortest-path').map((e) => strokeOn(fromShape(e, 'dish'), w, h)?.from ?? [NaN, NaN]);
     expect(a?.[0]).toBeCloseTo(b?.[0] ?? NaN, 9);
     expect(Math.abs((a?.[1] ?? 0) - (b?.[1] ?? 0))).toBeGreaterThan(0.5 * Math.min(w, h));
     // The maze's walls run across the long side: on a tall grid they are horizontal.
     for (const e of preset('maze')
       .filter((x) => x.kind === 'wall')
       .slice(0, 3)) {
-      const s = strokeOn(fromShape(e, 'box'), w, h, 'box');
+      const s = strokeOn(fromShape(e, 'box'), w, h);
       expect(s?.from[1], 'wall').toBeCloseTo(s?.to[1] ?? NaN, 9);
     }
   });
