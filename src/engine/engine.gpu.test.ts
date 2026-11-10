@@ -239,7 +239,9 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     engine.destroy();
   });
 
-  // Every agent on its own free cell from the first step (ADR 0008), in the scenes with walls or a dish.
+  // Every alive agent on its own free cell from the first step (ADR 0008), in the scenes with walls or a dish. An
+  // agent that finds no free cell in the claim rounds starts dead: in the full dish of Shrinking plasmodium one in
+  // a few runs out of a hundred (ADR 0019).
   it.each([
     ['maze', 320, 180],
     ['maze', 180, 390],
@@ -249,7 +251,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     ['steiner', 180, 390],
     ['shrinking', 320, 180],
     ['shrinking', 180, 390],
-  ] as const)('start %s (%i × %i canvas) with every agent alive on a free cell of its own', async (id, w, h) => {
+  ] as const)('start %s (%i × %i canvas) with every alive agent on a free cell of its own', async (id, w, h) => {
     const { engine } = await load(id, {}, [w, h]);
     const { width, height } = engine.sim;
     const env = await engine.sim.readEnv();
@@ -268,7 +270,8 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
       per.set(c, (per.get(c) ?? 0) + 1);
     }
     const shared = [...per.values()].filter((k) => k > 1).length;
-    expect({ dead, blocked }).toEqual({ dead: 0, blocked: 0 });
+    expect(blocked).toBe(0);
+    expect(dead).toBeLessThanOrEqual(Math.floor(1e-4 * engine.sim.agents));
     // A backend without the rule (WebGL2 without EXT_float_blend) runs the scene with shared cells.
     if (engine.settings.collisions) expect(shared).toBe(0);
     engine.destroy();
