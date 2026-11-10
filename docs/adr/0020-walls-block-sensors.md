@@ -185,8 +185,8 @@ Option 4, the owner's decision.
   +92 to +140 % on WebGL2 in three runs (24, 24 and 12 rounds; the sensor check was slower in every round). A frame runs
   at least one step (`src/engine/budget.ts`). So there a step of 49 to 72 ms on WebGL2 allows at most 14 to 20 frames
   per second, against 27 to 49 with the check of the moves only. On WebGPU a step of 15 to 22 ms allows at most 46 to
-  69 steps per second, against the 120 that the scene's speed asks for. Whether to keep this cost or make the walk
-  cheaper is an open owner decision (TODO.md).
+  69 steps per second, against the 120 that the scene's speed asks for. The owner keeps this cost (2026-11-10,
+  TODO.md).
 
 - Start: a scene without walls builds no pass for walls. In the CI image (SwiftShader, 10 builds paired with the base,
   each with code of its own), the five agent passes compiled in a median of 0.90 s against 0.81 s, as their source now
