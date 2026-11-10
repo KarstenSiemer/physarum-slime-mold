@@ -231,8 +231,9 @@ export class Engine {
   /**
    * A brush stroke in cells of the grid on screen (toGrid()); the next frame paints it. It is kept with that grid:
    * during a rebuild the view still shows the old grid, and the new one gets the stroke where it was drawn. Before
-   * the first simulation exists no grid is on screen, so the stroke is dropped. So is a stroke that paints no cell,
-   * beside a box or outside the dish: it changes nothing on screen, and on another grid or arena it must not either.
+   * the first simulation exists no grid is on screen, so the stroke is dropped. So is a stroke that does not clearly
+   * paint a cell (paintsCell()), such as one beside a box, outside the dish or light that rounds to 0 there: it
+   * changes nothing on screen, and on another grid or arena it must not either.
    */
   paint(stroke: Stroke) {
     if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;

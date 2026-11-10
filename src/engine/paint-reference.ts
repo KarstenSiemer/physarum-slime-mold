@@ -1,13 +1,8 @@
 // CPU mirror of shaders/paint.wgsl and gl/glsl/paint.frag, for tests only. sim.gpu.test.ts checks it against both
 // backends; the engine tests in Node paint with it (engine-env.test.ts).
 import type { Boundary } from '../model/params';
-import { cellIndex, segmentDistance } from './brush';
+import { cellIndex, lightByte, segmentDistance } from './brush';
 import { EnvKind, type Stroke } from './types';
-
-const smoothstep = (e0: number, e1: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-};
 
 /**
  * Paints one stroke into `env` (4 bytes per cell: wall, food, light, unused, as Sim.readEnv() returns them),
@@ -38,6 +33,6 @@ export function paintReference(
       if (kind === EnvKind.erase) env.fill(0, i, i + 4);
       else if (kind === EnvKind.wall) env.set([255, 0, 0, 0], i);
       else if (kind === EnvKind.food) env[i + 1] = 255;
-      else env[i + 2] = Math.max(env[i + 2] ?? 0, Math.floor(0.5 + 255 * smoothstep(r, 0.3 * r, d)));
+      else env[i + 2] = Math.max(env[i + 2] ?? 0, lightByte(d, r));
     }
 }

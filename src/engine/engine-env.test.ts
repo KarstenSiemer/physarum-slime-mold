@@ -238,6 +238,20 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 
+  it('record no light stroke whose cells all round to byte 0, so it lights no other grid', async () => {
+    const c = canvas();
+    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, [], c);
+    expect([sim().width, sim().height]).toEqual([512, 320]);
+    // Column 0 lies 9.9 to 10 cells from the centre, inside the radius, where the soft edge rounds to byte 0.
+    engine.paint({ kind: 'light', from: [-9.4, 160.5], to: [-9.4, 160.5], radius: 10 });
+    engine.frame(0, 0);
+    expect(empty(sim().env)).toBe(true);
+    // On a square screen the box's frame would have put 110 lit cells there (review of ADR 0019).
+    [c.width, c.height] = [1000, 1000];
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    expect(empty(sim().env)).toBe(true);
+  });
+
   it('get back a thin stroke exactly after an arena switch on a coarse grid', async () => {
     const { engine, sim } = await engineWith(three.settings(), []);
     await engine.apply({ ...engine.settings, resolution: 1024 });
