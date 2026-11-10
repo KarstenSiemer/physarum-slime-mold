@@ -35,13 +35,13 @@ describe('Params layout', () => {
     expect([...f.slice(12 * 4, 12 * 4 + 4)]).toEqual([-1, 1, 0, 0]);
   });
 
-  it('packs the layout and the walls flag into extra', () => {
+  it('packs the layout, the walls flag and the start claim round into extra', () => {
     const s = { ...defaultSettings(), layout: 'ring' as const };
-    const extra = (walls = false) => [
-      ...new Uint32Array(packParams(s, { width: 8, height: 8, agents: 1, step: 0, walls })).slice(19 * 4),
+    const extra = (more: { walls?: boolean; round?: number }) => [
+      ...new Uint32Array(packParams(s, { width: 8, height: 8, agents: 1, step: 0, ...more })).slice(19 * 4),
     ];
-    expect(extra()).toEqual([4, 0, 0, 0]);
-    expect(extra(true)).toEqual([4, 1, 0, 0]);
+    expect(extra({})).toEqual([4, 0, 0, 0]);
+    expect(extra({ walls: true, round: 7 })).toEqual([4, 1, 7, 0]);
   });
 });
 

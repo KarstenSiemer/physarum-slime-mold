@@ -1,5 +1,5 @@
 import type { Settings } from '../../model/params';
-import { packParams, PARAMS_BYTES, type AgentTool } from '../pack';
+import { packParams, PARAMS_BYTES, START_ROUNDS, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
 import {
@@ -128,8 +128,41 @@ export class GlSim implements Sim {
     this.p = 0;
     this.writeParams();
     for (const t of [...this.trail, ...this.scent, this.counts]) clear(gl, t);
-    this.pass(this.prog.init, this.agentsTex[0], { env: this.env.texture }, { agentWidth: this.agentWidth });
-    if (this.settings.collisions) this.rebuildOccupancy();
+    // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
+    const env = this.env.texture;
+    const init = { env, agentsIn: env, occ: env, claims: env };
+    this.pass(this.prog.init, this.agentsTex[0], init, { agentWidth: this.agentWidth, mode: 0 });
+    if (this.settings.collisions) {
+      this.placeOnFreeCells();
+      this.rebuildOccupancy();
+    }
+  }
+
+  /**
+   * One agent per cell from the first step (ADR 0008), as in sim.ts: START_ROUNDS claim rounds after init. A round
+   * counts the cells taken so far, lets every waiting agent claim its cell (points.vert kind 5, MAX blending) and
+   * settles the claims (init.frag).
+   */
+  private placeOnFreeCells() {
+    const gl = this.gl;
+    const col = this.ensureCollision();
+    const occ = col.occ[flip(this.q)];
+    for (let round = 0; round < START_ROUNDS; round++) {
+      this.writeParams(undefined, round);
+      clear(gl, occ);
+      this.points(2, occ, gl.FUNC_ADD);
+      clear(gl, col.claims);
+      this.points(5, col.claims, gl.MAX, this.agentsTex[this.a], [0, 0, 0, 0], { occ: occ.texture });
+      const textures = {
+        env: this.env.texture,
+        agentsIn: this.agentsTex[this.a].texture,
+        occ: occ.texture,
+        claims: col.claims.texture,
+      };
+      const mode = round === START_ROUNDS - 1 ? 2 : 1;
+      this.pass(this.prog.init, this.agentsTex[flip(this.a)], textures, { agentWidth: this.agentWidth, mode });
+      this.a = flip(this.a);
+    }
   }
 
   run(steps: number, tool?: AgentTool) {
@@ -241,7 +274,7 @@ export class GlSim implements Sim {
     gl.deleteBuffer(this.ubo);
   }
 
-  private writeParams(tool?: AgentTool) {
+  private writeParams(tool?: AgentTool, round = 0) {
     const gl = this.gl;
     const rt = {
       width: this.width,
@@ -250,6 +283,7 @@ export class GlSim implements Sim {
       step: this.step,
       tool,
       walls: this.walls,
+      round,
     };
     gl.bindBufferBase(gl.UNIFORM_BUFFER, PARAMS_BINDING, this.ubo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(this.settings, rt, this.paramData)));
@@ -359,13 +393,15 @@ export class GlSim implements Sim {
     equation: number,
     agents = this.agentsTex[this.a],
     unit: [number, number, number, number] = [0, 0, 0, 0],
+    more: Record<string, WebGLTexture> = {},
   ) {
     const gl = this.gl;
     const p = this.prog.points;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
     gl.viewport(0, 0, dst.width, dst.height);
     gl.useProgram(p.program);
-    textures(gl, p.program, { agents: agents.texture });
+    // env and occ are read for kind 5 only, but bound always: an active sampler on the target is a feedback loop.
+    textures(gl, p.program, { agents: agents.texture, env: this.env.texture, occ: this.env.texture, ...more });
     gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
     gl.uniform1i(p.loc('kind'), kind);
     gl.uniform1i(p.loc('tallySide'), TALLY_SIDE);

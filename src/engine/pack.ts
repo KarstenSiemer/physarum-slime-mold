@@ -27,6 +27,13 @@ const slot = (name: (typeof PARAM_SLOTS)[number]) => {
   return (i > PARAM_SLOTS.indexOf('attraction') ? i + 3 : i) * 4;
 };
 
+/**
+ * Claim rounds that place the agents on cells of their own with one agent per cell (ROUNDS in init.wgsl and
+ * gl/glsl/init.frag). A CPU model of Shrinking plasmodium (0.64 agents per dish cell) placed every agent within
+ * 24 rounds.
+ */
+export const START_ROUNDS = 32;
+
 /** Agent-pass tools (`Params.tool.w`). */
 export const AgentToolKind = { inoculate: 1, cut: 2 } as const;
 
@@ -48,6 +55,8 @@ export interface Runtime {
   tool?: AgentTool | undefined;
   /** The environment may hold walls: moves then check every cell they cross (agents.wgsl `clearPath`). */
   walls?: boolean;
+  /** The claim round of the start placement with one agent per cell (init.wgsl). */
+  round?: number;
 }
 
 /** Exclusive end index of each strain's agents, proportional to the population shares. */
@@ -91,7 +100,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
     f.set([t.strain, t.revive, t.teleport, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
-  u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0], slot('extra'));
+  u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
   return buf;
 }
 

@@ -1,7 +1,14 @@
 // Initial agent placement, one fragment per agent texel. Mirrors ../../shaders/init.wgsl.
+// mode 0: the first draw of every agent; without one agent per cell it draws again until its cell is free.
+// mode 1 and 2: the result of a claim round (gl/sim.ts reset()): the winner of a cell takes it, the others draw
+// again (mode 1) or, after the last round, start dead (mode 2). Claims come from points.vert kind 5.
 
 uniform sampler2D env;
+uniform sampler2D agentsIn; // modes 1 and 2: the agents before this round
+uniform sampler2D occ;      // modes 1 and 2: cells taken in earlier rounds
+uniform sampler2D claims;   // modes 1 and 2: the highest start key per cell
 uniform int agentWidth;
+uniform int mode;
 
 out vec4 result;
 
@@ -12,6 +19,9 @@ const uint COLONIES = 3u;
 const uint RING = 4u;
 const uint CENTER = 5u;
 const uint EMPTY = 6u;
+
+// Draws after the first, as ROUNDS in init.wgsl.
+const uint ROUNDS = 32u;
 
 // Bijection on [0, 2^k): odd multiply-add and xorshift are both invertible modulo 2^k.
 uint scramble(uint x0, uint k) {
@@ -39,20 +49,20 @@ vec2 disc(vec2 c, float r, inout uint rng) {
   return c + d * dir(rand(rng) * TAU);
 }
 
+// A position in cell c at offset f in [0, 1]², clamped below c + 1 (see inCell in init.wgsl).
+vec2 inCell(ivec2 c, vec2 f) {
+  vec2 lo = vec2(c);
+  vec2 hi = uintBitsToFloat(floatBitsToUint(lo + 1.0) - 1u);
+  return clamp(lo + f, lo, hi);
+}
+
 bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
-void main() {
-  ivec2 t = ivec2(gl_FragCoord.xy);
-  uint i = uint(t.y * agentWidth + t.x);
-  if (i >= P.grid.z) {
-    result = vec4(0.0);
-    return;
-  }
-  uint s = 0u;
-  while (s < 3u && i >= P.strainEnd[s]) s++;
+// Draw `round` of agent i's start (strain s): position and heading, as start() in init.wgsl.
+vec3 start(uint i, uint s, uint round) {
+  uint rng = rngSeed(i, 7u + round * 0x10000u);
   float n = float(P.cfg.y);
   float fs = float(s);
-  uint rng = rngSeed(i, 7u);
   vec2 size = vec2(W(), H());
   vec2 center = 0.5 * size;
   float m = min(size.x, size.y);
@@ -73,17 +83,63 @@ void main() {
     heading = a;
   } else if (layout_ == CENTER) {
     p = disc(center, 0.08 * m, rng);
-  } else if (P.cfg.w != 0u && P.grid.z <= P.grid.x * P.grid.y) {
+  } else if (round == 0u && P.cfg.w != 0u && P.grid.z <= P.grid.x * P.grid.y) {
     uint c = uniqueCell(i, P.grid.x * P.grid.y);
-    p = vec2(cellCoord(int(c))) + vec2(rand(rng), rand(rng));
+    p = inCell(cellCoord(int(c)), vec2(rand(rng), rand(rng)));
+  } else if (round > 0u && P.cfg.z == 2u) {
+    p = disc(center, dishRadius(), rng);
   } else {
     p = anywhere(rng);
   }
-  int c = cellOf(p);
-  for (int k = 0; k < 8 && !habitable(c); k++) {
-    p = anywhere(rng);
-    c = cellOf(p);
+  return vec3(p, heading);
+}
+
+// The position of an agent placed in cell c (an index of cellOf(p)), wrapped and inside c.
+vec2 placed(vec2 p, int c) { return inCell(cellCoord(c), p - floor(p)); }
+
+bool freeCell(int c) { return habitable(c) && texelFetch(occ, cellCoord(c), 0).r < 0.5; }
+
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  uint i = uint(t.y * agentWidth + t.x);
+  if (i >= P.grid.z) {
+    result = vec4(0.0);
+    return;
   }
-  bool alive = habitable(c) && layout_ != EMPTY;
-  result = vec4(wrapPos(p), heading, float(s | (alive ? ALIVE : 0u)));
+  if (mode == 0) {
+    uint s = 0u;
+    while (s < 3u && i >= P.strainEnd[s]) s++;
+    vec3 st = start(i, s, 0u);
+    int c = cellOf(st.xy);
+    uint bits = s;
+    if (P.extra.x == EMPTY) {
+      // stays dead
+    } else if (P.cfg.w != 0u) {
+      bits |= WANTS; // waits for the claim rounds
+    } else {
+      for (uint r = 1u; r <= ROUNDS && !habitable(c); r++) {
+        st = start(i, s, r);
+        c = cellOf(st.xy);
+      }
+      if (habitable(c)) bits |= ALIVE;
+    }
+    result = vec4((bits & ALIVE) != 0u ? placed(st.xy, c) : wrapPos(st.xy), st.z, float(bits));
+    return;
+  }
+  vec4 a = texelFetch(agentsIn, t, 0);
+  uint bits = bitsOf(a);
+  if ((bits & WANTS) == 0u) {
+    result = a;
+    return;
+  }
+  uint s = bits & 3u;
+  int c = cellOf(a.xy);
+  if (freeCell(c) && texelFetch(claims, cellCoord(c), 0).r == startKey(i)) {
+    result = vec4(placed(a.xy, c), a.z, float(s | ALIVE));
+  } else if (mode == 1) {
+    vec3 st = start(i, s, P.extra.z + 1u);
+    result = vec4(wrapPos(st.xy), st.z, float(s | WANTS));
+  } else {
+    result = vec4(a.xy, a.z, float(s)); // no free cell in any round: starts dead
+  }
 }

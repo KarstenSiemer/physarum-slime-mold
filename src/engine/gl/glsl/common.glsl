@@ -21,7 +21,7 @@ layout(std140) uniform Params {
   vec4 tool;           // x, y, radius, kind (0 none, 1 inoculate, 2 cut)
   vec4 tool2;          // strain, revive probability, teleport probability, unused
   uvec4 strainEnd;
-  uvec4 extra;         // layout, walls (1 if the environment may hold walls)
+  uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
 } P;
 
 const float PI = 3.14159265358979;
@@ -30,7 +30,7 @@ const float BLOCKED = -1e30;
 // Agent bits (stored as an exact float in texel .w): strain 0–1, alive 2; GL-only markers below.
 const uint ALIVE = 4u;
 const uint MOVED = 8u;  // deposited this step (read by the point pass)
-const uint WANTS = 16u; // claimed a cell this step (collision mode)
+const uint WANTS = 16u; // claimed a cell this step (collision mode); at init: waits for a start cell
 
 int W() { return int(P.grid.x); }
 int H() { return int(P.grid.y); }
@@ -90,6 +90,14 @@ vec2 destination(vec4 a) { return a.xy + P.stepSize[int(bitsOf(a) & 3u)] * dir(a
 // Unique per step (a bijection on [0, 2^24)), so claims never tie; +1 keeps 0 as "no claim".
 float claimKey(uint i) {
   uint k = (i * 0x9E3779B1u + pcg(P.grid.w ^ P.cfg.x)) & 0xFFFFFFu;
+  k ^= k >> 12u;
+  k = (k * 0x2C1B3C6Du) & 0xFFFFFFu;
+  return float(k + 1u);
+}
+
+// The same for a claim round of the start placement (init.frag, points.vert kind 5): P.extra.z is the round.
+float startKey(uint i) {
+  uint k = (i * 0x9E3779B1u + pcg(P.extra.z ^ 0x51ED270Bu ^ P.cfg.x)) & 0xFFFFFFu;
   k ^= k >> 12u;
   k = (k * 0x2C1B3C6Du) & 0xFFFFFFu;
   return float(k + 1u);

@@ -2,9 +2,12 @@
 // kind 0 deposit (moved agents, additive, one lane per strain), 1 claims (MAX of keys),
 // 2 occupancy (additive), 3 tally of alive agents per strain (additive, see below),
 // 4 deposit into one panel per strain (2 × 2 panels of the grid size), for exact counts without
-// float blending (gl/sim.ts deposit()).
+// float blending (gl/sim.ts deposit()), 5 start claims (MAX of keys) of agents that wait for a free cell of
+// their own (init.frag).
 
 uniform sampler2D agents;
+uniform sampler2D env; // kind 5
+uniform sampler2D occ; // kind 5: cells taken in earlier rounds
 uniform int agentWidth;
 uniform int kind;
 uniform int tallySide; // kind 3: side of the square tally target
@@ -23,7 +26,14 @@ void main() {
   float panels = 1.0;
   value = vec4(0.0);
   gl_PointSize = 1.0;
-  if (alive) {
+  if (kind == 5 && (bits & WANTS) != 0u && uint(i) < P.grid.z) {
+    int cell = cellOf(a.xy);
+    ivec2 q = cell >= 0 ? cellCoord(cell) : ivec2(0);
+    if (cell >= 0 && !isWall(texelFetch(env, q, 0)) && texelFetch(occ, q, 0).r < 0.5) {
+      c = cell;
+      value = vec4(startKey(uint(i)));
+    }
+  } else if (alive) {
     if ((kind == 0 || kind == 4) && (bits & MOVED) != 0u) {
       c = cellOf(a.xy);
       if (kind == 0) {

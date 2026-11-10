@@ -1,5 +1,5 @@
 import type { Settings } from '../model/params';
-import { packParams, PARAMS_BYTES, type AgentTool } from './pack';
+import { packParams, PARAMS_BYTES, START_ROUNDS, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -144,7 +144,39 @@ export class Simulation implements Sim {
     pass.dispatchWorkgroups(...this.groups);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    if (this.settings.collisions) this.rebuildOccupancy();
+    if (this.settings.collisions) {
+      this.placeOnFreeCells();
+      this.rebuildOccupancy();
+    }
+  }
+
+  /**
+   * One agent per cell from the first step (ADR 0008): START_ROUNDS claim rounds after init (init.wgsl). Each
+   * round needs its number in the parameters, so it is a submission of its own.
+   */
+  private placeOnFreeCells() {
+    const col = this.ensureCollision();
+    const q = flip(this.occParity);
+    const occ = col.occ[q];
+    const k = this.kernels;
+    const resources = [this.params, this.agentBuffer, null, null, this.env, null, null, occ, col.claims];
+    const claim = this.bind(`claimStart${this.agentParity}${q}`, k.claimStart, resources);
+    const settle = this.bind(`settleStart${this.agentParity}${q}`, k.settleStart, resources);
+    for (let round = 0; round < START_ROUNDS; round++) {
+      this.writeParams(undefined, round);
+      const enc = this.device.createCommandEncoder();
+      if (round === 0) enc.clearBuffer(occ);
+      enc.clearBuffer(col.claims);
+      const pass = enc.beginComputePass();
+      pass.setPipeline(k.claimStart);
+      pass.setBindGroup(0, claim);
+      pass.dispatchWorkgroups(...this.groups);
+      pass.setPipeline(k.settleStart);
+      pass.setBindGroup(0, settle);
+      pass.dispatchWorkgroups(...this.groups);
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+    }
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on the first step only. */
@@ -274,7 +306,7 @@ export class Simulation implements Sim {
     this.collision?.claims.destroy();
   }
 
-  private writeParams(tool?: AgentTool) {
+  private writeParams(tool?: AgentTool, round = 0) {
     const rt = {
       width: this.width,
       height: this.height,
@@ -282,6 +314,7 @@ export class Simulation implements Sim {
       step: this.step,
       tool,
       walls: this.walls,
+      round,
     };
     this.device.queue.writeBuffer(this.params, 0, packParams(this.settings, rt, this.paramData));
   }
@@ -453,6 +486,8 @@ class Kernels {
 
   private constructor(
     readonly init: GPUComputePipeline,
+    readonly claimStart: GPUComputePipeline,
+    readonly settleStart: GPUComputePipeline,
     readonly move: GPUComputePipeline,
     readonly claim: GPUComputePipeline,
     readonly settle: GPUComputePipeline,
@@ -517,21 +552,27 @@ class Kernels {
       ),
     );
     const sort = module(sortWgsl);
-    const [init, move, claim, settle, occupy, replace, paint, countTiles, scanTiles, scatter] = await Promise.all([
-      compute(module(initWgsl), 'init'),
-      compute(agents, 'advance'),
-      compute(agents, 'claim'),
-      compute(agents, 'settle'),
-      compute(agents, 'occupy'),
-      compute(agents, 'replace'),
-      compute(module(paintWgsl), 'paint'),
-      compute(sort, 'countTiles'),
-      compute(sort, 'scanTiles'),
-      compute(sort, 'scatter'),
-    ]);
+    const start = module(initWgsl);
+    const [init, claimStart, settleStart, move, claim, settle, occupy, replace, paint, countTiles, scanTiles, scatter] =
+      await Promise.all([
+        compute(start, 'init'),
+        compute(start, 'claimStart'),
+        compute(start, 'settleStart'),
+        compute(agents, 'advance'),
+        compute(agents, 'claim'),
+        compute(agents, 'settle'),
+        compute(agents, 'occupy'),
+        compute(agents, 'replace'),
+        compute(module(paintWgsl), 'paint'),
+        compute(sort, 'countTiles'),
+        compute(sort, 'scanTiles'),
+        compute(sort, 'scatter'),
+      ]);
     const sorting = { countTiles, scanTiles, scatter };
     return new Kernels(
       init,
+      claimStart,
+      settleStart,
       move,
       claim,
       settle,

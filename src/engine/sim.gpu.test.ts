@@ -2,7 +2,7 @@
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { hexToLinear } from '../model/color';
-import { defaultSettings, defaultStrain, STYLES, type Settings } from '../model/params';
+import { BOUNDARIES, defaultSettings, defaultStrain, LAYOUTS, STYLES, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
 import { AgentToolKind } from './pack';
 import { readBuffer } from './readback';
@@ -402,6 +402,88 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         .map((a) => (((Math.floor(a.y) % h) + h) % h) * w + (((Math.floor(a.x) % w) + w) % w));
       expect(cells).toHaveLength(n);
       expect(new Set(cells).size).toBe(n);
+    });
+
+    /** Alive agents, the cells holding more than one, and alive agents in a wall or outside the arena. */
+    async function starts(sim: Sim, boundary: Settings['boundary']) {
+      const { width: w, height: h } = sim;
+      const env = await sim.readEnv();
+      const per = new Map<number, number>();
+      let [alive, blocked] = [0, 0];
+      for (const a of await sim.readAgents()) {
+        if (!(a.bits & 4)) continue;
+        alive++;
+        const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
+        const inside =
+          x >= 0 &&
+          y >= 0 &&
+          x < w &&
+          y < h &&
+          (boundary !== 'dish' || Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1);
+        const c = y * w + x;
+        if (!inside || (env[c * 4] ?? 0) >= 128) blocked++;
+        per.set(c, (per.get(c) ?? 0) + 1);
+      }
+      return { alive, shared: [...per.values()].filter((k) => k > 1).length, blocked };
+    }
+
+    // Every layout and arena, with a wall across the middle: 20 agents fit every layout's region (the centre
+    // spot holds about 46 cells on this grid), so all of them start alive, each in a cell of its own (ADR 0008).
+    it.each(LAYOUTS.filter((l) => l !== 'empty').flatMap((l) => BOUNDARIES.map((b) => [l, b] as const)))(
+      'starts every agent of the %s layout in a %s on a free cell of its own',
+      async (layout, boundary) => {
+        const sim = await make({ layout, boundary, collisions: true, seed: 5 }, 64, 48, 20);
+        sim.paint({ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 });
+        sim.reset();
+        expect(await starts(sim, boundary)).toEqual({ alive: 20, shared: 0, blocked: 0 });
+      },
+    );
+
+    it('keeps the region of a layout: the centre spot, a colony, the ring', async () => {
+      const [w, h] = [64, 48];
+      const m = Math.min(w, h);
+      for (const [layout, near, far] of [
+        ['center', 0, 0.08 * m + 1],
+        ['colonies', 0, 0.1 * m + 1],
+        ['ring', 0.3 * m - 2, 0.3 * m + 2],
+      ] as const) {
+        const sim = await make({ layout, collisions: true, seed: 5 }, w, h, 20);
+        for (const a of await sim.readAgents()) {
+          const r = Math.hypot(a.x - w / 2, a.y - h / 2);
+          expect(r, layout).toBeGreaterThanOrEqual(near);
+          expect(r, layout).toBeLessThanOrEqual(far);
+        }
+      }
+    });
+
+    // Shrinking plasmodium: 0.64 agents per dish cell, and 0.5 % more agents than the dish has free cells for.
+    it('fills a dish to 64 % with every agent on a cell of its own, and starts the rest dead when it is full', async () => {
+      const [w, h] = [64, 48];
+      const cells = Array.from({ length: w * h }, (_, c) => [c % w, Math.floor(c / w)] as const).filter(
+        ([x, y]) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1,
+      ).length;
+      const dense = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, Math.round(0.64 * cells));
+      expect(await starts(dense, 'dish')).toEqual({ alive: Math.round(0.64 * cells), shared: 0, blocked: 0 });
+      const full = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, cells + 8);
+      const s = await starts(full, 'dish');
+      expect([s.shared, s.blocked]).toEqual([0, 0]);
+      expect(s.alive).toBeGreaterThan(0.97 * cells);
+      expect(s.alive).toBeLessThanOrEqual(cells);
+    });
+
+    // An offset just below 1 rounds into the next cell from coordinate 256 on (f32): with seed 7 the old start
+    // shared one cell here. The clamp keeps every agent of the permutation in its own cell.
+    it('keeps every agent of the mixed layout inside its own cell on a 512 × 288 grid', async () => {
+      const sim = await make({ collisions: true, seed: 7 }, 512, 288, Math.round(0.2 * 512 * 288));
+      expect(await starts(sim, 'wrap')).toEqual({ alive: Math.round(0.2 * 512 * 288), shared: 0, blocked: 0 });
+    });
+
+    it('places the same agents again for the same seed', async () => {
+      const place = async () => {
+        const sim = await make({ layout: 'center', boundary: 'dish', collisions: true, seed: 9 }, 64, 48, 30);
+        return sim.readAgents();
+      };
+      expect(await place()).toEqual(await place());
     });
   });
 
