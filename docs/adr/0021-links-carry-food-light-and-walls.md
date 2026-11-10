@@ -1,7 +1,7 @@
 # 0021: Shared links carry the scene with its food, light and walls
 
 - Status: accepted (that a link carries the drawing is owner decision D8 of 2026-11-09; the
-  behaviour of a drawing too large for a link and the caps are open owner items, TODO.md)
+  behaviour of a drawing too large for a link and the caps are the owner's decisions of 2026-11-10)
 - Date: 2026-11-10
 
 ## Context
@@ -201,7 +201,7 @@ of the grid, the density or the dish (ADR 0019). A new grid also maps the list a
 - A link names the scene's shapes by their order. If a later version changes a preset's shapes, a
   link made before paints the new shapes; with another number of shapes, the drawing is left out,
   the settings load alone and the notice says so.
-- A drawing too large for a link is dropped as a whole, and the sender sees one notice. Owner items
-  (TODO.md): whether that notice is enough, or the app should show it where the user copies a link;
-  and whether the caps (4,096 strokes, 64 passes) are right for weaker GPUs and phone CPUs.
+- A drawing too large for a link is dropped as a whole, and the sender sees one notice. The owner
+  keeps this, and keeps the caps (4,096 strokes, 64 passes), also for weaker GPUs and phone CPUs
+  (2026-11-10, TODO.md).
 - Links of this form do not open in an app from before this ADR, which reads only `#s=`.
