@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  let { title, open = false, children }: { title: string; open?: boolean; children: Snippet } = $props();
+  let { title, open = $bindable(false), children }: { title: string; open?: boolean; children: Snippet } = $props();
 </script>
 
-<details class="section" {open}>
+<details class="section" bind:open>
   <summary>{title}</summary>
   <div class="body">{@render children()}</div>
 </details>

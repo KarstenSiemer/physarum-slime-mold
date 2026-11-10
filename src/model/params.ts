@@ -145,7 +145,7 @@ export const globalSpec = {
   },
   foodStrength: {
     label: 'Food strength',
-    help: 'Weight of food projected into the scent field per step (wProj). Higher values tighten the network around food.',
+    help: 'Scent that each food cell releases per step (wProj): 255 × this value. The scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths leading in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
     min: 0,
     max: 0.5,
     step: 0.005,
@@ -160,7 +160,7 @@ export const globalSpec = {
   },
   scentDecay: {
     label: 'Scent decay',
-    help: 'Fraction of the food and light scent that disappears every step.',
+    help: 'Fraction of the food and light scent that disappears every step. Lower values spread the scent farther, but they also make it much stronger: at 0.001, food keeps pulling in more of the network.',
     min: 0.001,
     max: 0.9,
     step: 0.001,
@@ -202,6 +202,13 @@ export const globalSpec = {
 
 export type GlobalKey = keyof typeof globalSpec;
 
+/** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */
+export const collisionsHelp = {
+  label: 'One agent per cell',
+  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. Switching the rule restarts the population. Turning it on caps Agents per cell at 1.',
+  ref: 'Jones 2010, p. 133 and 135',
+} as const;
+
 export interface Settings extends Record<GlobalKey, number> {
   seed: number;
   resolution: number;
@@ -231,6 +238,24 @@ export function defaultStrain(index: number, count = MAX_STRAINS): Strain {
   };
 }
 
+/**
+ * A strain for slot `index` with the numbers of `base` (strain A of the scene) and the color of its slot.
+ * It weighs its own trail as `base` weighs its own, and every other trail as `base` weighs the trail in
+ * slot `index`. The other strains keep the weight their rows already hold for slot `index`: in Fogleman's
+ * scenes each strain flees all others with its own factor, so there the new strain and the others can flee
+ * each other with different weights. The defaults of defaultStrain() are Jones' values without the
+ * one-agent-per-cell rule, which contract into a few lines.
+ */
+export function strainLike(base: Strain, index: number): Strain {
+  const self = base.attraction[0] ?? 1;
+  const other = base.attraction[index] ?? -1;
+  return {
+    ...base,
+    color: PALETTE[index % PALETTE.length] ?? '#ffffff',
+    attraction: Array.from({ length: MAX_STRAINS }, (_, j) => (j === index ? self : other)),
+  };
+}
+
 export function defaultSettings(): Settings {
   return {
     seed: 1,
@@ -253,6 +278,25 @@ export function defaultSettings(): Settings {
 }
 
 const clamp = (v: number, s: Spec) => Math.min(s.max, Math.max(s.min, v));
+
+/** Decimals of a spec's step: 0.05 gives 2. */
+const stepDecimals = (s: Spec) => Math.min(5, Math.max(0, -Math.floor(Math.log10(s.step))));
+
+/**
+ * A value as a slider or its number field takes it. A log range spans orders of magnitude, so it keeps 3
+ * significant digits: its step of 0.01 would turn the Steiner tree's density of 0.012 into 0.01. A linear range
+ * snaps to its step.
+ */
+export function snap(v: number, s: Spec): number {
+  const r = s.log ? Number(v.toPrecision(3)) : Number((Math.round(v / s.step) * s.step).toFixed(stepDecimals(s)));
+  return clamp(r, s);
+}
+
+/** A value as the number field shows it: 3 significant digits on a log range, the step's decimals otherwise. */
+export function fieldText(v: number, s: Spec): string {
+  return s.log ? String(Number(v.toPrecision(3))) : v.toFixed(stepDecimals(s));
+}
+
 const num = (v: unknown, fallback: number, s: Spec) =>
   typeof v === 'number' && Number.isFinite(v) ? clamp(v, s) : fallback;
 const oneOf = <T extends string>(v: unknown, list: readonly T[], fallback: T): T =>

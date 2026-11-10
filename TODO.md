@@ -31,7 +31,8 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 
 - [x] `model/params.ts` schema + `sanitize()` + fuzz tests
 - [x] Device setup with raised limits; device-loss message
-- [x] Init pass with 7 layouts; unique cells in collision mode
+- [x] Init pass with 7 layouts; distinct cells in collision mode for the mixed layout
+- [ ] Collision mode: every agent on a free cell from the first step, in every layout, also when it moves out of a wall or the dish, and without rounding into the next cell (`init.wgsl`, ADR 0008)
 - [x] Agent pass (Jones rule), shrinkage, inoculate and cut tools
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)
 - [x] Collision mode (claims, ADR 0008)
@@ -54,6 +55,9 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] URL state (deflated, validated, bomb-safe) and PNG export
 - [x] Keyboard shortcuts, touch pinch/pan, axe scan clean, startup auto-tune of grid size
 - [x] Mobile layout check (375 × 812: settings closed, one toolbar row, no sideways scroll, error box fits)
+- [x] Scene card (source, summary, what to watch, strains from the live settings, why), scene name over the canvas, presets in groups, Learn → Scenes; preset unit tests check the texts against the settings (2026-11-09)
+- [x] One agent per cell: help, notice when switched off in a scene made for it, restart on every switch, kept off without `EXT_float_blend` (2026-11-09)
+- [ ] Dish scenes alike on every screen shape: food positions relative to the dish, and agents counted in the dish rather than the grid. Today Shortest path and Steiner tree end differently on a tall screen (a thick lens, a long bridge; measured on WebGPU on a 118 × 256 grid, 2026-11-10), and one food of Shrinking plasmodium lies outside the dish there; their texts say so
 
 ## M5 Quality and reach
 

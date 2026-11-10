@@ -110,20 +110,22 @@ the buffer slot.
 ### Initial layouts
 
 `mixed` (uniform), `bands` (strains side by side), `sectors`, `colonies` (one disc per strain),
-`ring`, `center`, `empty` (paint with the inoculate tool). Collision mode seeds unique cells.
+`ring`, `center`, `empty` (paint with the inoculate tool). In collision mode the mixed layout
+seeds distinct cells; the other layouts, agents moved out of walls or the dish, and rare rounding
+can start with shared cells (ADR 0008).
 
 ## 4. Interaction
 
 | Area                | Controls                                                                                                         |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Playback            | play/pause, single step, speed (steps per second), reset, new seed                                               |
-| Scene               | preset gallery, agent count (density readout), resolution, layout, boundary (wrap, box, dish)                    |
+| Scene               | presets in groups, scene card, agent count (density readout), resolution, layout, boundary (wrap, box, dish)     |
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |
 | Environment         | collisions (Jones), diffusion passes, food strength (wProj), scent decay, shrinkage                              |
 | Tools               | pan/zoom, inoculate (selected strain), food, light, wall, erase, cut; brush size                                 |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
-| Learn               | what Physarum is, the six sub-steps, parameter help, guided experiments from the paper                           |
+| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |
 | Share               | URL with full state, PNG export                                                                                  |
 
 Guided experiments (each sets a preset, an environment and a text that says what to watch):

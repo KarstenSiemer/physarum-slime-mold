@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Spec } from '../model/params';
+  import { fieldText, snap, type Spec } from '../model/params';
 
   interface Props {
     spec: Spec;
@@ -14,19 +14,16 @@
   let draft = $state<number | null>(null);
   let open = $state(false);
 
-  const decimals = $derived(Math.min(5, Math.max(0, -Math.floor(Math.log10(spec.step)))));
   const toPos = (v: number) => (spec.log ? (Math.log(v / spec.min) / Math.log(spec.max / spec.min)) * STEPS : v);
   const fromPos = (p: number) => (spec.log ? spec.min * (spec.max / spec.min) ** (p / STEPS) : p);
-  const clean = (v: number) =>
-    Math.min(spec.max, Math.max(spec.min, Number((Math.round(v / spec.step) * spec.step).toFixed(decimals))));
 
   function input(p: number) {
-    const v = clean(fromPos(p));
+    const v = snap(fromPos(p), spec);
     if (live) value = v;
     else draft = v;
   }
   function commit(v: number) {
-    if (Number.isFinite(v)) value = clean(v);
+    if (Number.isFinite(v)) value = snap(v, spec);
     draft = null;
   }
   const shown = $derived(draft ?? value);
@@ -42,7 +39,7 @@
       min={spec.min}
       max={spec.max}
       step={spec.step}
-      value={shown.toFixed(decimals)}
+      value={fieldText(shown, spec)}
       onchange={(e) => {
         commit(e.currentTarget.valueAsNumber);
       }}
@@ -69,7 +66,7 @@
       input(e.currentTarget.valueAsNumber);
     }}
     onchange={(e) => {
-      commit(clean(fromPos(e.currentTarget.valueAsNumber)));
+      commit(fromPos(e.currentTarget.valueAsNumber));
     }}
   />
   {#if open}

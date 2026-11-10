@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     BOUNDARIES,
-    defaultStrain,
+    collisionsHelp,
     globalSpec,
     LAYOUTS,
     MAX_STRAINS,
@@ -9,11 +9,12 @@
     STYLES,
     type Strain,
   } from '../model/params';
-  import { PRESETS } from '../model/presets';
+  import { GROUPS, PRESETS, presetById, ruleOffNotice, usesRule } from '../model/presets';
   import Matrix from './Matrix.svelte';
+  import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
-  import { app, getEngine, loadPreset } from './state.svelte';
+  import { addStrain, app, getEngine, loadPreset, removeStrain, showNotice } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
   const s = $derived(app.settings);
@@ -39,44 +40,38 @@
     agents: 'Agents only',
   };
 
-  let preset = $state('');
-  const chosen = $derived(PRESETS.find((p) => p.id === preset));
+  let ruleHelp = $state(false);
 
-  function addStrain() {
-    s.strains.push(defaultStrain(s.strains.length));
-  }
-
-  function removeStrain(i: number) {
-    s.strains.splice(i, 1);
-    for (const st of s.strains) st.attraction = [...st.attraction.slice(0, i), ...st.attraction.slice(i + 1), -1];
-    app.strain = Math.min(app.strain, s.strains.length - 1);
+  // The engine restarts the population on every switch, so agents stacked without the rule do not stay
+  // stacked (ADR 0008).
+  function setRule(on: boolean) {
+    s.collisions = on;
+    const scene = presetById(app.scene);
+    if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene), 12_000);
   }
 </script>
 
 <aside class="panel" aria-label="Simulation settings">
-  <Section title="Scene" open>
+  <Section title="Scene" bind:open={app.sceneSection}>
     <label class="field">
       <span>Preset</span>
       <select
-        bind:value={preset}
-        onchange={() => {
-          loadPreset(preset);
+        value={app.scene}
+        onchange={(e) => {
+          loadPreset(e.currentTarget.value);
         }}
       >
-        <option value="" disabled>Choose a preset…</option>
-        {#each PRESETS.filter((p) => !p.experiment) as p (p.id)}
-          <option value={p.id}>{p.name}{p.ref ? ` (${p.ref})` : ''}</option>
+        {#if !app.scene}<option value="" disabled>Choose a preset…</option>{/if}
+        {#each GROUPS as g (g.id)}
+          <optgroup label={g.label}>
+            {#each PRESETS.filter((p) => p.group === g.id) as p (p.id)}
+              <option value={p.id}>{p.name}</option>
+            {/each}
+          </optgroup>
         {/each}
-        <optgroup label="Experiments">
-          {#each PRESETS.filter((p) => p.experiment) as p (p.id)}
-            <option value={p.id}>{p.name}{p.ref ? ` (${p.ref})` : ''}</option>
-          {/each}
-        </optgroup>
       </select>
     </label>
-    {#if chosen}
-      <p class="blurb">{chosen.watch ?? chosen.blurb}</p>
-    {/if}
+    <SceneCard />
     <label class="field">
       <span>Start layout</span>
       <select bind:value={s.layout}>
@@ -96,10 +91,35 @@
         {#each RESOLUTIONS as r (r)}<option value={r}>{r}</option>{/each}
       </select>
     </label>
-    <label class="check" title={app.canCollide ? undefined : 'This browser lacks the GPU feature (EXT_float_blend).'}>
-      <input type="checkbox" bind:checked={s.collisions} disabled={!app.canCollide} />
-      <span>One agent per cell (Jones 2010){app.canCollide ? '' : ': not available here'}</span>
-    </label>
+    <div class="check">
+      <label>
+        <input
+          type="checkbox"
+          checked={s.collisions && app.canCollide}
+          disabled={!app.canCollide}
+          aria-describedby={ruleHelp ? 'rule-help' : undefined}
+          onchange={(e) => {
+            setRule(e.currentTarget.checked);
+          }}
+        />
+        <span>One agent per cell (Jones 2010){app.canCollide ? '' : ': not available here'}</span>
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={ruleHelp}
+        aria-controls="rule-help"
+        aria-label="About {collisionsHelp.label}"
+        onclick={() => (ruleHelp = !ruleHelp)}>?</button
+      >
+    </div>
+    {#if ruleHelp}
+      <p class="helptext" id="rule-help">
+        {collisionsHelp.help}
+        {#if !app.canCollide}Not available in this browser: it lacks the GPU feature EXT_float_blend.{/if}
+        <cite>{collisionsHelp.ref}</cite>
+      </p>
+    {/if}
   </Section>
 
   <Section title="Strains" open>
@@ -164,13 +184,35 @@
   }
   .check {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     margin: 8px 0;
   }
-  .blurb {
+  .check label {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  /* WCAG 2.2 target size (2.5.8): at least 24 × 24 px. */
+  .help {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .helptext {
     margin: -2px 0 8px;
     color: var(--muted);
     font-size: 12px;
+  }
+  cite {
+    display: block;
+    font-style: normal;
+    color: var(--accent);
+    opacity: 0.8;
   }
 </style>

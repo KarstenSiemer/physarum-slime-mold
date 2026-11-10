@@ -8,7 +8,9 @@ import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 // Changes that need a new population.
-const RESET_KEYS = ['seed', 'layout', 'boundary'] as const;
+// Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
+// thousands of steps, and a collapsed network would carry over (ADR 0008).
+const RESET_KEYS = ['seed', 'layout', 'boundary', 'collisions'] as const;
 
 /** Picks WebGPU, or WebGL2 when WebGPU is missing or `?backend=webgl2` (ADR 0003). */
 async function createBackend(canvas: HTMLCanvasElement): Promise<Backend> {
@@ -65,7 +67,9 @@ export class Engine {
     if (this.rebuilding || this.needsRebuild()) return this.rebuild();
     const shares = (s: Settings) => s.strains.map((st) => st.share).join();
     this.sim.update(this.settings);
-    if (RESET_KEYS.some((k) => next[k] !== prev[k]) || shares(next) !== shares(prev)) this.reset();
+    // Compare what runs, not what was asked: a backend without the rule keeps it off, which is no switch.
+    const now = this.settings;
+    if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
   }
 
   /** Loads a preset: its settings, a fresh population and its food, light and walls. */
