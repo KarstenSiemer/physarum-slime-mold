@@ -1,5 +1,5 @@
 import type { Boundary, Settings } from '../../model/params';
-import { scissorRects } from '../brush';
+import { paintSegments, scissorRects } from '../brush';
 import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
@@ -183,8 +183,9 @@ export class GlSim implements Sim {
   }
 
   /**
-   * Paints brush strokes in order. Every draw is scissored to the cells its brush can reach (brush.ts), and the
-   * parameters, color mask and blending change only where the boundary or the kind of brush changes.
+   * Paints brush strokes in order, as segments that the pass paints exactly (brush.ts paintSegments). Every draw is
+   * scissored to the cells its segment can reach (scissorRects), and the parameters, color mask and blending change
+   * only where the boundary or the kind of brush changes.
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
@@ -213,12 +214,14 @@ export class GlSim implements Sim {
         kind = k;
       }
       if (k === EnvKind.wall) this.walls = true;
-      gl.uniform2f(p.loc('from'), ...stroke.from);
-      gl.uniform2f(p.loc('to'), ...stroke.to);
       gl.uniform1f(p.loc('radius'), stroke.radius);
-      for (const r of scissorRects(stroke, this.width, this.height, b === 'wrap')) {
-        gl.scissor(...r);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      for (const segment of paintSegments(stroke, this.width, this.height, b === 'wrap')) {
+        gl.uniform2f(p.loc('from'), ...segment.from);
+        gl.uniform2f(p.loc('to'), ...segment.to);
+        for (const r of scissorRects(segment, this.width, this.height, b === 'wrap')) {
+          gl.scissor(...r);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
       }
     }
     gl.disable(gl.SCISSOR_TEST);

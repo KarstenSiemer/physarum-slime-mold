@@ -371,6 +371,43 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
     });
 
+    // A view zoomed out over a periodic grid shows many copies of it, and a fast drag there gives a stroke longer
+    // than the grid; a stroke mapped from a coarse grid to a fine one can be a brush larger than the grid. Both
+    // passes paint them as segments (brush.ts paintSegments), WebGPU over a box of at most one grid (paintBox).
+    it.each([
+      [
+        'far copies and strokes longer than the grid',
+        [
+          { kind: 'food', from: [-2 * 64 + 10.31, 20.73], to: [-2 * 64 + 13.17, 21.41], radius: 3.34 }, // two periods left
+          { kind: 'food', from: [40.23, 3 * 48 + 5.43], to: [40.23, 3 * 48 + 5.43], radius: 2.71 }, // three periods down
+          { kind: 'wall', from: [-70.31, 10.63], to: [140.77, -60.41], radius: 0.98 }, // over three periods
+          { kind: 'light', from: [5.31, 40.37], to: [5.31, 40.37], radius: 41.22 }, // wider than the grid
+          { kind: 'erase', from: [-20.17, 30.29], to: [100.43, 31.61], radius: 2.21 }, // longer than the grid
+          { kind: 'food', from: [33.11, 2.37], to: [-90.71, 8.13], radius: 1.28, boundary: 'box' }, // cut by the box
+        ],
+      ],
+      [
+        'brushes larger than a closed arena',
+        [
+          { kind: 'light', from: [20.17, 25.41], to: [20.17, 25.41], radius: 300.29, boundary: 'dish' },
+          { kind: 'food', from: [10.29, 10.37], to: [70.29, 10.37], radius: 130.43, boundary: 'box' },
+          { kind: 'erase', from: [-500, 5.5], to: [500, 5.5], radius: 2.21, boundary: 'box' },
+        ],
+      ],
+    ] satisfies [string, Stroke[]][])('paints %s like the CPU reference', async (_, strokes) => {
+      const [w, h] = [64, 48];
+      const ref = new Uint8Array(w * h * 4);
+      const margin = { min: Infinity };
+      for (const s of strokes) paintReference(ref, w, h, s, 'wrap', margin);
+      expect(margin.min).toBeGreaterThan(1e-3);
+      for (const split of [false, true]) {
+        const sim = await make({ layout: 'empty' }, w, h, 1);
+        if (split) for (const s of strokes) sim.paint([s]);
+        else sim.paint(strokes);
+        expect(unlike(await sim.readEnv(), ref), split ? 'one call per stroke' : 'one call').toEqual([]);
+      }
+    });
+
     // WebGPU paints 4096 strokes per submission: 5000 strokes cross that edge. Strokes that pass a cell centre
     // within float32 rounding of their edge are drawn again.
     it('paints 5000 strokes in one call like the CPU reference', async () => {

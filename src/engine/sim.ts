@@ -1,4 +1,5 @@
 import { BOUNDARIES, type Settings } from '../model/params';
+import { paintBox, paintSegments, type Rect } from './brush';
 import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
@@ -13,7 +14,7 @@ import { EnvKind, type AgentState, type Sim, type Stroke } from './types';
 const AGENT_BYTES = 16;
 const GROUP = 256;
 const TILE = 16;
-/** Brush strokes per submission (paint()): 4096 slots of 256 bytes. */
+/** Brush segments per submission (paint()): 4096 slots of 256 bytes. */
 const BRUSH_CHUNK = 4096;
 /** Steps between two spatial sorts of the agents. Measured: their locality halves about 150 steps after a sort. */
 const SORT_INTERVAL = 32;
@@ -33,7 +34,7 @@ export class Simulation implements Sim {
   private readonly params: GPUBuffer;
   /** The parameters once per boundary, for brush strokes (paint()): a stroke picks its boundary by offset. */
   private readonly paintParams: GPUBuffer;
-  /** Brush strokes, one per uniform offset step (paint()). */
+  /** Brush segments, one per uniform offset step (paint()). */
   private readonly brushes: GPUBuffer;
   private readonly offsetStep: number;
   /** Two agent buffers: the sort writes into the other one (ping-pong, no copy back). */
@@ -206,8 +207,8 @@ export class Simulation implements Sim {
   }
 
   /**
-   * Paints brush strokes in order, BRUSH_CHUNK per submission. Each dispatch picks its brush and its boundary's
-   * parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
+   * Paints brush strokes in order, BRUSH_CHUNK segments per submission. Each dispatch picks its brush and its
+   * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
@@ -228,35 +229,44 @@ export class Simulation implements Sim {
         { binding: 2, resource: { buffer: this.brushes, size: 32 } },
       ],
     });
-    for (let first = 0; first < strokes.length; first += BRUSH_CHUNK) {
-      const chunk = strokes.slice(first, first + BRUSH_CHUNK);
+    // Every stroke as segments the pass paints exactly, each with the box of cells it can reach (brush.ts).
+    const segments: Stroke[] = [];
+    const boxes: Rect[] = [];
+    const offsets: number[] = [];
+    for (const stroke of strokes) {
+      const boundary = stroke.boundary ?? this.settings.boundary;
+      const wrap = boundary === 'wrap';
+      if (stroke.kind === 'wall') this.walls = true;
+      for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
+        const box = paintBox(segment, this.width, this.height, wrap);
+        if (!box) continue;
+        segments.push(segment);
+        boxes.push(box);
+        offsets.push(BOUNDARIES.indexOf(boundary) * this.paramsStep);
+      }
+    }
+    for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
+      const chunk = segments.slice(first, first + BRUSH_CHUNK);
       const data = new ArrayBuffer(chunk.length * step);
       const f = new Float32Array(data);
       const i32 = new Int32Array(data);
       const u = new Uint32Array(data);
-      const boxes = chunk.map((stroke, j) => {
-        const { from: a, to: b, radius: r } = stroke;
-        const x0 = Math.floor(Math.min(a[0], b[0]) - r);
-        const y0 = Math.floor(Math.min(a[1], b[1]) - r);
-        const w = Math.ceil(Math.max(a[0], b[0]) + r) - x0 + 1;
-        const h = Math.ceil(Math.max(a[1], b[1]) + r) - y0 + 1;
+      chunk.forEach(({ from, to, radius, kind }, j) => {
+        const [x, y] = boxes[first + j] ?? [0, 0];
         const o = (j * step) / 4;
-        f.set([...a, ...b], o);
-        i32.set([x0, y0], o + 4);
-        f[o + 6] = r;
-        u[o + 7] = EnvKind[stroke.kind];
-        if (stroke.kind === 'wall') this.walls = true;
-        return [Math.ceil(w / TILE), Math.ceil(h / TILE)] as const;
+        [f[o], f[o + 1], f[o + 2], f[o + 3]] = [from[0], from[1], to[0], to[1]];
+        [i32[o + 4], i32[o + 5]] = [x, y];
+        f[o + 6] = radius;
+        u[o + 7] = EnvKind[kind];
       });
       this.device.queue.writeBuffer(this.brushes, 0, data);
       const enc = this.device.createCommandEncoder();
       const pass = enc.beginComputePass();
       pass.setPipeline(this.kernels.paint);
-      chunk.forEach((stroke, j) => {
-        const boundary = BOUNDARIES.indexOf(stroke.boundary ?? this.settings.boundary);
-        pass.setBindGroup(0, this.paintGroup, [boundary * this.paramsStep, j * step]);
-        const [gx, gy] = boxes[j] ?? [0, 0];
-        pass.dispatchWorkgroups(gx, gy);
+      chunk.forEach((_, j) => {
+        const [, , w, h] = boxes[first + j] ?? [0, 0, 0, 0];
+        pass.setBindGroup(0, this.paintGroup, [offsets[first + j] ?? 0, j * step]);
+        pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
       });
       pass.end();
       this.device.queue.submit([enc.finish()]);
