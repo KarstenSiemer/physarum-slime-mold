@@ -92,7 +92,10 @@ does not fit.
   link of the old form, and `decodeLink` sets `drawingLost`. `openLink` then shows the notice "This
   app cannot read the scene and drawing in this link, so only its settings load.", and the scene
   card says that the link names no scene this app can read. Unknown parts of the hash are ignored,
-  and the parts go into a `Map`, so `__proto__` is a key like any other.
+  and the parts go into a `Map`, so `__proto__` is a key like any other. Unit tests check the
+  limits at their edges: the longest link that keeps its drawing has at most 8,192 characters and
+  opens exactly; settings and a drawing that are valid but inflate to more than 64 KiB are refused;
+  so are versions 0, 2 and 255 and 0 or 5 strains.
 - **Caps** (`src/model/link.ts`, lines 20 and 26; the encoder and the decoder check the same,
   `Budget`). At most `MAX_STROKES` = 4,096 strokes, refused before the first stroke is read. At most
   `MAX_WORK` = 64 passes over 4,096 × 4,096 cells of paint work, by `workOf` (line 56), a bound for
@@ -170,8 +173,22 @@ finished, 3 runs; lists painted on 512 × 288 and mapped to the grid (`strokeOn`
 | 4,096 dabs, each a box of 1/8 of the sides | 65.5 passes | 51 to 54 ms        | 81 to 83 ms        | 29 to 33 ms        | 51 to 56 ms        |
 | 4,096 drag segments of the Maze's brush    | 16.5 passes | 17 to 20 ms        | 21 ms              | 5 to 7 ms          | 8 to 10 ms         |
 
-The second list lies just above the cap. The JavaScript part took at most 2 ms. A link paints once,
-when it opens.
+The second list lies just above the cap. `paint` itself took at most 2 ms of JavaScript. But
+`Engine.load` also maps every stroke to the grid and builds the sweep's `Placement` on the main
+thread (`flushEnv`, `src/engine/engine.ts`, line 363). In Node on the M3 Pro, with the GPU paint
+left out (the CPU test backend with `paint` stubbed), 3 runs:
+
+| List, painted on 512 × 288                                | Work        | `Engine.load`, 4096 × 2304 | `Engine.load`, 3072 × 3072 |
+| --------------------------------------------------------- | ----------- | -------------------------- | -------------------------- |
+| 4,096 walls of radius 17.5 cells, the most CPU work found | 62 passes   | 35 to 51 ms                | 60 to 69 ms                |
+| 4,096 drag segments of the Maze's brush                   | 16.5 passes | 9 to 14 ms                 | 10 to 12 ms                |
+| 2,700 of them, about what fits in 8,192 characters        | 10.9 passes | 5 to 7 ms                  | 7 to 8 ms                  |
+| 64 dabs that cover the grid                               | 64 passes   | 0.5 to 0.7 ms              | 0.5 ms                     |
+
+The Mac ran other work at the same time: a reviewer's runs of the same walls took 41 to 77 ms for
+`Engine.load`, and up to 109 ms for the `Placement` alone. The cost comes again later. Every new simulation paints the whole list again on the GPU: a change
+of the grid, the density or the dish (ADR 0019). A new grid also maps the list and builds the
+`Placement` again: 38 to 67 ms for the walls above.
 
 ## Consequences
 
@@ -186,5 +203,5 @@ when it opens.
   the settings load alone and the notice says so.
 - A drawing too large for a link is dropped as a whole, and the sender sees one notice. Owner items
   (TODO.md): whether that notice is enough, or the app should show it where the user copies a link;
-  and whether the caps (4,096 strokes, 64 passes) are right for weaker GPUs.
+  and whether the caps (4,096 strokes, 64 passes) are right for weaker GPUs and phone CPUs.
 - Links of this form do not open in an app from before this ADR, which reads only `#s=`.

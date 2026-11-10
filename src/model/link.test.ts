@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { paintBox, paintSegments } from '../engine/brush';
 import { fromShape, MIN_RADIUS, snap, STEP, strokeOn, type EnvEdit } from '../engine/environment';
 import { drawingOf, MAX_STROKES, MAX_WORK, packDrawing, sceneOnly, unpackDrawing, workOf, type Drawing } from './link';
-import { BOUNDARIES } from './params';
+import { BOUNDARIES, MAX_STRAINS } from './params';
 import { PRESETS, presetById } from './presets';
 
 /** mulberry32: a seeded random source, so a failure repeats. */
@@ -69,8 +69,9 @@ function valid(d: Drawing) {
   expect(d.scene === '' || p !== undefined).toBe(true);
   if (p) {
     expect(d.shapes).toHaveLength(p.env?.length ?? 0);
+    expect(d.origins.length >= 1 && d.origins.length <= MAX_STRAINS).toBe(true);
     for (const o of d.origins) expect(o >= -1 && o < p.settings().strains.length).toBe(true);
-  }
+  } else expect(d.origins).toEqual([]);
   expect(d.strokes.length).toBeLessThanOrEqual(MAX_STROKES);
   let work = 0;
   for (const e of d.strokes) {
@@ -138,6 +139,21 @@ describe('the drawing of a link', () => {
     expect(other.shapes.every((kept) => !kept)).toBe(true);
     expect(packDrawing(other)).toBeUndefined();
     expect(sceneOnly(d)).toEqual({ scene: 'maze', origins: [0], shapes: env.map(() => true), strokes: [] });
+  });
+
+  it('refuses another version, and a scene with no strain or more than four', () => {
+    const shapes = presetById('maze')?.env?.map(() => true) ?? [];
+    const four = packDrawing({ scene: 'maze', origins: [0, -1, 0, -1], shapes, strokes: [] }) ?? new Uint8Array();
+    expect(unpackDrawing(four)?.origins).toEqual([0, -1, 0, -1]);
+    for (const version of [0, 2, 255])
+      expect(unpackDrawing(Uint8Array.from(four, (v, i) => (i === 0 ? version : v))), `${version}`).toBeUndefined();
+    // The version, the id's length and 'maze', then at index 6 the number of strains, each one's origin plus 1, and
+    // after them the shapes and the number of strokes.
+    const strains = (n: number) =>
+      Uint8Array.from([...four.slice(0, 6), n, ...Array<number>(n).fill(1), ...four.slice(7 + 4)]);
+    expect(unpackDrawing(strains(1))?.origins).toEqual([0]);
+    expect(unpackDrawing(strains(0))).toBeUndefined();
+    expect(unpackDrawing(strains(MAX_STRAINS + 1))).toBeUndefined();
   });
 
   it('gives up on values off the steps, out of range or not finite, and never throws', () => {

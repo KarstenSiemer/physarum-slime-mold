@@ -35,7 +35,8 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    and in range, the kinds and arenas come from their fixed sets and the scene's id names a
    preset, and else undefined, and the settings then load alone with a notice. The hash's parts go
    into a `Map`. Unit tests fuzz it with random, truncated and changed bytes and hashes, huge
-   counts, NaN and Infinity, and `__proto__` and `constructor` keys.
+   counts, NaN and Infinity, and `__proto__` and `constructor` keys, and check the 8,192 characters
+   and the 64 KiB at their edges.
 4. **Resource limits for hostile links**: `Engine.fit()` runs before every allocation, the
    first one included (`Engine.create`). It lowers the grid until the estimated GPU memory fits
    a budget of one eighth of the device memory hint, at most 1 GiB (512 MiB when unknown), and
@@ -49,8 +50,10 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    losing the device. The URL decoder caps the hash at 8,192 characters and each inflated part
    at 64 KiB. A link's drawing holds at most 4,096 strokes and asks for at most 64 passes over
    4,096 × 4,096 cells of paint work, a bound for every grid (`MAX_STROKES`, `MAX_WORK` and
-   `workOf()` in `src/model/link.ts`): measured, such a link paints in at most 83 ms on an M3 Pro,
-   once (ADR 0021). If the simulation still fails, the error offers "Start fresh", which reloads
+   `workOf()` in `src/model/link.ts`). Measured on an M3 Pro, such a link paints in at most 83 ms
+   on the GPU and takes up to 77 ms of main-thread time in `Engine.load`, which builds the
+   sweep's `Placement`. Every new simulation paints it again, and a new grid builds the `Placement`
+   again (ADR 0021). If the simulation still fails, the error offers "Start fresh", which reloads
    without the shared link (a plain reload would replay it). An e2e test opens a 2048-cell link with a faked
    0.25 GB device and checks the fitted grid.
 5. **No runtime third parties**: no CDN, analytics, fonts or embeds.

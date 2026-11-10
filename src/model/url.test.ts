@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
-import type { Drawing } from './link';
+import { packDrawing, unpackDrawing, type Drawing } from './link';
 import { defaultSettings, defaultStrain } from './params';
 import { presetById } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
+
+/** Bytes or text as a part of the hash: deflate-raw and base64url, as url.ts makes it, but without its limits. */
+async function hashPart(data: Uint8Array<ArrayBuffer> | string): Promise<string> {
+  const deflated = new Blob([data]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  const bytes = new Uint8Array(await new Response(deflated).arrayBuffer());
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '');
+}
 
 describe('URL settings', () => {
   it('round-trips settings', async () => {
@@ -21,15 +31,13 @@ describe('URL settings', () => {
     expect(await decodeSettings('a'.repeat(10_000))).toBeUndefined();
   });
 
-  it('stops a decompression bomb', async () => {
-    const bomb = new Blob([' '.repeat(5_000_000)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-    const bytes = new Uint8Array(await new Response(bomb).arrayBuffer());
-    const encoded = btoa(String.fromCharCode(...bytes))
-      .replaceAll('+', '-')
-      .replaceAll('/', '_')
-      .replace(/=+$/, '');
-    expect(encoded.length).toBeLessThan(8192);
-    expect(await decodeSettings(encoded)).toBeUndefined();
+  it('stops a decompression bomb at 64 KiB, also one that would decode', async () => {
+    // JSON.parse takes the whitespace after the settings: only the limit on the inflated size refuses the second.
+    const json = JSON.stringify(defaultSettings());
+    expect(await decodeSettings(await hashPart(json + ' '.repeat(60_000)))).toEqual(defaultSettings());
+    const bomb = await hashPart(json + ' '.repeat(5_000_000));
+    expect(bomb.length).toBeLessThan(8192);
+    expect(await decodeSettings(bomb)).toBeUndefined();
   });
 
   it('sanitizes hostile values', async () => {
@@ -122,6 +130,60 @@ describe('URL links with food, light and walls', () => {
     expect(off.dropped).toBe(true);
   });
 
+  it('fill the hash up to its 8,192 characters, and the longest link opens exactly', async () => {
+    const s = maze?.settings() ?? defaultSettings();
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const r = random(seed);
+      // Dabs and short drags at random places on the Maze's grid: a few characters each, far below the caps.
+      const strokes = Array.from({ length: 4096 }, (): EnvEdit => {
+        const at: [number, number] = [Math.floor(r() * 512 * 16) / 16, Math.floor(r() * 288 * 16) / 16];
+        const to: [number, number] = r() < 0.5 ? [at[0] + 3, at[1] + 1.5] : at;
+        return { ...dab(...at), to, radius: 3 + (seed % 3), grid: [512, 288] };
+      });
+      const drawing = (n: number) => ({
+        scene: 'maze',
+        origins: [0],
+        shapes: mazeShapes,
+        strokes: strokes.slice(0, n),
+      });
+      let [fits, over] = [0, strokes.length];
+      expect((await encodeLink(s, drawing(over))).dropped).toBe(true);
+      while (over - fits > 1) {
+        const mid = (fits + over) >> 1;
+        if ((await encodeLink(s, drawing(mid))).dropped) over = mid;
+        else fits = mid;
+      }
+      const { hash } = await encodeLink(s, drawing(fits));
+      expect(hash.length, `seed ${seed}`).toBeLessThanOrEqual(8192);
+      expect(hash.length, `seed ${seed}`).toBeGreaterThan(8192 - 64);
+      expect(await decodeLink(hash)).toEqual({ settings: s, drawing: drawing(fits) });
+    }
+  });
+
+  it('refuse a drawing that inflates to more than 64 KiB, even a valid one', async () => {
+    // 4,096 strokes of 16 bytes each, far apart, on two grids: within the caps, and 4 bytes above 64 KiB.
+    const strokes = Array.from({ length: 4096 }, (_, i): EnvEdit => {
+      const at = i % 2 ? 1e6 : -1e6;
+      return {
+        ...dab(at, at),
+        to: [at + 1, at],
+        radius: i % 2 ? 0.8125 : 0.75,
+        grid: i % 2 ? [4095, 4095] : [4096, 4096],
+      };
+    });
+    const bytes = packDrawing({ scene: '', origins: [], shapes: [], strokes }) ?? new Uint8Array();
+    expect(bytes.length).toBeGreaterThan(64 * 1024);
+    expect(unpackDrawing(bytes)?.strokes).toHaveLength(4096);
+    const s = defaultSettings();
+    const hash = `s=${await encodeSettings(s)}&e=${await hashPart(bytes)}`;
+    expect(hash.length).toBeLessThan(8192);
+    expect(await decodeLink(hash)).toEqual({ settings: s, drawingLost: true });
+    // A bomb in the drawing part: the settings alone.
+    const bomb = `s=${await encodeSettings(s)}&e=${await hashPart(new Uint8Array(4 * 1024 * 1024))}`;
+    expect(bomb.length).toBeLessThan(8192);
+    expect(await decodeLink(bomb)).toEqual({ settings: s, drawingLost: true });
+  });
+
   it('give each strain no scene role when the origins do not match the strains', async () => {
     const s = { ...defaultSettings(), strains: [defaultStrain(0), defaultStrain(1)] };
     const { hash } = await encodeLink(s, { scene: 'maze', origins: [0], shapes: mazeShapes, strokes: [] });
@@ -172,14 +234,7 @@ describe('URL links with food, light and walls', () => {
   it('sanitize settings with NaN, Infinity and prototype keys, and leave Object.prototype alone', async () => {
     const json =
       '{"__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":1}},"density":1e999,"speed":"NaN"}';
-    const bytes = new Uint8Array(
-      await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer(),
-    );
-    const part = btoa(String.fromCharCode(...bytes))
-      .replaceAll('+', '-')
-      .replaceAll('/', '_')
-      .replace(/=+$/, '');
-    const link = await decodeLink(`__proto__=x&constructor=y&s=${part}`);
+    const link = await decodeLink(`__proto__=x&constructor=y&s=${await hashPart(json)}`);
     expect(link?.settings.density).toBe(defaultSettings().density);
     expect(link?.settings.speed).toBe(defaultSettings().speed);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
