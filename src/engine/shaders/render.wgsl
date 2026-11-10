@@ -19,6 +19,8 @@ struct View {
 @group(0) @binding(3) var<storage, read> counts: array<vec4u>;
 @group(0) @binding(4) var bloom: texture_2d<f32>;
 @group(0) @binding(5) var bloomSampler: sampler;
+@group(0) @binding(6) var heights: texture_2d<f32>; // gel style: written by `heightField` each frame
+@group(0) @binding(7) var heightSampler: sampler;   // bilinear, clamped
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -103,10 +105,35 @@ fn paper(v: vec4f) -> vec3f {
   return V.background.rgb * exp(-absorb * V.exposure);
 }
 
-fn height(p: vec2f) -> f32 {
-  let v = levels(trailFiltered(p));
-  return 1.0 - exp(-(v.x + v.y + v.z + v.w) * V.exposure);
+// Gel height field, one texel per cell plus a one-cell border, rendered before the main pass
+// (render.ts): the summed trail above the black level times the exposure. That is the sum of
+// levels(v) · exposure (levels() keeps the strain ratios) before the max with 0, and an affine
+// function of the trail, so filtering it equals filtering the trail first. Clamped to keep fp16
+// finite.
+@fragment
+fn heightField(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  let v = trailAt(vec2i(floor(frag.xy)) - 1);
+  let y = (v.x + v.y + v.z + v.w - V.fx.y) * V.exposure;
+  return vec4f(clamp(y, -6e4, 6e4), 0.0, 0.0, 1.0);
 }
+
+// The height field with hardware bilinear filtering at grid position q (wrapped for the periodic
+// boundary; outside a closed arena the border holds the value of an empty cell).
+fn heightAt(q: vec2f) -> f32 {
+  let s = vec2f(size());
+  let p = select(q, q - s * floor(q / s), V.boundary == 0u);
+  return textureSampleLevel(heights, heightSampler, (p + 1.0) / (s + 2.0), 0.0).r;
+}
+
+// Four taps spread over the pixel footprint when zoomed out, like trailFiltered().
+fn heightFiltered(p: vec2f) -> f32 {
+  if (V.scale <= 1.0) { return heightAt(p); }
+  let o = 0.25 * V.scale;
+  return 0.25 * (heightAt(p + vec2f(-o, -o)) + heightAt(p + vec2f(o, -o)) +
+                 heightAt(p + vec2f(-o, o)) + heightAt(p + vec2f(o, o)));
+}
+
+fn height(p: vec2f) -> f32 { return 1.0 - exp(-max(heightFiltered(p), 0.0)); }
 
 // Trail as a height field, lit like a wet gel.
 fn gel(p: vec2f, v: vec4f) -> vec3f {

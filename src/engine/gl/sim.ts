@@ -5,7 +5,10 @@ import { EnvKind, type AgentState, type Sim, type Stroke } from '../types';
 import {
   clear,
   destroyTarget,
+  fence,
   readTarget,
+  readTargetAsync,
+  stencilTarget,
   target,
   textures,
   uniformBlock,
@@ -19,6 +22,8 @@ type Pair<T> = [T, T];
 type Bit = 0 | 1;
 const flip = (b: Bit): Bit => (b === 0 ? 1 : 0);
 const AGENT_ROW = 2048;
+/** Side of the alive tally target (points.vert kind 3): 128² pixels keep every pixel sum exact. */
+const TALLY_SIDE = 128;
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -31,8 +36,10 @@ export class GlSim implements Sim {
   readonly trail: Pair<Target>;
   private readonly scent: Pair<Target>;
   private readonly counts: Target;
+  /** Without float blending: one panel per strain with a stencil, for exact counts (deposit()). */
+  private readonly panels: Target | undefined;
   private readonly env: Target;
-  private readonly tally: Target | undefined;
+  private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
   private a: Bit = 0;
@@ -62,10 +69,16 @@ export class GlSim implements Sim {
       this.agentsTex = [t(this.agentWidth, agentHeight, gl.RGBA32F), t(this.agentWidth, agentHeight, gl.RGBA32F)];
       this.trail = [t(width, height, gl.RGBA32F), t(width, height, gl.RGBA32F)];
       this.scent = [t(width, height, gl.RG32F), t(width, height, gl.RG32F)];
-      // Counts are small integers: exact in half floats too, which blend without EXT_float_blend.
-      this.counts = t(width, height, floatBlend ? gl.RGBA32F : gl.RGBA16F);
+      // Float blending sums the counts directly. Without it, deposit() counts in half floats with a
+      // stencil and writes the sums here.
+      this.counts = t(width, height, gl.RGBA32F);
+      if (!floatBlend) {
+        const p = stencilTarget(gl, 2 * width, 2 * height, gl.RG16F);
+        made.push(p);
+        this.panels = p;
+      }
       this.env = t(width, height, gl.RGBA8);
-      this.tally = floatBlend ? t(1, 1, gl.RGBA32F) : undefined;
+      this.tally = t(TALLY_SIDE, TALLY_SIDE, floatBlend ? gl.RGBA32F : gl.RGBA16F);
       // Collisions need float blending. Allocated now, so a failure is freed below; the budget counts them.
       if (floatBlend) {
         const r = () => t(width, height, gl.R32F);
@@ -151,20 +164,26 @@ export class GlSim implements Sim {
     clear(this.gl, this.env);
   }
 
-  finish(): Promise<void> {
-    return Promise.resolve();
+  /** Resolves when the GPU has finished all work issued so far (a fence, polled without blocking). */
+  async finish(): Promise<void> {
+    await fence(this.gl);
   }
 
-  alive(): Promise<number[]> {
-    if (!this.tally) return Promise.resolve([]);
+  /**
+   * Alive agents per strain. The GPU sums them into a 128² target, which is read back asynchronously
+   * and summed on the CPU, so the main thread never waits for the GPU. Exact up to 2^24 agents with
+   * 32- or 16-bit float blending (points.vert kind 3).
+   */
+  async alive(): Promise<number[]> {
     const gl = this.gl;
+    const strains = this.settings.strains.length;
     this.writeParams();
     clear(gl, this.tally);
     this.points(3, this.tally, gl.FUNC_ADD);
-    const px = new Float32Array(4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.tally.fbo);
-    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
-    return Promise.resolve(Array.from(px.slice(0, this.settings.strains.length), Math.round));
+    const px = await readTargetAsync(gl, this.tally);
+    const sums = [0, 0, 0, 0];
+    for (let i = 0; i < px.length; i += 4) for (let s = 0; s < 4; s++) sums[s] = (sums[s] ?? 0) + (px[i + s] ?? 0);
+    return sums.slice(0, strains).map(Math.round);
   }
 
   readAgents(): Promise<AgentState[]> {
@@ -191,10 +210,12 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.env) as Uint8Array);
   }
 
+  /** Agent `index` is its texel: WebGL2 never reorders agents, so the slot is the id (ADR 0005). */
   writeAgent(index: number, a: AgentState) {
+    if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
     const x = index % this.agentWidth;
     const y = Math.floor(index / this.agentWidth);
-    writeTarget(this.gl, this.agentsTex[this.a], x, y, 1, 1, new Float32Array([a.x, a.y, a.heading, a.bits]));
+    writeTarget(this.gl, this.agentsTex[this.a], x, y, 1, 1, new Float32Array([a.x, a.y, a.heading, a.bits & 7]));
   }
 
   writeTrail(data: Float32Array) {
@@ -203,8 +224,8 @@ export class GlSim implements Sim {
 
   destroy() {
     const gl = this.gl;
-    const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env];
-    if (this.tally) all.push(this.tally);
+    const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.tally];
+    if (this.panels) all.push(this.panels);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
@@ -220,7 +241,7 @@ export class GlSim implements Sim {
 
   private encodeStep() {
     const gl = this.gl;
-    const dummy = this.counts.texture; // bound to unused samplers; never a render target here
+    const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         this.prog.agents,
@@ -252,8 +273,7 @@ export class GlSim implements Sim {
       this.points(2, next, gl.FUNC_ADD);
       this.q = flip(this.q);
     }
-    clear(gl, this.counts);
-    this.points(0, this.counts, gl.FUNC_ADD);
+    this.deposit();
     for (const v of diffusePlan(this.settings.diffusion)) {
       const out = flip(this.p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.mrt[out]);
@@ -274,8 +294,56 @@ export class GlSim implements Sim {
     }
   }
 
+  /**
+   * Agents that moved into each cell this step, per strain, into `counts`. With float blending, one
+   * additive point per agent. Half floats count exactly only to 2048, and condensed networks gather
+   * thousands of agents in a cell, so without float blending each (cell, strain) gets its own pixel in
+   * a 2 × 2 panel layout, with an 8-bit stencil. One point pass: every agent increments the stencil
+   * (mod 256), and the agent that finds it at 255 adds a carry (red). Then eight full-screen passes,
+   * one per stencil bit, add 2^b to green where bit b is set, which copies the remainder into green.
+   * The merge pass writes 256 · carry + remainder: exact up to 2048 · 256 = 524 288 agents per cell
+   * and strain.
+   */
+  private deposit() {
+    const gl = this.gl;
+    const t = this.panels;
+    if (!t) {
+      clear(gl, this.counts);
+      this.points(0, this.counts, gl.FUNC_ADD);
+      return;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.viewport(0, 0, t.width, t.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clearStencil(0);
+    gl.stencilMask(0xff);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    gl.enable(gl.STENCIL_TEST);
+    gl.stencilFunc(gl.EQUAL, 255, 0xff);
+    gl.stencilOp(gl.INCR_WRAP, gl.INCR_WRAP, gl.INCR_WRAP);
+    this.points(4, t, gl.FUNC_ADD, this.agentsTex[this.a], [1, 0, 0, 0]);
+    const fill = this.prog.fill;
+    gl.useProgram(fill.program);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    this.blend(gl.FUNC_ADD);
+    for (let b = 0; b < 8; b++) {
+      gl.stencilFunc(gl.EQUAL, 0xff, 1 << b);
+      gl.uniform4f(fill.loc('value'), 0, 2 ** b, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.disable(gl.BLEND);
+    gl.disable(gl.STENCIL_TEST);
+    this.pass(this.prog.counts, this.counts, { panels: t.texture }, {});
+  }
+
   /** One point per agent into a per-cell target (see points.vert), combined by `equation` blending. */
-  private points(kind: number, dst: Target, equation: number, agents = this.agentsTex[this.a]) {
+  private points(
+    kind: number,
+    dst: Target,
+    equation: number,
+    agents = this.agentsTex[this.a],
+    unit: [number, number, number, number] = [0, 0, 0, 0],
+  ) {
     const gl = this.gl;
     const p = this.prog.points;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
@@ -284,6 +352,8 @@ export class GlSim implements Sim {
     textures(gl, p.program, { agents: agents.texture });
     gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
     gl.uniform1i(p.loc('kind'), kind);
+    gl.uniform1i(p.loc('tallySide'), TALLY_SIDE);
+    gl.uniform4f(p.loc('unit'), ...unit);
     this.blend(equation);
     gl.drawArrays(gl.POINTS, 0, this.agents);
     gl.disable(gl.BLEND);

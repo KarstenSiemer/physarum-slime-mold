@@ -1,8 +1,12 @@
 // Runs in Chromium with real GPU APIs (Metal locally, SwiftShader in CI). See ADR 0010.
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { hexToLinear } from '../model/color';
+import { defaultSettings, defaultStrain, STYLES, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
+import { AgentToolKind } from './pack';
+import { readBuffer } from './readback';
+import { BACKGROUND } from './render';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -11,7 +15,9 @@ import histogramWgsl from './shaders/histogram.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
-import type { Backend, Sim } from './types';
+import sortWgsl from './shaders/sort.wgsl?raw';
+import type { Simulation } from './sim';
+import type { Backend, Sim, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const lane = (a: Float32Array, l = 0) => Float64Array.from({ length: a.length / 4 }, (_, i) => a[i * 4 + l] ?? 0);
@@ -26,6 +32,7 @@ describe('WGSL', () => {
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
       paint: common + paintWgsl,
+      sort: common + sortWgsl,
       render: renderWgsl,
       bloom: bloomWgsl,
       histogram: histogramWgsl,
@@ -38,20 +45,115 @@ describe('WGSL', () => {
   });
 });
 
+type Vec3 = [number, number, number];
+
+/**
+ * The gel style on the CPU, as render.wgsl drew it before its height pre-pass: every height lookup runs the
+ * full trail filter, with levels() applied to the filtered trail. Returns sRGB bytes without the dither.
+ */
+function gelReference(
+  trail: Float32Array,
+  [w, h]: [number, number],
+  settings: Settings,
+  view: View,
+  { exposure, black }: { exposure: number; black: number },
+  [cw, ch]: [number, number],
+) {
+  const wrap = settings.boundary === 'wrap';
+  const colors = settings.strains.map((st) => hexToLinear(st.color));
+  const bg = hexToLinear(BACKGROUND.gel);
+  const trailAt = (x: number, y: number, s: number) => {
+    if (wrap) [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
+    else if (x < 0 || y < 0 || x >= w || y >= h) return 0;
+    return trail[(y * w + x) * 4 + s] ?? 0;
+  };
+  const bilinear = (px: number, py: number) => {
+    const [qx, qy] = [px - 0.5, py - 0.5];
+    const [x0, y0] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - x0, qy - y0];
+    return [0, 1, 2, 3].map((s) => {
+      const a = trailAt(x0, y0, s) * (1 - fx) + trailAt(x0 + 1, y0, s) * fx;
+      const b = trailAt(x0, y0 + 1, s) * (1 - fx) + trailAt(x0 + 1, y0 + 1, s) * fx;
+      return a * (1 - fy) + b * fy;
+    });
+  };
+  const filtered = (px: number, py: number) => {
+    if (view.scale <= 1) return bilinear(px, py);
+    const o = 0.25 * view.scale;
+    const taps = [
+      bilinear(px - o, py - o),
+      bilinear(px + o, py - o),
+      bilinear(px - o, py + o),
+      bilinear(px + o, py + o),
+    ];
+    return [0, 1, 2, 3].map((s) => 0.25 * taps.reduce((sum, t) => sum + (t[s] ?? 0), 0));
+  };
+  const levels = (v: number[]) => {
+    const t = v.reduce((a, b) => a + b, 0);
+    return v.map((x) => (x * Math.max(t - black, 0)) / Math.max(t, 1e-20));
+  };
+  const height = (px: number, py: number) =>
+    1 - Math.exp(-levels(filtered(px, py)).reduce((a, b) => a + b, 0) * exposure);
+  const norm = (v: Vec3): Vec3 => {
+    const l = Math.hypot(...v);
+    return [v[0] / l, v[1] / l, v[2] / l];
+  };
+  const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const light = norm([-0.45, -0.6, 0.65]);
+  const half = norm([light[0], light[1], light[2] + 1]);
+  const srgb = (c: number) => {
+    const x = Math.min(1, Math.max(0, c));
+    return x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
+  };
+  const out = new Uint8ClampedArray(cw * ch * 4);
+  for (let y = 0; y < ch; y++)
+    for (let x = 0; x < cw; x++) {
+      const [px, py] = [
+        (x + 0.5 - cw / 2) * view.scale + view.center[0],
+        (y + 0.5 - ch / 2) * view.scale + view.center[1],
+      ];
+      let c: number[];
+      if (!wrap && (px < 0 || py < 0 || px >= w || py >= h)) c = bg.map((b) => b * 0.55);
+      else {
+        const v = levels(filtered(px, py));
+        const d = Math.max(view.scale, 0.75);
+        const hh = height(px, py);
+        const gx = height(px + d, py) - height(px - d, py);
+        const gy = height(px, py + d) - height(px, py - d);
+        const n = norm([-gx, -gy, 0.35 * d]);
+        const diffuse = Math.max(dot(n, light), 0);
+        const spec = Math.max(dot(n, half), 0) ** 48;
+        const total = v.reduce((a, b) => a + b, 0);
+        const tint = [0, 1, 2].map((k) => colors.reduce((sum, col, s) => sum + (v[s] ?? 0) * (col[k] ?? 0), 0));
+        const albedo = total > 1e-6 ? tint.map((t) => t / total) : (colors[0] ?? bg);
+        const t = Math.min(1, Math.max(0, (hh - 0.02) / 0.33));
+        const mix = t * t * (3 - 2 * t);
+        c = albedo.map((a, k) => (bg[k] ?? 0) * (1 - mix) + (a * (0.25 + 0.9 * diffuse) + 0.6 * spec * hh) * mix);
+      }
+      for (let k = 0; k < 3; k++) out[(y * cw + x) * 4 + k] = Math.round(srgb(c[k] ?? 0) * 255);
+      out[(y * cw + x) * 4 + 3] = 255;
+    }
+  return out;
+}
+
 const BACKENDS = {
   webgpu: (c: HTMLCanvasElement): Promise<Backend> => WebGpuBackend.create(c),
   // Creating the backend compiles and links every GLSL program; errors throw here.
   webgl2: (c: HTMLCanvasElement): Promise<Backend> => Promise.resolve(WebGl2Backend.create(c)),
 };
 
-describe.each(Object.entries(BACKENDS))('%s', (_, create) => {
+// One backend per API for all model tests: on SwiftShader (CI) a WebGPU device with its pipelines takes
+// tens of seconds to start.
+describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   let backend: Backend;
   const live: Sim[] = [];
 
   beforeAll(async () => {
     backend = await create(document.createElement('canvas'));
     console.info('backend', backend.description);
-  });
+    // The first simulation compiles the pipelines: here, under a long timeout, and not in the first test.
+    (await backend.createSim(defaultSettings(), 16, 16, 1)).destroy();
+  }, 180_000);
   afterEach(() => {
     for (const s of live.splice(0)) s.destroy();
   });
@@ -267,4 +369,228 @@ describe.each(Object.entries(BACKENDS))('%s', (_, create) => {
       },
     );
   });
+
+  // The gel style's height field (render.wgsl `heightField`, gl/glsl/height.frag, ADR 0009): a blob of trail
+  // around one cell, seen at 8 px per cell (one bilinear lookup per height) and at 1.5 cells per px (four
+  // taps), must sit on that cell, across the wrap seam too.
+  describe('gel height field', () => {
+    const SIZE = 192;
+
+    /** Centre of the pixels the gel draws (anything clearly away from the background), in canvas pixels. */
+    function blobCentre(img: ImageData) {
+      const bg = [img.data[0] ?? 0, img.data[1] ?? 0, img.data[2] ?? 0];
+      let [n, sx, sy] = [0, 0, 0];
+      for (let y = 0; y < img.height; y++)
+        for (let x = 0; x < img.width; x++) {
+          const i = (y * img.width + x) * 4;
+          const d = Math.abs((img.data[i] ?? 0) - (bg[0] ?? 0)) + Math.abs((img.data[i + 1] ?? 0) - (bg[1] ?? 0));
+          if (d > 40) [n, sx, sy] = [n + 1, sx + x + 0.5, sy + y + 0.5];
+        }
+      return { pixels: n, x: sx / n, y: sy / n };
+    }
+
+    it.each([
+      ['wrap', 5, 9, 1 / 8],
+      ['wrap', 0, 0, 1 / 8],
+      ['wrap', 0, 0, 1.5],
+      ['box', 0, 13, 1 / 8],
+      ['box', 40, 3, 1 / 8],
+      ['box', 30, 20, 1.5],
+    ] as const)('is drawn in place (%s, cell %i, %i, scale %f)', async (boundary, cx, cy, scale) => {
+      const [w, h] = [64, 48];
+      const patch: Partial<Settings> = { style: 'gel', boundary, layout: 'empty', strains: [defaultStrain(0)] };
+      const sim = await make(patch, w, h, 1);
+      const trail = new Float32Array(w * h * 4);
+      for (let dy = -8; dy <= 8; dy++)
+        for (let dx = -8; dx <= 8; dx++) {
+          const [x, y] = [cx + dx, cy + dy];
+          if (boundary !== 'wrap' && (x < 0 || y < 0 || x >= w || y >= h)) continue;
+          trail[((((y % h) + h) % h) * w + (((x % w) + w) % w)) * 4] = 400 * Math.exp(-(dx * dx + dy * dy) / 8);
+        }
+      sim.writeTrail(trail);
+      const view = { center: [cx + 0.5, cy + 0.5] as [number, number], scale };
+      const img = await backend.capture(sim, { ...defaultSettings(), ...patch }, view, SIZE, SIZE);
+      const c = blobCentre(img);
+      expect(c.pixels).toBeGreaterThan(30);
+      // A closed arena cuts the blob at its edge: only check the axes it does not cut. A lookup one cell
+      // off moves the centre by 8 px at 8 px per cell.
+      const tolerance = scale < 1 ? 1.5 : 0.75;
+      if (boundary === 'wrap' || (cx > 8 && cx < w - 9)) expect(Math.abs(c.x - SIZE / 2)).toBeLessThan(tolerance);
+      if (boundary === 'wrap' || (cy > 8 && cy < h - 9)) expect(Math.abs(c.y - SIZE / 2)).toBeLessThan(tolerance);
+    });
+
+    // The colours, against the CPU reference above. Every cell holds trail below the black level, which
+    // must stay background, and two blobs of two strains rise above it. Fit (one lookup per height) and
+    // zoomed out (four taps), across the wrap seam and the edge of a closed box.
+    it.each([
+      ['wrap', 16, 12, 1 / 4],
+      ['wrap', 0, 0, 1 / 8],
+      ['wrap', 32, 24, 1.5],
+      ['box', 2, 20, 1 / 4],
+      ['box', 32, 24, 1.5],
+    ] as const)('matches the reference colours (%s, centre %i, %i, scale %f)', async (boundary, cx, cy, scale) => {
+      const [w, h] = [64, 48];
+      const strains = [defaultStrain(0), defaultStrain(1)];
+      const settings: Settings = {
+        ...defaultSettings(),
+        style: 'gel',
+        boundary,
+        layout: 'empty',
+        strains,
+        exposure: 1,
+      };
+      const sim = await make(settings, w, h, 1);
+      const trail = new Float32Array(w * h * 4);
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const blob = (bx: number, by: number, r: number) => Math.exp(-((x - bx) ** 2 + (y - by) ** 2) / (2 * r * r));
+          trail[(y * w + x) * 4] = 1 + 30 * blob(14, 14, 3) + 12 * blob(3, 22, 2);
+          trail[(y * w + x) * 4 + 1] = 20 * blob(40, 28, 4);
+        }
+      sim.writeTrail(trail);
+      const levels = await backend.settle(sim);
+      expect(levels.black).toBeGreaterThan(1); // above the trail of the empty cells
+      const view = { center: [cx, cy] as [number, number], scale };
+      const img = await backend.capture(sim, settings, view, SIZE, SIZE);
+      const exposure = levels.gain * 2 ** settings.exposure;
+      const ref = gelReference(trail, [w, h], settings, view, { exposure, black: levels.black }, [SIZE, SIZE]);
+      // The dither moves a channel by at most 1, hardware filtering of the height field by at most 2.
+      let [max, sum] = [0, 0];
+      for (let i = 0; i < ref.length; i++) {
+        if (i % 4 === 3) continue;
+        const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
+        [max, sum] = [Math.max(max, d), sum + d];
+      }
+      expect(max).toBeLessThanOrEqual(3);
+      expect(sum / ((ref.length / 4) * 3)).toBeLessThan(0.75);
+    });
+  });
+
+  // The gel height field has a one-cell border, so it is two texels larger than the grid (render.ts).
+  if (kind === 'webgpu')
+    it.each([true, false])('draws a grid at the largest side it reports, in every style (wide %s)', async (wide) => {
+      const { device } = (backend as WebGpuBackend).gpu;
+      const side = backend.maxGridSide;
+      const sim = await make({}, wide ? side : 16, wide ? 16 : side, 64);
+      for (const style of STYLES) {
+        device.pushErrorScope('validation');
+        await backend.capture(sim, { ...defaultSettings(), style }, { center: [8, 8], scale: 1 }, 8, 8);
+        expect((await device.popErrorScope())?.message, style).toBeUndefined();
+      }
+    });
+
+  // WebGPU sorts the agent buffer by position now and then, into the other of two buffers (shaders/sort.wgsl);
+  // the model must not notice (ADR 0005). Random streams and claim keys follow the agent id, not the slot.
+  if (kind === 'webgpu')
+    describe('agent sort', () => {
+      const strains = [0, 1, 2].map((i) => defaultStrain(i));
+
+      // 72 steps: sorting every 1, 8 or 32 steps makes 72, 9 or 3 sorts, so runs end on either buffer.
+      async function open(collisions: boolean, sortInterval: number) {
+        const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+        const sim = (await make(patch, 64, 48, collisions ? 1536 : 6144)) as Simulation;
+        sim.sortInterval = sortInterval;
+        sim.run(72);
+        return sim;
+      }
+
+      // Every random stream: inoculate and cut draw from TOOL, shrinkage from SHRINK, and the wall and the
+      // box edge block moves (BLOCK). Agent counts that are not a multiple of the workgroup size and a grid
+      // that is not a multiple of the 8-cell sort tile check the bounds of the sort.
+      async function arena(collisions: boolean, sortInterval: number) {
+        const patch: Partial<Settings> = {
+          seed: 11,
+          collisions,
+          density: collisions ? 0.4 : 2,
+          strains,
+          boundary: 'box',
+          shrink: 0.01,
+        };
+        const sim = (await make(patch, 61, 45, collisions ? 1001 : 5003)) as Simulation;
+        sim.sortInterval = sortInterval;
+        sim.paint({ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 });
+        sim.run(20);
+        sim.run(1, { kind: AgentToolKind.inoculate, x: 30, y: 22, radius: 8, strain: 1, revive: 0.5, teleport: 0.3 });
+        sim.run(15);
+        sim.run(1, { kind: AgentToolKind.cut, x: 20, y: 20, radius: 6, strain: 0, revive: 0, teleport: 0 });
+        sim.run(35);
+        return sim;
+      }
+
+      const state = async (sim: Sim) => ({ agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) });
+
+      it.each([
+        ['wrap', false],
+        ['wrap', true],
+        ['box with tools and shrinkage', false],
+        ['box with tools and shrinkage', true],
+      ] as const)(
+        'gives the same agents and trails as unsorted runs (%s, collisions %s)',
+        async (scene, collisions) => {
+          const build = scene === 'wrap' ? open : arena;
+          const unsorted = await state(await build(collisions, 0));
+          if (scene !== 'wrap') {
+            // Shrinkage must kill a part of the agents, or its random stream would not matter.
+            const dead = unsorted.agents.filter((a) => (a.bits & 4) === 0).length;
+            expect(dead).toBeGreaterThan(unsorted.agents.length / 10);
+            expect(dead).toBeLessThan(unsorted.agents.length);
+          }
+          for (const interval of [1, 8, 32]) {
+            const sorted = await state(await build(collisions, interval));
+            expect(sorted.trail, `sort every ${interval} steps`).toEqual(unsorted.trail);
+            expect(sorted.agents, `sort every ${interval} steps`).toEqual(unsorted.agents);
+          }
+        },
+      );
+
+      it('really reorders the buffer, and keeps every id once', async () => {
+        const sim = (await make({ seed: 7, density: 2, strains: [defaultStrain(0)] }, 96, 80, 15360)) as Simulation;
+        sim.run(33); // two sorts: steps 0 and 32
+        const raw = new Uint32Array(await readBuffer(sim.device, sim.agentBuffer));
+        const ids = Array.from({ length: sim.agents }, (_, k) => (raw[k * 4 + 3] ?? 0) >>> 3);
+        expect(new Set(ids).size).toBe(sim.agents);
+        expect(ids.filter((id, k) => id !== k).length).toBeGreaterThan(sim.agents / 2);
+      });
+
+      // One step sorts once (buffer 1 is current), 40 steps sort twice (buffer 0).
+      it.each([
+        ['one sort', 1],
+        ['two sorts', 40],
+      ] as const)('writes an agent by id after %s, without creating a duplicate id', async (_, steps) => {
+        const sim = await make({ seed: 7, density: 1, strains: [defaultStrain(0), defaultStrain(1)] }, 64, 64, 4096);
+        sim.run(steps);
+        const before = await sim.readAgents();
+        sim.writeAgent(1234, { x: 10.5, y: 20.5, heading: 1, bits: 4 | 1 });
+        const after = await sim.readAgents(); // throws if an id is missing or doubled
+        expect(after[1234]).toEqual({ x: 10.5, y: 20.5, heading: 1, bits: 5 });
+        expect(after.filter((_, i) => i !== 1234)).toEqual(before.filter((_, i) => i !== 1234));
+        expect(() => {
+          sim.writeAgent(4096, { x: 0, y: 0, heading: 0, bits: 4 });
+        }).toThrow(RangeError);
+      });
+
+      it('builds the occupancy from the current buffer when collisions are switched on', async () => {
+        const run = async (sortInterval: number) => {
+          const settings = { ...defaultSettings(), seed: 9, density: 0.5, strains };
+          const sim = (await make(settings, 64, 48, 1500)) as Simulation;
+          sim.sortInterval = sortInterval;
+          sim.run(1); // sorted: buffer 1 is current
+          sim.update({ ...settings, collisions: true });
+          sim.run(40);
+          return state(sim);
+        };
+        expect(await run(32)).toEqual(await run(0));
+      });
+
+      it.each([false, true])('starts over from scratch after an odd number of sorts (collisions %s)', async (c) => {
+        const patch = { seed: 9, collisions: c, density: 0.5, strains };
+        const sim = (await make(patch, 64, 48, 1500)) as Simulation;
+        sim.run(1); // sorted: buffer 1 is current
+        sim.reset();
+        sim.run(40);
+        const fresh = await make(patch, 64, 48, 1500);
+        fresh.run(40);
+        expect(await state(sim)).toEqual(await state(fresh));
+      });
+    });
 });

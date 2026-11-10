@@ -23,13 +23,15 @@ struct Params {
 struct Agent {
   pos: vec2f,
   heading: f32,
-  bits: u32, // bits 0–1 strain, bit 2 alive
+  bits: u32, // bits 0–1 strain, bit 2 alive, bits 3–26 id (ADR 0005)
 }
 
 const PI = 3.14159265358979;
 const TAU = 6.28318530717959;
 const BLOCKED = -1e30; // sensor value for walls and outside; finite on purpose
 const ALIVE = 4u;
+const ID_SHIFT = 3u;
+const ID_BITS = 0xfffffff8u; // the id field; up to 2^24 agents (webgpu.ts MAX_AGENTS)
 
 @group(0) @binding(0) var<uniform> P: Params;
 
@@ -43,9 +45,13 @@ fn pcg(v: u32) -> u32 {
   return (word >> 22u) ^ word;
 }
 
-// Stateless stream: one seed per (agent, step), advanced per draw.
-fn rngSeed(index: u32, salt: u32) -> u32 {
-  return pcg(index ^ pcg(P.grid.w ^ pcg(P.cfg.x ^ salt)));
+// Persistent agent id: its slot at init. The sort (sort.wgsl) moves agents between slots, so random
+// streams and collision keys use the id, never the slot.
+fn agentId(a: Agent) -> u32 { return a.bits >> ID_SHIFT; }
+
+// Stateless stream: one seed per (agent id, step), advanced per draw.
+fn rngSeed(id: u32, salt: u32) -> u32 {
+  return pcg(id ^ pcg(P.grid.w ^ pcg(P.cfg.x ^ salt)));
 }
 fn rand(s: ptr<function, u32>) -> f32 {
   *s = pcg(*s);

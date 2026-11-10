@@ -1,6 +1,7 @@
 // Agent passes. Prepended with common.wgsl.
 // `advance`: one pass, several agents per cell allowed (Jenson, Fogleman).
 // `claim` + `settle`: Jones' one agent per cell, deterministic (ADR 0008).
+// The buffer is sorted by position now and then (sort.wgsl): `i` is only the slot, `id` names the agent.
 
 @group(0) @binding(1) var<storage, read_write> agents: array<Agent>;
 @group(0) @binding(2) var trail: texture_2d<f32>;
@@ -11,6 +12,7 @@
 @group(0) @binding(7) var<storage, read> occ: array<u32>;
 @group(0) @binding(8) var<storage, read_write> claims: array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read_write> occNext: array<atomic<u32>>;
+@group(0) @binding(10) var<uniform> replacement: Agent;
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
 const STEER = 0u;
@@ -61,8 +63,8 @@ fn randomIn(center: vec2f, radius: f32, rng: ptr<function, u32>) -> vec2f {
 }
 
 // Tools and shrinkage. Returns false if the agent is dead after this step.
-fn lifecycle(a: ptr<function, Agent>, i: u32) -> bool {
-  var rng = rngSeed(i, TOOL);
+fn lifecycle(a: ptr<function, Agent>, id: u32) -> bool {
+  var rng = rngSeed(id, TOOL);
   let s = (*a).bits & 3u;
   var alive = ((*a).bits & ALIVE) != 0u;
   if (P.tool.w == 1.0 && f32(s) == P.tool2.x) {
@@ -86,10 +88,10 @@ fn lifecycle(a: ptr<function, Agent>, i: u32) -> bool {
     }
   }
   if (alive) {
-    var r = rngSeed(i, SHRINK);
+    var r = rngSeed(id, SHRINK);
     alive = rand(&r) >= P.scent.w;
   }
-  (*a).bits = s | select(0u, ALIVE, alive);
+  (*a).bits = ((*a).bits & ID_BITS) | s | select(0u, ALIVE, alive);
   return alive;
 }
 
@@ -109,9 +111,10 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
   if (i < P.grid.z) {
     var a = agents[i];
     let s = a.bits & 3u;
-    let alive = lifecycle(&a, i);
+    let id = agentId(a);
+    let alive = lifecycle(&a, id);
     if (alive) {
-      var rng = rngSeed(i, STEER);
+      var rng = rngSeed(id, STEER);
       let h = steer(a, s, &rng);
       let p = a.pos + P.stepSize[s] * dir(h);
       let c = cellOf(p);
@@ -120,7 +123,7 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
         a.heading = h;
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
       } else {
-        var b = rngSeed(i, BLOCK);
+        var b = rngSeed(id, BLOCK);
         a.heading = rand(&b) * TAU;
       }
     }
@@ -130,8 +133,8 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
   flushTally(li);
 }
 
-// Unique per step, so claims never tie (pcg is a bijection on u32).
-fn key(i: u32) -> u32 { return pcg(i ^ pcg(P.grid.w ^ 0x9e3779b9u ^ P.cfg.x)); }
+// Unique per step, so claims never tie (pcg is a bijection on u32 and ids are unique).
+fn key(id: u32) -> u32 { return pcg(id ^ pcg(P.grid.w ^ 0x9e3779b9u ^ P.cfg.x)); }
 
 fn destination(a: Agent) -> vec2f { return a.pos + P.stepSize[a.bits & 3u] * dir(a.heading); }
 
@@ -145,11 +148,12 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   let i = index(gid, groups);
   if (i >= P.grid.z) { return; }
   var a = agents[i];
-  if (lifecycle(&a, i)) {
-    var rng = rngSeed(i, STEER);
+  let id = agentId(a);
+  if (lifecycle(&a, id)) {
+    var rng = rngSeed(id, STEER);
     a.heading = steer(a, a.bits & 3u, &rng);
     let c = cellOf(destination(a));
-    if (canClaim(a, c)) { atomicMax(&claims[c], key(i)); }
+    if (canClaim(a, c)) { atomicMax(&claims[c], key(id)); }
   }
   agents[i] = a;
 }
@@ -161,19 +165,20 @@ fn settle(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
   if (i < P.grid.z) {
     var a = agents[i];
     let s = a.bits & 3u;
+    let id = agentId(a);
     let alive = (a.bits & ALIVE) != 0u;
     if (alive) {
       let p = destination(a);
       let c = cellOf(p);
       // Moving inside the own cell is always allowed; otherwise the claim must have won.
       var ok = habitable(c) && c == cellOf(a.pos);
-      if (!ok && canClaim(a, c)) { ok = atomicLoad(&claims[c]) == key(i); }
+      if (!ok && canClaim(a, c)) { ok = atomicLoad(&claims[c]) == key(id); }
       if (ok) {
         a.pos = wrapPos(p);
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
         atomicAdd(&occNext[c], 1u);
       } else {
-        var b = rngSeed(i, BLOCK);
+        var b = rngSeed(id, BLOCK);
         a.heading = rand(&b) * TAU;
         let here = cellOf(a.pos);
         if (here >= 0) { atomicAdd(&occNext[here], 1u); }
@@ -193,4 +198,11 @@ fn occupy(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
   let a = agents[i];
   let c = cellOf(a.pos);
   if ((a.bits & ALIVE) != 0u && c >= 0) { atomicAdd(&occNext[c], 1u); }
+}
+
+// Sim.writeAgent: replaces the agent whose id the replacement carries, wherever the sort has put it.
+@compute @workgroup_size(256)
+fn replace(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = index(gid, groups);
+  if (i < P.grid.z && agentId(agents[i]) == agentId(replacement)) { agents[i] = replacement; }
 }

@@ -13,14 +13,14 @@ on macOS with `channel: 'chromium'`.
 
 ## Decision
 
-| Layer       | Tool                                                                 | What it proves                                                                                                                                                                                             |
-| ----------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Static      | `tsc`, ESLint (type-checked), Prettier, `svelte-check`               | types, bugs, style                                                                                                                                                                                         |
-| Unit        | Vitest in Node                                                       | parameter schema, URL parsing with fuzzed input, presets, colors, RNG, CPU reference model                                                                                                                 |
-| GPU         | Vitest browser mode (Playwright, Chromium, `--enable-unsafe-webgpu`) | shaders compile; each pass matches the CPU reference on small inputs; invariants; determinism; memory: a rebuild frees the old simulation first, a failed WebGL2 allocation frees its textures             |
-| E2E         | Playwright test                                                      | app boots without console errors, canvas not blank, tools and presets work, URL round trip, axe accessibility scan; hostile links are fitted to the device memory; "Start fresh" drops the shared settings |
-| Visual      | Playwright screenshots, fixed seed and exposure                      | reviewed by eye in the development loop                                                                                                                                                                    |
-| Performance | timestamp queries on a real GPU                                      | steps per second per agent count, JSON report, local only                                                                                                                                                  |
+| Layer       | Tool                                                                 | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static      | `tsc`, ESLint (type-checked), Prettier, `svelte-check`               | types, bugs, style                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Unit        | Vitest in Node                                                       | parameter schema, URL parsing with fuzzed input, presets, colors, RNG, CPU reference model, frame budget, startup grid check                                                                                                                                                                                                                                                                                                           |
+| GPU         | Vitest browser mode (Playwright, Chromium, `--enable-unsafe-webgpu`) | shaders compile; each pass matches the CPU reference on small inputs; invariants; determinism, also with the agent sort; exact WebGL2 counts without float blending (and no blending into 32-bit float targets there), readback without stalls; gel height field in place, and its colours against a CPU evaluation of the old shader; memory: a rebuild frees the old simulation first, a failed WebGL2 allocation frees its textures |
+| E2E         | Playwright test                                                      | app boots without console errors, canvas not blank, tools and presets work, URL round trip, axe accessibility scan; hostile links are fitted to the device memory; "Start fresh" drops the shared settings                                                                                                                                                                                                                             |
+| Visual      | Playwright screenshots, fixed seed and exposure                      | reviewed by eye in the development loop                                                                                                                                                                                                                                                                                                                                                                                                |
+| Performance | timestamp queries on a real GPU                                      | GPU time per compute pass (render passes by wall time: Metal render-pass timestamps over-count), paired in one page, local only ([webgpu-platform](../knowledge-base/webgpu-platform.md#cost-per-pass-on-metal-measured-2026-11-10))                                                                                                                                                                                                   |
 
 GPU checks use invariants, not long exact trajectories:
 
@@ -34,8 +34,11 @@ GPU checks use invariants, not long exact trajectories:
 ## Consequences
 
 - CI runs real WGSL on SwiftShader, so CI scenes stay small: the model tests in
-  `sim.gpu.test.ts` use at most 200² cells and 6000 agents, `engine.gpu.test.ts` and the e2e
-  tests (1280 × 720 viewport) 512 × 288 cells.
+  `sim.gpu.test.ts` use at most 200² cells and 6000 agents (the sort tests up to 15 360 agents
+  on 96 × 80 cells, the WebGL2 counting tests in `gl/sim.gpu.test.ts` up to 100 000 agents on
+  one cell), `engine.gpu.test.ts` and the e2e tests (1280 × 720 viewport) 512 × 288 cells. The
+  grid-limit tests draw a grid 16 cells by the largest side the backend reports, 64 agents and
+  no steps.
 - Real-GPU coverage (Metal) comes from the local loop. CI asserts no performance numbers (the
   planned steps/s report is local only), but its time limits fail a run that SwiftShader makes
   too slow (next bullet).
@@ -45,3 +48,17 @@ GPU checks use invariants, not long exact trajectories:
   19 ms with the tiled diffuse pass and 4.1 ms without the tile. On Metal (M3 Pro) the tile
   saves about 25 % of the diffuse pass and about 4 % of an app-like step, so the app keeps it
   ([webgpu-platform](../knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)).
+- A WebGPU device on SwiftShader needs tens of seconds to compile the simulation pipelines. The
+  model, sort and gel tests in `sim.gpu.test.ts` therefore share one backend per API, whose setup
+  builds a first simulation under a 180 s timeout; the WebGL2 counting tests share one context
+  per counting path (compiling the programs takes seconds per context there). In the CI image
+  (`mcr.microsoft.com/playwright:v1.64.1-noble`, 4 CPUs) the GPU project (103 tests) took 192 s
+  on 2026-11-10 (171 s for the 30 tests before the sort and WebGL2 tests); apart from Fig. 10 no
+  test took more than 33 s. The e2e suite took 2.9 min there, its slowest test 40 s of 120 s
+  (the boot test's wait for step 100: 26 s of 60 s).
+- GitHub runners are slower than that image for the app's frame loop: on 2026-11-10 SwiftShader
+  drew about one frame per second there (3.9 in the image), and the frame budget then runs one
+  step per frame, so the boot test reached step 57 of 100 in its 60 s wait and failed. In the
+  image, each extra step in a frame cost about 150 ms (1, 4 and 16 steps per frame gave 3.9,
+  1.4 and 0.4 fps), so the budget's choice of one step is right there, and e2e tests wait for
+  few steps: the boot test for 30, because its contrast check passes from step 10 on.

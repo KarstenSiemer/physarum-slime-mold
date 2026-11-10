@@ -16,8 +16,8 @@ Jones runs agents in random sequential order; a GPU runs them in parallel.
 2. Compare-exchange on an occupancy grid in one pass — the winner depends on thread timing,
    so results are not reproducible.
 3. **Two passes with claims**: pass A computes headings and targets and calls
-   `atomicMin(claims[target], key)` with a unique per-step key (a bijective hash of the agent
-   index, so priorities are random but never tie). A target is free only if it was empty at
+   `atomicMax(claims[target], key)` with a unique per-step key (a bijective hash of the agent
+   id, ADR 0005, so priorities are random but never tie). A target is free only if it was empty at
    the start of the step. Pass B moves the winners, deposits, and writes the next occupancy
    with `atomicAdd`.
 

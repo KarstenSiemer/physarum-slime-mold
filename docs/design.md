@@ -38,8 +38,25 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   text, paper reference. UI controls, URL validation and GPU uniform packing all read it.
 - `engine/types.ts` defines the `Backend` and `Sim` interfaces. Both backends pass the same GPU
   test suite (`src/engine/sim.gpu.test.ts`).
-- One rAF loop: apply queued tool strokes → run _k_ simulation steps → render one frame.
-- A startup check lowers the grid (at most twice) while the frame rate stays below 40 fps.
+- One rAF loop: apply queued tool strokes → run _k_ simulation steps → render one frame. _k_
+  follows the speed, within a budget of steps per frame that the GPU keeps up with
+  (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
+  quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises
+  by 1/8 (to at most 16). It starts at 1 and stays at most one step above the steps of the last
+  frame, so it rises past the speed only while it is the limit. A slow GPU then lowers the
+  simulation speed instead of the frame rate. Steps it could not run are dropped, not caught up
+  later: after a pause in rendering (a hidden tab) or a speed raise, a frame runs at most one
+  step more than the frame before, and the steps follow a raise at 1/8 step per frame.
+- A startup check (`src/ui/tune.ts`) lowers the grid one step, at most twice and not below 512
+  cells, when over a window of at least 2 s the frame rate is below 40 fps or fewer than 3/4 of
+  the steps the speed asked for ran. The requested steps are summed per frame (speed times frame
+  interval, at most 16), so a speed change inside the window counts from when it happened; steps
+  the budget held back while the GPU had time to spare (the budget still rising) do not count. A
+  browser can give fewer than 40 fps whatever the grid (iOS Safari gives 30 in Low Power Mode,
+  and Chrome's Energy Saver lowers the frame rate too). The frames that started with no frame on
+  the GPU show that rate; when they are at least half of the window, 90 % of their rate is enough.
+  It counts only active time (tab visible, not paused, no rebuild), decides at 3, 6, 10 and 15 s
+  of it, restarts its window after a reset or rebuild, and never lowers a grid the user picked.
 
 ## 3. Simulation on the GPU
 
@@ -49,7 +66,7 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 
 | Resource           | Format                                           | Size             | Use                                                   |
 | ------------------ | ------------------------------------------------ | ---------------- | ----------------------------------------------------- |
-| `agents`           | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N         | `meta`: strain (2 bit), alive (1 bit)                 |
+| `agents[2]`        | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N each    | `meta`: strain (2 bit), alive (1 bit), id (24 bit)    |
 | `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
 | `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | agents that moved into the cell this step, per strain |
@@ -74,8 +91,8 @@ so the small decay values from Jones Fig. 12 would stop working.
    - **move** by SS; wrap (periodic) or block (closed box, dish, wall);
    - blocked: random new heading, no deposit. Success: `atomicAdd(counts[cell][strain], 1)`.
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the
-   heading and calls `atomicMin(claims[target], key)` with a unique per-step key (bijective
-   hash of the agent index). Pass 2b moves the winners. Free target = empty at step start.
+   heading and calls `atomicMax(claims[target], key)` with a unique per-step key (bijective
+   hash of the agent id). Pass 2b moves the winners. Free target = empty at step start.
    Deterministic: integer atomics and unique keys.
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
    tile saves about 25 % of this pass, see
@@ -84,8 +101,11 @@ so the small decay values from Jones Fig. 12 would stop working.
    3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
    `scent` with `food · 255 · wProj` and `light · 255 · wLight` as sources.
 
-All random numbers come from a PCG hash of `(seed, step, agent index)`. The whole step is
-deterministic on one GPU: integer atomics make the deposit order-independent.
+All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
+deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
+counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each
+other on the grid run together and hit the cache (ADR 0005). The model reads only the id, never
+the buffer slot.
 
 ### Initial layouts
 
@@ -96,7 +116,7 @@ deterministic on one GPU: integer atomics make the deposit order-independent.
 
 | Area                | Controls                                                                                                         |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Playback            | play/pause, single step, speed (steps per frame), reset, new seed                                                |
+| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                               |
 | Scene               | preset gallery, agent count (density readout), resolution, layout, boundary (wrap, box, dish)                    |
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |

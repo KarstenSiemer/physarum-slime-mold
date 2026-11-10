@@ -1,48 +1,10 @@
 // Full-screen pass: trail (or agent counts) → color. Mirrors ../../shaders/render.wgsl.
-precision highp float;
-precision highp int;
-precision highp sampler2D;
+// Prepended with view.glsl.
 
-// std140 = the layout of `struct View` in render.wgsl, filled by packView() in render.ts.
-layout(std140) uniform View {
-  vec2 canvas;
-  vec2 center;
-  float scale;
-  float exposure;
-  uint style;
-  uint boundary;
-  vec4 colors[4];
-  vec4 background;
-  uvec4 frame; // frame counter, strain count, overlays on/off, unused
-  vec4 fx;     // bloom strength, black level, unused, unused
-} V;
-
-uniform sampler2D trail;
 uniform sampler2D env;
 uniform sampler2D counts;
 uniform sampler2D bloom;
-
-out vec4 result;
-
-ivec2 gridSize() { return textureSize(trail, 0); }
-
-int cellAt(ivec2 c) {
-  ivec2 s = gridSize();
-  ivec2 q = c;
-  if (V.boundary == 0u) {
-    q = c - s * ivec2(floor(vec2(c) / vec2(s)));
-  } else if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) {
-    return -1;
-  }
-  return q.y * s.x + q.x;
-}
-
-ivec2 coord(int i) { return ivec2(i % gridSize().x, i / gridSize().x); }
-
-vec4 trailAt(ivec2 c) {
-  int i = cellAt(c);
-  return i < 0 ? vec4(0.0) : texelFetch(trail, coord(i), 0);
-}
+uniform sampler2D heights; // gel style: written by height.frag each frame
 
 vec4 bilinear(vec2 p) {
   vec2 q = p - 0.5;
@@ -93,10 +55,23 @@ vec3 paper(vec4 v) {
   return V.background.rgb * exp(-absorb * V.exposure);
 }
 
-float height(vec2 p) {
-  vec4 v = levels(trailFiltered(p));
-  return 1.0 - exp(-(v.x + v.y + v.z + v.w) * V.exposure);
+// The gel height field (height.frag) with hardware bilinear filtering at grid position q, wrapped
+// for the periodic boundary; outside a closed arena the border holds the value of an empty cell.
+float heightAt(vec2 q) {
+  vec2 s = vec2(gridSize());
+  vec2 p = V.boundary == 0u ? q - s * floor(q / s) : q;
+  return textureLod(heights, (p + 1.0) / (s + 2.0), 0.0).r;
 }
+
+// Four taps spread over the pixel footprint when zoomed out, like trailFiltered().
+float heightFiltered(vec2 p) {
+  if (V.scale <= 1.0) return heightAt(p);
+  float o = 0.25 * V.scale;
+  return 0.25 * (heightAt(p + vec2(-o, -o)) + heightAt(p + vec2(o, -o)) + heightAt(p + vec2(-o, o)) +
+                 heightAt(p + vec2(o, o)));
+}
+
+float height(vec2 p) { return 1.0 - exp(-max(heightFiltered(p), 0.0)); }
 
 vec3 gel(vec2 p, vec4 v) {
   float d = max(V.scale, 0.75);
