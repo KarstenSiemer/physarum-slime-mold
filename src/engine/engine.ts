@@ -6,9 +6,19 @@ import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './env
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
-import { compact, Placement, sweep } from './sweep';
+import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
+
+/**
+ * Sweep work (sweep.ts sweeping()) in the pointer handler, paint(): 256 rows are about 0.5 ms on an M3 Pro before
+ * the JIT has optimized the sweep, as at the first large erase of a page. Counted in rows, not time, so a stroke's
+ * sweep pauses at the same place on every machine. Each frame then goes on for FRAME_MS, which leaves room for the
+ * step past it and the deletions at the end within 2 ms. A deletion changes no byte on screen, so the rest of a long
+ * sweep can wait.
+ */
+const PAINT_ROWS = 256;
+const FRAME_MS = 1;
 
 // Changes that need a new population.
 // Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
@@ -52,6 +62,9 @@ export class Engine {
   private painted = 0;
   /** Every edit on the grid on screen, for the sweep: mapped once per grid and kept in step with `edits`. */
   private placement: Placement | undefined;
+  /** The sweep that runs on `placement`, over several frames when it is long, and the clearing strokes after it. */
+  private running: Generator<number, Set<number>, void> | undefined;
+  private queue: EnvEdit[] = [];
   /** The grid the view shows (fitView()): strokes from the canvas are in its cells, also during a rebuild. */
   private viewGrid: [number, number] | undefined;
   /** False from freeing a simulation until the next one exists. */
@@ -107,6 +120,7 @@ export class Engine {
     this.edits = env.map((e) => fromShape(e, arena));
     this.painted = 0;
     this.placement = undefined;
+    [this.running, this.queue] = [undefined, []];
     this.onEdits?.();
     // A new simulation paints the edits itself, before it places the agents.
     if (this.needsRebuild()) return this.rebuild();
@@ -232,12 +246,15 @@ export class Engine {
     this.edits = [];
     this.painted = 0;
     this.placement = undefined;
+    [this.running, this.queue] = [undefined, []];
     if (this.live) this.sim.clearEnvironment();
     this.onEdits?.();
   }
 
   fitView() {
     const { width, height } = this.sim;
+    // The sweeps that wait judge the grid on screen until now: they finish before it changes.
+    if ((this.viewGrid?.[0] !== width || this.viewGrid[1] !== height) && this.sweepFor()) this.onEdits?.();
     this.viewGrid = [width, height];
     this.view = {
       center: [width / 2, height / 2],
@@ -276,27 +293,57 @@ export class Engine {
     const edit = fromStroke(s, this.viewGrid, this.settings.boundary);
     this.edits.push(edit);
     this.placement?.push(edit);
-    if (edit.kind === 'erase' || edit.kind === 'wall') this.sweep(...this.viewGrid);
+    if (edit.kind === 'erase' || edit.kind === 'wall') this.queue.push(edit);
+    this.sweepFor(PAINT_ROWS);
     this.onEdits?.();
   }
 
+  /** False while a sweep waits for frames (sweepFor()). */
+  get swept() {
+    return !this.running && this.queue.length === 0;
+  }
+
   /**
-   * After a stroke that clears, deletes the edits that later strokes cleared completely on the grid on screen and
-   * the erases that clear nothing there any more (sweep.ts). That changes no byte there, and an erased food stays
-   * gone on every other grid.
+   * After a stroke that clears, the sweep deletes the edits that later strokes cleared completely on the grid on
+   * screen and the erases that clear nothing there any more (sweep.ts). That changes no byte there, and an erased
+   * food stays gone on every other grid. Runs the sweeps that wait for about `rows` rows of work or until
+   * performance.now() reaches `until`, and deletes what they find; true if that was an edit. A long sweep goes on in
+   * the next frame.
    */
-  private sweep(w: number, h: number) {
-    let placement = this.placement;
-    if (placement?.w !== w || placement.h !== h || placement.length !== this.edits.length)
-      this.placement = placement = new Placement(w, h, this.edits);
-    const gone = sweep(placement);
-    if (gone.size === 0) return;
+  private sweepFor(rows = Infinity, until = Infinity): boolean {
+    let [work, deleted] = [0, false];
+    while (work < rows && (until === Infinity || performance.now() < until)) {
+      if (!this.running) {
+        const edit = this.queue.shift();
+        if (!edit || !this.viewGrid) return deleted;
+        const x = this.edits.lastIndexOf(edit);
+        if (x < 0) continue; // an earlier sweep deleted it
+        const [w, h] = this.viewGrid;
+        let placement = this.placement;
+        if (placement?.w !== w || placement.h !== h || placement.length !== this.edits.length)
+          this.placement = placement = new Placement(w, h, this.edits);
+        this.running = sweeping(placement, x);
+      }
+      const step = this.running.next();
+      if (!step.done) work += step.value;
+      else {
+        this.running = undefined;
+        deleted = this.delete(step.value) || deleted;
+      }
+    }
+    return deleted;
+  }
+
+  /** Deletes the edits a sweep found: true if there was one. */
+  private delete(gone: ReadonlySet<number>): boolean {
+    if (gone.size === 0) return false;
     // The simulation holds the first `painted` edits. One of them that goes keeps its cells there until the strokes
     // that cleared them are painted, also when those go too: so the simulation gets every stroke recorded so far.
     if (this.live && [...gone].some((i) => i < this.painted)) this.flushEnv();
     this.painted -= [...gone].filter((i) => i < this.painted).length;
     compact(this.edits, gone);
-    placement.remove(gone);
+    this.placement?.remove(gone);
+    return true;
   }
 
   /**
@@ -344,12 +391,13 @@ export class Engine {
   }
 
   /**
-   * One frame: new strokes, as many steps as the speed asks for and the GPU keeps up with, then one
-   * render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
+   * One frame: a slice of a long sweep, new strokes, as many steps as the speed asks for and the GPU keeps up with,
+   * then one render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
    * simulation speed instead of the frame rate.
    */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
+    if (this.sweepFor(Infinity, performance.now() + FRAME_MS)) this.onEdits?.();
     this.flushEnv();
     const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
     let steps = forceSteps ?? planned;

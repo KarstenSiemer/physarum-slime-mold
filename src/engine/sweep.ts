@@ -109,6 +109,8 @@ export class Placement {
   private stale = 0;
   /** Whether the tiles hold the list: from `indexFrom` edits on. */
   private indexed = false;
+  /** Edits and tile entries that scans passed, as a measure of their work (sweeping()). */
+  visits = 0;
 
   /** `indexFrom`: from how many edits on the tiles hold the list. */
   constructor(
@@ -208,6 +210,7 @@ export class Placement {
     for (let ty = ty0; ty <= ty1; ty++)
       for (let tx = tx0; tx <= tx1; tx++) {
         const tile = this.painting[ty * this.cols + tx];
+        this.visits += tile?.n ?? 0;
         let n = 0;
         for (let k = 0, end = 5 * (tile?.n ?? 0); tile && k < end; k += 5) {
           const i = this.where[tile.data[k] ?? 0] ?? -1;
@@ -261,6 +264,7 @@ export class Placement {
   near([x0, y0, x1, y1]: Box): number[] {
     const found: number[] = [];
     const d = this.data;
+    this.visits += this.length;
     for (let i = 0, k = 0; i < this.length; i++, k += STRIDE)
       if ((d[k] ?? 0) < x1 && x0 < (d[k + 2] ?? 0) && (d[k + 1] ?? 0) < y1 && y0 < (d[k + 3] ?? 0)) found.push(i);
     return found;
@@ -278,6 +282,7 @@ export class Placement {
     const area = (tx1 - tx0 + 1) * (ty1 - ty0 + 1);
     const d = this.data;
     if (!this.indexed || area * (this.entries / (this.cols * Math.ceil(this.h / TILE))) > to - from) {
+      this.visits += to - from;
       for (let i = from, k = STRIDE * from; i < to; i++, k += STRIDE) {
         const kind = this.strokes[i]?.kind;
         const listed = clearing ? kind === 'erase' || kind === 'wall' : kind !== undefined && kind !== 'erase';
@@ -304,6 +309,7 @@ export class Placement {
         if (!tile) continue;
         const e = tile.data;
         let [lo, hi] = [0, tile.n];
+        this.visits += tile.n;
         while (lo < hi) {
           const mid = (lo + hi) >> 1;
           if ((e[5 * mid] ?? 0) < first) lo = mid + 1;
@@ -448,11 +454,32 @@ function meet(a: readonly number[], na: number, b: readonly number[], nb: number
  * a candidate and the edits under an erase come from the tiles of the placement.
  */
 export function sweep(placement: Placement): Set<number> {
+  const run = sweeping(placement);
+  for (let step = run.next(); ; step = run.next()) if (step.done) return step.value;
+}
+
+/** Rows a sweep judges between two pauses (sweeping()); a scan passing 32 edits counts as one. */
+const STEP = 32;
+
+/**
+ * sweep() for edit `x` of `placement`, which later edits may follow, in steps: it pauses after about STEP rows of
+ * work and yields their number, so that a long sweep can wait for the next frame (Engine). While it pauses the list
+ * may grow but nothing leaves it; later strokes then count as recorded after the edits they follow.
+ */
+export function* sweeping(placement: Placement, x = placement.length - 1): Generator<number, Set<number>, void> {
   const { strokes, w, h } = placement;
   const gone = new Set<number>();
-  const last = strokes.length - 1;
+  const last = x;
   const X = strokes[last];
   if (!X || (X.kind !== 'erase' && X.kind !== 'wall')) return gone;
+  let work = 0;
+  let visits = placement.visits;
+  /** Rows judged and edits scanned since the last pause. */
+  const done = () => {
+    const scanned = (placement.visits - visits) / 32;
+    visits = placement.visits;
+    return (work += scanned) >= STEP;
+  };
   const kind = (i: number) => strokes[i]?.kind ?? 'erase';
   /** The edits deleted so far, as flags: the scans ask for every edit they pass. */
   const dead = new Uint8Array(strokes.length);
@@ -491,6 +518,11 @@ export function sweep(placement: Placement): Set<number> {
     .near(placement.box(last))
     .filter((i) => i < last && kind(i) !== 'erase' && clears(X.kind, kind(i)));
   for (const i of candidates) {
+    work++;
+    if (done()) {
+      yield work;
+      work = 0;
+    }
     const S = strokes[i];
     const open = placement.open(i);
     if (!S || open === PAINTS_NONE) continue;
@@ -534,6 +566,11 @@ export function sweep(placement: Placement): Set<number> {
     }
     let found = false;
     for (let y = cursor, end = placement.bottom(i); y < end && !found; y++) {
+      work++;
+      if (done()) {
+        yield work;
+        work = 0;
+      }
       const n = y === probe ? 0 : runs(i, y, SLACK, true, own);
       const x = n > 0 ? openIn(y, n, by, recent) : -1;
       if (x >= 0) placement.setOpen(i, y * w + x, y);
@@ -575,9 +612,17 @@ export function sweep(placement: Placement): Set<number> {
         Math.max(area[3], y1),
       ];
     }
+    if (done()) {
+      yield work;
+      work = 0;
+    }
     // Where every food, light and wall went, an erase over one that went clears nothing: one deleted edit under it
     // is enough to know.
     const { count, tiles } = placement.alive(area, dead);
+    if (done()) {
+      yield work;
+      work = 0;
+    }
     const empty = ([x0, y0, x1, y1]: Box) => {
       const [tx0, ty0, tx1, ty1] = tiles;
       for (let ty = y0 >> TILE_BITS; ty <= (y1 - 1) >> TILE_BITS; ty++)
@@ -588,6 +633,11 @@ export function sweep(placement: Placement): Set<number> {
     };
     for (const j of placement.near(area)) {
       if (j === last || kind(j) !== 'erase') continue;
+      work++;
+      if (done()) {
+        yield work;
+        work = 0;
+      }
       // An erase keeps clearing its witness until that goes.
       const witness = placement.witness(j);
       if (witness >= 0 && !dead[witness]) continue;
@@ -603,6 +653,7 @@ export function sweep(placement: Placement): Set<number> {
     const [y0, y1] = [Math.max(placement.top(j), placement.top(i)), Math.min(placement.bottom(j), placement.bottom(i))];
     const meets = (y: number) => {
       if (y < y0 || y >= y1) return false;
+      work++;
       const n = runs(i, y, SLACK, true, own);
       return n > 0 && meet(own, n, one, runs(j, y, SLACK, true, one));
     };
@@ -611,6 +662,11 @@ export function sweep(placement: Placement): Set<number> {
     return false;
   };
   for (const [j, older] of erases) {
+    work++;
+    if (done()) {
+      yield work;
+      work = 0;
+    }
     const found = older.find((i) => share(j, i));
     if (found === undefined) drop(j);
     else placement.setWitness(j, found);

@@ -8,6 +8,7 @@ import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
 import { OutOfMemoryError } from './gpu';
+import { compact, Placement, sweep } from './sweep';
 import { paintReference } from './paint-reference';
 import type { Backend, Stroke } from './types';
 
@@ -589,6 +590,79 @@ describe('food, light and walls after an arena switch', () => {
   });
 });
 
+// A long sweep pauses after a few hundred rows of work and goes on in the next frames: a deletion changes no byte on
+// screen (Engine.sweepFor()).
+describe('a long sweep', () => {
+  /**
+   * 3,000 food dabs on 512 × 320, each painted, and an erase over most of them; while its sweep waits, an erase over a
+   * few others, apart from the first, and a food beside them.
+   */
+  const waiting = async () => {
+    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
+    let seed = 5;
+    const rand = () => {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      return (seed >>> 0) / 2 ** 32;
+    };
+    for (let k = 0; k < 3000; k++) {
+      const p: [number, number] = [8 + rand() * 300, 8 + rand() * 304];
+      engine.paint({ kind: 'food', from: p, to: p, radius: 2 + rand() * 4 });
+    }
+    engine.frame(0, 0);
+    const before = edits(engine).slice();
+    engine.paint({ kind: 'erase', from: [150, 160], to: [150, 160], radius: 120 });
+    engine.paint({ kind: 'erase', from: [300, 300], to: [300, 300], radius: 8 });
+    engine.paint({ kind: 'food', from: [450, 160], to: [450, 160], radius: 5 });
+    // What a sweep at once after each erase deletes.
+    const [first, second, food] = edits(engine).slice(-3);
+    let all = [...before];
+    for (const erase of [first, second]) {
+      if (!erase) throw new Error('no erase');
+      all = [...all, erase];
+      compact(all, sweep(new Placement(512, 320, all)));
+    }
+    if (!food) throw new Error('no food');
+    return { engine, sim, all: [...all, food] };
+  };
+
+  it('deletes over frames what a sweep at once deletes, with the simulation holding its list', async () => {
+    const { engine, sim, all } = await waiting();
+    expect(engine.swept).toBe(false);
+    // The scene card hears of every change, the last one too.
+    const heard: number[] = [];
+    engine.onEdits = () => heard.push(edits(engine).length);
+    while (!engine.swept) engine.frame(0, 0);
+    expect(edits(engine)).toEqual(all);
+    expect(heard.at(-1)).toBe(all.length);
+    engine.frame(0, 0);
+    const expected = new Uint8Array(512 * 320 * 4);
+    for (const e of edits(engine)) {
+      const s = strokeOn(e, 512, 320);
+      if (s) paintReference(expected, 512, 320, s, e.boundary);
+    }
+    expect(differing(sim().env, expected)).toBe(0);
+  });
+
+  it('is dropped by a Clear and by a preset load', async () => {
+    const first = await waiting();
+    first.engine.clearEnvironment();
+    expect([first.engine.swept, edits(first.engine)]).toEqual([true, []]);
+    const second = await waiting();
+    await second.engine.load(maze.settings(), mazeEnv);
+    expect(second.engine.swept).toBe(true);
+    expect(second.engine.matches(mazeEnv, 'box')).toBe(true);
+  });
+
+  it('finishes on the grid on screen before a new grid comes', async () => {
+    const { engine, sim, all } = await waiting();
+    await engine.apply({ ...engine.settings, resolution: 256 });
+    expect([sim().width, engine.swept]).toEqual([256, true]);
+    expect(edits(engine)).toEqual(all);
+  });
+});
+
 // A stroke that later strokes cleared completely on the grid on screen leaves the list (sweep.ts, ADR 0019), and so
 // does an erase that clears nothing there any more.
 describe('the sweep', () => {
@@ -823,6 +897,8 @@ describe('the sweep', () => {
     }
     expect(edits(engine)).toHaveLength(130_000);
     engine.paint({ kind: 'erase', from: [256, 160], to: [256, 160], radius: 400 });
+    // A sweep this long goes on in the frames after the stroke.
+    while (!engine.swept) engine.frame(0, 0);
     expect(edits(engine)).toHaveLength(0);
   }, 60_000);
 
