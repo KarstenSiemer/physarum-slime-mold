@@ -142,6 +142,14 @@ neither build's startup check changes the grid. A fifth series, the default scen
 
 On `main`, 300 to 620 frames per run took longer than 20 ms; on the branch none did.
 
+Startup check under a browser frame cap (2026-11-10, same machine, page visible, default scene
+at 1280 × 720, 18 s per run): an init script let every animation frame wait one more vsync, so
+the page got 30 fps, as in iOS Safari's Low Power Mode. `main` and the branch before the browser
+rate counted (`src/ui/tune.ts`) both lowered the grid from 1536 to 1024 and then to 768,
+although the GPU kept up. With it, every frame started with the GPU idle (rate 30 fps), and the
+grid stayed at 1536 with 4 steps per frame, 120 steps/s. Uncapped (60 fps), no build changed the
+grid.
+
 WebGL2 (`?backend=webgl2`, same machine, paired as above, 16 calls per run): `alive()` blocked
 the main thread for 90–93 ms per call at 1 million agents (median; 42–43 fps) and 570–575 ms at
 4 million (1.8 fps). Now a call takes 0.1–0.3 ms and resolves 7–8 ms (1 million) or 158–161 ms

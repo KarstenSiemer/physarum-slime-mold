@@ -10,6 +10,10 @@ export const MAX_LOWERINGS = 2;
 /** Too slow: fewer frames per second than this, or fewer steps than this share of the steps the speed asked for. */
 export const MIN_FPS = 40;
 export const MIN_SPEED_SHARE = 0.75;
+/** Also smooth: at least this share of the frame rate the browser gives, where that is below MIN_FPS. */
+export const MIN_BROWSER_SHARE = 0.9;
+/** The browser's frame rate counts once at least this share of the window's frames started with the GPU idle. */
+export const MIN_IDLE_SHARE = 0.5;
 
 /** Frames and steps over a stretch of active time. */
 export interface Window {
@@ -22,17 +26,28 @@ export interface Window {
    * limit, and without the steps the budget held back while it was still rising on an idle GPU.
    */
   requested: number;
+  /** Frames that started with the GPU idle, and the sum of their intervals in ms (FrameBudget.idleFrames, idleMs). */
+  idleFrames: number;
+  idleMs: number;
 }
 
 /**
  * The decision of the startup check: the grid to lower to after this window, or undefined to keep it.
  * The frame budget (engine/budget.ts) keeps the frame rate up on a slow GPU and lowers the steps per
  * second instead, so both count.
+ *
+ * A browser can give fewer than MIN_FPS frames per second whatever the grid: iOS Safari gives 30 in Low
+ * Power Mode. A smaller grid does not raise that rate. The frames that started with the GPU idle show it,
+ * so the frame rate must then reach only MIN_BROWSER_SHARE of it. A GPU that holds most frames up leaves
+ * too few idle frames for that, and MIN_FPS applies.
  */
 export function lowerGrid(w: Window, resolution: number, lowered: number): number | undefined {
   if (lowered >= MAX_LOWERINGS || w.ms < MIN_WINDOW_MS) return undefined;
   const fps = (1000 * w.frames) / w.ms;
-  if (fps >= MIN_FPS && w.steps >= MIN_SPEED_SHARE * w.requested) return undefined;
+  const idle = w.idleFrames > 0 && w.idleFrames >= MIN_IDLE_SHARE * w.frames;
+  const browserFps = idle ? (1000 * w.idleFrames) / w.idleMs : Infinity;
+  const minFps = Math.min(MIN_FPS, MIN_BROWSER_SHARE * browserFps);
+  if (fps >= minFps && w.steps >= MIN_SPEED_SHARE * w.requested) return undefined;
   const lower = [...RESOLUTIONS].reverse().find((r) => r < resolution);
   return lower !== undefined && lower >= MIN_GRID ? lower : undefined;
 }
@@ -49,6 +64,9 @@ export interface Tick {
   frames: number;
   steps: number;
   requested: number;
+  /** Frames that started with the GPU idle, and their summed intervals (FrameBudget.idleFrames, idleMs), so far. */
+  idleFrames: number;
+  idleMs: number;
   resolution: number;
   /** The user picked a grid in the panel: the check never lowers it. */
   picked: boolean;
@@ -62,7 +80,9 @@ export interface Tick {
 export class GridTuner {
   private activeMs = 0;
   private lastActive: number | undefined;
-  private start: { at: number; frames: number; steps: number; requested: number; run: number } | undefined;
+  private start:
+    | { at: number; frames: number; steps: number; requested: number; idleFrames: number; idleMs: number; run: number }
+    | undefined;
   private next = 0;
   private lowered = 0;
   private done = false;
@@ -80,7 +100,8 @@ export class GridTuner {
       return undefined;
     }
     const restart = () => {
-      this.start = { at: this.activeMs, frames: t.frames, steps: t.steps, requested: t.requested, run: t.run };
+      const { frames, steps, requested, idleFrames, idleMs, run } = t;
+      this.start = { at: this.activeMs, frames, steps, requested, idleFrames, idleMs, run };
     };
     if (!t.active) {
       this.lastActive = undefined;
@@ -101,6 +122,8 @@ export class GridTuner {
       frames: t.frames - this.start.frames,
       steps: t.steps - this.start.steps,
       requested: t.requested - this.start.requested,
+      idleFrames: t.idleFrames - this.start.idleFrames,
+      idleMs: t.idleMs - this.start.idleMs,
     };
     if (w.ms < MIN_WINDOW_MS) {
       // Too short after a restart: wait for a full window, but not past the last check.

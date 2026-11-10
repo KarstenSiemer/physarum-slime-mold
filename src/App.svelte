@@ -105,7 +105,8 @@
   });
 
   // Startup check: in the first 15 s of active time, lower the grid (at most twice, not below 512 cells)
-  // while the frame rate stays below 40 fps or the steps below 3/4 of what the speed asked for (ui/tune.ts).
+  // while the frame rate stays below 40 fps (or below 90 % of a lower rate the browser gives, such as
+  // 30 fps in a power saving mode) or the steps below 3/4 of what the speed asked for (ui/tune.ts).
   const tuner = new GridTuner();
   function autoTune(e: Engine) {
     const lower = tuner.tick({
@@ -115,6 +116,8 @@
       frames: e.frames,
       steps: e.sim.step,
       requested: e.budget.requested,
+      idleFrames: e.budget.idleFrames,
+      idleMs: e.budget.idleMs,
       resolution: app.settings.resolution,
       picked: app.gridPicked,
     });

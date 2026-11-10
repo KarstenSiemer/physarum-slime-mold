@@ -36,6 +36,14 @@ export class FrameBudget {
    * (ui/tune.ts) compares the steps run with this, also while the speed changes.
    */
   requested = 0;
+  /**
+   * Frames that started with no frame on the GPU, and the sum of their intervals (ms; intervals up to
+   * MAX_INTERVAL_MS only). The GPU did not hold these frames up, so their rate is the frame rate the
+   * browser gives. That can be below the display rate: iOS Safari gives 30 fps in Low Power Mode, and
+   * Chrome's Energy Saver lowers the frame rate too. The startup check (ui/tune.ts) compares with it.
+   */
+  idleFrames = 0;
+  idleMs = 0;
   /** Allowed steps not run yet, in [−SLACK, 1 − SLACK). */
   private wanted = 0;
   private inFlight = 0;
@@ -55,6 +63,10 @@ export class FrameBudget {
     const interval = this.last === undefined ? 0 : Math.max(0, now - this.last);
     this.last = Math.max(this.last ?? now, now);
     const demand = Math.min((Math.min(interval, MAX_INTERVAL_MS) / 1000) * speed, this.max);
+    if (this.inFlight === 0 && interval > 0 && interval <= MAX_INTERVAL_MS) {
+      this.idleFrames++;
+      this.idleMs += interval;
+    }
     const spare = this.inFlight === 0 && interval > 0 && now - this.doneAt > interval / 3;
     if (this.inFlight >= 2) this.steps = Math.max(1, this.steps * 0.75);
     else if (spare && demand > 0) this.steps = Math.min(this.max, this.steps + 1 / 8);

@@ -51,9 +51,12 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   cells, when over a window of at least 2 s the frame rate is below 40 fps or fewer than 3/4 of
   the steps the speed asked for ran. The requested steps are summed per frame (speed times frame
   interval, at most 16), so a speed change inside the window counts from when it happened; steps
-  the budget held back while the GPU had time to spare (the budget still rising) do not count. It
-  counts only active time (tab visible, not paused, no rebuild), decides at 3, 6, 10 and 15 s of
-  it, restarts its window after a reset or rebuild, and never lowers a grid the user picked.
+  the budget held back while the GPU had time to spare (the budget still rising) do not count. A
+  browser can give fewer than 40 fps whatever the grid (iOS Safari gives 30 in Low Power Mode,
+  and Chrome's Energy Saver lowers the frame rate too). The frames that started with no frame on
+  the GPU show that rate; when they are at least half of the window, 90 % of their rate is enough.
+  It counts only active time (tab visible, not paused, no rebuild), decides at 3, 6, 10 and 15 s
+  of it, restarts its window after a reset or rebuild, and never lowers a grid the user picked.
 
 ## 3. Simulation on the GPU
 

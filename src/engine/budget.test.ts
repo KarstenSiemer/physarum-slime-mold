@@ -4,9 +4,9 @@ import { FrameBudget, MAX_STEPS_PER_FRAME } from './budget';
 const FRAME = 1000 / 60;
 
 /**
- * Frames on a 60 Hz vsync; `gpuMs` is how long the GPU needs for a frame with that many steps. A frame
- * waits for the GPU while three earlier frames are unfinished (the browser stops issuing frames then).
- * `gaps` adds a pause in rendering (ms) before a frame, like a hidden tab.
+ * Frames on a vsync of `period` ms (60 Hz by default); `gpuMs` is how long the GPU needs for a frame with
+ * that many steps. A frame waits for the GPU while three earlier frames are unfinished (the browser stops
+ * issuing frames then). `gaps` adds a pause in rendering (ms) before a frame, like a hidden tab.
  */
 function run(
   b: FrameBudget,
@@ -14,6 +14,7 @@ function run(
   speed: number | ((frame: number) => number),
   gpuMs: (steps: number) => number,
   gaps: Record<number, number> = {},
+  period = FRAME,
 ) {
   const steps: number[] = [];
   const finish: number[] = []; // GPU finish time of each frame
@@ -23,10 +24,10 @@ function run(
   let busyUntil = 0;
   let resolved = 0;
   for (let f = 0; f < frames; f++) {
-    if (f > 0) now += FRAME + (gaps[f] ?? 0);
+    if (f > 0) now += period + (gaps[f] ?? 0);
     const blocker = finish[f - 3];
     if (blocker !== undefined && blocker > now) {
-      now = Math.ceil(blocker / FRAME) * FRAME;
+      now = Math.ceil(blocker / period) * period;
       late.push(f);
     }
     while (resolved < finish.length && (finish[resolved] ?? Infinity) <= now) b.done(finish[resolved++] ?? now);
@@ -223,5 +224,25 @@ describe('FrameBudget', () => {
     const slow = new FrameBudget();
     const limited = run(slow, 240, 960, (n) => 1 + 5 * n);
     expect(sum(limited.steps)).toBeLessThan(0.25 * slow.requested);
+  });
+
+  it('counts the frames that start with the GPU idle, and their intervals: the rate the browser gives', () => {
+    // A browser that gives 30 fps (iOS Low Power Mode) and a GPU that keeps up: every frame but the first.
+    const capped = new FrameBudget();
+    const { late } = run(capped, 90, 120, (n) => 2 + 5 * n, {}, 2 * FRAME);
+    expect(late).toEqual([]);
+    expect(capped.idleFrames).toBe(89);
+    expect(capped.idleMs / capped.idleFrames).toBeCloseTo(2 * FRAME, 6);
+    // A GPU too slow for even one step holds the frames up: only the second frame, before its queue
+    // fills, starts with it idle.
+    const slow = new FrameBudget();
+    run(slow, 600, 120, (n) => 1 + 25 * n);
+    expect(slow.idleFrames).toBe(1);
+    // A pause in rendering (a hidden tab) is no frame interval of the browser.
+    const paused = new FrameBudget();
+    paused.next(0, 120);
+    paused.next(5000, 120);
+    expect(paused.idleFrames).toBe(0);
+    expect(paused.idleMs).toBe(0);
   });
 });
