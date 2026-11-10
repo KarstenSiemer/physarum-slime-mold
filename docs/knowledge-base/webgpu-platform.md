@@ -213,6 +213,11 @@ an outline (ADR 0009, item 11).
   With food and light outlined without it, the test took 1.44 to 1.62 s on WebGPU (1.93 to 1.96 s
   before, in the same containers), and 4.65 to 5.18 s on WebGL2 (3.21 to 3.45 s), where SwiftShader
   runs the larger fragment shader of the outlines on the CPU.
+- Other work on the host slows both sides of a pair, not one: with a load average of 5 to 7 (other
+  test runs and a virtual machine), every replay of 100,000 strokes in ADR 0019 took 30 to 60 %
+  longer than the same replays measured earlier that day, the JavaScript part on WebGL2 most. Two
+  source trees with the same paint code still came out within 3 % of each other in one page.
+  Compare ratios measured in one page, not times measured at different hours.
 - SwiftShader compiles a compute pipeline in about 1.3 s when it holds the outline pass: a new
   WebGPU device with every pipeline and a first simulation took 16.2 to 16.8 s with six outline
   pipelines and 9.4 to 10.4 s with one. On Metal both took 6 to 18 ms, with Chrome's shader cache.

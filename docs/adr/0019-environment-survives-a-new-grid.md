@@ -329,6 +329,23 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   food and light without a tile of `env`, and a condition fixed per segment chooses one of six
   pipelines (ADR 0009, item 11).
 
+  Again after the rebase onto the final PR 2 (2026-11-10): this branch against PR 2 alone
+  (01059ae), paired in one page, until the GPU finished, the median of 5 rounds (3 for a kind for
+  each stroke) in each of two runs, with other work on the host (load average 5 to 7). The join
+  before the rebase (30b2007) took the same in the same page, within 3 %. The load made every
+  column 30 to 60 % slower than in the table above. On WebGPU the branch took 3.0 to 3.6 times as
+  long as PR 2 alone, as above; on WebGL2 2.9 to 7.6 times (above 2.9 to 5.7), and 58 to 65 times
+  for a kind for each stroke (above 46). There most of the time is JavaScript that waits for the
+  GPU, and the load slowed it most.
+
+  | 100,000 strokes in one call | WebGPU, PR 2 (01059ae) | WebGPU, branch | WebGL2, PR 2 (01059ae) | WebGL2, branch |
+  | --------------------------- | ---------------------- | -------------- | ---------------------- | -------------- |
+  | One drag                    | 284–292 ms             | 893–927 ms     | 55–59 ms               | 318–319 ms     |
+  | Drags                       | 327–357 ms             | 994–1,056 ms   | 68–70 ms               | 198–202 ms     |
+  | A session                   | 328–358 ms             | 1,017–1,081 ms | 70–75 ms               | 220–227 ms     |
+  | Random places               | 313–325 ms             | 1,069–1,100 ms | 96–98 ms               | 718–725 ms     |
+  | A kind for each stroke      | 282–296 ms             | 1,022–1,044 ms | 111–124 ms             | 7,212–7,240 ms |
+
 - **Strokes far out, long strokes and large brushes.** On a periodic grid both paint passes measure
   a cell's distance to the stroke and to its copies one period away. That finds the nearest copy
   for a segment that starts inside the grid and spans at most half of it along each axis, so both

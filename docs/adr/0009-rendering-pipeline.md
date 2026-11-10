@@ -319,7 +319,12 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   alone 0.99). PR 3 held only within 4 cells of the brush, which left wrong bytes, and the bytes
   that a subtraction can change lie within 7.07 cells; holding only those would need the same
   region for WebGL2's hold over the union of a run, which a draw cannot test per cell (TODO.md,
-  owner).
+  owner). Again after the rebase onto the final PR 2 (2026-11-10), paired in one page on WebGL2
+  against PR 2 alone (01059ae), radius 1,000 cells on 3072 × 1920 (periodic), median of 8 rounds,
+  two runs, with other work on the host (load average 5 to 7): erasers 5.87 and 6.01 ms per stroke
+  against 0.37 and 0.36 ms, walls 5.49 and 6.02 ms against 0.36 and 0.41 ms, 15 to 17 times PR 2
+  alone. The join before the rebase (30b2007) took 5.96 and 6.07 ms in the same page: the load,
+  not the rebase, made both slower than the 3.80 and 3.90 ms above.
 
 - Repainting many strokes (ADR 0019, item 11), paired in one page against PR 2 alone (a5631bc)
   and the joined branch before the review fixes (3a961ce), whole engines, grid 1536 × 864, until the
@@ -328,8 +333,11 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   0.09 s for PR 2 alone. With an outline right after every segment's paint and no workgroup memory
   (the first merge) they took 1.49 to 1.81 s and 5.81 to 6.32 s. The worst case is a kind that
   changes with every stroke of a drag: every stroke is then a run of its own on WebGL2, and 100,000
-  of them took 4.8 to 4.9 s there (0.10 s for PR 2 alone, 0.69 to 0.73 s on WebGPU). The table is
-  in ADR 0019.
+  of them took 4.8 to 4.9 s there (0.10 s for PR 2 alone, 0.69 to 0.73 s on WebGPU). After the
+  rebase onto the final PR 2, paired against PR 2 alone (01059ae) with other work on the host,
+  100,000 mixed strokes took 0.89 to 1.10 s on WebGPU against 0.28 to 0.36 s, and 0.20 to 0.73 s
+  on WebGL2 against 0.06 to 0.10 s; the join before the rebase took the same within 3 %. The
+  tables are in ADR 0019.
 - The drawn outline can lie up to about half a cell from the blocked cells: the model is
   cell-based, the picture is smooth. Where an erased outline met remaining food, the food's
   outline can move by up to about half a cell (item 2).
