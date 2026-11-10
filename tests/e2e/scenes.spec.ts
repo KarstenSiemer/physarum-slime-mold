@@ -183,13 +183,13 @@ test('the Maze keeps its walls and food when the grid changes, and gets them bac
   expect(errors).toEqual([]);
 });
 
-test('the panel shows the density the Steiner tree runs, not a rounded one', async ({ page }) => {
+test('the panel shows the density a scene runs, and a typed density is not rounded', async ({ page }) => {
   await openSmallScene(page);
   await preset(page).selectOption('steiner');
-  await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.012);
+  await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.02);
   const density = page.getByRole('spinbutton', { name: 'Agents per cell value' });
-  await expect(density).toHaveValue('0.012');
-  // A typed value keeps its digits too.
+  await expect(density).toHaveValue('0.02');
+  // The slider's step of 0.01 would make 0.01 of it: a log range keeps three significant digits.
   await density.fill('0.013');
   await density.press('Enter');
   await page.waitForFunction(() => globalThis.physarum?.settings.density === 0.013);

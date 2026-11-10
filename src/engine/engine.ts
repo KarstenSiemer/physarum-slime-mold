@@ -4,7 +4,7 @@ import { FrameBudget } from './budget';
 import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
-import { fitResolution, gridSize, memoryBudget } from './sizing';
+import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -51,7 +51,8 @@ export class Engine {
   private live = false;
   private raf = 0;
   private rebuilding: Promise<void> | undefined;
-  private built = { resolution: 0, density: 0 };
+  /** What the current simulation was built for: its grid and agent count follow from these. */
+  private built = { resolution: 0, density: 0, dish: false };
 
   private constructor(
     readonly backend: Backend,
@@ -127,8 +128,11 @@ export class Engine {
     return f;
   }
 
+  /** The grid or the agent count changes: a dish counts its agents over the short side's square (agentCount()). */
   private needsRebuild() {
-    return this.settings.resolution !== this.built.resolution || this.settings.density !== this.built.density;
+    const { resolution, density, boundary } = this.settings;
+    const b = this.built;
+    return resolution !== b.resolution || density !== b.density || (boundary === 'dish') !== b.dish;
   }
 
   /** True while the simulation is being replaced; it cannot be used meanwhile. */
@@ -145,13 +149,13 @@ export class Engine {
     this.rebuilding ??= (async () => {
       let old = this.sim as Sim | undefined;
       do {
-        const { resolution, density } = this.settings;
+        const { resolution, density, boundary } = this.settings;
         const [w, h] = gridSize(resolution, this.canvas.width / Math.max(1, this.canvas.height));
-        const agents = Math.max(1, Math.min(this.backend.maxAgents, Math.round(density * w * h)));
+        const agents = Math.max(1, Math.min(this.backend.maxAgents, agentCount(this.settings, w, h)));
         this.live = false;
         old?.destroy();
         old = undefined;
-        this.built = { resolution: 0, density: 0 }; // nothing is built until the new one exists
+        this.built = { resolution: 0, density: 0, dish: false }; // nothing is built until the new one exists
         try {
           this.sim = await this.backend.createSim(this.settings, w, h, agents);
         } catch (err) {
@@ -168,7 +172,7 @@ export class Engine {
         old = this.sim;
         this.live = true;
         this.painted = 0; // a new simulation starts without food, light and walls
-        this.built = { resolution, density };
+        this.built = { resolution, density, dish: boundary === 'dish' };
         this.fitView();
       } while (this.needsRebuild());
       // Settings may have changed during the allocation (seed, layout, shares): start from them.

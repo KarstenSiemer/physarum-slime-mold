@@ -213,11 +213,11 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 18',
     summary: 'Two food sources in a dish: the network contracts into one band between them.',
     watch:
-      'A loose network forms, snags on both food sources, then contracts into one band between them, like the real slime mold between two oat flakes. On a tall screen the foods sit closer, and the band stays a thick lens. In some runs a side branch to the rim stays for a long time.',
+      'A loose network forms, snags on both food sources, then contracts into one band between them, like the real slime mold between two oat flakes. In some runs a side branch to the rim stays for a long time.',
     about:
       'Several hundred agents in a round dish with two food sources. Food releases a scent that spreads and fades like the trail, so the network snags on both foods. Then it contracts like a soap film until one band joins them. The band stays many cells wide, because only one agent fits in a cell.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 18 (p. 145): 2 % of cells hold an agent, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. On grid 256 the dish is smaller than Jones’ 200 × 200 lattice, so a run takes a few thousand steps.',
+    why: 'Jones’ values for Fig. 18 (p. 145): as many agents as 2 % of the square around the dish, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. On grid 256 the dish is smaller than Jones’ 200 × 200 lattice.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
@@ -232,15 +232,15 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 19',
     summary: 'Four food sources: the network shrinks to a short tree that joins them all.',
     watch:
-      'A loose network wraps around the four food sources, then contracts. On a wide screen it usually ends as two three-way junctions joined by a short bridge, where paths meet at about 120° as in soap films (Plateau’s laws). On a tall screen the foods sit in a tall rectangle, and the bridge is long.',
+      'A loose network wraps around the four food sources, then contracts. It ends as two three-way junctions joined by a short bridge, where paths meet at about 120° as in soap films (Plateau’s laws). The bridge runs across or along the screen, and a tail to the rim can stay for a few thousand steps.',
     about:
-      'The same setup with four food sources and fewer agents. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
+      'The same setup with four food sources at the corners of a square. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 19 (p. 146): sensor and rotation angle 45°, one agent per cell, food weight 0.01. Jones filled 2 % of a lattice that his round dish nearly covers, about 2.5 % of the dish. Here 1.2 % of cells hold an agent, which gives about 2.5 % of the dish on a wide screen. With more agents the tree stays a thick cross.',
+    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01. With fewer agents loops and tails to the rim stay for thousands of steps longer.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
-        { resolution: 256, density: 0.012, boundary: 'dish', foodStrength: 0.01 },
+        { resolution: 256, density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
     // A square with the corners as far from the centre as the 0.32 × 0.26 rectangle of before.
     env: [food(-0.145, -0.145, 0.02), food(0.145, -0.145, 0.02), food(-0.145, 0.145, 0.02), food(0.145, 0.145, 0.02)],
@@ -252,11 +252,11 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 21',
     summary: 'A full sheet of agents slowly dies off and shrinks onto the food sources.',
     watch:
-      'Agents die at random, half of them within about 2,800 steps. The sheet shrinks onto the food sources and leaves a network of veins between them. In the paper this slow removal lets the sheet adapt; much faster removal tears holes into it (p. 148).',
+      'Agents die at random, half of them within about 2,800 steps. The sheet shrinks onto the food sources and leaves a network of veins between them, in most runs the same one. In some runs a hole opens beside the middle food early, and a loop stays around it.',
     about:
       'The dish starts packed with agents, which soon form a solid sheet. In every step each agent dies with a small chance, so the sheet thins out and shrinks onto the food sources, as a starving plasmodium does. In the paper, three runs ended in the same network (Fig. 21).',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 21 (p. 147): 0.5 agents per cell, so the agents start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Food weight 0.05 and the positions of the food are this app’s choice; Jones does not give them.',
+    why: 'Jones’ values for Fig. 21 (p. 147): as many agents as 50 % of the square around the dish, so they start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Slow removal lets the sheet adapt; faster removal tears holes into it (p. 148). Food weight 0.05 and the food positions are this app’s choice.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },

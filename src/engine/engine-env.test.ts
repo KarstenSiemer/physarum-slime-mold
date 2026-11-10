@@ -132,7 +132,8 @@ function hold(backend: CpuBackend) {
 const canvas = (width = 1600, height = 1000) => ({ width, height }) as HTMLCanvasElement;
 const maze = presetById('maze');
 const three = presetById('three-strains');
-if (!maze?.env || !three) throw new Error('presets missing');
+const shrinking = presetById('shrinking');
+if (!maze?.env || !three || !shrinking?.env) throw new Error('presets missing');
 const mazeEnv = maze.env;
 
 async function engineWith(settings: Settings, env = mazeEnv, c = canvas(), backend = new CpuBackend()) {
@@ -210,6 +211,20 @@ describe('food, light and walls on a new simulation', () => {
     expect([sim().width, sim().height]).toEqual([512, 512]);
     const square = await engineWith(maze.settings(), mazeEnv, canvas(1000, 1000));
     expect(differing(sim().env, square.sim().env)).toBe(0);
+  });
+
+  it('survive a switch between the dish and another arena, which changes the agent count', async () => {
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinking.env);
+    const before = sim().env.slice();
+    const agents = sim().agents;
+    expect(agents).toBe(Math.round(0.5 * 320 * 320)); // the dish counts the square of the short side
+    await engine.apply({ ...engine.settings, boundary: 'box' });
+    expect(sim().agents).toBe(Math.round(0.5 * 512 * 320));
+    // Painted under the dish's boundary, the food stays as it was.
+    expect(differing(sim().env, before)).toBe(0);
+    await engine.apply({ ...engine.settings, boundary: 'dish' });
+    expect(sim().agents).toBe(agents);
+    expect(differing(sim().env, before)).toBe(0);
   });
 
   it('move painted strokes with the grid, by the ratio of the short sides', async () => {

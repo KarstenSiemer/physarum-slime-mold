@@ -83,7 +83,7 @@ describe('presets', () => {
       spots: [45, 45, 40, 20, -1], // Fig. 16 top
       stripes: [112.5, 67.5, 13, 20, -1], // Fig. 16 bottom
       'shortest-path': [45, 45, 9, 2, 1], // Fig. 18
-      steiner: [45, 45, 9, 1.2, 1], // Fig. 19: %p 2 of a lattice his dish nearly fills, about 2.5 % of the dish
+      steiner: [45, 45, 9, 2, 1], // Fig. 19
       shrinking: [45, 45, 9, 50, 1], // Fig. 21
       wound: [45, 45, 27, 10, -1], // Fig. 22
     };
@@ -155,11 +155,16 @@ describe('presets', () => {
     }
   });
 
-  it('give Steiner 1.2 % of the cells and four food sources, and do not call them a square', () => {
+  it('give Steiner Jones’ population and four food sources at the corners of a square', () => {
     const p = preset('steiner');
-    expect(p.settings().density).toBe(0.012);
-    expect(p.env?.filter((e) => e.kind === 'food')).toHaveLength(4);
-    for (const t of texts(p)) expect(t).not.toMatch(/square/i);
+    // Agents for 2 % of the square around the dish (sizing.ts agentCount), as Jones counts %p (Fig. 19, p. 146).
+    expect(p.settings().density).toBe(0.02);
+    const foods = p.env?.filter((e) => e.kind === 'food') ?? [];
+    expect(foods).toHaveLength(4);
+    // In the canonical frame (engine/environment.ts), so a square on every screen.
+    const side = Math.abs(foods[0]?.at[0] ?? 0);
+    for (const f of foods) expect(f.at.map(Math.abs)).toEqual([side, side]);
+    expect(p.about).toMatch(/corners of a square/);
     expect(p.watch).toMatch(/two three-way junctions joined by a short bridge/);
   });
 
@@ -194,6 +199,10 @@ describe('presets', () => {
       const all = (re: RegExp) => [...text.matchAll(re)].map((m) => m[1] ?? '');
       const strains = (key: 'sensorOffset' | 'decay') => s.strains.map((st) => st[key]);
       for (const v of all(/(\d+(?:\.\d+)?) % of cells hold/g)) expect(num(v) / 100, p.id).toBeCloseTo(s.density, 9);
+      for (const v of all(/as many agents as (\d+(?:\.\d+)?) % of the square around the dish/g)) {
+        expect(num(v) / 100, p.id).toBeCloseTo(s.density, 9);
+        expect(s.boundary, p.id).toBe('dish');
+      }
       for (const v of all(/(\d+(?:\.\d+)?) agents per cell(?! per strain)/g)) expect(num(v), p.id).toBe(s.density);
       for (const v of all(/(\d+(?:\.\d+)?) agents per cell per strain/g))
         expect(num(v), p.id).toBeCloseTo(s.density / s.strains.length, 2);

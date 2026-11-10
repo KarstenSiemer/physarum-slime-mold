@@ -139,7 +139,7 @@ describe('snap and fieldText (sliders and their number fields)', () => {
   const { density, decay, speed } = { ...globalSpec, ...strainSpec };
 
   it('keep 3 significant digits on a log range, so small values stay what they are', () => {
-    expect(snap(0.012, density)).toBe(0.012); // Steiner tree, Jones' share of the dish
+    expect(snap(0.012, density)).toBe(0.012); // the step of 0.01 would give 0.01
     expect(fieldText(0.012, density)).toBe('0.012');
     expect(snap(0.012345, density)).toBe(0.0123);
     expect([3, 0.15, 8].map((v) => fieldText(v, density))).toEqual(['3', '0.15', '8']);

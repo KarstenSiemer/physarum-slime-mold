@@ -176,10 +176,16 @@ describe.each(Object.entries(BACKENDS))('%s: food, light and walls', (_, create)
     engine.destroy();
   });
 
-  // Every agent on its own free cell from the first step (ADR 0008), placed after the walls are painted.
+  // Every agent on its own free cell from the first step (ADR 0008), in the scenes with walls or a dish.
   it.each([
     ['maze', 320, 180],
     ['maze', 180, 390],
+    ['shortest-path', 320, 180],
+    ['shortest-path', 180, 390],
+    ['steiner', 320, 180],
+    ['steiner', 180, 390],
+    ['shrinking', 320, 180],
+    ['shrinking', 180, 390],
   ] as const)('start %s (%i × %i canvas) with every agent alive on a free cell of its own', async (id, w, h) => {
     const { engine } = await load(id, {}, [w, h]);
     const { width, height } = engine.sim;
