@@ -1,11 +1,22 @@
 // Runs in Chromium with real GPU APIs (Metal locally, SwiftShader in CI). See ADR 0010.
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hexToLinear } from '../model/color';
-import { BOUNDARIES, defaultSettings, defaultStrain, LAYOUTS, STYLES, type Settings } from '../model/params';
+import {
+  BOUNDARIES,
+  defaultSettings,
+  defaultStrain,
+  LAYOUTS,
+  STYLES,
+  type Boundary,
+  type Settings,
+} from '../model/params';
 import { outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
-import type { GlSim } from './gl/sim';
+import agentsFrag from './gl/glsl/agents.frag?raw';
+import wallsFrag from './gl/glsl/walls.frag?raw';
+import { compile, simProgram, type Programs, type Walled } from './gl/programs';
+import { GlSim } from './gl/sim';
 import { AgentToolKind } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
@@ -19,7 +30,8 @@ import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
-import type { Simulation } from './sim';
+import wallsWgsl from './shaders/walls.wgsl?raw';
+import { Simulation } from './sim';
 import { equilibrium } from './sizing';
 import { SHAPE_RANGE, type Backend, type Sim, type Stroke, type View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -64,6 +76,25 @@ function segmentDistance([px, py]: [number, number], [ax, ay]: [number, number],
   return Math.hypot(px - ax - t * abx, py - ay - t * aby);
 }
 
+/**
+ * Walls in the way of many sensors, on a grid of 64 × 48 cells or larger: a column at the wrap seam, a diagonal one
+ * cell thick, a short thick dash and a ring.
+ */
+const WALLS: Stroke[] = [
+  { kind: 'wall', from: [0.5, 10], to: [0.5, 40], radius: 0.5 },
+  { kind: 'wall', from: [10, 6], to: [40, 30], radius: 0.6 },
+  { kind: 'wall', from: [50, 20], to: [52, 20], radius: 1.5 },
+  ...Array.from({ length: 12 }, (_, k): Stroke => {
+    const [a, b] = [k, k + 1].map((j) => (j / 12) * 2 * Math.PI) as [number, number];
+    return {
+      kind: 'wall',
+      from: [30 + 8 * Math.cos(a), 36 + 8 * Math.sin(a)],
+      to: [30 + 8 * Math.cos(b), 36 + 8 * Math.sin(b)],
+      radius: 0.75,
+    };
+  }),
+];
+
 describe('WGSL', () => {
   it('compiles without errors or warnings', async () => {
     const backend = await WebGpuBackend.create(document.createElement('canvas'));
@@ -74,6 +105,7 @@ describe('WGSL', () => {
       diffuse: common + diffuseWgsl,
       paint: common + paintWgsl,
       sort: common + sortWgsl,
+      walls: common + wallsWgsl,
       render: renderWgsl,
       bloom: bloomWgsl,
       histogram: histogramWgsl,
@@ -432,7 +464,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
 
     // The longest step the panel allows: a move of 8 cells enters up to 13 cells, so the wall can be the fourth
-    // or a later one on the way (the walk loop in clearPath runs up to 24 cells).
+    // or a later one on the way (the walk in clearPath enters up to WALK = 92 cells).
     it('never lets a step of 8 cells cross a one-cell wall, also where the wall is far along the move', async () => {
       const [w, h, n, wall] = [64, 40, 128, 32];
       const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 8 }];
@@ -453,6 +485,490 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(await beyond(false)).toBeGreaterThan(40);
       expect(await beyond(true)).toBe(0);
     });
+
+    // In a dish only a wall byte inside the dish is a wall (wallIn in agents.wgsl and agents.frag, as cellAt() for
+    // the cell of a move). On a 64 × 64 dish a move of 4.21 cells from (23.5, 2.5) at −18° ends in cell (27, 1) and
+    // enters cell (25, 1) on its way, whose centre lies 31.18 cells from the centre of the dish, outside its radius
+    // of 31. A wall byte there does not block the move; one in cell (25, 2), also on the way, does.
+    it.each([false, true])('lets a move pass a wall byte outside the dish (collisions %s)', async (collisions) => {
+      const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 4.21 }];
+      const settings = { ...defaultSettings(), layout: 'empty' as const, boundary: 'dish' as const, strains };
+      const move = async ([x, y]: [number, number]) => {
+        const sim = await make(settings, 64, 64, 1);
+        const env = new Uint8Array(64 * 64 * 4);
+        env[(y * 64 + x) * 4] = 255;
+        sim.writeEnv(env);
+        sim.writeAgent(0, { x: 23.5, y: 2.5, heading: (-18 * Math.PI) / 180, bits: 4 });
+        // The occupancy is built from the agent written above when the rule is switched on.
+        if (collisions) sim.update({ ...settings, collisions: true });
+        sim.run(1);
+        const [a] = await sim.readAgents();
+        return [Math.floor(a?.x ?? -1), Math.floor(a?.y ?? -1)];
+      };
+      expect(await move([25, 1])).toEqual([27, 1]);
+      expect(await move([25, 2])).toEqual([23, 2]);
+    });
+  });
+
+  // A sensor reads BLOCKED where a wall lies between the agent and the sensor (sense in agents.wgsl and agents.frag,
+  // ADR 0020): the segment's cells go through the walk of the moves (clearPath). One agent with SA 45°, RA 30° and
+  // trail 10 only in the cell of its front-right sensor turns right by RA toward it. With a wall on the way the sensor
+  // reads BLOCKED, the lowest value, and the agent turns left, away from it. A sensor that read the trail behind the
+  // wall would turn it right, one that read 0 would keep its heading. The cells on each sensor's way were listed with
+  // a float32 copy of the walk, so every wall below lies on the front-right sensor's way only, or on no sensor's way.
+  describe('walls block sensors (ADR 0020)', () => {
+    const RA = 30;
+    interface Probe {
+      size: [number, number];
+      at: [number, number];
+      /** Degrees. */
+      heading: number;
+      sensorOffset: number;
+      /** The cell of the front-right sensor, which gets the trail. */
+      trail: [number, number];
+      /** In this order: strokes painted, wall cells written with writeEnv, strokes painted. */
+      before?: Stroke[];
+      walls?: [number, number][];
+      strokes?: Stroke[];
+      /** The periodic grid if not given. */
+      boundary?: Boundary;
+      collisions: boolean;
+    }
+
+    /** The turn of the agent in one step, in whole degrees: RA to the right, 360 − RA to the left, 0 none. */
+    async function turn(o: Probe) {
+      const [w, h] = o.size;
+      const strains = [{ ...defaultStrain(0), sensorAngle: 45, rotationAngle: RA, sensorOffset: o.sensorOffset }];
+      const settings = { ...defaultSettings(), layout: 'empty' as const, boundary: o.boundary ?? 'wrap', strains };
+      const sim = await make(settings, w, h, 1);
+      if (o.before) sim.paint(o.before);
+      if (o.walls) {
+        const env = new Uint8Array(w * h * 4);
+        for (const [x, y] of o.walls) env[(y * w + x) * 4] = 255;
+        sim.writeEnv(env);
+      }
+      if (o.strokes) sim.paint(o.strokes);
+      const trail = new Float32Array(w * h * 4);
+      trail[(o.trail[1] * w + o.trail[0]) * 4] = 10;
+      sim.writeTrail(trail);
+      const heading = (o.heading * Math.PI) / 180;
+      sim.writeAgent(0, { x: o.at[0], y: o.at[1], heading, bits: 4 });
+      // The occupancy is built from the agent written above when the rule is switched on.
+      if (o.collisions) sim.update({ ...settings, collisions: true });
+      sim.run(1);
+      const [a] = await sim.readAgents();
+      if (!a) throw new Error('no agent');
+      // A blocked move would give a random heading: every move here must succeed.
+      expect(total(await sim.readCounts()), 'the agent moved').toBe(1);
+      return (Math.round((a.heading * 180) / Math.PI - o.heading) + 720) % 360;
+    }
+
+    for (const collisions of [false, true]) {
+      // From (32.3, 32.6) the front-right sensor's way to cell (38, 38) enters cells (35, 35) and (35, 36).
+      it(`do not let a sensor read the trail behind a wall one cell thick (collisions ${collisions})`, async () => {
+        const probe: Probe = {
+          size: [64, 64],
+          at: [32.3, 32.6],
+          heading: 0,
+          sensorOffset: 9,
+          trail: [38, 38],
+          collisions,
+        };
+        const wall: Stroke = { kind: 'wall', from: [35.5, 33.5], to: [35.5, 36.5], radius: 0.5 };
+        expect(await turn(probe)).toBe(RA);
+        expect(await turn({ ...probe, strokes: [wall] })).toBe(360 - RA);
+        // Beside the way, and past the sensor's cell: no wall on the way.
+        expect(await turn({ ...probe, walls: [[34, 36]] })).toBe(RA);
+        expect(await turn({ ...probe, walls: [[39, 39]] })).toBe(RA);
+        // Erased again: the clearance follows (Sim.paint), and the trail is read again.
+        expect(await turn({ ...probe, strokes: [wall, { ...wall, kind: 'erase', radius: 1 }] })).toBe(RA);
+        // A wall far away gives the agent's tile a clearance above the sensor's way; the wall added next must lower it.
+        const far: Stroke = { kind: 'wall', from: [2.5, 2.5], to: [2.5, 2.5], radius: 0.5 };
+        expect(await turn({ ...probe, walls: [[2, 2]], strokes: [wall] })).toBe(360 - RA);
+        expect(await turn({ ...probe, before: [far], walls: [[35, 35]] })).toBe(360 - RA);
+      });
+
+      // From the centre of cell (16, 16) at 45° the way to cell (16 + 4·sx, 16 + 4·sy) runs through grid corners. At the
+      // middle one it touches the cells (16 + 2·sx, 16 + sy) and (16 + sx, 16 + 2·sy): float32 rounding decides which a
+      // plain walk would enter, so each one alone blocks (CORNER). (16 + 3·sx, 16 + sy) lies beside the way.
+      it(`count both cells beside a corner the sensor's way passes, in every direction (collisions ${collisions})`, async () => {
+        const results: string[] = [];
+        for (const heading of [0, 90, 180, 270]) {
+          const r = ((heading + 45) * Math.PI) / 180;
+          const [sx, sy] = [Math.sign(Math.round(Math.cos(r) * 2)), Math.sign(Math.round(Math.sin(r) * 2))];
+          const probe: Probe = {
+            size: [32, 32],
+            at: [16.5, 16.5],
+            heading,
+            sensorOffset: 4 * Math.SQRT2,
+            trail: [16 + 4 * sx, 16 + 4 * sy],
+            collisions,
+          };
+          const turns = [];
+          for (const wall of [
+            undefined,
+            [16 + 2 * sx, 16 + sy],
+            [16 + sx, 16 + 2 * sy],
+            [16 + 3 * sx, 16 + sy],
+          ] as const)
+            turns.push(await turn(wall ? { ...probe, walls: [[wall[0], wall[1]]] } : probe));
+          results.push(`${heading}°: ${turns.join(' ')}`);
+        }
+        const [right, left] = [RA, 360 - RA];
+        expect(results).toEqual([0, 90, 180, 270].map((hd) => `${hd}°: ${right} ${left} ${left} ${right}`));
+      });
+
+      // A corner on the wrap seam of a 32 × 32 periodic grid: from (30.5, 30.5) at 45° the way to the sensor's cell
+      // (34, 34), wrapped (2, 2), passes the grid corner (32, 32), which is (0, 0). The two cells beside it, (0, 31) and
+      // (31, 0), and the cell past it, (0, 0), each block alone; (2, 0) lies beside the way. From (1.5, 1.5) at 225° the
+      // way to (29, 29) passes the same corner in the other direction: beside it (31, 0) and (0, 31), past it (31, 31),
+      // and (29, 31) beside the way. The walk wraps these cells step by step (stepAxis in agents.wgsl).
+      it(`count the cells at a corner on the wrap seam, in both directions (collisions ${collisions})`, async () => {
+        const results: string[] = [];
+        for (const { at, heading, trail, walls } of [
+          {
+            at: [30.5, 30.5],
+            heading: 0,
+            trail: [2, 2],
+            walls: [
+              [0, 31],
+              [31, 0],
+              [0, 0],
+              [2, 0],
+            ],
+          },
+          {
+            at: [1.5, 1.5],
+            heading: 180,
+            trail: [29, 29],
+            walls: [
+              [31, 0],
+              [0, 31],
+              [31, 31],
+              [29, 31],
+            ],
+          },
+        ] as const) {
+          const probe: Probe = {
+            size: [32, 32],
+            at: [at[0], at[1]],
+            heading,
+            sensorOffset: 4 * Math.SQRT2,
+            trail: [trail[0], trail[1]],
+            collisions,
+          };
+          const turns = [await turn(probe)];
+          for (const [x, y] of walls) turns.push(await turn({ ...probe, walls: [[x, y]] }));
+          results.push(`${heading}°: ${turns.join(' ')}`);
+        }
+        const [right, left] = [RA, 360 - RA];
+        expect(results).toEqual([0, 180].map((hd) => `${hd}°: ${right} ${left} ${left} ${left} ${right}`));
+      });
+
+      // In a dish only a wall byte inside the dish is a wall (wallIn). On a 64 × 64 dish, from (23.5, 61.5) at −27°,
+      // the front-right sensor's way to cell (27, 62) enters cell (25, 62), whose centre lies 31.18 cells from the
+      // centre of the dish, outside its radius of 31. A wall byte there does not block the sensor; one in cell (25, 61),
+      // also on the way, does.
+      it(`count no wall byte outside the dish on a sensor's way (collisions ${collisions})`, async () => {
+        const probe: Probe = {
+          size: [64, 64],
+          at: [23.5, 61.5],
+          heading: -27,
+          sensorOffset: 4.21,
+          trail: [27, 62],
+          boundary: 'dish',
+          collisions,
+        };
+        expect(await turn(probe)).toBe(RA);
+        expect(await turn({ ...probe, walls: [[25, 62]] })).toBe(RA);
+        expect(await turn({ ...probe, walls: [[25, 61]] })).toBe(360 - RA);
+      });
+
+      // The longest sensor distance, 64 cells, at 45° and off the grid corners: the way enters 89 cells, and the wall
+      // is the last one before the sensor's cell (65, 105). A walk of fewer cells than WALK would miss it.
+      it(`block a sensor 64 cells away at the last cell before it (collisions ${collisions})`, async () => {
+        const probe: Probe = {
+          size: [128, 128],
+          at: [20.3, 60.6],
+          heading: 0,
+          sensorOffset: 64,
+          trail: [65, 105],
+          collisions,
+        };
+        expect(await turn(probe)).toBe(RA);
+        expect(await turn({ ...probe, walls: [[64, 105]] })).toBe(360 - RA);
+        expect(await turn({ ...probe, walls: [[20, 61]] })).toBe(360 - RA); // and at the first one
+      });
+
+      // On the periodic grid the way crosses the seam: from (60.3, 16.6) to the sensor's cell (2, 22) through cell (1, 21)
+      // on the far side, and from (3.7, 16.6), heading 180°, to cell (61, 10) through cell (62, 11).
+      it(`block a sensor whose way crosses the wrap seam at a wall on the far side (collisions ${collisions})`, async () => {
+        for (const [at, heading, trail, wall] of [
+          [[60.3, 16.6], 0, [2, 22], [1, 21]],
+          [[3.7, 16.6], 180, [61, 10], [62, 11]],
+        ] as const) {
+          const probe: Probe = {
+            size: [64, 32],
+            at: [at[0], at[1]],
+            heading,
+            sensorOffset: 9,
+            trail: [trail[0], trail[1]],
+            collisions,
+          };
+          expect(await turn(probe), `${heading}°`).toBe(RA);
+          expect(await turn({ ...probe, walls: [[wall[0], wall[1]]] }), `${heading}°`).toBe(360 - RA);
+        }
+      });
+    }
+
+    // Two runs with one seed and walls in the way of many sensors give the same agents and trails; another seed not.
+    it.each([false, true])('give identical agents and trails for one seed (collisions %s)', async (collisions) => {
+      const run = async (seed: number) => {
+        const strains = [9, 30, 64].map((sensorOffset, i) => ({ ...defaultStrain(i), sensorOffset }));
+        const sim = await make({ seed, collisions, density: collisions ? 0.5 : 1, strains }, 64, 48, 3072);
+        sim.paint(WALLS);
+        sim.reset();
+        sim.run(30);
+        return [await sim.readAgents(), Array.from(await sim.readTrail())];
+      };
+      expect(await run(42)).toEqual(await run(42));
+      expect(await run(43)).not.toEqual(await run(42));
+    });
+
+    // Built at the start, the passes for walls made the app reach its engine 2.6 s later on SwiftShader (CI, ADR 0020).
+    // The simulation here gets pipelines or programs of its own, also in a repeated run: no other test or run can have
+    // built them already.
+    let runs = 0;
+    it('build the passes for walls at the first wall, and none without walls', async () => {
+      const [w, h, n] = [64, 48, 1500];
+      const settings = { ...defaultSettings(), seed: 3 };
+      let sim: Sim;
+      /** The passes for walls built so far: the clearance passes and the agent passes that check for walls. */
+      let walled: () => string[];
+      let errors = async (during: () => Promise<void>) => during();
+      if (kind === 'webgpu') {
+        const { device } = (backend as WebGpuBackend).gpu;
+        const now = vi.spyOn(device, 'createComputePipeline');
+        const later = vi.spyOn(device, 'createComputePipelineAsync');
+        onTestFinished(() => {
+          now.mockRestore();
+          later.mockRestore();
+        });
+        walled = () =>
+          [...now.mock.calls, ...later.mock.calls]
+            .map(([d]) => d.compute)
+            .filter(
+              (c) => c.entryPoint === 'markWalls' || c.entryPoint === 'measureClearance' || c.constants?.SENSE_WALLS,
+            )
+            .map((c) => `${c.entryPoint ?? ''}${c.constants?.SENSE_WALLS ? ' with the check' : ''}`)
+            .sort();
+        errors = async (during) => {
+          device.pushErrorScope('validation');
+          await during();
+          expect((await device.popErrorScope())?.message).toBeUndefined();
+        };
+        device.pushErrorScope('validation');
+        sim = await Simulation.create(device, settings, w, h, n, `${agentsWgsl}\n// Run ${++runs} of one test.\n`);
+        expect((await device.popErrorScope())?.message).toBeUndefined();
+      } else {
+        const context = document.createElement('canvas').getContext('webgl2');
+        if (!context?.getExtension('EXT_color_buffer_float'))
+          throw new Error('WebGL2 with float render targets needed');
+        onTestFinished(() => context.getExtension('WEBGL_lose_context')?.loseContext());
+        const sources = vi.spyOn(context, 'shaderSource');
+        walled = () =>
+          sources.mock.calls
+            .map(([, source]) => source)
+            .filter((s) => s.includes(wallsFrag) || s.includes('#define SENSE_WALLS 1'))
+            .map((s) => (s.includes(wallsFrag) ? 'walls.frag' : 'agents.frag with the check'))
+            .sort();
+        sim = new GlSim(context, compile(context), settings, w, h, n, context.getExtension('EXT_float_blend') !== null);
+      }
+      live.push(sim);
+      const food: Stroke = { kind: 'food', from: [10, 10], to: [30, 12], radius: 3 };
+      const wall: Stroke = { kind: 'wall', from: [40, 10], to: [40, 30], radius: 1 };
+      const erase = (s: Stroke): Stroke => ({ ...s, kind: 'erase', radius: s.radius + 1 });
+      /** An environment with 255 in the given byte of the given cells: 0 a wall, 1 food. */
+      const env = (cells: [number, number, number][]) => {
+        const data = new Uint8Array(w * h * 4);
+        for (const [x, y, byte] of cells) data[(y * w + x) * 4 + byte] = 255;
+        return data;
+      };
+
+      // Food, light and erasing, written food, and both agent rules: no pass for walls.
+      sim.paint([food, { kind: 'light', from: [50, 30], to: [50, 30], radius: 4 }, erase(food)]);
+      sim.writeEnv(env([[5, 5, 1]]));
+      sim.run(3);
+      sim.update({ ...settings, collisions: true });
+      sim.run(3);
+      sim.clearEnvironment();
+      sim.paint([erase(wall)]);
+      sim.run(1);
+      await sim.finish();
+      expect(walled(), 'without walls').toEqual([]);
+
+      await errors(async () => {
+        sim.paint([wall]);
+        sim.run(2);
+        await sim.finish();
+      });
+      const all =
+        kind === 'webgpu'
+          ? ['advance with the check', 'claim with the check', 'markWalls', 'measureClearance']
+          : ['agents.frag with the check', 'walls.frag'];
+      expect(walled(), 'at the first wall').toEqual(all);
+      // Built once: more walls, erased walls and written walls build none again.
+      sim.paint([erase(wall), wall]);
+      sim.writeEnv(env([[20, 20, 0]]));
+      sim.clearEnvironment();
+      sim.paint([wall]);
+      sim.update({ ...settings, collisions: false });
+      sim.run(2);
+      await sim.finish();
+      expect(walled(), 'after more walls').toEqual(all);
+    });
+  });
+
+  // The passes from the shipped shaders against the same passes from another version of agents.wgsl or agents.frag, on
+  // the same device or context. `noSensorCheck`: the shipped source with the wall check cut out of sense(). Where no
+  // wall is painted, the passes built without the check (the override SENSE_WALLS, in agents.frag the #define) must
+  // give the bytes of that source: a check that is built in but never runs changed the float rounding on an M3 Pro.
+  // The version keeps every other change of ADR 0020 (the clearance, the walk with wallIn and stepAxis), so it is not
+  // the code before ADR 0020, and a change in the code that both share does not show here. ADR 0020 records the
+  // comparison with the code before it. `everyWalk`: without the clearance skip (walls.wgsl), so every walk runs to its
+  // end.
+  describe('agent passes against other versions of the agent shader', () => {
+    const edit = (source: string, from: string, to: string) => {
+      if (source.split(from).length !== 2) throw new Error(`Not found once in the agent shader: ${from}`);
+      return source.replace(from, to);
+    };
+    const VERSIONS = {
+      noSensorCheck: {
+        wgsl: edit(agentsWgsl, '(!habitable(c) || (SENSE_WALLS && !clearPath(pos, p, clear)))', '(!habitable(c))'),
+        glsl: edit(
+          agentsFrag,
+          '  if (!habitable(c) || !clearPath(pos, p, clear)) return BLOCKED;\n#else',
+          '  if (!habitable(c)) return BLOCKED;\n#else',
+        ),
+      },
+      everyWalk: {
+        wgsl: edit(agentsWgsl, ' || max(span.x, span.y) < clear)', ')'),
+        glsl: edit(agentsFrag, ' || max(span.x, span.y) < clear)', ')'),
+      },
+    };
+    type Version = keyof typeof VERSIONS;
+    let gl: { gl: WebGL2RenderingContext; floatBlend: boolean; shipped: Programs; versions: Record<Version, Programs> };
+
+    // Every version compiles every pipeline once: on SwiftShader (CI) that takes seconds per version.
+    beforeAll(async () => {
+      if (kind === 'webgpu') {
+        for (const v of Object.values(VERSIONS)) (await variant(v.wgsl, defaultSettings(), 16, 16, 1)).destroy();
+        return;
+      }
+      const context = document.createElement('canvas').getContext('webgl2');
+      if (!context?.getExtension('EXT_color_buffer_float')) throw new Error('WebGL2 with float render targets needed');
+      const shipped = compile(context);
+      const programs = (glsl: string): Programs => {
+        let walled: Walled | undefined;
+        return {
+          ...shipped,
+          agents: simProgram(context, glsl),
+          walled: () =>
+            (walled ??= {
+              agents: simProgram(context, '#define SENSE_WALLS 1\n' + glsl),
+              walls: shipped.walled().walls,
+            }),
+        };
+      };
+      gl = {
+        gl: context,
+        floatBlend: context.getExtension('EXT_float_blend') !== null,
+        shipped,
+        versions: {
+          noSensorCheck: programs(VERSIONS.noSensorCheck.glsl),
+          everyWalk: programs(VERSIONS.everyWalk.glsl),
+        },
+      };
+    }, 180_000);
+
+    /** A WebGPU simulation from another agent shader; a validation error fails the test. */
+    async function variant(wgsl: string, s: Settings, w: number, h: number, n: number) {
+      const { device } = (backend as WebGpuBackend).gpu;
+      device.pushErrorScope('validation');
+      const sim = await Simulation.create(device, s, w, h, n, wgsl);
+      expect((await device.popErrorScope())?.message).toBeUndefined();
+      return sim;
+    }
+
+    /** A simulation from the shipped shaders and one from `version`, with the same settings and walls. */
+    async function pair(version: Version, patch: Partial<Settings>, w: number, h: number, n: number, walls: Stroke[]) {
+      const s = { ...defaultSettings(), ...patch };
+      const sims: [Sim, Sim] =
+        kind === 'webgpu'
+          ? [await backend.createSim(s, w, h, n), await variant(VERSIONS[version].wgsl, s, w, h, n)]
+          : [
+              new GlSim(gl.gl, gl.shipped, s, w, h, n, gl.floatBlend),
+              new GlSim(gl.gl, gl.versions[version], s, w, h, n, gl.floatBlend),
+            ];
+      live.push(...sims);
+      // The pipelines for walls are built at the first paint with a wall (Kernels.walled in sim.ts).
+      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      device?.pushErrorScope('validation');
+      for (const sim of sims) {
+        sim.paint(walls);
+        sim.reset();
+      }
+      expect((await device?.popErrorScope())?.message).toBeUndefined();
+      return sims;
+    }
+
+    const state = async (sim: Sim) => ({ agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) });
+    const strains = [0, 1, 2].map((i) => ({
+      ...defaultStrain(i),
+      sensorAngle: 35,
+      rotationAngle: 40,
+      sensorOffset: 18,
+      stepSize: 1.4,
+      decay: 0.6,
+      attraction: [0, 1, 2].map((j) => (j === i ? 1 : -0.7)),
+    }));
+
+    // Three strains that flee each other, as in the start scene, and Jones' agents with one agent per cell. A wall check
+    // that is built into the passes but never runs can change how the compiler rounds the sensor positions. On an M3
+    // Pro the three strains then gave other agents by step 4 on both backends; on 96 × 64 cells, and in the other
+    // scene, they did not within 64 steps. SwiftShader (CI) gave the same agents in both scenes.
+    const SCENES = [
+      ['three strains', { seed: 7, density: 3, diffusion: 2, layout: 'sectors', strains }, [160, 144], 8],
+      ['one agent per cell', { seed: 7, density: 0.5, collisions: true }, [96, 64], 64],
+    ] as const;
+
+    it.each(SCENES)(
+      'give the agents and trail of the source without the sensor check while no wall is painted (%s)',
+      async (_, patch, [w, h], steps) => {
+        const n = Math.round(patch.density * w * h);
+        const [shipped, unchecked] = await pair('noSensorCheck', patch, w, h, n, []);
+        for (const sim of [shipped, unchecked]) sim.run(steps);
+        expect(await state(shipped)).toEqual(await state(unchecked));
+        // With walls, sensors see them only in the shipped passes.
+        const [walled, blind] = await pair('noSensorCheck', patch, w, h, n, WALLS);
+        for (const sim of [walled, blind]) sim.run(steps);
+        expect(await state(walled)).not.toEqual(await state(blind));
+      },
+    );
+
+    // Sensors of 9, 30 and 64 cells and walls at every distance from the agents: the clearance skips only walks
+    // that cannot meet a wall, on the periodic grid, in a box and in a dish.
+    it.each(BOUNDARIES.flatMap((b) => [false, true].map((c) => [b, c] as const)))(
+      'skip only walks that cannot meet a wall (%s, collisions %s)',
+      async (boundary, collisions) => {
+        const [w, h] = [96, 64];
+        const far = [9, 30, 64].map((sensorOffset, i) => ({ ...defaultStrain(i), sensorOffset, stepSize: 1 + 3 * i }));
+        const patch = { seed: 3, boundary, collisions, density: collisions ? 0.4 : 1, strains: far };
+        const [shipped, every] = await pair('everyWalk', patch, w, h, Math.round(patch.density * w * h), WALLS);
+        for (const sim of [shipped, every]) sim.run(48);
+        expect(await state(shipped)).toEqual(await state(every));
+      },
+    );
   });
 
   describe('environment', () => {
@@ -2343,19 +2859,34 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         return sim;
       }
 
+      // Walls in the way of sensors up to 64 cells long (ADR 0020), on the periodic grid.
+      async function walled(collisions: boolean, sortInterval: number) {
+        const far = [9, 30, 64].map((sensorOffset, i) => ({ ...defaultStrain(i), sensorOffset }));
+        const patch = { seed: 13, collisions, density: collisions ? 0.5 : 2, strains: far };
+        const sim = (await make(patch, 64, 48, collisions ? 1536 : 6144)) as Simulation;
+        sim.sortInterval = sortInterval;
+        sim.paint(WALLS);
+        sim.reset();
+        sim.run(72);
+        return sim;
+      }
+
       const state = async (sim: Sim) => ({ agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) });
+      const BUILDS = { wrap: open, 'box with tools and shrinkage': arena, 'walls in the way of sensors': walled };
 
       it.each([
         ['wrap', false],
         ['wrap', true],
         ['box with tools and shrinkage', false],
         ['box with tools and shrinkage', true],
+        ['walls in the way of sensors', false],
+        ['walls in the way of sensors', true],
       ] as const)(
         'gives the same agents and trails as unsorted runs (%s, collisions %s)',
         async (scene, collisions) => {
-          const build = scene === 'wrap' ? open : arena;
+          const build = BUILDS[scene];
           const unsorted = await state(await build(collisions, 0));
-          if (scene !== 'wrap') {
+          if (scene === 'box with tools and shrinkage') {
             // Shrinkage must kill a part of the agents, or its random stream would not matter.
             const dead = unsorted.agents.filter((a) => (a.bits & 4) === 0).length;
             expect(dead).toBeGreaterThan(unsorted.agents.length / 10);

@@ -1,6 +1,6 @@
 import type { Boundary, Settings } from '../../model/params';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
+import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
@@ -106,8 +106,14 @@ export class GlSim implements Sim {
   private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
-  /** A wall was painted since the last clear: moves then check every cell they cross (agents.frag clearPath). */
+  /**
+   * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
+   * clearPath, ADR 0020).
+   */
   private walls = false;
+  /** Per clearance tile: whether it holds a wall cell, and how far the nearest wall lies at least (walls.frag). */
+  private readonly walled: Target;
+  private readonly clearance: Target;
   private a: Bit = 0;
   private p: Bit = 0;
   private q: Bit = 0;
@@ -147,6 +153,9 @@ export class GlSim implements Sim {
       }
       this.env = t(width, height, gl.RGBA8);
       this.shape = t(width, height, gl.RGBA8);
+      const [tx, ty] = [Math.ceil(width / CLEAR_TILE), Math.ceil(height / CLEAR_TILE)];
+      this.walled = t(tx, ty, gl.R32F);
+      this.clearance = t(tx, ty, gl.R32F);
       this.tally = t(TALLY_SIDE, TALLY_SIDE, floatBlend ? gl.RGBA32F : gl.RGBA16F);
       // Collisions need float blending. Allocated now, so a failure is freed below; the budget counts them.
       if (floatBlend) {
@@ -323,6 +332,20 @@ export class GlSim implements Sim {
     gl.colorMask(true, true, true, true);
     gl.disable(gl.BLEND);
     if (foreign) this.shapeHeld = undefined;
+    // Without walls no pass reads the clearance: an erase then needs none, and compiles no program for walls.
+    if (this.walls && strokes.some((s) => s.kind === 'wall' || s.kind === 'erase')) this.updateClearance();
+  }
+
+  /**
+   * The clearance of every tile from the walls in `env` (walls.frag), which the agent pass reads to skip walks that
+   * cannot meet a wall; needed again after every change of the walls (Simulation.updateClearance in sim.ts). The
+   * first pass marks the tiles with a wall cell; its unused sampler `walled` gets another texture than the target.
+   */
+  private updateClearance() {
+    const env = this.env.texture;
+    const { walls } = this.prog.walled();
+    this.pass(walls, this.walled, { env, walled: this.clearance.texture }, { mode: 0 });
+    this.pass(walls, this.clearance, { env, walled: this.walled.texture }, { mode: 1 });
   }
 
   clearEnvironment() {
@@ -439,11 +462,16 @@ export class GlSim implements Sim {
     [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
     this.hasEnvironment = this.layers.some(Boolean);
     this.shapeHeld = undefined;
+    if (this.walls) {
+      this.writeParams(); // binds this simulation's parameters for the passes
+      this.updateClearance();
+    }
   }
 
   destroy() {
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
+    all.push(this.walled, this.clearance);
     if (this.panels) all.push(this.panels);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     for (const t of all) destroyTarget(gl, t);
@@ -532,7 +560,7 @@ export class GlSim implements Sim {
     const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
-        this.prog.agents,
+        this.walls ? this.prog.walled().agents : this.prog.agents,
         dst,
         {
           agentsIn: src.texture,
@@ -541,6 +569,7 @@ export class GlSim implements Sim {
           env: this.env.texture,
           occ,
           claims,
+          clearance: this.clearance.texture,
         },
         { agentWidth: this.agentWidth, mode },
       );

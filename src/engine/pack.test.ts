@@ -1,9 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain } from '../model/params';
-import { packParams, PARAM_SLOTS, PARAMS_BYTES, START_ROUNDS, startRounds, STEP_OFFSET, strainEnds } from './pack';
+import { defaultSettings, defaultStrain, strainSpec } from '../model/params';
+import {
+  CLEAR_TILE,
+  packParams,
+  PARAM_SLOTS,
+  PARAMS_BYTES,
+  START_ROUNDS,
+  startRounds,
+  STEP_OFFSET,
+  strainEnds,
+} from './pack';
 
-const wgsl = readFileSync(new URL('./shaders/common.wgsl', import.meta.url), 'utf8');
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+const wgsl = read('./shaders/common.wgsl');
 
 describe('Params layout', () => {
   it('matches the WGSL struct member order', () => {
@@ -60,5 +70,37 @@ describe('strainEnds', () => {
     const s = [defaultStrain(0), { ...defaultStrain(1), share: 3 }];
     expect(strainEnds(s, 1000)).toEqual([250, 1000, 1000, 1000]);
     expect(strainEnds([defaultStrain(0)], 7)).toEqual([7, 7, 7, 7]);
+  });
+});
+
+// The walk of agents.wgsl and agents.frag (clearPath) and the clearance of walls.wgsl and walls.frag (ADR 0020).
+describe('wall walks and clearance', () => {
+  const constant = (path: string, name: string) => {
+    const m = new RegExp(`const (?:int )?${name} = (\\d+);`).exec(read(path));
+    if (!m) throw new Error(`${name} not in ${path}`);
+    return Number(m[1]);
+  };
+
+  it('walks every cell of the longest sensor and of the longest step, alike on both backends', () => {
+    const walk = constant('./shaders/agents.wgsl', 'WALK');
+    expect(constant('./gl/glsl/agents.frag', 'WALK')).toBe(walk);
+    // A segment of length L enters fewer than |dx| + |dy| + 2 ≤ L · √2 + 2 cells.
+    for (const max of [strainSpec.sensorOffset.max, strainSpec.stepSize.max])
+      expect(walk).toBeGreaterThanOrEqual(Math.floor(max * Math.SQRT2) + 2);
+    expect(walk).toBe(92);
+  });
+
+  it('uses one tile size and a search that is exact up to FAR, which the longest walk stays below', () => {
+    expect(constant('./shaders/common.wgsl', 'CLEAR_TILE')).toBe(CLEAR_TILE);
+    expect(constant('./gl/glsl/common.glsl', 'CLEAR_TILE')).toBe(CLEAR_TILE);
+    const [search, far] = [constant('./shaders/walls.wgsl', 'SEARCH'), constant('./shaders/walls.wgsl', 'FAR')];
+    expect([constant('./gl/glsl/walls.frag', 'WALL_SEARCH'), constant('./gl/glsl/walls.frag', 'WALL_FAR')]).toEqual([
+      search,
+      far,
+    ]);
+    // A tile more than SEARCH tiles away lies at least (SEARCH − 1) · CLEAR_TILE + 2 cells away (walls.wgsl).
+    expect(far).toBeLessThanOrEqual((search - 1) * CLEAR_TILE + 2);
+    // A walk of a sensor 64 cells away spans up to 65 cells along an axis; it can skip only below the clearance.
+    expect(far).toBeGreaterThan(Math.floor(strainSpec.sensorOffset.max) + 1);
   });
 });

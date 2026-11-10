@@ -136,3 +136,50 @@ GPU checks use invariants, not long exact trajectories:
   starts" reached step 5 after a median of 14.8 and 14.9 s against 14.4 and 15.1 s for its two page
   loads (6 runs). The boot waits keep their 60 s; a review run beside more containers saw one of
   them reach 60 s once, and its retry passed.
+- After walls block sensors (ADR 0020, on PR 2 without PR 3; same image, 2026-11-10), first with the
+  pipelines for walls built at the start and no other test container on the host (its load stayed at
+  8 to 13 from other work): the GPU project (247 tests) took 303 s. The hooks of `sim.gpu.test.ts`,
+  which now also compile two other versions of the agent shader, took 57 s against 40 s in the run
+  above, and Fig. 10 on WebGPU 93 s of 600 s. The e2e suite (28 tests) took 8.9 min without a retry
+  (7.7 min above). Its waits for the started app took 13.6 to 18.4 s of their 60 s, median 15.2 s
+  (above 10.7 to 22.7 s, median 12.4 s). Paired with the base in one container (6 runs, another test
+  container on the host), the first page load of "a preset chosen while the engine starts" reached
+  the engine after a median of 20.9 s against 18.3 s.
+- So the pipelines for walls are now built at the first wall (ADR 0020). On that code (same image,
+  another test container on the host for 5 of the 14 min) the GPU project (249 tests) took 282 s.
+  Its 40 new tests took 64 s together and at most 6.9 s each (the WebGL2 test against the source
+  without the sensor check, three strains on 160 × 144 cells). The test of when the passes for walls
+  are built compiles pipelines or programs of its own: 2.2 s on WebGPU, 3.9 s on WebGL2. The hooks
+  took 50 s, Fig. 10 on WebGPU 94 s. The e2e suite took 9.2 min without a retry, its waits for the
+  started app 11.2 to 24.6 s, median 15.0 s. The 15 small WebGPU tests of walls (one or a few
+  agents) took 0.03 to 7.0 s in the first run and 0.03 to 5.0 s in the last; 5 and 8 of them took
+  more than 1 s, 3 of them in both runs. A start A/B of scenes without walls on that code ran beside
+  another test container: its paired differences spread from −89 to +100 s, so it gives no result.
+  ADR 0020 has the compile times, paired in one page. On GitHub the last run on `main` took 5.1 min
+  for the GPU project and 6.9 min for the e2e suite, in a job limited to 30 min.
+- After the review of ADR 0020 (same image, 2026-11-10, commit `738e0ab`, load of the Docker VM
+  median 6.2): the GPU project (261 tests) passed in 338 s. The 12 tests added by the review took
+  1.6 s together, at most 0.85 s each. Fig. 10 took 114 s on WebGPU and 39 s on WebGL2 of 600 s,
+  the hook that builds the WebGPU backend 54.5 s of 180 s. The e2e suite (28 tests) passed in
+  8.3 min without a retry.
+- Many waits use more than a quarter of their limit, the share at which a wait is at risk on GitHub,
+  whose runners draw frames about 4 times slower than the image (above). In that run the waits for
+  the started app (step 5 within 60 s: `tests/e2e/helpers.ts`, `scenes.spec.ts`, `app.spec.ts`) took
+  11.1 to 23.3 s, median 13.4 s, 7 of 28 above 15 s. The notice wait in `scenes.spec.ts`
+  (`toBeHidden` within 20 s) took 12.1 s, because the notice stays for 12 s
+  (`src/ui/state.svelte.ts`). The WebGL2 counting test without float blending (`gl/sim.gpu.test.ts`)
+  took 15.6 s of 60 s, and the hook that builds the WebGPU backend 30 % of its limit. The code
+  before ADR 0020 shows the same: a review ran it paired with this code in two containers at once
+  (load of the VM median 13.7). Its start waits took a median of 20.5 s (21 of 28 above 15 s, the
+  longest 37.4 s), against 21.0 s (24 of 28, the longest 30.6 s) for this code, and the counting
+  test 19.1 s against 18.8 s. Paired by test, this code waited a median of 1.2 s longer, and longer
+  in 16 of 28 waits: the start A/B that the run above could not give shows no measurable change. In
+  a run of this code in that review, beside more load, one start wait reached 60.3 s and failed, and
+  the counting test failed at 68.1 s of 60 s. On GitHub the run of `main` at 2026-11-10 13:44 UTC
+  took 6.3 min for its GPU project (105 tests) and 7.9 min for its e2e suite (26 tests), so an e2e
+  test took about as long there as in the image. There Fig. 10, which runs 2,000 steps, took 271 s
+  of 600 s on WebGPU, 2.4 times as long as in the run above, and the counting test 5.0 s. Whether to
+  give these waits longer limits, wait for fewer steps or give the tests less work is an owner
+  decision (TODO.md).
+- ADR 0020 joined onto PR 3 (2026-11-10) did not run in the image: by the owner's decision of that
+  day, GitHub CI times it after the push. On the M3 Pro its GPU project (419 tests) passed in 17 s.
