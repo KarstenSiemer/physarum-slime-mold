@@ -17,7 +17,7 @@ const uint TOOL = 1u;
 const uint SHRINK = 2u;
 const uint BLOCK = 3u;
 
-bool habitable(int c) { return c >= 0 && texelFetch(env, cellCoord(c), 0).r < 0.5; }
+bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
 float sense(vec2 p, int s) {
   int c = cellOf(p);

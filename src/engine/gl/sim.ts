@@ -222,6 +222,10 @@ export class GlSim implements Sim {
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
 
+  writeEnv(data: Uint8Array) {
+    writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
+  }
+
   destroy() {
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.tally];

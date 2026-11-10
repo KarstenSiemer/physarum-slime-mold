@@ -91,4 +91,6 @@ fn cellCoord(i: u32) -> vec2i { return vec2i(i32(i % W()), i32(i / W())); }
 
 // Environment bytes: x wall, y food, z light (0…1).
 fn envOf(e: u32) -> vec4f { return unpack4x8unorm(e); }
-fn isWall(e: u32) -> bool { return (e & 0xffu) != 0u; }
+// A cell is a wall when its wall byte is at least 128 (0.5). isWall in common.glsl uses the same threshold.
+const WALL_BYTE = 128u;
+fn isWall(e: u32) -> bool { return (e & 0xffu) >= WALL_BYTE; }

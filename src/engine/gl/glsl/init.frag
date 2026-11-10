@@ -39,7 +39,7 @@ vec2 disc(vec2 c, float r, inout uint rng) {
   return c + d * dir(rand(rng) * TAU);
 }
 
-bool habitable(int c) { return c >= 0 && texelFetch(env, cellCoord(c), 0).r < 0.5; }
+bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy);

@@ -255,6 +255,10 @@ export class Simulation implements Sim {
     ]);
   }
 
+  writeEnv(data: Uint8Array) {
+    this.device.queue.writeBuffer(this.env, 0, data);
+  }
+
   destroy() {
     for (const t of [...this.trail, ...this.scent]) t.destroy();
     for (const b of [this.params, this.brush, ...this.agentBuffers, this.tiles, this.replacement]) b.destroy();

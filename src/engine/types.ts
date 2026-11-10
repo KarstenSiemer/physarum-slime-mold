@@ -51,6 +51,11 @@ export interface Sim {
   readEnv(): Promise<Uint8Array>;
   writeAgent(index: number, a: AgentState): void;
   writeTrail(data: Float32Array): void;
+  /**
+   * Replaces the environment with `data`, 4 bytes per cell as readEnv() returns them. For tests: the engine
+   * changes the environment only with paint() and clearEnvironment().
+   */
+  writeEnv(data: Uint8Array): void;
 }
 
 /**

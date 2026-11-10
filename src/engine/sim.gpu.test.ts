@@ -272,6 +272,58 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       sim.paint({ kind: 'erase', from: [15, 10], to: [15, 10], radius: 2 });
       expect((await sim.readEnv())[(10 * 64 + 15) * 4 + 1]).toBe(0);
     });
+
+    // One threshold in every shader that reads walls (isWall in common.wgsl and common.glsl): a wall byte of
+    // 128 or more. Row 2 + k holds wall byte BYTES[k] in columns 11 to 20.
+    describe('wall bytes from 128 on are walls', () => {
+      const BYTES = [0, 1, 64, 127, 128, 129, 200, 255];
+      const [w, h] = [32, 16];
+      const env = new Uint8Array(w * h * 4);
+      BYTES.forEach((b, k) => {
+        for (let x = 11; x <= 20; x++) env[((2 + k) * w + x) * 4] = b;
+      });
+      const wall = BYTES.map((b) => b >= 128);
+
+      it('for moves', async () => {
+        // All three sensors on the next cell: they read the same value, so the agent keeps its heading.
+        const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1 }];
+        const sim = await make({ layout: 'empty', strains }, w, h, BYTES.length);
+        sim.writeEnv(env);
+        BYTES.forEach((_, k) => {
+          sim.writeAgent(k, { x: 10.5, y: 2.5 + k, heading: 0, bits: 4 });
+        });
+        sim.run(1);
+        expect((await sim.readAgents()).map((a) => Math.floor(a.x) === 10)).toEqual(wall);
+      });
+
+      it('for diffusion', async () => {
+        const sim = await make({ layout: 'empty' }, w, h, 1);
+        sim.writeEnv(env);
+        sim.writeTrail(new Float32Array(w * h * 4).fill(1));
+        sim.run(1);
+        const trail = await sim.readTrail();
+        // A wall holds no trail; an open cell keeps the mean of its open neighbours, all 1, times 1 − decay.
+        const at = BYTES.map((_, k) => trail[((2 + k) * w + 15) * 4] ?? -1);
+        expect(at.map((v) => (v === 0 ? 'wall' : Math.abs(v - 0.9) < 1e-6 ? 'open' : v))).toEqual(
+          wall.map((x) => (x ? 'wall' : 'open')),
+        );
+      });
+
+      it('for start positions', async () => {
+        const sim = await make({ layout: 'mixed', density: 8 }, w, h, 8 * w * h);
+        sim.writeEnv(env);
+        sim.reset();
+        const inRow = BYTES.map(() => 0);
+        for (const a of await sim.readAgents()) {
+          const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
+          if (a.bits & 4 && x >= 11 && x <= 20 && y >= 2 && y < 2 + BYTES.length)
+            inRow[y - 2] = (inRow[y - 2] ?? 0) + 1;
+        }
+        // 80 agents per row on average; none in a wall.
+        expect(inRow.map((n) => n > 20)).toEqual(wall.map((x) => !x));
+        expect(inRow.filter((_, k) => wall[k])).toEqual([0, 0, 0, 0]);
+      });
+    });
   });
 
   describe('determinism and collisions', () => {

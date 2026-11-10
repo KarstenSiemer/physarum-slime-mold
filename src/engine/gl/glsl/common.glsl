@@ -81,6 +81,10 @@ ivec2 cellCoord(int i) { return ivec2(i % W(), i / W()); }
 
 uint bitsOf(vec4 a) { return uint(a.w + 0.5); }
 
+// A cell is a wall when its wall byte is at least 128 (0.5), as isWall in common.wgsl. `e` is a texel of the
+// RGBA8 environment, so its red channel is the wall byte / 255.
+bool isWall(vec4 e) { return e.r * 255.0 >= 127.5; }
+
 vec2 destination(vec4 a) { return a.xy + P.stepSize[int(bitsOf(a) & 3u)] * dir(a.z); }
 
 // Unique per step (a bijection on [0, 2^24)), so claims never tie; +1 keeps 0 as "no claim".
