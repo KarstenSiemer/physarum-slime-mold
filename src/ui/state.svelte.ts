@@ -1,7 +1,9 @@
 import type { Engine } from '../engine/engine';
+import { drawingOf, type Drawing } from '../model/link';
 import { defaultSettings, MAX_STRAINS, strainLike, type Settings } from '../model/params';
 import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
 import { modelChanged } from '../model/scene';
+import type { Link } from '../model/url';
 
 export const TOOLS = [
   { id: 'pan', key: '1', label: 'Move', help: 'Drag to move the view. Scroll or pinch to zoom.' },
@@ -28,7 +30,7 @@ export interface Stats {
 
 export interface AppState {
   settings: Settings;
-  /** Id of the loaded preset; empty for settings from the page address (a shared link or a reload). */
+  /** Id of the loaded preset; empty for settings from a link that names no scene (url.ts, docs/adr/0021). */
   scene: string;
   /** The settings the scene loaded with, to tell whether a model parameter changed since. */
   sceneBase: Settings | undefined;
@@ -37,6 +39,11 @@ export interface AppState {
    * deleted a shape (Engine.matches). Kept in step with the engine's edit list (setEngine()).
    */
   envChanged: boolean;
+  /**
+   * Counts changes of the food, light and walls: the engine changes its edit list outside Svelte (Engine.onEdits),
+   * and the page address follows this count (App.svelte).
+   */
+  envVersion: number;
   /**
    * For each strain, its index in the loaded scene, or −1 for a strain added since. Removing a strain moves the
    * later ones up a letter, so the scene card finds each strain's role here.
@@ -74,6 +81,7 @@ export const app = $state<AppState>({
   scene: '',
   sceneBase: undefined,
   envChanged: false,
+  envVersion: 0,
   strainOrigin: [],
   sceneSection: true,
   sceneAbout: false,
@@ -127,12 +135,17 @@ export function loadPreset(id: string) {
   setScene(p);
   noteMissingRule();
   clearedBeforeStart = false;
+  linkDrawing = undefined;
   app.envChanged = false;
+  app.envVersion++;
   void engine?.load($state.snapshot(app.settings), p.env);
 }
 
 /** Clear was pressed before the engine existed: the engine starts without the scene's shapes (startScene()). */
 let clearedBeforeStart = false;
+
+/** The drawing of the shared link the page opened, until the engine loads it (startScene()). */
+let linkDrawing: Drawing | undefined;
 
 /** Removes food, light and walls. The panel works before the engine exists, so a Clear then waits for the start. */
 export function clearEnvironment() {
@@ -141,7 +154,26 @@ export function clearEnvironment() {
     return;
   }
   clearedBeforeStart = true;
+  app.envVersion++;
   if (presetById(app.scene)?.env?.length) app.envChanged = true;
+}
+
+/**
+ * Opens a shared link (url.ts decodeLink()) before the engine exists: its settings, and the scene and the food, light
+ * and walls it names, which startScene() then loads. The scene card compares the settings with the scene's, within
+ * what this device runs (sceneChanged(), ruleUnavailable()), and the drawing with the scene's shapes. A link that
+ * names no scene loads as before: its settings, its strokes if it has any, and no scene text.
+ */
+export function openLink({ settings, drawing }: Link) {
+  app.settings = settings;
+  linkDrawing = drawing;
+  app.envVersion++;
+  const p = drawing && presetById(drawing.scene);
+  if (!p) return;
+  app.scene = p.id;
+  app.sceneBase = p.settings();
+  app.strainOrigin = [...drawing.origins];
+  app.envChanged = drawing.strokes.length > 0 || drawing.shapes.some((kept) => !kept);
 }
 
 /**
@@ -151,9 +183,33 @@ export function clearEnvironment() {
  * changed while it builds the simulation reaches the engine through App.svelte's settings effect and stays.
  */
 export function startScene(e: Pick<Engine, 'load'>) {
-  const env = clearedBeforeStart ? [] : (presetById(app.scene)?.env ?? []);
-  return e.load($state.snapshot(app.settings), env, app.sceneBase?.boundary);
+  const { shapes, strokes } = waiting();
+  linkDrawing = undefined;
+  return e.load($state.snapshot(app.settings), shapes, app.sceneBase?.boundary, strokes);
 }
+
+/** What startScene() loads: the scene's shapes that a shared link kept, or all of them, then the link's strokes. */
+function waiting() {
+  const env = clearedBeforeStart ? [] : (presetById(app.scene)?.env ?? []);
+  const d = clearedBeforeStart ? undefined : linkDrawing;
+  return { shapes: env.filter((_, i) => d?.shapes[i] ?? true), strokes: d?.strokes ?? [] };
+}
+
+/**
+ * The scene with its food, light and walls, for the page address (App.svelte): the engine's edit list as it is now,
+ * or what startScene() will load before the engine exists. The shapes are in the scene's own arena (startScene()).
+ */
+export function currentDrawing(): Drawing {
+  const p = presetById(app.scene);
+  const [scene, env] = [p?.id ?? '', p?.env ?? []];
+  const origins = $state.snapshot(app.strainOrigin);
+  if (engine) return drawingOf(engine.envList(), scene, env, sceneArena(), origins);
+  const { shapes, strokes } = waiting();
+  return { scene, origins, shapes: env.map((shape) => shapes.includes(shape)), strokes: [...strokes] };
+}
+
+/** The arena of the scene's shapes in the engine's list: the scene's own (startScene(), loadPreset()). */
+const sceneArena = () => app.sceneBase?.boundary ?? app.settings.boundary;
 
 /**
  * The backend cannot run one agent per cell: the switch shows it off, and that is no change to the scene. A scene
@@ -222,6 +278,7 @@ export const setEngine = (e: Engine | undefined) => {
   if (!e) return;
   e.onEdits = () => {
     const env = presetById(app.scene)?.env ?? [];
-    app.envChanged = !e.matches(env, app.sceneBase?.boundary ?? app.settings.boundary);
+    app.envChanged = !e.matches(env, sceneArena());
+    app.envVersion++;
   };
 };
