@@ -172,7 +172,8 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
    style draws its trail as an opaque gel, which hid food under thick trail completely (Shortest
    path at every zoom): the gel is clear enough to show the flake, its albedo over food mixed with
    the flake's colour by 0.6 (`GEL_CLEAR`). The trail on food then changes the colour by 23 % of
-   what it changes on the bare dish (Metal), against 10 % with food drawn over the trail.
+   what it changes on the bare dish (Metal), against 10 % with food drawn over the trail. Decided:
+   `GEL_CLEAR` stays 0.6 (owner decision 2026-11-10).
 5. **Walls** (design B): a ridge whose outer 1.5 cells slope up, lit with the gel's light, with an
    albedo per style and the drop shadow of item 2. Walls hold no trail, so the trail fell to
    nothing towards their cells, in steps along a slanted wall that its smooth outline no longer
@@ -338,7 +339,7 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   the trail around them, not of their own strain.
 - Fitted, the small foods of Shortest path are less prominent in glow than the bright squares
   before: the network covers them, and the flake shows mainly by its rim. In gel the flake shows
-  through the trail (item 4); how much (`GEL_CLEAR`) is for the owner to judge.
+  through the trail by `GEL_CLEAR` = 0.6, which the owner kept (item 4, 2026-11-10).
 - GPU tests on both backends (`src/engine/sim.gpu.test.ts`): the signs and the light of the
   outline bytes agree with `env` at every arena cell after overlapping strokes, walls over food,
   erasers and strokes across the edges (wrap, box, dish), also under brushes wider than a small
