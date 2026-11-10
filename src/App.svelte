@@ -22,6 +22,7 @@
     type Tool,
   } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
+  import { BrushDrag } from './ui/drag';
   import { GridTuner } from './ui/tune';
 
   let canvas: HTMLCanvasElement;
@@ -175,7 +176,7 @@
   // Pointer input: pan, pinch, paint and agent tools.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- pointer bookkeeping, never rendered
   const pointers = new Map<number, [number, number]>();
-  let lastGrid: [number, number] | undefined;
+  const drag = new BrushDrag();
   let held: [number, number] | undefined;
   let pinch = 0;
 
@@ -193,15 +194,8 @@
   const brushCells = (e: Engine) => app.brush * (canvas.width / canvas.clientWidth) * e.view.scale;
   const painting = (t: Tool) => t === 'food' || t === 'light' || t === 'wall' || t === 'erase';
 
-  // A drag records a segment only once the pointer has moved half a brush radius, and paints exactly what it records:
-  // every new grid paints all segments again (ADR 0019), and a slow drag would otherwise add one per pointer event.
   function paintTo(e: Engine, p: [number, number]) {
-    if (!painting(app.tool)) return;
-    const g = e.toGrid(...p);
-    const radius = Math.max(MIN_RADIUS, brushCells(e));
-    if (lastGrid && Math.hypot(g[0] - lastGrid[0], g[1] - lastGrid[1]) < radius / 2) return;
-    e.paint({ kind: app.tool, from: lastGrid ?? g, to: g, radius });
-    lastGrid = g;
+    if (painting(app.tool)) drag.to(e, p, app.tool, Math.max(MIN_RADIUS, brushCells(e)));
   }
 
   function onpointerdown(ev: PointerEvent) {
@@ -217,7 +211,7 @@
       return;
     }
     if (ev.button !== 0 || app.tool === 'pan') return;
-    lastGrid = undefined;
+    drag.end();
     paintTo(e, p);
     if (app.tool === 'inoculate' || app.tool === 'cut') held = p;
   }
@@ -244,7 +238,7 @@
 
   function onpointerup(ev: PointerEvent) {
     pointers.delete(ev.pointerId);
-    lastGrid = undefined;
+    drag.end();
     held = undefined;
   }
 

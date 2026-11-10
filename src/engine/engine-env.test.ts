@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { Engine } from './engine';
+import { BrushDrag } from '../ui/drag';
 import { fromStroke, strokeOn } from './environment';
 import { OutOfMemoryError } from './gpu';
 import { paintReference } from './paint-reference';
@@ -299,6 +300,38 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, fine)).toBe(0);
     await engine.apply({ ...engine.settings, resolution: 512 });
     expect(differing(sim().env, own)).toBe(0);
+  });
+
+  // The startup check lowers the grid in the first seconds, maybe while the user drags a brush (App.svelte).
+  it('follow a drag across a rebuild: no segment from cells of the old grid to cells of the new one', async () => {
+    const { engine, backend, sim } = await engineWith(maze.settings(), []);
+    expect([sim().width, sim().height]).toEqual([512, 320]);
+    const drag = new BrushDrag();
+    // Along canvas row 500, the middle row of the 1600 × 1000 canvas. The brush is 18.75 pixels, as App.svelte
+    // brushCells() makes it: 6 cells on 512 × 320, 12 on 1024 × 640.
+    const move = (x: number) => {
+      drag.to(engine, [x, 500], 'food', 18.75 * engine.view.scale);
+    };
+    for (let x = 300; x <= 700; x += 10) move(x);
+    const release = hold(backend);
+    const rebuilt = engine.apply({ ...engine.settings, resolution: 1024 });
+    for (let x = 710; x <= 800; x += 10) move(x); // still the old grid on screen
+    release();
+    await rebuilt;
+    for (let x = 810; x <= 1300; x += 10) move(x); // the new grid
+    drag.end();
+    engine.frame(0, 0);
+    const { width: w, height: h, env } = sim();
+    expect([w, h]).toEqual([1024, 640]);
+    // Row 500 is grid row 320 of 1024 × 640, and the drag 640 cells long there, with 12 cells on each side.
+    let [on, off] = [0, 0];
+    for (let c = 0; c < w * h; c++) {
+      if (!env[c * 4 + 1]) continue;
+      if (Math.abs(Math.floor(c / w) + 0.5 - h / 2) <= 13) on++;
+      else off++;
+    }
+    expect(on).toBeGreaterThan(640 * 22);
+    expect(off).toBe(0);
   });
 
   it('put a stroke drawn while the new grid is allocated where it was drawn', async () => {
