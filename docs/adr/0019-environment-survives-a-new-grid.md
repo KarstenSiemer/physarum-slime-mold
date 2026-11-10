@@ -160,8 +160,9 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   and an arena that holds the edit's (the same one; a box or a periodic one over a dish edit; a
   periodic one painted as it is over a box edit) clears every cell the edit paints (`coversExactly`,
   line 365). Both paint passes decide every cell of every kind by the same distance to the segment
-  and `d > radius` (`paint.wgsl` lines 49 and 50, `paint.frag` line 28; a periodic stroke takes the
-  smaller distance to a copy), and light paints only within its radius. Before, an Erase click on a
+  and `d > radius` (`paint.wgsl` lines 62 and 63, `paint.frag` lines 11 and 12 with
+  `strokeDistance` in `brush.glsl` line 22; a periodic stroke takes the smaller distance to a
+  copy), and light paints only within its radius. Before, an Erase click on a
   Food click with the same brush kept both in 13 of 24 trials (a Wall click in 8 of 16, the
   keyboard's 3 then 6 in 2 of 10), the card said "changed", and after a switch from the dish to the
   box such a dab came back on a square screen in 3 of 10 trials (review of the fifth draft); now in

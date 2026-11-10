@@ -64,7 +64,7 @@ GPU checks use invariants, not long exact trajectories:
   in a run the same day; the new tests took 9.7 s together, at most 1.2 s each. The e2e suite took
   453 s against 478 s, all 26 tests at the first try; single tests moved by up to 8 s either way.
   The waits for a started engine (`helpers.ts:31`, 60 s) took 11 to 21 s, as on the base (12 to
-  20 s); the wait at `scenes.spec.ts:301` took 11.7 of its 20 s, the 12 s of the notice it waits
+  20 s); the wait at `scenes.spec.ts:434` took 11.7 of its 20 s, the 12 s of the notice it waits
   out (`state.svelte.ts`, `noteMissingRule`), as on the base. The engine test that switches one
   agent per cell took 42 s of its 60 s in the GPU project (32 s on the base, 39 and 41 s in two
   earlier runs of the branch). Run alone, four times each and alternating with the base, it took
@@ -102,7 +102,7 @@ GPU checks use invariants, not long exact trajectories:
   compiles every program (19.1 and 30.1 s, PR 2 alone 17.9 s) and once the test that never blends
   into 32-bit float targets (15.4 s, then 9.8 s; PR 2 alone 9.2 s). The e2e suite (28 tests)
   passed at the first try in 719 and 574 s, PR 2 alone in 673 s. The waits for the started app
-  took 13 to 36 s of their 60 s (PR 2 alone 14 to 25 s), and the wait at `scenes.spec.ts:340` 12.0
+  took 13 to 36 s of their 60 s (PR 2 alone 14 to 25 s), and the wait at `scenes.spec.ts:434` 12.0
   of 20 s, the 12 s timer of the notice, as before.
 - After the review fixes of the join (59a66ee, same image, 2026-11-10, a git-archive copy, other
   work on the host at times): the GPU project (357 tests, 36 of them new) took 250 s, against 292
@@ -123,7 +123,7 @@ GPU checks use invariants, not long exact trajectories:
   SwiftShader's WebGPU compute up to 1.9 times slower than the image (review, 2026-11-10), so this
   test can pass a quarter of its limit there. The e2e suite (28 tests) passed at the first try in
   636 s (before 719 and 574 s, PR 2 alone 673 s). Its waits for the started app took 18 to 22 s of
-  60 s, median 18.9 s (before medians 15.1 to 22.0 s), and the wait at `scenes.spec.ts:340` 11.6 of
+  60 s, median 18.9 s (before medians 15.1 to 22.0 s), and the wait at `scenes.spec.ts:434` 11.6 of
   20 s, the 12 s timer of the notice: these are the only waits over a quarter of their limit, as
   before.
 - After the review fixes of ADR 0019 (same image, 2026-11-10, one other test container on the
