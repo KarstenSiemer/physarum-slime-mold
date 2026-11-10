@@ -39,14 +39,18 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
   `EXT_float_blend` the texture is `RGBA32F`, exact to 2²⁴ agents per cell.
 - Without `EXT_float_blend` only half floats blend, and they count exactly to 2048 (11
   significant bits), while condensed networks gather more agents of one strain in a cell (in the
-  default scene up to 29 083 at step 600, sampled every 50 steps on WebGPU; on WebGL2 at a 768
-  grid 2269). So each (cell, strain) gets its own pixel in four panels of
-  the grid size, with an 8-bit stencil (`deposit()` in `src/engine/gl/sim.ts`). A first point
-  pass counts the agents modulo 256 in the stencil and adds a carry for every 256th; a second
-  moves the remainder from the stencil into the color; a full-screen pass writes 256 · carry +
-  remainder into an `RGBA32F` texture. Exact up to 2048 · 256 = 524 288 agents per cell and
-  strain; beyond that the carry stops growing. It costs a second point pass, 20 B more per cell
-  (106 instead of 86) and halves the largest grid side.
+  default scene up to 29 083 at step 600, sampled every 50 steps on WebGPU; on WebGL2 5052 to
+  15 296 at step 400 on grids from 768 × 480 to 1536 × 910). So each (cell, strain) gets its own
+  pixel in four panels of the grid size, with an 8-bit stencil (`deposit()` in
+  `src/engine/gl/sim.ts`). A point pass counts the agents modulo 256 in the stencil and adds a
+  carry for every 256th. Eight full-screen passes, one per stencil bit, add 2^b to the color where
+  bit b is set, which copies the remainder. A last full-screen pass writes 256 · carry + remainder
+  into an `RGBA32F` texture. Exact up to 2048 · 256 = 524 288 agents per cell and strain; beyond
+  that the carry stops growing. It costs 20 B more per cell (106 instead of 86) and halves the
+  largest grid side. Paired in one page on the M3 Pro (default scene, steps 330 to 400, four
+  grids with 0.66 to 4.2 million agents), a step took 0.6 to 1.0 times as long as with the
+  inexact half-float counts used before; a second point pass in place of the eight bit passes
+  took 1.05 to 1.8 times as long.
 - Diffusion, decay and scents: one fragment pass with two render targets.
 - Collisions (ADR 0008): claims with `MAX` blending of unique float keys (< 2²⁴, exact in
   float32); needs `EXT_float_blend`, otherwise the switch is disabled.

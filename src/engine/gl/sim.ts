@@ -298,10 +298,11 @@ export class GlSim implements Sim {
    * Agents that moved into each cell this step, per strain, into `counts`. With float blending, one
    * additive point per agent. Half floats count exactly only to 2048, and condensed networks gather
    * thousands of agents in a cell, so without float blending each (cell, strain) gets its own pixel in
-   * a 2 × 2 panel layout, with an 8-bit stencil. Pass 1: every agent increments the stencil (mod 256),
-   * and the agent that finds it at 255 adds a carry (red). Pass 2: agents add 1 (green) while the
-   * stencil is above 0 and decrement it, which moves the remainder into green. The merge pass writes
-   * 256 · carry + remainder: exact up to 2048 · 256 = 524 288 agents per cell and strain.
+   * a 2 × 2 panel layout, with an 8-bit stencil. One point pass: every agent increments the stencil
+   * (mod 256), and the agent that finds it at 255 adds a carry (red). Then eight full-screen passes,
+   * one per stencil bit, add 2^b to green where bit b is set, which copies the remainder into green.
+   * The merge pass writes 256 · carry + remainder: exact up to 2048 · 256 = 524 288 agents per cell
+   * and strain.
    */
   private deposit() {
     const gl = this.gl;
@@ -321,9 +322,16 @@ export class GlSim implements Sim {
     gl.stencilFunc(gl.EQUAL, 255, 0xff);
     gl.stencilOp(gl.INCR_WRAP, gl.INCR_WRAP, gl.INCR_WRAP);
     this.points(4, t, gl.FUNC_ADD, this.agentsTex[this.a], [1, 0, 0, 0]);
-    gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
-    gl.stencilOp(gl.KEEP, gl.DECR, gl.DECR);
-    this.points(4, t, gl.FUNC_ADD, this.agentsTex[this.a], [0, 1, 0, 0]);
+    const fill = this.prog.fill;
+    gl.useProgram(fill.program);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    this.blend(gl.FUNC_ADD);
+    for (let b = 0; b < 8; b++) {
+      gl.stencilFunc(gl.EQUAL, 0xff, 1 << b);
+      gl.uniform4f(fill.loc('value'), 0, 2 ** b, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.disable(gl.BLEND);
     gl.disable(gl.STENCIL_TEST);
     this.pass(this.prog.counts, this.counts, { panels: t.texture }, {});
   }

@@ -129,6 +129,15 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     sim.destroy();
   });
 
+  // Without float blending the stencil holds the count mod 256 and the carry its 256s (deposit()).
+  it.each([1, 255, 256, 257, 511, 512, 513, 65_535, 65_537])('counts exactly in a cell with n = %i', async (n) => {
+    const { gl, prog } = context();
+    const sim = new GlSim(gl, prog, settingsWith({ strains: [defaultStrain(0)], shrink: 0 }), 1, 1, n, floatBlend);
+    sim.run(1);
+    expect(Array.from(await sim.readCounts())).toEqual([n, 0, 0, 0]);
+    sim.destroy();
+  });
+
   it('counts alive agents exactly, without a synchronous readback', async () => {
     const { canvas, syncReads } = countingCanvas();
     const { gl, prog } = context(canvas);
