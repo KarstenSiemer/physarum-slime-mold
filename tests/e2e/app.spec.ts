@@ -8,7 +8,10 @@ test('boots from a shared link, simulates and draws a network without errors', a
   await page.waitForFunction(() => globalThis.physarum !== undefined, undefined, { timeout: 30_000 });
   const adapter = await page.evaluate(() => globalThis.physarum?.backend.description ?? '?');
   test.info().annotations.push({ type: 'adapter', description: adapter });
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 100, undefined, { timeout: 60_000 });
+  // On CI, SwiftShader draws about one frame per second, and the frame budget then runs one step per
+  // frame (budget.ts): 100 steps did not fit this wait on GitHub runners. The contrast check below
+  // passes from step 10 on in this scene (std 40 to 47 at steps 10 to 100), so 30 steps suffice.
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 30, undefined, { timeout: 60_000 });
   const { mean, std } = await page.evaluate(async () => {
     const img = await globalThis.physarum?.capture();
     if (!img) throw new Error('no engine');

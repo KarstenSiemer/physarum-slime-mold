@@ -56,3 +56,9 @@ GPU checks use invariants, not long exact trajectories:
   on 2026-11-10 (171 s for the 30 tests before the sort and WebGL2 tests); apart from Fig. 10 no
   test took more than 33 s. The e2e suite took 2.9 min there, its slowest test 40 s of 120 s
   (the boot test's wait for step 100: 26 s of 60 s).
+- GitHub runners are slower than that image for the app's frame loop: on 2026-11-10 SwiftShader
+  drew about one frame per second there (3.9 in the image), and the frame budget then runs one
+  step per frame, so the boot test reached step 57 of 100 in its 60 s wait and failed. In the
+  image, each extra step in a frame cost about 150 ms (1, 4 and 16 steps per frame gave 3.9,
+  1.4 and 0.4 fps), so the budget's choice of one step is right there, and e2e tests wait for
+  few steps: the boot test for 30, because its contrast check passes from step 10 on.
