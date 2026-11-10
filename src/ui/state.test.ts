@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CpuBackend } from '../engine/cpu-backend';
+import { Engine } from '../engine/engine';
 import type { Boundary, Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 
@@ -77,6 +79,55 @@ describe('the current scene', () => {
     app.strain = 1;
     loadPreset('two-strains');
     expect(app.strain).toBe(1);
+  });
+});
+
+// The owner: painting counts too. The card offers Reload scene when the food, light or walls are not the scene's.
+describe('food, light and walls of the scene', () => {
+  it('count as a change once they differ from the scene, and not once the sweep took a stroke back', async () => {
+    const { app, clearEnvironment, loadPreset, sceneChanged, setEngine, startScene } = await fresh();
+    loadPreset('maze');
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    expect(sceneChanged()).toBe(false);
+    engine.paint({ kind: 'food', from: [100, 100], to: [100, 100], radius: 5 });
+    expect(sceneChanged()).toBe(true);
+    // Erased completely: the sweep deletes the food and the erase, and the list is the scene's again.
+    engine.paint({ kind: 'erase', from: [100, 100], to: [100, 100], radius: 10 });
+    expect(sceneChanged()).toBe(false);
+    // Over a wall of the maze: the wall goes, and so does the scene.
+    engine.paint({ kind: 'erase', from: [128, 0], to: [128, 230], radius: 12 });
+    expect(sceneChanged()).toBe(true);
+    loadPreset('maze');
+    expect(sceneChanged()).toBe(false);
+    clearEnvironment();
+    expect(sceneChanged()).toBe(true);
+    loadPreset('three-strains');
+    clearEnvironment(); // nothing to clear
+    expect(sceneChanged()).toBe(false);
+    setEngine(undefined);
+  });
+
+  it('count a Clear before the engine exists as a change of a scene with shapes, until a preset loads', async () => {
+    const { app, clearEnvironment, loadPreset, sceneChanged, setEngine, startScene } = await fresh();
+    loadPreset('three-strains');
+    clearEnvironment();
+    expect(sceneChanged()).toBe(false);
+    loadPreset('maze');
+    clearEnvironment();
+    expect(sceneChanged()).toBe(true);
+    // The engine then starts without the shapes, and says so too.
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    expect(engine.matches([], 'box')).toBe(true);
+    expect(sceneChanged()).toBe(true);
+    loadPreset('maze');
+    expect(sceneChanged()).toBe(false);
+    setEngine(undefined);
   });
 });
 

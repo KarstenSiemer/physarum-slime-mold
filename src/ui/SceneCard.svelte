@@ -66,7 +66,7 @@
     {/if}
     {#if changed}
       <p class="changed">
-        <span>You changed the scene’s settings.</span>
+        <span>You changed the scene.</span>
         <button
           type="button"
           onclick={() => {

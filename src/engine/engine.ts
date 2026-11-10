@@ -107,6 +107,7 @@ export class Engine {
     this.edits = env.map((e) => fromShape(e, arena));
     this.painted = 0;
     this.placement = undefined;
+    this.onEdits?.();
     // A new simulation paints the edits itself, before it places the agents.
     if (this.needsRebuild()) return this.rebuild();
     this.sim.update(this.settings);
@@ -117,6 +118,30 @@ export class Engine {
 
   /** Called with the new grid when the engine had to lower it to fit the device. */
   onAdjust: Adjust | undefined;
+
+  /** Called after every change of the edit list: a recorded stroke and the sweep after it, a Clear, a load. */
+  onEdits: (() => void) | undefined;
+
+  /**
+   * Whether the edit list is exactly `env`, a scene's shapes in the canonical frame of `arena`, as load() makes it:
+   * then the food, light and walls are the scene's own, also after a stroke and an erase that the sweep took back.
+   */
+  matches(env: readonly EnvShape[], arena: Boundary): boolean {
+    return (
+      this.edits.length === env.length &&
+      env.every((shape, i) => {
+        const [e, f] = [this.edits[i], fromShape(shape, arena)];
+        return (
+          e !== undefined &&
+          e.grid === undefined &&
+          e.kind === f.kind &&
+          e.boundary === f.boundary &&
+          e.radius === f.radius &&
+          [0, 1].every((k) => e.from[k] === f.from[k] && e.to[k] === f.to[k])
+        );
+      })
+    );
+  }
 
   /** Settings this device can hold: collisions need a backend feature, memory caps the grid. */
   fit(s: Settings): Settings {
@@ -208,6 +233,7 @@ export class Engine {
     this.painted = 0;
     this.placement = undefined;
     if (this.live) this.sim.clearEnvironment();
+    this.onEdits?.();
   }
 
   fitView() {
@@ -251,6 +277,7 @@ export class Engine {
     this.edits.push(edit);
     this.placement?.push(edit);
     if (edit.kind === 'erase' || edit.kind === 'wall') this.sweep(...this.viewGrid);
+    this.onEdits?.();
   }
 
   /**
