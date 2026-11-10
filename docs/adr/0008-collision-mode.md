@@ -35,15 +35,16 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
 - Synchronous rule: a cell vacated in this step is not free until the next step. Documented
   difference to Jones' sequential order.
 - Agent density in collision mode is capped at 1 per cell (the paper's `%p` ≤ 100).
-- In collision mode the mixed layout places agents on distinct cells with a bijective cell
-  permutation (`init.wgsl`). Some cells still start with several agents: the other layouts draw
-  random positions, an agent that starts in a wall or outside the dish moves to a random spot
-  without a check, and rounding can push an agent into the next cell. Measured on WebGPU on
-  2026-11-10 (seed 7): Shrinking plasmodium on 512 × 320 starts with 20,204 shared cells (up to
-  7 agents) and has none left by step 2,000 (on a 236 × 512 phone grid by step 3,000); the
-  Transport network starts with 14,516 in pie slices, gone by step 500, and with 4 in the mixed
-  layout, gone after one step. The rule keeps agents out of occupied cells, so the stacks only
-  dissolve as their agents move on. Placing every agent on a free cell is still open (TODO.md).
+- In collision mode every alive agent starts on a cell of its own, in every layout and arena
+  (since 2026-11-10, ADR 0019). Claim rounds follow the init pass: every agent not placed yet
+  claims its cell with a key unique per round (`atomicMax`, on WebGL2 `MAX` blending), the highest
+  key takes the cell, and the others draw again in their layout's region. An agent with no free
+  cell after 32 rounds starts dead. The mixed layout's first draw is a bijective cell permutation,
+  so without walls and dish one round places everyone. Before, only the mixed layout started on
+  distinct cells: other layouts drew random positions, an agent in a wall or outside the dish
+  moved to a random spot without a check, and rounding pushed an agent into the next cell.
+  Shrinking plasmodium then started with 19,563 shared cells on 512 × 288 (seed 7); now every
+  scene with the rule starts with none, on both backends.
 - Jones' attraction networks need the rule. Without it, agents pile up and the Fig. 4 network
   contracts into a few straight lines that wrap around the edges, usually within 2,000 to
   8,000 steps (measured on 2026-11-09 on WebGPU and WebGL2 and in two CPU ports). Jones ties
@@ -51,8 +52,7 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
   switching it off in a scene made for the rule shows a notice.
 - Switching the rule restarts the population (`RESET_KEYS` in `engine.ts`, since 2026-11-09).
   Agents that piled up without the rule would stay stacked for thousands of steps. After the
-  restart the new start decides when every cell holds at most one agent, as the point on start
-  layouts above describes.
+  restart every agent starts on a cell of its own.
 - A backend without the rule (WebGL2 without `EXT_float_blend`, ADR 0003) runs every scene
   without it. The switch then shows off and disabled, also after a preset load, and a notice says
   so once per page load when a scene made for the rule loads.

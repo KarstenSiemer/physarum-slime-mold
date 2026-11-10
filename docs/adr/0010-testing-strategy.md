@@ -35,8 +35,10 @@ GPU checks use invariants, not long exact trajectories:
 
 - CI runs real WGSL on SwiftShader, so CI scenes stay small: the model tests in
   `sim.gpu.test.ts` use at most 200² cells and 6000 agents (the sort tests up to 15 360 agents
-  on 96 × 80 cells, the WebGL2 counting tests in `gl/sim.gpu.test.ts` up to 100 000 agents on
-  one cell), `engine.gpu.test.ts` and the e2e tests (1280 × 720 viewport) 512 × 288 cells. The
+  on 96 × 80 cells, the start test of the mixed layout 29 491 agents on 512 × 288 without a
+  step, the WebGL2 counting tests in `gl/sim.gpu.test.ts` up to 100 000 agents on one cell),
+  `engine.gpu.test.ts` and the e2e tests (1280 × 720 viewport) 512 × 288 cells, the engine tests
+  also 236 × 512 (a 9:19.5 phone). The
   grid-limit tests draw a grid 16 cells by the largest side the backend reports, 64 agents and
   no steps.
 - Real-GPU coverage (Metal) comes from the local loop. CI asserts no performance numbers (the
@@ -62,3 +64,12 @@ GPU checks use invariants, not long exact trajectories:
   image, each extra step in a frame cost about 150 ms (1, 4 and 16 steps per frame gave 3.9,
   1.4 and 0.4 fps), so the budget's choice of one step is right there, and e2e tests wait for
   few steps: the boot test for 30, because its contrast check passes from step 10 on.
+- In the CI image (`mcr.microsoft.com/playwright:v1.65.0-noble`, 4 CPUs, 2026-11-10, another test
+  run on the same host) a new WebGPU device on SwiftShader built its pipelines in 14 to 16 s, 12
+  to 14 s before the start placement and the wall walk of ADR 0019 (runs alternating with the
+  base). The engine GPU tests therefore share one backend per API, built under a 180 s limit:
+  with one device per test, two of them had taken 56 and 59 s of their 60 s. The GPU project
+  (187 tests) then took 224 s, its base (105 tests) 223 s; Fig. 10 on WebGPU 106 s. The e2e suite
+  (28 tests) took 10.2 and 13.3 min in two runs and its base (26 tests) 9.0 min between them: every
+  test needs 16 to 20 s there to start the app. The slowest was "a preset chosen while the engine
+  starts", 44 to 66 s of 120 s; the boot test waits up to 60 s for the engine to exist.

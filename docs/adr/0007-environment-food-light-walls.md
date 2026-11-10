@@ -31,9 +31,10 @@ Option 3, plus:
 - Sensed value: `dot(trail, A[strain]) + food_s · scent.r − light_s · scent.g`.
 - Sources per step: `food(cell) · 255 · wProj` and `light(cell) · 255 · wLight`, so `wProj`
   keeps Jones' meaning for a full-intensity food pixel.
-- Walls: block movement like an occupied cell (random new heading, no deposit); sensors read
-  walls and the outside as a large negative value; diffusion averages only over non-wall
-  cells (no flux into walls).
+- Walls: block movement like an occupied cell (random new heading, no deposit), also when a move
+  would pass through a wall cell on its way (ADR 0019); sensors read walls and the outside as a
+  large negative value; diffusion averages only over non-wall cells (no flux into walls). A cell
+  is a wall when its wall byte is at least 128 (0.5), in WGSL and GLSL alike (ADR 0019).
 - Boundary modes: periodic (Jones default), closed box, dish (circle, Jones Fig. 9 and 17–21).
 
 ## Consequences
@@ -49,3 +50,6 @@ Option 3, plus:
   scent decay reaches farther but also pulls more and more agents into the food. The help texts
   of Food strength and Scent decay and Learn → The model say this.
 - One more `rg32float` ping-pong pair and one more fetch per sensor.
+- Food, light and walls exist only on the GPU, so the engine keeps every edit since the last
+  "Clear" or preset load and paints them all again on every new simulation, on a new grid through a
+  frame of the short side (ADR 0019).
