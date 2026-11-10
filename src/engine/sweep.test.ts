@@ -1,0 +1,217 @@
+// The sweep changes no byte on the grid on screen (sweep.ts, docs/adr/0019). Random sequences of strokes of every
+// kind, in every arena, on grids of every shape, compared after every recorded stroke with the list that keeps every
+// stroke recorded since the grid on screen last changed, both painted with paintReference.
+import { describe, expect, it } from 'vitest';
+import type { Boundary } from '../model/params';
+import { presetById } from '../model/presets';
+import { paintsCell } from './brush';
+import { CpuBackend, type CpuSim, hold } from './cpu-backend';
+import { Engine } from './engine';
+import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
+import { paintReference } from './paint-reference';
+import { compact, Placement, sweep } from './sweep';
+import type { EnvTool, Stroke } from './types';
+
+function rng(seed: number) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s ^= s << 13;
+    s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    s >>>= 0;
+    return s / 2 ** 32;
+  };
+}
+
+/** The list painted on a `w` × `h` grid, every edit through the frame of the arena it was painted in. */
+function replay(list: readonly EnvEdit[], w: number, h: number) {
+  const env = new Uint8Array(w * h * 4);
+  for (const e of list) {
+    const s = strokeOn(e, w, h);
+    if (s) paintReference(env, w, h, s, e.boundary);
+  }
+  return env;
+}
+
+const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && Buffer.compare(a, b) === 0;
+const BOUNDARIES = ['dish', 'box', 'wrap'] as const;
+
+/**
+ * A random stroke on a `w` × `h` grid in `arena`, near one of a few spots, so that strokes often lie on top of each
+ * other: by the edges, on the periodic seam, on the dish's rim, in the middle, also on a copy of a periodic grid.
+ */
+function strokeNear(rand: () => number, spots: [number, number][], w: number, h: number, arena: Boundary): Stroke {
+  const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
+  const kind = pick<EnvTool>(['food', 'food', 'food', 'light', 'wall', 'wall', 'erase', 'erase', 'erase', 'erase']);
+  const [u, v] = pick(spots);
+  const copy = arena === 'wrap' && rand() < 0.15 ? [pick([-1, 1]) * w, pick([-1, 0, 1]) * h] : [0, 0];
+  const from: [number, number] = [
+    u * w + (rand() * 2 - 1) * 8 + (copy[0] ?? 0),
+    v * h + (rand() * 2 - 1) * 8 + (copy[1] ?? 0),
+  ];
+  const length = rand() < 0.5 ? 0 : rand() * 24;
+  const angle = rand() * 2 * Math.PI;
+  const big = kind === 'erase' ? 2 + rand() * 10 : MIN_RADIUS + rand() * 6;
+  return {
+    kind,
+    from,
+    to: [from[0] + length * Math.cos(angle), from[1] + length * Math.sin(angle)],
+    radius: rand() < 0.1 ? 0.3 + rand() : big,
+  };
+}
+
+/** Spots as fractions of the grid: the edges, the corners, the dish's rim on both axes, the middle. */
+function spotsOf(rand: () => number, w: number, h: number): [number, number][] {
+  const R = Math.min(w, h) / 2 - 1;
+  const all: [number, number][] = [
+    [0, 0.5],
+    [1, 0.3],
+    [0.5, 0],
+    [0.4, 1],
+    [0, 0],
+    [1, 1],
+    [0.5 - R / w, 0.5],
+    [0.5 + R / w, 0.5],
+    [0.5, 0.5 - R / h],
+    [0.5, 0.5],
+    [0.3, 0.6],
+  ];
+  return all.filter(() => rand() < 0.5).concat([[0.5, 0.5]]);
+}
+
+describe('the sweep', () => {
+  const GRIDS = [
+    [237, 512],
+    [511, 287],
+    [512, 320],
+    [96, 60],
+    [61, 37],
+    [37, 61],
+    [128, 128],
+  ] as const;
+
+  it('changes no byte on the grid on screen, after every recorded stroke of random sequences', () => {
+    let [checks, deleted, kept] = [0, 0, 0];
+    for (let seed = 1; seed <= 160; seed++) {
+      const rand = rng(seed);
+      const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
+      let [w, h] = pick(GRIDS);
+      let arena = pick(BOUNDARIES);
+      let spots = spotsOf(rand, w, h);
+      // A scene's shapes, in the frame of its arena.
+      const scene = pick(['maze', 'shrinking', 'steiner', 'light', 'three-strains'] as const);
+      const p = presetById(scene);
+      const list = (p?.env ?? []).map((e) => fromShape(e, p?.settings().boundary ?? 'box'));
+      /** Every stroke since the grid on screen changed: the sweep may change other grids, not this one. */
+      let full = list.slice();
+      // Kept in step with the list as the engine keeps it, with the open cells it remembers between sweeps.
+      let placement = new Placement(w, h, list);
+      for (let op = 0; op < 36; op++) {
+        const r = rand();
+        if (r < 0.08) {
+          [w, h] = pick(GRIDS);
+          spots = spotsOf(rand, w, h);
+          full = list.slice();
+          placement = new Placement(w, h, list);
+          continue;
+        }
+        if (r < 0.16) {
+          arena = pick(BOUNDARIES);
+          continue;
+        }
+        const s = strokeNear(rand, spots, w, h, arena);
+        const stroke = { ...s, radius: Math.max(MIN_RADIUS, s.radius) };
+        if (!paintsCell(stroke, w, h, arena)) continue;
+        const edit = fromStroke(stroke, [w, h], arena);
+        list.push(edit);
+        full.push(edit);
+        placement.push(edit);
+        if (edit.kind === 'erase' || edit.kind === 'wall') {
+          const gone = sweep(placement);
+          // A fresh placement, without the cells that earlier sweeps found open, deletes the same edits.
+          if (op % 3 === 0) expect([...sweep(new Placement(w, h, list))]).toEqual([...gone]);
+          deleted += gone.size;
+          compact(list, gone);
+          placement.remove(gone);
+        }
+        checks++;
+        const [swept, all] = [replay(list, w, h), replay(full, w, h)];
+        if (!same(swept, all)) expect.fail(`seed ${seed}, op ${op}: ${w} × ${h}, ${JSON.stringify(full.slice(-6))}`);
+      }
+      kept += list.length;
+    }
+    // The sequences delete a good share of their strokes, so the comparison means something.
+    expect(checks).toBeGreaterThan(3000);
+    expect(deleted).toBeGreaterThan(800);
+    expect(kept).toBeGreaterThan(800);
+  }, 120_000);
+});
+
+// The same rule through the engine: the CPU simulation holds every stroke painted since it was built, the engine's
+// list only what the sweep left, and after every operation the two must give the same bytes (I1 of the review of
+// ADR 0019). A stroke drawn while a new grid is allocated, a Clear, a preset load and arena switches are included.
+describe('the engine with the sweep', () => {
+  const CANVASES = [
+    [1600, 1000], // 512 × 320
+    [1280, 720], // 512 × 288
+    [1000, 1000], // 512 × 512
+    [474, 1024], // 237 × 512
+    [1784, 1000], // 512 × 287
+  ] as const;
+  const edits = (e: Engine) => (e as unknown as { edits: EnvEdit[] }).edits;
+
+  it('holds in the simulation exactly what its list paints, after every operation of random sequences', async () => {
+    let [ops, swept] = [0, 0];
+    for (let seed = 1; seed <= 24; seed++) {
+      const rand = rng(1000 + seed);
+      const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
+      const [cw, ch] = pick(CANVASES);
+      const canvas = { width: cw, height: ch } as HTMLCanvasElement;
+      const backend = new CpuBackend();
+      const p = presetById(pick(['maze', 'shrinking', 'three-strains', 'steiner'] as const));
+      if (!p) throw new Error('no preset');
+      const start = { ...p.settings(), resolution: pick([256, 512] as const), seed: 7 };
+      const engine = await Engine.create(canvas, start, undefined, backend);
+      await engine.load(start, p.env ?? []);
+      const sim = () => engine.sim as CpuSim;
+      const strokeOnScreen = () => {
+        const [w, h] = [sim().width, sim().height];
+        return strokeNear(rand, spotsOf(rand, w, h), w, h, engine.settings.boundary);
+      };
+      for (let op = 0; op < 30; op++) {
+        const r = rand();
+        const before = edits(engine).length;
+        if (r < 0.55) {
+          for (let k = 0; k < 1 + Math.floor(rand() * 4); k++) engine.paint(strokeOnScreen());
+        } else if (r < 0.65) {
+          await engine.apply({ ...engine.settings, boundary: pick(BOUNDARIES) });
+        } else if (r < 0.77) {
+          [canvas.width, canvas.height] = pick(CANVASES);
+          await engine.apply({ ...engine.settings, density: Math.round((0.05 + rand() * 0.3) * 100) / 100 });
+        } else if (r < 0.85) {
+          await engine.apply({ ...engine.settings, resolution: pick([256, 512] as const) });
+        } else if (r < 0.95) {
+          // Strokes while a new grid is allocated: the view still shows the old one.
+          const release = hold(backend);
+          const density = engine.settings.density === 0.21 ? 0.22 : 0.21;
+          const rebuilt = engine.apply({ ...engine.settings, resolution: pick([256, 512] as const), density });
+          for (let k = 0; k < 3; k++) engine.paint(strokeOnScreen());
+          release();
+          await rebuilt;
+        } else if (r < 0.98) {
+          engine.clearEnvironment();
+        } else {
+          await engine.load(start, p.env ?? []);
+        }
+        if (edits(engine).length < before) swept++;
+        engine.frame(0, 0);
+        ops++;
+        const expected = replay(edits(engine), sim().width, sim().height);
+        if (!same(sim().env, expected)) expect.fail(`seed ${seed}, op ${op}: the simulation is not the list`);
+      }
+    }
+    expect(ops).toBe(24 * 30);
+    expect(swept).toBeGreaterThan(20);
+  }, 120_000);
+});

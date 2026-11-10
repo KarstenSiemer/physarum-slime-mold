@@ -12,6 +12,9 @@ export const MIN_RADIUS = 0.75;
 
 type Point = [number, number];
 
+/** A stroke as an edit paints it on a grid: always with the boundary of the arena it was painted in. */
+export type Painted = Stroke & { boundary: Boundary };
+
 /** One food, light, wall or erase edit, kept so that a new simulation can paint it again. */
 export interface EnvEdit {
   kind: EnvTool;
@@ -98,7 +101,7 @@ export function fromFrame([u, v]: Point, [w, h]: Point, boundary: Boundary): Poi
  * on, its own coordinates. The radius scales with the short side in every arena, so a dab stays round. No MIN_RADIUS
  * and no skipping here.
  */
-function mapped(e: EnvEdit, [w, h]: Point): Stroke {
+function mapped(e: EnvEdit, [w, h]: Point): Painted {
   const { kind, boundary } = e;
   if (e.grid?.[0] === w && e.grid[1] === h) return { kind, from: e.from, to: e.to, radius: e.radius, boundary };
   const [from, to] = e.grid ? [toFrame(e.from, e.grid, boundary), toFrame(e.to, e.grid, boundary)] : [e.from, e.to];
@@ -120,7 +123,7 @@ function mapped(e: EnvEdit, [w, h]: Point): Stroke {
  * rounding at the edges. Any other edit that lies completely outside the grid is undefined: it paints nothing there
  * and stays in the list for other grids.
  */
-export function strokeOn(e: EnvEdit, width: number, height: number): Stroke | undefined {
+export function strokeOn(e: EnvEdit, width: number, height: number): Painted | undefined {
   const s = mapped(e, [width, height]);
   s.radius = Math.max(MIN_RADIUS, s.radius);
   const [a, b] = [s.from, s.to];

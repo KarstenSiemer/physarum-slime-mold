@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { Engine } from './engine';
+import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
 import { OutOfMemoryError } from './gpu';
 import { paintReference } from './paint-reference';
@@ -236,6 +237,47 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     expect(ratio).toBeLessThan(4.4);
     await engine.apply({ ...engine.settings, resolution: 256 });
     expect(differing(await engine.sim.readEnv(), coarse)).toBe(0);
+    engine.destroy();
+  });
+
+  // The sweep deletes strokes that later strokes cleared completely on the grid on screen (sweep.ts). The simulation
+  // keeps every stroke it painted and a new one paints the list: both must hold the list's bytes.
+  it('match the CPU replay of the list after sweeps, and after a rebuild on another grid', async () => {
+    const { engine } = await load('network', { resolution: 256 });
+    expect([engine.sim.width, engine.sim.height, engine.settings.boundary]).toEqual([256, 144, 'wrap']);
+    const list = () => (engine as unknown as { edits: EnvEdit[] }).edits;
+    const paint = (kind: Stroke['kind'], from: [number, number], to: [number, number], radius: number) => {
+      engine.paint({ kind, from, to, radius });
+    };
+    // Food across the periodic seam, erased completely: both go.
+    paint('food', [254.37, 70.21], [258.61, 72.43], 3.23);
+    paint('erase', [256.29, 71.17], [256.29, 71.17], 9.49);
+    // A wall erased in part by a drag: all stay. (Radii chosen so that no cell lies within 1e-3 of a brush's edge on
+    // either grid, where float32 may decide it otherwise.)
+    paint('wall', [40.33, 30.27], [120.71, 34.19], 2.01);
+    for (let x = 30.13; x < 80; x += 6.07) paint('erase', [x, 31.41], [x + 6.07, 32.37], 3.93);
+    // Light under a wall that covers every lit cell: the light goes.
+    paint('light', [180.37, 100.29], [180.37, 100.29], 5.11);
+    paint('wall', [180.41, 100.33], [181.29, 100.71], 7.29);
+    paint('food', [60.29, 110.37], [70.43, 112.19], 4.11);
+    engine.frame(performance.now(), 0);
+    expect(list().map((e) => e.kind)).toEqual(['wall', ...Array<string>(9).fill('erase'), 'wall', 'food']);
+    const check = async () => {
+      const { width: w, height: h } = engine.sim;
+      const expected = new Uint8Array(w * h * 4);
+      const margin = { min: Infinity };
+      for (const e of list()) {
+        const s = strokeOn(e, w, h);
+        if (s) paintReference(expected, w, h, s, e.boundary, margin);
+      }
+      expect(margin.min).toBeGreaterThan(1e-3);
+      expect(cells(expected, 0)).toBeGreaterThan(100);
+      expect(differing(await engine.sim.readEnv(), expected)).toBe(0);
+    };
+    await check();
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect(engine.sim.width).toBe(512);
+    await check();
     engine.destroy();
   });
 

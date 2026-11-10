@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Boundary } from '../model/params';
-import { lightByte, paintBox, paintsCell, paintSegments, scissorRects, segmentDistance, SLACK } from './brush';
+import {
+  lightByte,
+  paintBox,
+  paintsCell,
+  paintSegments,
+  scissorRects,
+  segmentDistance,
+  SLACK,
+  someCell,
+} from './brush';
 import { MIN_RADIUS } from './environment';
 import { paintReference } from './paint-reference';
 import type { EnvTool, Stroke } from './types';
@@ -283,5 +292,48 @@ describe('paintsCell', () => {
     // Both outcomes occur often enough to mean something.
     expect(counts.recorded).toBeGreaterThan(1000);
     expect(counts.dropped).toBeGreaterThan(500);
+  });
+});
+
+describe('someCell', () => {
+  // The sweep (sweep.ts) and paintsCell judge strokes by the cells this visits: without slack exactly the cells that
+  // the paint passes change.
+  it('visits exactly the cells paintReference paints, across edges, the seam and the rim, and for large brushes', () => {
+    let seed = 99;
+    const rand = () => {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      return (seed >>> 0) / 2 ** 32;
+    };
+    for (let k = 0; k < 1500; k++) {
+      const [w, h] = (
+        [
+          [48, 30],
+          [31, 47],
+          [40, 40],
+        ] as const
+      )[k % 3] ?? [48, 30];
+      const boundary: Boundary = (['box', 'dish', 'wrap'] as const)[Math.floor(rand() * 3)] ?? 'box';
+      const kind = (['food', 'light'] as const)[Math.floor(rand() * 2)] ?? 'food';
+      const radius = rand() < 0.1 ? 20 + rand() * 60 : MIN_RADIUS + rand() * 8;
+      const a: [number, number] = [rand() * 1.6 * w - 0.3 * w, rand() * 1.6 * h - 0.3 * h];
+      const long = rand() < 0.2 ? 3 * w : 25;
+      const b: [number, number] = rand() < 0.3 ? a : [a[0] + (rand() * 2 - 1) * long, a[1] + (rand() * 2 - 1) * long];
+      const s: Stroke = { kind, from: a, to: b, radius, boundary };
+      const env = new Uint8Array(w * h * 4);
+      paintReference(env, w, h, s, boundary);
+      const painted = new Set<number>();
+      for (let c = 0; c < w * h; c++) if (env[c * 4 + 1] || env[c * 4 + 2]) painted.add(c);
+      const visited = new Set<number>();
+      someCell(s, w, h, boundary, 0, (c) => {
+        visited.add(c);
+        return false;
+      });
+      expect(
+        [...visited].sort((x, y) => x - y),
+        JSON.stringify([s, w, h]),
+      ).toEqual([...painted].sort((x, y) => x - y));
+    }
   });
 });

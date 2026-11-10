@@ -6,6 +6,7 @@ import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './env
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
+import { compact, Placement, sweep } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -42,10 +43,15 @@ export class Engine {
   /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
   restarts = 0;
   private pendingTool: AgentTool | undefined;
-  /** Every food, light, wall and erase edit since the last clear or preset load: each new simulation paints them. */
+  /**
+   * Every food, light, wall and erase edit since the last clear or preset load, less those the sweep deleted
+   * (sweep.ts): each new simulation paints them.
+   */
   private edits: EnvEdit[] = [];
   /** How many of `edits` the current simulation holds; the next frame paints the rest. */
   private painted = 0;
+  /** Every edit on the grid on screen, for the sweep: mapped once per grid and kept in step with `edits`. */
+  private placement: Placement | undefined;
   /** The grid the view shows (fitView()): strokes from the canvas are in its cells, also during a rebuild. */
   private viewGrid: [number, number] | undefined;
   /** False from freeing a simulation until the next one exists. */
@@ -100,6 +106,7 @@ export class Engine {
     this.settings = this.supported(settings);
     this.edits = env.map((e) => fromShape(e, arena));
     this.painted = 0;
+    this.placement = undefined;
     // A new simulation paints the edits itself, before it places the agents.
     if (this.needsRebuild()) return this.rebuild();
     this.sim.update(this.settings);
@@ -199,6 +206,7 @@ export class Engine {
   clearEnvironment() {
     this.edits = [];
     this.painted = 0;
+    this.placement = undefined;
     if (this.live) this.sim.clearEnvironment();
   }
 
@@ -239,7 +247,29 @@ export class Engine {
     if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;
     const s = { ...stroke, radius: Math.max(MIN_RADIUS, stroke.radius) };
     if (!paintsCell(s, ...this.viewGrid, this.settings.boundary)) return;
-    this.edits.push(fromStroke(s, this.viewGrid, this.settings.boundary));
+    const edit = fromStroke(s, this.viewGrid, this.settings.boundary);
+    this.edits.push(edit);
+    this.placement?.push(edit);
+    if (edit.kind === 'erase' || edit.kind === 'wall') this.sweep(...this.viewGrid);
+  }
+
+  /**
+   * After a stroke that clears, deletes the edits that later strokes cleared completely on the grid on screen and
+   * the erases that clear nothing there any more (sweep.ts). That changes no byte there, and an erased food stays
+   * gone on every other grid.
+   */
+  private sweep(w: number, h: number) {
+    let placement = this.placement;
+    if (placement?.w !== w || placement.h !== h || placement.length !== this.edits.length)
+      this.placement = placement = new Placement(w, h, this.edits);
+    const gone = sweep(placement);
+    if (gone.size === 0) return;
+    // The simulation holds the first `painted` edits. One of them that goes keeps its cells there until the strokes
+    // that cleared them are painted, also when those go too: so the simulation gets every stroke recorded so far.
+    if (this.live && [...gone].some((i) => i < this.painted)) this.flushEnv();
+    this.painted -= [...gone].filter((i) => i < this.painted).length;
+    compact(this.edits, gone);
+    placement.remove(gone);
   }
 
   /**
@@ -249,9 +279,14 @@ export class Engine {
   private flushEnv() {
     if (this.painted === this.edits.length) return;
     const { width, height } = this.sim;
-    const strokes = this.edits.slice(this.painted).flatMap((e) => strokeOn(e, width, height) ?? []);
+    const strokes = this.edits.slice(this.painted).map((e) => strokeOn(e, width, height));
+    // A new simulation maps every edit onto the grid on screen: the sweep keeps them instead of mapping them again.
+    if (this.painted === 0 && this.viewGrid?.[0] === width && this.viewGrid[1] === height) {
+      this.placement = new Placement(width, height);
+      for (const s of strokes) this.placement.add(s);
+    }
     this.painted = this.edits.length;
-    this.sim.paint(strokes);
+    this.sim.paint(strokes.filter((s) => s !== undefined));
   }
 
   agentTool(tool: AgentTool) {
