@@ -28,9 +28,10 @@ const slot = (name: (typeof PARAM_SLOTS)[number]) => {
 };
 
 /**
- * Claim rounds that place the agents on cells of their own with one agent per cell (ROUNDS in init.wgsl and
- * gl/glsl/init.frag). A CPU model of Shrinking plasmodium (0.64 agents per dish cell) placed every agent within
- * 24 rounds.
+ * Claim rounds that place the agents on cells of their own with one agent per cell (init.wgsl claimStart and
+ * settleStart, gl/glsl/init.frag modes 1 and 2). ROUNDS in those shaders is another count: the draws of an agent
+ * without the rule. A CPU model of Shrinking plasmodium (0.64 agents per dish cell) placed every agent within 24
+ * rounds. On the GPU, 1 to 4 of 61 seeds left one of its agents without a free cell, to start dead (ADR 0019).
  */
 export const START_ROUNDS = 32;
 

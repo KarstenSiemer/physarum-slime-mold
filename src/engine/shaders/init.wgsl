@@ -1,9 +1,10 @@
 // Initial agent placement. Prepended with common.wgsl.
 // `init` draws every agent's start in its layout. Without the one-agent-per-cell rule, an agent whose cell is a
 // wall or outside the arena draws again in its layout's region, up to ROUNDS times, and starts dead if no draw
-// is free. With the rule, `claimStart` and `settleStart` then run ROUNDS rounds (sim.ts reset()): every agent
-// not placed yet claims its cell with a unique key, the highest key takes the cell, and the others draw again.
-// An agent with no free cell after the last round starts dead. So every alive agent starts in its own cell.
+// is free. With the rule, `claimStart` and `settleStart` then run the claim rounds (sim.ts reset(); their number
+// is startRounds() in pack.ts): every agent not placed yet claims its cell with a unique key, the highest key
+// takes the cell, and the others draw again. An agent with no free cell after the last round starts dead. So
+// every alive agent starts in its own cell.
 
 @group(0) @binding(1) var<storage, read_write> agents: array<Agent>;
 @group(0) @binding(4) var<storage, read> env: array<u32>;
@@ -18,7 +19,7 @@ const RING = 4u;
 const CENTER = 5u;
 const EMPTY = 6u;
 
-// Draws after the first; sim.ts START_ROUNDS and gl/sim.ts use the same number of claim rounds.
+// Draws after the first without the rule. The claim rounds with the rule are counted apart (pack.ts START_ROUNDS).
 const ROUNDS = 32u;
 
 // Bijection on [0, 2^k): odd multiply-add and xorshift are both invertible modulo 2^k.

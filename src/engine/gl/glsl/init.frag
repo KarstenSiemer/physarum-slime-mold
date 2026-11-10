@@ -20,7 +20,7 @@ const uint RING = 4u;
 const uint CENTER = 5u;
 const uint EMPTY = 6u;
 
-// Draws after the first, as ROUNDS in init.wgsl.
+// Draws after the first without the rule, as ROUNDS in init.wgsl.
 const uint ROUNDS = 32u;
 
 // Bijection on [0, 2^k): odd multiply-add and xorshift are both invertible modulo 2^k.
