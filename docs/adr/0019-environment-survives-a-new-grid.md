@@ -91,19 +91,19 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
 
 - **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or preset
   load that the sweep left: preset shapes in the canonical frame of the preset's own arena
-  (`fromShape`; `load()` at line 105 takes that arena, also when the settings hold another
-  boundary), strokes in the cells of the grid the view shows (`fromStroke`, `paint()` at line 272),
+  (`fromShape`; `load()` at line 118 takes that arena, also when the settings hold another
+  boundary), strokes in the cells of the grid the view shows (`fromStroke`, `paint()` at line 289),
   each with the arena it was painted in (`EnvEdit.boundary`; both backends write it into the
   parameters of the paint pass, which cuts the stroke at that arena's rim or wraps it around its
-  edges). Every new simulation paints the whole list (`flushEnv()`, line 306) before it places its
-  agents (`rebuild()`, line 183; `load()`). A frame paints the edits added since. "Clear" empties
+  edges). Every new simulation paints the whole list (`flushEnv()`, line 353) before it places its
+  agents (`rebuild()`, line 197; `load()`). A frame paints the edits added since. "Clear" empties
   the list, also during a rebuild; a preset load replaces it. At startup the engine loads once what
   the panel holds (`startScene` in `src/ui/state.svelte.ts`, line 153): the panel's settings, and
   the scene's shapes in the scene's own arena, or none after a Clear before the engine existed.
   Before, a second step applied a copy of the settings taken before the load and could undo a
   setting changed during it on WebGPU. `Engine.paint` before the first simulation exists drops the
   stroke: no grid is on screen yet. So does it with a stroke that does not clearly paint a cell
-  (`paintsCell` in `src/engine/brush.ts`, line 193): a cell inside the brush and the rim of a dish by
+  (`paintsCell` in `src/engine/brush.ts`, line 344): a cell inside the brush and the rim of a dish by
   `SLACK` = 0.01 cells, and for light one whose byte is at least 1. Such a stroke changes nothing on
   screen, and on another grid or arena it must not either. Before, 69 of 10,721 random light
   strokes lit nothing where they were painted and lit other grids, and 6 of about 32,000 strokes
@@ -141,10 +141,11 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   screen, where the erase lies beside it, and erased in part again back on 16:10. The sweep covers
   what matters most: what was erased completely stays gone. A periodic edit wraps around the grid's
   edges in a dish too: a food dab at the far left of a 1024 × 640 periodic grid, beside the dish
-  after a switch, lies inside the 1024 × 1024 dish of a square screen at its place, and its part
-  across the edge at the opposite rim (26 of its 1,624 cells, built app, both backends).
-- **The sweep** (`sweep` in `src/engine/sweep.ts`, line 204, after every recorded erase or wall;
-  `Engine.sweep` at line 288). On the grid on screen: (1) an older food, light or wall edit is
+  after a switch, lies inside the 1024 × 1024 dish of a square screen at its place, and 48 of its
+  1,672 cells lie across the edge at the opposite rim, 26 of them inside the dish (built app, both
+  backends).
+- **The sweep** (`sweeping` in `src/engine/sweep.ts`, line 469, after every recorded erase or wall;
+  `Engine.sweepFor` at line 313). On the grid on screen: (1) an older food, light or wall edit is
   deleted when every cell it paints is cleared by a stroke recorded after it: an erase clears every
   kind, a wall food and light. An edit that paints no cell of that grid is kept: that grid cannot
   judge it. (2) Then an erase is deleted when no older food, light or wall edit that stays paints a
@@ -154,50 +155,90 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   later strokes wrote, and none of them reads the deleted edit; and an erase over cells that hold
   only zeros changes nothing. Float32 on the GPU may decide a cell near the edge of a brush or the
   rim the other way, so every judgement keeps `SLACK`: an edit's cells count with its brush and the
-  rim widened, the cells a clearing stroke surely clears with both narrowed. The simulation holds
-  the first `painted` edits; when the sweep deletes one of them, the engine first paints the
+  rim widened, the cells a clearing stroke surely clears with both narrowed. One case needs no
+  margin: a later stroke with the edit's own segment on that grid, bit for bit, at least its radius
+  and an arena that holds the edit's (the same one; a box or a periodic one over a dish edit; a
+  periodic one painted as it is over a box edit) clears every cell the edit paints (`coversExactly`,
+  line 365). Both paint passes decide every cell of every kind by the same distance to the segment
+  and `d > radius` (`paint.wgsl` lines 49 and 50, `paint.frag` line 28; a periodic stroke takes the
+  smaller distance to a copy), and light paints only within its radius. Before, an Erase click on a
+  Food click with the same brush kept both in 13 of 24 trials (a Wall click in 8 of 16, the
+  keyboard's 3 then 6 in 2 of 10), the card said "changed", and after a switch from the dish to the
+  box such a dab came back on a square screen in 3 of 10 trials (review of the fifth draft); now in
+  none of 24, 24 and 10 trials, nor in any of 10 after the switch, on both backends. The simulation
+  holds the first `painted` edits; when the sweep deletes one of them, the engine first paints the
   strokes not painted yet, because the stroke that cleared the last cells of a food can go too and
-  the simulation would keep those cells until the next rebuild. So a food erased completely in a
-  box stays gone on a square screen, by one large erase or a drag of smaller segments, and its
-  erases go with it. A wall over food deletes the food when it covers it, a wall over a wall or
-  food over food keeps both, light under a wall goes when the wall covers every lit cell, and an
-  edit that lies outside the grid on screen stays under an erase there (CPU engine tests). A
-  property test checks the rule after every recorded stroke of 160 random sequences (every kind and
-  arena, grids from 37 × 61 to 237 × 512 and 511 × 287, strokes across the edges, the periodic
-  seam and the dish's rim): 3,865 checks, 1,470 deleted edits, each byte for byte against the list
-  of every stroke recorded since the grid on screen last changed. Through the engine the
-  simulation holds exactly what its list paints after each of 720 random operations (strokes, also
-  while a new grid is allocated, arena, grid and screen changes, Clear, loads). A GPU test on both
-  backends compares the simulation with the CPU replay of the list after sweeps and after a
-  rebuild on another grid.
+  the simulation would keep those cells until the next rebuild. So a food erased completely in a box
+  stays gone on a square screen, by one large erase or a drag of smaller segments, and its erases go
+  with it. A wall over food deletes the food when it covers it, a wall over a wall or food over food
+  keeps both, light under a wall goes when the wall covers every lit cell, and an edit that lies
+  outside the grid on screen stays under an erase there (CPU engine tests). A property test checks
+  the rule after every recorded stroke of 160 random sequences (every kind and arena, grids from 37
+  × 61 to 237 × 512 and 511 × 287, strokes across the edges, the periodic seam and the dish's rim; a
+  fifth of the strokes an erase or a wall on the last stroke's segment): 3,950 checks, 1,863 deleted
+  edits, each byte for byte against the list of every stroke recorded since the grid on screen last
+  changed. Through the engine the simulation holds exactly what its list paints after each of 720
+  random operations (strokes, also while a new grid is allocated, arena, grid and screen changes,
+  Clear, loads). GPU tests on both backends compare the simulation with the CPU replay of the list
+  after sweeps and after a rebuild on another grid, and after strokes that each lose an edit painted
+  before them with the same segment, brush edges on cell centres.
 
-  Speed: the sweep keeps every edit on the grid on screen and its box of cells in one typed array
-  (`Placement`), seeded by the replay of a new simulation and kept in step with every stroke,
-  deletion, Clear and load. It looks only at edits whose box overlaps the new stroke and at a
-  clearing stroke's cells only where its box holds the cell, visits an edit's cells row by row
-  inside its capsule (`someCell` in `src/engine/brush.ts`, line 107), the cells under its ends
-  first, stops at the first cell left open, and remembers that cell and where the visit stopped:
-  a cleared cell stays cleared, so the next sweep looks at the edit again only when the new stroke
-  covers that cell, and goes on from there. Measured with the engine in Node and a backend that
-  paints nothing (the engine's own work per recorded segment of a drag), M3 Pro at a load average
-  of 9 to 17 from other work:
+  Speed: the sweep judges a row of cells at a time (`Rows` in `src/engine/brush.ts`, line 259). In
+  a row the cell centres within a distance of a segment form one interval (the brush is convex), and
+  so do those within the rim of a dish; on a periodic grid each part of a stroke and each copy one
+  period around gives one, and light's lit cells (byte at least 1) lie within 98.2 % of its radius.
+  So a row costs a few square roots, however many cells the brush covers. Every edge moves by a hair
+  of float64 rounding, 1e-9 cells per cell of radius: out for an edit's cells and for an erase in
+  rule 2, in for the cells a clearing stroke surely clears (a unit test checks the runs against a
+  reference written apart, cell by cell, at +`SLACK` and −`SLACK`). The sweep keeps every edit on the
+  grid on screen and its box in one typed array (`Placement`, line 94), kept in step with every
+  stroke, deletion, Clear and load, and across a new simulation on the same grid; from 256 edits on,
+  tiles of 32 × 32 cells index the clearing strokes and the painting ones, so the strokes recorded
+  after an edit and the edits under an erase are found without a pass over the list. Rule 1 first
+  asks the new stroke alone (both ends of the edit's capsule within its capsule), then visits the
+  edit's rows from the first one not known to be cleared, the strokes that cleared the row before
+  first, stops at the first cell left open and remembers it and that row: a cleared cell stays
+  cleared, so the next sweep looks at the edit again only when the new stroke covers that cell.
+  Rule 2 tests the older edits under an erase row by row, stops at the first that shares a cell and
+  keeps it as the erase's witness: the erase is looked at again only when its witness goes. The
+  sweep pauses after 32 rows of work: the pointer handler runs 256 rows of it (about 0.5 ms on an
+  M3 Pro before the JIT has optimized it), each frame 1 ms more, and a deletion changes no byte on
+  screen. A new grid finishes a waiting sweep first; a Clear and a preset load drop it. Measured with
+  the scripts of the review of the fifth draft (3caa152, "before"), in the same run as that draft
+  and the fourth (a5631bc, no sweep), M3 Pro with two other workflows on the GPU:
 
-  | List                                                   | Erase segment, mean (p95) | Wall segment, mean (p95) |
-  | ------------------------------------------------------ | ------------------------- | ------------------------ |
-  | 2,000 edits on 1536 × 864                              | 0.08 ms (0.22 ms)         | 0.02 ms (0.06 ms)        |
-  | 100,000 edits on 1536 × 864, 61,788 after their sweeps | 2.0 ms (4.7 ms)           | 2.0 ms (5.6 ms)          |
+  | Built app, 120 px brush, the second drag (Engine.paint per segment, mean / max) | a5631bc       | Before         | After         |
+  | ------------------------------------------------------------------------------- | ------------- | -------------- | ------------- |
+  | Grid 2048 (192 cells), an erase drag along a wall drag, WebGPU                  | 0.01 / 0.1 ms | 15.1 / 25.1 ms | 0.65 / 1.5 ms |
+  | The same, WebGL2                                                                | 0.01 / 0.1 ms | 17.1 / 33.0 ms | 0.41 / 1.1 ms |
+  | Grid 2048, a wall drag over a food drag, WebGPU                                 | 0.01 / 0.1 ms | 15.1 / 33.8 ms | 0.56 / 1.2 ms |
+  | The same, WebGL2                                                                | 0.01 / 0.1 ms | 15.8 / 30.5 ms | 0.41 / 1.0 ms |
+  | Grid 2048 zoomed out one wheel step (384 cells), an erase along a wall, WebGPU  | 0.02 / 0.1 ms | 41.1 / 53.1 ms | 0.57 / 0.9 ms |
+  | The same, WebGL2                                                                | 0.00 / 0.0 ms | 44.7 / 60.1 ms | 0.45 / 1.0 ms |
+  | Grid 1536 (144 cells), an erase along a wall, WebGPU                            | 0.00 / 0.0 ms | 10.6 / 14.4 ms | 0.46 / 1.7 ms |
+  | The same, WebGL2                                                                | 0.01 / 0.1 ms | 9.3 / 13.4 ms  | 0.52 / 1.2 ms |
 
-  A horizontal wall across 2048 × 1152 erased by a drag of 200 segments along it took 0.021 ms per
-  segment, and the segment that deleted the wall and all 200 erases 3.9 ms; a diagonal one
-  0.024 ms and 0.06 ms. Without the stored place of the visit, the diagonal drag took 1.2 ms per
-  segment. A light dab of radius 500 cells (785,000 cells) erased by 200 segments took 0.77 ms per
-  segment, and once 44 ms, when its last open cells closed and its remaining cells were checked.
-  The first sweep after a new grid with 100,000 edits took 1.8 ms: the replay of the new simulation
-  maps the edits for it, which took 54 ms when the sweep mapped them itself.
+  Each drag has 10 to 21 segments. The first drag costs 0.09 to 0.22 ms per segment after (0.03 to
+  0.11 ms with a5631bc). During the second drag frames came at most 19 to 27 ms apart after, 31 to
+  77 ms apart before, and 18 to 31 ms apart with a5631bc, apart from one stall of 240 ms there.
+
+  In Chromium with the engine and a backend that paints nothing, per recorded segment or stroke: the
+  pointer handler, mean (p95), and in brackets the whole sweep over the frames it takes; "before"
+  is the same scripts on 3caa152 in the review of the fifth draft:
+
+  | List on 1536 × 864                                                        | Before                   | After                                                |
+  | ------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------- |
+  | 5,400 recorded edits (3,792 kept), largest eraser (96 cells), 96 segments | 8.6 ms (28 ms)           | 0.14 ms (0.3 ms) [0.21 ms, 0.5 ms]                   |
+  | 18,000 recorded edits (13,113 kept), the same                             | 26.7 ms (63 ms)          | 0.03 ms (0.1 ms) [0.40 ms, 0.8 ms]                   |
+  | One erase of radius 300 over 2,000 / 10,000 / 30,000 / 100,000 edits      | 13 / 55 / 302 / 2,053 ms | 0.3 / 0.2 / 0.4 / 0.9 ms [0.7 / 2.1 / 5.7 / 22.0 ms] |
+
+  The frames that finish such an erase take at most 1.5 ms up to 30,000 edits; with 100,000 the one
+  that ends it takes 3.4 ms, as it also compacts the list of 83,420 edits. On a new grid, where no
+  open cell is known yet, the erase over 100,000 edits takes 53.8 ms in all, over 49 frames.
 
 - **Scene changed.** The scene card shows "changed" and "Reload scene" when a model setting or the
   food, light and walls differ from the loaded scene: when the engine's list is not the scene's
-  shapes in the scene's arena (`Engine.matches`, line 129; `Engine.onEdits` after every change of
+  shapes in the scene's arena (`Engine.matches`, line 143; `Engine.onEdits` after every change of
   the list; `app.envChanged` in `src/ui/state.svelte.ts`). A Clear of a scene with shapes, a
   recorded stroke or a sweep that deleted a shape changes the scene; a stroke and an erase that the
   sweep took back leave it unchanged. Before the engine exists, a Clear of a scene with shapes sets
