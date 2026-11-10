@@ -5,7 +5,8 @@ import { smallScene, watchErrors } from './helpers';
 test('boots from a shared link, simulates and draws a network without errors', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto(await smallScene());
-  await page.waitForFunction(() => globalThis.physarum !== undefined, undefined, { timeout: 30_000 });
+  // The engine exists once the WebGPU device has built its pipelines: 14 to 16 s on SwiftShader in the CI image.
+  await page.waitForFunction(() => globalThis.physarum !== undefined, undefined, { timeout: 60_000 });
   const adapter = await page.evaluate(() => globalThis.physarum?.backend.description ?? '?');
   test.info().annotations.push({ type: 'adapter', description: adapter });
   // On CI, SwiftShader draws about one frame per second, and the frame budget then runs one step per

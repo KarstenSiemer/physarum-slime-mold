@@ -8,11 +8,63 @@ import { OutOfMemoryError } from './gpu';
 import type { Backend } from './types';
 import { WebGpuBackend } from './webgpu';
 
+const BACKENDS = {
+  webgpu: (c: HTMLCanvasElement): Promise<Backend> => WebGpuBackend.create(c),
+  webgl2: (c: HTMLCanvasElement): Promise<Backend> => Promise.resolve(WebGl2Backend.create(c)),
+};
+type Kind = keyof typeof BACKENDS;
+const shared: Partial<Record<Kind, Backend>> = {};
+
+// One backend per API for every engine here. In the CI image a new WebGPU device on SwiftShader took 14 to 16 s to
+// build its pipelines (2026-11-10), and with one device per test, two tests here took 56 and 59 s of their 60 s.
+beforeAll(async () => {
+  for (const [kind, create] of Object.entries(BACKENDS)) {
+    const backend = await create(document.createElement('canvas'));
+    // The first simulation builds the pipelines: here, under a long timeout, and not in the first test.
+    (await backend.createSim(defaultSettings(), 16, 16, 1)).destroy();
+    shared[kind as Kind] = backend;
+  }
+}, 180_000);
+afterAll(() => {
+  for (const backend of Object.values(shared)) backend.destroy();
+});
+
+/**
+ * A shared backend for one engine. Destroying the engine keeps it. A test may replace a member (createSim,
+ * supportsCollisions) for this engine only, and the next `failures.next` allocations fail as out of memory.
+ */
+function lend(kind: Kind = 'webgpu') {
+  const backend = shared[kind];
+  if (!backend) throw new Error(`no ${kind} backend`);
+  const own = new Map<PropertyKey, unknown>();
+  const failures = { next: 0 };
+  const lent = new Proxy(backend, {
+    get(t, key) {
+      if (own.has(key)) return own.get(key);
+      if (key === 'destroy') return () => undefined;
+      if (key === 'createSim')
+        return (...args: Parameters<Backend['createSim']>) =>
+          failures.next-- > 0 ? Promise.reject(new OutOfMemoryError('test')) : t.createSim(...args);
+      return Reflect.get(t, key, t) as unknown;
+    },
+    set(_, key, value) {
+      own.set(key, value);
+      return true;
+    },
+  });
+  return { lent, failures };
+}
+
 it('frees the old simulation before it allocates the new one (peak memory: one simulation)', async () => {
   const canvas = document.createElement('canvas');
   canvas.width = 320;
   canvas.height = 180;
-  const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, density: 0.2 });
+  const engine = await Engine.create(
+    canvas,
+    { ...defaultSettings(), resolution: 256, density: 0.2 },
+    undefined,
+    lend().lent,
+  );
   const old = engine.sim;
   let freed = false;
   const destroy = old.destroy.bind(old);
@@ -38,7 +90,12 @@ it('steps the grid down after an out-of-memory error, also back to the old size'
   const canvas = document.createElement('canvas');
   canvas.width = 320;
   canvas.height = 180;
-  const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 512, density: 0.2 });
+  const engine = await Engine.create(
+    canvas,
+    { ...defaultSettings(), resolution: 512, density: 0.2 },
+    undefined,
+    lend().lent,
+  );
   const old = engine.sim;
   const createSim = engine.backend.createSim.bind(engine.backend);
   const sizes: number[] = [];
@@ -74,7 +131,8 @@ it('switching one agent per cell restarts the population, so agents stacked with
   const canvas = document.createElement('canvas');
   canvas.width = 160;
   canvas.height = 100;
-  const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, density: 0.5, seed: 3 });
+  const settings = { ...defaultSettings(), resolution: 256, density: 0.5, seed: 3 };
+  const engine = await Engine.create(canvas, settings, undefined, lend().lent);
   engine.frame(performance.now(), 30);
   expect(engine.sim.step).toBe(30);
   expect(await crowding(engine)).toBeGreaterThan(1); // without the rule agents share cells
@@ -92,7 +150,12 @@ it('does not restart when a backend without the rule keeps it off', async () => 
   const canvas = document.createElement('canvas');
   canvas.width = 160;
   canvas.height = 100;
-  const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, density: 0.5 });
+  const engine = await Engine.create(
+    canvas,
+    { ...defaultSettings(), resolution: 256, density: 0.5 },
+    undefined,
+    lend().lent,
+  );
   // WebGL2 without EXT_float_blend (ADR 0003): the engine runs every scene without the rule.
   (engine.backend as { supportsCollisions: boolean }).supportsCollisions = false;
   engine.frame(performance.now(), 10);
@@ -103,42 +166,13 @@ it('does not restart when a backend without the rule keeps it off', async () => 
   engine.destroy();
 });
 
-const BACKENDS = {
-  webgpu: (c: HTMLCanvasElement): Promise<Backend> => WebGpuBackend.create(c),
-  webgl2: (c: HTMLCanvasElement): Promise<Backend> => Promise.resolve(WebGl2Backend.create(c)),
-};
-
 /** Bytes that differ (a readable failure instead of a diff of half a million bytes). */
 const differing = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length ? a.reduce((n, v, i) => n + (v === b[i] ? 0 : 1), 0) : Infinity;
 const cells = (env: Uint8Array, channel: number) => env.filter((v, i) => i % 4 === channel && v !== 0).length;
 
-// Owner report: load the Maze, change the grid, and the walls and the food were gone (ADR 0019). One backend per API
-// for all engines here: on SwiftShader (CI) a WebGPU device takes tens of seconds to compile its pipelines.
-describe.each(Object.entries(BACKENDS))('%s: food, light and walls', (_, create) => {
-  let backend: Backend;
-  beforeAll(async () => {
-    backend = await create(document.createElement('canvas'));
-  }, 180_000);
-  afterAll(() => {
-    backend.destroy();
-  });
-
-  /** The shared backend for one engine: destroying the engine keeps it, and `failures.next` allocations fail. */
-  function lend() {
-    const failures = { next: 0 };
-    const lent = new Proxy(backend, {
-      get(t, key) {
-        if (key === 'destroy') return () => undefined;
-        if (key === 'createSim')
-          return (...args: Parameters<Backend['createSim']>) =>
-            failures.next-- > 0 ? Promise.reject(new OutOfMemoryError('test')) : t.createSim(...args);
-        return Reflect.get(t, key, t) as unknown;
-      },
-    });
-    return { lent, failures };
-  }
-
+// Owner report: load the Maze, change the grid, and the walls and the food were gone (ADR 0019).
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kind) => {
   // 320 × 180 gives the 16:9 grids of ADR 0010 (512 × 288 at grid 512); 180 × 390 a 9:19.5 phone.
   async function load(id: string, patch: Partial<Settings> = {}, size: [number, number] = [320, 180]) {
     const p = presetById(id);
@@ -146,7 +180,7 @@ describe.each(Object.entries(BACKENDS))('%s: food, light and walls', (_, create)
     const canvas = document.createElement('canvas');
     [canvas.width, canvas.height] = size;
     const s = { ...p.settings(), seed: 5, ...patch };
-    const { lent, failures } = lend();
+    const { lent, failures } = lend(kind);
     const engine = await Engine.create(canvas, s, undefined, lent);
     await engine.load(s, p.env ?? []);
     return { engine, failures };
