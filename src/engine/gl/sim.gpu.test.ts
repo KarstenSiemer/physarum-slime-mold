@@ -1,5 +1,5 @@
 // WebGL2 resources, counting and readback in a real browser (ADR 0003, ADR 0010).
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BOUNDARIES, defaultSettings, defaultStrain, STYLES, type Settings } from '../../model/params';
 import { AgentToolKind } from '../pack';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
@@ -88,6 +88,11 @@ function alivePerStrain(agents: AgentState[], strains: number) {
 }
 
 describe.each(PATHS)('float blending %s', (floatBlend) => {
+  // One context for the tests that need no special canvas: on SwiftShader (CI) compiling the programs
+  // takes seconds per context.
+  let shared: ReturnType<typeof context> | undefined;
+  const plain = () => (shared ??= context());
+
   it('frees every texture, framebuffer and renderbuffer of a half-built simulation', () => {
     const { canvas, live, failAt } = countingCanvas();
     const { gl, prog } = context(canvas);
@@ -115,7 +120,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
 
   // Half floats count exactly to 2048 only; condensed networks hold thousands of agents per cell.
   it('counts deposits exactly far above 2048 agents per cell and strain', async () => {
-    const { gl, prog } = context();
+    const { gl, prog } = plain();
     const strains = [0, 1, 2].map((i) => defaultStrain(i));
     // One cell on a periodic grid: every agent moves into it.
     const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0 }), 1, 1, 100_000, floatBlend);
@@ -138,7 +143,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     [24, 80],
     [72, 40],
   ])('counts every cell and strain of a %i × %i grid exactly', async (w, h) => {
-    const { gl, prog } = context();
+    const { gl, prog } = plain();
     const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
     const settings = settingsWith({ strains, layout: 'center', shrink: 0 });
     const sim = new GlSim(gl, prog, settings, w, h, 12 * w * h, floatBlend);
@@ -156,7 +161,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
 
   // Without float blending the stencil holds the count mod 256 and the carry its 256s (deposit()).
   it.each([1, 255, 256, 257, 511, 512, 513, 65_535, 65_537])('counts exactly in a cell with n = %i', async (n) => {
-    const { gl, prog } = context();
+    const { gl, prog } = plain();
     const sim = new GlSim(gl, prog, settingsWith({ strains: [defaultStrain(0)], shrink: 0 }), 1, 1, n, floatBlend);
     sim.run(1);
     expect(Array.from(await sim.readCounts())).toEqual([n, 0, 0, 0]);
@@ -185,7 +190,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
   });
 
   it('finish() resolves only after the GPU has run the work, never within the same task', async () => {
-    const { gl, prog } = context();
+    const { gl, prog } = plain();
     // 300 000 agents for 10 steps: longer than a task on the GPUs we test with (Metal, SwiftShader).
     const sim = new GlSim(gl, prog, defaultSettings(), 512, 288, 300_000, floatBlend);
     sim.run(10);
@@ -297,18 +302,21 @@ it('never blends into a 32-bit float target without float blending', async () =>
 });
 
 describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
-  const create = () => WebGl2Backend.create(floatBlend ? document.createElement('canvas') : halfFloatCanvas().canvas);
+  let backend: WebGl2Backend;
+  beforeAll(() => {
+    backend = WebGl2Backend.create(floatBlend ? document.createElement('canvas') : halfFloatCanvas().canvas);
+  });
+  afterAll(() => {
+    backend.destroy();
+  });
 
   it('reports the memory and grid limits of its counting path', () => {
-    const backend = create();
     expect(backend.supportsCollisions).toBe(floatBlend);
     expect(backend.bytesPerCell).toBe(floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT);
-    backend.destroy();
   });
 
   // The gel height field has a one-cell border, so it is two texels larger than the grid (backend.ts).
   it.each([true, false])('draws a grid at the largest side it reports, in every style (wide %s)', async (wide) => {
-    const backend = create();
     const side = backend.maxGridSide;
     const sim = await backend.createSim(defaultSettings(), wide ? side : 16, wide ? 16 : side, 64);
     for (const style of STYLES) {
@@ -317,6 +325,5 @@ describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
       expect(img.width, style).toBe(8);
     }
     sim.destroy();
-    backend.destroy();
   });
 });
