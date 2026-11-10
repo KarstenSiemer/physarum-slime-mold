@@ -132,6 +132,17 @@ describe('strokeOn', () => {
     near(s.from, [256 + 1.6 * (100 - 256), 256 + 1.6 * (100 - 160)]);
   });
 
+  it("maps an edit through the frame of the list's arena, not of the boundary it was painted under", () => {
+    // Painted in a box, in a list whose arena is a dish (a dish preset, then Edges set to box): the dish's frame.
+    const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], 'box', 'dish');
+    const s = strokeOn(e, 512, 512);
+    near(s?.from ?? [], [256 + 1.6 * (100 - 256), 256 + 1.6 * (100 - 160)]);
+    expect(s?.boundary).toBe('box');
+    const shape = strokeOn(fromShape({ kind: 'food', at: [0.4, 0], r: 0.01 }, 'box', 'dish'), 512, 512);
+    near(shape?.from ?? [], [256 + 0.4 * 512, 256]);
+    expect(shape?.boundary).toBe('box');
+  });
+
   it('keeps an edit of a box or a periodic grid at its place relative to the edges, its radius on the short side', () => {
     for (const b of ['box', 'wrap'] as const) {
       // 512 × 320 to 512 × 512: x keeps its fraction of the width, y of the height; the radius grows by 1.6.

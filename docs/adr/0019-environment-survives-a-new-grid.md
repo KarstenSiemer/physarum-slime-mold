@@ -45,53 +45,70 @@ base commit (seed 7; the two backends gave the same numbers):
 
 For an edit on another grid than the one it was painted on:
 
-1. Positions in fractions of width and height in every arena: in a dish the layout follows the
-   screen, not the dish (the three defects above are all dish scenes).
-2. A frame of the grid's short side in every arena, turned on a portrait grid: a similarity
-   transform. In a box the layout then loses its edges. The first draft of this ADR did this: the
-   Maze's foods, 0.64 short sides from the centre, lay beside every grid from 1:1 to about
-   1.25:1, so the Maze had no food on 512 × 512 and 512 × 427 and 12 food cells on 512 × 410, and
-   on a square its outer corridors shrank to a tenth of the width (review of the first draft).
+1. Positions in fractions of width and height in every arena. In a dish the layout then follows
+   the screen, not the dish: the three defects above are all dish scenes.
+2. One canonical frame of the grid's short side in every arena, turned on a portrait grid: a
+   similarity transform. In a box the layout then loses its edges. The first draft of this ADR did
+   this. The Maze's foods lie 0.64 short sides from the centre, so they lay beside every grid from
+   1:1 to about 1.25:1: no food on 512 × 512 and 512 × 427, 12 food cells on 512 × 410. On a square
+   its outer corridors shrank to a tenth of the width (review of the first draft).
 3. The scale of the larger axis for strokes and the short side for presets (an earlier draft):
    the two drift apart when the screen turns.
-4. **The frame of the arena**, turned on a portrait grid: a dish keeps its short side as the unit
-   (option 2), a box and a periodic grid stretch with the grid (option 1).
+4. A canonical frame per arena, turned on a portrait grid: a dish keeps its short side as the unit
+   (option 2), a box and a periodic grid stretch with the grid (option 1). Each edit uses the arena
+   it was painted under. The review of the second draft found that edits then come apart after an
+   arena switch: in Shrinking plasmodium switched to a box, an erase over a food missed that food
+   on a square screen, and the food came back.
+5. **A canonical frame per arena, one arena per edit list**: option 4, but every edit since the
+   last Clear or preset load uses the list's arena.
 
 ## Decision
 
-Option 1 with the frame of the arena (option 4).
+Option 1 with option 5.
 
-- **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or
-  preset load: preset shapes in the canonical frame (`fromShape`), strokes in the cells of the grid
-  the view shows (`fromStroke`, `paint()` at line 233), each with the boundary it was painted under
-  (`Stroke.boundary`; both backends write it into the parameters of the paint pass). Every new
-  simulation paints the whole list (`flushEnv()`, line 240) before it places its agents
-  (`rebuild()`, line 180; `load()`, line 104). A frame paints the edits added since. "Clear" empties
-  the list, also during a rebuild; a preset load replaces it. `Engine.paint` before the first
-  simulation exists drops the stroke: no grid is on screen yet. On a periodic grid the view shows
-  copies of the grid around it, and a stroke on a copy paints the grid where the copy shows it. So
-  `fromStroke` moves such a stroke by whole periods until it starts inside the grid. Before, its
-  raw coordinates lay beside the grid, and every other grid skipped it as outside: 131 food cells
-  painted left of a 512 × 320 grid were none on 1024 × 640 (CPU engine test; the GPU engine test
-  failed the same way on both backends).
+- **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or preset
+  load: preset shapes in the canonical frame of the preset's own arena (`fromShape`), strokes in the
+  cells of the grid the view shows (`fromStroke`, `paint()` at line 234), each with the boundary it
+  was painted under (`Stroke.boundary`; both backends write it into the parameters of the paint
+  pass). Every new simulation paints the whole list (`flushEnv()`, line 243) before it places its
+  agents (`rebuild()`, line 181; `load()`, line 105). A frame paints the edits added since. "Clear"
+  empties the list, also during a rebuild; a preset load replaces it. `Engine.paint` before the
+  first simulation exists drops the stroke: no grid is on screen yet. On a periodic grid the view
+  shows copies of the grid around it, and a stroke on a copy paints the grid where the copy shows
+  it. So `fromStroke` moves such a stroke by whole periods until it starts inside the grid. Before,
+  its raw coordinates lay beside the grid, and every other grid skipped it as outside: 131 food
+  cells painted left of a 512 × 320 grid were none on 1024 × 640 (CPU engine test; the GPU engine
+  test failed the same way on both backends).
 - **Mapping** (`strokeOn`, `src/engine/environment.ts`). On the grid an edit was made on, it is
   painted with its original coordinates, byte for byte. On another grid it goes through the
-  canonical frame of the boundary it was painted under (`toFrame` and `fromFrame`): landscape,
+  canonical frame of the list's arena (`EnvEdit.frame`, `toFrame` and `fromFrame`): landscape,
   origin at the grid's centre. A dish is the circle on the grid's short side, so its frame has the
   short side as the unit on both axes: a similarity transform, circles stay circles and a food
   source keeps its area relative to the dish. A box and a periodic grid are the arena themselves,
   so their frame stretches with the grid: the long side spans 1.6 units (`FRAME_ASPECT`; presets
   are laid out for 16:10) and the short side 1, and a shape keeps its place relative to the edges.
-  Under every boundary the radius scales with the short side, so a dab stays round; a line in a
-  box or a periodic grid changes its angle when the screen changes its shape. On a 16:10 grid the
+  In every arena the radius scales with the short side, so a dab stays round. On a 16:10 grid the
   frames are the same. A portrait grid (height above width) turns the frame by 90° clockwise, so a
-  layout along the long side of a wide screen stays along the long side of a tall one. An edit that
-  lies completely outside the new grid is skipped and kept for other grids: in a dish when the
-  screen narrows, in a box for a stroke painted beside the grid. Preset shapes are given in the
-  frame of their boundary (`src/model/presets.ts`), with values that put every shape where the old
-  fractions put it on a 16:10 window. In a box or a periodic grid they lie there on every screen
-  (turned on a tall one). Steiner's foods form a square whose corners lie as far from the centre as
-  the old rectangle's.
+  layout along the long side of a wide screen stays along the long side of a tall one.
+- **The list's arena.** After a preset load it is the preset's own arena, also when the settings
+  hold another boundary (one chosen while the engine started, `App.svelte`). After a Clear, or a
+  preset without shapes, it is the arena of the first stroke. An arena switch does not change it,
+  so edits that lie on top of each other on one grid do so on every grid: in Shrinking plasmodium
+  switched to a box, an erase over a food stays on that food on a square screen. In return, after a
+  switch from a dish preset to a box, strokes near the ends of the long side can lie beside a
+  narrower grid, and after a switch from a box preset to a dish, strokes in the dish stretch with
+  the grid.
+- **What a new screen shape changes.** An edit that lies completely outside the new grid is
+  skipped and kept for other grids: in a dish's frame when the screen narrows, in a box's frame
+  for a stroke beside the grid or a dab over its long edge. In a box's or a periodic grid's frame
+  the positions stretch with the grid while the radius follows the short side. So a line changes
+  its angle, and along the long side a gap between two painted walls narrows against the walls on
+  a squarer screen and widens on a wider one: two walls of radius 6 with 8 open cells between them
+  on 512 × 320 leave 4 on 512 × 427 and none on 512 × 512. Preset shapes before this ADR did the
+  same. Preset shapes are given in the canonical frame of the preset's own arena
+  (`src/model/presets.ts`), with values that put every shape where the old fractions put it on a
+  16:10 window. In a box or a periodic grid they lie there on every screen (turned on a tall one).
+  Steiner's foods form a square whose corners lie as far from the centre as the old rectangle's.
 - **Radius.** A brush covers at least `MIN_RADIUS` = 0.75 cells, on live painting and on every
   replay. A cell that a segment passes through has its centre at most half a cell diagonal (0.71)
   from it, so a 0.75 brush paints every such cell: painted walls stay closed on any grid, also where
@@ -199,9 +216,9 @@ Option 1 with the frame of the arena (option 4).
   at density 0.5, in none at 0.6 (77 % of the dish) and in none with the old count of 73,728
   agents. Jones' %p 50 is 0.5, so a higher density is an open owner decision (TODO.md).
 - The Maze keeps its walls and both food sources on every screen shape, where the old fractions
-  put them (turned on a tall screen): 166 food cells on 512 × 288, 212 on 512 × 320, 366 on
-  512 × 427, 530 on 512 × 512 and 112 on 236 × 512 (CPU, `strokeOn` and `paint-reference.ts`). On
-  512 × 512 and 512 × 410 these are the cells of the base commit.
+  put them (turned on a tall screen): 166 food cells on 512 × 288, 212 on 512 × 320, 340 on
+  512 × 410, 366 on 512 × 427, 530 on 512 × 512 and 112 on 236 × 512 (CPU, `strokeOn` and
+  `paint-reference.ts`). On every landscape grid these are the cells of the base commit.
 - Maze walls are 0.008 short sides thick in radius. On WebGPU the painted walls are 4 cells across
   at 512 × 288 (the two short walls 5), 6 at 512 × 320, 4 at 236 × 512 and 8 at 512 × 512. The
   sensor distance of 7 reaches across them on the first three grids, not on 512 × 512. At step

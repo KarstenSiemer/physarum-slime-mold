@@ -1,7 +1,7 @@
 import { defaultSettings, defaultStrain, MAX_STRAINS, type Settings, type Strain } from './params';
 
 /**
- * Food, light or a wall in the canonical frame of the preset's boundary (engine/environment.ts, toFrame()):
+ * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()):
  * positions from the grid's centre, on a landscape grid; a portrait grid turns the frame by 90°. In a dish the unit
  * is the grid's short side on both axes. In a box or a periodic grid x from −0.8 to 0.8 spans the long side and y
  * from −0.5 to 0.5 the short side, whatever the screen's shape. The radius is in units of the short side.

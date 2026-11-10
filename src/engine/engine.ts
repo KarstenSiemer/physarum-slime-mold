@@ -1,4 +1,4 @@
-import { constrain, RESOLUTIONS, type Settings } from '../model/params';
+import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget } from './budget';
 import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
@@ -91,11 +91,12 @@ export class Engine {
 
   /**
    * Loads a preset: its settings, its food, light and walls in place of every earlier edit, then a fresh
-   * population, placed after the walls so that no agent starts inside one.
+   * population, placed after the walls so that no agent starts inside one. The shapes are in the canonical frame of
+   * `arena`, the preset's own arena; the settings can hold another boundary (one chosen while the engine started).
    */
-  async load(settings: Settings, env: readonly EnvShape[] = []) {
+  async load(settings: Settings, env: readonly EnvShape[] = [], arena: Boundary = settings.boundary) {
     this.settings = this.supported(settings);
-    this.edits = env.map((e) => fromShape(e, this.settings.boundary));
+    this.edits = env.map((e) => fromShape(e, this.settings.boundary, arena));
     this.painted = 0;
     // A new simulation paints the edits itself, before it places the agents.
     if (this.needsRebuild()) return this.rebuild();
@@ -233,7 +234,9 @@ export class Engine {
   paint(stroke: Stroke) {
     if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;
     const s = { ...stroke, radius: Math.max(MIN_RADIUS, stroke.radius) };
-    this.edits.push(fromStroke(s, this.viewGrid, this.settings.boundary));
+    // One canonical frame for the whole list (EnvEdit.frame): the preset's arena, or the arena of the first stroke.
+    const arena = this.edits[0]?.frame ?? this.settings.boundary;
+    this.edits.push(fromStroke(s, this.viewGrid, this.settings.boundary, arena));
   }
 
   /** Paints the edits the current simulation does not hold yet, mapped to its grid, in one call. */

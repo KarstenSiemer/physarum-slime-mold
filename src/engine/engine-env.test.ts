@@ -5,7 +5,7 @@ import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { Engine } from './engine';
 import { BrushDrag } from '../ui/drag';
-import { fromStroke, strokeOn } from './environment';
+import { fromShape, fromStroke, strokeOn } from './environment';
 import { OutOfMemoryError } from './gpu';
 import { paintReference } from './paint-reference';
 import type { Backend, Sim, Stroke } from './types';
@@ -148,6 +148,14 @@ const count = (env: Uint8Array, channel: number) => env.filter((v, i) => i % 4 =
 const differing = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length ? a.reduce((n, v, i) => n + (v === b[i] ? 0 : 1), 0) : Infinity;
 const empty = (env: Uint8Array) => count(env, 0) + count(env, 1) + count(env, 2) === 0;
+/** Food cells whose centre lies within `r` cells of `at`. */
+const foodNear = (sim: CpuSim, [x, y]: [number, number], r: number) => {
+  let n = 0;
+  for (let j = 0; j < sim.height; j++)
+    for (let i = 0; i < sim.width; i++)
+      if ((sim.env[(j * sim.width + i) * 4 + 1] ?? 0) > 0 && Math.hypot(i + 0.5 - x, j + 0.5 - y) <= r) n++;
+  return n;
+};
 
 describe('food, light and walls on a new simulation', () => {
   it('survive a grid change and come back byte for byte on the old grid', async () => {
@@ -250,7 +258,7 @@ describe('food, light and walls on a new simulation', () => {
     expect([sim().width, sim().height]).toEqual([320, 512]);
     const expected = new Uint8Array(320 * 512 * 4);
     for (const e of mazeEnv) {
-      const s = strokeOn({ kind: e.kind, from: e.at, to: e.to ?? e.at, radius: e.r, boundary: 'box' }, 320, 512);
+      const s = strokeOn(fromShape(e, 'box'), 320, 512);
       if (s) paintReference(expected, 320, 512, s, 'box');
     }
     const food = strokeOn(
@@ -266,19 +274,22 @@ describe('food, light and walls on a new simulation', () => {
   });
 
   it('skip an edit outside the new grid and paint it again where it fits', async () => {
-    const c = canvas();
-    // A dish keeps the short side as its unit, so the left end of a wide grid lies beside a square one.
-    const { engine, sim } = await engineWith({ ...maze.settings(), boundary: 'dish' }, [], c);
-    engine.paint({ kind: 'food', from: [6, 100], to: [6, 100], radius: 4 }); // near the left edge of 512 × 320
-    engine.frame(0, 0);
-    const wide = sim().env.slice();
-    [c.width, c.height] = [1000, 1000];
-    await engine.apply({ ...engine.settings, density: 0.2 });
+    const c = canvas(1000, 1000);
+    const { engine, sim } = await engineWith(maze.settings(), [], c);
     expect([sim().width, sim().height]).toEqual([512, 512]);
+    // A dab over the left edge of a square box. On a 2:1 grid its centre keeps its place along the long side while
+    // its radius shrinks with the short side, so it no longer reaches into the grid.
+    engine.paint({ kind: 'food', from: [-6, 256], to: [-6, 256], radius: 8 });
+    engine.frame(0, 0);
+    const square = sim().env.slice();
+    expect(count(square, 1)).toBeGreaterThan(0);
+    [c.width, c.height] = [2000, 1000];
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    expect([sim().width, sim().height]).toEqual([512, 256]);
     expect(empty(sim().env)).toBe(true);
-    [c.width, c.height] = [1600, 1000];
+    [c.width, c.height] = [1000, 1000];
     await engine.apply({ ...engine.settings, density: 0.12 });
-    expect(differing(sim().env, wide)).toBe(0);
+    expect(differing(sim().env, square)).toBe(0);
   });
 
   it('keep an edit near the edge of a box at that edge on a square screen, and back', async () => {
@@ -299,6 +310,75 @@ describe('food, light and walls on a new simulation', () => {
     [c.width, c.height] = [1600, 1000];
     await engine.apply({ ...engine.settings, density: 0.12 });
     expect(differing(sim().env, wide)).toBe(0);
+  });
+
+  // Every edit of a list goes through one canonical frame, so an arena switch cannot pull apart edits that lie on
+  // top of each other (review of ADR 0019).
+  it('keep an erase on the food it erased after an arena switch and a new screen shape', async () => {
+    const c = canvas();
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinking.env, c);
+    expect([sim().width, sim().height, engine.settings.boundary]).toEqual([512, 320, 'dish']);
+    await engine.apply({ ...engine.settings, boundary: 'box' });
+    // Shrinking's food at (−0.368, −0.05) of the dish's frame lies at (138.24, 144) on 512 × 320.
+    expect(foodNear(sim(), [138.24, 144], 12)).toBeGreaterThan(0);
+    engine.paint({ kind: 'erase', from: [138.24, 144], to: [138.24, 144], radius: 8 });
+    engine.frame(0, 0);
+    expect(foodNear(sim(), [138.24, 144], 12)).toBe(0);
+    [c.width, c.height] = [1000, 1000];
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    expect([sim().width, sim().height]).toEqual([512, 512]);
+    // The food and the erase both go through the dish's frame: (256 − 0.368 · 512, 256 − 0.05 · 512).
+    expect(foodNear(sim(), [67.584, 230.4], 16)).toBe(0);
+    const fresh = await engineWith(shrinking.settings(), shrinking.env, canvas(1000, 1000));
+    expect(foodNear(fresh.sim(), [67.584, 230.4], 16)).toBeGreaterThan(0);
+  });
+
+  it('keep dabs painted before and after an arena switch at their distance on a new screen shape', async () => {
+    const c = canvas();
+    const { engine, sim } = await engineWith(three.settings(), [], c);
+    await engine.apply({ ...engine.settings, resolution: 512 });
+    expect([sim().width, sim().height, engine.settings.boundary]).toEqual([512, 320, 'wrap']);
+    engine.paint({ kind: 'food', from: [150, 100], to: [150, 100], radius: 4 });
+    engine.frame(0, 0);
+    await engine.apply({ ...engine.settings, boundary: 'dish' });
+    engine.paint({ kind: 'food', from: [160, 100], to: [160, 100], radius: 4 });
+    engine.frame(0, 0);
+    [c.width, c.height] = [1000, 1000];
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    expect([sim().width, sim().height]).toEqual([512, 512]);
+    // The first dab set the list's arena: the periodic grid, whose frame stretches with the grid. Both dabs keep
+    // their place along the long side, 10 cells apart, each painted under its own boundary.
+    const expected = new Uint8Array(512 * 512 * 4);
+    paintReference(
+      expected,
+      512,
+      512,
+      { kind: 'food', from: [150, 160], to: [150, 160], radius: 6.4, boundary: 'wrap' },
+      'dish',
+    );
+    paintReference(
+      expected,
+      512,
+      512,
+      { kind: 'food', from: [160, 160], to: [160, 160], radius: 6.4, boundary: 'dish' },
+      'dish',
+    );
+    expect(differing(sim().env, expected)).toBe(0);
+  });
+
+  // App.svelte loads the scene's shapes with the settings the panel holds, which may have another boundary.
+  it("place a preset's shapes in the frame of its own arena, also under another boundary", async () => {
+    const steiner = presetById('steiner');
+    if (!steiner?.env) throw new Error('no Steiner tree');
+    const own = await engineWith(steiner.settings(), steiner.env, canvas(1000, 1000));
+    expect([own.sim().width, own.sim().height]).toEqual([256, 256]);
+    const boxed: Settings = { ...steiner.settings(), boundary: 'box' };
+    const engine = await Engine.create(canvas(1000, 1000), boxed, undefined, new CpuBackend());
+    await engine.load(boxed, steiner.env, 'dish');
+    // The four foods lie inside the dish, so painting them in a box gives the same bytes: a square.
+    expect(differing((engine.sim as CpuSim).env, own.sim().env)).toBe(0);
+    await engine.load(boxed, steiner.env);
+    expect(differing((engine.sim as CpuSim).env, own.sim().env)).toBeGreaterThan(0);
   });
 
   // Moved or zoomed out, the view shows copies of a periodic grid around it, and the brush paints on them.
