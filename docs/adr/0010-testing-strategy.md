@@ -36,7 +36,9 @@ GPU checks use invariants, not long exact trajectories:
 - CI runs real WGSL on SwiftShader, so CI scenes stay small: the model tests in
   `sim.gpu.test.ts` use at most 200² cells and 6000 agents (the sort tests up to 15 360 agents
   on 96 × 80 cells, the WebGL2 counting tests in `gl/sim.gpu.test.ts` up to 100 000 agents on
-  one cell), `engine.gpu.test.ts` and the e2e tests (1280 × 720 viewport) 512 × 288 cells.
+  one cell), `engine.gpu.test.ts` and the e2e tests (1280 × 720 viewport) 512 × 288 cells. The
+  grid-limit tests draw a grid 16 cells by the largest side the backend reports, 64 agents and
+  no steps.
 - Real-GPU coverage (Metal) comes from the local loop. CI asserts no performance numbers (the
   planned steps/s report is local only), but its time limits fail a run that SwiftShader makes
   too slow (next bullet).

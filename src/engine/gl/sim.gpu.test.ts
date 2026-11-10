@@ -1,6 +1,6 @@
 // WebGL2 resources, counting and readback in a real browser (ADR 0003, ADR 0010).
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, type Settings } from '../../model/params';
+import { defaultSettings, defaultStrain, STYLES, type Settings } from '../../model/params';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
@@ -203,8 +203,46 @@ it('polls a fence about once per millisecond, not every 4 ms like nested timers'
   expect(median).toBeLessThan(3.5);
 });
 
-it('the backend reports the memory and grid limits of its counting path', () => {
-  const backend = WebGl2Backend.create(document.createElement('canvas'));
-  expect(backend.bytesPerCell).toBe(backend.supportsCollisions ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT);
-  backend.destroy();
+/** A canvas whose WebGL2 context hides EXT_float_blend, so the backend takes the half-float path. */
+function withoutFloatBlend() {
+  const canvas = document.createElement('canvas');
+  const getContext = canvas.getContext.bind(canvas);
+  canvas.getContext = ((type: string, attrs?: WebGLContextAttributes) => {
+    const gl = getContext(type, attrs);
+    if (!(gl instanceof WebGL2RenderingContext)) return gl;
+    return new Proxy(gl, {
+      get(t, key) {
+        if (key === 'getExtension')
+          return (name: string): unknown => (name === 'EXT_float_blend' ? null : t.getExtension(name));
+        const v: unknown = Reflect.get(t, key);
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+      },
+    });
+  }) as unknown as typeof canvas.getContext;
+  return canvas;
+}
+
+describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
+  const create = () => WebGl2Backend.create(floatBlend ? document.createElement('canvas') : withoutFloatBlend());
+
+  it('reports the memory and grid limits of its counting path', () => {
+    const backend = create();
+    expect(backend.supportsCollisions).toBe(floatBlend);
+    expect(backend.bytesPerCell).toBe(floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT);
+    backend.destroy();
+  });
+
+  // The gel height field has a one-cell border, so it is two texels larger than the grid (backend.ts).
+  it.each([true, false])('draws a grid at the largest side it reports, in every style (wide %s)', async (wide) => {
+    const backend = create();
+    const side = backend.maxGridSide;
+    const sim = await backend.createSim(defaultSettings(), wide ? side : 16, wide ? 16 : side, 64);
+    for (const style of STYLES) {
+      const settings = settingsWith({ style });
+      const img = await backend.capture(sim, settings, { center: [8, 8], scale: 1 }, 8, 8);
+      expect(img.width, style).toBe(8);
+    }
+    sim.destroy();
+    backend.destroy();
+  });
 });

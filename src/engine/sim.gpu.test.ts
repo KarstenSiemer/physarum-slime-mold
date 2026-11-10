@@ -1,7 +1,7 @@
 // Runs in Chromium with real GPU APIs (Metal locally, SwiftShader in CI). See ADR 0010.
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { defaultSettings, defaultStrain, STYLES, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
 import { AgentToolKind } from './pack';
 import { readBuffer } from './readback';
@@ -326,6 +326,19 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       if (boundary === 'wrap' || (cy > 8 && cy < h - 9)) expect(Math.abs(c.y - SIZE / 2)).toBeLessThan(tolerance);
     });
   });
+
+  // The gel height field has a one-cell border, so it is two texels larger than the grid (render.ts).
+  if (kind === 'webgpu')
+    it.each([true, false])('draws a grid at the largest side it reports, in every style (wide %s)', async (wide) => {
+      const { device } = (backend as WebGpuBackend).gpu;
+      const side = backend.maxGridSide;
+      const sim = await make({}, wide ? side : 16, wide ? 16 : side, 64);
+      for (const style of STYLES) {
+        device.pushErrorScope('validation');
+        await backend.capture(sim, { ...defaultSettings(), style }, { center: [8, 8], scale: 1 }, 8, 8);
+        expect((await device.popErrorScope())?.message, style).toBeUndefined();
+      }
+    });
 
   // WebGPU sorts the agent buffer by position now and then, into the other of two buffers (shaders/sort.wgsl);
   // the model must not notice (ADR 0005). Random streams and claim keys follow the agent id, not the slot.

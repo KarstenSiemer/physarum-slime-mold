@@ -51,8 +51,9 @@ export class WebGpuBackend implements Backend<Simulation> {
     return Math.min(l.maxStorageBufferBindingSize, l.maxBufferSize);
   }
 
+  /** The gel height field has a one-cell border, two texels more than the grid (render.ts). */
   get maxGridSide() {
-    return this.gpu.device.limits.maxTextureDimension2D;
+    return this.gpu.device.limits.maxTextureDimension2D - 2;
   }
 
   get maxAgents() {

@@ -39,6 +39,8 @@ Measured in the gallery loop (`npm run gallery`, contact sheets reviewed by eye)
    The gel lighting reads the height at five points per pixel. A pass before the main pass
    writes it once per frame at grid resolution, with a one-cell border, into an `r16float`
    texture (filterable everywhere): the summed trail above the black level times the exposure.
+   The border makes the texture two texels larger than the grid, so both backends report the
+   texture size limit minus 2 as their largest grid side.
    That value is affine in the trail, so hardware bilinear filtering of it gives what filtering
    the trail first gave; only the exponential and the clamp at zero come after the lookup. Before,
    each of the five reads ran the full manual trail filter (4 to 16 `rgba32float` loads).

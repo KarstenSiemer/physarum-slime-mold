@@ -49,7 +49,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     // Claim keys must stay below 2^24 (exact in float32); memory stays moderate on weaker GPUs.
     this.maxAgents = Math.min(2 ** 22, 2048 * maxTex);
-    // Without float blending the counting panels (gl/sim.ts deposit()) are twice the grid on each side.
+    // The gel height field has a one-cell border (heightsFor()), two texels more than the grid. Without
+    // float blending the counting panels (gl/sim.ts deposit()) are twice the grid on each side.
     const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
     const side = Math.min(
       maxTex,
@@ -57,7 +58,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       viewport[0] ?? 0,
       viewport[1] ?? 0,
     );
-    this.maxGridSide = floatBlend ? maxTex : Math.floor(side / 2);
+    this.maxGridSide = Math.min(maxTex - 2, floatBlend ? maxTex : Math.floor(side / 2));
     this.bytesPerCell = floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT;
     this.maxBufferBytes = maxTex * maxTex * 16;
     this.description = `WebGL2 · ${String(gl.getParameter(gl.RENDERER))}`;
