@@ -2,7 +2,7 @@ import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/p
 import type { EnvShape } from '../model/presets';
 import { FrameBudget } from './budget';
 import { paintsCell } from './brush';
-import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
+import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import type { AgentTool } from './pack';
 import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
@@ -113,11 +113,17 @@ export class Engine {
    * Loads a preset: its settings, its food, light and walls in place of every earlier edit, then a fresh
    * population, placed after the walls so that no agent starts inside one. The shapes belong to `arena`, the
    * preset's own: they are in its canonical frame and painted in it. The simulation runs under the settings'
-   * boundary, which can be another one (chosen while the engine started).
+   * boundary, which can be another one (chosen while the engine started). `strokes` come after the shapes, each with
+   * its own grid and arena: a shared link's edit list (model/link.ts).
    */
-  async load(settings: Settings, env: readonly EnvShape[] = [], arena: Boundary = settings.boundary) {
+  async load(
+    settings: Settings,
+    env: readonly EnvShape[] = [],
+    arena: Boundary = settings.boundary,
+    strokes: readonly EnvEdit[] = [],
+  ) {
     this.settings = this.supported(settings);
-    this.edits = env.map((e) => fromShape(e, arena));
+    this.edits = [...env.map((e) => fromShape(e, arena)), ...strokes.map((e) => ({ ...e }))];
     this.painted = 0;
     this.placement = undefined;
     [this.running, this.queue] = [undefined, []];
@@ -136,6 +142,11 @@ export class Engine {
   /** Called after every change of the edit list: a recorded stroke and the sweep after it, a Clear, a load. */
   onEdits: (() => void) | undefined;
 
+  /** The edit list as it is now, for a shared link (model/link.ts). The engine changes it; read it at once. */
+  envList(): readonly EnvEdit[] {
+    return this.edits;
+  }
+
   /**
    * Whether the edit list is exactly `env`, a scene's shapes in the canonical frame of `arena`, as load() makes it:
    * then the food, light and walls are the scene's own, also after a stroke and an erase that the sweep took back.
@@ -144,15 +155,8 @@ export class Engine {
     return (
       this.edits.length === env.length &&
       env.every((shape, i) => {
-        const [e, f] = [this.edits[i], fromShape(shape, arena)];
-        return (
-          e !== undefined &&
-          e.grid === undefined &&
-          e.kind === f.kind &&
-          e.boundary === f.boundary &&
-          e.radius === f.radius &&
-          [0, 1].every((k) => e.from[k] === f.from[k] && e.to[k] === f.to[k])
-        );
+        const e = this.edits[i];
+        return e !== undefined && sameEdit(e, fromShape(shape, arena));
       })
     );
   }
@@ -284,11 +288,17 @@ export class Engine {
    * during a rebuild the view still shows the old grid, and the new one gets the stroke where it was drawn. Before
    * the first simulation exists no grid is on screen, so the stroke is dropped. So is a stroke that does not clearly
    * paint a cell (paintsCell()), such as one beside a box, outside the dish or light that rounds to 0 there: it
-   * changes nothing on screen, and on another grid or arena it must not either.
+   * changes nothing on screen, and on another grid or arena it must not either. Positions and radius go to the
+   * nearest whole STEP first, and the stroke is painted and recorded so: a shared link then holds it exactly.
    */
   paint(stroke: Stroke) {
     if (![...stroke.from, ...stroke.to, stroke.radius].every(Number.isFinite) || !this.viewGrid) return;
-    const s = { ...stroke, radius: Math.max(MIN_RADIUS, stroke.radius) };
+    const s: Stroke = {
+      ...stroke,
+      from: [snap(stroke.from[0]), snap(stroke.from[1])],
+      to: [snap(stroke.to[0]), snap(stroke.to[1])],
+      radius: Math.max(MIN_RADIUS, snap(stroke.radius)),
+    };
     if (!paintsCell(s, ...this.viewGrid, this.settings.boundary)) return;
     const edit = fromStroke(s, this.viewGrid, this.settings.boundary);
     this.edits.push(edit);

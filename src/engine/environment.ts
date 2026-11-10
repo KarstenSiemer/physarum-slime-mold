@@ -10,6 +10,16 @@ import type { EnvTool, Stroke } from './types';
  */
 export const MIN_RADIUS = 0.75;
 
+/**
+ * Cells between two positions or radii a recorded stroke can have (Engine.paint() snaps to it). A shared link holds
+ * whole steps (model/link.ts), so it holds every stroke exactly, and a link paints the bytes that the list paints
+ * (docs/adr/0021). A step moves a stroke by at most 1/32 of a cell. MIN_RADIUS is a whole number of steps.
+ */
+export const STEP = 1 / 16;
+
+/** `v` on the nearest whole step (STEP); never −0, which a link could not tell from 0. */
+export const snap = (v: number) => Math.round(v / STEP) * STEP + 0;
+
 type Point = [number, number];
 
 /** A stroke as an edit paints it on a grid: always with the boundary of the arena it was painted in. */
@@ -61,6 +71,18 @@ export function fromStroke(s: Stroke, grid: Point, boundary: Boundary): EnvEdit 
 /** An edit from a preset's shape, painted in `boundary`: the preset's arena, in whose canonical frame it is. */
 export function fromShape(e: EnvShape, boundary: Boundary): EnvEdit {
   return { kind: e.kind, from: e.at, to: e.to ?? e.at, radius: e.r, boundary };
+}
+
+/** Whether two edits are the same: kind, arena, positions, radius and grid (none for a preset's shape). */
+export function sameEdit(a: EnvEdit, b: EnvEdit): boolean {
+  return (
+    a.kind === b.kind &&
+    a.boundary === b.boundary &&
+    a.radius === b.radius &&
+    a.grid?.[0] === b.grid?.[0] &&
+    a.grid?.[1] === b.grid?.[1] &&
+    [0, 1].every((k) => a.from[k] === b.from[k] && a.to[k] === b.to[k])
+  );
 }
 
 /** Long side over short side of the canonical frame of a box or a periodic grid: presets are laid out for 16:10. */

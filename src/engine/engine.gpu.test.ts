@@ -249,17 +249,18 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     const paint = (kind: Stroke['kind'], from: [number, number], to: [number, number], radius: number) => {
       engine.paint({ kind, from, to, radius });
     };
+    // Positions and radii on whole steps of 1/16 cell, as Engine.paint() records them (STEP).
     // Food across the periodic seam, erased completely: both go.
-    paint('food', [254.37, 70.21], [258.61, 72.43], 3.23);
-    paint('erase', [256.29, 71.17], [256.29, 71.17], 9.49);
+    paint('food', [254.375, 70.1875], [258.625, 72.4375], 3.25);
+    paint('erase', [256.3125, 71.1875], [256.3125, 71.1875], 9.5);
     // A wall erased in part by a drag: all stay. (Radii chosen so that no cell lies within 1e-3 of a brush's edge on
     // either grid, where float32 may decide it otherwise.)
-    paint('wall', [40.33, 30.27], [120.71, 34.19], 2.01);
-    for (let x = 30.13; x < 80; x += 6.07) paint('erase', [x, 31.41], [x + 6.07, 32.37], 3.93);
+    paint('wall', [40.3125, 30.25], [120.6875, 34.1875], 2);
+    for (let x = 30.125; x < 80; x += 6) paint('erase', [x, 31.375], [x + 6, 32.375], 3.9375);
     // Light under a wall that covers every lit cell: the light goes.
-    paint('light', [180.37, 100.29], [180.37, 100.29], 5.11);
-    paint('wall', [180.41, 100.33], [181.29, 100.71], 7.29);
-    paint('food', [60.29, 110.37], [70.43, 112.19], 4.11);
+    paint('light', [180.375, 100.3125], [180.375, 100.3125], 5.25);
+    paint('wall', [180.4375, 100.3125], [181.3125, 100.6875], 7.3125);
+    paint('food', [60.3125, 110.375], [70.4375, 112.1875], 4.0625);
     engine.frame(performance.now(), 0);
     expect(list().map((e) => e.kind)).toEqual(['wall', ...Array<string>(9).fill('erase'), 'wall', 'food']);
     const check = async () => {
