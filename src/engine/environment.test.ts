@@ -11,42 +11,62 @@ const preset = (id: string) => {
   return p.env;
 };
 
-const near = (a: number[], b: number[]) => {
-  expect(a).toHaveLength(b.length);
+const near = (a: number[], b: number[], what?: string) => {
+  expect(a, what).toHaveLength(b.length);
   a.forEach((v, i) => {
-    expect(v).toBeCloseTo(b[i] ?? NaN, 9);
+    expect(v, what).toBeCloseTo(b[i] ?? NaN, 9);
   });
 };
 
+const BOUNDARIES = ['dish', 'box', 'wrap'] as const;
+
 describe('the canonical frame', () => {
-  it('has its origin at the centre and the short side as its unit, also on a portrait grid', () => {
-    near(toFrame([256, 160], [512, 320]), [0, 0]);
-    near(toFrame([512, 0], [512, 320]), [0.8, -0.5]);
-    // Portrait: the frame's long axis runs down the grid, so its right end is at the bottom.
-    near(toFrame([160, 512], [320, 512]), [0.8, 0]);
-    near(toFrame([0, 256], [320, 512]), [0, 0.5]);
+  it('has its origin at the centre and the short side as its unit on 16:10, also on a portrait grid', () => {
+    for (const b of BOUNDARIES) {
+      near(toFrame([256, 160], [512, 320], b), [0, 0]);
+      near(toFrame([512, 0], [512, 320], b), [0.8, -0.5]);
+      // Portrait: the frame's long axis runs down the grid, so its right end is at the bottom.
+      near(toFrame([160, 512], [320, 512], b), [0.8, 0]);
+      near(toFrame([0, 256], [320, 512], b), [0, 0.5]);
+    }
+  });
+
+  it('keeps the short side as the unit of a dish on every grid, and stretches a box or a periodic grid', () => {
+    // The top right corner of a square and of a 2:1 grid: a dish measures it in short sides, while a box and a
+    // periodic grid are the arena themselves, so their corner is the frame's corner on every screen.
+    near(toFrame([512, 0], [512, 512], 'dish'), [0.5, -0.5]);
+    near(toFrame([512, 0], [512, 256], 'dish'), [1, -0.5]);
+    for (const b of ['box', 'wrap'] as const) {
+      near(toFrame([512, 0], [512, 512], b), [0.8, -0.5]);
+      near(toFrame([512, 0], [512, 256], b), [0.8, -0.5]);
+      near(toFrame([128, 512], [256, 512], b), [0.8, 0]);
+    }
   });
 
   it('is turned by a rotation, not a mirror: a clockwise turn of the landscape grid', () => {
     // Left, right and top of a 16:10 grid go to the top, the bottom and the right of a 10:16 grid.
-    near(fromFrame([-0.8, 0], [320, 512]), [160, 0]);
-    near(fromFrame([0.8, 0], [320, 512]), [160, 512]);
-    near(fromFrame([0, -0.5], [320, 512]), [320, 256]);
+    for (const b of BOUNDARIES) {
+      near(fromFrame([-0.8, 0], [320, 512], b), [160, 0]);
+      near(fromFrame([0.8, 0], [320, 512], b), [160, 512]);
+      near(fromFrame([0, -0.5], [320, 512], b), [320, 256]);
+    }
   });
 
-  it('round-trips through every grid shape', () => {
-    for (const grid of [
-      [512, 320],
-      [320, 512],
-      [256, 256],
-      [1024, 120],
-    ] as const)
-      for (const p of [
-        [0, 0],
-        [17.25, 300.5],
-        [511, 3],
+  it('round-trips through every grid shape under every boundary', () => {
+    for (const b of BOUNDARIES)
+      for (const grid of [
+        [512, 320],
+        [320, 512],
+        [256, 256],
+        [1024, 120],
+        [120, 1024],
       ] as const)
-        near(fromFrame(toFrame([...p], [...grid]), [...grid]), [...p]);
+        for (const p of [
+          [0, 0],
+          [17.25, 300.5],
+          [511, 3],
+        ] as const)
+          near(fromFrame(toFrame([...p], [...grid], b), [...grid], b), [...p]);
   });
 });
 
@@ -101,15 +121,30 @@ describe('strokeOn', () => {
     expect(s?.boundary).toBe('wrap');
   });
 
-  it('keeps circles round when the aspect ratio changes: one scale for both axes', () => {
+  it('keeps shapes in a dish when the aspect ratio changes: one scale for both axes', () => {
     // 512 × 320 to 512 × 512: the short side grows from 320 to 512 cells, so every length grows by 1.6.
-    const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], 'box');
+    const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], 'dish');
     const s = strokeOn(e, 512, 512);
     if (!s) throw new Error('outside');
     const length = Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]);
     expect(length).toBeCloseTo(1.6 * 50, 9);
     expect(s.radius).toBeCloseTo(8, 9);
     near(s.from, [256 + 1.6 * (100 - 256), 256 + 1.6 * (100 - 160)]);
+  });
+
+  it('keeps an edit of a box or a periodic grid at its place relative to the edges, its radius on the short side', () => {
+    for (const b of ['box', 'wrap'] as const) {
+      // 512 × 320 to 512 × 512: x keeps its fraction of the width, y of the height; the radius grows by 1.6.
+      const e = fromStroke({ kind: 'wall', from: [100, 100], to: [140, 130], radius: 5 }, [512, 320], b);
+      const s = strokeOn(e, 512, 512);
+      near([...(s?.from ?? []), ...(s?.to ?? []), s?.radius ?? NaN], [100, 160, 140, 208, 8]);
+      // A corner of the arena stays its corner, also on a grid turned upright.
+      const corner = fromStroke({ kind: 'food', from: [0, 0], to: [512, 320], radius: 2 }, [512, 320], b);
+      const square = strokeOn(corner, 427, 427);
+      near([...(square?.from ?? []), ...(square?.to ?? [])], [0, 0, 427, 427]);
+      const tall = strokeOn(corner, 236, 512);
+      near([...(tall?.from ?? []), ...(tall?.to ?? [])], [236, 0, 0, 512]);
+    }
   });
 
   it('turns an edit by 90° on a portrait grid and back on a landscape one', () => {
@@ -124,13 +159,18 @@ describe('strokeOn', () => {
   });
 
   it('skips an edit that lies completely outside the new grid', () => {
-    // 4 cells from the left edge of a 2:1 grid: outside a square grid, which is narrower in the frame.
-    const e = fromStroke({ kind: 'food', from: [4, 64], to: [4, 64], radius: 3 }, [256, 128], 'wrap');
+    // 4 cells from the left edge of a 2:1 grid with a dish: outside a square grid, which is narrower in its frame.
+    const e = fromStroke({ kind: 'food', from: [4, 64], to: [4, 64], radius: 3 }, [256, 128], 'dish');
     expect(strokeOn(e, 128, 128)).toBeUndefined();
     expect(strokeOn(e, 512, 256)).toBeDefined();
-    // Partly inside: painted, and the paint pass cuts or wraps the rest.
-    const edge = fromStroke({ kind: 'food', from: [40, 64], to: [40, 64], radius: 30 }, [256, 128], 'wrap');
+    // Partly inside: painted, and the paint pass cuts the rest.
+    const edge = fromStroke({ kind: 'food', from: [40, 64], to: [40, 64], radius: 30 }, [256, 128], 'dish');
     expect(strokeOn(edge, 128, 128)).toBeDefined();
+    // A box or a periodic grid stretches with the grid, so the same edit stays 1/64 of the width from the edge.
+    for (const b of ['box', 'wrap'] as const) {
+      const s = strokeOn(fromStroke({ kind: 'food', from: [4, 64], to: [4, 64], radius: 3 }, [256, 128], b), 128, 128);
+      near(s?.from ?? [], [2, 64]);
+    }
   });
 
   it('never paints thinner than MIN_RADIUS, so a wall drawn on a fine grid stays closed on a coarse one', () => {
@@ -145,46 +185,73 @@ describe('strokeOn', () => {
 });
 
 describe('preset shapes in the canonical frame', () => {
+  // presets.ts before 2026-11-10: positions in fractions of width and height, radius in fractions of the short side.
+  const before: Record<string, [number, number, number, number, number][]> = {
+    'shortest-path': [
+      [0.32, 0.5, 0.32, 0.5, 0.02],
+      [0.68, 0.5, 0.68, 0.5, 0.02],
+    ],
+    shrinking: [
+      [0.5, 0.5],
+      [0.38, 0.32],
+      [0.62, 0.3],
+      [0.33, 0.62],
+      [0.66, 0.66],
+      [0.5, 0.78],
+      [0.27, 0.45],
+      [0.73, 0.47],
+    ].map(([x = 0, y = 0]) => [x, y, x, y, 0.012]),
+    light: [[0.5, 0.5, 0.5, 0.5, 0.16]],
+    maze: [
+      [0.25, 0.0, 0.25, 0.7, 0.008],
+      [0.5, 0.3, 0.5, 1.0, 0.008],
+      [0.75, 0.0, 0.75, 0.7, 0.008],
+      [0.25, 0.7, 0.4, 0.7, 0.008],
+      [0.6, 0.3, 0.75, 0.3, 0.008],
+      [0.1, 0.1, 0.1, 0.1, 0.018],
+      [0.9, 0.9, 0.9, 0.9, 0.018],
+    ],
+  };
+  const boundaryOf = (id: string) => presetById(id)?.settings().boundary ?? 'wrap';
+
   it('land on a 16:10 grid where the fractions of the grid used before put them', () => {
-    // presets.ts before 2026-11-10: positions in fractions of width and height, radius in fractions of the short side.
-    const before: Record<string, [number, number, number, number, number][]> = {
-      'shortest-path': [
-        [0.32, 0.5, 0.32, 0.5, 0.02],
-        [0.68, 0.5, 0.68, 0.5, 0.02],
-      ],
-      shrinking: [
-        [0.5, 0.5],
-        [0.38, 0.32],
-        [0.62, 0.3],
-        [0.33, 0.62],
-        [0.66, 0.66],
-        [0.5, 0.78],
-        [0.27, 0.45],
-        [0.73, 0.47],
-      ].map(([x = 0, y = 0]) => [x, y, x, y, 0.012]),
-      light: [[0.5, 0.5, 0.5, 0.5, 0.16]],
-      maze: [
-        [0.25, 0.0, 0.25, 0.7, 0.008],
-        [0.5, 0.3, 0.5, 1.0, 0.008],
-        [0.75, 0.0, 0.75, 0.7, 0.008],
-        [0.25, 0.7, 0.4, 0.7, 0.008],
-        [0.6, 0.3, 0.75, 0.3, 0.008],
-        [0.1, 0.1, 0.1, 0.1, 0.018],
-        [0.9, 0.9, 0.9, 0.9, 0.018],
-      ],
-    };
     const [w, h] = [512, 320];
     for (const [id, shapes] of Object.entries(before)) {
-      const now = preset(id).map((e) => strokeOn(fromShape(e, 'box'), w, h));
+      const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));
       expect(now, id).toHaveLength(shapes.length);
       shapes.forEach(([x0, y0, x1, y1, r], i) => {
         const s = now[i];
-        near([...(s?.from ?? []), ...(s?.to ?? []), s?.radius ?? NaN], [x0 * w, y0 * h, x1 * w, y1 * h, r * h]);
+        near([...(s?.from ?? []), ...(s?.to ?? []), s?.radius ?? NaN], [x0 * w, y0 * h, x1 * w, y1 * h, r * h], id);
       });
     }
   });
 
-  const grids = { '16:9': gridSize(512, 16 / 9), '9:19.5': gridSize(512, 9 / 19.5), square: gridSize(512, 1) };
+  const grids = {
+    '16:9': gridSize(512, 16 / 9),
+    '9:19.5': gridSize(512, 9 / 19.5),
+    square: gridSize(512, 1),
+    '6:5': gridSize(512, 1.2),
+  };
+
+  // On 6:5 the short-side frame of a dish put the Maze's two foods beside the grid (review of ADR 0019).
+  it('keep the shapes of a box or a periodic grid at those fractions on every screen, turned on a tall one', () => {
+    const arenas = Object.keys(before).filter((id) => boundaryOf(id) !== 'dish');
+    expect(arenas).toEqual(['light', 'maze']);
+    for (const id of arenas)
+      for (const [name, [w, h]] of Object.entries(grids)) {
+        const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));
+        // A portrait grid turns the landscape layout clockwise: the fraction (fx, fy) lands at (1 − fy, fx).
+        const at = (fx: number, fy: number) => (h > w ? [w * (1 - fy), h * fx] : [w * fx, h * fy]);
+        before[id]?.forEach(([x0, y0, x1, y1, r], i) => {
+          const s = now[i];
+          near(
+            [...(s?.from ?? []), ...(s?.to ?? []), s?.radius ?? NaN],
+            [...at(x0, y0), ...at(x1, y1), r * Math.min(w, h)],
+            `${id} on ${name}`,
+          );
+        });
+      }
+  });
 
   it('give the Steiner tree a square of food on every screen shape', () => {
     for (const [name, [w, h]] of Object.entries(grids)) {

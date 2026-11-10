@@ -51,5 +51,5 @@ Option 3, plus:
   of Food strength and Scent decay and Learn → The model say this.
 - One more `rg32float` ping-pong pair and one more fetch per sensor.
 - Food, light and walls exist only on the GPU, so the engine keeps every edit since the last
-  "Clear" or preset load and paints them all again on every new simulation, on a new grid through a
-  frame of the short side (ADR 0019).
+  "Clear" or preset load and paints them all again on every new simulation, on a new grid through
+  the frame of its arena (ADR 0019).

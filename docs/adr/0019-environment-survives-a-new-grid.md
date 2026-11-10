@@ -45,16 +45,21 @@ base commit (seed 7; the two backends gave the same numbers):
 
 For an edit on another grid than the one it was painted on:
 
-1. Positions in fractions of width and height: circles turn into ellipses when the shape of the
-   screen changes, and a preset's layout follows the screen (the defects above).
-2. **A canonical frame of the grid's short side**, turned on a portrait grid: a similarity
-   transform.
+1. Positions in fractions of width and height in every arena: in a dish the layout follows the
+   screen, not the dish (the three defects above are all dish scenes).
+2. A frame of the grid's short side in every arena, turned on a portrait grid: a similarity
+   transform. In a box the layout then loses its edges. The first draft of this ADR did this: the
+   Maze's foods, 0.64 short sides from the centre, lay beside every grid from 1:1 to about
+   1.25:1, so the Maze had no food on 512 × 512 and 512 × 427 and 12 food cells on 512 × 410, and
+   on a square its outer corridors shrank to a tenth of the width (review of the first draft).
 3. The scale of the larger axis for strokes and the short side for presets (an earlier draft):
    the two drift apart when the screen turns.
+4. **The frame of the arena**, turned on a portrait grid: a dish keeps its short side as the unit
+   (option 2), a box and a periodic grid stretch with the grid (option 1).
 
 ## Decision
 
-Option 1 with the canonical frame.
+Option 1 with the frame of the arena (option 4).
 
 - **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or
   preset load: preset shapes in the canonical frame (`fromShape`), strokes in the cells of the grid
@@ -71,14 +76,22 @@ Option 1 with the canonical frame.
   failed the same way on both backends).
 - **Mapping** (`strokeOn`, `src/engine/environment.ts`). On the grid an edit was made on, it is
   painted with its original coordinates, byte for byte. On another grid it goes through the
-  canonical frame: landscape, origin at the grid's centre, unit the grid's short side. A portrait
-  grid (height above width) turns the frame by 90° clockwise, so a layout along the long side of a
-  wide screen stays along the long side of a tall one. Positions and radii scale by the ratio of the
-  short sides, so circles stay circles and a food source keeps its area relative to the dish. An
-  edit that lies completely outside the new grid is skipped and kept for other grids. Preset shapes
-  are given in this frame (`src/model/presets.ts`), with values that put every shape where the old
-  fractions put it on a 16:10 window. Steiner's foods form a square whose corners lie as far from
-  the centre as the old rectangle's.
+  canonical frame of the boundary it was painted under (`toFrame` and `fromFrame`): landscape,
+  origin at the grid's centre. A dish is the circle on the grid's short side, so its frame has the
+  short side as the unit on both axes: a similarity transform, circles stay circles and a food
+  source keeps its area relative to the dish. A box and a periodic grid are the arena themselves,
+  so their frame stretches with the grid: the long side spans 1.6 units (`FRAME_ASPECT`; presets
+  are laid out for 16:10) and the short side 1, and a shape keeps its place relative to the edges.
+  Under every boundary the radius scales with the short side, so a dab stays round; a line in a
+  box or a periodic grid changes its angle when the screen changes its shape. On a 16:10 grid the
+  frames are the same. A portrait grid (height above width) turns the frame by 90° clockwise, so a
+  layout along the long side of a wide screen stays along the long side of a tall one. An edit that
+  lies completely outside the new grid is skipped and kept for other grids: in a dish when the
+  screen narrows, in a box for a stroke painted beside the grid. Preset shapes are given in the
+  frame of their boundary (`src/model/presets.ts`), with values that put every shape where the old
+  fractions put it on a 16:10 window. In a box or a periodic grid they lie there on every screen
+  (turned on a tall one). Steiner's foods form a square whose corners lie as far from the centre as
+  the old rectangle's.
 - **Radius.** A brush covers at least `MIN_RADIUS` = 0.75 cells, on live painting and on every
   replay. A cell that a segment passes through has its centre at most half a cell diagonal (0.71)
   from it, so a 0.75 brush paints every such cell: painted walls stay closed on any grid, also where
@@ -185,11 +198,10 @@ Option 1 with the canonical frame.
   to 23 and 31 to 42, a hole of 2,500 to 7,400 cells opened by step 1,000 or 2,800 in 3 of 15 runs
   at density 0.5, in none at 0.6 (77 % of the dish) and in none with the old count of 73,728
   agents. Jones' %p 50 is 0.5, so a higher density is an open owner decision (TODO.md).
-- The Maze's food sources lie 0.64 short sides from the centre along the long side. On a window
-  between square and about 1.25:1 (either way up) they lie outside the grid and are skipped: on
-  512 × 512 and 512 × 427 the Maze has no food, on 512 × 410 only 12 food cells. From 1.3:1 on both are
-  there, whole from 4:3 on. Moving them inward would change the Maze on every other screen, so it is
-  an open owner decision (TODO.md).
+- The Maze keeps its walls and both food sources on every screen shape, where the old fractions
+  put them (turned on a tall screen): 166 food cells on 512 × 288, 212 on 512 × 320, 366 on
+  512 × 427, 530 on 512 × 512 and 112 on 236 × 512 (CPU, `strokeOn` and `paint-reference.ts`). On
+  512 × 512 and 512 × 410 these are the cells of the base commit.
 - Maze walls are 0.008 short sides thick in radius: 4 to 5 cells across at 512 × 288 (the middle
   wall 4, the outer walls 5), 5 to 6 at 512 × 320, 3 to 4 at 236 × 512. The sensor distance of 7
   reaches across them. At step 10,000 (16:9, 3 seeds) the trail 1 to 3 cells beside a wall was 1.5

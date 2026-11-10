@@ -267,13 +267,35 @@ describe('food, light and walls on a new simulation', () => {
 
   it('skip an edit outside the new grid and paint it again where it fits', async () => {
     const c = canvas();
+    // A dish keeps the short side as its unit, so the left end of a wide grid lies beside a square one.
+    const { engine, sim } = await engineWith({ ...maze.settings(), boundary: 'dish' }, [], c);
+    engine.paint({ kind: 'food', from: [6, 100], to: [6, 100], radius: 4 }); // near the left edge of 512 × 320
+    engine.frame(0, 0);
+    const wide = sim().env.slice();
+    [c.width, c.height] = [1000, 1000];
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    expect([sim().width, sim().height]).toEqual([512, 512]);
+    expect(empty(sim().env)).toBe(true);
+    [c.width, c.height] = [1600, 1000];
+    await engine.apply({ ...engine.settings, density: 0.12 });
+    expect(differing(sim().env, wide)).toBe(0);
+  });
+
+  it('keep an edit near the edge of a box at that edge on a square screen, and back', async () => {
+    const c = canvas();
     const { engine, sim } = await engineWith(maze.settings(), [], c);
     engine.paint({ kind: 'food', from: [6, 100], to: [6, 100], radius: 4 }); // near the left edge of 512 × 320
     engine.frame(0, 0);
     const wide = sim().env.slice();
     [c.width, c.height] = [1000, 1000];
     await engine.apply({ ...engine.settings, density: 0.2 });
-    expect(empty(sim().env)).toBe(true);
+    expect([sim().width, sim().height]).toEqual([512, 512]);
+    // The box stretches with the grid: x keeps its 6 cells of 512, y its fraction of the height, the radius grows
+    // with the short side from 320 to 512 cells.
+    const expected = new Uint8Array(512 * 512 * 4);
+    paintReference(expected, 512, 512, { kind: 'food', from: [6, 160], to: [6, 160], radius: 6.4 }, 'box');
+    expect(count(expected, 1)).toBeGreaterThan(0);
+    expect(differing(sim().env, expected)).toBe(0);
     [c.width, c.height] = [1600, 1000];
     await engine.apply({ ...engine.settings, density: 0.12 });
     expect(differing(sim().env, wide)).toBe(0);

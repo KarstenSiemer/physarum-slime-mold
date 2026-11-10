@@ -20,7 +20,7 @@ export interface EnvEdit {
   radius: number;
   /**
    * The grid the edit was painted on (width, height): positions and radius are in its cells. Without it, they are
-   * in the canonical frame (frame()): a preset's shapes.
+   * in the canonical frame of `boundary` (toFrame()): a preset's shapes.
    */
   grid?: Point;
   /** The boundary it was painted under: whether the stroke wrapped around the edges. */
@@ -52,45 +52,61 @@ export function fromStroke(s: Stroke, grid: Point, boundary: Boundary): EnvEdit 
   return { kind: s.kind, from, to, radius: s.radius, grid, boundary: under };
 }
 
-/** An edit from a preset's shape, which is in the canonical frame, painted under `boundary`. */
+/** An edit from a preset's shape, which is in the canonical frame of `boundary` (toFrame()), painted under it. */
 export function fromShape(e: EnvShape, boundary: Boundary): EnvEdit {
   return { kind: e.kind, from: e.at, to: e.to ?? e.at, radius: e.r, boundary };
 }
 
+/** Long side over short side of the canonical frame of a box or a periodic grid: presets are laid out for 16:10. */
+export const FRAME_ASPECT = 1.6;
+
 /**
- * Grid cells to the canonical frame: landscape, its origin at the grid's centre and its unit the grid's short side.
- * On a portrait grid (height above width) the frame is turned by 90°: its long axis runs down the grid, so a
- * layout along the long side of a wide screen stays along the long side of a tall one.
+ * Cells per unit of the canonical frame along its long and its short axis. A dish is the circle on the grid's short
+ * side, so its frame has that side as the unit on both axes: a similarity transform, and a square of food stays a
+ * square on every screen. A box or a periodic grid is the arena itself, so its frame stretches with the grid: the
+ * long side spans FRAME_ASPECT units and the short side one, and a layout keeps its place relative to the edges.
+ * On a 16:10 grid both are the same.
  */
-export function toFrame([x, y]: Point, [w, h]: Point): Point {
-  const s = Math.min(w, h);
-  const [u, v] = [(x - w / 2) / s, (y - h / 2) / s];
-  return h > w ? [v, -u] : [u, v];
+function units([w, h]: Point, boundary: Boundary): Point {
+  const [long, short] = [Math.max(w, h), Math.min(w, h)];
+  return boundary === 'dish' ? [short, short] : [long / FRAME_ASPECT, short];
+}
+
+/**
+ * Grid cells to the canonical frame of an arena (units()): landscape, its origin at the grid's centre. On a portrait
+ * grid (height above width) the frame is turned by 90°: its long axis runs down the grid, so a layout along the
+ * long side of a wide screen stays along the long side of a tall one.
+ */
+export function toFrame([x, y]: Point, [w, h]: Point, boundary: Boundary): Point {
+  const [su, sv] = units([w, h], boundary);
+  const [lx, ly] = h > w ? [y - h / 2, w / 2 - x] : [x - w / 2, y - h / 2];
+  return [lx / su, ly / sv];
 }
 
 /** The canonical frame to the cells of a `w` × `h` grid (the inverse of toFrame()). */
-export function fromFrame([u, v]: Point, [w, h]: Point): Point {
-  const s = Math.min(w, h);
-  return h > w ? [w / 2 - s * v, h / 2 + s * u] : [w / 2 + s * u, h / 2 + s * v];
+export function fromFrame([u, v]: Point, [w, h]: Point, boundary: Boundary): Point {
+  const [su, sv] = units([w, h], boundary);
+  const [lx, ly] = [u * su, v * sv];
+  return h > w ? [w / 2 - ly, h / 2 + lx] : [w / 2 + lx, h / 2 + ly];
 }
 
 /**
  * The edit as a stroke on a `width` × `height` grid, or undefined if it lies completely outside that grid (it stays
  * in the list for other grids). On the grid it was painted on, it is the stroke as painted, byte for byte. On
- * another grid it goes through the canonical frame: a similarity transform, so circles stay circles and a food
- * source keeps its size relative to the dish, with a radius of at least MIN_RADIUS.
+ * another grid it goes through the canonical frame of the boundary it was painted under. The radius scales with the
+ * short side under every boundary, so a dab stays round, with a radius of at least MIN_RADIUS.
  */
 export function strokeOn(e: EnvEdit, width: number, height: number): Stroke | undefined {
   const grid: Point = [width, height];
   const { kind, boundary } = e;
   if (e.grid?.[0] === width && e.grid[1] === height)
     return { kind, from: e.from, to: e.to, radius: e.radius, boundary };
-  const [from, to] = e.grid ? [toFrame(e.from, e.grid), toFrame(e.to, e.grid)] : [e.from, e.to];
+  const [from, to] = e.grid ? [toFrame(e.from, e.grid, boundary), toFrame(e.to, e.grid, boundary)] : [e.from, e.to];
   const r = e.grid ? e.radius / Math.min(...e.grid) : e.radius;
   const stroke: Stroke = {
     kind,
-    from: fromFrame(from, grid),
-    to: fromFrame(to, grid),
+    from: fromFrame(from, grid, boundary),
+    to: fromFrame(to, grid, boundary),
     radius: Math.max(MIN_RADIUS, r * Math.min(width, height)),
     boundary,
   };
