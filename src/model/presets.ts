@@ -1,10 +1,12 @@
 import { defaultSettings, defaultStrain, MAX_STRAINS, type Settings, type Strain } from './params';
 
 /**
- * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()):
- * positions from the grid's centre, on a landscape grid; a portrait grid turns the frame by 90°. In a dish the unit
- * is the grid's short side on both axes. In a box or a periodic grid x from −0.8 to 0.8 spans the long side and y
- * from −0.5 to 0.5 the short side, whatever the screen's shape. The radius is in units of the short side.
+ * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
+ * arena it is painted in: like every edit, it goes to other grids through the canonical frame of the arena it was
+ * painted in, also after a switch to another arena. Positions from the grid's centre, on a landscape grid; a
+ * portrait grid turns the frame by 90°. In a dish the unit is the grid's short side on both axes. In a box or a
+ * periodic grid x from −0.8 to 0.8 spans the long side and y from −0.5 to 0.5 the short side, whatever the screen's
+ * shape. The radius is in units of the short side.
  */
 export interface EnvShape {
   kind: 'food' | 'light' | 'wall';
@@ -90,8 +92,8 @@ const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
 // Grid 1024 shows about four times as many holes as 512, and without glow they stay dark (decided 2026-11-09).
 const network = { resolution: 1024, bloom: 0 } satisfies Partial<Settings>;
 
-// Food, light and walls in the canonical frame (EnvShape): on a 16:10 window x from −0.8 to 0.8 spans its width and
-// y from −0.5 to 0.5 its height under every boundary. The values place every shape where the fractions of the grid
+// Food, light and walls in the canonical frame of the arena they are painted in, the preset's own (EnvShape): on a
+// 16:10 window x from −0.8 to 0.8 spans its width and y from −0.5 to 0.5 its height in every arena. The values place every shape where the fractions of the grid
 // used before 2026-11-10 put it on 16:10.
 const food = (x: number, y: number, r = 0.012): EnvShape => ({ kind: 'food', at: [x, y], r });
 const wall = (x1: number, y1: number, x2: number, y2: number): EnvShape => ({

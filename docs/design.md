@@ -39,12 +39,14 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
 - `engine/types.ts` defines the `Backend` and `Sim` interfaces. Both backends pass the same GPU
   test suite (`src/engine/sim.gpu.test.ts`).
 - Food, light and walls are a list of edits in the engine: preset shapes and painted strokes, each
-  with the boundary it was painted under. Every new simulation (new grid, density or arena) paints
-  the whole list before it places its agents. On another grid an edit goes through the canonical
-  frame of the arena on screen, turned on a portrait grid: a dish keeps its short side as the unit,
-  a box or a periodic grid stretches with the grid. When the arena changes its frame, every edit is
-  first anchored to the cells of the grid on screen (ADR 0019). A stroke on a copy of a periodic grid, which the
-  view shows around the grid, is kept where the copy shows it, inside the grid.
+  with the arena it was painted in. Every new simulation (new grid, density or arena) paints the
+  whole list before it places its agents. On another grid an edit goes through the canonical frame
+  of the arena it was painted in, whatever arena runs, turned on a portrait grid: a dish keeps its
+  short side as the unit, a box or a periodic grid stretches with the grid. After every erase or
+  wall, the edits that later strokes cleared completely on the grid on screen leave the list (the
+  sweep, ADR 0019). A stroke on a copy of a periodic grid, which the view shows around the grid, is
+  kept where the copy shows it, inside the grid. The scene card counts food, light and walls that
+  differ from the scene's as a change.
 - One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a

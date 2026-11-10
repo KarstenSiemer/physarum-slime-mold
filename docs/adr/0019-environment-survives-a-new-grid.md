@@ -1,6 +1,6 @@
 # 0019: Food, light and walls survive a new grid; agents start on cells of their own
 
-- Status: accepted (the mapping rule is the maintainer's decision for the owner, who can revisit it)
+- Status: accepted (the mapping rule, the sweep and the scene-changed rule are the owner's decisions of 2026-11-10)
 - Date: 2026-11-10
 
 ## Context
@@ -54,65 +54,153 @@ For an edit on another grid than the one it was painted on:
    its outer corridors shrank to a tenth of the width (review of the first draft).
 3. The scale of the larger axis for strokes and the short side for presets (an earlier draft):
    the two drift apart when the screen turns.
-4. A canonical frame per arena, turned on a portrait grid: a dish keeps its short side as the unit
-   (option 2), a box and a periodic grid stretch with the grid (option 1). Each edit uses the arena
-   it was painted under. The review of the second draft found that edits then come apart after an
-   arena switch: in Shrinking plasmodium switched to a box, an erase over a food missed that food
-   on a square screen, and the food came back.
-5. A canonical frame per arena, one arena per edit list: option 4, but every edit since the last
-   Clear or preset load uses the list's arena, the preset's or the first stroke's. The review of the
-   third draft found that the list's arena is then a state the user cannot see. After a dish preset
-   was switched to a box, a wall drawn across the whole box no longer reached its ends on a wider
-   screen, and a dab that painted nothing beside the dish appeared inside it on another grid.
-6. **The canonical frame of the arena on screen**: every edit maps through the frame of the arena
-   the simulation runs in now. When the arena changes its frame, every edit is first anchored to
-   the cells of the grid on screen, where it lies as before.
+4. **A canonical frame per arena, each edit through the frame of the arena it was painted in**,
+   turned on a portrait grid: a dish keeps its short side as the unit (option 2), a box and a
+   periodic grid stretch with the grid (option 1). The paint pass cuts an edit at the rim of the
+   arena it was painted in, so the cut always matches the frame. The review of the second draft
+   (943a16e) found that edits of different arenas that lie on top of or beside each other then
+   shift against each other on another screen shape: in Shrinking plasmodium switched to a box, an
+   erase over a food missed that food on a square screen, and the food came back; back on 16:10 it
+   was erased again.
+5. One frame per edit list: option 4, but every edit since the last Clear or preset load uses the
+   list's arena, the preset's or the first stroke's (f07d0f9). The review of the third draft found
+   that the list's arena is a state the user cannot see. After a dish preset was switched to a box,
+   a wall drawn across the whole box no longer reached its ends on a wider screen, and cut and
+   frame disagreed: a dab on the dish's rim was cut otherwise on another grid.
+6. The frame of the arena on screen, every edit anchored to the cells of the grid on screen at a
+   switch (a5631bc). The review of the fourth draft found that an edit kept the cut of the arena
+   it was painted in but moved by the frame of the arena on screen. Shrinking plasmodium on a
+   square screen, switched to a box, then 16:9: two of its foods kept 0 of 37 and 0 of 38 cells. A
+   periodic edit wrapped inside a dish to its other side: a dab at x = 20 on 512 × 320 lay at
+   x = 390 on a square. And the order of a switch and a screen change distorted a scene for good:
+   the Maze through the dish, a square screen, the box and 16:10 again had its walls at 10 % and
+   89 % of the width instead of 24 % and 74 %, and both foods were lost. In a randomized test 19
+   of 336 pairs of edits of different arenas that lay on top of each other came apart.
+
+For an edit that later strokes cleared:
+
+1. Keep it: on another screen shape an erase of another arena can miss what it erased (option 4).
+2. **The sweep**: after a stroke that clears, delete the edits that later strokes cleared
+   completely on the grid on screen, and the erases that clear nothing there any more.
 
 ## Decision
 
-Option 1 with option 6.
+Option 1, option 4 for the frame and the sweep (the owner, 2026-11-10). With option 4 the cut
+always matches the frame, nothing changes for good (back on an earlier screen shape every edit is
+where it was before), and it needs the least code. The sweep keeps an erased food gone.
 
 - **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or preset
-  load: preset shapes in the canonical frame of the preset's own arena (`fromShape`), strokes in the
-  cells of the grid the view shows (`fromStroke`, `paint()` at line 249), each with the boundary it
-  was painted under (`Stroke.boundary`; both backends write it into the parameters of the paint
-  pass). Every new simulation paints the whole list (`flushEnv()`, line 257) before it places its
-  agents (`rebuild()`, line 183; `load()`, line 107). A frame paints the edits added since. "Clear"
-  empties the list, also during a rebuild; a preset load replaces it. A Clear before the engine
-  exists waits for it, and the engine then starts without the scene's shapes (`clearEnvironment` and
-  `startScene` in `src/ui/state.svelte.ts`). `Engine.paint` before the first simulation exists drops
-  the stroke: no grid is on screen yet. So does it with a stroke that paints no cell, beside a box
-  or outside the dish (`paintsCell` in `src/engine/brush.ts`, the rule of the paint passes): it
-  changes nothing on screen, and on another grid or arena it must not either. On a periodic grid the
-  view shows copies of the grid around it, and a stroke on a copy paints the grid where the copy
-  shows it. So `fromStroke` moves such a stroke by whole periods until it starts inside the grid.
-  Before, its raw coordinates lay beside the grid, and every other grid skipped it as outside: 131
-  food cells painted left of a 512 × 320 grid were none on 1024 × 640 (CPU engine test; the GPU
-  engine test failed the same way on both backends).
-- **Mapping** (`strokeOn`, `src/engine/environment.ts`). On the grid an edit was made on, it is
-  painted with its original coordinates, byte for byte. On another grid it goes through the
-  canonical frame of the arena on screen (`toFrame` and `fromFrame`): landscape, origin at the
-  grid's centre. A dish is the circle on the grid's short side, so its frame has the
-  short side as the unit on both axes: a similarity transform, circles stay circles and a food
-  source keeps its area relative to the dish. A box and a periodic grid are the arena themselves,
-  so their frame stretches with the grid: the long side spans 1.6 units (`FRAME_ASPECT`; presets
-  are laid out for 16:10) and the short side 1, and a shape keeps its place relative to the edges.
-  In every arena the radius scales with the short side, so a dab stays round. On a 16:10 grid the
-  frames are the same. A portrait grid (height above width) turns the frame by 90° clockwise, so a
-  layout along the long side of a wide screen stays along the long side of a tall one. A stroke
-  under the periodic boundary is moved by whole periods into the grid instead of skipped: such a
-  grid has no outside, and its paint pass wraps a stroke that lies partly outside anyway.
-- **The arena on screen.** When the arena changes its frame (the dish against a box or a periodic
-  grid), `Engine.apply` anchors every edit to the cells of the grid on screen through the frame of
-  the arena before (`anchorEdits`, `anchor` in `src/engine/environment.ts`). So every edit keeps
-  its place on screen, edits that lie on top of each other stay so, and a new screen shape then
-  moves them all through the frame of the new arena. In Shrinking plasmodium switched to a box, an
-  erase over a food stays on that food on a square screen, and a wall drawn across the box reaches
-  both ends on a wider one. The anchor keeps the exact radius, so a thin stroke anchored on a coarse
-  grid comes back thin on a fine one. A grid used before the switch is then reached through the new
-  frame, so its old bytes come back only where both frames agree, as on 16:10. A preset loads under
-  its own arena. At startup, a boundary chosen in the panel before the engine existed then applies
-  as a switch on screen (`startScene`).
+  load that the sweep left: preset shapes in the canonical frame of the preset's own arena
+  (`fromShape`; `load()` at line 105 takes that arena, also when the settings hold another
+  boundary), strokes in the cells of the grid the view shows (`fromStroke`, `paint()` at line 272),
+  each with the arena it was painted in (`EnvEdit.boundary`; both backends write it into the
+  parameters of the paint pass, which cuts the stroke at that arena's rim or wraps it around its
+  edges). Every new simulation paints the whole list (`flushEnv()`, line 306) before it places its
+  agents (`rebuild()`, line 183; `load()`). A frame paints the edits added since. "Clear" empties
+  the list, also during a rebuild; a preset load replaces it. At startup the engine loads once what
+  the panel holds (`startScene` in `src/ui/state.svelte.ts`, line 153): the panel's settings, and
+  the scene's shapes in the scene's own arena, or none after a Clear before the engine existed.
+  Before, a second step applied a copy of the settings taken before the load and could undo a
+  setting changed during it on WebGPU. `Engine.paint` before the first simulation exists drops the
+  stroke: no grid is on screen yet. So does it with a stroke that does not clearly paint a cell
+  (`paintsCell` in `src/engine/brush.ts`, line 193): a cell inside the brush and the rim of a dish by
+  `SLACK` = 0.01 cells, and for light one whose byte is at least 1. Such a stroke changes nothing on
+  screen, and on another grid or arena it must not either. Before, 69 of 10,721 random light
+  strokes lit nothing where they were painted and lit other grids, and 6 of about 32,000 strokes
+  had their deepest cell within 1e-4 of the radius, where float32 on the GPU may paint none (review
+  of the fourth draft). A dropped stroke is not painted either, so the simulation and the list
+  agree. On a periodic grid the view shows copies of the grid around it, and a stroke on a copy
+  paints the grid where the copy shows it. So `fromStroke` moves such a stroke by whole periods
+  until it starts inside the grid. Before, its raw coordinates lay beside the grid, and every other
+  grid skipped it as outside: 131 food cells painted left of a 512 × 320 grid were none on
+  1024 × 640 (CPU engine test; the GPU engine test failed the same way on both backends).
+- **Mapping** (`strokeOn`, `src/engine/environment.ts`, line 126). On the grid an edit was made on,
+  it is painted with its original coordinates, byte for byte. On another grid it goes through the
+  canonical frame of the arena it was painted in (`toFrame` and `fromFrame`), whatever arena the
+  simulation runs in: landscape, origin at the grid's centre. A dish is the circle on the grid's
+  short side, so its frame has the short side as the unit on both axes: a similarity transform,
+  circles stay circles and a food source keeps its area relative to the dish. A box and a periodic
+  grid are the arena themselves, so their frame stretches with the grid: the long side spans 1.6
+  units (`FRAME_ASPECT`; presets are laid out for 16:10) and the short side 1, and a shape keeps its
+  place relative to the edges. In every arena the radius scales with the short side, so a dab stays
+  round. On a 16:10 grid the frames are the same. A portrait grid (height above width) turns the
+  frame by 90° clockwise, so a layout along the long side of a wide screen stays along the long
+  side of a tall one. A periodic edit starts inside the grid it was painted on, and its frame maps
+  that grid onto the new one; a shift by whole periods catches float rounding at the edges.
+- **Each edit in its own arena.** An arena switch changes no byte on the grid on screen. On another
+  screen shape a dish edit moves by the dish's frame and is cut at the new dish's rim, and a box or
+  a periodic edit moves with the stretched grid, whatever arena runs. So in a box Shrinking
+  plasmodium's foods lie where the dish puts them on every screen, a wall drawn across a box after
+  a dish preset reaches both ends on a wider screen, a dab painted on a periodic grid stays at its
+  place on the grid in a dish on a square screen, and after any order of switches and screen
+  changes the Maze is byte for byte the Maze (CPU engine tests). The known limit: after a switch
+  between the dish and a box or a periodic grid, strokes painted over or beside older strokes of
+  the other arena shift against them on another screen shape. Two dabs painted on top of each other
+  on 512 × 288, one on the periodic grid and one in the dish, lie 82 cells apart on 512 × 512 and on
+  top of each other again on 512 × 288. A dish food erased in part in a box is whole on a square
+  screen, where the erase lies beside it, and erased in part again back on 16:10. The sweep covers
+  what matters most: what was erased completely stays gone.
+- **The sweep** (`sweep` in `src/engine/sweep.ts`, line 204, after every recorded erase or wall;
+  `Engine.sweep` at line 288). On the grid on screen: (1) an older food, light or wall edit is
+  deleted when every cell it paints is cleared by a stroke recorded after it: an erase clears every
+  kind, a wall food and light. An edit that paints no cell of that grid is kept: that grid cannot
+  judge it. (2) Then an erase is deleted when no older food, light or wall edit that stays paints a
+  cell it erases; the erases looked at are the new stroke and those over an edit that went. The
+  deletion changes no byte on that grid: an erase writes all four bytes of a cell and a wall writes
+  [255, 0, 0, 0], so after the stroke that cleared a cell last, the cell holds what that stroke and
+  later strokes wrote, and none of them reads the deleted edit; and an erase over cells that hold
+  only zeros changes nothing. Float32 on the GPU may decide a cell near the edge of a brush or the
+  rim the other way, so every judgement keeps `SLACK`: an edit's cells count with its brush and the
+  rim widened, the cells a clearing stroke surely clears with both narrowed. The simulation holds
+  the first `painted` edits; when the sweep deletes one of them, the engine first paints the
+  strokes not painted yet, because the stroke that cleared the last cells of a food can go too and
+  the simulation would keep those cells until the next rebuild. So a food erased completely in a
+  box stays gone on a square screen, by one large erase or a drag of smaller segments, and its
+  erases go with it. A wall over food deletes the food when it covers it, a wall over a wall or
+  food over food keeps both, light under a wall goes when the wall covers every lit cell, and an
+  edit that lies outside the grid on screen stays under an erase there (CPU engine tests). A
+  property test checks the rule after every recorded stroke of 160 random sequences (every kind and
+  arena, grids from 37 × 61 to 237 × 512 and 511 × 287, strokes across the edges, the periodic
+  seam and the dish's rim): 3,865 checks, 1,470 deleted edits, each byte for byte against the list
+  of every stroke recorded since the grid on screen last changed. Through the engine the
+  simulation holds exactly what its list paints after each of 720 random operations (strokes, also
+  while a new grid is allocated, arena, grid and screen changes, Clear, loads). A GPU test on both
+  backends compares the simulation with the CPU replay of the list after sweeps and after a
+  rebuild on another grid.
+
+  Speed: the sweep keeps every edit on the grid on screen and its box of cells in one typed array
+  (`Placement`), seeded by the replay of a new simulation and kept in step with every stroke,
+  deletion, Clear and load. It looks only at edits whose box overlaps the new stroke and at a
+  clearing stroke's cells only where its box holds the cell, visits an edit's cells row by row
+  inside its capsule (`someCell` in `src/engine/brush.ts`, line 107), the cells under its ends
+  first, stops at the first cell left open, and remembers that cell and where the visit stopped:
+  a cleared cell stays cleared, so the next sweep looks at the edit again only when the new stroke
+  covers that cell, and goes on from there. Measured with the engine in Node and a backend that
+  paints nothing (the engine's own work per recorded segment of a drag), M3 Pro at a load average
+  of 9 to 17 from other work:
+
+  | List                                                   | Erase segment, mean (p95) | Wall segment, mean (p95) |
+  | ------------------------------------------------------ | ------------------------- | ------------------------ |
+  | 2,000 edits on 1536 × 864                              | 0.08 ms (0.22 ms)         | 0.02 ms (0.06 ms)        |
+  | 100,000 edits on 1536 × 864, 61,788 after their sweeps | 2.0 ms (4.7 ms)           | 2.0 ms (5.6 ms)          |
+
+  A horizontal wall across 2048 × 1152 erased by a drag of 200 segments along it took 0.021 ms per
+  segment, and the segment that deleted the wall and all 200 erases 3.9 ms; a diagonal one
+  0.024 ms and 0.06 ms. Without the stored place of the visit, the diagonal drag took 1.2 ms per
+  segment. A light dab of radius 500 cells (785,000 cells) erased by 200 segments took 0.77 ms per
+  segment, and once 44 ms, when its last open cells closed and its remaining cells were checked.
+  The first sweep after a new grid with 100,000 edits took 1.8 ms: the replay of the new simulation
+  maps the edits for it, which took 54 ms when the sweep mapped them itself.
+
+- **Scene changed.** The scene card shows "changed" and "Reload scene" when a model setting or the
+  food, light and walls differ from the loaded scene: when the engine's list is not the scene's
+  shapes in the scene's arena (`Engine.matches`, line 129; `Engine.onEdits` after every change of
+  the list; `app.envChanged` in `src/ui/state.svelte.ts`). A Clear of a scene with shapes, a
+  recorded stroke or a sweep that deleted a shape changes the scene; a stroke and an erase that the
+  sweep took back leave it unchanged. Before the engine exists, a Clear of a scene with shapes sets
+  the flag, and a preset load resets it. Before, the card counted only settings: after a Clear it
+  offered no Reload scene (also on `main`), and the Preset select cannot load the preset already
+  chosen, so the walls came back only through another preset.
 - **What a new screen shape changes.** An edit that lies completely outside the new grid is
   skipped and kept for other grids: in a dish's frame when the screen narrows, in a box's frame
   for a dab over its long edge. In a box's or a periodic grid's frame
@@ -230,8 +318,8 @@ Option 1 with option 6.
   to 23 and 31 to 42, a hole of 2,500 to 7,400 cells opened by step 1,000 or 2,800 in 3 of 15 runs
   at density 0.5, in none at 0.6 (77 % of the dish) and in none with the old count of 73,728
   agents. Jones' %p 50 is 0.5, so a higher density is an open owner decision (TODO.md).
-- The Maze keeps its walls and both food sources on every screen shape, where the old fractions
-  put them (turned on a tall screen): 166 food cells on 512 × 288, 212 on 512 × 320, 340 on
+- The Maze keeps its walls and both food sources on every screen shape, also after arena switches in
+  any order, where the old fractions put them (turned on a tall screen): 166 food cells on 512 × 288, 212 on 512 × 320, 340 on
   512 × 410, 366 on 512 × 427, 530 on 512 × 512 and 112 on 236 × 512 (CPU, `strokeOn` and
   `paint-reference.ts`). On every landscape grid these are the cells of the base commit.
 - Maze walls are 0.008 short sides thick in radius. On WebGPU the painted walls are 4 cells across
@@ -262,10 +350,16 @@ Option 1 with option 6.
   path holds on a square screen and breaks sooner on a wider or taller one.
 
 - Tests: the engine runs in Node with a CPU backend that paints with `paint-reference.ts`, the CPU
-  copy of the paint shaders (`engine-env.test.ts`); `sim.gpu.test.ts` checks that copy against both
-  backends, in one call and one call per stroke, across the edges, under other boundaries, on copies
-  of the grid two and three periods away, for strokes longer than the grid and for brushes larger
-  than it.
+  copy of the paint shaders (`cpu-backend.ts`; `engine-env.test.ts`, `sweep.test.ts`);
+  `sim.gpu.test.ts` checks that copy against both backends, in one call and one call per stroke,
+  across the edges, under other boundaries, on copies of the grid two and three periods away, for
+  strokes longer than the grid and for brushes larger than it. `someCell`, which `paintsCell` and
+  the sweep use, visits exactly the cells that copy paints (1,500 random strokes, `brush.test.ts`).
+- The sweep judges on the grid on screen only. An edit that lies outside that grid or paints no cell
+  there stays, also under a complete erase there. And an erase that went because it clears nothing
+  there any more no longer erases what it reached only on another grid: there, a part of another
+  stroke that it erased comes back. Without the sweep the same erase would erase things on other
+  grids that it never erased on screen.
 - If a later model changes the environment on the GPU (food that gets eaten), the edit list no
   longer describes it, and that part needs a readback for a new grid.
 - Shared links still carry only the settings, not the edits (owner decision D8, its own pull
