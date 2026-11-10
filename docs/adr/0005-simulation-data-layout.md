@@ -55,9 +55,13 @@ floats (10-bit mantissa, relative step ≈ 0.001), so slow decay stops working.
 - A step is deterministic per agent id for a given seed on a given GPU and driver. The order
   within a tile after a sort depends on atomic timing, so slots are not reproducible. The model
   does not see them: it reads ids, integer sums and the maximum of unique keys. A GPU test runs
-  the same scene unsorted and sorted every 1, 8 and 32 steps, in both collision modes, and
-  compares agents and trails bit by bit; it fails when a random stream or the claim key uses the
-  slot.
+  two scenes unsorted and sorted every 1, 8 and 32 steps, in both collision modes, and compares
+  agents and trails bit by bit: a periodic grid, and a closed box with a wall, shrinkage and
+  both agent tools, with agent counts and a grid that are not multiples of the workgroup size
+  and the tile. It fails when any random stream (STEER, TOOL, SHRINK, BLOCK) or the claim key
+  uses the slot, and when the sort counts invocations past the last agent. Further tests use
+  buffer 1 as the current one: `writeAgent`, switching collisions on (the occupancy rebuild) and
+  `reset()`.
 - `readAgents()` returns the agents in id order. `writeAgent(i, …)` replaces the agent with id
   `i` wherever the sort has put it (a compute pass finds it) and keeps the id, so ids stay
   unique. WebGL2 has no compute shaders and does not sort: there slot and id are the same.

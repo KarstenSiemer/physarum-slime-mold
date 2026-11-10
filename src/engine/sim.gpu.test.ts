@@ -3,6 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
+import { AgentToolKind } from './pack';
 import { readBuffer } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
@@ -330,22 +331,60 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   // the model must not notice (ADR 0005). Random streams and claim keys follow the agent id, not the slot.
   if (kind === 'webgpu')
     describe('agent sort', () => {
+      const strains = [0, 1, 2].map((i) => defaultStrain(i));
+
       // 72 steps: sorting every 1, 8 or 32 steps makes 72, 9 or 3 sorts, so runs end on either buffer.
-      async function run(collisions: boolean, sortInterval: number, steps = 72) {
-        const strains = [0, 1, 2].map((i) => defaultStrain(i));
+      async function open(collisions: boolean, sortInterval: number) {
         const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
         const sim = (await make(patch, 64, 48, collisions ? 1536 : 6144)) as Simulation;
         sim.sortInterval = sortInterval;
-        sim.run(steps);
-        return { agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) };
+        sim.run(72);
+        return sim;
       }
 
-      it.each([false, true])(
-        'gives the same agents and trails as unsorted runs (collisions %s)',
-        async (collisions) => {
-          const unsorted = await run(collisions, 0);
+      // Every random stream: inoculate and cut draw from TOOL, shrinkage from SHRINK, and the wall and the
+      // box edge block moves (BLOCK). Agent counts that are not a multiple of the workgroup size and a grid
+      // that is not a multiple of the 8-cell sort tile check the bounds of the sort.
+      async function arena(collisions: boolean, sortInterval: number) {
+        const patch: Partial<Settings> = {
+          seed: 11,
+          collisions,
+          density: collisions ? 0.4 : 2,
+          strains,
+          boundary: 'box',
+          shrink: 0.01,
+        };
+        const sim = (await make(patch, 61, 45, collisions ? 1001 : 5003)) as Simulation;
+        sim.sortInterval = sortInterval;
+        sim.paint({ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 });
+        sim.run(20);
+        sim.run(1, { kind: AgentToolKind.inoculate, x: 30, y: 22, radius: 8, strain: 1, revive: 0.5, teleport: 0.3 });
+        sim.run(15);
+        sim.run(1, { kind: AgentToolKind.cut, x: 20, y: 20, radius: 6, strain: 0, revive: 0, teleport: 0 });
+        sim.run(35);
+        return sim;
+      }
+
+      const state = async (sim: Sim) => ({ agents: await sim.readAgents(), trail: Array.from(await sim.readTrail()) });
+
+      it.each([
+        ['wrap', false],
+        ['wrap', true],
+        ['box with tools and shrinkage', false],
+        ['box with tools and shrinkage', true],
+      ] as const)(
+        'gives the same agents and trails as unsorted runs (%s, collisions %s)',
+        async (scene, collisions) => {
+          const build = scene === 'wrap' ? open : arena;
+          const unsorted = await state(await build(collisions, 0));
+          if (scene !== 'wrap') {
+            // Shrinkage must kill a part of the agents, or its random stream would not matter.
+            const dead = unsorted.agents.filter((a) => (a.bits & 4) === 0).length;
+            expect(dead).toBeGreaterThan(unsorted.agents.length / 10);
+            expect(dead).toBeLessThan(unsorted.agents.length);
+          }
           for (const interval of [1, 8, 32]) {
-            const sorted = await run(collisions, interval);
+            const sorted = await state(await build(collisions, interval));
             expect(sorted.trail, `sort every ${interval} steps`).toEqual(unsorted.trail);
             expect(sorted.agents, `sort every ${interval} steps`).toEqual(unsorted.agents);
           }
@@ -361,9 +400,13 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(ids.filter((id, k) => id !== k).length).toBeGreaterThan(sim.agents / 2);
       });
 
-      it('writes an agent by id after sorting, without creating a duplicate id', async () => {
+      // One step sorts once (buffer 1 is current), 40 steps sort twice (buffer 0).
+      it.each([
+        ['one sort', 1],
+        ['two sorts', 40],
+      ] as const)('writes an agent by id after %s, without creating a duplicate id', async (_, steps) => {
         const sim = await make({ seed: 7, density: 1, strains: [defaultStrain(0), defaultStrain(1)] }, 64, 64, 4096);
-        sim.run(40);
+        sim.run(steps);
         const before = await sim.readAgents();
         sim.writeAgent(1234, { x: 10.5, y: 20.5, heading: 1, bits: 4 | 1 });
         const after = await sim.readAgents(); // throws if an id is missing or doubled
@@ -372,6 +415,30 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(() => {
           sim.writeAgent(4096, { x: 0, y: 0, heading: 0, bits: 4 });
         }).toThrow(RangeError);
+      });
+
+      it('builds the occupancy from the current buffer when collisions are switched on', async () => {
+        const run = async (sortInterval: number) => {
+          const settings = { ...defaultSettings(), seed: 9, density: 0.5, strains };
+          const sim = (await make(settings, 64, 48, 1500)) as Simulation;
+          sim.sortInterval = sortInterval;
+          sim.run(1); // sorted: buffer 1 is current
+          sim.update({ ...settings, collisions: true });
+          sim.run(40);
+          return state(sim);
+        };
+        expect(await run(32)).toEqual(await run(0));
+      });
+
+      it.each([false, true])('starts over from scratch after an odd number of sorts (collisions %s)', async (c) => {
+        const patch = { seed: 9, collisions: c, density: 0.5, strains };
+        const sim = (await make(patch, 64, 48, 1500)) as Simulation;
+        sim.run(1); // sorted: buffer 1 is current
+        sim.reset();
+        sim.run(40);
+        const fresh = await make(patch, 64, 48, 1500);
+        fresh.run(40);
+        expect(await state(sim)).toEqual(await state(fresh));
       });
     });
 });
