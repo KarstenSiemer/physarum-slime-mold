@@ -117,7 +117,7 @@ Option 1 with the canonical frame.
   grid, 192.2 against 181.5 and 49.9 against 47.8 ms in a box.
 
 - **Growth.** A drag records a segment only once the pointer has moved half a brush radius from
-  the end of the last one, and paints exactly what it records (`paintTo` in `src/App.svelte`).
+  the end of the last one, and paints exactly what it records (`BrushDrag` in `src/ui/drag.ts`).
   Before, it recorded one stroke per pointer event: 59.8 per second at 300 px/s and 60.3 at 30 px/s
   (Playwright on the built app, Chrome at 60 Hz, brush 18 px). With the rule 29.8 and 3.4. A kept
   edit takes about 160 bytes (Node heap). Three minutes of fast painting now record about 5,400
