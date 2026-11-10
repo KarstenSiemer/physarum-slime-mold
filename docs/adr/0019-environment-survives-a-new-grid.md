@@ -202,14 +202,33 @@ Option 1 with the frame of the arena (option 4).
   put them (turned on a tall screen): 166 food cells on 512 × 288, 212 on 512 × 320, 366 on
   512 × 427, 530 on 512 × 512 and 112 on 236 × 512 (CPU, `strokeOn` and `paint-reference.ts`). On
   512 × 512 and 512 × 410 these are the cells of the base commit.
-- Maze walls are 0.008 short sides thick in radius: 4 to 5 cells across at 512 × 288 (the middle
-  wall 4, the outer walls 5), 5 to 6 at 512 × 320, 3 to 4 at 236 × 512. The sensor distance of 7
-  reaches across them. At step 10,000 (16:9, 3 seeds) the trail 1 to 3 cells beside a wall was 1.5
-  to 2.6 times the mean of open cells, and a path ran within 3 cells of a wall on both sides along
-  7 to 20 % of the walls' rows. A path of trail from food to food (open cells whose 3 × 3 mean
-  trail is above the mean of open cells, seeds 31 to 42) held in 12, 10, 7 and 5 of 12 runs at
-  steps 2,000, 5,000, 10,000 and 15,000 on 16:9, and in 7, 5, 4 and 1 of 12 on 9:19.5. The scene
-  text says that it breaks in most runs.
+- Maze walls are 0.008 short sides thick in radius. On WebGPU the painted walls are 4 cells across
+  at 512 × 288 (the two short walls 5), 6 at 512 × 320, 4 at 236 × 512 and 8 at 512 × 512. The
+  sensor distance of 7 reaches across them on the first three grids, not on 512 × 512. At step
+  10,000 on 512 × 288 (seeds 31 to 42) the trail 1 to 3 cells beside a wall was 0.9 to 3.4 times
+  the mean of open cells. A path (trail above twice that mean) ran within 3 cells of a wall on both
+  sides along 2.7 to 12.5 % of the long walls' rows, and along 3.5 to 12.2 % with walls 8 cells
+  across: such paths do not need agents that sense across the wall. The table counts the runs of 12
+  with a path of trail from food to food: a flood fill from one food over open cells whose 3 × 3
+  mean trail is above the mean of open cells reaches the other food (WebGPU on an M3 Pro, the built
+  app, seeds 31 to 42; in brackets at half that threshold).
+
+  | Grid (window)                  | Walls across | Step 2,000 | Step 5,000 | Step 10,000 | Step 15,000 |
+  | ------------------------------ | ------------ | ---------- | ---------- | ----------- | ----------- |
+  | 512 × 288 (1280 × 720, 16:9)   | 4, short 5   | 12 (12)    | 12 (12)    | 9 (12)      | 0 (5)       |
+  | 512 × 320 (1280 × 800, 16:10)  | 6            | 12 (12)    | 11 (12)    | 11 (12)     | 9 (9)       |
+  | 236 × 512 (375 × 812, 9:19.5)  | 4            | 11 (12)    | 9 (11)     | 1 (3)       | 1 (5)       |
+  | 512 × 512 (800 × 800, 1:1)     | 8            | 12 (12)    | 12 (12)    | 11 (12)     | 12 (12)     |
+  | 512 × 288, wall radius 0.01422 | 8            | 12 (12)    | 12 (12)    | 12 (12)     | 11 (12)     |
+  | 512 × 512, wall radius 0.0045  | 4, short 5   | 12 (12)    | 8 (11)     | 7 (11)      | 5 (9)       |
+
+  The last two rows are controls: they swap the walls' radius in cells between the two grids
+  (4.10 cells on 512 × 288, 2.30 on 512 × 512). Walls 8 cells across kept the path on 16:9, and
+  walls 4 cells across broke it on 1:1 in 7 of 12 runs at step 15,000. So the walls' thickness
+  against the sensor distance decides more than the shape of the screen. A second run of seeds 31
+  and 37 on 16:9, 9:19.5 and 1:1 gave the same trail byte for byte. The scene text says that the
+  path holds on a square screen and breaks sooner on a wider or taller one.
+
 - Tests: the engine runs in Node with a CPU backend that paints with `paint-reference.ts`, the CPU
   copy of the paint shaders (`engine-env.test.ts`); `sim.gpu.test.ts` checks that copy against both
   backends, in one call and one call per stroke, across the edges, under other boundaries, on copies
