@@ -902,25 +902,6 @@ describe('the sweep', () => {
     expect(edits(engine)).toEqual([]);
   });
 
-  // A radius a hair smaller: 5 − 5e-7 is 4.9999995 in float32 too, less than the distance of the 12 cells that lie
-  // exactly 5 cells from the centre. The erase leaves their food, so the food stays in the list (mutant VM8).
-  it('keeps a stroke under a later one with its segment and a radius a hair smaller, which leaves its edge cells', async () => {
-    const at: [number, number] = [200.5, 160.5];
-    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
-    engine.paint({ kind: 'food', from: at, to: at, radius: 5 });
-    engine.frame(0, 0);
-    engine.paint({ kind: 'erase', from: at, to: at, radius: 5 - 5e-7 });
-    engine.frame(0, 0);
-    expect(Math.fround(5 - 5e-7)).toBeLessThan(5);
-    expect(foodNear(sim(), at, 5)).toBe(12);
-    expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
-    // A new simulation paints the list again: the 12 cells keep their food.
-    const first = sim();
-    await engine.apply({ ...engine.settings, density: 0.3 });
-    expect(sim()).not.toBe(first);
-    expect(foodNear(sim(), at, 5)).toBe(12);
-  });
-
   // Spread into Math.min, V8 throws from about 125,000 arguments: an erase over 130,000 edits threw out of
   // Engine.paint and stayed unswept (review of ADR 0019).
   it('sweeps an erase over 130,000 edits', async () => {

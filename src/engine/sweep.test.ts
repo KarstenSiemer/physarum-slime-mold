@@ -234,6 +234,25 @@ describe('the sweep at the edge of the grid', () => {
   });
 });
 
+// Engine.paint puts every painted stroke on whole steps of 1/16 cell (STEP in environment.ts), but a scene's shapes
+// keep their radius. So the sweep can meet an edit and a later stroke with its segment and a radius a hair smaller:
+// 5 − 5e-7 is 4.9999995 in float32 too, less than the distance of the 12 cells that lie exactly 5 cells from the
+// centre. The erase leaves their food, so it does not cover the food (coversExactly(), mutant VM8).
+describe('the sweep with the same segment', () => {
+  it('keeps an edit under a later stroke with its segment and a radius a hair smaller, which leaves its edge cells', () => {
+    const [w, h] = [512, 320];
+    const at: [number, number] = [200.5, 160.5];
+    expect(Math.fround(5 - 5e-7)).toBeLessThan(5);
+    const list = [
+      fromStroke({ kind: 'food', from: at, to: at, radius: 5 }, [w, h], 'box'),
+      fromStroke({ kind: 'erase', from: at, to: at, radius: 5 - 5e-7 }, [w, h], 'box'),
+    ];
+    const env = replay(list, w, h);
+    expect([...Array(w * h).keys()].filter((c) => (env[4 * c + 1] ?? 0) > 0).length).toBe(12);
+    expect([...sweep(new Placement(w, h, list))]).toEqual([]);
+  });
+});
+
 // Rule 2 looks at the erases over an edit that went: a box that only touches the erase's box holds no cell of it
 // (boxes are grown by a cell), in the pass over the list and in the tiles alike (mutant TL4).
 describe('the sweep beside an erase', () => {
