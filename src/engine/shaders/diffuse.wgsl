@@ -62,7 +62,7 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
         // Cut tool: in the extended model the wound also loses its chemicals, this app's choice. Jones 2010
         // (Sec. 4.3, p. 148) only removes the agents from the wound and places them elsewhere: the Jones model
         // packs P.tool2.z = 1 and keeps them (pack.ts).
-        if (P.tool.w == 2.0 && P.tool2.z == 0.0 && distance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z) {
+        if (P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z) {
           t = vec4f(0.0);
           s = vec2f(0.0);
         }

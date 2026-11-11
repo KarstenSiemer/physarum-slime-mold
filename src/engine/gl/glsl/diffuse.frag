@@ -53,7 +53,7 @@ void load(ivec2 c, out vec4 t, out vec2 s, out float open) {
     s += vec2(e.g * P.scent.x, e.b * P.scent.y);
 #endif
     // Cut tool: only in the extended model the wound also loses its chemicals (diffuse.wgsl).
-    if (P.tool.w == 2.0 && P.tool2.z == 0.0 && distance(vec2(q) + 0.5, P.tool.xy) < P.tool.z) {
+    if (P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2(q) + 0.5, P.tool.xy) < P.tool.z) {
       t = vec4(0.0);
       s = vec2(0.0);
     }

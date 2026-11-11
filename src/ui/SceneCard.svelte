@@ -2,10 +2,12 @@
   import { tick } from 'svelte';
   import { presetById, sourceKind, sourceText } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
-  import { app, loadPreset, openLearn, sceneChanged, type LearnTab } from './state.svelte';
+  import { app, linkUnchanged, loadPreset, openLearn, sceneChanged, type LearnTab } from './state.svelte';
 
   const scene = $derived(presetById(app.scene));
   const changed = $derived(sceneChanged());
+  // A shared link can hold other settings than the scene: until the receiver changes something, the link did it.
+  const byLink = $derived(app.envVersion >= 0 && linkUnchanged());
   let sourceOpen = $state(false);
   let heading = $state<HTMLHeadingElement>();
 
@@ -67,7 +69,7 @@
     {/if}
     {#if changed}
       <p class="changed">
-        <span>You changed the scene.</span>
+        <span>{byLink ? 'This link changes the scene.' : 'You changed the scene.'}</span>
         <button
           type="button"
           onclick={() => {

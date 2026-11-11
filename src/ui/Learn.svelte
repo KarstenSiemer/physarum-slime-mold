@@ -105,7 +105,7 @@
       <p>
         Sage Jenson’s GPU version (2019) and Michael Fogleman’s version with several species (2020) build on the same
         rules, and this app draws on all three. A scene marked “Jones 2010, Fig. 4” uses the settings of figure 4 of the
-        paper, on a grid shaped like your screen.
+        paper, on the grid of that figure: 200&nbsp;×&nbsp;200 cells.
       </p>
       <p>
         Like the paper, the app imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of
@@ -132,6 +132,14 @@
         With Jones’ settings, diffusion and decay alone do not keep it from collapsing into lines; his rule of one agent
         per cell does. A blocked agent turns to a random direction, and these turns start new branches (p. 135). Without
         the rule, agents pile up in the same cells and the network contracts into a few lines.
+      </p>
+      <p>
+        Jones gives every length in cells: how far ahead the sensors are, how far an agent moves in a step, and how far
+        one 3 × 3 average spreads the trail. So a pattern keeps its size in cells. A scene of Jones runs on the grid of
+        its figure on every screen, with free space beside it. Around a grid with wrapping edges, its copies show
+        dimmed. On another grid the same settings make more or fewer meshes, and the result is different from the paper.
+        You can choose another grid under Scene → Grid. The panel then names Jones’ grid and has a button to go back to
+        it. The other scenes use a grid shaped like your screen.
       </p>
       <p>
         The setting Model chooses the rules. <strong>Jones</strong> has only the rules that Jeff Jones published.
@@ -186,8 +194,8 @@
     {:else if app.learnTab === 'Scenes'}
       <p>
         Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
-        figure in his paper, on a grid shaped like your screen. Fogleman 2020 scenes are his saved settings. The others
-        were made for this app.
+        figure in his paper, on the grid of that figure. Fogleman 2020 scenes are his saved settings, and the others
+        were made for this app. These scenes use a grid shaped like your screen.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>

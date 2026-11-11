@@ -395,11 +395,17 @@ void main() {
   float inside = 1.0;
   if (V.boundary == 1u) inside = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
   else if (V.boundary == 2u) inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
-  vec3 c = V.background.rgb * (V.style == 2u ? 0.92 : 0.55);
+  vec3 space = V.background.rgb * (V.style == 2u ? 0.92 : 0.55);
+  vec3 c = space;
   // One call: a GPU that runs both sides of a branch (SwiftShader in CI) would draw the scene twice.
   if (inside > 0.0) {
     vec3 inner = scene(p, s);
     c = inside >= 1.0 ? inner : mix(c, inner, inside);
+  }
+  // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it (see render.wgsl).
+  if (V.fx.z < 1.0) {
+    float edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
+    c = mix(mix(space, c, V.fx.z), c, edge);
   }
   uvec2 px = uvec2(gl_FragCoord.xy);
   float n = hash(px) - hash(px + uvec2(7919u, 104729u));

@@ -73,12 +73,22 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   browser can give fewer than 40 fps whatever the grid (iOS Safari gives 30 in Low Power Mode,
   and Chrome's Energy Saver lowers the frame rate too). The frames that started with no frame on
   the GPU show that rate; when they are at least half of the window, 90 % of their rate is enough.
-  It counts only active time (tab visible, not paused, no rebuild), decides at 3, 6, 10 and 15 s
-  of it, restarts its window after a reset or rebuild, and never lowers a grid the user picked.
+  It counts only active time (tab visible, not paused, no rebuild, no lattice), decides at 3, 6, 10
+  and 15 s of it, restarts its window after a reset or rebuild, and never lowers a grid the user
+  picked or a lattice.
+- The scenes of Jones run on the lattice of their figure (ADR 0026): 200 × 200 cells for Fig. 4, 5,
+  16, 18 and 19, 300 × 300 for Fig. 21 and 22, on every screen, because Jones' lengths are in cells.
+  The other scenes use `resolution` cells on the long side of a grid shaped like the screen. The
+  view fits a lattice into the canvas with free space beside it; around a periodic lattice its
+  copies show dimmed. Below the grid choice, a scene on another grid says why its result differs
+  from the paper and offers its lattice again. A lattice that the device cannot hold becomes a grid
+  shaped like the screen, and a notice says so.
 
 ## 3. Simulation on the GPU
 
-Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `vec4` lane each).
+Grid `W × H` cells (any size, not only powers of two): a lattice of fixed size, or `resolution`
+cells on the long side in the canvas's aspect (`gridOf()` in `src/engine/sizing.ts`). Up to 4
+strains (one `vec4` lane each).
 
 ### Buffers and textures
 
@@ -169,7 +179,7 @@ its cells.
 | Area                | Controls                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Playback            | play/pause, single step, speed (steps per second), reset, new seed                                            |
-| Scene               | presets, scene card, agent count, resolution, layout, boundary, the rule, model; extended: scent decay, K     |
+| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model; extended: scent decay, K           |
 | Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight    |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)              |
 | Environment         | food strength, covered food, shrinkage; extended: diffusion passes, light strength                            |
@@ -187,12 +197,18 @@ competing strains (Fogleman presets).
 While the pointer is held, inoculate and cut act on every step. Inoculate uses only dead agents. It
 places an amount per second of holding at any frame rate. With none left, a notice says so. While
 paused, a held tool runs 60 steps per second; inoculate runs none while every agent of its strain
-lives (ADR 0023).
+lives (ADR 0023), and no tool runs any beside a closed arena, where it reaches no cell. On a
+periodic grid the tools act on the cells under the pointer, also on a copy of the grid and across
+its edges (ADR 0026).
 
 Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
 
 ## 5. Look
 
+- The view fits the grid into the canvas, centred. Beside a closed arena the free space shows a
+  dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
+  on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
+  copies as they are when zoomed out.
 - Linear-light compositing: radiance `L = Σ trail_s · gain · color_s`, then tone mapping,
   then sRGB encoding. Overlaps turn white-hot instead of clipping.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed
