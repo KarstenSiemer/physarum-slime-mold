@@ -569,12 +569,14 @@ export class Simulation implements Sim {
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
     const [trail, scent] = [this.trailViews[p], this.scentViews[p]];
-    // With walls, the passes whose sensors check the cells on the way for walls (agents.wgsl SENSE_WALLS); with a
-    // trail saturation K above 0, the passes that saturate the trail (SATURATE).
+    // With walls in the extended model, the passes whose sensors check the cells on the way for walls (agents.wgsl
+    // SENSE_WALLS, ADR 0020): Jones does not say what a sensor reads behind a wall, so his model reads the sensor's
+    // cell only (ADR 0022). With a trail saturation K above 0, the passes that saturate the trail (SATURATE).
+    const senseWalls = this.walls && this.settings.model === 'extended';
     const saturate = trailSaturation(this.settings) > 0;
     // Bind groups of 'auto' layouts belong to their pipeline: the key names the variant.
-    const w = `${this.walls ? 1 : 0}${saturate ? 1 : 0}`;
-    const agentPasses = saturate ? k.saturated(this.walls) : this.walls ? k.walled() : k;
+    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}`;
+    const agentPasses = saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k;
     if (!col) {
       const move = agentPasses.move;
       pass.setPipeline(move);

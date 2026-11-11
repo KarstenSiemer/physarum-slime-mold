@@ -68,7 +68,7 @@ export const strainSpec = {
   },
   decay: {
     label: 'Decay',
-    help: 'Fraction of the trail that disappears every step (decayT). Low decay gives strong, long-lived gradients.',
+    help: 'Fraction of the trail that disappears every step (decayT). Low decay gives strong, long-lived gradients. In the Jones model the food scent decays with it, because Jones puts food into the trail map.',
     min: 0.0001,
     max: 0.9,
     step: 0.0001,
@@ -85,14 +85,14 @@ export const strainSpec = {
   },
   food: {
     label: 'Food attraction',
-    help: 'How strongly the strain follows the scent of food. Negative values make food repel.',
+    help: 'How strongly the strain follows the scent of food. Negative values make food repel. Only the extended model has this setting: in the Jones model a strain weighs food as it weighs its own trail.',
     min: -2,
     max: 2,
     step: 0.05,
   },
   light: {
     label: 'Light avoidance',
-    help: 'How strongly the strain flees light. Physarum avoids light.',
+    help: 'How strongly the strain flees light. Physarum avoids light. Only the extended model has light.',
     min: -2,
     max: 2,
     step: 0.05,
@@ -120,7 +120,7 @@ export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center
 export const BOUNDARIES = ['wrap', 'box', 'dish'] as const;
 export const STYLES = ['glow', 'gel', 'paper', 'agents'] as const;
 export const RESOLUTIONS = [256, 512, 768, 1024, 1536, 2048, 3072, 4096] as const;
-/** The rule set (ADR 0022): Jones' published rules only, or with this app's additions. */
+/** The rule set (ADR 0022): only Jones' published rules, or Jones' rules and this app's additions. */
 export const MODELS = ['jones', 'extended'] as const;
 
 export type Layout = (typeof LAYOUTS)[number];
@@ -140,7 +140,7 @@ export const globalSpec = {
   },
   diffusion: {
     label: 'Diffusion passes',
-    help: 'How many 3 × 3 mean filters run per step. Jones uses 1, Fogleman 2; 0 turns diffusion off.',
+    help: 'How many 3 × 3 mean filters run per step. Jones uses 1, Fogleman 2; 0 turns diffusion off. The Jones model always runs 1.',
     min: 0,
     max: 4,
     step: 1,
@@ -148,7 +148,7 @@ export const globalSpec = {
   },
   foodStrength: {
     label: 'Food strength',
-    help: 'Scent that each food cell releases per step (wProj): 255 × this value, in the extended model scaled with Scent decay. With Scent decay 0.1 the scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths leading in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
+    help: 'Scent that each food cell releases per step (wProj): 255 × this value. In the Jones model the scent spreads and decays like the trail, as food in Jones’ trail map does. In the extended model, Scent decay scales it. With a decay of 0.1 the scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths that lead in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
     min: 0,
     max: 0.5,
     step: 0.005,
@@ -156,14 +156,14 @@ export const globalSpec = {
   },
   lightStrength: {
     label: 'Light strength',
-    help: 'Repellent that each lit cell releases per step: 255 × this value, in the extended model scaled with Scent decay. It spreads and fades like the food scent, with the same Scent decay.',
+    help: 'Only the extended model has light. Each lit cell releases a repellent per step: 255 × this value, scaled with Scent decay. It spreads and fades like the food scent, with the same Scent decay. Jones’ papers have no light that releases a repellent.',
     min: 0,
     max: 0.5,
     step: 0.005,
   },
   scentDecay: {
     label: 'Scent decay',
-    help: 'Fraction of the food and light scent that disappears every step. Lower values spread the scent farther: at 0.1 it falls to a third within 2 cells of a food, at 0.003 within about 9 cells, one sensor distance. In the Jones model a lower decay also makes the scent stronger: at 0.001 the scent on a food is 28 to 111 times as strong as at 0.1, and the food keeps pulling in more of the network. In the extended model, food and light release less at a lower decay. Then the scent on a large food stays as strong as at 0.1, and the scent on a small food gets weaker.',
+    help: 'Only the extended model has this setting: in the Jones model the scent decays with the strain’s Decay. It is the fraction of the food and light scent that disappears every step. Lower values spread the scent farther. At 0.1 the scent falls to a third within 2 cells of a food, and at 0.003 within about 9 cells. Food and light release less at a lower decay. So the scent on a large food stays as strong as at 0.1, and the scent on a small food gets weaker.',
     min: 0.001,
     max: 0.9,
     step: 0.001,
@@ -171,7 +171,7 @@ export const globalSpec = {
   },
   coveredFoodFactor: {
     label: 'Covered food factor',
-    help: 'With Covered food releases less: the share of its scent that a food cell releases while agents cover it. Adamatzky and Jones 2010 use 0.001 for food areas, Jones and Adamatzky 2014 use 0.01 for food at a point.',
+    help: 'The share of its scent that a food cell releases while an agent covers it, if Covered food releases less is on. Adamatzky and Jones 2010 use 0.001 for food areas. Jones and Adamatzky 2014 use 0.01 for food at a point.',
     min: 0.0001,
     max: 1,
     step: 0.0001,
@@ -180,7 +180,7 @@ export const globalSpec = {
   },
   trailSaturation: {
     label: 'Trail saturation',
-    help: 'Extended model only. Each sensor reads the trail t of each strain as t / (1 + t / K), with K this value. A trail far above K counts about as much as K, so a weak food scent can still turn an agent on a dense trail. Without food, one strain makes the same turns at every K. 0 turns it off.',
+    help: 'Only the extended model has this setting. Each sensor reads the trail t of each strain as t / (1 + t / K), with K this value. A trail far above K counts about as much as K, so a weak food scent can still turn an agent on a dense trail. Without food, one strain makes the same turns at every K. With food, most straight paths out of a food then run along the grid axes, because each sensor reads one grid cell. 0 turns it off.',
     min: 0,
     max: 1000,
     step: 1,
@@ -224,14 +224,14 @@ export type GlobalKey = keyof typeof globalSpec;
 /** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
 export const modelHelp = {
   label: 'Model',
-  help: 'Jones uses only rules that Jeff Jones published, in his 2010 paper and in later papers. Every scene starts with it. Extended adds rules of this app: food and light release less scent at a lower Scent decay, so a lower decay spreads the scent farther without making it stronger, and Trail saturation is available.',
-  ref: 'ADR 0022',
+  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, light, more diffusion passes, a scent decay of its own, sensors that walls block, and Trail saturation. With Scent decay 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
+  ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014',
 } as const;
 
 /** Help for the switch "Covered food releases less"; Learn → Controls lists it with the sliders. */
 export const coveredFoodHelp = {
   label: 'Covered food releases less',
-  help: 'A food cell releases only a small share of its scent, the Covered food factor, while an agent is on it or on one of its 8 neighbour cells. Food that the network covers then stops pulling in more agents, and uncovered food pulls with full strength. Jones uses this rule in later papers with Adamatzky. It works in both models.',
+  help: 'A food cell releases less scent while an agent is on it or on one of its 8 neighbour cells. It then releases only the Covered food factor of its scent. With one agent per cell, covered food then pulls in almost no more agents, and food without agents pulls with full strength. Jones uses this rule in later papers with Adamatzky. The Jones model always has one agent per cell. In the extended model without that rule, agents stack on a food and hold each other there with their own trail. Then more agents can gather on covered food than without this option. Without the rule the option also costs time: up to 38 % of the steps per second on WebGL2, and up to 24 % on WebGPU.',
   ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
 } as const;
 
@@ -251,7 +251,7 @@ export function emissionScale(scentDecay: number): number {
 /** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */
 export const collisionsHelp = {
   label: 'One agent per cell',
-  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. Switching the rule restarts the population. Turning it on caps Agents per cell at 1.',
+  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. The Jones model always has the rule, and only the extended model can switch it off. A switch restarts the population. With the rule, Agents per cell is at most 1.',
   ref: 'Jones 2010, p. 133 and 135',
 } as const;
 
@@ -261,7 +261,10 @@ export interface Settings extends Record<GlobalKey, number> {
   layout: Layout;
   boundary: Boundary;
   collisions: boolean;
-  /** The rule set (ADR 0022); old links without it load as 'jones'. */
+  /**
+   * The rule set (ADR 0022). 'jones' holds only Jones' published rules (constrain()); an old link without it loads as
+   * 'jones' when its values fit.
+   */
   model: Model;
   /** Food under agents releases `coveredFoodFactor` of its scent (coveredFoodHelp). */
   coveredFood: boolean;
@@ -313,7 +316,7 @@ export function defaultSettings(): Settings {
     layout: 'mixed',
     boundary: 'wrap',
     collisions: false,
-    model: 'jones',
+    model: 'extended',
     coveredFood: false,
     style: 'glow',
     density: 1,
@@ -375,7 +378,11 @@ export function sanitize(input: unknown): Settings {
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
   out.collisions = raw.collisions === true;
-  out.model = oneOf(raw.model, MODELS, d.model);
+  // A link made before the model switch holds no model: it was made with Jones' rules, and constrain() makes it
+  // Jones' model if its values fit (ADR 0022).
+  out.model = oneOf(raw.model, MODELS, 'jones');
+  // K is a whole number (its step): a tiny K such as 1e-300 would pick the saturating passes and pack as 0 in f32.
+  out.trailSaturation = Math.round(out.trailSaturation);
   out.coveredFood = raw.coveredFood === true;
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
@@ -393,9 +400,59 @@ export function sanitize(input: unknown): Settings {
   return constrain(out);
 }
 
-/** Invariants between parameters, applied to URL input and to UI changes alike. */
+/**
+ * Invariants between parameters, applied to URL input and to UI changes alike. A Jones model that holds a value Jones
+ * does not have becomes the extended model (jonesFits()), and its other values are bound to Jones' (asJones()).
+ */
 export function constrain(s: Settings): Settings {
   const density = s.collisions ? Math.min(s.density, 1) : s.density; // one agent per cell at most
   const strains = s.strains.length > MAX_STRAINS ? s.strains.slice(0, MAX_STRAINS) : s.strains;
-  return density === s.density && strains === s.strains ? s : { ...s, density, strains };
+  const out = density === s.density && strains === s.strains ? s : { ...s, density, strains };
+  if (out.model !== 'jones') return out;
+  return jonesFits(out) ? asJones(out) : { ...out, model: 'extended' };
+}
+
+/**
+ * Whether the settings fit Jones' model (owner decision 2026-11-11, ADR 0022): one strain that follows (+1) or flees
+ * (−1) its own trail (Jones 2010, Sec. 3.5), one agent per cell (p. 133) and one 3 × 3 mean per step (Table 1). Jones
+ * has no other value for these settings, so the panel offers none in the Jones model.
+ */
+export function jonesFits(s: Settings): boolean {
+  const self = s.strains[0]?.attraction[0];
+  return s.strains.length === 1 && s.collisions && s.diffusion === 1 && (self === 1 || self === -1);
+}
+
+/**
+ * The Jones model's values of the settings that are not Jones' own (ADR 0022). Food goes into his one trail map
+ * (Jones 2010, p. 141): its scent decays with the strain's decay, and the strain weighs it as its own trail. Jones'
+ * papers have neither light that releases a repellent nor trail saturation, so their values return to the defaults,
+ * and a link holds none of them. Returns `s` itself when it holds these values already.
+ */
+function asJones(s: Settings): Settings {
+  const d = defaultSettings();
+  const st = s.strains[0];
+  if (!st) return s;
+  const self = st.attraction[0] ?? 1;
+  const light = defaultStrain(0).light;
+  const strainOk = st.food === self && st.light === light;
+  const ok = strainOk && s.scentDecay === st.decay && s.lightStrength === d.lightStrength && s.trailSaturation === 0;
+  if (ok) return s;
+  return {
+    ...s,
+    scentDecay: st.decay,
+    lightStrength: d.lightStrength,
+    trailSaturation: 0,
+    strains: strainOk ? s.strains : [{ ...st, food: self, light }],
+  };
+}
+
+/**
+ * The settings in Jones' model: strain A alone, which follows or flees its own trail with weight 1, one agent per
+ * cell, one 3 × 3 mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
+ */
+export function toJones(s: Settings): Settings {
+  const st = s.strains[0] ?? defaultStrain(0);
+  const self = (st.attraction[0] ?? 1) < 0 ? -1 : 1;
+  const attraction = st.attraction.map((v, j) => (j === 0 ? self : v));
+  return constrain({ ...s, model: 'jones', collisions: true, diffusion: 1, strains: [{ ...st, attraction }] });
 }

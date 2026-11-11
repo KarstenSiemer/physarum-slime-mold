@@ -12,6 +12,7 @@
   import SceneLabel from './ui/SceneLabel.svelte';
   import { constrain } from './model/params';
   import {
+    adopt,
     app,
     currentDrawing,
     deadLeft,
@@ -22,7 +23,7 @@
     setScene,
     showNotice,
     startScene,
-    TOOLS,
+    toolsFor,
     type Tool,
   } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
@@ -103,8 +104,9 @@
   $effect(() => {
     const snapshot = $state.snapshot(app.settings);
     const valid = constrain(snapshot);
-    // Keep the UI consistent with what a shared link would load (e.g. collisions cap density at 1).
-    if (valid.density !== snapshot.density) app.settings.density = valid.density;
+    // Keep the UI consistent with what a shared link would load (e.g. collisions cap density at 1, and the Jones
+    // model binds its scent to the trail).
+    if (valid !== snapshot) adopt(valid);
     getEngine()?.apply(valid).catch(fail);
   });
 
@@ -314,7 +316,7 @@
     const t = ev.target as HTMLElement;
     if (ev.metaKey || ev.ctrlKey || ev.altKey || t.closest('input, select, textarea, button, summary, a, dialog'))
       return;
-    const tool = TOOLS.find((x) => x.key === ev.key);
+    const tool = toolsFor(app.settings.model).find((x) => x.key === ev.key);
     if (tool) app.tool = tool.id;
     else if (ev.key === ' ') app.paused = !app.paused;
     else if (ev.key === '.') {

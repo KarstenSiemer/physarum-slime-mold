@@ -46,6 +46,7 @@
         title="Where these settings come from"
         onclick={() => (sourceOpen = !sourceOpen)}>{scene.source}</button
       >
+      <span class="chip">{app.settings.model === 'jones' ? 'Only Jones’ rules' : 'Jones plus this app’s rules'}</span>
       {#if app.settings.collisions}<span class="chip">One agent per cell</span>{/if}
     </div>
     {#if sourceOpen}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
 import { packDrawing, unpackDrawing, type Drawing } from './link';
-import { defaultSettings, defaultStrain } from './params';
+import { defaultSettings, defaultStrain, type Settings } from './params';
 import { presetById } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
 
@@ -26,15 +26,33 @@ describe('URL settings', () => {
     expect(await decodeSettings(encoded)).toEqual(s);
   });
 
-  // ADR 0022: a link made before the model switch holds no model, covered food or trail saturation.
-  it('opens links made before the model switch with the Jones model', async () => {
-    const { model, coveredFood, coveredFoodFactor, trailSaturation, ...old } = {
+  // ADR 0022: a link made before the model switch holds no model, covered food or trail saturation. It opens with the
+  // Jones model if its values fit Jones' rules, and with the extended model else: then it runs as it was made.
+  it('opens links made before the model switch with the Jones model only if they fit it', async () => {
+    const strip = (s: Settings) => {
+      const { model, coveredFood, coveredFoodFactor, trailSaturation, ...old } = s;
+      expect([coveredFood, coveredFoodFactor, trailSaturation]).toEqual([false, 0.001, 0]);
+      return { model, old };
+    };
+    const ext = strip({ ...defaultSettings(), scentDecay: 0.01 });
+    expect(ext.model).toBe('extended');
+    expect(await decodeSettings(await hashPart(JSON.stringify(ext.old)))).toEqual({
       ...defaultSettings(),
       scentDecay: 0.01,
-    };
-    expect([model, coveredFood, coveredFoodFactor, trailSaturation]).toEqual(['jones', false, 0.001, 0]);
-    const s = await decodeSettings(await hashPart(JSON.stringify(old)));
-    expect(s).toEqual({ ...defaultSettings(), scentDecay: 0.01 });
+    });
+    const network = presetById('network')?.settings();
+    if (!network) throw new Error('no preset network');
+    const jones = strip(network);
+    expect(jones.model).toBe('jones');
+    expect(await decodeSettings(await hashPart(JSON.stringify(jones.old)))).toEqual(network);
+  });
+
+  // The reviewer's case: Extended, K 30, then back to Jones. A Jones link holds no K.
+  it('drops trail saturation from a Jones link', async () => {
+    const network = presetById('network')?.settings();
+    if (!network) throw new Error('no preset network');
+    const s = await decodeSettings(await hashPart(JSON.stringify({ ...network, trailSaturation: 30 })));
+    expect(s).toEqual(network);
   });
 
   it('rejects malformed, oversized and non-base64url input', async () => {

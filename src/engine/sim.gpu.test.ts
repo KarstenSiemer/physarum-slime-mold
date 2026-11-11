@@ -1086,50 +1086,179 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       ['one agent per cell', { seed: 7, density: 0.5, collisions: true }, [96, 64], 64],
     ] as const;
 
-    // Overrides that are off, and an extended model at decay 0.1 with K = 0, build the passes from the shipped
-    // sources: they must give the bytes of the sources without saturation and covered food.
+    // Overrides that are off build the passes from the shipped sources: in both models they must give the bytes of
+    // the sources without saturation and covered food. The GPU runs what packParams() packs, the same for both.
     it.each(SCENES)(
       'give the agents, trail and scent of the sources without the switch while it changes nothing (%s)',
       async (_, patch, [w, h], steps) => {
         const n = Math.round(patch.density * w * h);
-        const plain = await build({ ...defaultSettings(), ...patch }, w, h, n, true);
-        plain.paint(FOOD);
-        plain.reset();
-        plain.run(steps);
-        const expected = await state(plain);
-        for (const model of ['jones', 'extended'] as const) {
-          const sim = await build({ ...defaultSettings(), ...patch, model, trailSaturation: 0 }, w, h, n);
+        const run = async (s: Settings, plain = false) => {
+          const sim = await build(s, w, h, n, plain);
           sim.paint(FOOD);
           sim.reset();
           sim.run(steps);
-          expect(await state(sim), model).toEqual(expected);
+          return state(sim);
+        };
+        for (const model of MODELS) {
+          const s: Settings = { ...defaultSettings(), ...patch, model, trailSaturation: 0 };
+          const expected = await run(s, true);
+          expect(await run(s), model).toEqual(expected);
+          // A K that reached the settings past sanitize(): the Jones model never saturates (pack.ts trailSaturation()).
+          if (model === 'jones') expect(await run({ ...s, trailSaturation: 20 }), 'Jones with K').toEqual(expected);
         }
         // K and covered food change them.
-        for (const more of [{ model: 'extended', trailSaturation: 20 }, { coveredFood: true }] as const) {
-          const sim = await build({ ...defaultSettings(), ...patch, ...more }, w, h, n);
-          sim.paint(FOOD);
-          sim.reset();
-          sim.run(steps);
-          expect(await state(sim), JSON.stringify(more)).not.toEqual(expected);
-        }
+        const ext: Settings = { ...defaultSettings(), ...patch, model: 'extended', trailSaturation: 0 };
+        const expected = await run(ext, true);
+        for (const more of [{ trailSaturation: 20 }, { coveredFood: true }])
+          expect(await run({ ...ext, ...more }), JSON.stringify(more)).not.toEqual(expected);
       },
     );
 
-    /** One step of the scent on the CPU: sources (food × `covered` factor), the 3 × 3 means, then the decay. */
+    const cellAtFor = (boundary: Boundary, w: number, h: number) => (x: number, y: number) => {
+      if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
+      if (x < 0 || y < 0 || x >= w || y >= h) return -1;
+      if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > 0.5 * Math.min(w, h) - 1) return -1;
+      return y * w + x;
+    };
+
+    // Jones 2010, p. 144: food goes into the one trail map and diffuses and decays with it. The app keeps food in a
+    // scent field of its own (ADR 0007); the Jones model gives it the strain's decay (pack.ts), so trail + scent must
+    // be Jones' map. CPU reference of that one map, stepped with the deposits that the GPU's agents made in each step.
+    it.each([
+      ['attraction, closed box with a wall', 1, 'box', 0.05],
+      ['chemorepulsion, periodic grid', -1, 'wrap', 0.1],
+      ['attraction, dish', 1, 'dish', 0.2],
+    ] as const)('keep trail + scent equal to Jones’ one trail map (%s)', async (_, self, boundary, decay) => {
+      const [w, h] = [48, 40];
+      const strain = { ...defaultStrain(0), decay, food: self, attraction: [self, 0, 0, 0] };
+      const settings: Settings = {
+        ...defaultSettings(),
+        seed: 3,
+        model: 'jones',
+        collisions: true,
+        density: 0.15,
+        boundary,
+        foodStrength: 0.05,
+        // Past constrain(): packParams() must bind the scent to the strain's decay itself.
+        scentDecay: 0.1,
+        strains: [strain],
+      };
+      const cells = boundary === 'dish' ? Math.min(w, h) ** 2 : w * h;
+      const sim = await build(settings, w, h, Math.round(0.15 * cells));
+      sim.paint([
+        { kind: 'food', from: [10, 12], to: [30, 14], radius: 3 },
+        { kind: 'food', from: [1, 30], to: [1, 30], radius: 2 }, // across the seam of the periodic grid
+        { kind: 'wall', from: [24, 20], to: [24, 34], radius: 1 },
+      ]);
+      sim.reset();
+      const env = await sim.readEnv();
+      const cellAt = cellAtFor(boundary, w, h);
+      const open = (c: number) => c >= 0 && (env[c * 4] ?? 0) < 128;
+      const keep = 1 - decay;
+      let map = new Float64Array(w * h);
+      for (let k = 0; k < 40; k++) {
+        sim.run(1);
+        const counts = await sim.readCounts();
+        const src = map.map((v, c) =>
+          open(c) ? v + (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 : 0,
+        );
+        map = src.map((_, c) => {
+          const [x, y] = [c % w, Math.floor(c / w)];
+          if (!open(cellAt(x, y))) return 0;
+          let [sum, n] = [0, 0];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const q = cellAt(x + dx, y + dy);
+              if (!open(q)) continue;
+              sum += src[q] ?? 0;
+              n++;
+            }
+          return (keep * sum) / n;
+        });
+      }
+      const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
+      const sum = Float32Array.from({ length: w * h }, (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0));
+      expect(maxRelError(sum, map)).toBeLessThan(1e-5);
+      // Food and agents both count: the map without the deposits or without the food is far off.
+      expect(Math.max(...Array.from(scent))).toBeGreaterThan(1);
+      expect(Math.max(...Array.from(trail))).toBeGreaterThan(1);
+    });
+
+    // Jones does not say what a sensor reads behind a wall (ADR 0020): only the extended model's sensors check the
+    // cells on the way for walls, and the Jones model reads the sensor's cell (ADR 0022). Without walls both agree.
+    it('check the sensors for walls on the way in the extended model only', async () => {
+      const [w, h] = [64, 48];
+      const settings: Settings = {
+        ...defaultSettings(),
+        seed: 7,
+        model: 'jones',
+        collisions: true,
+        density: 0.3,
+        strains: [{ ...defaultStrain(0), sensorOffset: 12 }],
+      };
+      const run = async (model: Settings['model'], walls: boolean) => {
+        const sim = await build({ ...settings, model }, w, h, Math.round(0.3 * w * h));
+        if (walls) sim.paint(WALLS);
+        sim.reset();
+        sim.run(48);
+        return state(sim);
+      };
+      expect(await run('jones', false)).toEqual(await run('extended', false));
+      expect(await run('jones', true)).not.toEqual(await run('extended', true));
+    });
+
+    // Jones 2010, p. 148: the wound loses its agents, which go elsewhere. The extended model also clears its chemicals.
+    it('clear the trail and scent in a cut in the extended model only', async () => {
+      const [w, h] = [64, 48];
+      const settings: Settings = {
+        ...defaultSettings(),
+        seed: 4,
+        model: 'jones',
+        collisions: true,
+        density: 0.3,
+      };
+      const inWound = async (model: Settings['model']) => {
+        const sim = await build({ ...settings, model }, w, h, Math.round(0.3 * w * h));
+        sim.paint([{ kind: 'food', from: [32, 24], to: [32, 24], radius: 4 }]);
+        sim.reset();
+        sim.run(30);
+        const cut: AgentTool = { kind: AgentToolKind.cut, x: 32, y: 24, radius: 8, strain: 0, revive: 0 };
+        sim.run(1, cut);
+        const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
+        const c = 24 * w + 32;
+        return { trail: trail[c * 4] ?? 0, scent: scent[c * 2] ?? 0 };
+      };
+      const jones = await inWound('jones');
+      const ext = await inWound('extended');
+      expect(jones.scent).toBeGreaterThan(1);
+      expect(jones.trail).toBeGreaterThan(0);
+      expect([ext.trail, ext.scent]).toEqual([0, 0]);
+    });
+
+    /**
+     * One step of the scent on the CPU, on a periodic grid: sources (food × `covered` factor; with `coverLight` the
+     * light too, which the shaders must not do), the 3 × 3 means, then the decay. The Jones model has no light, and its
+     * scent decays with the strain's decay (pack.ts).
+     */
     function scentStep(
       s: Float64Array,
       env: Uint8Array,
       [w, h]: [number, number],
       settings: Settings,
       coveredAt: (c: number) => boolean = () => false,
+      coverLight = false,
     ) {
-      const g = settings.model === 'extended' ? emissionScale(settings.scentDecay) : 1;
+      const jones = settings.model === 'jones';
+      const g = jones ? 1 : emissionScale(settings.scentDecay);
+      const decay = jones ? (settings.strains[0]?.decay ?? 0) : settings.scentDecay;
       const factor = settings.coveredFood ? settings.coveredFoodFactor : 1;
       let cur = Float64Array.from(s);
       for (let c = 0; c < w * h; c++) {
         const food = ((env[c * 4 + 1] ?? 0) / 255) * 255 * settings.foodStrength * g;
-        cur[c * 2] = (cur[c * 2] ?? 0) + food * (coveredAt(c) ? factor : 1);
-        cur[c * 2 + 1] = (cur[c * 2 + 1] ?? 0) + ((env[c * 4 + 2] ?? 0) / 255) * 255 * settings.lightStrength * g;
+        const f = coveredAt(c) && (env[c * 4 + 1] ?? 0) > 0 ? factor : 1;
+        cur[c * 2] = (cur[c * 2] ?? 0) + food * f;
+        const light = jones ? 0 : ((env[c * 4 + 2] ?? 0) / 255) * 255 * settings.lightStrength * g;
+        cur[c * 2 + 1] = (cur[c * 2 + 1] ?? 0) + light * (coverLight ? f : 1);
       }
       for (let pass = 0; pass < settings.diffusion; pass++) {
         const next = new Float64Array(cur.length);
@@ -1143,7 +1272,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             }
         cur = next;
       }
-      return cur.map((v) => v * (1 - settings.scentDecay));
+      return cur.map((v) => v * (1 - decay));
     }
 
     const maxRelError = (gpu: Float32Array, cpu: Float64Array) => {
@@ -1152,12 +1281,21 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     };
 
     // A food and a light disc on a periodic grid, 30 steps: the GPU scent within 1e-4 of the CPU reference, in both
-    // models and at three decays.
+    // models and at three decays. In the Jones model the decay is the strain's, Scent decay stays at 0.1 and the light
+    // releases nothing.
     it.each(MODELS.flatMap((model) => [0.1, 0.01, 0.001].map((d) => [model, d] as const)))(
       'release food and light scent as the CPU reference does (%s model, scent decay %s)',
-      async (model, scentDecay) => {
+      async (model, d) => {
         const [w, h] = [48, 32];
-        const settings = { ...defaultSettings(), layout: 'empty' as const, model, scentDecay, lightStrength: 0.2 };
+        const jones = model === 'jones';
+        const settings: Settings = {
+          ...defaultSettings(),
+          layout: 'empty',
+          model,
+          scentDecay: jones ? 0.1 : d,
+          lightStrength: 0.2,
+          strains: [{ ...defaultStrain(0), decay: jones ? d : 0.1 }],
+        };
         const sim = await build(settings, w, h, 1);
         sim.paint([
           { kind: 'food', from: [12, 10], to: [12, 10], radius: 3.5 },
@@ -1167,7 +1305,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         let cpu = new Float64Array(w * h * 2);
         for (let k = 0; k < 30; k++) cpu = scentStep(cpu, env, [w, h], settings);
         sim.run(30);
-        expect(maxRelError(await sim.readScent(), cpu)).toBeLessThan(1e-4);
+        const scent = await sim.readScent();
+        expect(maxRelError(scent, cpu)).toBeLessThan(1e-4);
+        const light = Math.max(...Array.from(scent).filter((_, i) => i % 2 === 1));
+        if (jones) expect(light).toBe(0);
+        else expect(light).toBeGreaterThan(1);
       },
     );
 
@@ -1198,51 +1340,81 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
 
     // Agents near and on food: a food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it
-    // holds an agent after the step's moves (Adamatzky and Jones 2010, ADR 0022). With and without the rule of one
-    // agent per cell, with 1 and 2 blur passes.
+    // holds an alive agent after the step's moves (Adamatzky and Jones 2010, ADR 0022). With and without the rule of
+    // one agent per cell, with 1 and 2 blur passes. Food lies across both seams of the periodic grid, light lies on
+    // food, and shrinkage leaves dead agents: the references with an unwrapped window, with dead agents and with
+    // covered light are each far off, so a pass that did any of these would fail.
     it.each([false, true].flatMap((collisions) => [1, 2].map((diffusion) => [collisions, diffusion] as const)))(
       'release the covered-food factor of the scent where an agent covers it (collisions %s, diffusion %s)',
       async (collisions, diffusion) => {
         const [w, h] = [64, 48];
-        // Two blur passes with the factor of Jones and Adamatzky 2014, one with the default of 2010.
+        // Two blur passes with the factor of Jones and Adamatzky 2014 and the extended model at decay 0.003 (g ≠ 1),
+        // one with the default of 2010.
         const coveredFoodFactor = diffusion === 2 ? 0.01 : 0.001;
-        const settings = {
+        const settings: Settings = {
           ...defaultSettings(),
           seed: 5,
           density: 0.08,
           collisions,
           diffusion,
+          shrink: 0.02,
+          lightStrength: 0.2,
+          scentDecay: diffusion === 2 ? 0.003 : 0.1,
           coveredFood: true,
           coveredFoodFactor,
+          // Agents that ignore light also cover the lit food.
+          strains: [{ ...defaultStrain(0), light: 0 }],
         };
         const sim = await build(settings, w, h, Math.round(0.08 * w * h));
         sim.paint([
           { kind: 'food', from: [6, 6], to: [58, 40], radius: 3 },
           { kind: 'food', from: [6, 40], to: [58, 6], radius: 1.5 },
+          { kind: 'food', from: [0.5, 4], to: [0.5, 44], radius: 2.5 }, // across the x seam
+          { kind: 'food', from: [8, 0.5], to: [56, 0.5], radius: 2 }, // across the y seam
+          { kind: 'light', from: [6, 6], to: [58, 40], radius: 2 }, // on the first food stroke
         ]);
         sim.reset();
         sim.run(20);
         const env = await sim.readEnv();
         const before = Float64Array.from(await sim.readScent());
         sim.run(1);
+        const after = await sim.readScent();
         const agents = await sim.readAgents();
-        const held = new Uint8Array(w * h);
-        for (const a of agents) if (a.bits & 4) held[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
-        const coveredAt = (c: number) => {
+        const [alive, dead] = [new Uint8Array(w * h), new Uint8Array(w * h)];
+        for (const a of agents) ((a.bits & 4) !== 0 ? alive : dead)[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
+        const windowOf = (held: (c: number) => boolean, wrap: boolean) => (c: number) => {
           const [x, y] = [c % w, Math.floor(c / w)];
           for (let dy = -1; dy <= 1; dy++)
-            for (let dx = -1; dx <= 1; dx++) if (held[((y + dy + h) % h) * w + ((x + dx + w) % w)]) return true;
+            for (let dx = -1; dx <= 1; dx++) {
+              const [nx, ny] = [x + dx, y + dy];
+              if (!wrap && (nx < 0 || ny < 0 || nx >= w || ny >= h)) continue;
+              if (held(((ny + h) % h) * w + ((nx + w) % w))) return true;
+            }
           return false;
         };
+        const coveredAt = windowOf((c) => alive[c] === 1, true);
         const cpu = scentStep(before, env, [w, h], settings, coveredAt);
-        expect(maxRelError(await sim.readScent(), cpu)).toBeLessThan(1e-4);
+        expect(maxRelError(after, cpu)).toBeLessThan(1e-4);
         // Some food is covered and some is not: the reference without the rule is far off.
         const foodCells = Array.from({ length: w * h }, (_, c) => c).filter((c) => (env[c * 4 + 1] ?? 0) > 0);
         const covered = foodCells.filter(coveredAt).length;
         expect(covered).toBeGreaterThan(10);
         expect(foodCells.length - covered).toBeGreaterThan(10);
-        const without = scentStep(before, env, [w, h], { ...settings, coveredFood: false });
-        expect(maxRelError(await sim.readScent(), without)).toBeGreaterThan(1e-2);
+        const far = (other: Float64Array) => {
+          expect(maxRelError(after, other)).toBeGreaterThan(1e-3);
+        };
+        far(scentStep(before, env, [w, h], { ...settings, coveredFood: false }));
+        // The window wraps at the seams: some food cells are covered only through a seam.
+        const unwrapped = windowOf((c) => alive[c] === 1, false);
+        expect(foodCells.filter((c) => coveredAt(c) !== unwrapped(c)).length).toBeGreaterThan(0);
+        far(scentStep(before, env, [w, h], settings, unwrapped));
+        // Dead agents cover nothing.
+        const withDead = windowOf((c) => alive[c] === 1 || dead[c] === 1, true);
+        expect(foodCells.filter((c) => coveredAt(c) !== withDead(c)).length).toBeGreaterThan(0);
+        far(scentStep(before, env, [w, h], settings, withDead));
+        // Light keeps its full source on covered food.
+        expect(foodCells.filter((c) => coveredAt(c) && (env[c * 4 + 2] ?? 0) > 0).length).toBeGreaterThan(0);
+        far(scentStep(before, env, [w, h], settings, coveredAt, true));
       },
     );
 
@@ -1302,9 +1474,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // Two strains with weights on both trails, on a random trail: every agent's turn in one step against the CPU
     // reference of sense() and steer() with t / (1 + t / K) per lane. Agents whose sensors lie within 1e-3 of a cell
     // edge or whose two strongest sensors differ by less than 1e-4 are left out: float rounding could decide them.
-    it.each([false, true])(
-      'saturate the trail per lane as the CPU reference does (collisions %s)',
-      async (collisions) => {
+    // With a wall painted, the passes whose sensors check for walls (SENSE_WALLS) saturate too; agents near the wall
+    // are left out, so no sensor of the rest meets it.
+    it.each([false, true].flatMap((collisions) => [false, true].map((walls) => [collisions, walls] as const)))(
+      'saturate the trail per lane as the CPU reference does (collisions %s, walls %s)',
+      async (collisions, walls) => {
         const [w, h] = [64, 64];
         const K = 120;
         const RA = 30;
@@ -1324,6 +1498,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           strains,
         };
         const sim = await build(settings, w, h, n);
+        const wall = { x: 30, y: 30, r: 2 };
+        if (walls) sim.paint([{ kind: 'wall', from: [wall.x, wall.y], to: [wall.x, wall.y], radius: wall.r }]);
         let r = 99;
         const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
         const trail = Float32Array.from({ length: w * h * 4 }, (_, i) =>
@@ -1358,6 +1534,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           if (!st || !b) return;
           // In collision mode a blocked agent takes a random heading: only agents that moved show their turn.
           if (collisions && b.x === a.x && b.y === a.y) return;
+          if (walls && Math.hypot(a.x - wall.x, a.y - wall.y) < wall.r + st.sensorOffset + 3) return;
           const near = { edge: false };
           const read = (angle: number, saturate: boolean) => {
             const [px, py] = [a.x + st.sensorOffset * Math.cos(angle), a.y + st.sensorOffset * Math.sin(angle)];
@@ -1393,7 +1570,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const diff = Math.abs(((b.heading - expected + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
           expect(diff, `agent ${i}`).toBeLessThan(1e-4);
         });
-        expect(checked).toBeGreaterThan(0.5 * agents.length);
+        expect(checked).toBeGreaterThan(0.4 * agents.length);
         expect(changedByK).toBeGreaterThan(0.1 * checked);
       },
     );

@@ -15,7 +15,7 @@ struct Params {
   attraction: array<vec4f, 4>, // row s: weight of each strain's trail for strain s
   scent: vec4f,          // food source, light source, scent keep, shrink probability
   tool: vec4f,           // x, y (cells), radius, kind (0 none, 1 inoculate, 2 cut)
-  tool2: vec4f,          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
+  tool2: vec4f,          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
   extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
   model: vec4f,          // trail saturation K (0 off), covered food factor (1 off), unused, unused (ADR 0022)

@@ -124,7 +124,7 @@
           agent per cell).
         </li>
         <li><strong>Deposit</strong> some trail after a successful move.</li>
-        <li><strong>Diffuse:</strong> the trail spreads to the 8 neighbor cells (a 3 × 3 average).</li>
+        <li><strong>Diffuse:</strong> the trail spreads to the 8 neighbour cells (a 3 × 3 average).</li>
         <li><strong>Decay:</strong> a fixed fraction of the trail disappears.</li>
       </ol>
       <p>
@@ -134,25 +134,35 @@
         the rule, agents pile up in the same cells and the network contracts into a few lines.
       </p>
       <p>
-        Here, several strains can share the dish. Each strain has its own trail. A table sets how strongly each strain
-        follows or flees the trails of the others (an idea from Michael Fogleman’s version). Food and light add their
-        own scents.
+        The setting Model chooses the rules. <strong>Jones</strong> has only the rules that Jeff Jones published.
+        <strong>Extended</strong> has Jones’ rules and the additions of this app. The scenes from Jones’ papers start with
+        Jones, and all other scenes and the default settings start with Extended.
       </p>
       <p>
-        Food releases a scent that spreads and fades like the trail. In Jones 2010 the food goes into the trail map
-        itself; here it has a scent of its own, so a strain that flees other strains is not repelled by food. With Scent
-        decay 0.1 the scent fades within a few cells, so an agent notices food only when a sensor comes close. In a
-        dense network, food becomes a hub with paths leading in, and the rest of the network goes on as before. A whole
-        network reorganizes around food only when agents are few and the network contracts, as in Shortest path and
-        Steiner tree, or when agents die off, as in Shrinking plasmodium.
+        In the Jones model, one strain follows its own trail, or flees it as in Jones’ Turing patterns. One agent fits
+        in a cell, and one 3 × 3 average spreads the trail in each step. Food goes into the trail map, so its scent
+        spreads and fades with the trail. Walls mark where agents cannot go. Agents can die off, as in Shrinking
+        plasmodium. In later papers Jones lets food release almost no scent while agents cover it: the switch Covered
+        food releases less.
       </p>
       <p>
-        The setting Model chooses the rules. Jones uses only rules that Jones published, and every scene starts with it.
-        There, a lower Scent decay spreads the scent farther, but it also makes the scent much stronger, and the food
-        pulls in more and more of the network. Extended adds rules of this app. Food releases less scent at a lower
-        decay, so the scent reaches farther without getting stronger. Trail saturation makes a dense trail count less,
-        so a weak scent can still turn an agent on it. In later papers, Jones lets food release almost no scent while
-        agents cover it. The switch Covered food releases less adds this rule in both models.
+        The extended model adds what Jones did not publish. Several strains can share the dish, each with its own trail.
+        A table sets how strongly each strain follows or flees the trails of the others, an idea from Michael Fogleman’s
+        version. Light releases a repellent that spreads like the food scent. The food scent has a decay of its own, and
+        a strain has its own weight for food and light. Agents can share cells, the trail can spread in more passes, and
+        walls also block what the sensors read.
+      </p>
+      <p>
+        With Scent decay 0.1 the scent fades within a few cells, so an agent notices food only when a sensor comes
+        close. In a dense network, food becomes a hub with paths that lead in, and the rest of the network goes on as
+        before. A whole network reorganizes around food only when agents are few and the network contracts, as in
+        Shortest path and Steiner tree. It also does when agents die off, as in Shrinking plasmodium.
+      </p>
+      <p>
+        In the extended model, a lower Scent decay spreads the food scent farther. Food then releases less scent, so the
+        scent reaches farther without getting stronger. Trail saturation makes a dense trail count less, so a weak scent
+        can still turn an agent on it. With Scent decay 0.1 and Trail saturation 0, the extended model runs a scene of
+        Jones as Jones does, until you paint a wall.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

@@ -19,7 +19,7 @@ layout(std140) uniform Params {
   vec4 attraction[4];
   vec4 scent;          // food source, light source, scent keep, shrink probability
   vec4 tool;           // x, y, radius, kind (0 none, 1 inoculate, 2 cut)
-  vec4 tool2;          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
+  vec4 tool2;          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   uvec4 strainEnd;
   uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
   vec4 model;          // trail saturation K (0 off), covered food factor (1 off) (ADR 0022)

@@ -7,13 +7,15 @@
     strain: Strain;
     index: number;
     removable: boolean;
+    /** The Jones model: food counts as the strain's own trail, and there is no light and no other strain (ADR 0022). */
+    jones?: boolean;
     onremove: () => void;
   }
-  let { strain = $bindable(), index, removable, onremove }: Props = $props();
+  let { strain = $bindable(), index, removable, jones = false, onremove }: Props = $props();
 
   const name = $derived(`Strain ${'ABCD'[index] ?? index + 1}`);
   const MAIN: StrainKey[] = ['sensorAngle', 'sensorOffset', 'rotationAngle', 'stepSize', 'decay'];
-  const MORE: StrainKey[] = ['deposit', 'randomTurn', 'food', 'light'];
+  const MORE = $derived<StrainKey[]>(jones ? ['deposit', 'randomTurn'] : ['deposit', 'randomTurn', 'food', 'light']);
   let more = $state(false);
 </script>
 
@@ -36,7 +38,9 @@
     {#each MORE as key (key)}
       <Slider spec={strainSpec[key]} bind:value={strain[key]} id="s{index}-{key}" />
     {/each}
-    <Slider spec={strainSpec.share} bind:value={strain.share} id="s{index}-share" live={false} />
+    {#if !jones}
+      <Slider spec={strainSpec.share} bind:value={strain.share} id="s{index}-share" live={false} />
+    {/if}
   {/if}
 </article>
 

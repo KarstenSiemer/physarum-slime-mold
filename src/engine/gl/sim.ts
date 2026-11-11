@@ -575,13 +575,17 @@ export class GlSim implements Sim {
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(s, rt, this.paramData)));
   }
 
-  /** The agent pass for the walls and the trail saturation of the current settings. */
+  /**
+   * The agent pass for the walls and the trail saturation of the current settings. Only the extended model's sensors
+   * check for walls on the way (SENSE_WALLS, ADR 0020 and 0022).
+   */
   private agentProgram(): Program {
+    const senseWalls = this.walls && this.settings.model === 'extended';
     if (trailSaturation(this.settings) > 0) {
       const p = this.prog.saturated();
-      return this.walls ? p.walled : p.agents;
+      return senseWalls ? p.walled : p.agents;
     }
-    return this.walls ? this.prog.walled().agents : this.prog.agents;
+    return senseWalls ? this.prog.walled().agents : this.prog.agents;
   }
 
   /**

@@ -17,10 +17,12 @@
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
-  import { addStrain, app, clearEnvironment, loadPreset, removeStrain, showNotice } from './state.svelte';
+  import { addStrain, app, clearEnvironment, loadPreset, removeStrain, setModel, showNotice } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
   const s = $derived(app.settings);
+  /** The Jones model offers only Jones' settings (ADR 0022). */
+  const extended = $derived(s.model === 'extended');
 
   const LAYOUT_LABEL: Record<(typeof LAYOUTS)[number], string> = {
     mixed: 'Mixed everywhere',
@@ -37,8 +39,8 @@
     dish: 'Petri dish',
   };
   const MODEL_LABEL: Record<(typeof MODELS)[number], string> = {
-    jones: 'Jones (published rules)',
-    extended: 'Extended (with this app’s rules)',
+    jones: 'Jones (only Jones’ published rules)',
+    extended: 'Extended (Jones plus this app’s rules)',
   };
   const STYLE_LABEL: Record<(typeof STYLES)[number], string> = {
     glow: 'Glow',
@@ -105,13 +107,19 @@
         <input
           type="checkbox"
           checked={s.collisions && app.canCollide}
-          disabled={!app.canCollide}
+          disabled={!app.canCollide || !extended}
           aria-describedby={ruleHelp ? 'rule-help' : undefined}
           onchange={(e) => {
             setRule(e.currentTarget.checked);
           }}
         />
-        <span>One agent per cell (Jones 2010){app.canCollide ? '' : ': not available here'}</span>
+        <span
+          >One agent per cell (Jones 2010){app.canCollide
+            ? extended
+              ? ''
+              : ': always on in the Jones model'
+            : ': not available here'}</span
+        >
       </label>
       <button
         class="help"
@@ -132,8 +140,16 @@
     <div class="check">
       <label class="field model">
         <span>{modelHelp.label}</span>
-        <select bind:value={s.model} aria-describedby={modelHelpOpen ? 'model-help' : undefined}>
-          {#each MODELS as m (m)}<option value={m}>{MODEL_LABEL[m]}</option>{/each}
+        <select
+          value={s.model}
+          aria-describedby={modelHelpOpen ? 'model-help' : undefined}
+          onchange={(e) => {
+            setModel(e.currentTarget.value as (typeof MODELS)[number]);
+          }}
+        >
+          {#each MODELS as m (m)}
+            <option value={m} disabled={m === 'jones' && !app.canCollide}>{MODEL_LABEL[m]}</option>
+          {/each}
         </select>
       </label>
       <button
@@ -148,6 +164,11 @@
     {#if modelHelpOpen}
       <p class="helptext" id="model-help">{modelHelp.help} <cite>{modelHelp.ref}</cite></p>
     {/if}
+    {#if extended}
+      <!-- The extended model's own settings, where the choice of the model is. -->
+      <Slider spec={globalSpec.scentDecay} bind:value={s.scentDecay} id="scent" />
+      <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
+    {/if}
   </Section>
 
   <Section title="Strains" open>
@@ -156,12 +177,13 @@
         bind:strain={() => strain, (v: Strain) => (s.strains[i] = v)}
         index={i}
         removable={s.strains.length > 1}
+        jones={!extended}
         onremove={() => {
           removeStrain(i);
         }}
       />
     {/each}
-    {#if s.strains.length < MAX_STRAINS}
+    {#if extended && s.strains.length < MAX_STRAINS}
       <button type="button" onclick={addStrain}>Add strain</button>
     {/if}
   </Section>
@@ -173,10 +195,13 @@
   {/if}
 
   <Section title="Environment">
-    <Slider spec={globalSpec.diffusion} bind:value={s.diffusion} id="diffusion" />
+    {#if extended}
+      <Slider spec={globalSpec.diffusion} bind:value={s.diffusion} id="diffusion" />
+    {/if}
     <Slider spec={globalSpec.foodStrength} bind:value={s.foodStrength} id="food" />
-    <Slider spec={globalSpec.lightStrength} bind:value={s.lightStrength} id="light" />
-    <Slider spec={globalSpec.scentDecay} bind:value={s.scentDecay} id="scent" />
+    {#if extended}
+      <Slider spec={globalSpec.lightStrength} bind:value={s.lightStrength} id="light" />
+    {/if}
     <div class="check">
       <label>
         <input
@@ -200,9 +225,6 @@
     {/if}
     {#if s.coveredFood}
       <Slider spec={globalSpec.coveredFoodFactor} bind:value={s.coveredFoodFactor} id="covered-factor" />
-    {/if}
-    {#if s.model === 'extended'}
-      <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
     {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
     <button type="button" onclick={clearEnvironment}>Clear food, light and walls</button>

@@ -380,7 +380,7 @@ test('switching one agent per cell restarts the population, and its help opens',
   const help = page.getByRole('button', { name: 'About One agent per cell' });
   await help.click();
   await expect(help).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('#rule-help')).toContainText('Switching the rule restarts the population.');
+  await expect(page.locator('#rule-help')).toContainText('A switch restarts the population.');
   const rule = page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' });
   // Like the sliders, the switch names its open help as its description.
   await expect(rule).toHaveAttribute('aria-describedby', 'rule-help');
@@ -401,6 +401,9 @@ test('switching the rule off in a Jones scene explains the collapse', async ({ p
   await openSmallScene(page);
   await preset(page).selectOption('spots');
   await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
+  // The Jones model always has the rule: only the extended model can switch it off (ADR 0022).
+  await expect(page.getByRole('checkbox', { name: /^One agent per cell/ })).toBeDisabled();
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
   await page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' }).uncheck();
   await expect(page.getByRole('status')).toContainText('Without one agent per cell');
   await expect(card(page).getByText('changed', { exact: true })).toBeVisible();
@@ -515,6 +518,7 @@ test.describe('on a 375 × 812 phone', () => {
     const below = async (above: Locator) => (await box(panel)).y - ((await box(above)).y + (await box(above)).height);
     expect(await below(label)).toBeGreaterThanOrEqual(0);
     // A notice pushes the panel down instead of covering the preset list and the card.
+    await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
     await page.getByRole('checkbox', { name: 'One agent per cell (Jones 2010)' }).uncheck();
     const notice = page.getByRole('status');
     await expect(notice).toContainText('Without one agent per cell');

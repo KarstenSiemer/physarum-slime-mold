@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   attractionSpec,
+  constrain,
   defaultSettings,
+  defaultStrain,
   fieldText,
   globalSpec,
+  jonesFits,
   MAX_STRAINS,
   sanitize,
   snap,
   strainLike,
   strainSpec,
+  toJones,
   type Settings,
   type Spec,
+  type Strain,
 } from './params';
 import { presetById, PRESETS } from './presets';
 
@@ -80,14 +85,24 @@ describe('sanitize (untrusted input)', () => {
     for (const st of s.strains) expect(st.attraction).toEqual(Array(MAX_STRAINS).fill(attractionSpec.max));
   });
 
-  it('takes the model, covered food and trail saturation, and loads old links as the Jones model', () => {
-    const old = sanitize({ density: 2 });
-    expect([old.model, old.coveredFood, old.trailSaturation]).toEqual(['jones', false, 0]);
+  it('takes the model, covered food and trail saturation', () => {
     const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
     expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);
     const bad = sanitize({ model: 'Extended', coveredFood: 'yes', trailSaturation: -3 });
-    expect([bad.model, bad.coveredFood, bad.trailSaturation]).toEqual(['jones', false, 0]);
-    expect(sanitize({ trailSaturation: 1e9 }).trailSaturation).toBe(globalSpec.trailSaturation.max);
+    expect([bad.model, bad.coveredFood, bad.trailSaturation]).toEqual(['extended', false, 0]);
+    expect(sanitize({ model: 'extended', trailSaturation: 1e9 }).trailSaturation).toBe(globalSpec.trailSaturation.max);
+  });
+
+  // K has steps of 1. A K of 1e-300 passed the clamp, picked the saturating passes and packed as 0 in f32, so
+  // t / (1 + t / 0) gave NaN in every lane with t = 0 and no agent turned, while the panel showed K = 0.
+  it('rounds trail saturation to its whole steps', () => {
+    for (const [k, want] of [
+      [1e-300, 0],
+      [0.4, 0],
+      [0.6, 1],
+      [29.5, 30],
+    ] as const)
+      expect(sanitize({ model: 'extended', trailSaturation: k }).trailSaturation, `${k}`).toBe(want);
   });
 
   it('caps density at one agent per cell in collision mode', () => {
@@ -125,6 +140,77 @@ describe('covered food (Adamatzky and Jones 2010, ADR 0022)', () => {
     expect(sanitize({ coveredFoodFactor: 0.01 }).coveredFoodFactor).toBe(0.01); // Jones and Adamatzky 2014
     expect(sanitize({ coveredFoodFactor: 0 }).coveredFoodFactor).toBe(globalSpec.coveredFoodFactor.min);
     expect(sanitize({ coveredFoodFactor: 'x' }).coveredFoodFactor).toBe(0.001);
+  });
+});
+
+// Owner decision 2026-11-11 (ADR 0022): the Jones model holds only Jones' published rules.
+describe('the Jones model', () => {
+  const one = (patch: Partial<Strain> = {}) => [{ ...defaultStrain(0), ...patch }];
+  const jonesLink = (patch: Record<string, unknown> = {}) =>
+    sanitize({ model: 'jones', collisions: true, density: 0.15, strains: one(), ...patch });
+
+  it('loads a link that fits Jones’ rules as Jones, and any other as extended', () => {
+    expect(jonesLink().model).toBe('jones');
+    expect(jonesLink({ strains: one({ attraction: [-1, 0, 0, 0] }) }).model).toBe('jones'); // chemorepulsion
+    for (const [what, patch] of [
+      ['two strains', { strains: [defaultStrain(0), defaultStrain(1)] }],
+      ['no rule', { collisions: false }],
+      ['two diffusion passes', { diffusion: 2 }],
+      ['no diffusion', { diffusion: 0 }],
+      ['own weight 0.5', { strains: one({ attraction: [0.5, 0, 0, 0] }) }],
+    ] as const)
+      expect(jonesLink(patch).model, what).toBe('extended');
+  });
+
+  it('opens a link from before the model switch as Jones when its values fit, else as extended', () => {
+    const network = presetById('network')?.settings();
+    if (!network) throw new Error('no preset network');
+    const { model: _, ...old } = network;
+    expect(sanitize(old).model).toBe('jones');
+    const { model: __, ...defaults } = defaultSettings();
+    expect(sanitize(defaults).model).toBe('extended');
+  });
+
+  it('drops the values that Jones does not have, and binds the scent to the trail', () => {
+    const s = jonesLink({
+      trailSaturation: 30,
+      lightStrength: 0.3,
+      scentDecay: 0.01,
+      strains: one({ decay: 0.05, food: 0.4, light: 2, attraction: [-1, 0, 0, 0] }),
+    });
+    expect(s.model).toBe('jones');
+    expect([s.trailSaturation, s.lightStrength, s.scentDecay]).toEqual([0, defaultSettings().lightStrength, 0.05]);
+    expect([s.strains[0]?.food, s.strains[0]?.light]).toEqual([-1, defaultStrain(0).light]);
+    // The extended model keeps them.
+    const e = sanitize({ ...s, model: 'extended', trailSaturation: 30, scentDecay: 0.01 });
+    expect([e.trailSaturation, e.scentDecay]).toEqual([30, 0.01]);
+  });
+
+  it('stays the same through constrain() once bound, so the panel and the link agree', () => {
+    const s = jonesLink({ trailSaturation: 30 });
+    expect(constrain(s)).toBe(s);
+    for (const p of PRESETS) {
+      const t = p.settings();
+      expect(constrain(t), p.id).toBe(t);
+    }
+  });
+
+  it('switches to Jones with strain A, the rule and one diffusion pass (toJones)', () => {
+    const three = presetById('three-strains')?.settings();
+    if (!three) throw new Error('no preset three-strains');
+    const s = toJones({ ...three, trailSaturation: 30, scentDecay: 0.01 });
+    expect(jonesFits(s)).toBe(true);
+    expect(s.model).toBe('jones');
+    expect([s.strains.length, s.collisions, s.diffusion, s.trailSaturation]).toEqual([1, true, 1, 0]);
+    expect(s.density).toBeLessThanOrEqual(1);
+    expect(s.scentDecay).toBe(three.strains[0]?.decay);
+    expect(s.strains[0]?.attraction[0]).toBe(1);
+    expect(toJones({ ...three, strains: one({ attraction: [-0.7, 1, 0, 0] }) }).strains[0]?.attraction[0]).toBe(-1);
+  });
+
+  it('turns a Jones model without the rule into the extended model', () => {
+    const s = jonesLink();
+    expect(constrain({ ...s, collisions: false }).model).toBe('extended');
   });
 });
 

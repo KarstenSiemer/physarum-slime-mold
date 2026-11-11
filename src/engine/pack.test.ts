@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, emissionScale, strainSpec } from '../model/params';
+import { defaultSettings, defaultStrain, emissionScale, strainSpec, type Settings } from '../model/params';
 import {
   AgentToolKind,
   CLEAR_TILE,
@@ -14,6 +14,8 @@ import {
   stepChance,
   strainAgents,
   strainEnds,
+  trailSaturation,
+  type AgentTool,
 } from './pack';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -102,32 +104,75 @@ describe('agent tools (ADR 0023)', () => {
   });
 });
 
-// The model slot and the sources (ADR 0022): the Jones model packs the bytes of the code before it, and the extended
-// model at scent decay 0.1 does too.
+// The model slot and the sources (ADR 0022): the Jones model packs Jones' one trail map whatever the settings hold,
+// and the extended model at scent decay 0.1 packs the sources of the Jones model.
 describe('model slot and sources', () => {
   const rt = { width: 8, height: 8, agents: 1, step: 0 };
-  const floats = (s: Parameters<typeof packParams>[0]) => new Float32Array(packParams(s, rt));
-  const scent = (s: Parameters<typeof packParams>[0]) => [...floats(s).slice(15 * 4, 16 * 4)];
-  const model = (s: Parameters<typeof packParams>[0]) => [...floats(s).slice(20 * 4)];
+  const floats = (s: Settings, tool?: AgentTool) => new Float32Array(packParams(s, { ...rt, tool }));
+  const scent = (s: Settings) => [...floats(s).slice(15 * 4, 16 * 4)];
+  const model = (s: Settings) => [...floats(s).slice(20 * 4)];
+  const jones = (patch: Partial<Settings> = {}): Settings => ({
+    ...defaultSettings(),
+    model: 'jones',
+    collisions: true,
+    density: 0.15,
+    ...patch,
+  });
 
-  it('packs no saturation and full food in the Jones model, whatever K says', () => {
+  it('packs no saturation in the Jones model whatever K says, and a K below 1 as none', () => {
     const s = { ...defaultSettings(), trailSaturation: 50 };
-    expect(model(s)).toEqual([0, 1, 0, 0]);
-    expect(model({ ...s, model: 'extended' })).toEqual([50, 1, 0, 0]);
-    expect(model({ ...s, coveredFood: true })).toEqual([0, Math.fround(0.001), 0, 0]);
-    expect(model({ ...s, coveredFood: true, coveredFoodFactor: 0.01 })).toEqual([0, Math.fround(0.01), 0, 0]);
-    expect(model({ ...s, coveredFoodFactor: 0.01 })).toEqual([0, 1, 0, 0]);
+    expect(s.model).toBe('extended');
+    expect(model(s)).toEqual([50, 1, 0, 0]);
+    expect(model({ ...s, model: 'jones' })).toEqual([0, 1, 0, 0]);
+    // A link's 1e-300 would pack as 0 in f32 and divide every lane by 0 (sanitize() rounds it too).
+    for (const K of [1e-300, 0.5, 0.999]) {
+      expect(trailSaturation({ model: 'extended', trailSaturation: K }), `${K}`).toBe(0);
+      expect(model({ ...s, trailSaturation: K }), `${K}`).toEqual([0, 1, 0, 0]);
+    }
+    expect(trailSaturation({ model: 'extended', trailSaturation: 1 })).toBe(1);
+    expect(model({ ...s, coveredFood: true })).toEqual([50, Math.fround(0.001), 0, 0]);
+    expect(model({ ...s, coveredFood: true, coveredFoodFactor: 0.01 })).toEqual([50, Math.fround(0.01), 0, 0]);
+    expect(model({ ...s, coveredFoodFactor: 0.01 })).toEqual([50, 1, 0, 0]);
+  });
+
+  // Jones 2010, p. 144: food goes into the trail map, which decays with decayT, and the strain weighs it as its trail.
+  it('packs Jones’ one trail map in the Jones model: the scent bound to the trail, and no light', () => {
+    const strain = { ...defaultStrain(0), decay: 0.05, food: 0.3, light: 2, attraction: [-1, 0, 0, 0] };
+    const s = jones({ strains: [strain], scentDecay: 0.2, lightStrength: 0.4, foodStrength: 0.02 });
+    const f = floats(s);
+    expect([f[9 * 4], f[10 * 4]]).toEqual([-1, 0]); // food weight = own trail weight, light weight 0
+    expect(scent(s)).toEqual([Math.fround(255 * 0.02), 0, Math.fround(1 - 0.05), 0]);
+    const e = floats({ ...s, model: 'extended' });
+    expect([e[9 * 4], e[10 * 4]]).toEqual([Math.fround(0.3), 2]);
+    const g = emissionScale(0.2);
+    expect(scent({ ...s, model: 'extended' })).toEqual(
+      [255 * 0.02 * g, 255 * 0.4 * g, 1 - 0.2, 0].map((v) => Math.fround(v)),
+    );
+  });
+
+  // Jones 2010, p. 148: the wound loses its agents, which go elsewhere; this app also clears its chemicals.
+  it('keeps the chemicals of a cut in the Jones model only (tool2.z)', () => {
+    const cut = { kind: AgentToolKind.cut, x: 3, y: 4, radius: 2, strain: 0, revive: 0 };
+    const tool2 = (s: Settings, t: AgentTool) => [...floats(s, t).slice(17 * 4, 18 * 4)];
+    expect(tool2(jones(), cut)).toEqual([0, 0, 1, 0]);
+    expect(tool2(defaultSettings(), cut)).toEqual([0, 0, 0, 0]);
+    const inoculate = { ...cut, kind: AgentToolKind.inoculate, revive: 0.5 };
+    expect(tool2(jones(), inoculate)).toEqual([0, 0.5, 0, 0]);
   });
 
   it('scales the sources by emissionScale() only in the extended model, by exactly 1 at decay 0.1', () => {
     expect(emissionScale(0.1)).toBe(1);
-    const s = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2 };
-    expect(scent({ ...s, model: 'extended' })).toEqual(scent(s));
-    const low = { ...s, scentDecay: 0.001 };
-    const [food = 0, light = 0] = scent({ ...low, model: 'extended' });
-    expect(scent(low).slice(0, 2)).toEqual([Math.fround(255 * 0.05), Math.fround(255 * 0.2)]);
+    const s = jones({ foodStrength: 0.05 });
+    const ext = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2 };
+    // At decay 0.1 the extended model releases the food of the Jones model.
+    expect(scent(ext)[0]).toBe(scent(s)[0]);
+    expect(scent(ext)[1]).toBe(Math.fround(255 * 0.2));
+    const [food = 0, light = 0] = scent({ ...ext, scentDecay: 0.001 });
     expect(food).toBeCloseTo((255 * 0.05 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
     expect(light).toBeCloseTo((255 * 0.2 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
+    // The Jones model releases 255 · wProj at every decay of the strain.
+    const low = jones({ foodStrength: 0.05, strains: [{ ...defaultStrain(0), decay: 0.001 }], scentDecay: 0.001 });
+    expect(scent(low).slice(0, 3)).toEqual([Math.fround(255 * 0.05), 0, Math.fround(0.999)]);
   });
 
   it('keeps the plateau of a large food at every scent decay: source · (1 − d) / d', () => {
