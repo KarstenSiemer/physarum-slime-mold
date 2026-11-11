@@ -1,11 +1,11 @@
-import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
-import type { EnvShape } from '../model/presets';
+import { constrain, RESOLUTIONS, sameLattice, type Boundary, type Lattice, type Settings } from '../model/params';
+import { latticeText, type EnvShape } from '../model/presets';
 import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import { stepChance, type AgentTool } from './pack';
-import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
+import { agentCount, fitResolution, fits, gridOf, memoryBudget } from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -59,9 +59,13 @@ async function createBackend(canvas: HTMLCanvasElement): Promise<Backend> {
   return WebGl2Backend.create(canvas);
 }
 
-/** Backend-independent simulation control: settings, frame loop, view and tools. */
-type Adjust = (message: string, resolution: number) => void;
+/**
+ * The engine lowered the grid to `resolution` cells on the long side to fit the device. `lattice`: the lattice it
+ * could not hold, so the grid is shaped like the screen now (ADR 0026).
+ */
+type Adjust = (message: string, resolution: number, lattice?: Lattice) => void;
 
+/** Backend-independent simulation control: settings, frame loop, view and tools. */
 export class Engine {
   sim!: Sim;
   view: View = { center: [0, 0], scale: 1 };
@@ -96,7 +100,12 @@ export class Engine {
   private raf = 0;
   private rebuilding: Promise<void> | undefined;
   /** What the current simulation was built for: its grid and agent count follow from these. */
-  private built = { resolution: 0, density: 0, dish: false };
+  private built: { resolution: number; lattice: Lattice | null; density: number; dish: boolean } = {
+    resolution: 0,
+    lattice: null,
+    density: 0,
+    dish: false,
+  };
 
   private constructor(
     readonly backend: Backend,
@@ -185,7 +194,10 @@ export class Engine {
     );
   }
 
-  /** Settings this device can hold: collisions need a backend feature, memory caps the grid. */
+  /**
+   * Settings this device can hold: collisions need a backend feature, memory caps the grid. A lattice keeps its cells
+   * (ADR 0026): it runs as it is, or the grid becomes one shaped like the screen that fits.
+   */
   fit(s: Settings): Settings {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
@@ -193,25 +205,33 @@ export class Engine {
     // Covered food needs more memory only on some backends, and only while it is on.
     const bytesPerCell = this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, budget: memoryBudget(memory) };
-    return constrain({
-      ...s,
-      resolution: fitResolution(s, aspect, limits),
-      collisions: s.collisions && this.backend.supportsCollisions,
-    });
+    const collisions = s.collisions && this.backend.supportsCollisions;
+    if (s.lattice && fits(s, s.lattice[0], s.lattice[1], limits)) return constrain({ ...s, collisions });
+    return constrain({ ...s, lattice: null, resolution: fitResolution(s, aspect, limits), collisions });
   }
 
   private supported(s: Settings): Settings {
     const f = this.fit(s);
-    if (f.resolution !== s.resolution)
+    if (s.lattice && !f.lattice)
+      this.onAdjust?.(
+        `This device cannot hold a lattice of ${latticeText(s.lattice)}. The scene runs on a grid of ${f.resolution} cells on the long side.`,
+        f.resolution,
+        s.lattice,
+      );
+    else if (f.resolution !== s.resolution)
       this.onAdjust?.(`Lowered the grid to ${f.resolution} cells to fit this device.`, f.resolution);
     return f;
   }
 
-  /** The grid or the agent count changes: a dish counts its agents over the short side's square (agentCount()). */
+  /**
+   * The grid or the agent count changes: a dish counts its agents over the short side's square (agentCount()). On a
+   * lattice the resolution does not set the grid.
+   */
   private needsRebuild() {
-    const { resolution, density, boundary } = this.settings;
+    const { resolution, lattice, density, boundary } = this.settings;
     const b = this.built;
-    return resolution !== b.resolution || density !== b.density || (boundary === 'dish') !== b.dish;
+    const grid = lattice ? !sameLattice(lattice, b.lattice) : b.lattice !== null || resolution !== b.resolution;
+    return grid || density !== b.density || (boundary === 'dish') !== b.dish;
   }
 
   /** True while the simulation is being replaced; it cannot be used meanwhile. */
@@ -228,30 +248,38 @@ export class Engine {
     this.rebuilding ??= (async () => {
       let old = this.sim as Sim | undefined;
       do {
-        const { resolution, density, boundary } = this.settings;
-        const [w, h] = gridSize(resolution, this.canvas.width / Math.max(1, this.canvas.height));
+        const { resolution, lattice, density, boundary } = this.settings;
+        const [w, h] = gridOf(this.settings, this.canvas.width / Math.max(1, this.canvas.height));
         const agents = Math.max(1, Math.min(this.backend.maxAgents, agentCount(this.settings, w, h)));
         this.live = false;
         old?.destroy();
         old = undefined;
-        this.built = { resolution: 0, density: 0, dish: false }; // nothing is built until the new one exists
+        // Nothing is built until the new one exists.
+        this.built = { resolution: 0, lattice: null, density: 0, dish: false };
         try {
           this.sim = await this.backend.createSim(this.settings, w, h, agents);
         } catch (err) {
-          // The estimate was too optimistic for this GPU: step the grid down and try again.
-          const lower = [...RESOLUTIONS].reverse().find((r) => r < resolution);
+          // The estimate was too optimistic for this GPU: step the grid down and try again. A lattice keeps its cells
+          // or goes: the grid below it is shaped like the screen (ADR 0026).
+          const lower = [...RESOLUTIONS].reverse().find((r) => r < Math.max(w, h));
           if (!(err instanceof OutOfMemoryError) || lower === undefined) {
             this.stop(); // nothing is left to draw
             throw err;
           }
-          this.settings = { ...this.settings, resolution: lower };
-          this.onAdjust?.(`Lowered the grid to ${lower} cells: the GPU ran out of memory.`, lower);
+          this.settings = { ...this.settings, lattice: null, resolution: lower };
+          if (lattice)
+            this.onAdjust?.(
+              `The GPU ran out of memory for a lattice of ${latticeText(lattice)}. The scene runs on a grid of ${lower} cells on the long side.`,
+              lower,
+              lattice,
+            );
+          else this.onAdjust?.(`Lowered the grid to ${lower} cells: the GPU ran out of memory.`, lower);
           continue;
         }
         old = this.sim;
         this.live = true;
         this.painted = 0; // a new simulation starts without food, light and walls
-        this.built = { resolution, density, dish: boundary === 'dish' };
+        this.built = { resolution, lattice, density, dish: boundary === 'dish' };
         this.fitView();
       } while (this.needsRebuild());
       // Settings may have changed during the allocation (seed, layout, shares): start from them.

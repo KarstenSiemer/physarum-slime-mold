@@ -140,6 +140,15 @@ describe('GridTuner', () => {
     expect(t.run(500, 60, 30)).toEqual([1024]);
   });
 
+  // ADR 0026: a scene of Jones keeps the lattice of its figure. Its time does not count, and the check goes on after it.
+  it('never lowers a lattice, counts none of its time, and goes on after it', () => {
+    const tuner = new GridTuner();
+    const t = ticker(tuner);
+    expect(t.run(20_000, 10, 10, { lattice: true })).toEqual([]);
+    expect(tuner.running).toBe(true);
+    expect(t.run(20_000, 60, 30)).toEqual([1024, 768]);
+  });
+
   it('never lowers a grid the user picked', () => {
     const tuner = new GridTuner();
     const t = ticker(tuner);

@@ -9,10 +9,12 @@
     modelHelp,
     MODELS,
     RESOLUTIONS,
+    sameLattice,
     STYLES,
+    type Lattice,
     type Strain,
   } from '../model/params';
-  import { GROUPS, PRESETS, presetById, ruleOffNotice, usesRule } from '../model/presets';
+  import { GROUPS, latticeNotice, latticeText, PRESETS, presetById, ruleOffNotice, usesRule } from '../model/presets';
   import Matrix from './Matrix.svelte';
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
@@ -22,11 +24,15 @@
     app,
     clearEnvironment,
     JONES_LIGHT,
+    latticeLeft,
+    latticeValue,
     lightDrawn,
     loadPreset,
+    pickGrid,
     removeStrain,
     setModel,
     showNotice,
+    useSceneLattice,
   } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
@@ -35,6 +41,14 @@
   const extended = $derived(s.model === 'extended');
   /** Light that the Jones model draws without effect: the panel says so below the model choice. */
   const lit = $derived(!extended && lightDrawn());
+  /** The scene's lattice while the grid is another one: the panel says why the result differs (ADR 0026). */
+  const left = $derived(latticeLeft());
+  /** The lattices the grid choice offers: the one that runs and the scene's own. */
+  const lattices = $derived(
+    [s.lattice, app.sceneBase?.lattice ?? null].filter(
+      (l, i, all): l is Lattice => l !== null && all.findIndex((m) => sameLattice(m, l)) === i,
+    ),
+  );
 
   const LAYOUT_LABEL: Record<(typeof LAYOUTS)[number], string> = {
     mixed: 'Mixed everywhere',
@@ -109,11 +123,28 @@
     </label>
     <Slider spec={globalSpec.density} bind:value={s.density} id="density" live={false} />
     <label class="field">
-      <span>Grid (cells on the long side)</span>
-      <select bind:value={s.resolution} onchange={() => (app.gridPicked = true)}>
-        {#each RESOLUTIONS as r (r)}<option value={r}>{r}</option>{/each}
+      <span>Grid</span>
+      <select
+        value={s.lattice ? latticeValue(s.lattice) : String(s.resolution)}
+        aria-describedby={left ? 'lattice-help' : undefined}
+        onchange={(e) => {
+          pickGrid(e.currentTarget.value);
+        }}
+      >
+        {#each lattices as l (latticeValue(l))}
+          <option value={latticeValue(l)}
+            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? ', as in the paper' : ''}</option
+          >
+        {/each}
+        {#each RESOLUTIONS as r (r)}<option value={String(r)}>{r} cells on the long side</option>{/each}
       </select>
     </label>
+    {#if left}
+      <div class="helptext" id="lattice-help">
+        <p>{latticeNotice(left)}</p>
+        <button type="button" onclick={useSceneLattice}>Use {latticeText(left)}</button>
+      </div>
+    {/if}
     <div class="check">
       <label>
         <input
@@ -305,6 +336,9 @@
     margin: -2px 0 8px;
     color: var(--muted);
     font-size: 12px;
+  }
+  .helptext p {
+    margin: 0 0 6px;
   }
   cite {
     display: block;

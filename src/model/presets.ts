@@ -1,4 +1,4 @@
-import { defaultSettings, defaultStrain, MAX_STRAINS, type Settings, type Strain } from './params';
+import { defaultSettings, defaultStrain, MAX_STRAINS, type Lattice, type Settings, type Strain } from './params';
 
 /**
  * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
@@ -84,9 +84,10 @@ function fogleman(rows: number[][], perStrainDensity: number): Settings {
 }
 
 // Jones' model: Table 1 (p. 134), 15 % of cells with an agent as in Fig. 4 and 5, and his rule of one agent per
-// cell (p. 133). Sensor offset and step size are in cells, so the grid sets the scale of the model: 512 here;
-// scenes that need another grid set it themselves. The scenes of Jones' papers run on the Jones model, which weighs
-// food as the strain's own trail (ADR 0022); the app's scenes with these agents set the extended model.
+// cell (p. 133). Sensor offset and step size are in cells, so the grid sets the scale of the model. The scenes of
+// Jones' papers run on the lattice of their figure (ADR 0026) and on the Jones model, which weighs food as the
+// strain's own trail (ADR 0022). The app's scenes with these agents set the extended model and a grid of 512 cells on
+// the long side, shaped like the screen; so does a scene of Jones on a device that cannot hold its lattice.
 const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
   settings({
     resolution: 512,
@@ -97,8 +98,15 @@ const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
     ...extra,
   });
 
-// Grid 1024 shows about four times as many holes as 512, and without glow they stay dark (decided 2026-11-09).
-const network = { resolution: 1024, bloom: 0 } satisfies Partial<Settings>;
+/**
+ * The lattices of Jones 2010 (ADR 0026): 200 × 200 cells for Fig. 4, 5, 10, 16 and 18 to 20, 300 × 300 for Fig. 11,
+ * 12, 15 and 21 to 23 (500 × 500 for Fig. 13 and 14). A new array for each scene's settings.
+ */
+const L200 = (): Lattice => [200, 200];
+const L300 = (): Lattice => [300, 300];
+
+// Without glow the holes of the networks stay dark (decided 2026-11-09).
+const network = () => ({ lattice: L200(), bloom: 0 }) satisfies Partial<Settings>;
 
 // Food, light and walls in the canonical frame of the arena they are painted in, the preset's own (EnvShape): on a
 // 16:10 window x from −0.8 to 0.8 spans its width and y from −0.5 to 0.5 its height in every arena. The values place every shape where the fractions of the grid
@@ -174,8 +182,8 @@ export const PRESETS: Preset[] = [
     about:
       'Jones’ default setting (p. 134–135). Within a few hundred steps, randomly placed agents form a mesh of trails. Small loops shrink and vanish, bigger holes grow, and now and then a new branch sprouts across a hole, so the network never settles (Fig. 4 shows steps 2 to 4,151). The trails look grainy, as in Jones’ figures: in every step most agents are blocked and turn at random.',
     strainRoles: ['Jones’ standard agent'],
-    why: 'Jones’ defaults: Table 1 (p. 134) with one blur pass and wrapping edges, 15 % of cells holding an agent (Fig. 4) and his rule of one agent per cell (p. 133). A rotation angle above the sensor angle keeps the network changing (p. 135). Blocked agents turn at random, and these turns let new branches take hold; without the rule the network contracts into a few lines. Grid 1024 and no glow keep the holes small and dark.',
-    settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network),
+    why: 'Jones’ defaults: Table 1 (p. 134) with one blur pass and wrapping edges, 15 % of cells holding an agent (Fig. 4) and his rule of one agent per cell (p. 133). A rotation angle above the sensor angle keeps the network changing (p. 135). Blocked agents turn at random and start new branches; without the rule the network contracts into a few lines. Jones used 200 × 200 cells. Without glow the holes stay dark.',
+    settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network()),
   },
   {
     id: 'hexagons',
@@ -184,10 +192,10 @@ export const PRESETS: Preset[] = [
     source: 'Jones 2010, Fig. 5',
     summary: 'Equal angles: loops close one by one until a simple mesh is left.',
     about:
-      'Jones’ model with the sensor angle raised to 45°, equal to the rotation angle. New branches do not last: small loops close, the other holes grow, and the network contracts like a soap film. On Jones’ 200 × 200 grid it ends after about 31,000 steps as a simple network whose copies, side by side, approximate a hexagonal tiling (Fig. 5). This grid holds far more holes, so the mesh keeps coarsening for longer.',
+      'Jones’ model with the sensor angle raised to 45°, equal to the rotation angle. New branches do not last: small loops close, the other holes grow, and the network contracts like a soap film. On Jones’ lattice of 200 × 200 cells it ends after about 31,000 steps as a simple network with one or two holes. Its copies, side by side, approximate a hexagonal tiling (Fig. 5).',
     strainRoles: ['Jones’ agent with equal angles'],
-    why: 'Only the sensor angle differs from Jones’ defaults. With equal angles an agent turns exactly toward where its side sensor was, so its sensors stay on the trail and new branches do not last (p. 135). The rest is as for Fig. 5: 15 % of cells hold an agent (p. 136), one blur pass (Table 1) and one agent per cell (p. 133). Grid 1024 and no glow keep the holes small and dark.',
-    settings: () => jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network),
+    why: 'Only the sensor angle differs from Jones’ defaults. With equal angles an agent turns exactly toward where its side sensor was, so its sensors stay on the trail and new branches do not last (p. 135). The rest is as for Fig. 5: 15 % of cells hold an agent (p. 136), one blur pass (Table 1), one agent per cell (p. 133) and 200 × 200 cells. Without glow the holes stay dark.',
+    settings: () => jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network()),
   },
   {
     id: 'spots',
@@ -198,9 +206,12 @@ export const PRESETS: Preset[] = [
     about:
       'Here agents are repelled by the trail they lay (chemorepulsion). They first gather in tight circular flows that push each other apart, and over time a regular array of spots spreads across the grid (p. 143). Jones compares such patterns to Turing patterns, the chemistry used to explain spots and stripes on animal coats.',
     strainRoles: ['Jones’ repelled agent'],
-    why: 'Jones’ values for Fig. 16, top row (p. 144): 20 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 40, one agent per cell. The long sensor distance sets the wide spacing between the spots.',
+    why: 'Jones’ values for Fig. 16, top row (p. 144): 20 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 40, one agent per cell, 200 × 200 cells. The long sensor distance sets the wide spacing between the spots.',
     settings: () =>
-      jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 40, attraction: [-1, 0, 0, 0] }, { density: 0.2 }),
+      jones(
+        { sensorAngle: 45, rotationAngle: 45, sensorOffset: 40, attraction: [-1, 0, 0, 0] },
+        { lattice: L200(), density: 0.2 },
+      ),
   },
   {
     id: 'stripes',
@@ -211,9 +222,12 @@ export const PRESETS: Preset[] = [
     about:
       'Again agents flee their own trail, but the side sensors point far to the sides and agents turn further. Stripes first appear in many directions. Then one direction wins, turns the neighbouring stripes to its orientation and finally covers the grid (p. 143–144).',
     strainRoles: ['Jones’ repelled agent with wide-set sensors'],
-    why: 'Jones’ values for Fig. 16, bottom row (p. 144): 20 % of cells hold an agent, one agent per cell, sensor distance 13. The sensor distance sets the spacing between the stripes.',
+    why: 'Jones’ values for Fig. 16, bottom row (p. 144): 20 % of cells hold an agent, one agent per cell, sensor distance 13, 200 × 200 cells. The sensor distance sets the spacing between the stripes.',
     settings: () =>
-      jones({ sensorAngle: 112.5, rotationAngle: 67.5, sensorOffset: 13, attraction: [-1, 0, 0, 0] }, { density: 0.2 }),
+      jones(
+        { sensorAngle: 112.5, rotationAngle: 67.5, sensorOffset: 13, attraction: [-1, 0, 0, 0] },
+        { lattice: L200(), density: 0.2 },
+      ),
   },
 ];
 
@@ -230,11 +244,11 @@ PRESETS.push(
     about:
       'Several hundred agents in a round dish with two food sources. Food releases a scent that spreads and fades like the trail, so the network snags on both foods. Then it contracts like a soap film until one band joins them. The band stays many cells wide, because only one agent fits in a cell.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 18 (p. 145): as many agents as 2 % of the square around the dish, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. On grid 256 the dish is smaller than Jones’ 200 × 200 lattice.',
+    why: 'Jones’ values for Fig. 18 (p. 145): as many agents as 2 % of the square around the dish, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. The dish fills Jones’ lattice of 200 × 200 cells.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
-        { resolution: 256, density: 0.02, boundary: 'dish', foodStrength: 0.01 },
+        { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
     env: [food(-0.288, 0, 0.02), food(0.288, 0, 0.02)],
   },
@@ -249,11 +263,11 @@ PRESETS.push(
     about:
       'The same setup with four food sources at the corners of a square. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01. With fewer agents loops and tails to the rim stay for thousands of steps longer.',
+    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. With fewer agents loops and tails to the rim stay for thousands of steps longer.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
-        { resolution: 256, density: 0.02, boundary: 'dish', foodStrength: 0.01 },
+        { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
     // A square with the corners as far from the centre as the 0.32 × 0.26 rectangle of before.
     env: [food(-0.145, -0.145, 0.02), food(0.145, -0.145, 0.02), food(-0.145, 0.145, 0.02), food(0.145, 0.145, 0.02)],
@@ -265,15 +279,15 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 21',
     summary: 'A full sheet of agents slowly dies off and shrinks onto the food sources.',
     watch:
-      'Agents die at random, half of them within about 2,800 steps. The sheet shrinks onto the food sources and leaves a network of veins between them, in most runs the same one. In some runs a hole opens beside the middle food early, and a loop stays around it.',
+      'Agents die at random, half of them within about 2,800 steps. The sheet shrinks onto the food sources and leaves a network of veins, the same one in each run without a hole. In about half of the runs a hole opens around the middle food early, and a ring through the outer foods stays.',
     about:
       'The dish starts packed with agents, which soon form a solid sheet. In every step each agent dies with a small chance, so the sheet thins out and shrinks onto the food sources, as a starving plasmodium does. In the paper, three runs ended in the same network (Fig. 21).',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 21 (p. 147): as many agents as 50 % of the square around the dish, so they start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Slow removal lets the sheet adapt; faster removal tears holes into it (p. 148). Food weight 0.05 and the food positions are this app’s choice.',
+    why: 'Jones’ values for Fig. 21 (p. 147): as many agents as 50 % of the square around the dish, so they start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Slow removal lets the sheet adapt; faster removal tears holes into it (p. 148). Jones used 300 × 300 cells. Food weight 0.05 and the food positions are this app’s choice.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
-        { density: 0.5, boundary: 'dish', foodStrength: 0.05, shrink: 0.00025 },
+        { lattice: L300(), density: 0.5, boundary: 'dish', foodStrength: 0.05, shrink: 0.00025 },
       ),
     env: [
       food(0, 0),
@@ -297,9 +311,12 @@ PRESETS.push(
     about:
       'A regular spot pattern made by chemorepulsion, like Turing spots with a shorter sensor distance. Jones cut a square hole into it. The agents flowed back in, and the undamaged pattern around the wound guided the regrowth until it matched the old one (p. 148). A network made by attraction also heals, but into a different pattern (Fig. 23).',
     strainRoles: ['Jones’ repelled agent'],
-    why: 'Jones’ values for Fig. 22 (p. 148): 10 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 27, one agent per cell. The Cut tool differs from his method in one point: Jones kept agents out of the wound until all were placed elsewhere, while here they flow back as soon as you release the tool. As in his method, the wound keeps its trail.',
+    why: 'Jones’ values for Fig. 22 (p. 148): 10 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 27, one agent per cell, 300 × 300 cells. The Cut tool differs from his method in one point: Jones kept agents out of the wound until all were placed elsewhere, while here they flow back as soon as you release the tool. As in his method, the wound keeps its trail.',
     settings: () =>
-      jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 27, attraction: [-1, 0, 0, 0] }, { density: 0.1 }),
+      jones(
+        { sensorAngle: 45, rotationAngle: 45, sensorOffset: 27, attraction: [-1, 0, 0, 0] },
+        { lattice: L300(), density: 0.1 },
+      ),
   },
   {
     id: 'light',
@@ -430,6 +447,17 @@ export function ruleOffNotice(p: Preset): string {
     : 'Without one agent per cell, several agents can share a cell. Jones made this pattern with the rule, so it can turn out different. Tick the box to restart with the rule.';
 }
 
+/** A lattice as people write it: "200 × 200 cells". */
+export const latticeText = ([w, h]: Lattice) => `${w} × ${h} cells`;
+
+/**
+ * Shown below the grid while a scene with the lattice of its figure runs on another grid (ADR 0026): why the result
+ * then differs from the paper, and which lattice the paper used.
+ */
+export function latticeNotice(lattice: Lattice): string {
+  return `Jones gives all lengths in cells, for example the sensor distance and the step. On a different grid, the pattern has a different scale, and the result is different from the paper. For this figure, Jones used a lattice of ${latticeText(lattice)}.`;
+}
+
 export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
@@ -444,7 +472,9 @@ export function sourceText(p: Preset): string {
   switch (sourceKind(p)) {
     case 'jones': {
       const figure = p.source.slice('Jones 2010, '.length);
-      return `Jones 2010 is the research paper this simulator is built on: Jeff Jones, University of the West of England, in the journal Artificial Life. It shows that thousands of simple agents, each following and laying a chemical trail, build networks like the slime mold Physarum. This scene uses the settings of ${figure} of the paper, on a grid shaped like your screen.`;
+      const lattice = p.settings().lattice;
+      const on = lattice ? `, on its lattice of ${latticeText(lattice)} on every screen` : '';
+      return `Jones 2010 is the research paper this simulator is built on: Jeff Jones, University of the West of England, in the journal Artificial Life. It shows that thousands of simple agents, each following and laying a chemical trail, build networks like the slime mold Physarum. This scene uses the settings of ${figure} of the paper${on}.`;
     }
     case 'fogleman':
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';

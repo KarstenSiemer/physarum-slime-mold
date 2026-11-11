@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { drawingOf } from '../model/link';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
-import { presetById } from '../model/presets';
+import { presetById, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
@@ -16,9 +16,15 @@ import type { Backend, Stroke } from './types';
 
 // 16:10, like a laptop window: a 512 grid has 512 × 320 cells.
 const canvas = (width = 1600, height = 1000) => ({ width, height }) as HTMLCanvasElement;
+/**
+ * A scene of Jones on a grid shaped like the screen, as after a pick in the panel: its lattice keeps its cells on
+ * every screen (ADR 0026), and these tests change the screen's shape.
+ */
+const onScreen = (p: Preset | undefined, resolution: number): Preset | undefined =>
+  p && { ...p, settings: () => ({ ...p.settings(), lattice: null, resolution }) };
 const maze = presetById('maze');
 const three = presetById('three-strains');
-const shrinking = presetById('shrinking');
+const shrinking = onScreen(presetById('shrinking'), 512);
 if (!maze?.env || !three || !shrinking?.env) throw new Error('presets missing');
 const mazeEnv = maze.env;
 const shrinkingEnv = shrinking.env;
@@ -605,7 +611,7 @@ describe('food, light and walls after an arena switch', () => {
 
   // App.svelte's startScene() loads a scene under the panel's boundary: the shapes keep the scene's own arena.
   it("load a scene's shapes in the scene's own arena under another boundary, as a load and a switch would", async () => {
-    const steiner = presetById('steiner');
+    const steiner = onScreen(presetById('steiner'), 256);
     if (!steiner?.env) throw new Error('no Steiner tree');
     for (const [p, other] of [
       [steiner, 'box'],
@@ -628,7 +634,7 @@ describe('food, light and walls after an arena switch', () => {
   });
 
   it("place a preset's shapes as on screen when the boundary changes after the load", async () => {
-    const steiner = presetById('steiner');
+    const steiner = onScreen(presetById('steiner'), 256);
     if (!steiner?.env) throw new Error('no Steiner tree');
     const own = await engineWith(steiner.settings(), steiner.env, canvas(1000, 1000));
     expect([own.sim().width, own.sim().height]).toEqual([256, 256]);
@@ -1132,5 +1138,148 @@ describe('a shared link', () => {
         expect(count(env(), 0) + count(env(), 1) + count(env(), 2)).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+// ADR 0026: a scene of Jones runs on the lattice of its figure, which keeps its cells on every screen; the app's scenes
+// get a grid shaped like the screen. Screens: 16:9, a square and a phone held upright.
+describe('lattices', () => {
+  const screens = [
+    [1280, 720],
+    [1000, 1000],
+    [390, 844],
+  ] as const;
+  const jones = (id: string) => {
+    const p = presetById(id);
+    if (!p) throw new Error(id);
+    return p;
+  };
+
+  it('keep a scene of Jones on the lattice of its figure on every screen, with the same bytes', async () => {
+    for (const [id, side, agents] of [
+      ['shrinking', 300, 45_000], // %p 50 on 300 × 300 (p. 147)
+      ['steiner', 200, 800], // %p 2 on 200 × 200 (Fig. 19)
+      ['network', 200, 6000], // %p 15 on 200 × 200 (Fig. 4)
+      ['wound', 300, 9000], // %p 10 on 300 × 300 (Fig. 22)
+    ] as const) {
+      const p = jones(id);
+      const runs = [];
+      for (const [w, h] of screens) {
+        const run = await engineWith(p.settings(), p.env ?? [], canvas(w, h));
+        expect([run.sim().width, run.sim().height, run.sim().agents], `${id} on ${w} × ${h}`).toEqual([
+          side,
+          side,
+          agents,
+        ]);
+        runs.push(run);
+      }
+      for (const r of runs.slice(1)) expect(differing(r.sim().env, runs[0]?.sim().env ?? new Uint8Array())).toBe(0);
+    }
+    // All eight foods of Shrinking plasmodium lie in the dish, each with its cells.
+    const { sim } = await engineWith(jones('shrinking').settings(), shrinkingEnv, canvas(390, 844));
+    shrinkingEnv.forEach((e, i) => {
+      const at = fromFrame(e.at, [300, 300], 'dish');
+      expect(Math.hypot(at[0] - 150, at[1] - 150), `food ${i}`).toBeLessThan(149 - e.r * 300);
+      expect(foodNear(sim(), at, 2 + e.r * 300), `food ${i}`).toBeGreaterThan(20);
+    });
+  });
+
+  it('give the app’s scenes a grid shaped like the screen', async () => {
+    for (const id of ['three-strains', 'maze', 'light', 'cyclones']) {
+      const p = jones(id);
+      for (const [w, h] of screens) {
+        const { sim } = await engineWith(p.settings(), p.env ?? [], canvas(w, h));
+        const r = p.settings().resolution;
+        const expected = w >= h ? [r, Math.round((r * h) / w)] : [Math.round((r * w) / h), r];
+        expect([sim().width, sim().height], `${id} on ${w} × ${h}`).toEqual(expected);
+      }
+    }
+  });
+
+  it('keep the dish’s and the box’s frames on a square lattice: the foods lie where the dish puts them', async () => {
+    const p = jones('shrinking');
+    const dish = await engineWith(p.settings(), shrinkingEnv, canvas(1280, 720));
+    for (const [w, h] of screens) {
+      const { engine, sim } = await engineWith(p.settings(), shrinkingEnv, canvas(w, h));
+      await engine.apply({ ...engine.settings, boundary: 'box' });
+      expect([sim().width, sim().height, sim().agents]).toEqual([300, 300, 45_000]);
+      // The foods lie inside the dish, so a box gives the dish's bytes on every screen.
+      expect(differing(sim().env, dish.sim().env), `${w} × ${h}`).toBe(0);
+      await engine.apply({ ...engine.settings, boundary: 'wrap' });
+      expect(differing(sim().env, dish.sim().env), `${w} × ${h}`).toBe(0);
+    }
+  });
+
+  it('build a lattice again for its density and arena, not for the resolution or a new screen shape', async () => {
+    const p = jones('wound');
+    const c = canvas(1280, 720);
+    const { engine, backend, sim } = await engineWith(p.settings(), [], c);
+    const built = backend.built.length;
+    await engine.apply({ ...engine.settings, resolution: 1024 });
+    [c.width, c.height] = [390, 844];
+    await engine.apply({ ...engine.settings, speed: 60 });
+    expect(backend.built.length).toBe(built);
+    expect([sim().width, sim().height]).toEqual([300, 300]);
+    await engine.apply({ ...engine.settings, density: 0.2 });
+    expect([backend.built.length, sim().agents]).toEqual([built + 1, 18_000]);
+    // Off the lattice: a grid of the resolution, shaped like the screen; back on it, the lattice.
+    await engine.apply({ ...engine.settings, lattice: null });
+    expect([sim().width, sim().height]).toEqual([473, 1024]);
+    await engine.apply({ ...engine.settings, lattice: [300, 300] });
+    expect([sim().width, sim().height]).toEqual([300, 300]);
+  });
+
+  it('give back the bytes of a stroke on the lattice after a grid shaped like the screen', async () => {
+    const p = jones('steiner');
+    const c = canvas(1280, 720);
+    const { engine, sim } = await engineWith(p.settings(), p.env ?? [], c);
+    engine.paint({ kind: 'food', from: [60, 70], to: [90, 75], radius: 3 });
+    engine.paint({ kind: 'wall', from: [120, 40], to: [130, 160], radius: 2 });
+    engine.frame(0, 0);
+    const before = sim().env.slice();
+    await engine.apply({ ...engine.settings, lattice: null, resolution: 512 });
+    expect([sim().width, sim().height]).toEqual([512, 288]);
+    expect(count(sim().env, 1)).toBeGreaterThan(count(before, 1));
+    await engine.apply({ ...engine.settings, lattice: [200, 200] });
+    expect(differing(sim().env, before)).toBe(0);
+  });
+
+  it('turn a lattice that the device cannot hold into a grid shaped like the screen, and say so', async () => {
+    // 10,000 bytes per cell: the 512 MiB budget holds 256 × 144 cells, not 300 × 300 nor 512 × 288.
+    const backend = new CpuBackend();
+    backend.bytesPerCell = 10_000;
+    const told: [string, number, unknown][] = [];
+    const s = jones('shrinking').settings();
+    const engine = await Engine.create(canvas(1280, 720), s, (m, r, l) => told.push([m, r, l]), backend);
+    expect([engine.settings.lattice, engine.settings.resolution]).toEqual([null, 256]);
+    expect([engine.sim.width, engine.sim.height]).toEqual([256, 144]);
+    expect(told).toEqual([
+      [
+        'This device cannot hold a lattice of 300 × 300 cells. The scene runs on a grid of 256 cells on the long side.',
+        256,
+        [300, 300],
+      ],
+    ]);
+    // A smaller lattice fits and runs as it is, without a message.
+    told.length = 0;
+    await engine.apply({ ...s, lattice: [100, 100] });
+    expect([engine.sim.width, engine.sim.height, told]).toEqual([100, 100, []]);
+  });
+
+  it('step a lattice down to a grid shaped like the screen after an out-of-memory error, and say so', async () => {
+    const backend = new CpuBackend();
+    backend.before = () => Promise.reject(new OutOfMemoryError('test'));
+    const told: [string, number, unknown][] = [];
+    const s = jones('shrinking').settings();
+    const engine = await Engine.create(canvas(1280, 720), s, (m, r, l) => told.push([m, r, l]), backend);
+    expect([engine.settings.lattice, engine.settings.resolution]).toEqual([null, 256]);
+    expect([engine.sim.width, engine.sim.height]).toEqual([256, 144]);
+    expect(told).toEqual([
+      [
+        'The GPU ran out of memory for a lattice of 300 × 300 cells. The scene runs on a grid of 256 cells on the long side.',
+        256,
+        [300, 300],
+      ],
+    ]);
   });
 });

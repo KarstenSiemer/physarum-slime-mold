@@ -38,12 +38,62 @@ describe('the current scene', () => {
 
   it('does not count a grid the device lowered as a change', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
-    loadPreset('network');
+    loadPreset('three-strains');
     app.maxResolution = 768; // as the startup check or the memory fit set it
     app.settings.resolution = 768;
     expect(sceneChanged()).toBe(false);
     app.settings.resolution = 512; // the user's choice
     expect(sceneChanged()).toBe(true);
+  });
+
+  // ADR 0026: a scene of Jones runs on the lattice of its figure. Another grid is the user's choice: the scene changed,
+  // and the panel names the lattice with a way back (latticeLeft(), useSceneLattice()).
+  it('counts another grid of a scene of Jones as a change, and its way back restores the lattice', async () => {
+    const { app, latticeLeft, latticeValue, loadPreset, pickGrid, sceneChanged, useSceneLattice } = await fresh();
+    loadPreset('shrinking');
+    expect(app.settings.lattice).toEqual([300, 300]);
+    expect([sceneChanged(), latticeLeft()]).toEqual([false, undefined]);
+    // On its lattice the resolution sets nothing: no change.
+    app.settings.resolution = 1024;
+    expect(sceneChanged()).toBe(false);
+    // A grid shaped like the screen is a change, also at the scene's own resolution.
+    pickGrid('512');
+    expect([sceneChanged(), latticeLeft()]).toEqual([true, [300, 300]]);
+    pickGrid('768');
+    expect([app.settings.lattice, app.settings.resolution, app.gridPicked]).toEqual([null, 768, true]);
+    expect([sceneChanged(), latticeLeft()]).toEqual([true, [300, 300]]);
+    // Another change stays when the lattice comes back.
+    app.settings.foodStrength = 0.1;
+    useSceneLattice();
+    expect(app.settings.lattice).toEqual([300, 300]);
+    expect(latticeLeft()).toBeUndefined();
+    expect(sceneChanged()).toBe(true);
+    app.settings.foodStrength = 0.05;
+    expect(sceneChanged()).toBe(false);
+    // The grid choice takes the lattice's own value too, and ignores what it does not know.
+    pickGrid('512');
+    pickGrid(latticeValue([300, 300]));
+    expect([app.settings.lattice, sceneChanged()]).toEqual([[300, 300], false]);
+    pickGrid('evil');
+    pickGrid('0');
+    expect([app.settings.lattice, app.settings.resolution]).toEqual([[300, 300], 512]);
+    // The app's scenes have no lattice, so no hint and nothing to restore.
+    loadPreset('maze');
+    pickGrid('256');
+    useSceneLattice();
+    expect([app.settings.lattice, latticeLeft(), sceneChanged()]).toEqual([null, undefined, true]);
+  });
+
+  it('opens an old link of a scene of Jones as it was made, on the grid shaped like the screen', async () => {
+    const { app, latticeLeft, openLink, sceneChanged } = await fresh();
+    const old = { ...(presetById('steiner')?.settings() ?? defaultSettings()), lattice: null, resolution: 256 };
+    const link = await decodeLink(
+      (await encodeLink(old, { scene: 'steiner', origins: [0], shapes: [true, true, true, true], strokes: [] })).hash,
+    );
+    if (!link) throw new Error('no link');
+    openLink(link);
+    expect([app.scene, app.settings.lattice, app.settings.resolution]).toEqual(['steiner', null, 256]);
+    expect([sceneChanged(), latticeLeft()]).toEqual([true, [200, 200]]);
   });
 
   it('keeps the rule off without the backend feature, and says so once per page load', async () => {

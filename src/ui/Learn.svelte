@@ -105,7 +105,15 @@
       <p>
         Sage Jenson’s GPU version (2019) and Michael Fogleman’s version with several species (2020) build on the same
         rules, and this app draws on all three. A scene marked “Jones 2010, Fig. 4” uses the settings of figure 4 of the
-        paper, on a grid shaped like your screen.
+        paper, on the lattice of that figure: 200 × 200 cells.
+      </p>
+      <p>
+        Jones gives all lengths in cells: the sensor distance, the step, and one 3 × 3 average of the trail in each
+        step. So the pattern has a fixed size in cells, and only Jones’ lattice gives his result. On another grid, the
+        same settings make more or fewer meshes, and the result is different from the paper. A scene of Jones keeps its
+        lattice on every screen, with free space beside it. Around a lattice with wrapping edges, its copies show
+        dimmed. You can select another grid under Scene → Grid. The panel then names Jones’ lattice and has a button to
+        go back to it. The other scenes use a grid shaped like your screen.
       </p>
       <p>
         Like the paper, the app imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of
@@ -186,8 +194,8 @@
     {:else if app.learnTab === 'Scenes'}
       <p>
         Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
-        figure in his paper, on a grid shaped like your screen. Fogleman 2020 scenes are his saved settings. The others
-        were made for this app.
+        figure in his paper, on the lattice of that figure. Fogleman 2020 scenes are his saved settings. The others were
+        made for this app, and they use a grid shaped like your screen.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>

@@ -10,7 +10,7 @@
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
   import SceneLabel from './ui/SceneLabel.svelte';
-  import { constrain } from './model/params';
+  import { constrain, sameLattice } from './model/params';
   import {
     adopt,
     app,
@@ -61,10 +61,19 @@
       addressRead = true;
       try {
         // The engine lowers the grid when the device cannot hold it, also for the first allocation.
-        const engine = await Engine.create(canvas, $state.snapshot(app.settings), (message, resolution) => {
-          app.maxResolution = Math.min(app.maxResolution, resolution);
-          // A scene chosen meanwhile may ask for less than the grid this message is about.
-          app.settings.resolution = Math.min(app.settings.resolution, resolution);
+        const engine = await Engine.create(canvas, $state.snapshot(app.settings), (message, resolution, lattice) => {
+          if (lattice) {
+            // The device cannot hold this lattice (ADR 0026): the grid is shaped like the screen now. A scene chosen
+            // meanwhile keeps its own lattice. The grid says nothing about the largest grid the device holds.
+            if (sameLattice(app.settings.lattice, lattice)) {
+              app.settings.lattice = null;
+              app.settings.resolution = resolution;
+            }
+          } else {
+            app.maxResolution = Math.min(app.maxResolution, resolution);
+            // A scene chosen meanwhile may ask for less than the grid this message is about.
+            app.settings.resolution = Math.min(app.settings.resolution, resolution);
+          }
           showNotice(message);
         });
         if (life.signal.aborted) {
@@ -143,12 +152,14 @@
 
   // Startup check: in the first 15 s of active time, lower the grid (at most twice, not below 512 cells)
   // while the frame rate stays below 40 fps (or below 90 % of a lower rate the browser gives, such as
-  // 30 fps in a power saving mode) or the steps below 3/4 of what the speed asked for (ui/tune.ts).
+  // 30 fps in a power saving mode) or the steps below 3/4 of what the speed asked for (ui/tune.ts). A lattice keeps
+  // its cells (ADR 0026).
   const tuner = new GridTuner();
   function autoTune(e: Engine) {
     const lower = tuner.tick({
       now: performance.now(),
       active: document.visibilityState === 'visible' && !app.paused && !e.busy,
+      lattice: e.settings.lattice !== null,
       run: e.restarts,
       frames: e.frames,
       steps: e.sim.step,

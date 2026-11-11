@@ -6,9 +6,12 @@ import {
   defaultSettings,
   globalSpec,
   MAX_STRAINS,
+  RESOLUTIONS,
+  sameLattice,
   strainLike,
   strainSpec,
   toJones,
+  type Lattice,
   type Model,
   type Settings,
 } from '../model/params';
@@ -371,6 +374,41 @@ export function removeStrain(i: number) {
   if (i < app.strain) app.strain--;
   app.strain = Math.min(app.strain, s.strains.length - 1);
 }
+
+/**
+ * The lattice of the loaded scene while the grid is another one (ADR 0026): the panel then says why the result
+ * differs from the paper and offers the lattice again. Undefined for a scene without a lattice.
+ */
+export function latticeLeft(): Lattice | undefined {
+  const lattice = app.sceneBase?.lattice;
+  return lattice && !sameLattice(app.settings.lattice, lattice) ? lattice : undefined;
+}
+
+/** Puts the loaded scene back on its lattice; the other settings stay (the button below the grid). */
+export function useSceneLattice() {
+  const lattice = app.sceneBase?.lattice;
+  if (!lattice) return;
+  app.settings.lattice = [lattice[0], lattice[1]];
+  app.gridPicked = true;
+}
+
+/**
+ * The grid choice of the panel: a lattice, "200x200", or a grid shaped like the screen, its cells on the long side.
+ * Unknown values change nothing.
+ */
+export function pickGrid(value: string) {
+  const lattice = /^(\d+)x(\d+)$/.exec(value);
+  const resolution = Number(value);
+  if (lattice) app.settings.lattice = [Number(lattice[1]), Number(lattice[2])];
+  else if (RESOLUTIONS.includes(resolution as never)) {
+    app.settings.lattice = null;
+    app.settings.resolution = resolution;
+  } else return;
+  app.gridPicked = true;
+}
+
+/** The value of a lattice in the panel's grid choice (pickGrid()). */
+export const latticeValue = ([w, h]: Lattice) => `${w}x${h}`;
 
 /**
  * True when a model parameter or the food, light and walls differ from the loaded scene. A grid the device lowered

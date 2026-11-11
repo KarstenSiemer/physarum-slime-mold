@@ -70,6 +70,8 @@ export interface Tick {
   resolution: number;
   /** The user picked a grid in the panel: the check never lowers it. */
   picked: boolean;
+  /** The grid is a lattice (ADR 0026): it keeps its cells, so the check never lowers it, and its time does not count. */
+  lattice?: boolean;
 }
 
 /**
@@ -103,7 +105,7 @@ export class GridTuner {
       const { frames, steps, requested, idleFrames, idleMs, run } = t;
       this.start = { at: this.activeMs, frames, steps, requested, idleFrames, idleMs, run };
     };
-    if (!t.active) {
+    if (!t.active || t.lattice) {
       this.lastActive = undefined;
       this.start = undefined;
       return undefined;

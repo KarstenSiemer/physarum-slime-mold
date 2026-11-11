@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
 import {
   GROUPS,
+  latticeNotice,
   PRESETS,
   presetById,
   RULE_MISSING_NOTICE,
@@ -118,17 +119,46 @@ describe('presets', () => {
     for (const id of ['network', 'hexagons', 'spots', 'stripes', 'wound']) expect(settingsOf(id).boundary).toBe('wrap');
   });
 
-  it('show the two networks on grid 1024 without glow, and keep the grid of the other Jones scenes', () => {
-    for (const id of ['network', 'hexagons']) {
-      expect(settingsOf(id).resolution, id).toBe(1024);
-      expect(settingsOf(id).bloom, id).toBe(0);
-    }
-    // Their food, light and walls are placed in fractions of the grid, so the grid stays as it was.
+  // Owner decision 2026-11-11 (ADR 0024 decision 3, ADR 0026): a scene of Jones' papers runs on the lattice of its
+  // figure, the app's scenes on a grid shaped like the screen. The lattices are in the captions of Jones 2010.
+  it('run each scene of Jones on the lattice of its figure, and the app’s scenes on a grid shaped like the screen', () => {
+    const lattices: Record<string, [number, number]> = {
+      network: [200, 200], // Fig. 4, p. 135
+      hexagons: [200, 200], // Fig. 5, p. 136
+      spots: [200, 200], // Fig. 16 top, p. 144
+      stripes: [200, 200], // Fig. 16 bottom, p. 144
+      'shortest-path': [200, 200], // Fig. 18, p. 145
+      steiner: [200, 200], // Fig. 19, p. 146
+      shrinking: [300, 300], // Fig. 21, p. 147
+      wound: [300, 300], // Fig. 22, p. 148
+    };
+    for (const p of PRESETS) expect(p.settings().lattice, p.id).toEqual(lattices[p.id] ?? null);
+    expect(defaultSettings().lattice).toBeNull();
+    // Each call gives its own array: a change to the settings of one load cannot reach the next.
+    expect(settingsOf('network').lattice).not.toBe(settingsOf('network').lattice);
+    // On a device that cannot hold the lattice, a scene of Jones gets 512 cells on the long side (Engine.fit()).
+    for (const id of Object.keys(lattices)) expect(settingsOf(id).resolution, id).toBe(512);
+    // Without glow the holes of the networks stay dark (decided 2026-11-09).
+    for (const id of ['network', 'hexagons']) expect(settingsOf(id).bloom, id).toBe(0);
     for (const id of ['spots', 'stripes', 'shrinking', 'wound', 'light', 'maze']) {
       expect(settingsOf(id).resolution, id).toBe(512);
       expect(settingsOf(id).bloom, id).toBe(1);
     }
-    for (const id of ['shortest-path', 'steiner']) expect(settingsOf(id).resolution, id).toBe(256);
+    // Jones' %p 50 on 300 × 300 is 45,000 agents (p. 147); the dish counts the square around it (sizing.ts).
+    const sh = settingsOf('shrinking');
+    expect(Math.round(sh.density * (sh.lattice?.[0] ?? 0) * (sh.lattice?.[1] ?? 0))).toBe(45_000);
+  });
+
+  it('name the lattice in the hint below the grid, with the words of the owner’s rule', () => {
+    const text = latticeNotice([300, 300]);
+    expect(text).toContain('in cells');
+    expect(text).toContain('different scale');
+    expect(text).toContain('different from the paper');
+    expect(text).toContain('Jones used a lattice of 300 × 300 cells');
+    // ASD-STE100: at most 20 words in a sentence of a procedure, 25 in a description.
+    for (const sentence of text.split(/(?<=\.)\s+/))
+      expect(sentence.split(/\s+/).length, sentence).toBeLessThanOrEqual(20);
+    expect(text).not.toMatch(/—/);
   });
 
   it('copy the Fogleman presets exactly (cmd/viewer/main.go:31–42, commit 62342a2)', () => {
@@ -232,6 +262,8 @@ describe('presets', () => {
         expect(strains('sensorOffset'), p.id).toContain(num(v));
       for (const v of all(/[Dd]ecay (\d+(?:\.\d+)?)/g)) expect(strains('decay'), p.id).toContain(num(v));
       for (const v of all(/[Gg]rid (\d+)\b(?! ×)/g)) expect(num(v), p.id).toBe(s.resolution);
+      for (const [, w = '', h = ''] of text.matchAll(/(\d+) × (\d+) cells/g))
+        expect([num(w), num(h)], p.id).toEqual(s.lattice);
       for (const v of all(/weight of −(\d+(?:\.\d+)?) on the other strain/g))
         expect(s.strains[0]?.attraction[1], p.id).toBe(-num(v));
       for (const v of all(/sensor and rotation angle (\d+(?:\.\d+)?)°/g)) {

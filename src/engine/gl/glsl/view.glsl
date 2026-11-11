@@ -15,7 +15,7 @@ layout(std140) uniform View {
   vec4 colors[4];
   vec4 background;
   uvec4 frame; // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
-  vec4 fx;     // bloom strength, black level, unused, unused
+  vec4 fx;     // bloom strength, black level, copies (packView), unused
 } V;
 
 uniform sampler2D trail;

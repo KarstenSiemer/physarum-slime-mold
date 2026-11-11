@@ -1,5 +1,5 @@
 // Texts about a scene that come from its settings, and the check whether the user changed them.
-import { strainSpec, type Settings, type Strain, type StrainKey } from './params';
+import { sameLattice, strainSpec, type Settings, type Strain, type StrainKey } from './params';
 import type { EnvShape } from './presets';
 
 export const letter = (i: number) => 'ABCD'[i] ?? String(i + 1);
@@ -82,10 +82,13 @@ function sameStrain(a: Strain, b: Strain, n: number): boolean {
 
 /**
  * True when a model parameter differs. Look, speed, strain colors and the seed do not count, and neither do
- * weights on the trails of strains that do not exist: the GPU never gets them (packParams in engine/pack.ts).
+ * weights on the trails of strains that do not exist: the GPU never gets them (packParams in engine/pack.ts). On a
+ * lattice the resolution does not count either: the lattice sets the grid (ADR 0026).
  */
 export function modelChanged(current: Settings, base: Settings): boolean {
+  if (!sameLattice(current.lattice, base.lattice)) return true;
   for (const k of Object.keys(base) as (keyof Settings)[]) {
+    if (k === 'lattice' || (k === 'resolution' && current.lattice)) continue;
     if (!NOT_MODEL.has(k) && current[k] !== base[k]) return true;
   }
   const n = current.strains.length;

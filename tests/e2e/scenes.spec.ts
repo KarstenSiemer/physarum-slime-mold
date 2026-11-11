@@ -177,7 +177,7 @@ test('the Maze keeps its walls and food when the grid changes, and gets them bac
   const cellsOf = () =>
     page.evaluate(() => (globalThis.physarum?.sim.width ?? 0) * (globalThis.physarum?.sim.height ?? 0));
   const fineCells = await cellsOf();
-  const select = page.getByLabel('Grid (cells on the long side)');
+  const select = page.getByRole('combobox', { name: 'Grid' });
   await select.selectOption('256');
   await grid(256);
   const coarse = await environment(page);
