@@ -190,6 +190,8 @@ paused, a held tool runs 60 steps per second; inoculate runs none while every ag
 lives (ADR 0023).
 
 Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn.
+A key is a shortcut unless the focused element uses it: a field takes every key, a button Space and Enter, a slider
+the arrows.
 
 ## 5. Look
 
@@ -208,11 +210,14 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
   (they deposit nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
-- Scent view (ADR 0009, amendment 2026-11-11): a switch of the look draws the food scent (green) and the light
-  repellent (pink) over the picture, below the walls, in bands of one power of ten from 0.01 up with a line at each
-  power of ten. The scale is fixed, so scenes and models compare; a legend gives the values. It changes nothing in
-  the simulation, goes into the link like the style, stays on when a scene loads, and without it the render pass
-  draws the pixels of before at the same cost.
+- Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
+  glow and the light repellent (extended model only) as a pink glow over the picture, below the oat flake and the
+  walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and
+  models compare. One thin line marks where the food scent weighs as much in a sensor as the trail of a strand (the
+  99th percentile of the trail that the auto levels measure). A legend shows the scale, the mark and what the scene
+  holds. Zoomed out the view reads a coarser lattice of the scent, so it costs about what it costs at fit. It changes
+  nothing in the simulation, goes into the link like the style, stays on when a scene loads, and without it the
+  render pass draws the pixels of before at the same cost.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.

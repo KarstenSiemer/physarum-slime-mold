@@ -1,7 +1,7 @@
 # 0009: Rendering pipeline
 
 - Status: accepted (revised 2026-11-08 after the visual review loop; amended 2026-11-10: food,
-  light and walls; amended 2026-11-11: scent view)
+  light and walls; amended 2026-11-11: scent view, revised the same day: a glow and the mark of a strand)
 - Date: 2026-11-08
 
 ## Context
@@ -407,7 +407,8 @@ is 115 on the dab and 0.36 nine cells out; a large food in the Jones model reach
 
 ### Decision
 
-Each decision is this branch's (2026-11-11) and is open to the owner (TODO.md).
+Each decision is this branch's (2026-11-11) and is open to the owner (TODO.md). The revision below (the same day,
+after two reviews and an owner decision) replaces items 4, 6, 7 and 11 and the consequences of this first version.
 
 1. **A setting of the look, `Settings.showScent`.** `packParams()` does not read it, `Engine.apply()` neither restarts
    nor rebuilds for it, and `modelChanged()` does not count it (`NOT_MODEL` in `src/model/scene.ts`), so the scene card
@@ -523,3 +524,209 @@ Each decision is this branch's (2026-11-11) and is open to the owner (TODO.md).
 - The width of a line steps a little where the pixel crosses a cell centre: the gradient of a bilinear lookup jumps
   there. The line's place does not. At 10 pixels per cell the lines look round in the screenshots of the pull request.
 - The PNG export has the bands and lines, but no legend.
+
+## Revision 2026-11-11: a glow, the mark of a strand, and the review
+
+### Context
+
+Two reviews of the first version of the view (a logic review and an app review, 2026-11-11) found:
+
+- The e2e test of the switch read its count of restarts while the new scene's simulation was still being built, and
+  failed 4 of 4 runs there. The render tests of the view ran on auto levels that the test before them had started.
+- No GPU test reached a scent above 66, so nothing held the upper half of the scale or its top to the CPU reference:
+  the top could change from 10,000 to 1,000 unseen.
+- In the Jones model the view drew the repellent that light leaves for about 60 steps after a switch from the extended
+  model, which the legend did not name. The legend named the repellent in every scene of the extended model, also
+  without light, and said nothing when a scene had neither food nor light.
+- On a tablet in portrait with the panel open the toolbar wraps into two rows, and the legend, fixed at 80 px, covered
+  the first row; on a phone it covered a seventh of the screen and the open panel.
+- Zoomed out to 4 and 8 cells per pixel at 2560 × 1600, the view cost 8.5 and 11.7 ms per frame (WebGPU; running at 38
+  frames per second, 25 with the view).
+- The first press on WebGL2 froze a frame for 150 ms (33 ms with the shader cache warm): the programs of the view
+  compiled at once. Nothing tested that the view's pipelines and programs are built once.
+- The view tinted the oat flake green. Lines swelled to 4 to 5 px in the last half cell before the box edge at 10 px per
+  cell. The key S did nothing after a click on a toolbar button until the canvas was clicked, as every key (older than
+  the view). The legend drew its lines at full opacity, the view at 0.75.
+- The test against the shaders of main compares the shipped shader with itself without the scent code, so a change to
+  code that both share passes it: a paper wall shadow of 0.2 instead of 0.3 passed all 166 tests of shadows, walls and
+  styles, a gap that main already had.
+- The view showed how far the scent goes, not where it matters to an agent: the green ended at 0.01, about 500 times
+  below the trail on a strand (p90 5.4, p99 7.6 in the Transport network).
+
+The owner decided on the look the same day (2026-11-11): "Gerne deine Empfehlung. Ich hab mir die Visualisierung des
+Dufts einfach als glow vorgestellt, welcher ausfaded wenn er schwächer wird." ("Your recommendation, please. I imagined
+the view of the scent simply as a glow that fades out when it gets weaker.") He accepted the coordinator's
+recommendation of a mark on the legend for the trail of a strand, so the user sees where food is stronger than a
+strand, with the scale kept fixed so scenes and models compare.
+
+### Decision
+
+Each with its date (2026-11-11), who made it, and its reason. These replace items 4, 6, 7 and 11 of the amendment above
+and its consequences; the rest stays.
+
+1. **A glow replaces the bands and the lines at the powers of ten** (owner). Reason: the owner pictured the scent as a
+   glow that fades out as it gets weaker. Each layer is one smooth glow, food green and the repellent pink as before.
+2. **The glow's curve** (this branch). Its opacity rises in a straight line with log10 of the scent, from 0 at 0.01 to
+   0.45 at 10,000, and stays at 0.45 above (`scentGlow()` in `src/engine/scent.ts`, `SCENT_TOP`, `SCENT_GLOW`); over
+   paper 1.5 times that, up to 0.675. Reason: a straight line in log10 gives each power of ten the same step, so two
+   scenes and the two models still compare on one fixed scale, and the glow fades out evenly with no edge at 0.01. At
+   0.45 the trail and the agents stay readable under the strongest glow (the screenshots of the pull request); a food of
+   the default strength reaches about 0.3 on its flake.
+3. **The mark of a strand** (owner, on the coordinator's recommendation; the definition is this branch's). The mark is
+   the food scent that weighs as much in a sensor as the trail of a strand. A sensor of strain s reads
+   `attraction[s] · trail + food[s] · scent.r − light[s] · scent.g` (`sense()` in `agents.wgsl` and `agents.frag`), and
+   with trail saturation K each trail lane as t / (1 + t / K). On a strand of its own trail T the two terms are equal
+   at scent = attraction[s][s] · T / food[s], with T / (1 + T / K) in place of T under saturation (`scentMark()`). The
+   Jones model weighs food as the strain's own trail, so there the mark is T itself. T is the 99th percentile of the
+   summed trail: the level that the auto levels draw at full strength, so the trail that the picture shows as a bright
+   strand (in the Transport network 7.6, where p90 is 5.4). Reason: it reuses the histogram of the auto levels, so it
+   needs no readback of its own, and it holds for sparse networks, where strands cover more than 1 % of the cells but
+   a lower percentile falls into empty cells.
+4. **The strand level is read within its bin and smoothed slowly** (this branch). The auto levels take the centre of a
+   bin of half a power of two (steps of 41 %); the mark reads the same percentile within the bin by the share of its
+   cells it needs (`levelWithin()` in `exposure.ts`), and each measurement moves it by 0.1 of the way (the levels by
+   0.25; `STRAND_BLEND`). Reason: the line on the map follows the mark, and bin steps made it jump; at 0.1 it follows a
+   changing network in about a second (WebGPU measures every 6 frames, WebGL2 every 15) without visible jitter.
+5. **Several strains** (this branch). The mark is the lowest mark of the strains that follow their own trail and food
+   (weights above 0): where food outweighs a strand for at least one strain. The histogram holds the summed trail, so
+   every strain takes it as its strand. Reason: one line on the map has to stand for all strains, and the lowest mark
+   shows where food acts first. A strain that flees food or its own trail has no mark; with none left, there is no mark
+   and no line. Where strains share cells, the summed trail is above each strain's own, so the mark lies too high there.
+6. **One line on the map at the mark** (the coordinator's choice, not the owner's). A thin line (about one pixel,
+   opacity 0.8, the light green of the food scent) where the food scent equals the mark (`scentLine()`): inside it,
+   food pulls an agent on a strand more than the strand does. Reason: the mark on the legend says what level matters,
+   the line shows where that level is on the map. Assessed on the screenshots: one closed line per food, close to the
+   flake in Jones at decay 0.1 and farther out in the extended model at 0.003; it does not crowd the picture.
+7. **The repellent only where the model reads it** (coordinator). The pass draws the repellent only in the extended
+   model (`View.fx.z` + 4); the Jones model's agents do not read it. Reason: after a switch from the extended model the
+   repellent decays for about 60 steps, and the view drew pink that no agent felt.
+8. **The legend names what the scene holds** (coordinator, app review). A row for food when the drawing holds food, and
+   for the repellent when the model is extended and the drawing holds light; with neither, one sentence says that the
+   scene has no scent to show, so the switch does not look broken. Each row is a gradient of the glow over the bare dish
+   of the style, with the values at the powers of ten (the last "10k+", and the text says that the glow stays the same
+   from 10,000 up) and the mark of a strand, which the legend draws as the map draws its line. Screen readers hear
+   "green glow" and "pink glow" and the text as the figure's description. Reason: the colours alone give no values, and
+   a row for a layer that cannot be there misleads. The food row follows the drawing, so for a while after all food is
+   erased its fading scent shows with no row.
+9. **The view lies below the oat flake** (coordinator), as it lies below the walls; within the view the food's glow,
+   then its line, then the repellent's glow over them. Reason: the flake is the marker of the food, and its colour must
+   not change; the repellent is the warning, so it lies on top.
+10. **Zoomed out, the view reads a coarser lattice** (this branch, after measuring the cause). From 2 cells per pixel on
+    the pass reads the scent from a lattice of 2, 4 or 8 cells per texel (`scentLevel()`: the power of two at or below
+    the scale, at most 8), filled each frame by a pass at that lattice (`scentDown`: rgba32float, each texel the mean of
+    the cells it covers by the share it covers, with walls and cells outside the dish weighing 0, and that share). Its
+    texels tile the grid exactly (n = ⌈side / 2^k⌉, each side / n cells wide), so on the periodic grid it wraps with the
+    grid. Reason: at 8 cells per pixel each pixel read 4 cells far from those of its neighbours, which missed the
+    cache: 17.2 ms more per frame at 2560 × 1600 against 0.55 ms with the same arithmetic on 4 reads of one texel (paired
+    probe, WebGPU). The lookup weighs each texel by the share that holds scent, so walls and the rim of the dish do not
+    pull it down.
+11. **At the box edge the log of the scent goes on with its slope** (coordinator: a one-sided gradient). Within half a
+    cell of the edge the pass takes the scent and its gradient at the centres of the outer cells and goes on with the
+    gradient of its logarithm (`scentFrom()`). Reason: the clamped lookup held the scent flat there, so a line that
+    met the edge at a slant turned along it for the last half cell; in log space the scent stays positive. Where the
+    scent is flat at the edge, as the arena's lack of flux makes it there most of the time, both lookups draw the same.
+    The swelling to 4 to 5 px that the review saw came from the floor of item 12: the reviewed code with a floor of
+    0.0001 drew those lines one pixel wide (checked at 10 px per cell in the Maze at decay 0.003). The rim of the dish
+    and the side of a wall keep the lookup that holds the outer value; their last half cell lies under the rim's ramp
+    or the wall's bevel.
+12. **A flat scent** (this branch): below 0.0001 powers of ten per pixel the line counts the scent as flat. Reason: the
+    floor of 0.001 of the first version made a line on a nearly flat scent several pixels wide, at the box edge too.
+13. **The view's pipelines and programs are built without blocking** (coordinator). WebGPU builds them with
+    `createRenderPipelineAsync`, WebGL2 starts the compile and asks for `COMPLETION_STATUS_KHR`
+    (`KHR_parallel_shader_compile`) each frame; frames draw without the view until both are built, and a PNG export
+    waits for them. Each is built once per renderer or GL context. Reason: the first press froze a frame for 150 ms on
+    WebGL2. Without the extension the first query still waits, as before. On a cold browser the view then shows after
+    a few hundred milliseconds.
+14. **Legend and stats sit above the toolbar at its real height** (coordinator, app review). App.svelte measures the
+    toolbar and the stats; the stats sit above the toolbar, and the legend above both. On a phone and on a short screen
+    (up to 720 px wide or 500 px high) the legend drops its text, and while the phone's panel covers the picture the
+    legend hides. The Scent button stays in the toolbar, which a phone scrolls sideways (older than the view). Reason:
+    the fixed bottom of 80 px covered the wrapped toolbar; with the stats at 56 px the stats covered it too.
+15. **Shortcuts work whenever the focused element does not use the key** (coordinator; the bug is older than the view).
+    A text field, a number field and a list take every key, a button, link or switch Space and Enter, a slider and the
+    tabs of Learn the arrows, a modal dialog every key (`keyUsed()` in App.svelte). Reason: after a click on a toolbar
+    button every shortcut did nothing until the canvas was clicked.
+16. **Texts** (coordinator). The button's title is "Show the scent of food and light (S)", as short as the other titles.
+    The help (Learn → Controls), the legend and Learn → The model say what the glow and the line mean in short plain
+    sentences, and Learn says that a small food gets weaker at a lower decay, so its line can come closer.
+17. **The uniform**: `View.fx.z` holds the lattice level (0 to 3) plus 4 when the repellent is drawn, `View.fx.w` the
+    mark (0: none). Reason: the struct had these two floats free, and both backends share it.
+18. **The shared path is pinned** (coordinator). A GPU test draws walls and light over the bare dish in glow, gel and
+    paper and holds pixels on cell centres to the formulas: the drop shadow (0.75, 0.6, 0.3 per style), the light's
+    tint, and the flat top of a wall (albedo, diffuse and specular light). Reason: the test against main cannot see a
+    change to code both share, and these numbers had no test of their own. The flake's grain, the bevels and the gel's
+    relief stay held only by tests of their shape (`sim.gpu.test.ts`).
+19. **Colours, as OKLCH lightness / chroma / hue** (this branch, recorded now): food glow 0.80 / 0.18 / 145 and its line
+    0.90 / 0.14 / 145 over the dark styles, 0.55 / 0.15 / 145 and 0.42 / 0.12 / 145 over paper; the repellent's glow
+    0.74 / 0.19 / 340 over the dark styles, 0.52 / 0.19 / 340 over paper.
+
+### Consequences
+
+- Cost of the view zoomed out, measured as the review did (draw-only frames of the paused app, the order off, on, off,
+  median of 11 rounds of 20 frames; Transport network on 1024 × 640 in the extended model at decay 0.003 with three UI
+  dabs, 1,500 steps; 2560 × 1600; M3 Pro, other work on the host, load average 4 to 15). On − off in ms, two runs each,
+  before (28a81d4) and after, paired run by run:
+
+  | Cells per pixel | WebGPU before | WebGPU after  | WebGL2 before  | WebGL2 after  |
+  | --------------- | ------------- | ------------- | -------------- | ------------- |
+  | fit (0.4)       | +0.58 / +0.65 | +0.44 / +0.86 | +0.74 / +0.29  | +0.85 / +0.86 |
+  | 2               | +1.07 / +1.34 | +0.56 / +0.68 | +1.36 / +0.07  | +1.86 / +1.30 |
+  | 4               | +6.93 / +7.77 | +0.04 / +0.38 | +6.97 / +7.28  | +2.19 / +2.65 |
+  | 8               | +13.0 / +11.6 | +0.30 / −0.34 | +11.84 / +14.7 | +0.93 / −1.89 |
+
+  Two more runs before on WebGPU gave +6.1 / +8.0 ms at 4 and +14.8 / +14.6 ms at 8 cells per pixel (the review: +8.5
+  and +11.7). The view now costs about what it costs at fit at every zoom; on WebGL2 at 2 to 4 cells per pixel up to
+  about twice that. At 8 cells per pixel the frame itself takes 20 to 40 ms (the trail's four taps of 4 cells), so the
+  difference lies within the spread there.
+
+- Paired in one page (the method of the amendment above: the pass without the scent code (A), the shipped pass with
+  the view off (B) and on (C), 21 rounds of 20 frames, Transport network on 1024 × 640 with three dabs, glow style;
+  load average 5 to 7): B − A lies within −0.16 and +0.54 ms at every zoom, and within ±2.5 ms at 8 cells per pixel on
+  2560 × 1600, where a frame takes 30 to 38 ms. C − B in ms:
+
+  | Canvas      | Fit and zoomed in 6 times | 2 cells per pixel | 4 cells per pixel | 8 cells per pixel         |
+  | ----------- | ------------------------- | ----------------- | ----------------- | ------------------------- |
+  | 1280 × 800  | 0.12 to 0.22              | 0.47 to 0.51      | 0.43 to 0.64      | 0.33 to 0.96              |
+  | 2560 × 1600 | 0.47 to 0.89              | 1.15 to 1.59      | 1.24 to 1.65      | −2.4 to +2.0 (the spread) |
+
+- Tests on both backends (`sim.gpu.test.ts`, "scent view"):
+  - Without the view, 0 of 255 apart from the shaders of main in every style, on the periodic grid, in a box and in a
+    dish, with and without food, light and walls, at four zooms down to 6 cells per pixel. The cut of the scent code
+    still gives main's `render.wgsl` and `render.frag` byte for byte; `view.glsl` differs from main only by its comment
+    on `fx`.
+  - With the view, no byte of the simulation changes.
+  - Every pixel inside the arena follows the CPU reference of the glow and the line (`scentAt()` with `scentGlow()`,
+    `scentLine()`, `scentMark()` and `scentOver()`), in every style, across the seam, at the box edge with the slope of
+    item 11, at the rim of the dish, zoomed in, near fit, and on the lattices of 2 and 4 cells (2.5 and 6 cells per
+    pixel), with the line at the mark of the settled levels; outside the arena and on the flake no pixel changes by more
+    than the dither; in the Jones model no repellent shows.
+  - The Jones model at a decay of 0.0001 with food strength 0.5 reaches more than 10,000 (every power of ten from 1,000
+    to the top is compared), and in a small box more than 100,000, where the glow stays at its top.
+  - Zoomed in beside a wall the glow and the line follow the reference that leaves the wall's cells out.
+  - The view's pipelines and programs are built once.
+  - The shadow, the light and the flat top of walls follow their formulas in glow, gel and paper (item 18).
+  - Unit tests: `scent.test.ts` (the glow, the line, the mark for one and several strains, Jones, saturation, the
+    strand level within its bin, the lattice level), `engine.test.ts`, `pack.test.ts`, `params.test.ts`,
+    `url.test.ts`, `scene.test.ts`, `state.test.ts`. e2e (`ui.spec.ts`): the button and the key, the legend's rows and
+    its sentence for a scene without scent, its description, the link, no change of the scene, no restart, the key
+    after a click on a toolbar button and not in a number field, Space on a focused button, and the legend clear of the
+    toolbar and the stats at 375 × 812, 812 × 375, 721 × 900, 768 × 1024 and 1280 × 800.
+  - Each test was checked with deliberate mutations of the code it guards, each reverted after its run. Caught: the
+    pass without the view built with `SCENT` (WebGPU: a validation error) or drawing the view (both backends), the view
+    clearing the scent (both), a restart on the switch, `packParams()` reading it, the top of the glow at 1,000 instead
+    of 10,000 (WGSL and GLSL), the glow's top opacity, the line's opacity, the lowest level, the wrap at the seam, the
+    clamp at the box edge, the slope at the box edge, the rim of the dish, the wall cells in the lookup (both), the
+    repellent drawn in the Jones model, the view over the flake, the coarse lattice's gradient in cells, a build of the
+    pipelines or programs in every frame (both), the paper shadow of 0.2, the light's tint, the walls' albedo, the
+    switch dropped on a new scene, in the link or counted as a change, the mark without the food weight, the strand
+    level at the bin's centre, the key S, and the shortcuts ignored after a click on a button (both e2e). Not caught:
+    the coarse lattice counting walls as cells with scent; its effect stays within one texel of a wall, which is one
+    pixel at that zoom and lies under the wall's ramp.
+- On SwiftShader on an M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`; load average 6 to 12),
+  the longest new GPU test, the pixels without the view on WebGL2, took 11.4 s of its 240 s limit (the review measured
+  14.0 s under load 13; ADR 0010), the test of the simulation's bytes 3.7 s of 120 s (5.0 s before), the test of the
+  glow above 10,000 5.6 s, the formulas of the walls 5.1 s, and every other new test under 3 s of 60 s. Every limit is
+  more than 4 times the longest time measured.
+- The line's width steps a little where a pixel crosses a cell centre, where the bilinear gradient jumps; its place
+  does not.
+- The PNG export has the glow and the line, but no legend (owner item).
