@@ -142,8 +142,9 @@ that measure it, and the agent passes that check for walls, are built at the fir
    `scent` with `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources: g = 1 in the
    Jones model, `g = (d / (1 − d)) / (0.1 / 0.9)` with the scent decay d in the extended model,
    so a large food reaches the same scent at every decay (ADR 0022). With covered food on, a food
-   cell releases 0.1 % while the 3 × 3 window around it holds an agent after the moves (Adamatzky
-   and Jones 2010; the occupancy comes from collision mode, else from the `occupy` pass).
+   cell releases the covered-food factor (0.001 by default, Adamatzky and Jones 2010) while the
+   3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
+   else from the `occupy` pass).
 
 All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
 deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a

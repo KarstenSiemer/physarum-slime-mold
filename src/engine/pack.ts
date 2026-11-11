@@ -1,12 +1,4 @@
-import {
-  BOUNDARIES,
-  COVERED_FOOD_FACTOR,
-  emissionScale,
-  LAYOUTS,
-  MAX_STRAINS,
-  type Settings,
-  type Strain,
-} from '../model/params';
+import { BOUNDARIES, emissionScale, LAYOUTS, MAX_STRAINS, type Settings, type Strain } from '../model/params';
 
 // Slot order of `struct Params` in shaders/common.wgsl (16 bytes each); a test checks it.
 export const PARAM_SLOTS = [
@@ -171,7 +163,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
   u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
-  f.set([trailSaturation(s), s.coveredFood ? COVERED_FOOD_FACTOR : 1], slot('model'));
+  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1], slot('model'));
   return buf;
 }
 

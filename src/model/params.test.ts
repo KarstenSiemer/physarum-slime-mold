@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   attractionSpec,
-  COVERED_FOOD_FACTOR,
   defaultSettings,
   fieldText,
   globalSpec,
@@ -121,8 +120,11 @@ describe('sanitize (untrusted input)', () => {
 });
 
 describe('covered food (Adamatzky and Jones 2010, ADR 0022)', () => {
-  it('multiplies the source of a covered food cell by Jones’ 0.001', () => {
-    expect(COVERED_FOOD_FACTOR).toBe(0.001);
+  it('multiplies the source of a covered food cell by Jones’ 0.001 unless a scene sets its paper’s factor', () => {
+    expect(defaultSettings().coveredFoodFactor).toBe(0.001);
+    expect(sanitize({ coveredFoodFactor: 0.01 }).coveredFoodFactor).toBe(0.01); // Jones and Adamatzky 2014
+    expect(sanitize({ coveredFoodFactor: 0 }).coveredFoodFactor).toBe(globalSpec.coveredFoodFactor.min);
+    expect(sanitize({ coveredFoodFactor: 'x' }).coveredFoodFactor).toBe(0.001);
   });
 });
 

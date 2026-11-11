@@ -77,8 +77,8 @@ scent of this ADR stays as it is in a model "Jones", and this app's additions go
   `255 · wProj · g(d)` and `255 · wLight · g(d)` with `g(d) = (d / (1 − d)) / (0.1 / 0.9)`, d the
   scent decay: the scent of a large food is then the same at every decay, 114.75 for wProj 0.05,
   and only its reach grows. g(0.1) = 1 exactly, so at decay 0.1 both models give the same bytes.
-- Covered food, a rule of Jones' later papers (Adamatzky and Jones 2010), works in both models: a
-  food cell releases 0.1 % of its scent while the 3 × 3 window around it holds an agent. It is off
-  in every scene.
+- Covered food, a rule of Jones' later papers (Adamatzky and Jones 2010, Jones and Adamatzky 2014),
+  works in both models: a food cell releases a small share of its scent (0.001 by default, a
+  setting per scene) while the 3 × 3 window around it holds an agent. It is off in every scene.
 - Trail saturation (extended model only) makes a sensor read each strain's trail t as
   `t / (1 + t / K)`, so food can turn agents on a dense trail.

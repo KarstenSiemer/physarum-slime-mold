@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COVERED_FOOD_FACTOR, defaultSettings, defaultStrain, emissionScale, strainSpec } from '../model/params';
+import { defaultSettings, defaultStrain, emissionScale, strainSpec } from '../model/params';
 import {
   AgentToolKind,
   CLEAR_TILE,
@@ -114,7 +114,9 @@ describe('model slot and sources', () => {
     const s = { ...defaultSettings(), trailSaturation: 50 };
     expect(model(s)).toEqual([0, 1, 0, 0]);
     expect(model({ ...s, model: 'extended' })).toEqual([50, 1, 0, 0]);
-    expect(model({ ...s, coveredFood: true })).toEqual([0, Math.fround(COVERED_FOOD_FACTOR), 0, 0]);
+    expect(model({ ...s, coveredFood: true })).toEqual([0, Math.fround(0.001), 0, 0]);
+    expect(model({ ...s, coveredFood: true, coveredFoodFactor: 0.01 })).toEqual([0, Math.fround(0.01), 0, 0]);
+    expect(model({ ...s, coveredFoodFactor: 0.01 })).toEqual([0, 1, 0, 0]);
   });
 
   it('scales the sources by emissionScale() only in the extended model, by exactly 1 at decay 0.1', () => {

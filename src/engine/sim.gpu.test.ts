@@ -4,7 +4,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, v
 import { hexToLinear } from '../model/color';
 import {
   BOUNDARIES,
-  COVERED_FOOD_FACTOR,
   defaultSettings,
   defaultStrain,
   emissionScale,
@@ -1125,7 +1124,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       coveredAt: (c: number) => boolean = () => false,
     ) {
       const g = settings.model === 'extended' ? emissionScale(settings.scentDecay) : 1;
-      const factor = settings.coveredFood ? COVERED_FOOD_FACTOR : 1;
+      const factor = settings.coveredFood ? settings.coveredFoodFactor : 1;
       let cur = Float64Array.from(s);
       for (let c = 0; c < w * h; c++) {
         const food = ((env[c * 4 + 1] ?? 0) / 255) * 255 * settings.foodStrength * g;
@@ -1198,14 +1197,24 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
     });
 
-    // Agents near and on food: a food cell releases COVERED_FOOD_FACTOR of its scent while the 3 × 3 window around it
+    // Agents near and on food: a food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it
     // holds an agent after the step's moves (Adamatzky and Jones 2010, ADR 0022). With and without the rule of one
     // agent per cell, with 1 and 2 blur passes.
     it.each([false, true].flatMap((collisions) => [1, 2].map((diffusion) => [collisions, diffusion] as const)))(
-      'release a thousandth of the food scent where an agent covers it (collisions %s, diffusion %s)',
+      'release the covered-food factor of the scent where an agent covers it (collisions %s, diffusion %s)',
       async (collisions, diffusion) => {
         const [w, h] = [64, 48];
-        const settings = { ...defaultSettings(), seed: 5, density: 0.08, collisions, diffusion, coveredFood: true };
+        // Two blur passes with the factor of Jones and Adamatzky 2014, one with the default of 2010.
+        const coveredFoodFactor = diffusion === 2 ? 0.01 : 0.001;
+        const settings = {
+          ...defaultSettings(),
+          seed: 5,
+          density: 0.08,
+          collisions,
+          diffusion,
+          coveredFood: true,
+          coveredFoodFactor,
+        };
         const sim = await build(settings, w, h, Math.round(0.08 * w * h));
         sim.paint([
           { kind: 'food', from: [6, 6], to: [58, 40], radius: 3 },
@@ -1239,7 +1248,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // WebGL2 without float blending marks the cells with an agent in a target of its own (gl/sim.ts `presence`).
     it.runIf(kind === 'webgl2')(
-      'release a thousandth of the food scent where an agent covers it without float blending',
+      'release the covered-food factor of the scent where an agent covers it without float blending',
       async () => {
         const g = plainGl;
         if (!g) throw new Error('no WebGL2 context');

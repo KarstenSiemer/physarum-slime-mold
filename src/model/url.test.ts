@@ -20,7 +20,7 @@ describe('URL settings', () => {
     const s = defaultSettings();
     s.strains = [defaultStrain(0), { ...defaultStrain(1), sensorOffset: 33, color: '#123456' }];
     s.boundary = 'dish';
-    Object.assign(s, { model: 'extended', coveredFood: true, trailSaturation: 40 });
+    Object.assign(s, { model: 'extended', coveredFood: true, coveredFoodFactor: 0.01, trailSaturation: 40 });
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);
     expect(await decodeSettings(encoded)).toEqual(s);
@@ -28,8 +28,11 @@ describe('URL settings', () => {
 
   // ADR 0022: a link made before the model switch holds no model, covered food or trail saturation.
   it('opens links made before the model switch with the Jones model', async () => {
-    const { model, coveredFood, trailSaturation, ...old } = { ...defaultSettings(), scentDecay: 0.01 };
-    expect([model, coveredFood, trailSaturation]).toEqual(['jones', false, 0]);
+    const { model, coveredFood, coveredFoodFactor, trailSaturation, ...old } = {
+      ...defaultSettings(),
+      scentDecay: 0.01,
+    };
+    expect([model, coveredFood, coveredFoodFactor, trailSaturation]).toEqual(['jones', false, 0.001, 0]);
     const s = await decodeSettings(await hashPart(JSON.stringify(old)));
     expect(s).toEqual({ ...defaultSettings(), scentDecay: 0.01 });
   });

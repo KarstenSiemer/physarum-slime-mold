@@ -69,13 +69,14 @@ Each decision with its date, who made it, and why.
    only in the extended model.
 8. **Covered food is a Jones rule, available in both models, off in every scene** (owner, 2026-11-11). Reason: Jones
    published it (Context). Off keeps the scenes' bytes.
-9. **Covered food takes the form and the value of Adamatzky and Jones 2010, as fixed constants** (this branch,
-   2026-11-11). A food cell releases `COVERED_FOOD_FACTOR` = 0.001 of its scent while the 3 × 3 window around it holds
-   at least one alive agent. The switch is "Covered food releases less"; factor and window are not sliders. Reason: the
-   owner asked for Jones' published form and values, from one paper. Food here is painted as an area of cells, as the
-   urban areas of 2010 are areas of pixels, and that paper checks each pixel as this code checks each cell. The 2014
-   paper projects from points and keeps 1 % (0.01); for a food of strength 0.05 the covered source is then 0.13 instead
-   of 0.013 per step, against 12.75 when uncovered. Light has no such rule.
+9. **Covered food: Jones' form with a fixed window, and a factor per scene, 0.001 by default** (this branch,
+   2026-11-11). A food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it holds at least
+   one alive agent. The switch is "Covered food releases less", and the slider "Covered food factor" (0.0001 to 1) shows
+   while it is on. Reasons: both papers use the 3 × 3 window, so it is fixed. Their factors differ (0.001 in 2010, 0.01
+   in 2014), and ADR 0024 (decision 1) lets each scene set the values of its own paper, so the factor is a setting that
+   links carry. The default is 0.001 of Adamatzky and Jones 2010, because that paper checks each pixel of a food area as
+   this code checks each painted food cell; the 2014 paper projects from points. For a food of strength 0.05 the
+   covered source is then 0.013 per step (0.13 with 0.01), against 12.75 uncovered. Light has no such rule.
 10. **Covered food counts the agents after the step's moves** (this branch, 2026-11-11). Reason: Jones checks the
     window in every step of his scheduler; on the GPU the positions after the moves are the ones the diffusion pass of
     the same step can read. Collision mode keeps these counts anyway (ADR 0008). Without it, WebGPU runs the pass
@@ -91,8 +92,9 @@ Each decision with its date, who made it, and why.
     that block sensors (ADR 0020), the separate scent fields (ADR 0007) and the rule of one agent per cell. Reason: the
     scenes that use them run on "Jones" and must keep their bytes (decision 2).
 13. **Where the switch sits in the panel** (this branch, 2026-11-11): "Model" in the Scene section, beside the rule of
-    one agent per cell; "Covered food releases less" and "Trail saturation" in the Environment section. Reason: the
-    model is a choice of rules like the rule of one agent per cell, and the two options act on food and sensing.
+    one agent per cell; "Covered food releases less" with "Covered food factor", and "Trail saturation", in the
+    Environment section. Reason: the model is a choice of rules like the rule of one agent per cell, and the options
+    act on food and sensing.
 14. **For tests only**, `Sim.readScent()` reads the scent, and `Simulation.create` takes a diffusion source as it takes
     an agent source (this branch, 2026-11-11). Reason: the tests compare the scent with a CPU reference, and the shipped
     passes with the sources without the new code.
@@ -175,9 +177,9 @@ See `TODO.md` (M2):
   a fifth to a third of the network. K 100 holds 1 to 2 % per dab and meets it in 5 to 8 seeds of 10. With K 100 a
   lower decay helps less, because the normalised scent at the dab's edge is weaker (62 at 0.1, 40 at 0.003).
 
-- **Covered food in the same experiment.** In the Transport network it keeps the reach and lowers the pile-up: the
-  extended model at 0.003 reached 40 of 40 dabs with 1.1 % of all agents per ring (1.6 % without), the Jones model 23 of
-  40 (25 without). In the default settings it does not stop food from taking the network: with K 30 at 0.003 each ring
+- **Covered food in the same experiment** (factor 0.001). In the Transport network it keeps the reach and lowers the
+  pile-up: the extended model at 0.003 reached 40 of 40 dabs with 1.1 % of all agents per ring (1.6 % without), the
+  Jones model 23 of 40 (25 without). In the default settings it does not stop food from taking the network: with K 30 at 0.003 each ring
   held 9.4 % of all agents (5.5 % without), with K 100 0.69 % (0.95 %), and the Jones model passed 2 seeds of 10 (3
   without). Agents stacked on a dab hold each other there by their own trail, so a dab that releases almost nothing
   keeps them.

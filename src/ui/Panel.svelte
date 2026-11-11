@@ -198,6 +198,9 @@
     {#if coveredHelp}
       <p class="helptext" id="covered-help">{coveredFoodHelp.help} <cite>{coveredFoodHelp.ref}</cite></p>
     {/if}
+    {#if s.coveredFood}
+      <Slider spec={globalSpec.coveredFoodFactor} bind:value={s.coveredFoodFactor} id="covered-factor" />
+    {/if}
     {#if s.model === 'extended'}
       <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
     {/if}

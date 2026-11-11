@@ -169,6 +169,15 @@ export const globalSpec = {
     step: 0.001,
     log: true,
   },
+  coveredFoodFactor: {
+    label: 'Covered food factor',
+    help: 'With Covered food releases less: the share of its scent that a food cell releases while agents cover it. Adamatzky and Jones 2010 use 0.001 for food areas, Jones and Adamatzky 2014 use 0.01 for food at a point.',
+    min: 0.0001,
+    max: 1,
+    step: 0.0001,
+    log: true,
+    ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
+  },
   trailSaturation: {
     label: 'Trail saturation',
     help: 'Extended model only. Each sensor reads the trail t of each strain as t / (1 + t / K), with K this value. A trail far above K counts about as much as K, so a weak food scent can still turn an agent on a dense trail. Without food, one strain makes the same turns at every K. 0 turns it off.',
@@ -219,17 +228,10 @@ export const modelHelp = {
   ref: 'ADR 0022',
 } as const;
 
-/**
- * Adamatzky and Jones 2010 (Road planning with slime mould, arXiv:0912.3967): each pixel of a food area has its
- * projection multiplied by 0.001 while a particle lies in the 3 × 3 neighbourhood around the pixel. Here every food cell
- * is such a pixel (ADR 0022). Jones and Adamatzky 2014 keep 1 % for food at a point.
- */
-export const COVERED_FOOD_FACTOR = 0.001;
-
 /** Help for the switch "Covered food releases less"; Learn → Controls lists it with the sliders. */
 export const coveredFoodHelp = {
   label: 'Covered food releases less',
-  help: 'A food cell releases 0.1 % of its scent while an agent is on it or on one of its 8 neighbour cells. Food that the network covers then stops pulling in more agents, and uncovered food pulls with full strength. Jones uses this rule in later papers with Adamatzky. It works in both models.',
+  help: 'A food cell releases only a small share of its scent, the Covered food factor, while an agent is on it or on one of its 8 neighbour cells. Food that the network covers then stops pulling in more agents, and uncovered food pulls with full strength. Jones uses this rule in later papers with Adamatzky. It works in both models.',
   ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
 } as const;
 
@@ -261,7 +263,7 @@ export interface Settings extends Record<GlobalKey, number> {
   collisions: boolean;
   /** The rule set (ADR 0022); old links without it load as 'jones'. */
   model: Model;
-  /** Food under agents releases COVERED_FOOD_FACTOR of its scent (coveredFoodHelp). */
+  /** Food under agents releases `coveredFoodFactor` of its scent (coveredFoodHelp). */
   coveredFood: boolean;
   style: Style;
   strains: Strain[];
@@ -319,6 +321,9 @@ export function defaultSettings(): Settings {
     foodStrength: 0.05,
     lightStrength: 0.05,
     scentDecay: 0.1,
+    // Adamatzky and Jones 2010 (arXiv:0912.3967): each pixel of a food area releases 0.001 of its projection while a
+    // particle lies in the 3 × 3 neighbourhood around it, as this app checks each food cell (ADR 0022).
+    coveredFoodFactor: 0.001,
     trailSaturation: 0,
     shrink: 0,
     speed: 120,
