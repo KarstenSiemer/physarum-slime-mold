@@ -348,6 +348,33 @@ for (const [width, height] of [
       expect((ticks[k]?.[0] ?? 0) - (ticks[k - 1]?.[1] ?? 0), JSON.stringify(ticks)).toBeGreaterThanOrEqual(3);
   });
 
+// A lost device stays the message: the scent view asked for afterwards compiles nothing and reports no error of its
+// own (review of 2026-11-11: WebGL2 replaced the loss by "GLSL compile error: ."). A device that something else
+// destroys is a loss too (WebGPU reported nothing).
+for (const [name, query] of [
+  ['WebGPU', ''],
+  ['WebGL2', '?backend=webgl2'],
+] as const)
+  test(`a lost device stays reported when the scent view is asked for (${name})`, async ({ page }) => {
+    await page.goto((await smallScene()).replace('/#', `/${query}#`));
+    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
+    await page.evaluate(() => {
+      const backend = globalThis.physarum?.backend as unknown as {
+        gpu?: { device: GPUDevice };
+        gl?: WebGL2RenderingContext;
+      };
+      if (backend.gpu) backend.gpu.device.destroy();
+      else backend.gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    });
+    const alert = page.getByRole('alert');
+    await expect(alert).toContainText('The graphics device was lost');
+    await page.keyboard.press('s');
+    await page.waitForFunction(() => globalThis.physarum?.settings.showScent === true);
+    await page.waitForTimeout(1000); // a build of the view would fail within this
+    await expect(alert).toContainText('The graphics device was lost');
+    await expect(alert).not.toContainText('error');
+  });
+
 // The legend lies on the glass of the other panels, without a backdrop blur (ADR 0028), and its text keeps WCAG 2.2
 // contrast (1.4.3: 4.5:1) over a white canvas, as glass.test.ts asks of the panels: the worst case of the paper style.
 test('the scent legend keeps its text readable on the glass over a white canvas', async ({ page }) => {

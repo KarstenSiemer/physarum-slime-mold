@@ -122,8 +122,9 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   async capture(sim: GlSim, settings: Settings, view: View, width: number, height: number): Promise<ImageData> {
     const gl = this.gl;
-    // An export shows the scent view as asked: wait for its programs.
-    while (settings.showScent && !this.fixed && !this.prog.scent()) await new Promise((r) => setTimeout(r, 2));
+    // An export shows the scent view as asked: wait for its programs, unless the context is lost.
+    while (settings.showScent && !this.fixed && !this.prog.scent() && !gl.isContextLost())
+      await new Promise((r) => setTimeout(r, 2));
     const t = target(gl, width, height, gl.RGBA8);
     this.encode(sim, settings, view, width, height, t);
     const pixels = new Uint8ClampedArray(width * height * 4);

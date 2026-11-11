@@ -162,7 +162,8 @@ export function compile(gl: GL): Programs {
     points: wrap(gl, program(gl, V + common + toolsGlsl + pointsVert, V + common + pointsFrag)),
     render: view(renderFrag),
     scent: () => {
-      if (scent) return scent;
+      // A lost context builds nothing: the frames draw without the view, and the app reports the loss.
+      if (scent || gl.isContextLost()) return scent;
       const vertex = V + 'precision highp float;\n' + fullscreen;
       scentStarted ??= [
         startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 0\n' + viewGlsl + renderFrag),

@@ -11,7 +11,8 @@ export function program(gl: GL, vertex: string, fragment: string): WebGLProgram 
 /**
  * Compiles and links a program without asking for the result, so a driver with KHR_parallel_shader_compile builds it
  * beside the frames. `done()` says whether it is built (always true without the extension: the first query waits);
- * `check()` throws for a compile or link error.
+ * `check()` throws for a compile or link error. A lost context fails every compile without a log: check() then throws
+ * nothing, and the app reports the loss instead (WebGl2Backend.lost).
  */
 export function startProgram(gl: GL, vertex: string, fragment: string) {
   const shaders = [
@@ -32,7 +33,7 @@ export function startProgram(gl: GL, vertex: string, fragment: string) {
     program: p,
     done: () => !parallel || (gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR) as boolean),
     check: () => {
-      if (gl.getProgramParameter(p, gl.LINK_STATUS)) return;
+      if (gl.isContextLost() || gl.getProgramParameter(p, gl.LINK_STATUS)) return;
       for (const s of shaders)
         if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
           throw new Error(`GLSL compile error: ${gl.getShaderInfoLog(s) ?? ''}`);

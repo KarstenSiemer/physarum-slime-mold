@@ -25,6 +25,8 @@ export class WebGpuBackend implements Backend<Simulation> {
   private readonly format: GPUTextureFormat;
   private readonly bloom: Bloom;
   private readonly auto: AutoExposure;
+  /** destroy() was called: the end of the device that follows is no loss. */
+  private ending = false;
 
   private constructor(
     readonly gpu: Gpu,
@@ -38,8 +40,9 @@ export class WebGpuBackend implements Backend<Simulation> {
     this.auto = new AutoExposure(gpu.device);
     const i = gpu.info;
     this.description = `WebGPU · ${[i.vendor, i.architecture, i.description].filter(Boolean).join(' ')}`;
+    // destroy() below ends the device on purpose; any other end of it is a loss, also a destroy() from elsewhere.
     this.lost = gpu.device.lost.then((info) =>
-      info.reason === 'destroyed' ? new Promise<string>(() => undefined) : info.message,
+      this.ending ? new Promise<string>(() => undefined) : info.message || `device ${info.reason}`,
     );
   }
 
@@ -119,6 +122,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   destroy() {
+    this.ending = true;
     this.renderer.destroy();
     this.bloom.destroy();
     this.auto.destroy();
