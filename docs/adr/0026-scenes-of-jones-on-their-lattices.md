@@ -30,11 +30,15 @@ the caption.
 Each caption names its lattice, and no two places in the paper disagree. Table 1 (p. 134) gives 200 × 200 as the
 typical image size. Where the paper leaves a choice, this app keeps its earlier reading:
 
-- The paper does not draw the shape of the closed arena of Fig. 18, 19 and 21 in its text. Fig. 17 shows "a circular
-  sheet of agents". The app's dish is the circle on the lattice's side (ADR 0019), so %p of the lattice's area gives
-  Jones' count: 0.5 × 300 × 300 = 45,000 agents, as on p. 147.
+- The paper does not give the shape of the closed arena of Fig. 18, 19 and 21 in its text. Fig. 17 shows "a circular
+  sheet of agents". The app's dish is the circle on the lattice's side less 2 cells (ADR 0019), and %p of the lattice's
+  area gives Jones' count: 0.5 × 300 × 300 = 45,000 agents, as on p. 147. The images of Fig. 18 and 19 show a dish
+  0.945 of the lattice's side (the fidelity check of 2026-11-11, see Measurements); that dish comes with a later
+  change.
 - The caption of Fig. 22 names no boundary: Table 1's periodic boundary, as before.
 - The positions of the food in Fig. 18, 19 and 21 are not in the text. They stay this app's choice (decision 10).
+  The images show them: Fig. 19 a square of about 60 cells, 0.32 of the dish, with foods of about 2.7 cells; Fig. 21
+  19 foods, not the app's 8. The figures' foods come with a later change.
 
 ## Options
 
@@ -57,10 +61,10 @@ Option 1, with these decisions of this app, on 2026-11-11 under the owner's rule
 2. **An old link opens as it was made.** A link from before this change holds no lattice, so it opens on the grid
    shaped like the screen of its resolution, with the sender's bytes on the sender's grid (ADR 0021). The scene card
    shows the scene as changed, and the hint (item 6) offers Jones' lattice. To open it on the lattice instead would
-   change the picture that the sender shared. Known exception, open (review of 2026-11-11): a link names a scene's
-   shapes by the scene and one bit each (ADR 0021), so an old link of Steiner tree paints the foods of decision 10, not
-   those its sender saw. The fix waits for the comparison of the scenes with Jones' figures, which may move these
-   foods again; it will give a scene's shapes a revision that a link holds.
+   change the picture that the sender shared. A link names a scene's shapes by the scene and one bit each (ADR 0021),
+   so this holds only while a scene's shapes stay: Steiner tree's foods moved and came back on the same day
+   (decision 10), and an old link of every scene paints its sender's bytes. A later change that moves shapes must give
+   a scene's shapes a revision that a link holds.
 3. **The view fits the lattice** (`Engine.fitView()`, unchanged): the lattice fits the canvas, centred (a square one
    fills the canvas's short side), with free space beside it, at every zoom and on both backends. Beside a closed
    arena, and in a square lattice's corners outside the dish, the free space shows only the background, as it did
@@ -128,10 +132,14 @@ Option 1, with these decisions of this app, on 2026-11-11 under the owner's rule
    screen, with the usual notice (review of 2026-11-11). Before, a link of 2048 × 2048 cells kept running on a slow
    GPU. After a lattice the check goes on. A lattice is built again for a new density and a switch to or from the dish,
    which changes the agent count, not for the resolution or a new shape of the screen (`Engine.needsRebuild()`).
-10. **Steiner tree's foods move** to the corners of a square half as wide as the dish (±0.25 of its side in the dish's
-    frame, before ±0.145). Jones' positions are not in the text. On his lattice the square of before (58 cells wide)
-    kept a ring of trail in 5 of 10 runs up to step 30,000 (table below); half the dish (100 cells) ends as the
-    Steiner tree in 10 of 10 by step 6,000, with a bridge of 45 cells, as the shortest tree has (0.42 of the side).
+10. **Steiner tree keeps its foods** (±0.145 of the dish's side, radius 0.02 of it: 4 cells on 200 × 200). They moved
+    to a square half as wide as the dish (±0.25) on 2026-11-11, because the old square kept a ring of trail in 5 of 10
+    runs on Jones' lattice and half the dish gave a tree with two junctions and a long bridge in 10 of 10. They came
+    back the same day: the image of Fig. 19 shows a square of about 60 cells (0.32 of the dish) with foods of about
+    2.7 cells, and the end state of an X with a short bridge (row 2), not a long bridge. With the figure's foods the
+    network forms a tree in 20 of 20 runs (the fidelity check). Those foods come with a later change, together with the
+    shapes' revision of decision 2. Until then the scene text says what the scene shows: an X in about half of the
+    runs, a ring in the others.
 11. **The other scenes keep their values.** Shortest path keeps its foods, Shrinking plasmodium Jones' density 0.5, the
     networks no glow (decided 2026-11-09).
 12. **The agent tools on a periodic grid** (review of 2026-11-11, also on `main` when zoomed out). Cut, the Cut's
@@ -158,19 +166,19 @@ mean of the arena; a lacuna is a part of the rest of at least 20 cells, not open
 band is one part of the trail that touches every food, holds no lacuna and stays off the rim; its junctions are
 those of its skeleton (Zhang and Suen thinning).
 
-| Scene, property                                             | Before 16:9          | Before phone         | After (lattice)      |
-| ----------------------------------------------------------- | -------------------- | -------------------- | -------------------- |
-| Transport network, grid                                     | 1024 × 576           | 473 × 1024           | 200 × 200            |
-| lacunae at step 4,151 (Fig. 4)                              | 97.4 ± 4.6           | 77.4 ± 3.9           | 6.6 ± 1.0            |
-| mean lacuna at step 4,151, cells                            | 4,314 ± 221          | 4,468 ± 236          | 4,424 ± 784          |
-| trail cells that changed from step 4,151 to 4,651           | 23.2 ± 2.0 %         | 22.4 ± 1.5 %         | 18.5 ± 5.9 %         |
-| Minimizing network, lacunae at step 31,190 (Fig. 5)         | 26.8 ± 1.6           | 22.4 ± 1.7           | 1.6 ± 0.5            |
-| Turing spots, spots at step 10,000                          | 82.0 ± 2.8           | 66.8 ± 3.5           | 19.0 ± 1.9           |
-| spacing to the next spot, cells; its variation              | 28.3; 19.9 ± 2.5 %   | 28.6; 17.9 ± 3.2 %   | 31.1; 27.7 ± 4.7 %   |
-| Turing stripes, one orientation over the grid, step 20,000  | 59.5 ± 20.2 %        | 47.9 ± 30.7 %        | 84.6 ± 1.0 %         |
-| Shortest path, one band, no loop, off the rim, step 12,000  | 10 of 10             | 10 of 10             | 10 of 10             |
-| Steiner tree, a tree off the rim with two junctions, 12,000 | 10 of 10 (bridge 20) | 10 of 10 (bridge 15) | 10 of 10 (bridge 45) |
-| Wound healing, wound vs. before the cut, 700 steps later    | 43.9 ± 24.2 %        | 43.2 ± 14.8 %        | 47.1 ± 14.1 %        |
+| Scene, property                                             | Before 16:9          | Before phone         | After (lattice)    |
+| ----------------------------------------------------------- | -------------------- | -------------------- | ------------------ |
+| Transport network, grid                                     | 1024 × 576           | 473 × 1024           | 200 × 200          |
+| lacunae at step 4,151 (Fig. 4)                              | 97.4 ± 4.6           | 77.4 ± 3.9           | 6.6 ± 1.0          |
+| mean lacuna at step 4,151, cells                            | 4,314 ± 221          | 4,468 ± 236          | 4,424 ± 784        |
+| trail cells that changed from step 4,151 to 4,651           | 23.2 ± 2.0 %         | 22.4 ± 1.5 %         | 18.5 ± 5.9 %       |
+| Minimizing network, lacunae at step 31,190 (Fig. 5)         | 26.8 ± 1.6           | 22.4 ± 1.7           | 1.6 ± 0.5          |
+| Turing spots, spots at step 10,000                          | 82.0 ± 2.8           | 66.8 ± 3.5           | 19.0 ± 1.9         |
+| spacing to the next spot, cells; its variation              | 28.3; 19.9 ± 2.5 %   | 28.6; 17.9 ± 3.2 %   | 31.1; 27.7 ± 4.7 % |
+| Turing stripes, one orientation over the grid, step 20,000  | 59.5 ± 20.2 %        | 47.9 ± 30.7 %        | 84.6 ± 1.0 %       |
+| Shortest path, one band, no loop, off the rim, step 12,000  | 10 of 10             | 10 of 10             | 10 of 10           |
+| Steiner tree, a tree off the rim with two junctions, 12,000 | 10 of 10 (bridge 20) | 10 of 10 (bridge 15) | 5 of 10, 5 rings   |
+| Wound healing, wound vs. before the cut, 700 steps later    | 43.9 ± 24.2 %        | 43.2 ± 14.8 %        | 47.1 ± 14.1 %      |
 
 - The lacunae of the Transport network have the same size in cells on every grid: the pattern keeps its size, and
   the lattice holds Jones' number of them. The network keeps changing on the lattice.
@@ -178,20 +186,22 @@ those of its skeleton (Zhang and Suen thinning).
   step of his last image. On the grids of before it was still coarsening.
 - A spot is a maximum of the trail blurred over 8 cells. The spots keep their spacing in cells. On the lattice their
   array has more defects: a variation of the spacing of 28.7 ± 2.1 % at step 30,000 and 28.8 ± 4.0 % at 60,000,
-  against 18.0 to 19.0 % on 512 × 288. Some runs keep two spots in one ring. A lattice of 200 × 200 cells holds no
-  hexagonal array of this spacing without defects, and Jones' text says that the regular spacing comes only slowly
-  (p. 143). The scene runs Jones' setting, so it keeps them.
+  against 18.0 to 19.0 % on 512 × 288. Some runs keep two spots in one ring. The cause is the order inside a step:
+  Jones moves and deposits, then senses, then diffuses (p. 132–133), and this app senses first. With Jones' order all
+  30 runs of the fidelity check hold exactly 20 discs on 200 × 200 cells at step 30,000, with a spacing variation of
+  4.4 % (5.7 % in Fig. 16). Jones' order comes with a later change.
 - On the lattice one orientation of stripes covers the grid by step 5,000 (82.4 ± 1.2 %), as on p. 143 to 144.
 - The wound's pattern correlates with the pattern before the cut as much as the undamaged ring around it does
   (51.0 ± 13.0 % there at step 3,350).
-- Steiner tree on the lattice, seeds 1 to 10, by the width of the square of food against the dish: 0.21 wide, 1 tree
-  at step 30,000 (9 rings); 0.23 wide, 3 trees; 0.29 wide (the foods of before), 5 trees at steps 6,000 to 30,000,
-  and their bridges of 0 to 10 cells are shorter than the 24 of the shortest tree; 0.4 wide, 9 trees from step 6,000;
-  0.5 wide (now), 10 trees from step 6,000 to 30,000, with bridges of 40 to 50 cells. A ring stays where Jones says
-  that loops cannot close around the points (p. 145).
+- Steiner tree on the lattice, seeds 1 to 10, by the width of the square of food against the dish, with foods of
+  4 cells: 0.21 wide, 1 tree at step 30,000 (9 rings); 0.23 wide, 3 trees; 0.29 wide (the app's foods), 5 trees at
+  steps 6,000 to 30,000, an X or two junctions with a bridge of up to 15 cells; 0.4 wide, 9 trees from step 6,000;
+  0.5 wide, 10 trees from step 6,000 to 30,000, with bridges of 40 to 50 cells. A ring stays where Jones says that
+  loops cannot close around the points (p. 145). Fig. 19 shows 0.32 with foods of about 2.7 cells (decision 10).
 
 Shrinking plasmodium (an open owner question since ADR 0019: Jones' density 0.5 tears holes): a hole is a part of the
-sheet of at least 1,000 cells without trail, not open to the rim, by step 2,800.
+sheet of at least 1,000 cells without trail, not open to the rim, by step 2,800. The app's dish has the lattice's side
+less 2 cells.
 
 | Grid                                 | Density | Agents | Runs with a hole      | Same network (IoU at step 10,000) |
 | ------------------------------------ | ------- | ------ | --------------------- | --------------------------------- |
@@ -206,8 +216,14 @@ runs, always around the middle food (the centres of the 19 holes lie 12 to 39 ce
 a ring through the outer foods. The runs without a hole
 end in the same network (IoU 0.80 between them on the lattice, 0.82 on 512 × 288; 0.48 and 0.47 between the runs with
 a hole). Jones reports three runs with the same network (p. 147). On the lattice the scene reproduces Fig. 21 less
-often than on 512 × 288 (18 of 31 runs with a hole against 11 of 31). The density stays 0.5 until the owner decides
-(TODO.md); 0.6 tears no hole in 31 runs.
+often than on 512 × 288 (18 of 31 runs with a hole against 11 of 31), and 0.6 tears no hole in 31 runs. The cause is
+the dish, not the density: Jones' dish is 0.945 of the lattice's side (0.947 in the image of Fig. 18, 0.944 in
+Fig. 19), and with it Jones' density 0.5 tears a hole in 0 of 31 runs (the fidelity check). That dish comes with a
+later change; the density stays Jones' 0.5.
+
+The fidelity check (2026-11-11) compared every scene of Jones with the images of its figure and with a reference
+simulator written from the paper's text. Its other result for these scenes: Fig. 4 shows 8 lacunae at step 4,151,
+and the lattice gives 6.4 ± 0.9.
 
 ## Consequences
 
@@ -216,7 +232,7 @@ often than on 512 × 288 (18 of 31 runs with a hole against 11 of 31). The densi
   agents, trail, scent and environment after 500 steps from seed 7, WebGPU, WebGL2 and WebGL2 without float blending).
 - A scene of Jones on a desktop window lies partly below the panel, as the dish did before. The view does not fit the
   lattice into the space beside the panel.
-- A link holds the lattice. The README's image of the Steiner tree is rendered again (`docs/images/steiner.jpg`).
+- A link holds the lattice. The README's image of the Steiner tree stays: the scene keeps its foods (decision 10).
 - Tests: `src/engine/lattice.gpu.test.ts` (both backends: the lattice on 16:9, 1:1 and a phone, also one that is not
   square, and the app's scenes on the screen's grid; a tool paints the cell under the pointer on the lattice, on a copy
   of a periodic lattice and on a lattice that is not square, and nothing beside a dish; the pixels beside a closed

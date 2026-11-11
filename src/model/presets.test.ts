@@ -228,7 +228,9 @@ describe('presets', () => {
     const side = Math.abs(foods[0]?.at[0] ?? 0);
     for (const f of foods) expect(f.at.map(Math.abs)).toEqual([side, side]);
     expect(p.about).toMatch(/corners of a square/);
-    expect(p.watch).toMatch(/two three-way junctions joined by a short bridge/);
+    // With this app's foods on Jones' lattice: an X in about half of the runs, a ring in the others (ADR 0026).
+    expect(p.watch).toMatch(/about half of the runs it ends as an X/);
+    expect(p.watch).toMatch(/a ring through the four foods stays/);
   });
 
   it('have one strain role per strain', () => {

@@ -204,7 +204,7 @@ export const PRESETS: Preset[] = [
     source: 'Jones 2010, Fig. 16 (top)',
     summary: 'Agents flee their own trail and gather in rings that keep their distance.',
     about:
-      'Here agents are repelled by the trail they lay (chemorepulsion). They gather in tight circular flows that push each other apart, and Jones saw them form a regular array only slowly, like a Turing pattern on an animal coat (p. 143). On his grid of 200 × 200 cells only a few rings fit, and defects can stay for a long time: two spots in one ring, or rings out of line.',
+      'Here agents are repelled by the trail they lay (chemorepulsion). They gather in tight circular flows that push each other apart, and in Jones’ figure they slowly form a regular array, like a Turing pattern on an animal coat (p. 143). Here the array keeps defects for a long time: rings out of line, and some rings with two spots. This app senses before it moves, and Jones moves first (p. 133).',
     strainRoles: ['Jones’ repelled agent'],
     why: 'Jones’ values for Fig. 16, top row (p. 144): 20 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 40, one agent per cell, 200 × 200 cells. The long sensor distance sets the wide spacing between the spots.',
     settings: () =>
@@ -259,11 +259,11 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 19',
     summary: 'Four food sources: the network shrinks to a short tree that joins them all.',
     watch:
-      'A loose network wraps around the four food sources, then contracts. It ends as two three-way junctions joined by a short bridge, where paths meet at about 120° as in soap films (Plateau’s laws). The bridge runs across or along the screen, and a tail to the rim can stay for a few thousand steps.',
+      'A loose network wraps around the four food sources, then contracts. In about half of the runs it ends as an X: two three-way junctions close together, where paths meet at about 120° as in soap films (Plateau’s laws). In the other runs a ring through the four foods stays.',
     about:
-      'The same setup with four food sources at the corners of a square. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
+      'The same setup with four food sources at the corners of a square. In Jones’ figure the network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Here a ring can stay instead: Jones notes that the points can hold a loop open (p. 145).',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. With fewer agents loops and tails to the rim stay for thousands of steps longer.',
+    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. The food positions are this app’s choice. The foods in Fig. 19 are smaller and lie a little farther apart.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
