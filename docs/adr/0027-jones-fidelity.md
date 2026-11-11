@@ -245,6 +245,81 @@ is the code before this change, as ADR 0026 and the fidelity check measured it.
 - Wound healing stays less regular than the figure. Its variation is 9.1 to 9.3 % against about 3 to 5 % in the JPEG of
   Fig. 22, and 10.8 % with this app's order. It stays an open item (TODO.md); its cause is not found.
 
+### The app's own scenes
+
+Contact sheets of main and this branch (WebGPU, 1280 × 720, seed 7, steps 500 and 3,000; in the pull request). The
+default settings, Three strains, Two strains, Fleeing light, the Maze and Cyclones keep their character. Two scenes of
+Fogleman 2020 do not: in Dunes strain B no longer gathers into dots (on main the top 1 % of its cells hold 48 to 61 % of
+its trail, now 4 %, a haze), and its ridges break into fewer pieces; in Dot grid strain B's lattice of dots goes and
+strain A's streaks become round spots (top 1 % share 70 % against 31 %). Cyclones keeps its honeycomb and its
+vortices, with more of them (17.4 and 11.4 at steps 3,000 and 10,000 against 11.0 and 7.8; 5 seeds, 1024 × 576). These
+scenes run on a periodic grid without walls or food, so their only change is the step order: Fogleman's code senses,
+moves and deposits, then blurs (`knowledge-base/variants.md`), the app's order before, and the two affected strains
+sense only 1.3 and 1.7 cells ahead. A step order per scene of the extended model, with Fogleman's order for his scenes,
+gives their statistics back (prepared, not in this branch; owner question below). The scenes of Jones sparkle in the
+glow style: each agent's fresh deposit is a bright point (decision 22; owner question below).
+
+### Cost
+
+Paired in one page on the M3 Pro (this branch's shaders against main's, 24 rounds of 300 steps, the order alternating):
+the median ratio of a step's time per round is 1.02, 1.03, 0.99, 0.94 and 1.03 on WebGPU and 0.96, 1.02, 1.01, 0.98
+and 0.95 on WebGL2 for the default settings (1536 × 864), Three strains, the Transport network (200 × 200), Shrinking
+plasmodium (300 × 300) and the Maze, with rounds from 0.5 to 1.8 of each other. No change shows above that spread.
+
+The old look of the view (decision 22, owner question), on a canvas of 2560 × 1600 at fit: Three strains on 1536 × 960
+(4.4 M agents on WebGPU, 4.2 M on WebGL2, 0.6 cells per pixel) and the Transport network on 200 × 200 (0.125 cells per
+pixel), medians of 12 to 16 rounds while other jobs shared the machine:
+
+| Way to the old look                                                 | Three strains, WebGPU | WebGL2          | 200 × 200, WebGPU | WebGL2            |
+| ------------------------------------------------------------------- | --------------------- | --------------- | ----------------- | ----------------- |
+| None (decision 22): the draw                                        | 8.7 to 9.0 ms         | 9.2 ms          | 2.8 to 4.1 ms     | 1.5 ms            |
+| (b) a diffusion pass per frame for the view                         | + 1.6 to 2.3 ms       | + 0.1 to 1.3 ms | + 0.04 to 0.07 ms | + 0.03 to 0.05 ms |
+| (c) the 3 × 3 mean in the render pass where a cell is above a pixel | 15.5 to 19.8 ms       | 7.8 ms          | 10.2 to 10.5 ms   | 5.7 ms            |
+
+- (b) is exact for every scene with one diffusion pass (the scenes of Jones, the default settings, Two strains) if the
+  render pass, the gel's height field, the bloom, the auto levels and the PNG all read the pass's output, which fits in
+  the free texture of the ping-pong pair. Three strains and the scenes of Fogleman run two diffusion passes; they need
+  two passes per frame and a third trail texture (16 B per cell) to be exact.
+- (c) reads 16 trail texels per pixel instead of 4. It is not exact: the bloom, the auto levels and the height field
+  still read the sensed map, and zoomed out its 4 taps average the sensed map.
+- Neither gives main's pixels: the dynamics differ (this ADR). (b) gives the renderer the kind of map it drew before.
+
+### Tests
+
+- `sim.gpu.test.ts`, both backends: Jones' order (the trail holds the step's deposits undiffused; a sensor reads the
+  deposits of the last moves before they diffuse; the first step after a reset moves with the start heading); the
+  boundaries (trail, food and light in both models and every arena against a float64 reference of ADR 0027's rules for
+  20 steps, and far from the other model's walls and from the reflective mean; outside a dish and in the extended
+  model's walls no trail, in the Jones model's walls trail; the wall byte for the sources and the sinks); Jones' one
+  map, the scent references, covered food, the plateau and the mass balance in Jones' order; the dish (71 % filled,
+  every agent of Shrinking plasmodium placed with seed 6, the moves and sensors past a wall byte outside a 64 × 64
+  dish, the rim drawn and the outline of food straight up to the rim at 64 pixels per cell).
+- Unit: `pack.test.ts` (one `DISH_FILL` in every shader, no rim of the old formula, the wall flag, the emission
+  factor), `brush.test.ts`, `sweep.test.ts` and `engine-env.test.ts` (the geometry at the new rim, found again by
+  search), `link.test.ts` (revisions in the bytes, version 1 as revision 0, refused revisions and counts, kinds by
+  revision), `state.test.ts` (an old link paints its 8 foods until Reload scene), `presets.test.ts` (Fig. 19's foods,
+  the texts), `environment.test.ts` (revision 0 against the fractions of before).
+- e2e: an old link of Shortest path paints its foods of revision 0, and Reload scene those of Fig. 18.
+- On SwiftShader on the M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`) the new and changed GPU
+  tests took at most 5.6 s (Jones' one map in a box, WebGL2, which has a limit of 120 s); every other new test at most
+  3.1 s of 60 s. At the four times of CI (ADR 0010) none passes a quarter of its limit, so no limit changes.
+
+### Mutations
+
+Each new rule was broken on purpose, one at a time, and the tests named for it run (`vitest -t`); 36 mutations:
+
+- killed (34): the deposits added before the decay, and before the mean (the old order), on each backend; the first
+  step that senses, on each backend; the old emission factor (unit and GPU); the dish's radius of before in
+  `common.wgsl`, `common.glsl`, the render rim of `render.wgsl` and `render.frag`, the outline lookups of `render.wgsl`
+  and `view.glsl`, `brush.ts`, and a `DISH_FILL` of 0.95 in one shader; 32 start rounds; the reflective mean, the
+  walls of the other model and the outside that keeps its trail, each on both backends; the wall flag left out of
+  `pack.ts` (GPU and unit); sources in Jones' walls on both backends; a version 1 link read as the newest revision; the
+  revision left out of the bytes; `kindsOf()` with the newest shapes; the card without the old revision; `waiting()`
+  with the newest shapes; `openLink()` without the link's revision; `drawingOf()` without the revision.
+- survived (2): the near-rim threshold of `shapeCells` in `render.wgsl` and `render.frag` with the old rim. It only
+  chooses between two ways of reading the same cells; a probe of 4 views across the rim, 3 styles and both backends
+  found no pixel that changed, so the mutation is equivalent there.
+
 ## Not changed
 
 - **Jones' sequential order of the agents** (p. 133) against the synchronous claims of ADR 0008. The fidelity check
@@ -253,3 +328,24 @@ is the code before this change, as ADR 0026 and the fidelity check measured it.
 - **Wound healing's remaining irregularity** (9.1 to 9.3 % against about 3 to 5 % in Fig. 22) stays an open item in
   TODO.md; its cause is not found.
 - **Sensors in walls** read `BLOCKED` in both models (decision 13).
+
+## Open for the owner
+
+- **The scenes of Fogleman 2020 in Jones' order** (Dunes and Dot grid lose their dots, above). Options: keep Jones' order
+  for every scene; a step order per scene of the extended model, with Fogleman's order for his three scenes and links
+  that carry it (prepared: it gives their statistics back, and on WebGL2 main's exact bytes); or retune or drop the two
+  scenes. Their texts stay as they are until then.
+- **The sparkle of the scenes of Jones in the view** (decision 22): keep the map as the agents sense it, or show the map
+  after the diffusion as before (a pass per frame, or a mean in the render pass; measured below).
+- **The emission factor** (decision 5): d / 0.1 keeps the plateau of a large food at every decay, as ADR 0022's decision
+  13 asks; the old factor would keep the scent outside a food as it was and let the plateau fall by up to 10 %.
+
+## Consequences
+
+- The eight scenes of Jones match their figures where the fidelity check found them off (the table above); Wound
+  healing stays less regular than Fig. 22.
+- Every scene changes its bytes on both backends, and so does every link, old ones too (decision 21). WebGPU and WebGL2
+  give the same trail as each other where they did before (decision 23).
+- No pass, texture or buffer is added; the diffusion pass reads `env` and `counts` once per output cell instead of per
+  tile cell (WebGPU) or per tap (WebGL2).
+- Links have version 2; an app from before this change refuses them and loads their settings alone, with its notice.
