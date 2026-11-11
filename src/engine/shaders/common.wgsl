@@ -87,6 +87,18 @@ fn wrapPos(p: vec2f) -> vec2f {
 
 fn dishRadius() -> f32 { return 0.5 * f32(min(W(), H())) - 1.0; }
 
+// The distance from p to the centre q of an agent tool. On the periodic grid it is the distance to the nearest copy
+// of q (the minimum image): a tool held on a copy of the grid acts on the cells the copy shows, and one across an edge
+// acts on both sides (ADR 0026). Inside a closed arena it is the plain distance.
+fn toolDistance(p: vec2f, q: vec2f) -> f32 {
+  var d = p - q;
+  if (P.cfg.z == 0u) {
+    let s = vec2f(f32(W()), f32(H()));
+    d -= s * round(d / s);
+  }
+  return length(d);
+}
+
 // Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena.
 // Agents and diffusion share this rule, so a position is habitable exactly when its cell is.
 fn cellAt(c: vec2i) -> i32 {

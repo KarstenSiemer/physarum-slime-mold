@@ -1,4 +1,4 @@
-import { capacityOf, RESOLUTIONS, type Settings } from '../model/params';
+import { capacityOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 
 /**
  * Agents for a `width` × `height` grid: the density times the cells of the arena's square. A dish counts the square
@@ -28,6 +28,14 @@ export function gridSize(resolution: number, aspect: number): [number, number] {
   return aspect >= 1
     ? [resolution, Math.max(16, Math.round(resolution / aspect))]
     : [Math.max(16, Math.round(resolution * aspect)), resolution];
+}
+
+/**
+ * The grid of the settings: the lattice, which keeps its cells on every screen, or else a grid of `resolution` cells
+ * on the long side shaped like the screen (ADR 0026).
+ */
+export function gridOf(s: Pick<Settings, 'resolution' | 'lattice'>, aspect: number): Lattice {
+  return s.lattice ? [s.lattice[0], s.lattice[1]] : gridSize(s.resolution, aspect);
 }
 
 /** Trail level of a uniform population: deposit · agents per cell / decay. Sets the exposure scale. */
@@ -105,15 +113,20 @@ export interface Limits {
   bytesPerAgent?: number;
 }
 
+/** Whether a `w` × `h` grid with the agents that these settings hold (capacityCount()) fits the limits. */
+export function fits(s: Settings, w: number, h: number, l: Limits): boolean {
+  return (
+    estimateBytes(w, h, Math.min(l.maxAgents, capacityCount(s, w, h)), l.bytesPerCell, l.bytesPerAgent) <= l.budget &&
+    w * h * 16 <= l.maxBufferBytes && // the largest per-cell buffer: 16 B (counts, trail texel)
+    Math.max(w, h) <= l.maxGridSide
+  );
+}
+
 export function fitResolution(s: Settings, aspect: number, l: Limits): number {
   const options = RESOLUTIONS.filter((r) => r <= s.resolution);
   for (const r of options.reverse()) {
     const [w, h] = gridSize(r, aspect);
-    const fits =
-      estimateBytes(w, h, Math.min(l.maxAgents, capacityCount(s, w, h)), l.bytesPerCell, l.bytesPerAgent) <= l.budget &&
-      w * h * 16 <= l.maxBufferBytes && // the largest per-cell buffer: 16 B (counts, trail texel)
-      Math.max(w, h) <= l.maxGridSide;
-    if (fits) return r;
+    if (fits(s, w, h, l)) return r;
   }
   return RESOLUTIONS[0];
 }

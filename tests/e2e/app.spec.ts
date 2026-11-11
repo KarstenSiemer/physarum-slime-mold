@@ -73,7 +73,7 @@ test('fits a shared link to the device memory before the first allocation', asyn
   expect(sim.grid).toBeLessThan(2048);
   expect(estimateBytes(sim.width, sim.height, sim.agents)).toBeLessThanOrEqual(memoryBudget(0.25));
   // The panel shows the grid that the engine runs (startup tuning may lower it further).
-  const select = page.getByLabel('Grid (cells on the long side)');
+  const select = page.getByRole('combobox', { name: 'Grid' });
   await expect
     .poll(
       async () =>

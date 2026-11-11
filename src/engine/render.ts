@@ -56,8 +56,13 @@ export function packView(
   });
   fl.set(hexToLinear(BACKGROUND[settings.style]), 24);
   u.set([frame, strains.length, overlays ? 1 : 0, occupancy ? 1 : 0], 28);
-  fl.set([settings.bloom, black, 0, 0], 32);
+  // Copies of the grid around a periodic lattice show at this brightness (ADR 0026); 1 shows them as they are.
+  const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
+  fl.set([settings.bloom, black, copies, 0], 32);
 }
+
+/** How much of the scene the copies around a periodic lattice show (packView). */
+export const LATTICE_COPIES = 0.15;
 
 interface Groups {
   group: GPUBindGroup;

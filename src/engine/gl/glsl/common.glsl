@@ -80,6 +80,17 @@ vec2 wrapPos(vec2 p) {
 
 float dishRadius() { return 0.5 * float(min(W(), H())) - 1.0; }
 
+// The distance from p to the centre q of an agent tool: to the nearest copy of q on the periodic grid (toolDistance in
+// common.wgsl, ADR 0026).
+float toolDistance(vec2 p, vec2 q) {
+  vec2 d = p - q;
+  if (P.cfg.z == 0u) {
+    vec2 s = vec2(W(), H());
+    d -= s * round(d / s);
+  }
+  return length(d);
+}
+
 // Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (cellAt in common.wgsl).
 int cellAt(ivec2 c) {
   ivec2 size = ivec2(W(), H());

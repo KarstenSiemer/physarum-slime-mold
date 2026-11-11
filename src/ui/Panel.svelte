@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import {
     BOUNDARIES,
     capacityOf,
@@ -11,10 +12,21 @@
     modelHelp,
     MODELS,
     RESOLUTIONS,
+    sameLattice,
     STYLES,
+    type Lattice,
     type Strain,
   } from '../model/params';
-  import { GROUPS, PRESETS, presetById, ruleOffNotice, usesRule } from '../model/presets';
+  import {
+    GROUPS,
+    latticeLostNotice,
+    latticeNotice,
+    latticeText,
+    PRESETS,
+    presetById,
+    ruleOffNotice,
+    usesRule,
+  } from '../model/presets';
   import Matrix from './Matrix.svelte';
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
@@ -25,11 +37,15 @@
     clearEnvironment,
     getEngine,
     JONES_LIGHT,
+    latticeLeft,
+    latticeValue,
     lightDrawn,
     loadPreset,
+    pickGrid,
     removeStrain,
     setModel,
     showNotice,
+    useSceneLattice,
   } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
@@ -38,6 +54,28 @@
   const extended = $derived(s.model === 'extended');
   /** Light that the Jones model draws without effect: the panel says so below the model choice. */
   const lit = $derived(!extended && lightDrawn());
+  /** The scene's lattice while the grid is another one: the panel says why the result differs (ADR 0026). */
+  const left = $derived(latticeLeft());
+  /** The scene's lattice that this device could not hold, while it runs on another grid (ADR 0026). */
+  const lost = $derived(
+    app.lostLattice && !s.lattice && sameLattice(app.lostLattice, presetById(app.scene)?.settings().lattice ?? null)
+      ? app.lostLattice
+      : undefined,
+  );
+  let gridSelect = $state<HTMLSelectElement>();
+
+  // The button removes itself with the hint: the focus goes to the grid choice it changed, not to the page.
+  async function useLattice() {
+    useSceneLattice();
+    await tick();
+    gridSelect?.focus();
+  }
+  /** The lattices the grid choice offers: the one that runs and the scene's own. */
+  const lattices = $derived(
+    [s.lattice, app.sceneBase?.lattice ?? null].filter(
+      (l, i, all): l is Lattice => l !== null && all.findIndex((m) => sameLattice(m, l)) === i,
+    ),
+  );
 
   const LAYOUT_LABEL: Record<(typeof LAYOUTS)[number], string> = {
     mixed: 'Mixed everywhere',
@@ -136,11 +174,31 @@
     </label>
     <Slider spec={globalSpec.density} bind:value={s.density} id="density" live={false} />
     <label class="field">
-      <span>Grid (cells on the long side)</span>
-      <select bind:value={s.resolution} onchange={() => (app.gridPicked = true)}>
-        {#each RESOLUTIONS as r (r)}<option value={r}>{r}</option>{/each}
+      <span>Grid</span>
+      <select
+        bind:this={gridSelect}
+        value={s.lattice ? latticeValue(s.lattice) : String(s.resolution)}
+        aria-describedby={left || lost ? 'lattice-help' : undefined}
+        onchange={(e) => {
+          pickGrid(e.currentTarget.value);
+        }}
+      >
+        {#each lattices as l (latticeValue(l))}
+          <option value={latticeValue(l)}
+            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? ', as in the paper' : ''}</option
+          >
+        {/each}
+        {#each RESOLUTIONS as r (r)}<option value={String(r)}>{r} cells on the long side</option>{/each}
       </select>
     </label>
+    {#if left}
+      <div class="lattice" id="lattice-help">
+        <p class="helptext">{latticeNotice(left, s)}</p>
+        <button type="button" class="action" onclick={useLattice}>Use {latticeText(left)}</button>
+      </div>
+    {:else if lost}
+      <p class="helptext" id="lattice-help">{latticeLostNotice(lost, s)}</p>
+    {/if}
     <div class="check">
       <label>
         <input
@@ -414,6 +472,17 @@
   .hint button {
     display: block;
     margin-top: 4px;
+  }
+  .lattice {
+    margin: -2px 0 10px;
+  }
+  .lattice .helptext {
+    margin: 0 0 6px;
+  }
+  /* An action, like Reload scene in the scene card. */
+  .action {
+    color: var(--accent);
+    font-size: 13px;
   }
   cite {
     display: block;

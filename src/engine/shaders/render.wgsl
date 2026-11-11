@@ -14,7 +14,7 @@ struct View {
   colors: array<vec4f, 4>, // strain colors, linear RGB
   background: vec4f,  // linear RGB
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
-  fx: vec4f,          // bloom strength, black level (summed trail), unused, unused
+  fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), unused
 }
 
 @group(0) @binding(0) var<uniform> V: View;
@@ -571,11 +571,18 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   } else if (V.boundary == 2u) {
     inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
   }
-  var c = V.background.rgb * select(0.55, 0.92, V.style == 2u);
+  let space = V.background.rgb * select(0.55, 0.92, V.style == 2u);
+  var c = space;
   // One call: a GPU that runs both sides of a branch (SwiftShader in CI) would draw the scene twice.
   if (inside > 0.0) {
     let inner = scene(p, s);
     c = select(mix(c, inner, inside), inner, inside >= 1.0);
+  }
+  // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it, with a ramp one pixel wide
+  // across its edge. A grid shaped like the screen shows them as they are (copies 1).
+  if (V.fx.z < 1.0) {
+    let edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
+    c = mix(mix(space, c, V.fx.z), c, edge);
   }
   // Triangular dither of ±1 LSB against banding in dark gradients.
   let n = hash(vec2u(frag.xy)) - hash(vec2u(frag.xy) + vec2u(7919u, 104729u));
