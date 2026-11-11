@@ -19,6 +19,9 @@ struct Params {
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
   extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
   model: vec4f,          // trail saturation K (0 off), covered food factor (1 off), unused, unused (ADR 0022)
+  growth: vec4u,         // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
+  shrinkage: vec4u,      // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
+  startEnd: vec4u,       // exclusive end index of each strain's agents alive at the start (ADR 0025)
 }
 
 struct Agent {

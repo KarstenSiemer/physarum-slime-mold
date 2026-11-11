@@ -1,11 +1,20 @@
-import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
+import { capacityOf, constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
-import { stepChance, type AgentTool } from './pack';
-import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
+import { growthOn, stepChance, type AgentTool } from './pack';
+import {
+  agentCount,
+  BYTES_PER_AGENT,
+  capacityCount,
+  fitResolution,
+  GROWTH_BYTES_PER_AGENT,
+  GROWTH_BYTES_PER_CELL,
+  gridSize,
+  memoryBudget,
+} from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -96,7 +105,7 @@ export class Engine {
   private raf = 0;
   private rebuilding: Promise<void> | undefined;
   /** What the current simulation was built for: its grid and agent count follow from these. */
-  private built = { resolution: 0, density: 0, dish: false };
+  private built = { resolution: 0, density: 0, capacity: 0, dish: false };
 
   private constructor(
     readonly backend: Backend,
@@ -190,9 +199,13 @@ export class Engine {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
     const { maxAgents, maxBufferBytes, maxGridSide, coveredBytesPerCell } = this.backend;
-    // Covered food needs more memory only on some backends, and only while it is on.
-    const bytesPerCell = this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0);
-    const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, budget: memoryBudget(memory) };
+    // Covered food needs more memory only on some backends, and only while it is on; growth only while it is on.
+    const growth = growthOn({ ...s, collisions: s.collisions && this.backend.supportsCollisions });
+    const bytesPerCell =
+      this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0) + (growth ? GROWTH_BYTES_PER_CELL : 0);
+    const bytesPerAgent = BYTES_PER_AGENT + (growth ? GROWTH_BYTES_PER_AGENT : 0);
+    const budget = memoryBudget(memory);
+    const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
     return constrain({
       ...s,
       resolution: fitResolution(s, aspect, limits),
@@ -207,11 +220,20 @@ export class Engine {
     return f;
   }
 
-  /** The grid or the agent count changes: a dish counts its agents over the short side's square (agentCount()). */
+  /**
+   * The grid, the agent count or the capacity changes: a dish counts its agents over the short side's square
+   * (agentCount()).
+   */
   private needsRebuild() {
     const { resolution, density, boundary } = this.settings;
     const b = this.built;
-    return resolution !== b.resolution || density !== b.density || (boundary === 'dish') !== b.dish;
+    const capacity = capacityOf(this.settings);
+    return (
+      resolution !== b.resolution ||
+      density !== b.density ||
+      capacity !== b.capacity ||
+      (boundary === 'dish') !== b.dish
+    );
   }
 
   /** True while the simulation is being replaced; it cannot be used meanwhile. */
@@ -230,13 +252,16 @@ export class Engine {
       do {
         const { resolution, density, boundary } = this.settings;
         const [w, h] = gridSize(resolution, this.canvas.width / Math.max(1, this.canvas.height));
-        const agents = Math.max(1, Math.min(this.backend.maxAgents, agentCount(this.settings, w, h)));
+        // The buffer holds the capacity; the first agents of each strain, the start population, start alive.
+        const agents = Math.max(1, Math.min(this.backend.maxAgents, capacityCount(this.settings, w, h)));
+        const start = Math.min(agents, agentCount(this.settings, w, h));
+        const capacity = capacityOf(this.settings);
         this.live = false;
         old?.destroy();
         old = undefined;
-        this.built = { resolution: 0, density: 0, dish: false }; // nothing is built until the new one exists
+        this.built = { resolution: 0, density: 0, capacity: 0, dish: false }; // nothing is built until the new one exists
         try {
-          this.sim = await this.backend.createSim(this.settings, w, h, agents);
+          this.sim = await this.backend.createSim(this.settings, w, h, agents, start);
         } catch (err) {
           // The estimate was too optimistic for this GPU: step the grid down and try again.
           const lower = [...RESOLUTIONS].reverse().find((r) => r < resolution);
@@ -251,7 +276,7 @@ export class Engine {
         old = this.sim;
         this.live = true;
         this.painted = 0; // a new simulation starts without food, light and walls
-        this.built = { resolution, density, dish: boundary === 'dish' };
+        this.built = { resolution, density, capacity, dish: boundary === 'dish' };
         this.fitView();
       } while (this.needsRebuild());
       // Settings may have changed during the allocation (seed, layout, shares): start from them.

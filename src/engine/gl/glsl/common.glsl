@@ -23,6 +23,9 @@ layout(std140) uniform Params {
   uvec4 strainEnd;
   uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
   vec4 model;          // trail saturation K (0 off), covered food factor (1 off) (ADR 0022)
+  uvec4 growth;        // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
+  uvec4 shrinkage;     // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
+  uvec4 startEnd;      // exclusive end index of each strain's agents alive at the start (ADR 0025)
 } P;
 
 const float PI = 3.14159265358979;
