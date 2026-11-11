@@ -138,10 +138,11 @@ Each decision with its date, who made it, and why.
    `jonesFits()` asks for one strain with weight +1 or −1 on its own trail, the rule of one agent per cell and one
    diffusion pass. `constrain()` turns a Jones model without them into the extended model, for links and changes alike.
    Reason: these values change the run, so dropping them would run another scene than the one that was made.
-5. **Links** (this branch, 2026-11-11). `sanitize()` reads a link without `model` as Jones' (it was made with Jones'
-   rules and this app's additions together), then `constrain()` applies decisions 3 and 4. So an old link of a scene of
-   Jones opens with Jones, an old link with several strains or without the rule opens with Extended, and a Jones link
-   with K, light or a scent decay of its own holds Jones' values. K is rounded to its whole steps: a link with K 1e-300
+5. **Links** (this branch, 2026-11-11; for links without `model` replaced by decision 24). `constrain()` applies
+   decisions 3 and 4 to every link, so a Jones link with K, light or a scent decay of its own holds Jones' values, and
+   one with several strains or without the rule opens with Extended. The first version read a link without `model` as
+   Jones' and then constrained it; the review found that this opened old links of the Maze and of Fleeing light as
+   Jones (decision 24). K is rounded to its whole steps: a link with K 1e-300
    passed the clamp, picked the saturating passes and packed as 0 in float32, so t / (1 + t / 0) gave NaN in every lane
    with t = 0 and no agent turned, while the panel showed K 0. `trailSaturation()` also treats a K below 1 as off.
 6. **The panel offers only Jones' settings in the Jones model** (this branch, 2026-11-11): one strain without Add strain,
@@ -155,10 +156,13 @@ Each decision with its date, who made it, and why.
    trail, switches the rule on, sets one diffusion pass and binds the rest (decision 3). A notice says what went. A
    switch to Extended changes no value. Reason: a switch must not leave a Jones label on a run that is not Jones', and
    the user sees what changed. After Extended, K 30 and back to Jones the scene is the scene again, and the link holds
-   no K: the review found the card "changed" and `trailSaturation: 30` in the link of a plain Jones run.
+   no K: the review found the card "changed" and `trailSaturation: 30` in the link of a plain Jones run. The notice
+   names every value that went (decision 28).
 8. **Light in the Jones model** (this branch, 2026-11-11): no Light tool, and painted light stays painted but has no
    effect (source and weight 0). Reason: no paper of Jones has light that releases a repellent (list above). Light that
-   a scene or the user painted in Extended comes back when the user switches back.
+   a scene or the user painted in Extended acts again when the user switches back, with the default Light strength
+   and Light avoidance: the Jones model sets them to their defaults (decision 3), and the notice of the switch says so
+   (decision 28). The panel says that drawn light has no effect (decision 29).
 9. **Walls in the Jones model** (this branch, 2026-11-11): the sensors read their own cell only; moves still check the
    cells on their way. Reason: ADR 0020 was the owner's decision for the Maze, which is not Jones' scene; Jones does not
    say what a sensor behind a wall reads. No scene of Jones has walls, so none changes.
@@ -256,6 +260,68 @@ Each decision with its date, who made it, and why.
     an agent source (this branch, 2026-11-11). Reason: the tests compare the scent with a CPU reference, and the shipped
     passes with the sources without the new code.
 
+### Review of the settings and the panel of the strict model (2026-11-11)
+
+The settings and panel logic of decisions 2 to 8 had e2e tests only. A review against the owner rule of 2026-11-11 (a
+run labelled Jones is always Jones; a switch to Jones drops the extended values and says what went; a switch to
+Extended keeps Jones' values; an old link opens as Jones only if it fits, else Extended) found the defects below. Each
+decision has unit tests in `state.test.ts`, `params.test.ts` and `url.test.ts`, and each test failed under a temporary
+mutation of its code (the pull request lists them).
+
+24. **A link from before the model switch opens as Jones only if the Jones model runs it as it was made** (this branch,
+    2026-11-11, from the owner rule). `sanitize(raw, drawn)` reads a link without a valid `model` as Extended, and as
+    Jones only if `runsAsJones()` holds: the link fits (decision 4), holds no K, and has no walls, no light with an
+    effect, and no food with a source unless the strain weighs it as its own trail and the scent decay is the strain's
+    decay. `drawn` is what the link's drawing holds (`kindsOf()` in `src/model/link.ts`), so `decodeLink()` reads the
+    drawing before the settings. Reason: the code before the switch ran every link with this app's additions, as the
+    extended model does at Scent decay 0.1. Decision 5 read such a link as Jones whenever decision 4 held and bound the
+    rest. So an old link of the Maze opened as Jones, whose sensors do not check walls on their way (decision 9). An old
+    link of Fleeing light opened as Jones with Light strength 0.05 instead of 0.2, so its light had no effect. The scene
+    card said "changed" for both, and an old link of a scene of Jones with food and a scent decay of its own lost that
+    decay. Now the old link of every scene opens with the scene's model, and the card shows no change (test). What a
+    value without effect changes is nothing: without food and light the scent is 0, so an old link of Turing spots
+    (food weight +1 before the switch, trail weight −1) opens as Jones. Links with a model do not change: a link that
+    claims Jones holds Jones' values (decisions 3 and 4), its walls are Jones' obstacles, and its light has no effect.
+25. **The selected tool is one that the model offers** (this branch, 2026-11-11). `fitTool()` in
+    `src/ui/state.svelte.ts` selects Move when the model has no such tool. `setScene()` (a preset and Reload scene),
+    `openLink()`, `setModel()`, `adopt()` and `ruleUnavailable()` call it. Reason: the first version reset the Light
+    tool only in the switch and in `adopt()`, which App.svelte calls only when `constrain()` changes the settings. A
+    scene of Jones chosen with the Light tool kept that tool: the toolbar showed no tool selected, and a drag painted
+    light into the Jones run.
+26. **Scent decay has the range of the strain's Decay: 0.0001 to 0.9** (this branch, 2026-11-11). Reason: the Jones
+    model sets the scent decay to the strain's decay (decision 3), whose range starts at 0.0001, and a switch to
+    Extended keeps it (decision 7). With the old minimum of 0.001, a strain decay of 0.0005 in Jones ran in Extended with
+    a scent decay of 0.0005, but the slider could not show it, and the link clamped it to 0.001: the receiver ran
+    another scent.
+27. **The Jones model sets the population share of its strain to 1** (this branch, 2026-11-11, `asJones()`). Reason:
+    one population has no share (list above), and the panel shows none in the Jones model. After Extended, Add strain,
+    a share of 0.5 for strain A and back to Jones, the card said "changed" for a run equal to the scene, and no control
+    in the panel could undo it. One strain gets all agents at every share, so no scene changes.
+28. **The notice of the switch to Jones names every value it changed** (this branch, 2026-11-11, `jonesChanges()`):
+    the strains and the agents that share a cell that it removed, and every number that differs before and after
+    `toJones()`, with its old and new value: Agents per cell, Diffusion passes, Scent decay (with the reason: the Decay
+    of strain A), Trail saturation, Light strength, the weight of strain A on its own trail, Food attraction and Light
+    avoidance. With walls on the canvas it also says that they stop agents but do not block sensors (decision 9). It
+    shows for at least 10 s, 0.3 s per word. Reason: the owner rule "says what went". The first list missed Light
+    strength, the weights of strain A and the cap of Agents per cell, and for 0 diffusion passes it said "more than one
+    diffusion pass".
+29. **The panel says that drawn light has no effect in the Jones model** (this branch, 2026-11-11). Below the model
+    choice, while the food, light and walls hold light (`lightDrawn()`): "The light on the canvas has no effect in the
+    Jones model. To remove it, use the Erase tool. To use it, select Extended." Reason: the review asked whether light
+    that stays drawn without effect is clear. It was not: the notice of the switch goes after 10 s, and a link of the
+    Jones model with light opens without a notice.
+30. **The help says that Extended also differs from Jones at a cut** (this branch, 2026-11-11). The help of Model and
+    Learn → The model now say "until you paint a wall or use the Cut tool", and the help lists all of Extended's
+    rules: also agents that share a cell, no diffusion, and a Cut that also removes the trail. Reason: the extended
+    model's cut clears the trail and the scent (decision 3), and Wound healing asks the user to cut.
+31. **A held agent tool acts only while it is selected** (this branch, 2026-11-11; the agent tools of ADR 0023). In
+    App.svelte the hold applies Inoculate or Cut only while one of the two is selected, and it follows the pointer also
+    while another tool is selected. Reason: the review asked what a switch during a hold does. A switch of the model
+    changes no held tool, because both models have Inoculate and Cut: it selects strain A for Inoculate, and the cut
+    then keeps or clears the chemicals as the new model does. But a key can select another tool during the hold, and
+    since the first agent tools (before this branch) the hold then went on inoculating under that tool, for example
+    under Move or Food.
+
 ## Open for the owner
 
 See `TODO.md` (M2):
@@ -268,10 +334,8 @@ See `TODO.md` (M2):
   or counts only the agents that moved, which misses agents that a wall blocked.
 - Whether K should get a random offset of the sensors in each step, so that its straight paths out of food lose their
   preference for the grid axes (decision 17).
-- Old links that set a scent decay other than 0.1 and use something that is not Jones' (several strains, no rule) open
-  in Extended, which scales their food and light by g(d): their scent is weaker than when they were made. An old link of
-  a scene of Jones with a scent decay of its own opens in Jones with the strain's decay. No model keeps the old
-  unscaled, decoupled scent.
+- Old links that set a scent decay other than 0.1 open in Extended (decision 24), which scales their food and light by
+  g(d): their scent is weaker than when they were made. No model keeps the old unscaled, decoupled scent.
 
 ## Consequences
 
@@ -292,7 +356,12 @@ See `TODO.md` (M2):
   and without the rule, with food across both seams of the periodic grid, light on food and dead agents, and on WebGL2
   without float blending; and the turn of every agent of two strains on a random trail against a CPU reference of
   `sense()` and `steer()` with K, with and without a wall. Unit tests: `params.test.ts` (the Jones model's links,
-  `constrain()`, `toJones()`, K's steps), `pack.test.ts`, `presets.test.ts`, `url.test.ts`, `sizing.test.ts`.
+  `jonesFits()` for each weight, rule and diffusion, `constrain()` on 2,000 random settings, `toJones()` on every scene,
+  `runsAsJones()`, the share and the range of Scent decay, K's steps), `state.test.ts` (`setModel()` both ways and its
+  notice, `toolsFor()`, the tool after a preset, Reload scene, a link and `adopt()`, the scene flag after a switch and
+  back, `lightDrawn()`, the old link of every scene), `url.test.ts` (old links by what their drawing holds, links that
+  claim Jones), `pack.test.ts`, `presets.test.ts`, `sizing.test.ts`. e2e: `ui.spec.ts` (the Jones panel, the Light tool
+  after a preset and the switch, the line about drawn light, the held agent tool).
 - **Plateau.** A disc of food of radius 300 on 1024 × 1024 cells, Food strength 0.05, after 20 / d steps, on both
   backends: the extended model gave 114.750, 114.748 and 114.736 at decays 0.1, 0.01 and 0.001 (theory 114.75, within
   1.3e-4); with a source that does not depend on the decay (the Jones model, where d is the strain's decay) 114.75,
