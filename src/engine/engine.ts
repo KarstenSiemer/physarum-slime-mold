@@ -5,7 +5,7 @@ import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import { stepChance, type AgentTool } from './pack';
-import { agentCount, fitResolution, fits, gridOf, memoryBudget } from './sizing';
+import { agentCount, fitResolution, fits, gridOf, gridSize, memoryBudget } from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -260,8 +260,13 @@ export class Engine {
           this.sim = await this.backend.createSim(this.settings, w, h, agents);
         } catch (err) {
           // The estimate was too optimistic for this GPU: step the grid down and try again. A lattice keeps its cells
-          // or goes: the grid below it is shaped like the screen (ADR 0026).
-          const lower = [...RESOLUTIONS].reverse().find((r) => r < Math.max(w, h));
+          // or goes: the next grid is the largest one shaped like the screen with fewer cells (ADR 0026). For a grid
+          // shaped like the screen that is the next resolution below.
+          const aspect = this.canvas.width / Math.max(1, this.canvas.height);
+          const lower = [...RESOLUTIONS].reverse().find((r) => {
+            const [gw, gh] = gridSize(r, aspect);
+            return gw * gh < w * h;
+          });
           if (!(err instanceof OutOfMemoryError) || lower === undefined) {
             this.stop(); // nothing is left to draw
             throw err;
@@ -430,9 +435,16 @@ export class Engine {
     this.sim.paint(strokes.filter((s) => s !== undefined));
   }
 
-  /** The agent tool held during the next frame. Call it every frame while the tool is held (App.svelte). */
+  /**
+   * The agent tool held during the next frame. Call it every frame while the tool is held (App.svelte). A tool whose
+   * brush reaches no cell of the arena, such as one held on the free space beside a closed lattice (ADR 0026), can
+   * change nothing: it is idle, so a paused hold runs no step. On a periodic grid every brush reaches the grid.
+   */
   agentTool(tool: HeldTool) {
-    this.pendingTool = tool;
+    const { x, y, radius } = tool;
+    const brush = { kind: 'erase' as const, from: [x, y] as [number, number], to: [x, y] as [number, number], radius };
+    const reaches = this.live && paintsCell(brush, this.sim.width, this.sim.height, this.settings.boundary);
+    this.pendingTool = reaches ? tool : { ...tool, idle: true };
   }
 
   /** Called when a frame throws; the loop stops instead of failing silently. */

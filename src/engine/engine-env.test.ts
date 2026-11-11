@@ -1,6 +1,6 @@
 // The engine keeps food, light and walls across new simulations (ADR 0019), checked in Node with a CPU backend
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { drawingOf } from '../model/link';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
 import { presetById, type Preset } from '../model/presets';
@@ -1184,6 +1184,18 @@ describe('lattices', () => {
     });
   });
 
+  // ADR 0026, decision 4: a lattice that is not square keeps its width and height on every screen; it never turns.
+  it('keep the width and the height of a lattice that is not square on every screen', async () => {
+    for (const lattice of [
+      [400, 150],
+      [150, 400],
+    ] as const)
+      for (const [w, h] of screens) {
+        const { sim } = await engineWith({ ...jones('wound').settings(), lattice: [...lattice] }, [], canvas(w, h));
+        expect([sim().width, sim().height], `${lattice.join(' × ')} on ${w} × ${h}`).toEqual(lattice);
+      }
+  });
+
   it('give the app’s scenes a grid shaped like the screen', async () => {
     for (const id of ['three-strains', 'maze', 'light', 'cyclones']) {
       const p = jones(id);
@@ -1255,7 +1267,7 @@ describe('lattices', () => {
     expect([engine.sim.width, engine.sim.height]).toEqual([256, 144]);
     expect(told).toEqual([
       [
-        'This device cannot hold a lattice of 300 × 300 cells. The scene runs on a grid of 256 cells on the long side.',
+        'This device cannot hold a lattice of 300\u00a0×\u00a0300 cells. The scene runs on a grid of 256 cells on the long side.',
         256,
         [300, 300],
       ],
@@ -1266,20 +1278,41 @@ describe('lattices', () => {
     expect([engine.sim.width, engine.sim.height, told]).toEqual([100, 100, []]);
   });
 
-  it('step a lattice down to a grid shaped like the screen after an out-of-memory error, and say so', async () => {
-    const backend = new CpuBackend();
-    backend.before = () => Promise.reject(new OutOfMemoryError('test'));
-    const told: [string, number, unknown][] = [];
-    const s = jones('shrinking').settings();
-    const engine = await Engine.create(canvas(1280, 720), s, (m, r, l) => told.push([m, r, l]), backend);
-    expect([engine.settings.lattice, engine.settings.resolution]).toEqual([null, 256]);
-    expect([engine.sim.width, engine.sim.height]).toEqual([256, 144]);
-    expect(told).toEqual([
-      [
-        'The GPU ran out of memory for a lattice of 300 × 300 cells. The scene runs on a grid of 256 cells on the long side.',
-        256,
-        [300, 300],
-      ],
-    ]);
+  // ADR 0026: out of memory steps a lattice down to the largest grid shaped like the screen with fewer cells.
+  it('step a lattice down to a grid shaped like the screen with fewer cells after an out-of-memory error', async () => {
+    const run = async (id: string, w: number, h: number, lattice?: [number, number]) => {
+      const backend = new CpuBackend();
+      backend.before = () => Promise.reject(new OutOfMemoryError('test'));
+      const told: [string, number, unknown][] = [];
+      const s = { ...jones(id).settings(), ...(lattice ? { lattice } : {}) };
+      const engine = await Engine.create(canvas(w, h), s, (m, r, l) => told.push([m, r, l]), backend);
+      return { engine, told };
+    };
+    const nb = (t: string) => t.replaceAll(' ', '\u00a0');
+    for (const [id, side, w, h, grid] of [
+      ['shrinking', 300, 1280, 720, [256, 144]], // 36,864 cells of 90,000
+      ['steiner', 200, 1280, 720, [256, 144]], // 36,864 of 40,000: no resolution lies below 200
+      ['network', 200, 390, 844, [118, 256]], // a phone: 30,208 of 40,000
+    ] as const) {
+      const { engine, told } = await run(id, w, h);
+      expect([engine.settings.lattice, engine.settings.resolution], id).toEqual([null, 256]);
+      expect([engine.sim.width, engine.sim.height], id).toEqual(grid);
+      expect(told, id).toEqual([
+        [
+          `The GPU ran out of memory for a lattice of ${nb(`${side} × ${side}`)} cells. The scene runs on a grid of 256 cells on the long side.`,
+          256,
+          [side, side],
+        ],
+      ]);
+    }
+    // A wide lattice goes by its cells, not by its long side: 1000 × 100 cells step down to 512 × 288 (147,456 cells),
+    // not to 768 × 432.
+    const wide = await run('wound', 1280, 720, [1000, 100]);
+    expect([wide.engine.sim.width, wide.engine.sim.height]).toEqual([256, 144]);
+    // On a square screen no grid shaped like it has fewer cells than 200 × 200 (256 × 256 has 65,536): the error
+    // stands, as for the smallest grid shaped like the screen.
+    vi.stubGlobal('cancelAnimationFrame', () => undefined); // Engine.stop() in Node
+    await expect(run('steiner', 1000, 1000)).rejects.toThrow(OutOfMemoryError);
+    vi.unstubAllGlobals();
   });
 });

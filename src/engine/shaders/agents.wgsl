@@ -196,11 +196,11 @@ fn placement(a: Agent, id: u32) -> Spot {
     let p = randomIn(P.tool.xy, P.tool.z, &rng);
     let c = cellOf(p);
     if (openCell(c)) { return Spot(wrapPos(p), rand(&rng) * TAU, c); }
-  } else if (P.tool.w == 2.0 && alive && distance(a.pos, P.tool.xy) < P.tool.z) {
+  } else if (P.tool.w == 2.0 && alive && toolDistance(a.pos, P.tool.xy) < P.tool.z) {
     for (var k = 0u; k < 8u; k++) {
       let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
       let c = cellOf(p);
-      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) { return Spot(wrapPos(p), a.heading, c); }
+      if (openCell(c) && toolDistance(p, P.tool.xy) >= P.tool.z) { return Spot(wrapPos(p), a.heading, c); }
     }
   }
   return Spot(a.pos, a.heading, -1);

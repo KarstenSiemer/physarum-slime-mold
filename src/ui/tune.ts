@@ -1,4 +1,5 @@
-import { RESOLUTIONS } from '../model/params';
+import { RESOLUTIONS, type Lattice } from '../model/params';
+import { gridSize } from '../engine/sizing';
 
 /** Active time (ms) at which the startup check looks at the window since the last check or restart. */
 export const CHECKS_MS = [3000, 6000, 10_000, 15_000] as const;
@@ -52,6 +53,19 @@ export function lowerGrid(w: Window, resolution: number, lowered: number): numbe
   return lower !== undefined && lower >= MIN_GRID ? lower : undefined;
 }
 
+/**
+ * The resolution that the startup check uses for a lattice it may lower (ADR 0026): the smallest whose grid shaped like
+ * the screen (`aspect`, width / height) holds at least the lattice's cells, else the largest. lowerGrid() then gives a
+ * grid shaped like the screen with fewer cells.
+ */
+export function latticeResolution([w, h]: Lattice, aspect: number): number {
+  const fit = RESOLUTIONS.find((r) => {
+    const [gw, gh] = gridSize(r, aspect);
+    return gw * gh >= w * h;
+  });
+  return fit ?? RESOLUTIONS[RESOLUTIONS.length - 1] ?? 4096;
+}
+
 /** What the startup check sees at one stats tick. */
 export interface Tick {
   /** performance.now() */
@@ -70,7 +84,10 @@ export interface Tick {
   resolution: number;
   /** The user picked a grid in the panel: the check never lowers it. */
   picked: boolean;
-  /** The grid is a lattice (ADR 0026): it keeps its cells, so the check never lowers it, and its time does not count. */
+  /**
+   * The grid is the loaded scene's own lattice (ADR 0026): it keeps its cells, so the check never lowers it, and its
+   * time does not count. Another lattice, such as one from a link, comes as `resolution` (latticeResolution()).
+   */
   lattice?: boolean;
 }
 

@@ -54,7 +54,7 @@ for (const [backend, query] of [
   ['WebGPU', ''],
   ['WebGL2', '?backend=webgl2'],
 ] as const) {
-  test(`a scene of Jones keeps its lattice; another grid shows why, and the hint’s button and the link restore it (${backend})`, async ({
+  test(`a scene of Jones keeps its lattice; another grid shows why, and the hint’s button restores it (${backend})`, async ({
     page,
   }) => {
     const errors = watchErrors(page);
@@ -66,27 +66,28 @@ for (const [backend, query] of [
 
     await grid(page).selectOption('256');
     await expect.poll(() => simGrid(page), { timeout: 120_000 }).not.toEqual([200, 200]);
-    await expect(hint(page)).toContainText('Jones gives all lengths in cells');
-    await expect(hint(page)).toContainText('For this figure, Jones used a lattice of 200 × 200 cells.');
+    await expect(hint(page)).toContainText('This grid has 256 cells on the long side.');
+    await expect(hint(page)).toContainText('For this figure, Jones used 200 × 200 cells.');
+    await expect(hint(page)).toContainText('Sensor distance and Step size');
+    await expect(hint(page)).toContainText('the pattern keeps its size in cells');
     await expect(grid(page)).toHaveAttribute('aria-describedby', 'lattice-help');
     await expect(card(page).getByText('changed', { exact: true })).toBeVisible();
+    await expect(card(page)).toContainText('You changed the scene.');
+    // The grid choice still lists the paper's lattice.
+    await expect(grid(page).locator('option[value="200x200"]')).toHaveText('200 × 200 cells, as in the paper');
     // The link holds the grid shaped like the screen.
     expect((await linked(page))?.lattice).toBeNull();
 
+    // The button removes itself with the hint: the focus goes to the grid choice.
     await hint(page).getByRole('button', { name: 'Use 200 × 200 cells' }).click();
     await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([200, 200]);
     await expect(hint(page)).toBeHidden();
     await expect(grid(page)).toHaveValue('200x200');
+    await expect(grid(page)).toBeFocused();
     await expect(card(page).getByText('changed', { exact: true })).toBeHidden();
 
-    // The link holds the lattice, and opens on it.
+    // The link holds the lattice. The tests below open such links.
     expect((await linked(page))?.lattice).toEqual([200, 200]);
-    const back = await page.evaluate(() => location.href);
-    await page.goto('about:blank');
-    await page.goto(back);
-    await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([200, 200]);
-    await expect(card(page).getByRole('heading', { name: 'Steiner tree' })).toBeVisible();
-    await expect(hint(page)).toBeHidden();
     expect(errors).toEqual([]);
   });
 
@@ -133,6 +134,24 @@ for (const [backend, query] of [
     });
 }
 
+test('the app’s own scenes show no hint and no lattice of a paper', async ({ page }) => {
+  const errors = watchErrors(page);
+  // The Maze on 256 cells: cheap on SwiftShader in CI.
+  const p = presetById('maze');
+  if (!p) throw new Error('no Maze');
+  const { hash } = await encodeLink(
+    { ...p.settings(), resolution: 256 },
+    { scene: p.id, origins: [0], shapes: p.env?.map(() => true) ?? [], strokes: [] },
+  );
+  await page.goto(`/#${hash}`);
+  await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([256, 144]);
+  await expect(card(page).getByRole('heading', { name: 'Maze' })).toBeVisible();
+  await expect(hint(page)).toBeHidden();
+  await expect(grid(page)).not.toHaveAttribute('aria-describedby');
+  await expect(grid(page).locator('option', { hasText: '×' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('an old link of a scene of Jones opens as it was made, on a grid shaped like the screen, with the hint', async ({
   page,
 }) => {
@@ -148,9 +167,68 @@ test('an old link of a scene of Jones opens as it was made, on a grid shaped lik
   await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([256, 144]);
   await expect(card(page).getByRole('heading', { name: 'Shortest path' })).toBeVisible();
   await expect(card(page).getByText('changed', { exact: true })).toBeVisible();
-  await expect(hint(page)).toContainText('Jones used a lattice of 200 × 200 cells');
+  // The receiver changed nothing: the link did.
+  await expect(card(page)).toContainText('This link changes the scene.');
+  await expect(hint(page)).toContainText('This grid has 256 cells on the long side.');
+  await expect(hint(page)).toContainText('For this figure, Jones used 200 × 200 cells.');
   await hint(page).getByRole('button', { name: 'Use 200 × 200 cells' }).click();
   await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([200, 200]);
   await expect(card(page).getByText('changed', { exact: true })).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('a lattice the device cannot hold runs on a grid shaped like the screen; the notice, the panel and the link say so', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // 0.25 GB of device memory: a budget of 32 MiB. A link asks Wound healing for 4096 × 4096 cells (about 1.5 GB).
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
+  });
+  const p = presetById('wound');
+  if (!p) throw new Error('no Wound healing');
+  const s: Settings = { ...p.settings(), lattice: [4096, 4096], resolution: 512 };
+  const { hash } = await encodeLink(s, { scene: p.id, origins: [0], shapes: [], strokes: [] });
+  await page.goto(`/#${hash}`);
+  await expect(page.getByRole('status')).toContainText(
+    'This device cannot hold a lattice of 4096 × 4096 cells. The scene runs on a grid of 512 cells on the long side.',
+    { timeout: 60_000 },
+  );
+  await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([512, 288]);
+  // The panel and the link follow what runs, so the next setting does not ask for the lattice again
+  // (Engine.supported() tells only about a lattice it was asked for).
+  await expect(grid(page)).toHaveValue('512');
+  expect((await linked(page))?.lattice).toBeNull();
+  // The scene's own lattice is the way back.
+  await expect(hint(page)).toContainText('For this figure, Jones used 300 × 300 cells.');
+  await hint(page).getByRole('button', { name: 'Use 300 × 300 cells' }).click();
+  await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([300, 300]);
+  expect(errors).toEqual([]);
+});
+
+test('a device that cannot hold the scene’s own lattice runs a grid shaped like the screen, as no change of the scene', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // 1 MB of device memory: a budget of 128 KiB, below the 9.5 MB that Wound healing's 300 × 300 cells need. The app's
+  // smallest grid still runs (the memory fit never goes below it).
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.001 });
+  });
+  const p = presetById('wound');
+  if (!p) throw new Error('no Wound healing');
+  const { hash } = await encodeLink(p.settings(), { scene: p.id, origins: [0], shapes: [], strokes: [] });
+  await page.goto(`/#${hash}`);
+  await expect(page.getByRole('status')).toContainText('This device cannot hold a lattice of 300 × 300 cells.', {
+    timeout: 60_000,
+  });
+  await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([256, 144]);
+  // No change of the scene, and no way back that would fail the same way.
+  await expect(card(page).getByText('changed', { exact: true })).toBeHidden();
+  await expect(hint(page)).toContainText(
+    'This device cannot hold Jones’ grid of 300 × 300 cells for this figure. The scene runs on a grid of 256 cells on the long side',
+  );
+  await expect(hint(page).getByRole('button')).toHaveCount(0);
+  await expect(grid(page)).toHaveAttribute('aria-describedby', 'lattice-help');
   expect(errors).toEqual([]);
 });

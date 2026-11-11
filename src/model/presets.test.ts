@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
 import {
   GROUPS,
+  latticeLostNotice,
   latticeNotice,
+  latticeText,
   PRESETS,
   presetById,
   RULE_MISSING_NOTICE,
@@ -149,12 +151,25 @@ describe('presets', () => {
     expect(Math.round(sh.density * (sh.lattice?.[0] ?? 0) * (sh.lattice?.[1] ?? 0))).toBe(45_000);
   });
 
-  it('name the lattice in the hint below the grid, with the words of the owner’s rule', () => {
-    const text = latticeNotice([300, 300]);
-    expect(text).toContain('in cells');
-    expect(text).toContain('different scale');
+  it('name the grid and Jones’ lattice in the hint below the grid, with the words of the owner’s rule', () => {
+    const nb = (t: string) => t.replaceAll(' ', '\u00a0');
+    const text = latticeNotice([300, 300], { lattice: null, resolution: 512 });
+    expect(text).toContain('This grid has 512 cells on the long side.');
+    expect(text).toContain(`For this figure, Jones used ${nb('300 × 300')} cells.`);
+    expect(text).toContain('lengths in cells');
+    // The panel's names, and what another grid does: the pattern keeps its size in cells (ADR 0026, measurements).
+    expect(text).toContain('Sensor distance and Step size');
+    expect(text).toContain('the pattern keeps its size in cells');
     expect(text).toContain('different from the paper');
-    expect(text).toContain('Jones used a lattice of 300 × 300 cells');
+    expect(text).not.toMatch(/scale|changed/);
+    expect(latticeNotice([200, 200], { lattice: [300, 300], resolution: 512 })).toContain(
+      `This grid has ${nb('300 × 300')} cells.`,
+    );
+    // No-break spaces keep "200 × 200" on one line.
+    expect(latticeText([200, 200])).toBe(`${nb('200 × 200')} cells`);
+    expect(latticeLostNotice([300, 300], { lattice: null, resolution: 256 })).toBe(
+      `This device cannot hold Jones’ grid of ${nb('300 × 300')} cells for this figure. The scene runs on a grid of 256 cells on the long side, so the result can be different from the paper.`,
+    );
     // ASD-STE100: at most 20 words in a sentence of a procedure, 25 in a description.
     for (const sentence of text.split(/(?<=\.)\s+/))
       expect(sentence.split(/\s+/).length, sentence).toBeLessThanOrEqual(20);
@@ -264,7 +279,7 @@ describe('presets', () => {
         expect(strains('sensorOffset'), p.id).toContain(num(v));
       for (const v of all(/[Dd]ecay (\d+(?:\.\d+)?)/g)) expect(strains('decay'), p.id).toContain(num(v));
       for (const v of all(/[Gg]rid (\d+)\b(?! ×)/g)) expect(num(v), p.id).toBe(s.resolution);
-      for (const [, w = '', h = ''] of text.matchAll(/(\d+) × (\d+) cells/g))
+      for (const [, w = '', h = ''] of text.matchAll(/(\d+)\s×\s(\d+) cells/g))
         expect([num(w), num(h)], p.id).toEqual(s.lattice);
       for (const v of all(/weight of −(\d+(?:\.\d+)?) on the other strain/g))
         expect(s.strains[0]?.attraction[1], p.id).toBe(-num(v));

@@ -202,9 +202,9 @@ export const PRESETS: Preset[] = [
     name: 'Turing spots',
     group: 'jones',
     source: 'Jones 2010, Fig. 16 (top)',
-    summary: 'Agents flee their own trail and settle into a regular array of spots.',
+    summary: 'Agents flee their own trail and gather in rings that keep their distance.',
     about:
-      'Here agents are repelled by the trail they lay (chemorepulsion). They first gather in tight circular flows that push each other apart, and over time a regular array of spots spreads across the grid (p. 143). Jones compares such patterns to Turing patterns, the chemistry used to explain spots and stripes on animal coats.',
+      'Here agents are repelled by the trail they lay (chemorepulsion). They gather in tight circular flows that push each other apart, and Jones saw them form a regular array only slowly, like a Turing pattern on an animal coat (p. 143). On his grid of 200 × 200 cells only a few rings fit, and defects can stay for a long time: two spots in one ring, or rings out of line.',
     strainRoles: ['Jones’ repelled agent'],
     why: 'Jones’ values for Fig. 16, top row (p. 144): 20 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 40, one agent per cell, 200 × 200 cells. The long sensor distance sets the wide spacing between the spots.',
     settings: () =>
@@ -448,15 +448,25 @@ export function ruleOffNotice(p: Preset): string {
     : 'Without one agent per cell, several agents can share a cell. Jones made this pattern with the rule, so it can turn out different. Tick the box to restart with the rule.';
 }
 
-/** A lattice as people write it: "200 × 200 cells". */
-export const latticeText = ([w, h]: Lattice) => `${w} × ${h} cells`;
+/** A lattice as people write it: "200 × 200 cells", with no-break spaces so that a line never breaks inside it. */
+export const latticeText = ([w, h]: Lattice) => `${w}\u00a0×\u00a0${h} cells`;
+
+/** A grid as the panel's Grid choice names it: a lattice, or the cells on the long side of a grid shaped like the screen. */
+export const gridText = (s: Pick<Settings, 'lattice' | 'resolution'>) =>
+  s.lattice ? latticeText(s.lattice) : `${s.resolution} cells on the long side`;
 
 /**
- * Shown below the grid while a scene with the lattice of its figure runs on another grid (ADR 0026): why the result
- * then differs from the paper, and which lattice the paper used.
+ * Shown below the grid while a scene with the lattice of its figure runs on another grid `now` (ADR 0026): the grid,
+ * Jones' lattice, and why the result then differs from the paper, with the names of the panel. Also for a shared link
+ * made on another grid, so it says what runs, not who changed it.
  */
-export function latticeNotice(lattice: Lattice): string {
-  return `Jones gives all lengths in cells, for example the sensor distance and the step. On a different grid, the pattern has a different scale, and the result is different from the paper. For this figure, Jones used a lattice of ${latticeText(lattice)}.`;
+export function latticeNotice(lattice: Lattice, now: Pick<Settings, 'lattice' | 'resolution'>): string {
+  return `This grid has ${gridText(now)}. For this figure, Jones used ${latticeText(lattice)}. Jones gives lengths in cells, as for Sensor distance and Step size. So the pattern keeps its size in cells, and another grid holds more or less of it. The result is then different from the paper.`;
+}
+
+/** Shown below the grid while the device cannot hold the lattice of the scene's figure (ADR 0026): no way back. */
+export function latticeLostNotice(lattice: Lattice, now: Pick<Settings, 'lattice' | 'resolution'>): string {
+  return `This device cannot hold Jones’ grid of ${latticeText(lattice)} for this figure. The scene runs on a grid of ${gridText(now)}, so the result can be different from the paper.`;
 }
 
 export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'app';

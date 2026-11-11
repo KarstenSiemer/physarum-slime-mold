@@ -85,7 +85,7 @@ describe('the current scene', () => {
   });
 
   it('opens an old link of a scene of Jones as it was made, on the grid shaped like the screen', async () => {
-    const { app, latticeLeft, openLink, sceneChanged } = await fresh();
+    const { app, latticeLeft, linkUnchanged, loadPreset, openLink, sceneChanged, useSceneLattice } = await fresh();
     const old = { ...(presetById('steiner')?.settings() ?? defaultSettings()), lattice: null, resolution: 256 };
     const link = await decodeLink(
       (await encodeLink(old, { scene: 'steiner', origins: [0], shapes: [true, true, true, true], strokes: [] })).hash,
@@ -94,6 +94,105 @@ describe('the current scene', () => {
     openLink(link);
     expect([app.scene, app.settings.lattice, app.settings.resolution]).toEqual(['steiner', null, 256]);
     expect([sceneChanged(), latticeLeft()]).toEqual([true, [200, 200]]);
+    // The receiver changed nothing: the card says that the link changes the scene, until the receiver changes it.
+    expect(linkUnchanged()).toBe(true);
+    app.settings.density = 0.03;
+    expect(linkUnchanged()).toBe(false);
+    app.settings.density = 0.02;
+    expect(linkUnchanged()).toBe(true);
+    // The way back is no change made by the link.
+    useSceneLattice();
+    expect([sceneChanged(), linkUnchanged()]).toEqual([false, false]);
+    loadPreset('steiner');
+    expect(app.linkBase).toBeUndefined();
+  });
+
+  // ADR 0026: the scene's own lattice is no pick of a grid size, so the startup check goes on for later scenes.
+  it('stops the startup check for a picked grid size, not for the scene’s own lattice', async () => {
+    const { app, loadPreset, pickGrid, useSceneLattice } = await fresh();
+    loadPreset('wound');
+    pickGrid('300x300');
+    expect(app.gridPicked).toBe(false);
+    app.settings.lattice = null;
+    useSceneLattice();
+    expect([app.settings.lattice, app.gridPicked]).toEqual([[300, 300], false]);
+    pickGrid('512');
+    expect(app.gridPicked).toBe(true);
+    app.gridPicked = false;
+    pickGrid('640x480');
+    expect([app.settings.lattice, app.gridPicked]).toEqual([[640, 480], true]);
+  });
+
+  // ADR 0026: what the app does when the engine cannot hold a grid (Engine.onAdjust).
+  it('drops a lattice the device cannot hold, and counts the scene’s own lattice as no change', async () => {
+    const { app, deviceAdjusted, latticeLeft, loadPreset, sceneChanged } = await fresh();
+    loadPreset('shrinking');
+    deviceAdjusted('no room', 256, [300, 300]);
+    expect([app.settings.lattice, app.settings.resolution, app.maxResolution]).toEqual([null, 256, 4096]);
+    expect([app.lostLattice, sceneChanged(), latticeLeft(), app.notice]).toEqual([
+      [300, 300],
+      false,
+      undefined,
+      'no room',
+    ]);
+    // A new load tries the lattice again.
+    loadPreset('shrinking');
+    expect([app.settings.lattice, app.lostLattice]).toEqual([[300, 300], null]);
+    // A lattice from a link that the device cannot hold: the scene's own lattice stays the way back.
+    app.settings.lattice = [3000, 3000];
+    deviceAdjusted('no room', 512, [3000, 3000]);
+    expect([app.settings.lattice, app.lostLattice, sceneChanged(), latticeLeft()]).toEqual([
+      null,
+      null,
+      true,
+      [300, 300],
+    ]);
+    // A scene chosen meanwhile keeps its lattice.
+    loadPreset('steiner');
+    deviceAdjusted('no room', 256, [300, 300]);
+    expect(app.settings.lattice).toEqual([200, 200]);
+    // A grid shaped like the screen: the device's largest grid caps it and later scenes.
+    loadPreset('three-strains');
+    deviceAdjusted('lowered', 768);
+    expect([app.settings.resolution, app.maxResolution, sceneChanged()]).toEqual([768, 768, false]);
+  });
+
+  // ADR 0026: the startup check never lowers the scene's own lattice and counts none of its time; a larger lattice from
+  // a link counts as the grid shaped like the screen with at least its cells, and goes.
+  it('lowers a link’s lattice but never the scene’s own in the startup check', async () => {
+    const { app, autoTune, loadPreset } = await fresh();
+    const { GridTuner } = await import('./tune');
+    /** An engine that runs `fps` frames and half the steps the speed asks for: too slow for the check. */
+    const slow = (fps: number) => {
+      const e = {
+        settings: app.settings,
+        canvas: { width: 1280, height: 720 },
+        busy: false,
+        restarts: 0,
+        frames: 0,
+        sim: { step: 0 },
+        budget: { requested: 0, idleFrames: 0, idleMs: 0 },
+      };
+      return (tuner: InstanceType<typeof GridTuner>, ms: number) => {
+        for (let t = 0; t < ms; t += 500) {
+          e.settings = app.settings;
+          e.frames += fps / 2;
+          e.sim.step += 30;
+          e.budget.requested += 60;
+          autoTune(tuner, e as unknown as Parameters<typeof autoTune>[1], t, true);
+        }
+      };
+    };
+    loadPreset('wound');
+    let tuner = new GridTuner();
+    slow(10)(tuner, 20_000);
+    expect([app.settings.lattice, tuner.running, app.notice]).toEqual([[300, 300], true, '']);
+    // A link's lattice of 2048 × 2048 cells (4.2 million): it counts as 3072 on 16:9 and goes to 2048 × 1152.
+    app.settings.lattice = [2048, 2048];
+    tuner = new GridTuner();
+    slow(10)(tuner, 4000);
+    expect([app.settings.lattice, app.settings.resolution, app.maxResolution]).toEqual([null, 2048, 2048]);
+    expect(app.notice).toMatch(/^Lowered the grid to 2048 cells/);
   });
 
   it('keeps the rule off without the backend feature, and says so once per page load', async () => {
