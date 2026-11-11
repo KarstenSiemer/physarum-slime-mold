@@ -69,7 +69,7 @@ bool clearPath(vec2 p, vec2 q, int clear) {
   }
   // w is c wrapped into the periodic grid, kept step by step (cellAt wraps the same way).
   ivec2 size = ivec2(W(), H());
-  ivec2 w = P.cfg.z == 0u ? c - size * ivec2(floor(vec2(c) / vec2(size))) : c;
+  ivec2 w = P.cfg.z == 0u ? wrapCell(c, size) : c;
   for (int k = 0; k < WALK; k++) {
     bool needX = c.x != end.x;
     bool needY = c.y != end.y;
@@ -167,9 +167,8 @@ void main() {
       int clear = clearanceAt(a.xy);
       float h = steer(a, s, rng, clear);
       vec2 p = a.xy + P.stepSize[s] * dir(h);
-      int c = cellOf(p);
-      if (habitable(c) && clearPath(a.xy, p, clear)) {
-        a.xy = landed(p, c);
+      if (habitable(cellOf(p)) && clearPath(a.xy, p, clear)) {
+        a.xy = wrapPos(p);
         a.z = h;
         a.w += float(MOVED);
       } else {
@@ -204,7 +203,7 @@ void main() {
       bool ok = habitable(c) && c == cellOf(a.xy);
       if (!ok && canClaim(a, c, clearanceAt(a.xy))) ok = texelFetch(claims, cellCoord(c), 0).r == claimKey(i);
       if (ok) {
-        a.xy = landed(p, c);
+        a.xy = wrapPos(p);
         bits |= MOVED;
       } else {
         uint b = rngSeed(i, BLOCK);

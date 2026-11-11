@@ -188,12 +188,12 @@ fn placement(a: Agent, id: u32) -> Spot {
   if (P.tool.w == 1.0 && !alive && f32(a.bits & 3u) == P.tool2.x && rand(&rng) < P.tool2.y) {
     let p = randomIn(P.tool.xy, P.tool.z, &rng);
     let c = cellOf(p);
-    if (openCell(c)) { return Spot(landed(p, c), rand(&rng) * TAU, c); }
+    if (openCell(c)) { return Spot(wrapPos(p), rand(&rng) * TAU, c); }
   } else if (P.tool.w == 2.0 && alive && distance(a.pos, P.tool.xy) < P.tool.z) {
     for (var k = 0u; k < 8u; k++) {
       let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
       let c = cellOf(p);
-      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) { return Spot(landed(p, c), a.heading, c); }
+      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) { return Spot(wrapPos(p), a.heading, c); }
     }
   }
   return Spot(a.pos, a.heading, -1);
@@ -231,7 +231,7 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
       let p = a.pos + P.stepSize[s] * dir(h);
       let c = cellOf(p);
       if (habitable(c) && clearPath(a.pos, p, clear)) {
-        a.pos = landed(p, c);
+        a.pos = wrapPos(p);
         a.heading = h;
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
       } else {
@@ -306,7 +306,7 @@ fn settle(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
       var ok = habitable(c) && c == cellOf(a.pos);
       if (!ok && canClaim(a, c, clearanceAt(a.pos))) { ok = atomicLoad(&claims[c]) == key(id); }
       if (ok) {
-        a.pos = landed(p, c);
+        a.pos = wrapPos(p);
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
         atomicAdd(&occNext[c], 1u);
       } else {

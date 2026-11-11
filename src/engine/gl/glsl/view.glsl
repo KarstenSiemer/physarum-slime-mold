@@ -26,11 +26,16 @@ out vec4 result;
 
 ivec2 gridSize() { return textureSize(trail, 0); }
 
+// v wrapped into [0, n), in integers, and a cell coordinate wrapped into a periodic grid of n cells: wrapAxis and
+// wrapCell in common.glsl. A float floor(v / n) is not exact on every GPU (ADR 0023).
+int wrapAxis(int v, int n) { return v >= 0 ? v % n : n - 1 - (-1 - v) % n; }
+ivec2 wrapCell(ivec2 c, ivec2 n) { return ivec2(wrapAxis(c.x, n.x), wrapAxis(c.y, n.y)); }
+
 int cellAt(ivec2 c) {
   ivec2 s = gridSize();
   ivec2 q = c;
   if (V.boundary == 0u) {
-    q = c - s * ivec2(floor(vec2(c) / vec2(s)));
+    q = wrapCell(c, s);
   } else if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) {
     return -1;
   }
@@ -54,7 +59,7 @@ vec4 shapeAt(ivec2 c) {
   ivec2 s = gridSize();
   ivec2 q = clamp(c, ivec2(0), s - 1);
   if (V.boundary == 0u) {
-    q = c - s * ivec2(floor(vec2(c) / vec2(s)));
+    q = wrapCell(c, s);
   } else if (V.boundary == 2u) {
     vec2 o = 0.5 * vec2(s);
     vec2 m = vec2(c) + 0.5 - o;

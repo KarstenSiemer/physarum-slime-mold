@@ -49,6 +49,13 @@ vec2 disc(vec2 c, float r, inout uint rng) {
   return c + d * dir(rand(rng) * TAU);
 }
 
+// A position in cell c at offset f in [0, 1]², clamped below c + 1 (see inCell in init.wgsl).
+vec2 inCell(ivec2 c, vec2 f) {
+  vec2 lo = vec2(c);
+  vec2 hi = uintBitsToFloat(floatBitsToUint(lo + 1.0) - 1u);
+  return clamp(lo + f, lo, hi);
+}
+
 bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
 // Draw `round` of agent i's start (strain s): position and heading, as start() in init.wgsl.

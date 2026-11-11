@@ -69,6 +69,13 @@ function maxDiff(a: ImageData, b: ImageData) {
   return max;
 }
 
+/** The largest float32 below x > 0. */
+function below(x: number) {
+  const bits = new Uint32Array(Float32Array.of(x).buffer);
+  bits.set([(bits[0] ?? 1) - 1]);
+  return new Float32Array(bits.buffer)[0] ?? x;
+}
+
 /** Distance from a point to a segment. */
 function segmentDistance([px, py]: [number, number], [ax, ay]: [number, number], [bx, by]: [number, number]) {
   const [abx, aby] = [bx - ax, by - ay];
@@ -282,8 +289,13 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   }
 
   describe('diffusion and decay', () => {
-    it('apply a periodic 3×3 mean, then × (1 − decay) (Jones 2010, p. 132)', async () => {
-      const [w, h] = [32, 16];
+    // 47 and 246 are sides where a float floor(c / side) was not exact on an Apple M3 Pro (WebGL2 on Metal): there
+    // GLSL's cellAt took the cell right of the seam from the next row and the row above the top from outside the
+    // grid (ADR 0023).
+    it.each([
+      [32, 16],
+      [47, 246],
+    ])('apply a periodic 3×3 mean, then × (1 − decay) (Jones 2010, p. 132; %i × %i cells)', async (w, h) => {
       const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
       const sim = await make({ layout: 'empty', strains }, w, h, 1);
       const trail = Float32Array.from({ length: w * h * 4 }, (_, i) => ((i * 7919) % 101) / 10);
@@ -700,25 +712,30 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(await turn({ ...probe, walls: [[20, 61]] })).toBe(360 - RA); // and at the first one
       });
 
-      // On the periodic grid the way crosses the seam: from (60.3, 16.6) to the sensor's cell (2, 22) through cell (1, 21)
-      // on the far side, and from (3.7, 16.6), heading 180°, to cell (61, 10) through cell (62, 11).
-      it(`block a sensor whose way crosses the wrap seam at a wall on the far side (collisions ${collisions})`, async () => {
-        for (const [at, heading, trail, wall] of [
-          [[60.3, 16.6], 0, [2, 22], [1, 21]],
-          [[3.7, 16.6], 180, [61, 10], [62, 11]],
-        ] as const) {
-          const probe: Probe = {
-            size: [64, 32],
-            at: [at[0], at[1]],
-            heading,
-            sensorOffset: 9,
-            trail: [trail[0], trail[1]],
-            collisions,
-          };
-          expect(await turn(probe), `${heading}°`).toBe(RA);
-          expect(await turn({ ...probe, walls: [[wall[0], wall[1]]] }), `${heading}°`).toBe(360 - RA);
-        }
-      });
+      // On the periodic grid the way crosses the seam: from (W − 3.7, 16.6) to the sensor's cell (2, 22) through cell
+      // (1, 21) on the far side, and from (3.7, 16.6), heading 180°, to cell (W − 3, 10) through cell (W − 2, 11).
+      // 264 cells make 33 clearance tiles. WebGL2 wrapped the tiles with a float floor(tile / 33), which gave 0 for
+      // tile 33 on an Apple M3 Pro: the tiles beside the seam missed the wall and skipped the walk (ADR 0023).
+      it.each([64, 264])(
+        `block a sensor whose way crosses the wrap seam at a wall on the far side (W %i, collisions ${collisions})`,
+        async (w) => {
+          for (const [at, heading, trail, wall] of [
+            [[w - 3.7, 16.6], 0, [2, 22], [1, 21]],
+            [[3.7, 16.6], 180, [w - 3, 10], [w - 2, 11]],
+          ] as const) {
+            const probe: Probe = {
+              size: [w, 32],
+              at: [at[0], at[1]],
+              heading,
+              sensorOffset: 9,
+              trail: [trail[0], trail[1]],
+              collisions,
+            };
+            expect(await turn(probe), `${heading}°`).toBe(RA);
+            expect(await turn({ ...probe, walls: [[wall[0], wall[1]]] }), `${heading}°`).toBe(360 - RA);
+          }
+        },
+      );
     }
 
     // Two runs with one seed and walls in the way of many sensors give the same agents and trails; another seed not.
@@ -2098,7 +2115,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // x = 0.999999 − 2 = −1.000001 lies in cell −2, which is cell W − 2 on the periodic grid, and the move counts
     // there. Wrapped in float32 the position rounded up to 511.0, into cell W − 1, where another agent could
-    // claim the same cell (common.wgsl and common.glsl landed()).
+    // claim the same cell (wrapPos in common.wgsl and common.glsl).
     it.each([false, true])(
       'lands a move that ends just below x = −1 in the cell it counted (collisions %s)',
       async (collisions) => {
@@ -2114,6 +2131,88 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const counted = Array.from({ length: w * h }, (_, c) => c).filter((c) => (counts[c * 4] ?? 0) > 0);
         expect([Math.floor(a?.x ?? -1), Math.floor(a?.y ?? -1)]).toEqual([w - 2, 0]);
         expect(counted).toEqual([w - 2]);
+      },
+    );
+
+    // A move across the seam lands in the cell of its floor, wrapped with whole periods from integers and rounded
+    // once to float32 (wrapPos in common.wgsl and common.glsl, ADR 0023). On these sides a float division was not
+    // exact on an Apple M3 Pro: on 33, 47 and 246, x = W wrapped to 0.99999994 on WebGPU, and WebGL2's cellAt put
+    // cell W in the next row and row H outside the grid. On 480, x = 479.99997 wrapped to −0.00003 and landed at
+    // 479.0. Each agent moves half a cell in a row or column of its own; along +x the move and its result are exact.
+    describe.each([33, 47, 246, 480])('a move across the seam of a side of %i cells', (side) => {
+      const STEP = 0.5;
+      /** p wrapped into [0, n) in the cell of its floor, rounded once, as wrapPos() does it. */
+      const wrapped = (p: number, n: number) => {
+        const c = Math.floor(p);
+        const lo = ((c % n) + n) % n;
+        return Math.min(Math.fround(p - (c - lo)), below(lo + 1));
+      };
+      // Into the first cell: exactly onto the seam and past it; staying in the last cell: a hair below the seam,
+      // and below it; and a move inside the grid.
+      const starts = [side - STEP, side - 0.25, below(side) - STEP, side - 0.75, 0.25].map(Math.fround);
+
+      async function moved(axis: 'x' | 'y', collisions: boolean) {
+        const [w, h] = axis === 'x' ? [side, 16] : [16, side];
+        const straight = { sensorAngle: 0, sensorOffset: 1, randomTurn: 0, stepSize: STEP };
+        const strains = [{ ...defaultStrain(0), ...straight }];
+        const sim = await make({ layout: 'empty', strains }, w, h, starts.length);
+        starts.forEach((v, i) => {
+          const across = 3 * i + 0.5;
+          const [x, y] = axis === 'x' ? [v, across] : [across, v];
+          sim.writeAgent(i, { x, y, heading: axis === 'x' ? 0 : Math.PI / 2, bits: 4 });
+        });
+        if (collisions) sim.update({ ...defaultSettings(), layout: 'empty', strains, collisions: true });
+        sim.run(1);
+        const agents = await sim.readAgents();
+        const counts = await sim.readCounts();
+        const counted = Array.from({ length: w * h }, (_, c) => c).filter((c) => (counts[c * 4] ?? 0) > 0);
+        const cells = agents.map((a) => Math.floor(a.y) * w + Math.floor(a.x)).sort((a, b) => a - b);
+        return { agents, counted, cells, w };
+      }
+
+      it.each([false, true])(
+        'along +x: the exact float32 result, in the cell it counted (collisions %s)',
+        async (c) => {
+          const { agents, counted, cells } = await moved('x', c);
+          expect(agents.map((a) => a.x)).toEqual(starts.map((v) => wrapped(Math.fround(v + STEP), side)));
+          expect(agents.map((a) => a.y)).toEqual(starts.map((_, i) => 3 * i + 0.5));
+          expect(counted).toEqual(cells);
+        },
+      );
+
+      it.each([false, true])(
+        'along +y: in row 0 past the top seam, in the cell it counted (collisions %s)',
+        async (c) => {
+          const { agents, counted, cells, w } = await moved('y', c);
+          const rows = starts.map((v) => Math.floor(wrapped(Math.fround(v + STEP), side)));
+          expect(agents.map((a) => Math.floor(a.y))).toEqual(rows);
+          for (const [i, a] of agents.entries()) {
+            expect(a.y, `agent ${i}`).toBeLessThan(side);
+            expect(Math.abs(a.y - wrapped(Math.fround((starts[i] ?? 0) + STEP), side)), `agent ${i}`).toBeLessThan(
+              1e-4,
+            );
+            expect(Math.floor(a.x), `agent ${i}`).toBe(3 * i);
+          }
+          expect(counted).toEqual(cells);
+          expect(cells.every((c) => c < w * side)).toBe(true);
+        },
+      );
+    });
+
+    // A box does not wrap, but the float division ran there too: x = 479.99997 in a box 480 cells wide landed at
+    // 479.0 (ADR 0023).
+    it.each([false, true])(
+      'keeps a move that ends a hair below the edge of a box where it ends (collisions %s)',
+      async (c) => {
+        const end = below(480); // 479.99997
+        const straight = { sensorAngle: 0, sensorOffset: 1, randomTurn: 0, stepSize: 1 };
+        const strains = [{ ...defaultStrain(0), ...straight }];
+        const sim = await make({ layout: 'empty', boundary: 'box', strains }, 480, 16, 1);
+        sim.writeAgent(0, { x: end - 1, y: 8.5, heading: 0, bits: 4 });
+        if (c) sim.update({ ...defaultSettings(), layout: 'empty', boundary: 'box', strains, collisions: true });
+        sim.run(1);
+        const [a] = await sim.readAgents();
+        expect([a?.x, a?.y]).toEqual([end, 8.5]);
       },
     );
 
@@ -2477,6 +2576,34 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const row = Array.from({ length: 64 }, (_, i) => luma(seam, 64 + i, 96, 0));
       expect(Math.max(...row) - Math.min(...row)).toBeGreaterThan(8);
     });
+
+    // 47 and 246 are sides where a float floor(c / side) was not exact on an Apple M3 Pro: the WebGL2 view drew
+    // cell W from the next row and row H from outside the grid (view.glsl and render.frag, ADR 0023). Food and trail
+    // across both seams of a 47 × 246 grid look the same from every side of the seams.
+    it.each(['paper', 'gel', 'glow'] as const)(
+      'draw food and trail across both seams of a grid of 47 × 246 cells without a seam (%s)',
+      async (style) => {
+        backend.forget();
+        const [w, h] = [47, 246];
+        const settings: Settings = { ...defaultSettings(), style, layout: 'empty', strains: [cyan], bloom: 0 };
+        const sim = await make(settings, w, h, 1);
+        sim.paint([{ kind: 'food', from: [0, 0], to: [2, 1], radius: 5 }]); // across x = 0 and y = 0
+        const level = 1 / (0.4 / equilibrium(settings));
+        sim.writeTrail(
+          Float32Array.from({ length: w * h * 4 }, (_, i) => (i % 4 ? 0 : (((i >> 2) * 37) % 11) * level)),
+        );
+        const capture = (x: number, y: number) =>
+          backend.capture(sim, settings, { center: [x, y], scale: 1 / 8 }, SIZE, SIZE);
+        const seam = await capture(0, 0);
+        for (const [x, y] of [
+          [w, 0],
+          [0, h],
+          [w, h],
+          [-w, -h],
+        ] as const)
+          expect(maxDiff(seam, await capture(x, y)), `centre (${x}, ${y})`).toBeLessThanOrEqual(2);
+      },
+    );
 
     it('anti-alias the edge of the box and the rim of the dish', async () => {
       backend.forget();

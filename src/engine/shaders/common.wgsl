@@ -63,11 +63,22 @@ fn dir(a: f32) -> vec2f {
   return vec2f(cos(w), sin(w));
 }
 
-// A position wrapped into the periodic grid, below W and H. A position a hair below 0 would round up to W in f32,
-// in cell 0, while cellOf() of the unwrapped position is cell W − 1: the largest f32 below W keeps it in that cell.
+// A cell coordinate wrapped into a periodic grid of n cells, in integers: % keeps the sign of c (wrapCell in
+// common.glsl).
+fn wrapCell(c: vec2i, n: vec2i) -> vec2i { return ((c % n) + n) % n; }
+
+// A position wrapped into the periodic grid, in the cell of its floor. That cell is the one that cellOf(p) gives on
+// the periodic grid, and for every p inside a closed arena: a move or a tool puts an agent in the cell it claimed and
+// counted (ADR 0023).
+// - The whole periods come from integers. Before, p − size · floor(p / size) took them from a float division, which
+//   is not exact on every GPU: on an Apple M3 Pro, x = 479.99997 on a side of 480 wrapped to −0.00003.
+// - Then one subtraction of two exact f32 values rounds once, as the old formula did where its division was right.
+// - That rounding can reach the next cell: x = −1.000001 lies in cell 510 of a grid 512 cells wide, and wraps to
+//   511.0. The largest f32 below the upper edge of the cell keeps it in its cell.
 fn wrapPos(p: vec2f) -> vec2f {
-  let size = vec2f(f32(W()), f32(H()));
-  return min(p - size * floor(p / size), bitcast<vec2f>(bitcast<vec2u>(size) - 1u));
+  let c = vec2i(floor(p));
+  let lo = wrapCell(c, vec2i(i32(W()), i32(H())));
+  return min(p - vec2f(c - lo), bitcast<vec2f>(bitcast<vec2u>(vec2f(lo) + 1.0) - 1u));
 }
 
 fn dishRadius() -> f32 { return 0.5 * f32(min(W(), H())) - 1.0; }
@@ -78,7 +89,7 @@ fn cellAt(c: vec2i) -> i32 {
   let size = vec2i(i32(W()), i32(H()));
   var q = c;
   if (P.cfg.z == 0u) {
-    q = ((c % size) + size) % size;
+    q = wrapCell(c, size);
   } else {
     if (any(c < vec2i(0)) || any(c >= size)) { return -1; }
     if (P.cfg.z == 2u && distance(vec2f(c) + 0.5, 0.5 * vec2f(size)) > dishRadius()) { return -1; }
@@ -89,22 +100,6 @@ fn cellAt(c: vec2i) -> i32 {
 fn cellOf(p: vec2f) -> i32 { return cellAt(vec2i(floor(p))); }
 
 fn cellCoord(i: u32) -> vec2i { return vec2i(i32(i % W()), i32(i / W())); }
-
-// A position in cell c at offset f in [0, 1]². c + f alone can round up into the next cell: f32 has 24 bits,
-// so from coordinate 256 on an offset just below 1 lands on c + 1. Clamped to the largest f32 below c + 1.
-fn inCell(c: vec2i, f: vec2f) -> vec2f {
-  let lo = vec2f(c);
-  let hi = bitcast<vec2f>(bitcast<vec2u>(lo + 1.0) - 1u);
-  return clamp(lo + f, lo, hi);
-}
-
-// Where an agent that goes to p lands: p wrapped into the grid, in c = cellOf(p), the cell its move or placement
-// claimed and counted. wrapPos() alone can round up into the next cell: on a grid 512 cells wide, x = −1.000001
-// (cell 510) wraps to 511.0, in cell 511. Bit for bit the same as wrapPos(p) wherever that stays in c.
-fn landed(p: vec2f, c: i32) -> vec2f {
-  let lo = cellCoord(u32(c));
-  return inCell(lo, wrapPos(p) - vec2f(lo));
-}
 
 // Environment bytes: x wall, y food, z light (0…1).
 fn envOf(e: u32) -> vec4f { return unpack4x8unorm(e); }

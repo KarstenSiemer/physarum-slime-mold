@@ -41,12 +41,12 @@ Spot placement(vec4 a, uint i) {
   if (P.tool.w == 1.0 && !alive && float(bits & 3u) == P.tool2.x && rand(rng) < P.tool2.y) {
     vec2 p = randomIn(P.tool.xy, P.tool.z, rng);
     int c = cellOf(p);
-    if (openCell(c)) return Spot(landed(p, c), rand(rng) * TAU, c);
+    if (openCell(c)) return Spot(wrapPos(p), rand(rng) * TAU, c);
   } else if (P.tool.w == 2.0 && alive && distance(a.xy, P.tool.xy) < P.tool.z) {
     for (int k = 0; k < 8; k++) {
       vec2 p = vec2(rand(rng) * float(W()), rand(rng) * float(H()));
       int c = cellOf(p);
-      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) return Spot(landed(p, c), a.z, c);
+      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) return Spot(wrapPos(p), a.z, c);
     }
   }
   return Spot(a.xy, a.z, -1);
