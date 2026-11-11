@@ -3601,6 +3601,36 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(Math.abs(outlineAt(0.25) - outlineAt(3))).toBeLessThanOrEqual(1);
     });
 
+    // The renderer reads a cell inside the dish for each cell outside its rim (render.wgsl shapeIndex and shapeCells,
+    // view.glsl shapeAt). That rim must be the dish's own, 0.945 of the short side (ADR 0027): with the rim of before,
+    // the cells between both rims read their own bytes, and the outline of food bent there by 2 to 3 pixels at 32 pixels
+    // per cell (up to 187 levels). At 64 pixels per cell the food's upper edge, y = 24 − 2.56, lies on its row from 0.25
+    // to 2.75 cells inside the rim.
+    it('draw the outline of food straight up to the rim of the dish, zoomed in', async () => {
+      const settings: Settings = {
+        ...defaultSettings(),
+        style: 'paper',
+        boundary: 'dish',
+        layout: 'empty',
+        strains: [defaultStrain(0)],
+      };
+      const sim = await make(settings, W, H, 1);
+      sim.paint([{ kind: 'food', from: [32, 24], to: [2, 24], radius: 2.56 }]);
+      const rim = W / 2 - dishRadius(W, H);
+      const centre: [number, number] = [rim + 1.5, 24 - 2.56];
+      const img = await backend.capture(sim, settings, { center: centre, scale: 1 / 64 }, 256, 128);
+      const edgeAt = (at: number) => {
+        const k = Math.floor((rim + at - centre[0]) * 64 + 128);
+        for (let y = 0; y < 128; y++) {
+          const i = (y * 256 + k) * 4;
+          if ((img.data[i] ?? 0) - (img.data[i + 2] ?? 0) > 30) return y;
+        }
+        return NaN;
+      };
+      for (const at of [0.25, 0.5, 1, 2, 2.75])
+        expect(Math.abs(edgeAt(at) - 64), `${at} cells inside`).toBeLessThanOrEqual(1);
+    });
+
     // Walls hold no trail (diffuse.wgsl), and their cells step along a slanted wall. Where the wall's smooth outline
     // no longer covered a step, the trail fell to nothing towards it: a saw tooth with the period of the cells,
     // lit as dark teeth in the gel style (up to 78 levels, Metal), and in glow and paper up to 82 levels within half

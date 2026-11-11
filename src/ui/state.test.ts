@@ -463,6 +463,9 @@ describe('a shared link', () => {
     if (!p) throw new Error('no Shrinking plasmodium');
     const old = shapesAt(p, 0) ?? [];
     const drawing = { scene: 'shrinking', revision: 0, origins: [0], shapes: old.map(() => true), strokes: [] };
+    // After the scene's newest shapes, the link's own revision.
+    loadPreset('shrinking');
+    expect(app.sceneRevision).toBe(1);
     openLink({ settings: p.settings(), drawing });
     expect([app.sceneRevision, sceneChanged(), linkUnchanged()]).toEqual([0, true, true]);
     expect(currentDrawing()).toEqual(drawing);
