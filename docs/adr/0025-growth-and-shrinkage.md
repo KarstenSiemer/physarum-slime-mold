@@ -452,8 +452,8 @@ population over time in the start flow (median of 10 seeds, WebGPU; WebGL2 withi
 | 16:10  | 2,410    | 6,236 | 12,744 | 17,538 | 17,398 | 17,319 | 17,283 | 18,529, 45 %                     |
 | 1:1    | 1,820    | 4,706 | 13,438 | 21,880 | 26,268 | 26,462 | 26,294 | 27,534, 42 %                     |
 
-The colony fills the maze with a mesh and settles at 10 to 12 % of the cells (all flows, step 15,000), below half of
-its buffer, as without a cap (decision 30): the cap does not shape it. Images of seed 1 on 16:9 and 1:1 at steps 500
+The colony fills the maze with a mesh. At step 15,000 it holds 9.4 to 11.5 % of the cells (all flows), and at no mark
+more than 47 % of its buffer, as without a cap (decision 30): the cap does not shape it. Images of seed 1 on 16:9 and 1:1 at steps 500
 to 15,000 are in the pull request.
 
 **D2: a full scene of Jones with growth on.** The Transport network (Jones 2010, Fig. 4) on its lattice of 200 × 200
