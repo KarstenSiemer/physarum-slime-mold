@@ -122,6 +122,12 @@
   });
   /** The Capacity that the hint offers: room for an agent in every cell (growth runs only with the rule). */
   const roomy = $derived(capacityMax);
+  // The button removes itself at once: the focus goes to the Capacity it changed, not to the page.
+  async function raiseCapacity() {
+    s.capacity = roomy;
+    await tick();
+    document.getElementById('capacity')?.focus();
+  }
 
   // The engine restarts the population on every switch, so agents stacked without the rule do not stay
   // stacked (ADR 0008).
@@ -371,7 +377,7 @@
           Growth has no room: every agent that the simulation holds is alive, and a child needs a dead agent.
           {#if roomy > capacityOf(s)}
             Raise Capacity to make room. This restarts the scene.
-            <button type="button" onclick={() => (s.capacity = roomy)}>Set Capacity to {roomy}</button>
+            <button type="button" class="action" onclick={raiseCapacity}>Set Capacity to {roomy}</button>
           {/if}
         </p>
       {/if}

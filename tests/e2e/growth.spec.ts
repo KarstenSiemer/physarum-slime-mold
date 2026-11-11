@@ -63,6 +63,9 @@ test('growth without a dead agent says so, and the offered Capacity makes room',
   const agents = await page.evaluate(() => globalThis.physarum?.sim.agents ?? 0);
   expect(agents).toBe(start);
   await offer.click();
+  // The button removes itself at once: the focus goes to the Capacity it changed (ADR 0025, decision 23).
+  await expect(offer).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Capacity', exact: true })).toBeFocused();
   await page.waitForFunction(() => globalThis.physarum?.settings.capacity === 1);
   await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.agents ?? 0)).toBeGreaterThan(50 * agents);
   await expect.poll(() => alive(page), { timeout: 60_000 }).toBeGreaterThan(2 * start);
