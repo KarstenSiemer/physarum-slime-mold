@@ -213,7 +213,9 @@ describe('presets', () => {
     const side = Math.abs(foods[0]?.at[0] ?? 0);
     for (const f of foods) expect(f.at.map(Math.abs)).toEqual([side, side]);
     expect(p.about).toMatch(/corners of a square/);
-    expect(p.watch).toMatch(/two three-way junctions joined by a short bridge/);
+    expect(p.watch).toMatch(/two three-way junctions joined by a bridge/);
+    // A square half as wide as the dish (ADR 0026): on Jones' lattice it ends as the Steiner tree in 10 of 10 runs.
+    expect(side).toBe(0.25);
   });
 
   it('have one strain role per strain', () => {
