@@ -233,14 +233,20 @@ test('keyboard shortcuts pause, step and switch tools', async ({ page }) => {
   await expect(page.getByRole('radio', { name: 'Wall' })).toHaveAttribute('aria-checked', 'true');
 });
 
-// The scent view (ADR 0009, amendment 2026-11-11): a switch of the look, with a key and a legend. It goes into the
-// link as the style does, changes no scene and does not restart the simulation.
+// The scent view (ADR 0009, amendments of 2026-11-11): a switch of the look, with a key and a legend. It goes into the
+// link as the style does, changes no scene and does not restart the simulation. The legend names what the scene holds.
 test('the Scent switch and the S key show the scent with its legend, and go into the link', async ({ page }) => {
   const errors = watchErrors(page);
-  await page.getByRole('combobox', { name: 'Preset' }).selectOption('light');
-  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2);
   const button = page.getByRole('button', { name: 'Scent', exact: true });
   const legend = page.getByRole('figure', { name: 'Scent per cell' });
+  // The small scene has no food and no light: the legend says so.
+  await button.click();
+  await expect(legend).toContainText('no food and no light');
+  await button.click();
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('light');
+  // The scene has another density than the small scene, so the engine builds a new simulation, and that restart comes
+  // after the settings: wait for it to end before counting restarts.
+  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2 && !globalThis.physarum.busy);
   const changed = page.getByRole('region', { name: 'Scene', exact: true }).getByText('changed', { exact: true });
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(legend).toHaveCount(0);
@@ -248,8 +254,10 @@ test('the Scent switch and the S key show the scent with its legend, and go into
   await button.click();
   await expect(button).toHaveAttribute('aria-pressed', 'true');
   await expect(legend).toBeVisible();
-  await expect(legend.getByText('Food scent')).toBeVisible();
-  await expect(legend.getByText('Light repellent')).toBeVisible();
+  // Fleeing light has light and no food.
+  await expect(legend.getByText(/^Light \(pink glow\)$/)).toBeVisible();
+  await expect(legend.getByText(/^Food/)).toHaveCount(0);
+  await expect(legend).toHaveAccessibleDescription(/Pink glow/);
   await page.waitForFunction(() => globalThis.physarum?.settings.showScent === true);
   await expect(changed).toHaveCount(0);
   await expect
@@ -257,11 +265,18 @@ test('the Scent switch and the S key show the scent with its legend, and go into
     .toBe(true);
   const axe = await new AxeBuilder({ page }).include('figure').analyze();
   expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([]);
-  await page.locator('canvas').click();
+  // The key works right after a click on a toolbar button, and not in a number field.
+  await button.focus();
   await page.keyboard.press('s');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(legend).toHaveCount(0);
   await page.waitForFunction(() => globalThis.physarum?.settings.showScent === false);
+  await page.getByRole('button', { name: 'Fit' }).click();
+  await page.keyboard.press('s');
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await page.getByLabel('Agents per cell value').focus();
+  await page.keyboard.press('s');
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
   expect(await page.evaluate(() => globalThis.physarum?.restarts)).toBe(restarts);
   expect(errors).toEqual([]);
 });
@@ -283,6 +298,44 @@ test('shortcuts work after a click on a toolbar button', async ({ page }) => {
   await page.keyboard.press(' ');
   expect(await page.evaluate(() => globalThis.physarum?.paused)).toBe(paused);
 });
+
+// The legend never covers the toolbar or the stats: the toolbar wraps into two rows on a tablet with the panel open
+// (review of 2026-11-11). On a phone the legend is small, it hides while the panel covers the picture, and the toolbar
+// scrolls to the Scent button.
+for (const [width, height] of [
+  [375, 812],
+  [812, 375],
+  [721, 900],
+  [768, 1024],
+  [1280, 800],
+] as const)
+  test(`the scent legend stays clear of the toolbar and the stats (${width} × ${height})`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    const settings = page.getByRole('button', { name: 'Settings', exact: true });
+    if (await settings.isVisible()) await settings.click();
+    await page.getByRole('combobox', { name: 'Preset' }).selectOption('maze');
+    await page.waitForFunction(() => globalThis.physarum?.settings.foodStrength === 0.03);
+    const button = page.getByRole('button', { name: 'Scent', exact: true });
+    await button.click(); // scrolls the toolbar to it on a phone
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    const legend = page.getByRole('figure', { name: 'Scent per cell' });
+    if (width <= 720) {
+      await expect(legend).toBeHidden(); // the panel covers the picture
+      await page.getByRole('button', { name: 'Hide settings' }).click();
+    }
+    await expect(legend).toBeVisible();
+    const box = await legend.boundingBox();
+    if (!box) throw new Error('no legend');
+    const others = [page.locator('.stats'), ...(await page.locator('.toolbar .group').all())];
+    for (const other of others) {
+      const o = await other.boundingBox();
+      if (!o || !(await other.isVisible())) continue;
+      const apart =
+        box.y + box.height <= o.y || o.y + o.height <= box.y || box.x + box.width <= o.x || o.x + o.width <= box.x;
+      expect(apart, `${JSON.stringify(box)} against ${JSON.stringify(o)}`).toBe(true);
+    }
+    if (width <= 720 || height <= 500) expect(box.height).toBeLessThan(110); // compact
+  });
 
 // Inoculate places only dead agents (docs/adr/0023). In the small scene every agent is alive: the tool places nothing
 // and says so. The alive count in the stats is at most 500 ms old.

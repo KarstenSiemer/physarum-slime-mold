@@ -24,6 +24,27 @@ export function levelAbove(bins: ArrayLike<number>, cells: number, fraction: num
   return undefined;
 }
 
+/**
+ * The trail level that a `fraction` of all cells exceed, read within its log₂ bin by the share of the bin's cells it
+ * needs: levelAbove() gives the bin's centre, steps of √2. The scent view's mark (scent.ts) moves with it, so it must
+ * not jump between bins. 0 if fewer cells than that fraction hold any trail.
+ */
+export function levelWithin(bins: ArrayLike<number>, cells: number, fraction: number): number {
+  let above = 0;
+  for (let b = BINS - 1; b >= 0; b--) {
+    const n = bins[b] ?? 0;
+    if (n > 0 && above + n >= fraction * cells) return 2 ** ((b + 1 - (fraction * cells - above) / n) / 2 - 10);
+    above += n;
+  }
+  return 0;
+}
+
+/** The trail of a strand for the scent view's mark: the white level's percentile, within its bin (Levels.strand). */
+export const strandLevel = (bins: ArrayLike<number>, cells: number) => levelWithin(bins, cells, WHITE);
+
+/** Share of a new measurement that the strand level takes: slower than the exposure, so the mark does not jitter. */
+export const STRAND_BLEND = 0.1;
+
 /** Auto levels: black at the 65th, white at the 99th percentile (like Fogleman's percentile levels). */
 export function levels(bins: ArrayLike<number>, cells: number): { black: number; gain: number } | undefined {
   const white = levelAbove(bins, cells, WHITE);
@@ -46,6 +67,8 @@ export class AutoExposure {
   gain = 0;
   /** Summed trail level shown as black. */
   black = 0;
+  /** The trail of a strand (Levels.strand). */
+  strand = 0;
 
   constructor(private readonly device: GPUDevice) {
     this.pipeline = device.createComputePipeline({
@@ -100,11 +123,14 @@ export class AutoExposure {
     const cells = trail.width * trail.height;
     try {
       await this.readback.mapAsync(GPUMapMode.READ);
-      const l = levels(new Uint32Array(this.readback.getMappedRange()), cells);
+      const bins = new Uint32Array(this.readback.getMappedRange());
+      const l = levels(bins, cells);
+      const strand = strandLevel(bins, cells);
       this.readback.unmap();
       if (l && generation === this.generation) {
         this.gain += (l.gain - this.gain) * blend;
         this.black += (l.black - this.black) * blend;
+        this.strand += (strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
       }
     } catch {
       // device lost or buffer destroyed: nothing to measure
@@ -114,6 +140,7 @@ export class AutoExposure {
   reset() {
     this.gain = 0;
     this.black = 0;
+    this.strand = 0;
     this.generation++;
   }
 

@@ -474,6 +474,11 @@ export class Engine {
     return this.backend.capture(this.sim, this.settings, this.view, this.canvas.width, this.canvas.height);
   }
 
+  /** The auto levels frames use now; the scent view's legend reads its mark from them (Levels.strand). */
+  levels(): Levels {
+    return this.backend.levels();
+  }
+
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */
   async settle(): Promise<Levels> {
     await this.rebuilding;

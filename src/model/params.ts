@@ -241,7 +241,7 @@ export const coveredFoodHelp = {
 /** Help for the view switch "Scent" (ADR 0009, amendment 2026-11-11); Learn → Controls lists it with the sliders. */
 export const scentViewHelp = {
   label: 'Scent',
-  help: 'Draws the food scent in green and the light repellent in pink over the picture. Each band starts at a power of ten, from 0.01 per cell up, and a line marks its start. The scale does not change, so you can compare two scenes or the two models. The simulation does not change.',
+  help: 'Shows the scent of food as a green glow and the repellent of light as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where the food scent is as strong as the trail of a strand. The simulation does not change.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */

@@ -166,10 +166,12 @@
         scene of Jones as Jones does, until you paint a wall or use the Cut tool.
       </p>
       <p>
-        To see how far the scent reaches, select Scent in the toolbar or press S. The view draws the food scent in green
-        and the light repellent in pink, with one band for each power of ten. The scale is the same in every scene and
-        in both models. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the green bands
-        reach farther. The view changes only the picture, not the simulation.
+        To see the scent, select Scent in the toolbar or press S. A green glow shows the scent of food, and a pink glow
+        the repellent of light. The glow fades out as the scent gets weaker, down to 0.01 per cell. The scale is the
+        same in every scene and in both models. A green line shows where the food scent is as strong as the trail of a
+        strand: inside it, food pulls an agent on a strand more than the strand does. Compare a scene in Jones with the
+        same scene in Extended at a low Scent decay: the glow reaches farther, but a small food gets weaker, so the line
+        can come closer to the food. The view changes only the picture, not the simulation.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

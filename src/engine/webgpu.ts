@@ -96,7 +96,11 @@ export class WebGpuBackend implements Backend<Simulation> {
 
   async settle(sim: Simulation): Promise<Levels> {
     await this.auto.measure(sim.current.trail);
-    return { gain: this.auto.gain, black: this.auto.black };
+    return this.levels();
+  }
+
+  levels(): Levels {
+    return { gain: this.auto.gain, black: this.auto.black, strand: this.auto.strand };
   }
 
   /**
@@ -132,6 +136,7 @@ export class WebGpuBackend implements Backend<Simulation> {
     const wrap = s.boundary === 'wrap';
     const bloom =
       s.bloom > 0 && s.style === 'glow' ? this.bloom.run(trail, exposure, black, wrap) : this.bloom.view(trail);
-    return { sim, settings: s, view, exposure, black, bloom, sampler: at(this.bloom.samplers, wrap ? 1 : 0) };
+    const sampler = at(this.bloom.samplers, wrap ? 1 : 0);
+    return { sim, settings: s, view, exposure, black, strand: this.auto.strand, bloom, sampler };
   }
 }

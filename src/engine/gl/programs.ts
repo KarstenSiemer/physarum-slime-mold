@@ -13,11 +13,12 @@ import pointsFrag from './glsl/points.frag?raw';
 import pointsVert from './glsl/points.vert?raw';
 import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
+import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import wallsFrag from './glsl/walls.frag?raw';
-import { bindBlock, program, type GL } from './gl';
+import { bindBlock, program, startProgram, type GL } from './gl';
 
 /** Uniform block binding points. */
 export const PARAMS_BINDING = 0;
@@ -37,6 +38,14 @@ export interface Walled {
   agents: Program;
   /** The clearance passes (walls.frag). */
   walls: Program;
+}
+
+/** The programs of the scent view (ADR 0009, amendment 2026-11-11). */
+export interface ScentPrograms {
+  /** The render pass with the view (SCENT in render.frag), without (index 0) and with (1) the food, light and walls. */
+  render: [Program, Program];
+  /** The pass that fills its coarse lattice (scent-down.frag). */
+  down: Program;
 }
 
 /** The agent passes with the saturating trail perception (SATURATE in agents.frag, ADR 0022). */
@@ -68,8 +77,12 @@ export interface Programs {
   shape: Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
   render: [Program, Program];
-  /** The same with the scent view (SCENT in render.frag), compiled at its first use: most frames never draw it. */
-  scentRender: () => [Program, Program];
+  /**
+   * The programs of the scent view once they are built, else undefined. The first call starts their build, and with
+   * KHR_parallel_shader_compile the driver builds them beside the frames, which draw without the view until then.
+   * Most frames never draw it.
+   */
+  scent: () => ScentPrograms | undefined;
   height: [Program, Program];
   bloom: Program;
   sample: Program;
@@ -129,7 +142,8 @@ export function compile(gl: GL): Programs {
   let walled: Walled | undefined;
   let saturated: Saturated | undefined;
   let covered: Program | undefined;
-  let scentRender: [Program, Program] | undefined;
+  let scentStarted: ReturnType<typeof startProgram>[] | undefined;
+  let scent: ScentPrograms | undefined;
   return {
     agents: agentsProgram(gl, agentsFrag, false),
     walled: () => (walled ??= { agents: agentsProgram(gl, agentsFrag, true), walls: sim(wallsFrag) }),
@@ -147,7 +161,20 @@ export function compile(gl: GL): Programs {
     fill: plain(fillFrag),
     points: wrap(gl, program(gl, V + common + toolsGlsl + pointsVert, V + common + pointsFrag)),
     render: view(renderFrag),
-    scentRender: () => (scentRender ??= viewPrograms(gl, renderFrag, '#define SCENT 1\n')),
+    scent: () => {
+      if (scent) return scent;
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      scentStarted ??= [
+        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 1\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + scentDownFrag),
+      ];
+      if (!scentStarted.every((p) => p.done())) return undefined;
+      for (const p of scentStarted) p.check();
+      const [off, on, down] = scentStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !down) return undefined;
+      return (scent = { render: [off, on], down });
+    },
     height: view(heightFrag),
     bloom: plain(bloomFrag),
     sample: plain(sampleFrag),

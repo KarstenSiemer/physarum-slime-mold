@@ -1,8 +1,9 @@
 import type { Settings } from '../../model/params';
 import { at } from '../at';
-import { levels } from '../exposure';
+import { levels, STRAND_BLEND, strandLevel } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
+import { scentLevel, scentLevelSize } from '../scent';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
@@ -33,9 +34,13 @@ export class WebGl2Backend implements Backend<GlSim> {
   private sampleTarget: Target | undefined;
   /** Gel height field: one texel per cell plus a one-cell border (height.frag). */
   private heights: Target | undefined;
+  /** The scent view's coarse lattice (scent-down.frag): half the grid's sides, rounded up. */
+  private coarse: Target | undefined;
   private frame = 0;
   private gain = 0;
   private black = 0;
+  /** The trail of a strand (Levels.strand). */
+  private strand = 0;
   /** The auto-levels measurement whose readback is still on its way. */
   private measuring: Promise<void> | undefined;
   /** Counts forget() calls: a readback of a replaced simulation must not change the new levels. */
@@ -115,8 +120,10 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.frame++;
   }
 
-  capture(sim: GlSim, settings: Settings, view: View, width: number, height: number): Promise<ImageData> {
+  async capture(sim: GlSim, settings: Settings, view: View, width: number, height: number): Promise<ImageData> {
     const gl = this.gl;
+    // An export shows the scent view as asked: wait for its programs.
+    while (settings.showScent && !this.fixed && !this.prog.scent()) await new Promise((r) => setTimeout(r, 2));
     const t = target(gl, width, height, gl.RGBA8);
     this.encode(sim, settings, view, width, height, t);
     const pixels = new Uint8ClampedArray(width * height * 4);
@@ -126,12 +133,16 @@ export class WebGl2Backend implements Backend<GlSim> {
     const out = new Uint8ClampedArray(pixels.length);
     const row = width * 4;
     for (let y = 0; y < height; y++) out.set(pixels.subarray(y * row, (y + 1) * row), (height - 1 - y) * row);
-    return Promise.resolve(new ImageData(out, width, height));
+    return new ImageData(out, width, height);
   }
 
   async settle(sim: GlSim): Promise<Levels> {
     await this.measure(sim, 1);
-    return { gain: this.gain, black: this.black };
+    return this.levels();
+  }
+
+  levels(): Levels {
+    return { gain: this.gain, black: this.black, strand: this.strand };
   }
 
   /**
@@ -145,6 +156,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   forget() {
     this.gain = 0;
     this.black = 0;
+    this.strand = 0;
     this.generation++;
   }
 
@@ -152,6 +164,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     for (const t of this.bloomChain) destroyTarget(this.gl, t);
     if (this.sampleTarget) destroyTarget(this.gl, this.sampleTarget);
     if (this.heights) destroyTarget(this.gl, this.heights);
+    if (this.coarse) destroyTarget(this.gl, this.coarse);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
@@ -199,6 +212,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     if (l) {
       this.gain += (l.gain - this.gain) * blend;
       this.black += (l.black - this.black) * blend;
+      const strand = strandLevel(bins, t.width * t.height);
+      this.strand += (strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
     }
   }
 
@@ -212,7 +227,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     const bloom = this.runBloom(sim, s, exposure, black);
     // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
     const occ = s.collisions ? sim.occupancyTexture : undefined;
-    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined);
+    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined, this.strand);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
     const heights = this.heightsFor(sim);
@@ -231,13 +246,39 @@ export class WebGl2Backend implements Backend<GlSim> {
       textures(gl, h.program, cells);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    // The scent view once its programs are built; zoomed out it reads a coarser lattice, filled here.
+    const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
+    const level = scentLevel(view.scale);
+    const coarse = scent ? this.coarseFor(sim) : undefined;
+    if (scent && coarse && level > 0) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, coarse.fbo);
+      gl.viewport(0, 0, scentLevelSize(sim.width, level), scentLevelSize(sim.height, level));
+      gl.useProgram(scent.down.program);
+      textures(gl, scent.down.program, {
+        trail: sim.currentTrail.texture,
+        shape: sim.shapeTexture,
+        scent: sim.currentScent.texture,
+      });
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    const p = (this.fixed ?? (s.showScent ? this.prog.scentRender() : this.prog.render))[variant];
+    const p = (this.fixed ?? scent?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
     const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture };
-    textures(gl, p.program, s.showScent ? { ...all, scent: sim.currentScent.texture } : all);
+    const scentLevels = coarse?.texture ?? sim.currentScent.texture;
+    textures(gl, p.program, scent ? { ...all, scent: sim.currentScent.texture, scentLevels } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** The scent view's coarse lattice for this grid size, made anew when the size changes. */
+  private coarseFor(sim: GlSim): Target {
+    const [w, h] = [scentLevelSize(sim.width, 1), scentLevelSize(sim.height, 1)];
+    if (this.coarse?.width !== w || this.coarse.height !== h) {
+      if (this.coarse) destroyTarget(this.gl, this.coarse);
+      this.coarse = target(this.gl, w, h, this.gl.RGBA32F);
+    }
+    return this.coarse;
   }
 
   /** The gel height field for this grid size, made anew when the size changes. */

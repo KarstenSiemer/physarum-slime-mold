@@ -36,6 +36,9 @@
   let ready = $state(false);
   /** Height of the header, scene name and notice; the phone panel starts below them. */
   let topHeight = $state(72);
+  /** Heights of the toolbar (one row or more) and the stats: the stats and the scent legend sit above them. */
+  let toolbarHeight = $state(52);
+  let statsHeight = $state(20);
   /** The page address was read: from then on it follows the state. */
   let addressRead = $state(false);
 
@@ -353,7 +356,14 @@
 
 <svelte:window {onkeydown} />
 
-<main class="app" class:hide={app.hideUi} class:with-panel={app.panel} style:--top-height="{topHeight}px">
+<main
+  class="app"
+  class:hide={app.hideUi}
+  class:with-panel={app.panel}
+  style:--top-height="{topHeight}px"
+  style:--toolbar-height="{toolbarHeight}px"
+  style:--stats-height="{statsHeight}px"
+>
   <canvas
     bind:this={canvas}
     class="tool-{app.tool}"
@@ -384,9 +394,9 @@
     <div class="panel-wrap ui" id="settings"><Panel /></div>
   {/if}
 
-  <div class="toolbar-wrap ui"><Toolbar /></div>
+  <div class="toolbar-wrap ui" bind:clientHeight={toolbarHeight}><Toolbar /></div>
 
-  <p class="stats ui" aria-live="off">
+  <p class="stats ui" aria-live="off" bind:clientHeight={statsHeight}>
     {app.stats.fps.toFixed(0)} fps · {app.stats.stepsPerSecond.toFixed(0)} steps/s · step {app.stats.step}
     {#if app.stats.alive.length}· {fmt(app.stats.alive.reduce((a, b) => a + b, 0))} agents{/if}
   </p>
@@ -499,10 +509,11 @@
     pointer-events: auto;
   }
   /* On glass like the scene name: --muted straight on the canvas had about 2.3:1 over the paper style. */
+  /* Above the toolbar, which wraps into more rows on a narrow screen with the panel open. */
   .stats {
     position: absolute;
     left: 10px;
-    bottom: 56px;
+    bottom: calc(4px + var(--toolbar-height));
     margin: 0;
     padding: 2px 6px;
     border-radius: 6px;
@@ -516,11 +527,11 @@
     color: var(--muted);
     pointer-events: none;
   }
-  /* Above the stats, on the left: the panel opens on the right. */
+  /* Above the stats and the toolbar, at any height of either, on the left: the panel opens on the right. */
   .legend-wrap {
     position: absolute;
     left: 10px;
-    bottom: 80px;
+    bottom: calc(4px + var(--toolbar-height) + var(--stats-height) + 6px);
   }
   .notice {
     align-self: center;
@@ -569,8 +580,9 @@
     .stats {
       display: none;
     }
-    .legend-wrap {
-      bottom: 60px;
+    /* The panel covers the picture: its legend would cover the panel. */
+    .with-panel .legend-wrap {
+      display: none;
     }
   }
 </style>

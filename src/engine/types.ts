@@ -79,11 +79,14 @@ export interface Sim {
 
 /**
  * Auto levels: `gain` maps trail units to radiance before the exposure setting (0 until a measurement found
- * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black.
+ * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black. `strand`: the trail
+ * of a strand for the scent view's mark (scent.ts scentMark()): the 99th percentile of the summed trail, which the
+ * levels draw at full strength, read from the same measurement within its bin and smoothed slowly; 0 until measured.
  */
 export interface Levels {
   gain: number;
   black: number;
+  strand: number;
 }
 
 /** A GPU API: creates simulations and draws them. */
@@ -109,6 +112,8 @@ export interface Backend<S extends Sim = Sim> {
   capture(sim: S, settings: Settings, view: View, width: number, height: number): Promise<ImageData>;
   /** Measures auto levels now instead of smoothing over frames; resolves with the levels frames now use. */
   settle(sim: S): Promise<Levels>;
+  /** The levels frames use now. */
+  levels(): Levels;
   /** Drops caches tied to a replaced simulation and restarts auto levels. */
   forget(): void;
   destroy(): void;

@@ -3,22 +3,42 @@
 export type GL = WebGL2RenderingContext;
 
 export function program(gl: GL, vertex: string, fragment: string): WebGLProgram {
-  const shader = (type: number, source: string) => {
-    const s = gl.createShader(type);
+  const started = startProgram(gl, vertex, fragment);
+  started.check();
+  return started.program;
+}
+
+/**
+ * Compiles and links a program without asking for the result, so a driver with KHR_parallel_shader_compile builds it
+ * beside the frames. `done()` says whether it is built (always true without the extension: the first query waits);
+ * `check()` throws for a compile or link error.
+ */
+export function startProgram(gl: GL, vertex: string, fragment: string) {
+  const shaders = [
+    [gl.VERTEX_SHADER, vertex],
+    [gl.FRAGMENT_SHADER, fragment],
+  ].map(([type, source]) => {
+    const s = gl.createShader(type as number);
     if (!s) throw new Error('createShader failed');
-    gl.shaderSource(s, source);
+    gl.shaderSource(s, source as string);
     gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      throw new Error(`GLSL compile error: ${gl.getShaderInfoLog(s) ?? ''}`);
-    }
     return s;
-  };
+  });
   const p = gl.createProgram();
-  gl.attachShader(p, shader(gl.VERTEX_SHADER, vertex));
-  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fragment));
+  for (const s of shaders) gl.attachShader(p, s);
   gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(`GLSL link error: ${gl.getProgramInfoLog(p) ?? ''}`);
-  return p;
+  const parallel = gl.getExtension('KHR_parallel_shader_compile') as { COMPLETION_STATUS_KHR: number } | null;
+  return {
+    program: p,
+    done: () => !parallel || (gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR) as boolean),
+    check: () => {
+      if (gl.getProgramParameter(p, gl.LINK_STATUS)) return;
+      for (const s of shaders)
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+          throw new Error(`GLSL compile error: ${gl.getShaderInfoLog(s) ?? ''}`);
+      throw new Error(`GLSL link error: ${gl.getProgramInfoLog(p) ?? ''}`);
+    },
+  };
 }
 
 /** A texture with its framebuffer, so it can be both drawn into and read. */

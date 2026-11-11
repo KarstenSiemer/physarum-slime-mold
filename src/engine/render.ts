@@ -1,6 +1,7 @@
 import { hexToLinear } from '../model/color';
 import { BOUNDARIES, MAX_STRAINS, STYLES, type Settings } from '../model/params';
 import { readPixels } from './readback';
+import { scentLevel, scentLevelSize, scentMark } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Simulation } from './sim';
 import type { View } from './types';
@@ -21,6 +22,8 @@ export interface Frame {
   exposure: number;
   /** Summed trail level shown as black (auto levels). */
   black: number;
+  /** The trail of a strand, for the scent view's mark (Levels.strand). */
+  strand: number;
   /** Half-resolution blurred trail (bloom.ts) and how to sample it. */
   bloom: GPUTextureView;
   sampler: GPUSampler;
@@ -29,6 +32,8 @@ export interface Frame {
 export const VIEW_BYTES = 144;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
+/** The scent view's coarse lattice: the scent of both layers times the share that holds scent, and that share. */
+const COARSE_FORMAT: GPUTextureFormat = 'rgba32float';
 
 /**
  * Fills `struct View` (render.wgsl), which is also the std140 `View` block of the WebGL2 renderer. `occupancy`:
@@ -45,6 +50,7 @@ export function packView(
   frame: number,
   overlays: boolean,
   occupancy: boolean,
+  strand: number,
 ) {
   const fl = new Float32Array(data);
   const u = new Uint32Array(data);
@@ -56,51 +62,70 @@ export function packView(
   });
   fl.set(hexToLinear(BACKGROUND[settings.style]), 24);
   u.set([frame, strains.length, overlays ? 1 : 0, occupancy ? 1 : 0], 28);
-  fl.set([settings.bloom, black, 0, 0], 32);
+  // The scent view: the lattice it reads (scentLevel()), plus 4 with the repellent, which only the extended model
+  // reads; and the mark of a strand.
+  const level = (settings.showScent ? scentLevel(view.scale) : 0) + (settings.model === 'extended' ? 4 : 0);
+  fl.set([settings.bloom, black, level, scentMark(settings, strand)], 32);
 }
 
 interface Groups {
   group: GPUBindGroup;
   /** The gel height pass (`heightField` in render.wgsl). */
   heights: GPUBindGroup;
+  /** The scent view's pass that fills its coarse lattice (`scentDown` in render.wgsl). */
+  down: GPUBindGroup;
   bloom: GPUTextureView;
   sampler: GPUSampler;
+}
+
+/** The scent view: the render pass with it, without (index 0) or with (1) the food, light and walls, and `scentDown`. */
+interface ScentPipelines {
+  render: Variants;
+  down: GPURenderPipeline;
 }
 
 /** A render pass and the gel height pass, without (index 0) or with (1) the food, light and walls. */
 type Variants = [GPURenderPipeline, GPURenderPipeline];
 
 /**
- * The render pass from `module` without (index 0) or with (1) the food, light and walls (`ENV`), with or without the
- * scent view (`SCENT`). Without it the pipeline sets only `ENV`, as before the view existed.
+ * The descriptor of the render pass from `module` without or with the food, light and walls (`env`), with or without
+ * the scent view (`scent`). Without it the pipeline sets only `ENV`, as before the view existed.
  */
-function renderPipelines(
+function renderPipeline(
   device: GPUDevice,
   module: GPUShaderModule,
   layout: GPUBindGroupLayout,
   format: GPUTextureFormat,
+  env: boolean,
   scent: boolean,
-): Variants {
-  return [false, true].map((env) =>
-    device.createRenderPipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
-      vertex: { module, entryPoint: 'vs' },
-      fragment: {
-        module,
-        entryPoint: 'fs',
-        targets: [{ format }],
-        constants: { ENV: Number(env), ...(scent ? { SCENT: 1 } : {}) },
-      },
-    }),
-  ) as Variants;
+): GPURenderPipelineDescriptor {
+  return {
+    layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+    vertex: { module, entryPoint: 'vs' },
+    fragment: {
+      module,
+      entryPoint: 'fs',
+      targets: [{ format }],
+      constants: { ENV: Number(env), ...(scent ? { SCENT: 1 } : {}) },
+    },
+  };
 }
 
 export class Renderer {
   private readonly layout: GPUBindGroupLayout;
   private readonly heightLayout: GPUBindGroupLayout;
   private readonly pipelines: Variants;
-  /** The render pass with the scent view, built at its first use: most frames never draw it. */
-  private scentPipelines: Variants | undefined;
+  /**
+   * The pipelines of the scent view, built without blocking from the first frame that asks for the view (scentNow()):
+   * most frames never draw it. Until they are built, frames draw without it.
+   */
+  private scent: ScentPipelines | undefined;
+  private scentBuild: Promise<ScentPipelines> | undefined;
+  private readonly downLayout: GPUBindGroupLayout;
+  /** The scent view's coarse lattice (scentDown), made at the first frame that draws the view. */
+  private coarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  /** Bound in its place until then. */
+  private readonly noCoarse: GPUTexture;
   private readonly module: GPUShaderModule;
   private readonly heightPipelines: Variants;
   private readonly heightSampler: GPUSampler;
@@ -144,7 +169,21 @@ export class Renderer {
         { binding: 7, visibility: F, sampler: { type: 'filtering' } },
         storage(8),
         { binding: 9, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 10, visibility: F, texture: { sampleType: 'unfilterable-float' } },
       ],
+    });
+    this.downLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: F, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        storage(2),
+        { binding: 9, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+      ],
+    });
+    this.noCoarse = device.createTexture({
+      size: [1, 1],
+      format: COARSE_FORMAT,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     });
     this.heightLayout = device.createBindGroupLayout({
       entries: [
@@ -167,7 +206,9 @@ export class Renderer {
           },
         }),
       ) as Variants;
-    this.pipelines = renderPipelines(device, module, this.layout, format, false);
+    this.pipelines = [false, true].map((env) =>
+      device.createRenderPipeline(renderPipeline(device, module, this.layout, format, env, false)),
+    ) as Variants;
     this.heightPipelines = heightVariants(this.heightLayout, HEIGHT_FORMAT);
     this.heightSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     this.uniform = device.createBuffer({ size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -184,6 +225,8 @@ export class Renderer {
    * canvas clears its buffer after presentation, so the canvas itself cannot be read later.
    */
   async capture(f: Frame, width: number, height: number): Promise<ImageData> {
+    // An export shows the view as asked: wait for its pipelines.
+    if (f.settings.showScent && this.fixed === undefined) await this.scentNow(true);
     const texture = this.device.createTexture({
       size: [width, height],
       format: this.format,
@@ -203,12 +246,27 @@ export class Renderer {
     sim.syncShape();
     // Collision mode keeps the occupancy up to date (WebGPU allocates it with every simulation).
     const occupancy = f.settings.collisions;
-    packView(this.data, width, height, f.view, f.exposure, f.black, f.settings, this.frame++, this.overlays, occupancy);
+    const { exposure, black, strand } = f;
+    packView(
+      this.data,
+      width,
+      height,
+      f.view,
+      exposure,
+      black,
+      f.settings,
+      this.frame++,
+      this.overlays,
+      occupancy,
+      strand,
+    );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
     const { trail, scent } = sim.current;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
+    const view = f.settings.showScent && this.fixed === undefined ? this.scentNow() : undefined;
+    const coarse = view ? this.coarseFor(trail) : undefined;
     let byOcc = this.groups.get(trail);
     if (!byOcc) {
       byOcc = new Map();
@@ -216,12 +274,13 @@ export class Renderer {
     }
     let cached = byOcc.get(occ);
     if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {
-      const view = trail.createView();
+      const trailView = trail.createView();
+      const scentView = scent.createView();
       const group = this.device.createBindGroup({
         layout: this.layout,
         entries: [
           { binding: 0, resource: { buffer: this.uniform } },
-          { binding: 1, resource: view },
+          { binding: 1, resource: trailView },
           { binding: 2, resource: { buffer: sim.shape } },
           { binding: 3, resource: { buffer: sim.counts } },
           { binding: 4, resource: f.bloom },
@@ -230,19 +289,29 @@ export class Renderer {
           { binding: 7, resource: this.heightSampler },
           { binding: 8, resource: { buffer: occ } },
           // The scent of the same state as the trail: both alternate together (Simulation.current).
-          { binding: 9, resource: scent.createView() },
+          { binding: 9, resource: scentView },
+          { binding: 10, resource: this.coarse?.view ?? this.noCoarse.createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({
         layout: this.heightLayout,
         entries: [
           { binding: 0, resource: { buffer: this.uniform } },
-          { binding: 1, resource: view },
+          { binding: 1, resource: trailView },
           { binding: 2, resource: { buffer: sim.shape } },
           { binding: 8, resource: { buffer: occ } },
         ],
       });
-      cached = { group, heights: heightGroup, bloom: f.bloom, sampler: f.sampler };
+      const down = this.device.createBindGroup({
+        layout: this.downLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.uniform } },
+          { binding: 1, resource: trailView },
+          { binding: 2, resource: { buffer: sim.shape } },
+          { binding: 9, resource: scentView },
+        ],
+      });
+      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler };
       byOcc.set(occ, cached);
     }
     // Without food, light or walls the environment code would only cost time: the variant without it
@@ -258,18 +327,69 @@ export class Renderer {
       pre.draw(3);
       pre.end();
     }
+    // Zoomed out, the scent view reads a coarser lattice of the scent, filled here (scentDown in render.wgsl).
+    const level = scentLevel(f.view.scale);
+    if (view && coarse && level > 0) {
+      const down = enc.beginRenderPass({ colorAttachments: [{ view: coarse, loadOp: 'clear', storeOp: 'store' }] });
+      down.setViewport(0, 0, scentLevelSize(trail.width, level), scentLevelSize(trail.height, level), 0, 1);
+      down.setPipeline(view.down);
+      down.setBindGroup(0, cached.down);
+      down.draw(3);
+      down.end();
+    }
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
-    const pipelines =
-      f.settings.showScent && this.fixed === undefined
-        ? (this.scentPipelines ??= renderPipelines(this.device, this.module, this.layout, this.format, true))
-        : this.pipelines;
-    pass.setPipeline(pipelines[variant]);
+    pass.setPipeline((view?.render ?? this.pipelines)[variant]);
     pass.setBindGroup(0, cached.group);
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
+  }
+
+  /**
+   * The pipelines of the scent view once they are built, else undefined; the first call starts their build, without
+   * blocking. `wait`: resolves when they are built (exports and tests).
+   */
+  private scentNow(): ScentPipelines | undefined;
+  private scentNow(wait: true): Promise<ScentPipelines>;
+  private scentNow(wait = false): ScentPipelines | undefined | Promise<ScentPipelines> {
+    if (!this.scentBuild) {
+      const { device, module, layout, format } = this;
+      const render = (env: boolean) =>
+        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, true));
+      this.scentBuild = Promise.all([
+        render(false),
+        render(true),
+        device.createRenderPipelineAsync({
+          layout: device.createPipelineLayout({ bindGroupLayouts: [this.downLayout] }),
+          vertex: { module, entryPoint: 'vs' },
+          fragment: { module, entryPoint: 'scentDown', targets: [{ format: COARSE_FORMAT }] },
+        }),
+      ]).then(([off, on, down]) => (this.scent = { render: [off, on], down }));
+      // A failed build shows in the next frame that asks for the view.
+      this.scentBuild.catch((err: unknown) => (this.scentError = err instanceof Error ? err : new Error(String(err))));
+    }
+    if (this.scentError) throw this.scentError;
+    return wait ? this.scentBuild : this.scent;
+  }
+
+  private scentError: Error | undefined;
+
+  /** The scent view's coarse lattice for a trail of this size (half its sides, rounded up), made anew with the size. */
+  private coarseFor(trail: GPUTexture): GPUTextureView {
+    const [width, height] = [scentLevelSize(trail.width, 1), scentLevelSize(trail.height, 1)];
+    if (this.coarse?.texture.width !== width || this.coarse.texture.height !== height) {
+      this.coarse?.texture.destroy();
+      const texture = this.device.createTexture({
+        size: [width, height],
+        format: COARSE_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.coarse = { texture, view: texture.createView() };
+      this.groups.clear();
+    }
+    return this.coarse.view;
   }
 
   /** The gel height field for a trail of this size, made anew when the size changes. */
@@ -296,5 +416,7 @@ export class Renderer {
   destroy() {
     this.uniform.destroy();
     this.heights?.texture.destroy();
+    this.coarse?.texture.destroy();
+    this.noCoarse.destroy();
   }
 }

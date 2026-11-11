@@ -1,88 +1,102 @@
-// The scent view (ADR 0009, amendment 2026-11-11): the food scent and the light repellent over the picture, on a
-// fixed logarithmic scale. Display only. render.wgsl and gl/glsl/render.frag hold the same numbers (`scentView`); the
-// legend (ui/ScentLegend.svelte) and the GPU tests take them from here.
-import type { Style } from '../model/params';
+// The scent view (ADR 0009, amendments of 2026-11-11): the food scent and the light repellent over the picture, as a
+// glow per layer that fades out as the scent gets weaker, on a fixed logarithmic scale, and one line where the food
+// scent weighs as much as the trail of a strand. Display only. render.wgsl and gl/glsl/render.frag hold the same
+// numbers (`scentView`); the legend (ui/ScentLegend.svelte) and the GPU tests take them from here.
+import { MAX_STRAINS, type Settings, type Style } from '../model/params';
+import { trailSaturation } from './pack';
 
-/** log10 of the lowest level drawn: 0.01. Below it the view draws nothing. */
+/** log10 of the lowest level drawn: 0.01. Below it the glow is 0. */
 export const SCENT_LOW = -2;
-/** Bands of one power of ten each, from 10^SCENT_LOW up. The last one holds everything from 10^(LOW + BANDS − 1). */
-export const SCENT_BANDS = 7;
-/** Opacity of the first band, and what each band above it adds. */
-export const SCENT_FILL = [0.1, 0.05] as const;
-/** Opacity of the line at each power of ten. */
-export const SCENT_LINE = 0.75;
+/** Powers of ten from 0.01 to the top of the glow, 10,000. From there up the glow stays at SCENT_GLOW. */
+export const SCENT_TOP = 6;
+/** Opacity of the glow at 10,000 and more. */
+export const SCENT_GLOW = 0.45;
+/** Opacity of the line at the mark (scentMark()). */
+export const SCENT_LINE = 0.8;
 /**
- * The fill over paper, times this: over a light colour the same opacity shows less (the first band took the paper
- * from 243 to 232 of 255, against 0 to 63 over the glow's black).
+ * The glow over paper, times this: over a light colour the same opacity shows less. An opacity of 0.1 took the paper's
+ * red from 243 to 232 of 255, and the green of the glow's background from 6 to 76 (agents: 0 to 75).
  */
 export const SCENT_PAPER_FILL = 1.5;
+/** Powers of ten per pixel below which the scent counts as flat. */
+export const SCENT_FLAT = 1e-4;
+/** The coarsest lattice the view reads when zoomed out (scentLevel()). */
+export const SCENT_LEVELS_MAX = 3;
+
+/** The levels the legend names: 0.01, 0.1, …, 10,000. */
+export const SCENT_LEVELS = Array.from({ length: SCENT_TOP + 1 }, (_, i) => 10 ** (SCENT_LOW + i));
+
+/**
+ * The lattice the view reads at `scale` cells per pixel: 0 is the grid, k from 1 to SCENT_LEVELS_MAX a lattice of
+ * cells over 2^k per side (scentLevelSize()). From 2 cells per pixel a pixel then reads texels next to those of the
+ * pixels beside it: 4 cells far apart missed the cache (ADR 0009, amendment 2026-11-11).
+ */
+export function scentLevel(scale: number): number {
+  return Math.min(SCENT_LEVELS_MAX, Math.max(0, Math.floor(Math.log2(scale))));
+}
+
+/** Texels per side of the lattice of level k: the grid side over 2^k, rounded up. */
+export const scentLevelSize = (side: number, k: number) => (side + (1 << k) - 1) >> k;
 
 type Rgb = readonly [number, number, number];
 
 /**
- * Linear RGB of the fill and the line of each layer: OKLCH hue 145 (green) for food, 340 (pink) for the repellent,
- * away from the strain palette (hues 24, 85, 201, 294), the oat flake and the walls. Light colours over the dark
- * styles, dark ones over paper.
+ * Linear RGB of the glow and the line of the food scent, and of the glow of the repellent: OKLCH hue 145 (green) for
+ * food, 340 (pink) for the repellent, away from the strain palette (hues 24, 85, 201, 294), the oat flake and the
+ * walls. Light colours over the dark styles, dark ones over paper. Lightness and chroma: food 0.80 / 0.18 and its line
+ * 0.90 / 0.14 (paper 0.55 / 0.15 and 0.42 / 0.12), repellent 0.74 / 0.19 (paper 0.52 / 0.19).
  */
-export const SCENT_COLOURS: Record<'dark' | 'paper', { food: [Rgb, Rgb]; repellent: [Rgb, Rgb] }> = {
-  dark: {
-    food: [
-      [0.1383, 0.7091, 0.1623],
-      [0.3553, 0.9273, 0.3684],
-    ],
-    repellent: [
-      [0.9216, 0.1742, 0.6301],
-      [0.9316, 0.4403, 0.7387],
-    ],
-  },
-  paper: {
-    food: [
-      [0.0207, 0.2429, 0.033],
-      [0.0063, 0.1096, 0.0124],
-    ],
-    repellent: [
-      [0.4023, 0.024, 0.2555],
-      [0.1955, 0.0055, 0.1219],
-    ],
-  },
+export const SCENT_COLOURS: Record<'dark' | 'paper', { food: Rgb; line: Rgb; repellent: Rgb }> = {
+  dark: { food: [0.1383, 0.7091, 0.1623], line: [0.3553, 0.9273, 0.3684], repellent: [0.9216, 0.1742, 0.6301] },
+  paper: { food: [0.0207, 0.2429, 0.033], line: [0.0063, 0.1096, 0.0124], repellent: [0.4023, 0.024, 0.2555] },
 };
 
 export const scentColours = (style: Style) => SCENT_COLOURS[style === 'paper' ? 'paper' : 'dark'];
 
-/** The levels at the edges of the bands: 0.01, 0.1, …, 10,000. */
-export const SCENT_LEVELS = Array.from({ length: SCENT_BANDS }, (_, i) => 10 ** (SCENT_LOW + i));
-
-/** ∫₀ˣ clamp(floor(u), 0, BANDS − 1) du: the band count, integrated, for the filter over a pixel. */
-function stairs(x: number): number {
-  const top = SCENT_BANDS - 1;
-  const y = Math.min(Math.max(x, 0), top);
-  const n = Math.floor(y);
-  return y * n - 0.5 * n * (n + 1) + top * Math.max(x - top, 0);
+/**
+ * The opacity of the glow for a scent `value`: 0 at 0.01, rising in a straight line with log10(value) to SCENT_GLOW
+ * at 10,000, and SCENT_GLOW above it. A straight line in log10 gives every power of ten the same step of opacity, so
+ * the glow fades out evenly toward 0.01 and has no edge there.
+ */
+export function scentGlow(value: number): number {
+  if (!(value > 0)) return 0;
+  return SCENT_GLOW * Math.min(Math.max((Math.log10(value) - SCENT_LOW) / SCENT_TOP, 0), 1);
 }
 
 /**
- * The opacity of the fill and of the line for a scent `value` whose gradient has the length `slope` (per cell), at
- * `scale` cells per pixel. The fill rises by one step per band; it is filtered over the pixel, so where the bands lie
- * closer than a pixel it shows their mean, and the lines fade out where they lie closer than 4 pixels. The passes take
- * the value and the gradient from one bilinear lookup of the scent at the pixel centre, also when zoomed out: the
- * scent is smooth over cells, and this filter does what the four taps of the trail do against aliasing.
+ * The opacity of the line where the food scent `value`, whose gradient has the length `slope` (per cell), equals
+ * `mark`, at `scale` cells per pixel: about one pixel wide, from the distance to the mark in pixels.
  */
-export function scentBands(value: number, slope: number, scale: number): [number, number] {
-  if (!(value > 0)) return [0, 0];
-  const t = Math.log10(value) - SCENT_LOW;
-  const dt = Math.max((slope * scale) / (value * Math.LN10), 1e-3); // powers of ten per pixel
-  const enter = Math.min(Math.max(t / dt + 0.5, 0), 1);
-  const steps = (stairs(t + 0.5 * dt) - stairs(t - 0.5 * dt)) / dt;
-  const fill = SCENT_FILL[0] * enter + SCENT_FILL[1] * steps;
-  const k = Math.min(Math.max(Math.round(t), 0), SCENT_BANDS - 1);
-  const d = Math.abs(t - k) / dt;
-  const line = (1 - smoothstep(0.25, 1.25, d)) * (1 - smoothstep(0.25, 0.5, dt)) * SCENT_LINE;
-  return [fill, line];
+export function scentLine(value: number, slope: number, scale: number, mark: number): number {
+  if (!(value > 0) || !(mark > 0)) return 0;
+  const dt = Math.max((slope * scale) / (value * Math.LN10), SCENT_FLAT); // powers of ten per pixel
+  return (1 - smoothstep(0.25, 1.25, Math.abs(Math.log10(value / mark)) / dt)) * SCENT_LINE;
 }
 
 function smoothstep(a: number, b: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * The mark: the food scent that weighs as much in a sensor as the trail of a strand (agents.wgsl `sense()`: a strain
+ * reads `attraction · trail + food · scent`). `strand` is the trail of a strand: the summed trail that the auto levels
+ * draw at full strength, their 99th percentile (Levels.strand). With trail saturation K, a sensor reads it as
+ * strand / (1 + strand / K). The Jones model weighs food as the strain's own trail, so there the mark is the strand
+ * itself. With several strains it is the lowest mark of the strains that follow their own trail and food: where food
+ * outweighs a strand for at least one of them. 0: no mark (no strand measured, or no strain follows food).
+ */
+export function scentMark(s: Pick<Settings, 'model' | 'strains' | 'trailSaturation'>, strand: number): number {
+  if (!(strand > 0)) return 0;
+  const k = trailSaturation(s);
+  const trail = k > 0 ? strand / (1 + strand / k) : strand;
+  let mark = Infinity;
+  s.strains.slice(0, MAX_STRAINS).forEach((st, i) => {
+    const self = st.attraction[i] ?? 0;
+    const food = s.model === 'jones' ? self : st.food;
+    if (self > 0 && food > 0) mark = Math.min(mark, (self * trail) / food);
+  });
+  return Number.isFinite(mark) ? mark : 0;
 }
 
 const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
@@ -92,20 +106,12 @@ const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
 ];
 
 /**
- * The view over linear colour `c`: the food layer, then the repellent, each its fill and then its line. `food` and
- * `repellent` are [opacity of the fill, opacity of the line] (scentBands()); over paper the fill is SCENT_PAPER_FILL
- * times as opaque.
+ * The view over linear colour `c`: the glow of the food scent, its line at the mark, then the glow of the repellent.
+ * `food` and `repellent` are opacities of the glow (scentGlow()), `line` the line's (scentLine()); over paper the glow
+ * is SCENT_PAPER_FILL times as opaque.
  */
-export function scentOver(
-  c: Rgb,
-  style: Style,
-  food: readonly [number, number],
-  repellent: readonly [number, number],
-): Rgb {
+export function scentOver(c: Rgb, style: Style, food: number, line: number, repellent: number): Rgb {
   const k = scentColours(style);
   const fill = style === 'paper' ? SCENT_PAPER_FILL : 1;
-  let o = mix(c, k.food[0], food[0] * fill);
-  o = mix(o, k.food[1], food[1]);
-  o = mix(o, k.repellent[0], repellent[0] * fill);
-  return mix(o, k.repellent[1], repellent[1]);
+  return mix(mix(mix(c, k.food, food * fill), k.line, line), k.repellent, repellent * fill);
 }

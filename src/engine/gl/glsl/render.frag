@@ -349,13 +349,15 @@ vec3 walls(vec3 c, Env e) {
 #ifdef SCENT
 // ---- Scent view (SCENT; see render.wgsl and src/engine/scent.ts) ----
 
-uniform sampler2D scent; // food scent (r) and light repellent (g)
+uniform sampler2D scent;       // food scent (r) and light repellent (g)
+uniform sampler2D scentLevels; // the scent on a coarser lattice (scent-down.frag), zoomed out
 
 const float SCENT_LOW = -2.0;              // log10 of the lowest level drawn: 0.01
-const float SCENT_TOP = 6.0;               // the last band, from 10^4 up
-const vec2 SCENT_FILL = vec2(0.1, 0.05);   // opacity of the first band, and what each band above it adds
-const float SCENT_LINE = 0.75;             // opacity of the line at a power of ten
-const float SCENT_PAPER_FILL = 1.5;        // the fill over paper, times this (see render.wgsl)
+const float SCENT_TOP = 6.0;               // powers of ten from 0.01 to the top of the glow: 10^4
+const float SCENT_GLOW = 0.45;             // opacity of the glow at the top
+const float SCENT_LINE = 0.8;              // opacity of the line at the mark
+const float SCENT_PAPER_FILL = 1.5;        // the glow over paper, times this (see render.wgsl)
+const float SCENT_FLAT = 1e-4;             // powers of ten per pixel below which the scent counts as flat
 const float LN10 = 2.302585093;
 
 struct Scent {
@@ -379,7 +381,7 @@ ivec2 scentTexel(ivec2 c) {
 }
 
 // The bilinear mix of a (top left), b (top right), c (bottom left) and d (bottom right) at fraction f, without the
-// cells that `open` marks 0, with its gradient (see scentMix in render.wgsl).
+// corners that `open` weighs 0, with its gradient (see scentMix in render.wgsl).
 Scent scentMix(vec2 a, vec2 b, vec2 c, vec2 d, vec2 f, vec4 open) {
   vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y) * open;
   vec4 wx = vec4(f.y - 1.0, 1.0 - f.y, -f.y, f.y) * open;
@@ -428,24 +430,58 @@ Scent scentBilinear(vec2 p, vec4 open) {
                   texelFetch(scent, t3, 0).xy, f, open);
 }
 
-// The band count, integrated (see scentStairs in render.wgsl).
-float scentStairs(float x) {
-  float y = clamp(x, 0.0, SCENT_TOP);
-  float n = floor(y);
-  return y * n - 0.5 * n * (n + 1.0) + SCENT_TOP * max(x - SCENT_TOP, 0.0);
+// The scent at p from the scent s at a point d cells away, with its logarithm going on in a straight line (see
+// scentFrom in render.wgsl).
+Scent scentFrom(Scent s, vec2 d) {
+  vec2 k = exp(mix(vec2(0.0), (s.gx * d.x + s.gy * d.y) / max(s.v, vec2(1e-30)), greaterThan(s.v, vec2(0.0))));
+  return Scent(s.v * k, s.gx * k, s.gy * k);
 }
 
-// The opacity of the fill and of the line for a scent v with gradient g (see scentBands in render.wgsl).
-vec2 scentBands(float v, vec2 g) {
-  if (!(v > 0.0)) return vec2(0.0);
-  float t = log2(v) / log2(10.0) - SCENT_LOW;
-  float dt = max(length(g) * V.scale / (v * LN10), 1e-3);
-  float enter = clamp(t / dt + 0.5, 0.0, 1.0);
-  float steps = (scentStairs(t + 0.5 * dt) - scentStairs(t - 0.5 * dt)) / dt;
-  float k = clamp(floor(t + 0.5), 0.0, SCENT_TOP);
-  float d = abs(t - k) / dt;
-  float line = (1.0 - smoothstep(0.25, 1.25, d)) * (1.0 - smoothstep(0.25, 0.5, dt)) * SCENT_LINE;
-  return vec2(SCENT_FILL.x * enter + SCENT_FILL.y * steps, line);
+// Texels per side of the coarse lattice of level k (see scentLevelSize in render.wgsl).
+ivec2 scentLevelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
+
+// The scent at p on the coarse lattice of level k, with the gradient per cell (see scentCoarse in render.wgsl).
+Scent scentCoarse(vec2 p, int k) {
+  ivec2 s = gridSize();
+  ivec2 n = scentLevelSize(k);
+  vec2 ratio = vec2(n) / vec2(s);
+  vec2 q = p * ratio - 0.5;
+  ivec2 i = ivec2(floor(q));
+  vec2 f = q - floor(q);
+  ivec2 x = ivec2(i.x, i.x + 1);
+  ivec2 y = ivec2(i.y, i.y + 1);
+  if (V.boundary == 0u) {
+    ivec2 w = wrapCell(i, n);
+    x = ivec2(w.x, w.x == n.x - 1 ? 0 : w.x + 1);
+    y = ivec2(w.y, w.y == n.y - 1 ? 0 : w.y + 1);
+  } else {
+    x = clamp(x, ivec2(0), ivec2(n.x - 1));
+    y = clamp(y, ivec2(0), ivec2(n.y - 1));
+  }
+  vec3 a = texelFetch(scentLevels, ivec2(x.x, y.x), 0).xyz;
+  vec3 b = texelFetch(scentLevels, ivec2(x.y, y.x), 0).xyz;
+  vec3 c = texelFetch(scentLevels, ivec2(x.x, y.y), 0).xyz;
+  vec3 d = texelFetch(scentLevels, ivec2(x.y, y.y), 0).xyz;
+  vec4 open = vec4(a.z, b.z, c.z, d.z);
+  vec4 mean = 1.0 / max(open, vec4(1e-30));
+  Scent r = scentMix(a.xy * mean.x, b.xy * mean.y, c.xy * mean.z, d.xy * mean.w, f, open);
+  r.gx *= ratio.x;
+  r.gy *= ratio.y;
+  return r;
+}
+
+// The opacity of the glow for a scent v (see scentGlow in render.wgsl).
+float scentGlow(float v) {
+  if (!(v > 0.0)) return 0.0;
+  return SCENT_GLOW * clamp((log2(v) / log2(10.0) - SCENT_LOW) / SCENT_TOP, 0.0, 1.0);
+}
+
+// The opacity of the line where the scent v equals the mark (see scentLine in render.wgsl).
+float scentLine(float v, vec2 g, float mark) {
+  if (!(v > 0.0) || !(mark > 0.0)) return 0.0;
+  float dt = max(length(g) * V.scale / (v * LN10), SCENT_FLAT);
+  float d = abs(log2(v / mark) / log2(10.0)) / dt;
+  return (1.0 - smoothstep(0.25, 1.25, d)) * SCENT_LINE;
 }
 
 #if ENV
@@ -457,18 +493,16 @@ vec4 openCells(vec2 p, vec4 cells[9]) {
 }
 #endif
 
-// The view over colour c: the food scent, then the repellent, each its fill and then its line (see render.wgsl).
-vec3 scentView(vec2 p, vec3 c, vec4 open) {
-  // One lookup also when zoomed out (see scentView in render.wgsl).
-  Scent s = scentBilinear(p, open);
-  vec2 food = scentBands(s.v.x, vec2(s.gx.x, s.gy.x));
-  vec2 repellent = scentBands(s.v.y, vec2(s.gx.y, s.gy.y));
+// The view of the scent s over colour c: the glow of the food scent, its line at the mark, then the glow of the
+// repellent, only in the extended model (see scentView in render.wgsl).
+vec3 scentView(Scent s, vec3 c) {
   bool paperStyle = V.style == 2u;
   float fill = paperStyle ? SCENT_PAPER_FILL : 1.0;
-  vec3 o = mix(c, paperStyle ? vec3(0.0207, 0.2429, 0.033) : vec3(0.1383, 0.7091, 0.1623), food.x * fill);
-  o = mix(o, paperStyle ? vec3(0.0063, 0.1096, 0.0124) : vec3(0.3553, 0.9273, 0.3684), food.y);
-  o = mix(o, paperStyle ? vec3(0.4023, 0.024, 0.2555) : vec3(0.9216, 0.1742, 0.6301), repellent.x * fill);
-  return mix(o, paperStyle ? vec3(0.1955, 0.0055, 0.1219) : vec3(0.9316, 0.4403, 0.7387), repellent.y);
+  float repellent = int(V.fx.z) >= 4 ? scentGlow(s.v.y) : 0.0;
+  vec3 o = mix(c, paperStyle ? vec3(0.0207, 0.2429, 0.033) : vec3(0.1383, 0.7091, 0.1623), scentGlow(s.v.x) * fill);
+  o = mix(o, paperStyle ? vec3(0.0063, 0.1096, 0.0124) : vec3(0.3553, 0.9273, 0.3684),
+          scentLine(s.v.x, vec2(s.gx.x, s.gy.x), V.fx.w));
+  return mix(o, paperStyle ? vec3(0.4023, 0.024, 0.2555) : vec3(0.9216, 0.1742, 0.6301), repellent * fill);
 }
 #endif
 
@@ -509,11 +543,20 @@ vec3 scene(vec2 p, vec2 s) {
   }
 #endif
 #ifdef SCENT
-  vec4 open = vec4(1.0);
+  // The view lies below the flake of food and the walls (see scene in render.wgsl).
+  Scent sc;
+  int level = int(V.fx.z) & 3;
+  if (level > 0) {
+    sc = scentCoarse(p, level);
+  } else {
+    vec2 q = V.boundary == 1u ? clamp(p, vec2(0.5), vec2(gridSize()) - 0.5) : p;
+    vec4 open = vec4(1.0);
 #if ENV
-  if (near && V.scale <= 1.0) open = openCells(p, cells);
+    if (near && V.scale <= 1.0) open = openCells(q, cells);
 #endif
-  c = scentView(p, c, open);
+    sc = scentFrom(scentBilinear(q, open), p - q);
+  }
+  c = mix(scentView(sc, c), c, f.cover);
 #endif
 #if ENV
   if (near) {
