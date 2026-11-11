@@ -117,7 +117,14 @@ export const attractionSpec = {
   ref: 'Fogleman 2020; Jones 2010, Fig. 15',
 } as const satisfies Spec;
 
-export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center', 'empty'] as const;
+/**
+ * Start layouts. 'food': every agent starts dead, and the engine places about FOOD_START agents of strain A on the
+ * first food (ADR 0025): a small colony to grow from, as Jones starts his foraging runs at a food source.
+ */
+export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center', 'empty', 'food'] as const;
+
+/** Agents that the start layout 'food' places on the first food (ADR 0025). */
+export const FOOD_START = 50;
 export const BOUNDARIES = ['wrap', 'box', 'dish'] as const;
 export const STYLES = ['glow', 'gel', 'paper', 'agents'] as const;
 export const RESOLUTIONS = [256, 512, 768, 1024, 1536, 2048, 3072, 4096] as const;
@@ -200,7 +207,7 @@ export const globalSpec = {
   // count includes the agent itself (ADR 0024, decision 6).
   capacity: {
     label: 'Capacity',
-    help: 'The most agents that the simulation holds per cell, alive and dead. Agents per cell sets how many live at the start. The others wait as dead agents, and Growth and the Inoculate tool bring them to life. Capacity is never below Agents per cell. With one agent per cell, 1 gives room for an agent in every cell. More capacity uses more memory. A change restarts the population.',
+    help: 'The most agents that the simulation holds per cell, alive and dead. Agents per cell sets how many live at the start. The others wait as dead agents, and Growth and the Inoculate tool bring them to life. Capacity is never below Agents per cell. With one agent per cell, Capacity is at most 1: then there is room for an agent in every cell. More capacity uses more memory. A change restarts the scene.',
     min: 0.01,
     max: 8,
     step: 0.01,
@@ -217,8 +224,8 @@ export const globalSpec = {
   },
   growthWindow: {
     label: 'Growth window',
-    unit: 'cells',
-    help: 'The side of the square around an agent in which it counts the agents for the growth test (Gw). The count includes the agent itself. Jones uses 9 × 9.',
+    unit: 'cells wide',
+    help: 'The square around an agent in which it counts the agents for the growth test, given by its side (Gw): 9 is a square of 9 × 9 cells. The count includes the agent itself. Jones uses 9 × 9.',
     min: 3,
     max: 15,
     step: 2,
@@ -226,7 +233,7 @@ export const globalSpec = {
   },
   growthMin: {
     label: 'Growth minimum',
-    help: 'An agent that moved divides only if its growth window holds at least this many agents (Gmin). The count includes the agent itself, so 0 and 1 have the same effect. Jones uses 1 (2011 to 2015) and 0 (2017).',
+    help: 'An agent that moved divides only if its growth window holds at least this many agents (Gmin). The count includes the agent itself, so 0 and 1 have the same effect. It is at most Growth maximum. Jones uses 1 (2011 to 2015) and 0 (2017).',
     min: 0,
     max: 225,
     step: 1,
@@ -234,8 +241,8 @@ export const globalSpec = {
   },
   growthMax: {
     label: 'Growth maximum',
-    help: 'An agent that moved divides only if its growth window holds at most this many agents (Gmax). So agents divide where the colony is thin, at its edge. Jones uses 10 (2011 to 2015) and 15 (2017).',
-    min: 0,
+    help: 'An agent that moved divides only if its growth window holds at most this many agents (Gmax). So agents divide where the colony is thin, at its edge. It is at least 1 and at most the cells of the window. Jones uses 10 (2011 to 2015) and 15 (2017).',
+    min: 1,
     max: 225,
     step: 1,
     ref: 'Jones 2011, Sec. 5.1',
@@ -251,8 +258,8 @@ export const globalSpec = {
   },
   shrinkWindow: {
     label: 'Shrinkage window',
-    unit: 'cells',
-    help: 'The side of the square around an agent in which it counts the agents for the shrinkage test (Sw). The count includes the agent itself. Jones uses 5 × 5 (2011, 2017) and 9 × 9 (2014, 2015).',
+    unit: 'cells wide',
+    help: 'The square around an agent in which it counts the agents for the shrinkage test, given by its side (Sw): 5 is a square of 5 × 5 cells. The count includes the agent itself. Jones uses 5 × 5 (2011, 2017) and 9 × 9 (2014, 2015).',
     min: 3,
     max: 15,
     step: 2,
@@ -260,7 +267,7 @@ export const globalSpec = {
   },
   shrinkMin: {
     label: 'Shrinkage minimum',
-    help: 'An agent survives the shrinkage test only if its shrinkage window holds at least this many agents (Smin). The count includes the agent itself. Jones uses 0.',
+    help: 'An agent survives the shrinkage test only if its shrinkage window holds at least this many agents (Smin). The count includes the agent itself. It is at most Shrinkage maximum. Jones uses 0.',
     min: 0,
     max: 225,
     step: 1,
@@ -268,8 +275,8 @@ export const globalSpec = {
   },
   shrinkMax: {
     label: 'Shrinkage maximum',
-    help: 'An agent survives the shrinkage test only if its shrinkage window holds at most this many agents (Smax). More agents delete it, so crowded paths stay thin. Jones uses 20 of 25 (2011), 24 of 25 (2017), 80 of 81 (2014) and 79 of 81 (2015).',
-    min: 0,
+    help: 'An agent survives the shrinkage test only if its shrinkage window holds at most this many agents (Smax). More agents delete it, so crowded paths stay thin. It is at least 1, because the count includes the agent itself, and at most the cells of the window. Jones uses 20 of 25 (2011), 24 of 25 (2017), 80 of 81 (2014) and 79 of 81 (2015).',
+    min: 1,
     max: 225,
     step: 1,
     ref: 'Jones 2011, Sec. 5.1',
@@ -332,7 +339,7 @@ export function emissionScale(scentDecay: number): number {
 /** Help for the switch "Growth and shrinkage"; Learn → Controls lists it with the sliders (ADR 0025). */
 export const growthHelp = {
   label: 'Growth and shrinkage',
-  help: 'Jones’ rule from 2011 for the size of the population. Every few steps, each agent that moved counts the agents in a square around it, itself included. If the count lies from Growth minimum to Growth maximum, the agent divides: a dead agent comes to life in a random empty cell next to it. Every few steps, each agent also counts the agents in its shrinkage square. If that count lies outside Shrinkage minimum to Shrinkage maximum, the agent dies. So a colony grows at its thin edge, crowded paths stay thin, and a torn path grows together again. Capacity sets how many agents can live. The rule needs one agent per cell, because the counts assume it. It is off in every scene of this app.',
+  help: 'Jones’ rule from 2011 for the size of the population. Every few steps, each agent that moved counts the agents in a square around it, itself included. If the count lies between Growth minimum and Growth maximum, the agent divides: a dead agent comes to life in a random empty cell next to it. Every few steps, each agent also counts the agents in its shrinkage square. If that count is below Shrinkage minimum or above Shrinkage maximum, the agent dies. So a colony grows at its thin edge, and crowded paths stay thin. A child needs a dead agent: Capacity sets how many agents the simulation holds. In a full scene with the default Capacity, growth only replaces the agents that shrinkage removes, and in a dense scene of Jones shrinkage first removes many agents. The rule needs one agent per cell, because the counts assume it. On a device with little memory, the switch can lower the grid, which restarts the scene. The scene Foraging maze uses the rule.',
   ref: 'Jones 2011, Nat. Comput. 10: 1345, Sec. 5.1; Jones and Adamatzky 2014; Jones 2015; Jones, Mayne and Adamatzky 2017',
 } as const;
 
@@ -507,6 +514,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
   out.growth = raw.growth === true;
   for (const k of GROWTH_COUNTS) out[k] = Math.round(out[k]);
   for (const k of ['growthWindow', 'shrinkWindow'] as const) out[k] = snap(out[k], globalSpec[k]);
+  // Capacity 0 stands for as many as Agents per cell (capacityOf()): a link keeps it 0, not the range's minimum.
+  if (typeof raw.capacity !== 'number' || !(raw.capacity > 0)) out.capacity = 0;
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);
@@ -547,23 +556,36 @@ export function runsAsJones(s: Settings, drawn: Drawn = new Set()): boolean {
 export function constrain(s: Settings): Settings {
   const density = s.collisions ? Math.min(s.density, 1) : s.density; // one agent per cell at most
   const strains = s.strains.length > MAX_STRAINS ? s.strains.slice(0, MAX_STRAINS) : s.strains;
-  // Capacity holds at least the start population, and with the rule at most one agent per cell: 0 stands for "as many
-  // as Agents per cell", so a scene and its link hold 0 whatever their density (ADR 0025).
-  const most = s.collisions ? Math.min(s.capacity, 1) : s.capacity;
-  const capacity = most > density ? most : 0;
   // The window counts of growth and shrinkage assume one agent per cell (Jones 2011, Sec. 5.1).
   const growth = s.growth && s.collisions;
-  const same = density === s.density && strains === s.strains && capacity === s.capacity && growth === s.growth;
-  const out = same ? s : { ...s, density, strains, capacity, growth };
+  const limits = growthLimits(s);
+  const same = density === s.density && strains === s.strains && growth === s.growth && limits === undefined;
+  const out = same ? s : { ...s, density, strains, growth, ...limits };
   if (out.model !== 'jones') return out;
   return jonesFits(out) ? asJones(out) : { ...out, model: 'extended' };
 }
 
 /**
- * The most agents per cell that the simulation holds, alive and dead (ADR 0025): Capacity, and at least the start
- * population (Agents per cell). With constrain() a Capacity of 0 means as many as Agents per cell.
+ * The limits of growth and shrinkage (ADR 0025, review of 2026-11-11), or undefined when the settings keep them: each
+ * maximum from 1 to the cells of its window, and each minimum at most its maximum. Shrinkage maximum 0 or a minimum
+ * above the maximum deletes every agent, and a growth maximum below 1 or below the minimum never divides one.
  */
-export const capacityOf = (s: Pick<Settings, 'capacity' | 'density'>) => Math.max(s.capacity, s.density);
+function growthLimits(s: Settings) {
+  const gMax = Math.min(Math.max(s.growthMax, 1), s.growthWindow ** 2);
+  const sMax = Math.min(Math.max(s.shrinkMax, 1), s.shrinkWindow ** 2);
+  const [gMin, sMin] = [Math.min(s.growthMin, gMax), Math.min(s.shrinkMin, sMax)];
+  if (gMax === s.growthMax && sMax === s.shrinkMax && gMin === s.growthMin && sMin === s.shrinkMin) return undefined;
+  return { growthMax: gMax, shrinkMax: sMax, growthMin: gMin, shrinkMin: sMin };
+}
+
+/**
+ * The most agents per cell that the simulation holds, alive and dead (ADR 0025): Capacity, at least the start
+ * population (Agents per cell), and at most one agent per cell with the rule. Capacity keeps the value the user set,
+ * also while Agents per cell lies above it or the rule caps it: it acts again when they change back. 0 means as many
+ * as Agents per cell.
+ */
+export const capacityOf = (s: Pick<Settings, 'capacity' | 'density' | 'collisions'>) =>
+  Math.min(Math.max(s.capacity, s.density), s.collisions ? 1 : Infinity);
 
 /**
  * Whether the settings fit Jones' model (owner decision 2026-11-11, ADR 0022): one strain that follows (+1) or flees

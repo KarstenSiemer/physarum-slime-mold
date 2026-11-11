@@ -42,6 +42,9 @@
       value={fieldText(shown, spec)}
       onchange={(e) => {
         commit(e.currentTarget.valueAsNumber);
+        // A typed value that snaps back to the current one changes nothing, so nothing redraws the field: show the
+        // value that the simulation uses (a window of 8 is 9).
+        e.currentTarget.value = fieldText(value, spec);
       }}
     />
     {#if spec.unit}<span class="unit">{spec.unit}</span>{/if}

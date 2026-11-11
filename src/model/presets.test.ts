@@ -84,7 +84,12 @@ describe('presets', () => {
       expect(s.density, p.id).toBeLessThanOrEqual(1);
     }
     // Fleeing light and Maze use Jones' model too; usesRule() marks every scene made for the rule.
-    expect(PRESETS.filter(usesRule).map((p) => p.id)).toEqual([...jones.map((p) => p.id), 'light', 'maze']);
+    expect(PRESETS.filter(usesRule).map((p) => p.id)).toEqual([
+      ...jones.map((p) => p.id),
+      'light',
+      'maze',
+      'foraging-maze',
+    ]);
   });
 
   it('keep the parameters of Jones 2010 (Table 1 p. 134, Fig. 4 p. 135 to Fig. 22 p. 148)', () => {

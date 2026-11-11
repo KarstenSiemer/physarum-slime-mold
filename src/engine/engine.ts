@@ -1,10 +1,10 @@
-import { capacityOf, constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
+import { capacityOf, constrain, FOOD_START, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
-import { growthOn, stepChance, type AgentTool } from './pack';
+import { AgentToolKind, growthOn, stepChance, strainAgents, type AgentTool } from './pack';
 import {
   agentCount,
   BYTES_PER_AGENT,
@@ -35,6 +35,19 @@ const FRAME_MS = 1;
  * agents leave in the brush: 22 % more agents after a second.
  */
 const PAUSED_TOOL_STEPS = 60;
+
+/**
+ * The disc on the first food where the start layout 'food' places its colony (seedAtFood()): twice as many cells as
+ * agents, so the colony starts at half the density of a full sheet. A sheet of one agent per cell has 25 agents in a
+ * 5 × 5 window, above Jones' Shrinkage maximum of 20, and its first shrinkage test would trim it (ADR 0025).
+ */
+const FOOD_CELLS = 2 * FOOD_START;
+const FOOD_RADIUS = Math.sqrt(FOOD_CELLS / Math.PI);
+/**
+ * Dead agents that try a random point of the disc. With the rule only one per cell takes it: K points hit
+ * FOOD_CELLS · (1 − e^(−K / FOOD_CELLS)) cells, FOOD_START for K = FOOD_CELLS · ln 2.
+ */
+const FOOD_TRIES = FOOD_CELLS * Math.LN2;
 
 // Changes that need a new population.
 // Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
@@ -199,18 +212,16 @@ export class Engine {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
     const { maxAgents, maxBufferBytes, maxGridSide, coveredBytesPerCell } = this.backend;
+    const collisions = s.collisions && this.backend.supportsCollisions;
     // Covered food needs more memory only on some backends, and only while it is on; growth only while it is on.
-    const growth = growthOn({ ...s, collisions: s.collisions && this.backend.supportsCollisions });
+    const growth = growthOn({ ...s, collisions });
     const bytesPerCell =
       this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0) + (growth ? GROWTH_BYTES_PER_CELL : 0);
     const bytesPerAgent = BYTES_PER_AGENT + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
-    return constrain({
-      ...s,
-      resolution: fitResolution(s, aspect, limits),
-      collisions: s.collisions && this.backend.supportsCollisions,
-    });
+    // With the rule the capacity is at most one agent per cell (capacityOf()): count what this backend runs.
+    return constrain({ ...s, resolution: fitResolution({ ...s, collisions }, aspect, limits), collisions });
   }
 
   private supported(s: Settings): Settings {
@@ -283,6 +294,7 @@ export class Engine {
       this.sim.update(this.settings);
       this.flushEnv();
       this.sim.reset();
+      this.seedAtFood();
       this.backend.forget();
       this.restarts++;
     })().finally(() => (this.rebuilding = undefined));
@@ -292,8 +304,27 @@ export class Engine {
   reset() {
     if (this.rebuilding) return; // the new simulation starts fresh anyway
     this.sim.reset();
+    this.seedAtFood();
     this.backend.forget();
     this.restarts++;
+  }
+
+  /**
+   * The start layout 'food' (ADR 0025): every agent starts dead, and one step of the inoculate tool places about
+   * FOOD_START agents of strain A in a disc of FOOD_CELLS cells on the first food of the edit list, as Jones starts a
+   * foraging run at a food source. About FOOD_TRIES dead agents try a random point of the disc; with the rule one agent
+   * takes each cell they hit (about FOOD_START), and without it about FOOD_START agents try. Nothing happens without a
+   * food. The step is step 0 of the run, the same in every run of a seed.
+   */
+  private seedAtFood() {
+    if (this.settings.layout !== 'food') return;
+    const food = this.edits.find((e) => e.kind === 'food');
+    const at = food && strokeOn(food, this.sim.width, this.sim.height);
+    if (!at) return;
+    const dead = Math.max(1, strainAgents(this.settings.strains, this.sim.agents)[0] ?? 0);
+    const revive = Math.min(1, (this.settings.collisions ? FOOD_TRIES : FOOD_START) / dead);
+    const [x, y] = at.from;
+    this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain: 0, revive });
   }
 
   /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */

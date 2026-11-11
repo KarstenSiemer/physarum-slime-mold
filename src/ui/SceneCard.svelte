@@ -6,6 +6,13 @@
 
   const scene = $derived(presetById(app.scene));
   const changed = $derived(sceneChanged());
+  /** The tests of growth and shrinkage that run (ADR 0025): none while growth is off or both intervals are 0. */
+  const growthChip = $derived.by(() => {
+    const s = app.settings;
+    if (!s.growth || !s.collisions) return '';
+    const [grow, shrink] = [s.growthEvery > 0, s.shrinkEvery > 0];
+    return grow && shrink ? 'Growth and shrinkage' : grow ? 'Growth' : shrink ? 'Shrinkage by crowding' : '';
+  });
   let sourceOpen = $state(false);
   let heading = $state<HTMLHeadingElement>();
 
@@ -27,6 +34,7 @@
     jones: 'The model',
     fogleman: 'About',
     nakagaki: 'Physarum',
+    later: 'The model',
     app: 'Scenes',
   };
 </script>
@@ -48,7 +56,7 @@
       >
       <span class="chip">{app.settings.model === 'jones' ? 'Only Jones’ rules' : 'Jones plus this app’s rules'}</span>
       {#if app.settings.collisions}<span class="chip">One agent per cell</span>{/if}
-      {#if app.settings.growth}<span class="chip">Growth and shrinkage</span>{/if}
+      {#if growthChip}<span class="chip">{growthChip}</span>{/if}
     </div>
     {#if sourceOpen}
       <div class="source-text" id="scene-source">

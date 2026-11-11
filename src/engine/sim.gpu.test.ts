@@ -36,7 +36,7 @@ import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { Simulation } from './sim';
+import { GROWTH_BINDINGS, Simulation } from './sim';
 import { equilibrium } from './sizing';
 import { SHAPE_RANGE, type AgentState, type Backend, type Sim, type Stroke, type View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -2588,15 +2588,15 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // Every layout and arena, with a wall across the middle: 20 agents fit every layout's region (the centre
     // spot holds about 46 cells on this grid), so all of them start alive, each in a cell of its own (ADR 0008).
-    it.each(LAYOUTS.filter((l) => l !== 'empty').flatMap((l) => BOUNDARIES.map((b) => [l, b] as const)))(
-      'starts every agent of the %s layout in a %s on a free cell of its own',
-      async (layout, boundary) => {
-        const sim = await make({ layout, boundary, collisions: true, seed: 5 }, 64, 48, 20);
-        sim.paint([{ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 }]);
-        sim.reset();
-        expect(await starts(sim, boundary)).toEqual({ alive: 20, shared: 0, blocked: 0 });
-      },
-    );
+    // 'empty' and 'food' start every agent dead (the engine places the colony of 'food', ADR 0025).
+    it.each(
+      LAYOUTS.filter((l) => l !== 'empty' && l !== 'food').flatMap((l) => BOUNDARIES.map((b) => [l, b] as const)),
+    )('starts every agent of the %s layout in a %s on a free cell of its own', async (layout, boundary) => {
+      const sim = await make({ layout, boundary, collisions: true, seed: 5 }, 64, 48, 20);
+      sim.paint([{ kind: 'wall', from: [0, 23.5], to: [64, 25.5], radius: 1.5 }]);
+      sim.reset();
+      expect(await starts(sim, boundary)).toEqual({ alive: 20, shared: 0, blocked: 0 });
+    });
 
     it('keeps the region of a layout: the centre spot, a colony, the ring', async () => {
       const [w, h] = [64, 48];
@@ -2974,6 +2974,17 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     };
     const two = [defaultStrain(0, 2), { ...defaultStrain(1, 2), share: 0.6 }];
 
+    // The passes of growth, the start passes of a capacity and the passes for walls, built here under a long timeout:
+    // the first test would pay for them, up to 12.8 s of its 60 s on SwiftShader (logic review of 2026-11-11, ADR 0010).
+    beforeAll(async () => {
+      const s = { ...defaultSettings(), ...GROWTH, layout: 'center' as const, density: 0.05 };
+      const sim = await backend.createSim(s, 32, 32, 200, 50);
+      sim.paint([{ kind: 'wall', from: [2, 2], to: [8, 2], radius: 1 }]);
+      sim.run(1);
+      await sim.finish();
+      sim.destroy();
+    }, 180_000);
+
     /** Alive agents, the most in one cell, the alive count per strain, and alive agents in a wall or outside. */
     async function census(sim: Sim, boundary: Boundary) {
       const { width: w, height: h } = sim;
@@ -3101,6 +3112,131 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         ).toBe(true);
       }
       expect((await census(a, boundary)).most).toBe(1);
+    });
+
+    // Review of 2026-11-11: one growth step from fresh buffers missed what a step leaves for the next, such as claims
+    // that were not cleared. Four growth steps in a row against the CPU copy, with more births than dead agents: both
+    // strains run out, one of them has no dead agent at all, and the buffer of 700 agents is no power of 4. After each
+    // step the twin gets the grown agents.
+    it.each([
+      ['wrap', 0],
+      ['box', 5],
+    ] as const)(
+      'divide and die as the CPU copy over four steps, beyond the dead agents (%s, %i dead of A)',
+      async (boundary, spare) => {
+        const [w, h, n] = [64, 48, 700];
+        const s: Settings = {
+          ...defaultSettings(),
+          ...GROWTH,
+          boundary,
+          strains: two,
+          density: 1,
+          growthWindow: 7,
+          growthMin: 2,
+          growthMax: 14,
+          growthEvery: 1,
+          shrinkEvery: 2,
+          shrinkMax: 9,
+        };
+        const plain = { ...s, growth: false, collisions: false };
+        const [a, b] = [await make(plain, w, h, n), await make(plain, w, h, n)];
+        const ends = strainEnds(two, n);
+        // Every id alive but `spare` of strain A: one agent per random cell.
+        let r = 11;
+        const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+        const cells = Array.from({ length: w * h }, (_, c) => [c, rnd()] as const).sort((p, q) => p[1] - q[1]);
+        const endA = ends[0] ?? 0;
+        const alive = Array.from({ length: n }, (_, id) => id).filter((id) => id < endA - spare || id >= endA);
+        const placed = alive.map((id, k) => {
+          const c = cells[k]?.[0] ?? 0;
+          const strain = id < endA ? 0 : 1;
+          return [
+            id,
+            { x: (c % w) + 0.5, y: Math.floor(c / w) + 0.5, heading: Math.fround(rnd() * 6.28), bits: strain | 4 },
+          ] as const;
+        });
+        for (const sim of [a, b]) {
+          for (const [id, agent] of placed) sim.writeAgent(id, agent);
+          sim.update({ ...s, growth: sim === a });
+        }
+        const env = await a.readEnv();
+        let born = 0;
+        for (let step = 0; step < 4; step++) {
+          a.run(1);
+          b.run(1);
+          const moved = await b.readAgents();
+          const expected = growthStep({
+            kind: kind as 'webgpu' | 'webgl2',
+            settings: s,
+            ...{ w, h, env, step, agents: moved, counts: await b.readCounts() },
+          });
+          const got = await a.readAgents();
+          expect(got, `step ${step}`).toEqual(expected.agents);
+          expect(await a.alive(), `step ${step}`).toEqual(
+            [0, 1].map((k) => got.filter((x) => x.bits & 4 && (x.bits & 3) === k).length),
+          );
+          born += got.filter((g, id) => {
+            // A child lies elsewhere than the agent of its id after the moves (NaN: no such agent).
+            const [x, y] = [moved[id]?.x ?? Number.NaN, moved[id]?.y ?? Number.NaN];
+            return g.bits & 4 && (x !== g.x || y !== g.y);
+          }).length;
+          // The twin goes on from the grown agents; the rule builds its occupancy anew when it is switched on.
+          got.forEach((g, id) => {
+            b.writeAgent(id, g);
+          });
+          b.update({ ...s, collisions: false, growth: false });
+          b.update({ ...s, growth: false });
+        }
+        expect(born).toBeGreaterThan(20);
+      },
+      150_000,
+    ); // up to 2.3 s on Metal (WebGPU writes back 700 agents a step); see ADR 0010.
+
+    // Decision 9 of ADR 0025: when dead agents run out, the births that get one spread over the grid. Checked on the
+    // children themselves, not with the CPU copy of place(): 40 dead agents for a few hundred births all over a grid.
+    it('spreads the births that get a dead agent over the grid', async () => {
+      const [w, h] = [64, 64];
+      let r = 3;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      const cells = Array.from({ length: w * h }, (_, c) => c).filter(() => rnd() < 0.06);
+      const n = cells.length + 40;
+      const s: Settings = { ...defaultSettings(), ...GROWTH, density: 1, growthMax: 30, shrinkEvery: 0 };
+      const sim = await make({ ...s, growth: false, collisions: false }, w, h, n);
+      cells.forEach((c, id) => {
+        sim.writeAgent(id, { x: (c % w) + 0.5, y: Math.floor(c / w) + 0.5, heading: rnd() * 6.28, bits: 4 });
+      });
+      sim.update(s);
+      sim.run(1);
+      const children = (await sim.readAgents()).filter((a, id) => id >= cells.length && a.bits & 4);
+      expect(children).toHaveLength(40);
+      // In row order all 40 would lie in the top rows.
+      const top = children.filter((a) => a.y < h / 2).length;
+      const left = children.filter((a) => a.x < w / 2).length;
+      expect(top).toBeGreaterThan(10);
+      expect(top).toBeLessThan(30);
+      expect(left).toBeGreaterThan(10);
+      expect(left).toBeLessThan(30);
+    });
+
+    // Review of 2026-11-11: an 'auto' layout holds only the bindings that its entry point uses, and sim.ts lists them
+    // by hand (GROWTH_BINDINGS). A binding missing from the list, or one that the pass no longer uses, would make the
+    // pass fail with no error in its results. Each pass must take a bind group of exactly its list.
+    it('binds exactly the resources that each growth pass uses', async () => {
+      if (kind !== 'webgpu') return; // WebGL2 binds its textures by name
+      const { device } = (backend as WebGpuBackend).gpu;
+      const sim = await make({ ...GROWTH }, 16, 16, 4);
+      const kernels = (sim as unknown as { kernels: { growth(): Record<string, GPUComputePipeline> } }).kernels;
+      const passes = kernels.growth();
+      const lists = GROWTH_BINDINGS as Record<string, readonly number[]>;
+      expect(Object.keys(passes).sort()).toEqual(Object.keys(lists).sort());
+      const buffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.UNIFORM });
+      for (const [name, pipeline] of Object.entries(passes)) {
+        device.pushErrorScope('validation');
+        const entries = (lists[name] ?? []).map((binding) => ({ binding, resource: { buffer } }));
+        device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
+        expect((await device.popErrorScope())?.message, name).toBeUndefined();
+      }
+      buffer.destroy();
     });
 
     // A colony of 40 agents grows to fill the box with a wall in it: one agent per cell, none lost or doubled, none
@@ -3275,7 +3411,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         if (kind === 'webgpu') {
           const { device } = (backend as WebGpuBackend).gpu;
           const s = defaultSettings();
-          (await Simulation.create(device, s, 16, 16, 1, undefined, undefined, 1, PLAIN_INIT.wgsl)).destroy();
+          const sim = await Simulation.create(device, s, 16, 16, 1, undefined, undefined, 1, PLAIN_INIT.wgsl);
+          // The passes for walls of these sources too: the first test paints a wall.
+          sim.paint([{ kind: 'wall', from: [2, 2], to: [8, 2], radius: 1 }]);
+          sim.run(1);
+          await sim.finish();
+          sim.destroy();
           return;
         }
         const context = document.createElement('canvas').getContext('webgl2');
@@ -3283,7 +3424,15 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           throw new Error('WebGL2 with float render targets needed');
         const shipped = compile(context);
         const plain = { ...shipped, init: initProgram(context, PLAIN_INIT.frag, false) };
-        gl = { gl: context, floatBlend: context.getExtension('EXT_float_blend') !== null, shipped, plain };
+        const floatBlend = context.getExtension('EXT_float_blend') !== null;
+        gl = { gl: context, floatBlend, shipped, plain };
+        for (const programs of [shipped, plain]) {
+          const sim = new GlSim(context, programs, defaultSettings(), 16, 16, 1, floatBlend);
+          sim.paint([{ kind: 'wall', from: [2, 2], to: [8, 2], radius: 1 }]);
+          sim.run(1);
+          await sim.finish();
+          sim.destroy();
+        }
       }, 180_000);
 
       async function build(s: Settings, w: number, h: number, n: number, plain: boolean) {

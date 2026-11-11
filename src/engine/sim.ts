@@ -932,7 +932,7 @@ interface Starts {
 }
 
 /** The bindings that each pass of growth.wgsl uses: the 'auto' layout of its pipeline holds only these. */
-const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
+export const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   rowSums: [0, 3, 5],
   windowSums: [0, 5, 6],
   test: [0, 1, 2, 3, 4, 6, 7],

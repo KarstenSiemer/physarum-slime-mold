@@ -15,7 +15,11 @@ export function agentCount(s: Pick<Settings, 'density' | 'boundary'>, width: num
  * The agents that the simulation holds, alive and dead: agentCount() at the capacity (ADR 0025). The first
  * agentCount() of them start alive.
  */
-export function capacityCount(s: Pick<Settings, 'density' | 'capacity' | 'boundary'>, width: number, height: number) {
+export function capacityCount(
+  s: Pick<Settings, 'density' | 'capacity' | 'boundary' | 'collisions'>,
+  width: number,
+  height: number,
+) {
   return agentCount({ density: capacityOf(s), boundary: s.boundary }, width, height);
 }
 

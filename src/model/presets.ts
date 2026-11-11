@@ -346,6 +346,42 @@ PRESETS.push(
       food(0.64, 0.4, 0.018),
     ],
   },
+  {
+    id: 'foraging-maze',
+    name: 'Foraging maze',
+    group: 'experiments',
+    source: 'After Jones 2011 and 2017',
+    summary: 'A small colony on one food grows through the maze until it reaches the other food.',
+    watch:
+      'Fifty agents start on the bottom-right food. They divide at the thin edge of the colony, branch out and fill the corridors with a fine mesh. Within a few thousand steps a path reaches the top-left food. Hold Inoculate on a food to start a colony of your own.',
+    about:
+      'Jones lets his agents divide where the colony is thin and die where it is crowded (2011). A colony then grows from one food and forages, as a real slime mold does. Here, a small colony starts on one food of the maze. It branches through the corridors and finds the other food by growth alone, as no scent reaches that far.',
+    strainRoles: ['Jones’ foraging agent, drawn to food'],
+    why: 'Growth and shrinkage with Jones’ values of 2011: a 9 × 9 window with 1 to 10 agents for growth, a 5 × 5 window with up to 20 for shrinkage, both every 3 steps. Sensor angle 22.5° and rotation angle 45° are Jones’ angles for foraging (2011, 2017); 45° makes the colony contract. The maze, its foods, sensor distance 7 and food weight 0.03 are the Maze’s. Capacity 0.25 leaves room for the colony.',
+    settings: () =>
+      jones(
+        { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
+        {
+          model: 'extended',
+          density: 0.01,
+          capacity: 0.25,
+          layout: 'food',
+          boundary: 'box',
+          foodStrength: 0.03,
+          growth: true,
+        },
+      ),
+    // The start layout 'food' places the colony on the first food: the bottom-right one.
+    env: [
+      wall(-0.4, -0.5, -0.4, 0.2),
+      wall(0, -0.2, 0, 0.5),
+      wall(0.4, -0.5, 0.4, 0.2),
+      wall(-0.4, 0.2, -0.16, 0.2),
+      wall(0.16, -0.2, 0.4, -0.2),
+      food(0.64, 0.4, 0.018),
+      food(-0.64, -0.4, 0.018),
+    ],
+  },
 );
 
 // Michael Fogleman's saved settings (MIT).
@@ -430,12 +466,13 @@ export function ruleOffNotice(p: Preset): string {
     : 'Without one agent per cell, several agents can share a cell. Jones made this pattern with the rule, so it can turn out different. Tick the box to restart with the rule.';
 }
 
-export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'app';
+export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'later' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Jones 2010')) return 'jones';
   if (p.source.startsWith('Fogleman 2020')) return 'fogleman';
   if (p.source.startsWith('Nakagaki')) return 'nakagaki';
+  if (p.source.startsWith('After Jones')) return 'later';
   return 'app';
 }
 
@@ -450,6 +487,8 @@ export function sourceText(p: Preset): string {
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';
     case 'nakagaki':
       return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app.';
+    case 'later':
+      return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'app':
       return 'This scene was made for this app. Its settings are not taken from a paper.';
   }

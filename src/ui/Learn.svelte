@@ -17,13 +17,30 @@
     app.learn = false;
   }
 
+  // The switch Growth and shrinkage comes before its values and Capacity, as in the panel.
+  const GROWTH_KEYS = new Set<string>([
+    'growthEvery',
+    'growthWindow',
+    'growthMin',
+    'growthMax',
+    'shrinkEvery',
+    'shrinkWindow',
+    'shrinkMin',
+    'shrinkMax',
+    'capacity',
+  ]);
   const specs: { label: string; help: string; ref?: string }[] = [
     ...Object.values(strainSpec),
-    ...Object.values(globalSpec),
+    ...Object.entries(globalSpec)
+      .filter(([k]) => !GROWTH_KEYS.has(k))
+      .map(([, v]) => v),
     collisionsHelp,
     modelHelp,
     coveredFoodHelp,
     growthHelp,
+    ...Object.entries(globalSpec)
+      .filter(([k]) => GROWTH_KEYS.has(k))
+      .map(([, v]) => v),
   ];
 
   // Each scene's strains with the numbers of its own settings (not the live ones).
@@ -92,9 +109,10 @@
         and Steiner tree.
       </p>
       <p>
-        A real plasmodium also grows: from one oat flake it spreads a fan of fine veins over the agar until it finds
-        more food. Agents do not grow by themselves. The switch Growth and shrinkage adds Jones’ rule for this from his
-        later papers: agents divide at the thin edge of the colony and die where they crowd.
+        A real plasmodium also grows: from one oat flake it spreads over the agar until it finds more food. Agents do
+        not grow by themselves. The switch Growth and shrinkage adds Jones’ rule for this from his later papers: agents
+        divide at the thin edge of the colony and die where they crowd. The scene Foraging maze shows it: a small colony
+        on one food grows through a maze until it reaches the other food.
       </p>
     {:else if app.learnTab === 'The model'}
       <p>
@@ -154,10 +172,12 @@
       <p>
         From 2011 on, Jones also lets the population grow and shrink (Nat. Comput. 10: 1345). Every few steps, an agent
         that moved counts the agents in a square around it, itself included. If the square holds few agents, the agent
-        divides: a new agent appears in an empty cell next to it. If a smaller square holds too many agents, the agent
-        dies. So a colony grows at its thin edge, and crowded paths stay thin. Each of his later papers uses its own
-        window sizes, limits and intervals. The switch Growth and shrinkage has the values of 2011 as its defaults.
-        Capacity sets how many agents the simulation can hold.
+        divides: a new agent appears in an empty cell next to it. If its shrinkage square holds too many agents, the
+        agent dies. So a colony grows at its thin edge, and crowded paths stay thin. Each of his later papers uses its
+        own squares, limits and intervals. The switch Growth and shrinkage has the values of 2011 as its defaults. A new
+        agent needs a dead one: Capacity sets how many agents the simulation can hold. To see growth, choose the scene
+        Foraging maze, or switch on one agent per cell and Growth and shrinkage, then raise Capacity or start with the
+        layout Empty and use Inoculate.
       </p>
       <p>
         The extended model adds what Jones did not publish. Several strains can share the dish, each with its own trail.

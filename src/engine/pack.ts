@@ -224,7 +224,9 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
     f.set([t.strain, t.revive, jones && t.kind === AgentToolKind.cut ? 1 : 0, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
-  u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
+  // The start layout 'food' starts every agent dead, as 'empty' does; the engine then places the colony (ADR 0025).
+  const layout = LAYOUTS.indexOf(s.layout === 'food' ? 'empty' : s.layout);
+  u.set([layout, rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
   f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1], slot('model'));
   // Growth and shrinkage (ADR 0025): an interval of 0 turns a test off, and both are off without the rule.
   const on = growthOn(s);

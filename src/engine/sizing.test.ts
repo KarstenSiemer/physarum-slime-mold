@@ -88,7 +88,9 @@ describe('capacity (ADR 0025)', () => {
     const [w, h] = gridSize(2048, 1.6);
     const budget = estimateBytes(w, h, w * h);
     expect(fitResolution(s, 1.6, { ...roomy, budget })).toBe(2048);
-    expect(fitResolution({ ...s, capacity: 2 }, 1.6, { ...roomy, budget })).toBeLessThan(2048);
+    // With the rule a capacity of 2 holds one agent per cell (capacityOf()); without it, two.
+    expect(fitResolution({ ...s, capacity: 2 }, 1.6, { ...roomy, budget })).toBe(2048);
+    expect(fitResolution({ ...s, capacity: 2, collisions: false }, 1.6, { ...roomy, budget })).toBeLessThan(2048);
     const growth = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL + 34, bytesPerAgent: BYTES_PER_AGENT + 6 };
     expect(fitResolution(s, 1.6, growth)).toBeLessThan(2048);
   });
