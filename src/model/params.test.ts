@@ -86,6 +86,13 @@ describe('sanitize (untrusted input)', () => {
     for (const st of s.strains) expect(st.attraction).toEqual(Array(MAX_STRAINS).fill(attractionSpec.max));
   });
 
+  // The scent view is a setting of the look (ADR 0009, amendment 2026-11-11): only `true` turns it on.
+  it('takes the scent view only as true', () => {
+    expect(defaultSettings().showScent).toBe(false);
+    expect(sanitize({ showScent: true }).showScent).toBe(true);
+    for (const v of [1, 'true', {}, null, undefined]) expect(sanitize({ showScent: v }).showScent).toBe(false);
+  });
+
   it('takes the model, covered food and trail saturation', () => {
     const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
     expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);

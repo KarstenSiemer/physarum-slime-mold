@@ -3,6 +3,8 @@
 // Food, light and walls are compiled in only while something is painted (Simulation.hasEnvironment,
 // render.ts). Without them both entry points draw the same pixels and skip the work.
 override ENV: bool = true;
+// The scent view (ADR 0009, amendment 2026-11-11), compiled in only while it is on (render.ts).
+override SCENT: bool = false;
 
 struct View {
   canvas: vec2f,      // canvas size, pixels
@@ -26,6 +28,7 @@ struct View {
 @group(0) @binding(6) var heights: texture_2d<f32>; // gel style: written by `heightField` each frame
 @group(0) @binding(7) var heightSampler: sampler;   // bilinear, clamped
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
+@group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -555,9 +558,143 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   }
   if (near) {
     c += e.light * select(vec3f(0.22, 0.2, 0.12), vec3f(-0.04, -0.03, -0.12), V.style == 2u);
+  }
+  if (SCENT) { c = scentView(p, c, near, cells); }
+  if (near) {
     c = walls(c, e);
   }
   return c;
+}
+
+// ---- Scent view (SCENT) -------------------------------------------------------------------------------
+// The food scent and the light repellent over the picture, below the walls, which hold none. Display only. A band per
+// power of ten from 0.01 up, each more opaque than the one outside it, and a line at each power of ten. The scale is
+// fixed, so two scenes or two models compare directly. src/engine/scent.ts holds the same numbers.
+
+const SCENT_LOW = -2.0;            // log10 of the lowest level drawn: 0.01
+const SCENT_TOP = 6.0;             // the last band, from 10^4 up: SCENT_BANDS − 1 in scent.ts
+const SCENT_FILL = vec2f(0.1, 0.05); // opacity of the first band, and what each band above it adds
+const SCENT_LINE = 0.75;           // opacity of the line at a power of ten
+const SCENT_PAPER_FILL = 1.5;      // the fill over paper, times this: a light colour shows the same opacity less
+const LN10 = 2.302585093;
+
+// The scent at p and its gradient (per cell) for both layers.
+struct Scent {
+  v: vec2f,
+  gx: vec2f,
+  gy: vec2f,
+}
+
+// The texel of the scent for grid cell c in a closed arena: clamped to the box, and outside the dish the cell inside
+// the rim on the way to the centre (as shapeIndex). The arena has no flux across its edge, so the scent of its outer
+// cells goes on up to the edge, with no drop beside it.
+fn scentTexel(c: vec2i) -> vec2i {
+  let s = size();
+  var q = clamp(c, vec2i(0), s - 1);
+  if (V.boundary == 2u) {
+    let o = 0.5 * vec2f(s);
+    let m = vec2f(c) + 0.5 - o;
+    let rim = 0.5 * f32(min(s.x, s.y)) - 1.0;
+    if (dot(m, m) > rim * rim) { q = vec2i(floor(o + m * ((rim - 0.75) * inverseSqrt(dot(m, m))))); }
+  }
+  return q;
+}
+
+// Bilinear over the 4 cells around p, without the cells that `open` marks 0 (walls, which hold no scent): the
+// weights of the others are scaled up to 1, as trailBesideWalls() does for the trail. The gradient comes with it.
+// On the periodic grid the columns and rows are wrapped once, with one remainder each: remainders cost.
+fn scentBilinear(p: vec2f, open: vec4f) -> Scent {
+  let s = size();
+  let q = p - 0.5;
+  let i = vec2i(floor(q));
+  let f = q - floor(q);
+  // The 4 cells: top left, top right, bottom left, bottom right.
+  var x = vec2i(i.x, i.x + 1);
+  var y = vec2i(i.y, i.y + 1);
+  if (V.boundary == 0u) {
+    let r = i % s;
+    let w = select(r, r + s, r < vec2i(0));
+    x = vec2i(w.x, select(w.x + 1, 0, w.x == s.x - 1));
+    y = vec2i(w.y, select(w.y + 1, 0, w.y == s.y - 1));
+  } else {
+    x = clamp(x, vec2i(0), vec2i(s.x - 1));
+    y = clamp(y, vec2i(0), vec2i(s.y - 1));
+  }
+  var t = array<vec2i, 4>(vec2i(x.x, y.x), vec2i(x.y, y.x), vec2i(x.x, y.y), vec2i(x.y, y.y));
+  let m = p - 0.5 * vec2f(s);
+  let rim = 0.5 * f32(min(s.x, s.y)) - 1.0;
+  if (V.boundary == 2u && dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
+    // Near the rim: some of the 4 cells may lie outside the dish.
+    t = array<vec2i, 4>(scentTexel(i), scentTexel(i + vec2i(1, 0)), scentTexel(i + vec2i(0, 1)),
+                        scentTexel(i + vec2i(1, 1)));
+  }
+  return scentMix(textureLoad(scent, t[0], 0).xy, textureLoad(scent, t[1], 0).xy, textureLoad(scent, t[2], 0).xy,
+                  textureLoad(scent, t[3], 0).xy, f, open);
+}
+
+// The bilinear mix of a (the cell at the floor of p − 0.5), b (right of it), c (below it) and d (right below) at
+// fraction f, without the cells that `open` marks 0, with its gradient.
+fn scentMix(a: vec2f, b: vec2f, c: vec2f, d: vec2f, f: vec2f, open: vec4f) -> Scent {
+  let w = vec4f((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y) * open;
+  let wx = vec4f(f.y - 1.0, 1.0 - f.y, -f.y, f.y) * open;
+  let wy = vec4f(f.x - 1.0, -f.x, 1.0 - f.x, f.x) * open;
+  let total = w.x + w.y + w.z + w.w;
+  var r: Scent;
+  if (total <= 0.0) { return r; }
+  let sum = a * w.x + b * w.y + c * w.z + d * w.w;
+  r.v = sum / total;
+  r.gx = (a * wx.x + b * wx.y + c * wx.z + d * wx.w - r.v * (wx.x + wx.y + wx.z + wx.w)) / total;
+  r.gy = (a * wy.x + b * wy.y + c * wy.z + d * wy.w - r.v * (wy.x + wy.y + wy.z + wy.w)) / total;
+  return r;
+}
+
+// ∫₀ˣ clamp(floor(u), 0, SCENT_TOP) du: the band count, integrated, for the filter over a pixel.
+fn scentStairs(x: f32) -> f32 {
+  let y = clamp(x, 0.0, SCENT_TOP);
+  let n = floor(y);
+  return y * n - 0.5 * n * (n + 1.0) + SCENT_TOP * max(x - SCENT_TOP, 0.0);
+}
+
+// The opacity of the fill and of the line for a scent v with gradient g (per cell). The fill steps up once per band
+// and is filtered over the pixel, so bands closer than a pixel give their mean; the lines fade out where they lie
+// closer than 4 pixels.
+fn scentBands(v: f32, g: vec2f) -> vec2f {
+  if (!(v > 0.0)) { return vec2f(0.0); }
+  let t = log2(v) / log2(10.0) - SCENT_LOW;
+  let dt = max(length(g) * V.scale / (v * LN10), 1e-3); // powers of ten per pixel
+  let enter = clamp(t / dt + 0.5, 0.0, 1.0);
+  let steps = (scentStairs(t + 0.5 * dt) - scentStairs(t - 0.5 * dt)) / dt;
+  let k = clamp(round(t), 0.0, SCENT_TOP);
+  let d = abs(t - k) / dt;
+  let line = (1.0 - smoothstep(0.25, 1.25, d)) * (1.0 - smoothstep(0.25, 0.5, dt)) * SCENT_LINE;
+  return vec2f(SCENT_FILL.x * enter + SCENT_FILL.y * steps, line);
+}
+
+// Which of the 4 cells around p that bilinear() reads hold no wall: 1 open, 0 wall (`cells`: shapeCells of the cell
+// under p).
+fn openCells(p: vec2f, cells: array<u32, 9>) -> vec4f {
+  let o = vec2i(floor(p - 0.5)) - vec2i(floor(p)) + 1;
+  let open = vec4u(cells[o.y * 3 + o.x], cells[o.y * 3 + o.x + 1], cells[(o.y + 1) * 3 + o.x],
+                   cells[(o.y + 1) * 3 + o.x + 1]) & vec4u(0x80u);
+  return select(vec4f(1.0), vec4f(0.0), open != vec4u(0u));
+}
+
+// The view over colour c: the food scent, then the repellent, each its fill and then its line. Zoomed in near walls
+// the filter leaves out their cells (`near`, `cells`: as in scene()).
+fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
+  var open = vec4f(1.0);
+  if (ENV && near && V.scale <= 1.0) { open = openCells(p, cells); }
+  // One lookup also when zoomed out: the scent is smooth over cells, and scentBands() filters its bands and lines
+  // over the pixel from the gradient.
+  let s = scentBilinear(p, open);
+  let food = scentBands(s.v.x, vec2f(s.gx.x, s.gy.x));
+  let repellent = scentBands(s.v.y, vec2f(s.gx.y, s.gy.y));
+  let paperStyle = V.style == 2u;
+  let fill = select(1.0, SCENT_PAPER_FILL, paperStyle);
+  var o = mix(c, select(vec3f(0.1383, 0.7091, 0.1623), vec3f(0.0207, 0.2429, 0.033), paperStyle), food.x * fill);
+  o = mix(o, select(vec3f(0.3553, 0.9273, 0.3684), vec3f(0.0063, 0.1096, 0.0124), paperStyle), food.y);
+  o = mix(o, select(vec3f(0.9216, 0.1742, 0.6301), vec3f(0.4023, 0.024, 0.2555), paperStyle), repellent.x * fill);
+  return mix(o, select(vec3f(0.9316, 0.4403, 0.7387), vec3f(0.1955, 0.0055, 0.1219), paperStyle), repellent.y);
 }
 
 @fragment

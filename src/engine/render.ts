@@ -70,10 +70,38 @@ interface Groups {
 /** A render pass and the gel height pass, without (index 0) or with (1) the food, light and walls. */
 type Variants = [GPURenderPipeline, GPURenderPipeline];
 
+/**
+ * The render pass from `module` without (index 0) or with (1) the food, light and walls (`ENV`), with or without the
+ * scent view (`SCENT`). Without it the pipeline sets only `ENV`, as before the view existed.
+ */
+function renderPipelines(
+  device: GPUDevice,
+  module: GPUShaderModule,
+  layout: GPUBindGroupLayout,
+  format: GPUTextureFormat,
+  scent: boolean,
+): Variants {
+  return [false, true].map((env) =>
+    device.createRenderPipeline({
+      layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+      vertex: { module, entryPoint: 'vs' },
+      fragment: {
+        module,
+        entryPoint: 'fs',
+        targets: [{ format }],
+        constants: { ENV: Number(env), ...(scent ? { SCENT: 1 } : {}) },
+      },
+    }),
+  ) as Variants;
+}
+
 export class Renderer {
   private readonly layout: GPUBindGroupLayout;
   private readonly heightLayout: GPUBindGroupLayout;
   private readonly pipelines: Variants;
+  /** The render pass with the scent view, built at its first use: most frames never draw it. */
+  private scentPipelines: Variants | undefined;
+  private readonly module: GPUShaderModule;
   private readonly heightPipelines: Variants;
   private readonly heightSampler: GPUSampler;
   private readonly uniform: GPUBuffer;
@@ -89,8 +117,14 @@ export class Renderer {
     private readonly device: GPUDevice,
     private readonly context: GPUCanvasContext,
     private readonly format: GPUTextureFormat,
+    /**
+     * For tests: another version of the render shader, which then draws every frame as the code before the scent view
+     * drew it (the pipelines without the view, whatever the settings say).
+     */
+    private readonly fixed?: string,
   ) {
-    const module = device.createShaderModule({ code: renderWgsl });
+    const module = device.createShaderModule({ code: fixed ?? renderWgsl });
+    this.module = module;
     const F = GPUShaderStage.FRAGMENT;
     const storage = (binding: number): GPUBindGroupLayoutEntry => ({
       binding,
@@ -109,6 +143,7 @@ export class Renderer {
         { binding: 6, visibility: F, texture: { sampleType: 'float' } },
         { binding: 7, visibility: F, sampler: { type: 'filtering' } },
         storage(8),
+        { binding: 9, visibility: F, texture: { sampleType: 'unfilterable-float' } },
       ],
     });
     this.heightLayout = device.createBindGroupLayout({
@@ -119,16 +154,21 @@ export class Renderer {
         storage(8),
       ],
     });
-    const variants = (entryPoint: string, layout: GPUBindGroupLayout, target: GPUTextureFormat) =>
+    const heightVariants = (layout: GPUBindGroupLayout, target: GPUTextureFormat) =>
       [false, true].map((env) =>
         device.createRenderPipeline({
           layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
           vertex: { module, entryPoint: 'vs' },
-          fragment: { module, entryPoint, targets: [{ format: target }], constants: { ENV: Number(env) } },
+          fragment: {
+            module,
+            entryPoint: 'heightField',
+            targets: [{ format: target }],
+            constants: { ENV: Number(env) },
+          },
         }),
       ) as Variants;
-    this.pipelines = variants('fs', this.layout, format);
-    this.heightPipelines = variants('heightField', this.heightLayout, HEIGHT_FORMAT);
+    this.pipelines = renderPipelines(device, module, this.layout, format, false);
+    this.heightPipelines = heightVariants(this.heightLayout, HEIGHT_FORMAT);
     this.heightSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     this.uniform = device.createBuffer({ size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
@@ -166,7 +206,7 @@ export class Renderer {
     packView(this.data, width, height, f.view, f.exposure, f.black, f.settings, this.frame++, this.overlays, occupancy);
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
-    const trail = sim.current.trail;
+    const { trail, scent } = sim.current;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
     let byOcc = this.groups.get(trail);
@@ -189,6 +229,8 @@ export class Renderer {
           { binding: 6, resource: heights },
           { binding: 7, resource: this.heightSampler },
           { binding: 8, resource: { buffer: occ } },
+          // The scent of the same state as the trail: both alternate together (Simulation.current).
+          { binding: 9, resource: scent.createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -219,7 +261,11 @@ export class Renderer {
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
-    pass.setPipeline(this.pipelines[variant]);
+    const pipelines =
+      f.settings.showScent && this.fixed === undefined
+        ? (this.scentPipelines ??= renderPipelines(this.device, this.module, this.layout, this.format, true))
+        : this.pipelines;
+    pass.setPipeline(pipelines[variant]);
     pass.setBindGroup(0, cached.group);
     pass.draw(3);
     pass.end();

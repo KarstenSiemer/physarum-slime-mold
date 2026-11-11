@@ -6,7 +6,7 @@ import { packView, VIEW_BYTES } from '../render';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
-import { compile, VIEW_BINDING, type Programs } from './programs';
+import { compile, VIEW_BINDING, viewPrograms, type Program, type Programs } from './programs';
 import { GlSim } from './sim';
 
 const BLOOM_LEVELS = 5;
@@ -25,6 +25,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly bytesPerCell: number;
   readonly coveredBytesPerCell: number;
   private readonly prog: Programs;
+  /** For tests: the render programs of another version of render.frag that draw every frame (renderFrom()). */
+  private fixed: [Program, Program] | undefined;
   private readonly viewUbo: WebGLBuffer;
   private readonly viewData = new ArrayBuffer(VIEW_BYTES);
   private bloomChain: Target[] = [];
@@ -132,6 +134,14 @@ export class WebGl2Backend implements Backend<GlSim> {
     return { gain: this.gain, black: this.black };
   }
 
+  /**
+   * For tests: draws every frame with another version of render.frag from now on, as the code before the scent view
+   * did, or as shipped again when `frag` is undefined.
+   */
+  renderFrom(frag?: string) {
+    this.fixed = frag === undefined ? undefined : viewPrograms(this.gl, frag);
+  }
+
   forget() {
     this.gain = 0;
     this.black = 0;
@@ -223,9 +233,10 @@ export class WebGl2Backend implements Backend<GlSim> {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    const p = this.prog.render[variant];
+    const p = (this.fixed ?? (s.showScent ? this.prog.scentRender() : this.prog.render))[variant];
     gl.useProgram(p.program);
-    textures(gl, p.program, { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture });
+    const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture };
+    textures(gl, p.program, s.showScent ? { ...all, scent: sim.currentScent.texture } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 

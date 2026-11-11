@@ -188,6 +188,11 @@ export class GlSim implements Sim {
     return this.trail[this.p];
   }
 
+  /** The scent of the same state as currentTrail: both alternate together. */
+  get currentScent(): Target {
+    return this.scent[this.p];
+  }
+
   get countsTexture(): WebGLTexture {
     return this.counts.texture;
   }

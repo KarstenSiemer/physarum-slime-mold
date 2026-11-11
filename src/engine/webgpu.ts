@@ -20,7 +20,9 @@ export class WebGpuBackend implements Backend<Simulation> {
 
   readonly description: string;
   readonly lost: Promise<string>;
-  private readonly renderer: Renderer;
+  private renderer: Renderer;
+  private readonly context: GPUCanvasContext;
+  private readonly format: GPUTextureFormat;
   private readonly bloom: Bloom;
   private readonly auto: AutoExposure;
 
@@ -30,6 +32,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   ) {
     const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({ device: gpu.device, format, alphaMode: 'opaque' });
+    [this.context, this.format] = [context, format];
     this.renderer = new Renderer(gpu.device, context, format);
     this.bloom = new Bloom(gpu.device);
     this.auto = new AutoExposure(gpu.device);
@@ -94,6 +97,16 @@ export class WebGpuBackend implements Backend<Simulation> {
   async settle(sim: Simulation): Promise<Levels> {
     await this.auto.measure(sim.current.trail);
     return { gain: this.auto.gain, black: this.auto.black };
+  }
+
+  /**
+   * For tests: draws every frame with another version of the render shader from now on, as the code before the scent
+   * view did, or as shipped again when `code` is undefined. The new renderer counts its frames from 0, so its dither
+   * matches another one's frame by frame.
+   */
+  renderFrom(code?: string) {
+    this.renderer.destroy();
+    this.renderer = new Renderer(this.gpu.device, this.context, this.format, code);
   }
 
   forget() {

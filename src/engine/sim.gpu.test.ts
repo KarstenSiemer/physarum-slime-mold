@@ -13,10 +13,12 @@ import {
   type Boundary,
   type Settings,
 } from '../model/params';
+import { at } from './at';
 import { outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
 import agentsFrag from './gl/glsl/agents.frag?raw';
 import diffuseFrag from './gl/glsl/diffuse.frag?raw';
+import renderFrag from './gl/glsl/render.frag?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
 import { agentsProgram, compile, diffuseProgram, type Programs, type Walled } from './gl/programs';
 import { GlSim } from './gl/sim';
@@ -24,6 +26,7 @@ import { AgentToolKind, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND } from './render';
+import { scentBands, scentOver } from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -256,6 +259,140 @@ function styleReference(
 function smoothstep(a: number, b: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
+}
+
+/** `source` with the one match of `from` replaced by `to`. */
+function once(source: string, from: string, to: string) {
+  if (source.split(from).length !== 2) throw new Error(`Not found once: ${from}`);
+  return source.replace(from, to);
+}
+
+/** `source` without the text from the one match of `start` up to the next match of `end`. */
+function cutSpan(source: string, start: string, end: string) {
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
+  if (a < 0 || b < 0 || source.includes(start, a + 1)) throw new Error(`Not found once: ${start}`);
+  return source.slice(0, a) + source.slice(b);
+}
+
+/**
+ * The render shaders without the scent view (ADR 0009, amendment 2026-11-11). When the view was added, these gave the
+ * files of main (45155a8) byte for byte, on both backends.
+ */
+const WITHOUT_SCENT = {
+  wgsl: cutSpan(
+    cutSpan(
+      once(
+        once(
+          renderWgsl,
+          '// The scent view (ADR 0009, amendment 2026-11-11), compiled in only while it is on (render.ts).\noverride SCENT: bool = false;\n',
+          '',
+        ),
+        '  }\n  if (SCENT) { c = scentView(p, c, near, cells); }\n  if (near) {\n',
+        '',
+      ),
+      '@group(0) @binding(9) var scent',
+      '\n@vertex',
+    ),
+    '// ---- Scent view (SCENT) ---',
+    '@fragment\nfn fs',
+  ),
+  glsl: cutSpan(
+    cutSpan(renderFrag, '  }\n#endif\n#ifdef SCENT\n  vec4 open', '    c = walls(c, e);'),
+    '#ifdef SCENT\n// ---- Scent view',
+    'vec3 scene(vec2 p, vec2 s) {',
+  ),
+};
+
+/** sRGB byte → linear light. */
+const fromByte = (b: number) => {
+  const x = b / 255;
+  return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+};
+/** Linear light → sRGB byte, without the dither. */
+const toByte = (c: number) => {
+  const x = Math.min(1, Math.max(0, c));
+  return Math.round((x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055) * 255);
+};
+
+/**
+ * The scent view's opacities at grid position p on the CPU, as render.wgsl `scentView` draws them: the scent of
+ * `scent` (2 values per cell) bilinear at p with its gradient, wrapped on the periodic grid, clamped to the box, and
+ * outside the dish from the cell inside the rim on the way to the centre; zoomed in, without the cells that `wall`
+ * marks. Then scentBands() for the food scent and the repellent. `kink`: p lies within 0.001 cells of a cell centre,
+ * where the bilinear gradient jumps, so float32 on the GPU may take the other side.
+ */
+function scentAt(
+  scent: Float32Array,
+  [w, h]: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  [px, py]: [number, number],
+  scale: number,
+) {
+  const texel = (x: number, y: number): [number, number] => {
+    if (boundary === 'wrap') return [((x % w) + w) % w, ((y % h) + h) % h];
+    let q: [number, number] = [Math.min(Math.max(x, 0), w - 1), Math.min(Math.max(y, 0), h - 1)];
+    if (boundary === 'dish') {
+      const [mx, my] = [x + 0.5 - w / 2, y + 0.5 - h / 2];
+      const rim = 0.5 * Math.min(w, h) - 1;
+      const d2 = mx * mx + my * my;
+      if (d2 > rim * rim) {
+        const k = (rim - 0.75) / Math.sqrt(d2);
+        q = [Math.floor(w / 2 + mx * k), Math.floor(h / 2 + my * k)];
+      }
+    }
+    return q;
+  };
+  let kink = false;
+  const bilinear = (x: number, y: number, masked: boolean) => {
+    const [qx, qy] = [x - 0.5, y - 0.5];
+    const [x0, y0] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - x0, qy - y0];
+    kink ||= Math.min(fx, 1 - fx, fy, 1 - fy) < 1e-3;
+    const corners = [
+      [x0, y0, (1 - fx) * (1 - fy), fy - 1, fx - 1],
+      [x0 + 1, y0, fx * (1 - fy), 1 - fy, -fx],
+      [x0, y0 + 1, (1 - fx) * fy, -fy, 1 - fx],
+      [x0 + 1, y0 + 1, fx * fy, fy, fx],
+    ] as const;
+    let [total, totalX, totalY] = [0, 0, 0];
+    const [sum, sumX, sumY] = [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ];
+    for (const [cx, cy, wt, wx, wy] of corners) {
+      const [tx, ty] = texel(cx, cy);
+      if (masked && wall(tx, ty)) continue;
+      [total, totalX, totalY] = [total + wt, totalX + wx, totalY + wy];
+      for (const k of [0, 1]) {
+        const v = scent[(ty * w + tx) * 2 + k] ?? 0;
+        sum[k] = (sum[k] ?? 0) + v * wt;
+        sumX[k] = (sumX[k] ?? 0) + v * wx;
+        sumY[k] = (sumY[k] ?? 0) + v * wy;
+      }
+    }
+    return [0, 1].map((k) => {
+      if (total <= 0) return [0, 0, 0];
+      const v = (sum[k] ?? 0) / total;
+      return [v, ((sumX[k] ?? 0) - v * totalX) / total, ((sumY[k] ?? 0) - v * totalY) / total];
+    });
+  };
+  const [food = [0, 0, 0], repellent = [0, 0, 0]] = bilinear(px, py, scale <= 1);
+  return {
+    food: scentBands(food[0] ?? 0, Math.hypot(food[1] ?? 0, food[2] ?? 0), scale),
+    repellent: scentBands(repellent[0] ?? 0, Math.hypot(repellent[1] ?? 0, repellent[2] ?? 0), scale),
+    kink,
+  };
+}
+
+/** The share of the pixel at grid position p inside the arena, as render.wgsl `fs` draws the box edge and the rim. */
+function insideArena(boundary: Boundary, [w, h]: [number, number], [px, py]: [number, number], scale: number) {
+  const ramp = (sd: number) => smoothstep(-0.5 * scale, 0.5 * scale, sd);
+  if (boundary === 'wrap') return 1;
+  if (boundary === 'box') return ramp(Math.min(px, py, w - px, h - py));
+  return ramp(0.5 * Math.min(w, h) - 1 - Math.hypot(px - w / 2, py - h / 2));
 }
 
 const BACKENDS = {
@@ -3629,6 +3766,217 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   // of ef7f2af: the reference above computes them on the CPU. The dither moves a channel by at most 1, rounding by
   // 1 more, the gel's hardware filtering of its height field by at most 2. Fit (one bilinear lookup) and zoomed
   // out (four taps), every style, across the wrap seam, the box edge and the dish rim.
+  // The scent view (ADR 0009, amendment 2026-11-11): display only, on a fixed scale, in every style and at every zoom.
+  describe('scent view', () => {
+    const [W, H] = [64, 48];
+    const [CW, CH] = [96, 72];
+    const extended = (patch: Partial<Settings>): Settings => ({
+      ...defaultSettings(),
+      model: 'extended',
+      scentDecay: 0.02,
+      lightStrength: 0.2,
+      density: 0.5,
+      ...patch,
+    });
+    /** Food across the seam or the edge, or at the rim of the dish, and light inside: what each view looks at. */
+    const SCENES = {
+      wrap: { food: [1, 24], light: [40, 12], centre: [0, 24] },
+      box: { food: [2, 24], light: [40, 12], centre: [0, 24] },
+      dish: { food: [32, 3.5], light: [40, 30], centre: [32, 1] },
+    } as const satisfies Record<
+      Boundary,
+      { food: [number, number]; light: [number, number]; centre: [number, number] }
+    >;
+    const strokes = (b: Boundary): Stroke[] => [
+      { kind: 'food', from: [...SCENES[b].food], to: [...SCENES[b].food], radius: 3 },
+      { kind: 'light', from: [...SCENES[b].light], to: [...SCENES[b].light], radius: 3 },
+    ];
+    // Off the cell centres by a little: there the bilinear gradient jumps (scentAt `kink`), and these pixel grids would
+    // put whole columns and rows on them.
+    const views = (b: Boundary): View[] => [
+      { center: [SCENES[b].centre[0] + 0.0137, SCENES[b].centre[1] + 0.0291], scale: 1 / 8 },
+      { center: [SCENES[b].centre[0] + 0.0137, SCENES[b].centre[1] + 0.0291], scale: 0.6 },
+      { center: [32.0137, 24.0291], scale: 2.5 },
+    ];
+
+    // The pass without the view must draw what it drew before the view existed. Against the shaders without the
+    // scent code, with the same state, uniforms and dither: 0 of 255 apart. 2 × 72 captures: on SwiftShader on an
+    // M3 Pro up to 12 s (WebGL2), and GitHub runs SwiftShader up to about 4 times slower (ADR 0010).
+    it('draws the pixels of the shaders without the view while it is off, in every style', async () => {
+      const cases: { sim: Sim; settings: Settings; view: View }[] = [];
+      for (const boundary of BOUNDARIES)
+        for (const painted of [false, true]) {
+          const settings = extended({ boundary, strains: [defaultStrain(0), defaultStrain(1)] });
+          const sim = await make(settings, W, H, (W * H) / 2);
+          if (painted) sim.paint([...strokes(boundary), { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 }]);
+          sim.run(40);
+          expect(sim.hasEnvironment).toBe(painted);
+          for (const style of STYLES)
+            for (const view of views(boundary)) cases.push({ sim, settings: { ...settings, style }, view });
+        }
+      const captures = async () => {
+        const out: ImageData[] = [];
+        for (const c of cases) out.push(await backend.capture(c.sim, c.settings, c.view, 64, 48));
+        return out;
+      };
+      const hook = backend as WebGpuBackend | WebGl2Backend;
+      onTestFinished(() => {
+        hook.renderFrom();
+      });
+      // A new WebGPU renderer counts frames from 0, so both runs dither alike; WebGL2 captures keep the frame.
+      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      device?.pushErrorScope('validation');
+      hook.renderFrom(kind === 'webgpu' ? WITHOUT_SCENT.wgsl : WITHOUT_SCENT.glsl);
+      const before = await captures();
+      hook.renderFrom();
+      const now = await captures();
+      expect((await device?.popErrorScope())?.message).toBeUndefined();
+      const apart = now.map((img, i) => maxDiff(img, before[i] ?? img));
+      expect(Math.max(...apart), apart.join(' ')).toBe(0);
+    }, 240_000);
+
+    // Two simulations from one seed, one drawn with the view on after every few steps: the same bytes everywhere. Up
+    // to 5 s on SwiftShader on an M3 Pro (WebGL2).
+    it('changes no byte of the simulation', async () => {
+      const settings = extended({ boundary: 'box', collisions: backend.supportsCollisions, seed: 11 });
+      const on = { ...settings, showScent: true };
+      const [viewed, plain] = [await make(settings, W, H, 800), await make(settings, W, H, 800)];
+      for (const sim of [viewed, plain])
+        sim.paint([...strokes('box'), { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 }]);
+      for (let k = 0; k < 6; k++) {
+        viewed.update(on);
+        plain.update(settings);
+        viewed.run(5);
+        plain.run(5);
+        backend.draw(viewed, on, { center: [32, 24], scale: 0.5 }, true);
+        for (const style of STYLES) await backend.capture(viewed, { ...on, style }, at(views('box'), k % 3), 32, 24);
+      }
+      const state = async (sim: Sim) => ({
+        agents: await sim.readAgents(),
+        trail: Array.from(await sim.readTrail()),
+        scent: Array.from(await sim.readScent()),
+        env: Array.from(await sim.readEnv()),
+        shape: Array.from(await sim.readShape()),
+        step: sim.step,
+      });
+      const [a, b] = [await state(viewed), await state(plain)];
+      expect(a.scent.some((v) => v > 1)).toBe(true);
+      expect(a).toEqual(b);
+    }, 120_000);
+
+    // Every pixel inside the arena against the CPU reference of the view over the picture without it: across the seam
+    // of the periodic grid, at the edge of the box and at the rim of the dish, zoomed in, near fit and zoomed out. Outside
+    // the arena the view changes nothing: no halo.
+    it.each(BOUNDARIES)(
+      'follows the scent by the scale of scent.ts, at every zoom and in every style (%s)',
+      async (boundary) => {
+        // Exposure −2 EV and no glow keep most of the picture below 1, where the pass does not clamp it (below).
+        const strains = [defaultStrain(0), defaultStrain(1)];
+        const settings = extended({ boundary, strains, exposure: -2, bloom: 0 });
+        const sim = await make(settings, W, H, (W * H) / 2);
+        sim.paint(strokes(boundary));
+        sim.run(150);
+        const scent = await sim.readScent();
+        const worst: string[] = [];
+        let drawn = 0;
+        for (const style of STYLES)
+          for (const view of views(boundary)) {
+            const off = await backend.capture(sim, { ...settings, style }, view, CW, CH);
+            const on = await backend.capture(sim, { ...settings, style, showScent: true }, view, CW, CH);
+            let [max, sum, n, outside, arena] = [0, 0, 0, 0, 0];
+            for (let y = 0; y < CH; y++)
+              for (let x = 0; x < CW; x++) {
+                const p: [number, number] = [
+                  (x + 0.5 - CW / 2) * view.scale + view.center[0],
+                  (y + 0.5 - CH / 2) * view.scale + view.center[1],
+                ];
+                const inside = insideArena(boundary, [W, H], p, view.scale);
+                const i = (y * CW + x) * 4;
+                if (inside <= 0) {
+                  for (let k = 0; k < 3; k++)
+                    outside = Math.max(outside, Math.abs((on.data[i + k] ?? 0) - (off.data[i + k] ?? 0)));
+                  continue;
+                }
+                if (inside < 1) continue; // the ramp across the edge mixes the outside colour in
+                arena++;
+                const { food, repellent, kink } = scentAt(scent, [W, H], boundary, () => false, p, view.scale);
+                if (kink) continue;
+                if (food[0] > 0) drawn++;
+                // The pass clamps to [0, 1] after the view: where it clamped the picture, the bytes do not tell the
+                // colour below the view. Highlights of the gel and light pass 1; light on paper takes blue below 0.
+                const bytes = [0, 1, 2].map((k) => off.data[i + k] ?? 0);
+                if (bytes.some((b) => b >= 254) || (style === 'paper' && bytes.some((b) => b <= 1))) continue;
+                const base = bytes.map(fromByte) as Vec3;
+                const want = scentOver(base, style, food, repellent);
+                for (let k = 0; k < 3; k++) {
+                  const d = Math.abs((on.data[i + k] ?? 0) - toByte(want[k] ?? 0));
+                  [max, sum, n] = [Math.max(max, d), sum + d, n + 1];
+                }
+              }
+            // Kinks and clamped pixels leave out at most a tenth.
+            if (n / 3 < 0.9 * arena) worst.push(`${style} at ${view.scale}: ${n / 3} of ${arena} pixels compared`);
+            if (max > 3 || sum / n > 0.75 || outside > 2)
+              worst.push(`${style} at ${view.scale}: max ${max}, mean ${(sum / n).toFixed(2)}, outside ${outside}`);
+          }
+        expect(worst).toEqual([]);
+        expect(drawn).toBeGreaterThan(1000); // the food scent covers much of the views
+      },
+    );
+
+    // Walls hold no scent. Zoomed in, the filter leaves their cells out, so no band edge or line runs along a wall:
+    // without that, the value fell to half at the outline. Food up left of a long wall: along the wall the scent spans
+    // several powers of ten, so lines cross the strip beside it. Over the bare paper the picture is the background
+    // times the walls' shadow, so the reference is the view over the background times what the picture without the
+    // view holds there.
+    it('leaves the cells of walls out of the scent, zoomed in', async () => {
+      const settings = extended({ style: 'paper', layout: 'empty', boundary: 'wrap' });
+      const sim = await make(settings, W, H, 1);
+      const food: [number, number] = [24, 8];
+      sim.paint([
+        { kind: 'food', from: food, to: food, radius: 3 },
+        { kind: 'wall', from: [32, 2], to: [32, 46], radius: 1 },
+      ]);
+      sim.run(150);
+      const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+      const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
+      expect(wall(31, 24) && wall(32, 24) && !wall(30, 24) && !wall(33, 24)).toBe(true);
+      const bg = hexToLinear(BACKGROUND.paper);
+      const [cw, ch] = [96, 288];
+      const worst: string[] = [];
+      for (const scale of [1 / 8, 1 / 2]) {
+        const view: View = { center: [29.0137, 24.0291], scale };
+        const off = await backend.capture(sim, settings, view, cw, ch);
+        const on = await backend.capture(sim, { ...settings, showScent: true }, view, cw, ch);
+        let [max, n, beside] = [0, 0, 0];
+        for (let y = 0; y < ch; y++)
+          for (let x = 0; x < cw; x++) {
+            const p: [number, number] = [
+              (x + 0.5 - cw / 2) * scale + view.center[0],
+              (y + 0.5 - ch / 2) * scale + view.center[1],
+            ];
+            // The wall covers the view from its outline at x = 31 and 33 inward, with a ramp of one pixel, and the
+            // flake of food and its copies on the periodic grid lie below the view.
+            if (p[0] > 31 - 0.5 * scale - 0.1 && p[0] < 33 + 0.5 * scale + 0.1) continue;
+            const wrapped = (d: number, n: number) => d - n * Math.round(d / n);
+            if (Math.hypot(wrapped(p[0] - food[0], W), wrapped(p[1] - food[1], H)) < 3 + 2 + scale) continue;
+            const i = (y * cw + x) * 4;
+            const { food: f, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale);
+            if (kink) continue;
+            if (p[0] > 30.5 && p[0] < 31) beside++;
+            const want = scentOver(bg, 'paper', f, repellent);
+            for (let k = 0; k < 3; k++) {
+              const shade = fromByte(off.data[i + k] ?? 0) / (bg[k] ?? 1);
+              const d = Math.abs((on.data[i + k] ?? 0) - toByte((want[k] ?? 0) * shade));
+              [max, n] = [Math.max(max, d), n + 1];
+            }
+          }
+        if (max > 3 || (scale < 0.2 && beside < 300))
+          worst.push(`at ${scale}: max ${max} over ${n / 3} pixels, ${beside} between the cell centre and the wall`);
+      }
+      expect(worst).toEqual([]);
+    });
+  });
+
   describe('styles without food, light or walls', () => {
     const SIZE = 128;
     it.each(BOUNDARIES)(

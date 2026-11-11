@@ -21,6 +21,7 @@ describe('URL settings', () => {
     s.strains = [defaultStrain(0), { ...defaultStrain(1), sensorOffset: 33, color: '#123456' }];
     s.boundary = 'dish';
     Object.assign(s, { model: 'extended', coveredFood: true, coveredFoodFactor: 0.01, trailSaturation: 40 });
+    s.showScent = true; // a setting of the look, as the style: the link shows what the sender sees
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);
     expect(await decodeSettings(encoded)).toEqual(s);

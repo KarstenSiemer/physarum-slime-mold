@@ -63,7 +63,7 @@ describe('modelChanged', () => {
     const again = settingsOf('three-strains').s; // settings() draws a new seed every time
     expect(again.seed === s.seed).toBe(false);
     expect(modelChanged(again, s)).toBe(false);
-    const looks = { ...again, style: 'paper' as const, exposure: 1, bloom: 0.2, speed: 30 };
+    const looks = { ...again, style: 'paper' as const, showScent: true, exposure: 1, bloom: 0.2, speed: 30 };
     looks.strains = again.strains.map((st) => ({ ...st, color: '#ffffff' }));
     expect(modelChanged(looks, s)).toBe(false);
   });

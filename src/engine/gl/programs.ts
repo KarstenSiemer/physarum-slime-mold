@@ -68,6 +68,8 @@ export interface Programs {
   shape: Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
   render: [Program, Program];
+  /** The same with the scent view (SCENT in render.frag), compiled at its first use: most frames never draw it. */
+  scentRender: () => [Program, Program];
   height: [Program, Program];
   bloom: Program;
   sample: Program;
@@ -105,17 +107,29 @@ export function diffuseProgram(gl: GL, frag: string, covered: boolean): Program 
   return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + frag);
 }
 
+const plainProgram = (gl: GL, frag: string) =>
+  wrap(gl, program(gl, V + 'precision highp float;\n' + fullscreen, V + frag));
+
+/**
+ * A view pass from `frag` (render.frag, height.frag or a version of them, after view.glsl) without (index 0) and with
+ * (1) the food, light and walls; `defines` go first, such as SCENT for the scent view.
+ */
+export function viewPrograms(gl: GL, frag: string, defines = ''): [Program, Program] {
+  return [
+    plainProgram(gl, defines + '#define ENV 0\n' + viewGlsl + frag),
+    plainProgram(gl, defines + '#define ENV 1\n' + viewGlsl + frag),
+  ];
+}
+
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
 export function compile(gl: GL): Programs {
   const sim = (frag: string) => simProgram(gl, frag);
-  const plain = (frag: string) => wrap(gl, program(gl, V + 'precision highp float;\n' + fullscreen, V + frag));
-  const view = (frag: string): [Program, Program] => [
-    plain('#define ENV 0\n' + viewGlsl + frag),
-    plain('#define ENV 1\n' + viewGlsl + frag),
-  ];
+  const plain = (frag: string) => plainProgram(gl, frag);
+  const view = (frag: string) => viewPrograms(gl, frag);
   let walled: Walled | undefined;
   let saturated: Saturated | undefined;
   let covered: Program | undefined;
+  let scentRender: [Program, Program] | undefined;
   return {
     agents: agentsProgram(gl, agentsFrag, false),
     walled: () => (walled ??= { agents: agentsProgram(gl, agentsFrag, true), walls: sim(wallsFrag) }),
@@ -133,6 +147,7 @@ export function compile(gl: GL): Programs {
     fill: plain(fillFrag),
     points: wrap(gl, program(gl, V + common + toolsGlsl + pointsVert, V + common + pointsFrag)),
     render: view(renderFrag),
+    scentRender: () => (scentRender ??= viewPrograms(gl, renderFrag, '#define SCENT 1\n')),
     height: view(heightFrag),
     bloom: plain(bloomFrag),
     sample: plain(sampleFrag),

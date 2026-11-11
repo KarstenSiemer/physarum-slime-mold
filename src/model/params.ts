@@ -238,6 +238,12 @@ export const coveredFoodHelp = {
   ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
 } as const;
 
+/** Help for the view switch "Scent" (ADR 0009, amendment 2026-11-11); Learn → Controls lists it with the sliders. */
+export const scentViewHelp = {
+  label: 'Scent',
+  help: 'Draws the food scent in green and the light repellent in pink over the picture. Each band starts at a power of ten, from 0.01 per cell up, and a line marks its start. The scale does not change, so you can compare two scenes or the two models. The simulation does not change.',
+} as const;
+
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
 export const REFERENCE_SCENT_DECAY = 0.1;
 
@@ -272,6 +278,8 @@ export interface Settings extends Record<GlobalKey, number> {
   /** Food under agents releases `coveredFoodFactor` of its scent (coveredFoodHelp). */
   coveredFood: boolean;
   style: Style;
+  /** The view draws the food scent and the light repellent over the picture (scentViewHelp). Display only. */
+  showScent: boolean;
   strains: Strain[];
 }
 
@@ -322,6 +330,7 @@ export function defaultSettings(): Settings {
     model: 'extended',
     coveredFood: false,
     style: 'glow',
+    showScent: false,
     density: 1,
     diffusion: 1,
     foodStrength: 0.05,
@@ -384,6 +393,7 @@ export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
   out.layout = oneOf(raw.layout, LAYOUTS, d.layout);
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
+  out.showScent = raw.showScent === true;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
   // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).

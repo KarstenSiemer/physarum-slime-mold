@@ -126,3 +126,21 @@ describe('agent tools held over frames', () => {
     expect(runs).toEqual([{ steps: 1, revive: undefined }]);
   });
 });
+
+// The scent view (ADR 0009, amendment 2026-11-11) draws over the picture and changes nothing in the simulation: no
+// restart, no new simulation, and the parameters the GPU gets stay as they were (pack.test.ts).
+describe('the scent view', () => {
+  it('neither restarts nor rebuilds the simulation', async () => {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const settings = { ...defaultSettings(), resolution: 256 };
+    const engine = await Engine.create(canvas, settings, undefined, new CpuBackend());
+    const [sim, restarts] = [engine.sim, engine.restarts];
+    engine.frame(0, 3);
+    await engine.apply({ ...settings, showScent: true });
+    engine.frame(16, 3);
+    await engine.apply({ ...settings, showScent: false });
+    expect(engine.sim).toBe(sim);
+    expect(engine.restarts).toBe(restarts);
+    expect(engine.sim.step).toBe(6);
+  });
+});

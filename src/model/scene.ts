@@ -69,7 +69,7 @@ export function strainNumbers(s: Settings, i: number, env: readonly EnvShape[] =
 }
 
 /** Settings that change the look or the pace, not the model. The seed is drawn anew on every load. */
-const NOT_MODEL = new Set<keyof Settings>(['seed', 'style', 'exposure', 'bloom', 'speed', 'strains']);
+const NOT_MODEL = new Set<keyof Settings>(['seed', 'style', 'showScent', 'exposure', 'bloom', 'speed', 'strains']);
 const STRAIN_KEYS = Object.keys(strainSpec) as StrainKey[];
 
 /** Same numbers, and the same weights on the trails of the `n` strains that exist. */
