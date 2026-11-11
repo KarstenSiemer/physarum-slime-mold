@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { drawingOf } from '../model/link';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
-import { presetById, type Preset } from '../model/presets';
+import { presetById, shapesAt, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
@@ -28,6 +28,18 @@ const shrinking = onScreen(presetById('shrinking'), 512);
 if (!maze?.env || !three || !shrinking?.env) throw new Error('presets missing');
 const mazeEnv = maze.env;
 const shrinkingEnv = shrinking.env;
+/**
+ * Revision 0 of Shrinking plasmodium's shapes, its 8 foods before ADR 0027, which old links still paint: the tests of
+ * the sweep erase its food 6.
+ */
+const shrinking8 = shapesAt(shrinking, 0) ?? [];
+
+/** The cells whose centre lies within `r` cells of `at`: every cell of a whole food dab there, on a w × h grid. */
+const disc = ([x, y]: [number, number], r: number, w: number, h: number) => {
+  let n = 0;
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (Math.hypot(i + 0.5 - x, j + 0.5 - y) <= r) n++;
+  return n;
+};
 
 async function engineWith(settings: Settings, env = mazeEnv, c = canvas(), backend = new CpuBackend()) {
   const engine = await Engine.create(c, settings, undefined, backend);
@@ -540,13 +552,13 @@ describe('food, light and walls after an arena switch', () => {
       await engine.apply({ ...engine.settings, density });
       const fresh = await engineWith(shrinking.settings(), shrinkingEnv, canvas(w, h));
       expect(differing(sim().env, fresh.sim().env), `${w} × ${h}`).toBe(0);
-      // Each of the eight foods at the place of the dish's frame, with all its cells.
+      // Each of the 19 foods at the place of the dish's frame, with all its cells.
       const short = Math.min(sim().width, sim().height);
       shrinkingEnv.forEach((e, i) => {
         const at = fromFrame(e.at, [sim().width, sim().height], 'dish');
         const cells = foodNear(sim(), at, 2 + e.r * short);
         expect(cells, `food ${i} on ${w} × ${h}`).toBe(foodNear(fresh.sim(), at, 2 + e.r * short));
-        expect(cells, `food ${i} on ${w} × ${h}`).toBeGreaterThan(20);
+        expect(cells, `food ${i} on ${w} × ${h}`).toBe(disc(at, e.r * short, sim().width, sim().height));
       });
     }
   });
@@ -629,7 +641,8 @@ describe('food, light and walls after an arena switch', () => {
         await started.load(settings, env, p.settings().boundary);
         expect(started.settings.boundary).toBe(other);
         expect(differing((started.sim as CpuSim).env, switched.sim().env), `${p.id} on ${w} × ${h}`).toBe(0);
-        expect(count(switched.sim().env, 1), `${p.id} on ${w} × ${h}`).toBeGreaterThan(50);
+        // Steiner's foods of 0.0135 short sides (ADR 0027) have about 11 cells each on 256 × 144.
+        expect(count(switched.sim().env, 1), `${p.id} on ${w} × ${h}`).toBeGreaterThan(30);
       }
   });
 
@@ -721,15 +734,15 @@ describe('a long sweep', () => {
 // A stroke that later strokes cleared completely on the grid on screen leaves the list (sweep.ts, ADR 0019), and so
 // does an erase that clears nothing there any more.
 describe('the sweep', () => {
-  // Shrinking's food 6 at (−0.368, −0.05) of the dish's frame, radius 0.012 short sides: on 512 × 320 at
-  // (138.24, 144) with a radius of 3.84 cells.
+  // Food 6 of revision 0 of Shrinking's shapes (shrinking8) at (−0.368, −0.05) of the dish's frame, radius 0.012
+  // short sides: on 512 × 320 at (138.24, 144) with a radius of 3.84 cells.
   const food6: [number, number] = [256 - 0.368 * 320, 160 - 0.05 * 320];
-  const others = shrinkingEnv.filter((_, i) => i !== 6);
+  const others = shrinking8.filter((_, i) => i !== 6);
 
   it('deletes a food erased completely in a box, with its erases, so it stays gone on a square screen', async () => {
     for (const drag of [false, true]) {
       const c = canvas();
-      const { engine, sim } = await engineWith(shrinking.settings(), shrinkingEnv, c);
+      const { engine, sim } = await engineWith(shrinking.settings(), shrinking8, c);
       await engine.apply({ ...engine.settings, boundary: 'box' });
       expect(foodNear(sim(), food6, 5)).toBeGreaterThan(40);
       if (drag) {
@@ -760,7 +773,7 @@ describe('the sweep', () => {
   // The known limit of ADR 0019: strokes painted in different arenas shift against each other on another screen.
   it('keeps a food erased in part and its erase, each in its own frame on a square screen', async () => {
     const c = canvas();
-    const { engine, sim } = await engineWith(shrinking.settings(), shrinkingEnv, c);
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinking8, c);
     await engine.apply({ ...engine.settings, boundary: 'box' });
     const before = foodNear(sim(), food6, 5);
     engine.paint({ kind: 'erase', from: [food6[0] - 3, food6[1]], to: [food6[0] - 3, food6[1]], radius: 2 });
@@ -772,7 +785,7 @@ describe('the sweep', () => {
     [c.width, c.height] = [1000, 1000];
     await engine.apply({ ...engine.settings, density: 0.2 });
     // The food in the dish's frame, whole; the erase in the box's frame, beside it.
-    const fresh = await engineWith(shrinking.settings(), shrinkingEnv, canvas(1000, 1000));
+    const fresh = await engineWith(shrinking.settings(), shrinking8, canvas(1000, 1000));
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
     [c.width, c.height] = [1600, 1000];
     await engine.apply({ ...engine.settings, density: 0.45 });
@@ -984,13 +997,13 @@ describe('the sweep', () => {
   // goes there.
   it('keeps an erase that clears nothing only on this screen shape until an edit under it goes there', async () => {
     const c = canvas();
-    const { engine, sim } = await engineWith(shrinking.settings(), shrinkingEnv, c);
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinking8, c);
     await engine.apply({ ...engine.settings, boundary: 'box' });
     // Over a part of food 6 here; on a square screen the box's frame puts it 67 cells beside the food.
     engine.paint({ kind: 'erase', from: [food6[0] - 3, food6[1]], to: [food6[0] - 3, food6[1]], radius: 2 });
     engine.frame(0, 0);
     const erased = foodNear(sim(), food6, 5);
-    const whole = await engineWith(shrinking.settings(), shrinkingEnv, canvas());
+    const whole = await engineWith(shrinking.settings(), shrinking8, canvas());
     await whole.engine.apply({ ...whole.engine.settings, boundary: 'box' });
     expect(erased).toBeLessThan(foodNear(whole.sim(), food6, 5));
     const square = async () => {
@@ -1032,7 +1045,7 @@ describe('the sweep', () => {
   // reaches only on another screen shape, here food 6 on a square one.
   it('deletes an erase over an edit that went when only a newer edit lies under it', async () => {
     const c = canvas();
-    const { engine, sim } = await engineWith(shrinking.settings(), shrinkingEnv, c);
+    const { engine, sim } = await engineWith(shrinking.settings(), shrinking8, c);
     await engine.apply({ ...engine.settings, boundary: 'box' });
     // On a square screen x stays and y spreads by 1.6 about the centre, in the box's frame and the dish's: at x = 67.6
     // these strokes lie over food 6 there, 70 cells beside it here.
@@ -1045,10 +1058,10 @@ describe('the sweep', () => {
     dab('food', 140, 2); // over the top of the erase
     dab('erase', 148.5, 4.6); // over all of the first food, beside the second
     const kept = edits(engine);
-    expect(kept.map((e) => e.kind)).toEqual([...shrinkingEnv.map(() => 'food'), 'food']);
+    expect(kept.map((e) => e.kind)).toEqual([...shrinking8.map(() => 'food'), 'food']);
     [c.width, c.height] = [1000, 1000];
     await engine.apply({ ...engine.settings, density: 0.2 });
-    const fresh = await engineWith(shrinking.settings(), shrinkingEnv, canvas(1000, 1000));
+    const fresh = await engineWith(shrinking.settings(), shrinking8, canvas(1000, 1000));
     await fresh.engine.apply({ ...fresh.engine.settings, boundary: 'box' });
     const newer = kept.at(-1);
     if (!newer) throw new Error('no newer food');
@@ -1177,12 +1190,12 @@ describe('lattices', () => {
       }
       for (const r of runs.slice(1)) expect(differing(r.sim().env, runs[0]?.sim().env ?? new Uint8Array())).toBe(0);
     }
-    // All eight foods of Shrinking plasmodium lie in the dish, each with its cells.
+    // All 19 foods of Shrinking plasmodium lie in Jones' dish (radius 141.75 cells), each with its cells.
     const { sim } = await engineWith(jones('shrinking').settings(), shrinkingEnv, canvas(390, 844));
     shrinkingEnv.forEach((e, i) => {
       const at = fromFrame(e.at, [300, 300], 'dish');
-      expect(Math.hypot(at[0] - 150, at[1] - 150), `food ${i}`).toBeLessThan(149 - e.r * 300);
-      expect(foodNear(sim(), at, 2 + e.r * 300), `food ${i}`).toBeGreaterThan(20);
+      expect(Math.hypot(at[0] - 150, at[1] - 150), `food ${i}`).toBeLessThan(141.75 - e.r * 300);
+      expect(foodNear(sim(), at, 2 + e.r * 300), `food ${i}`).toBe(disc(at, e.r * 300, 300, 300));
     });
   });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
 import { packDrawing, unpackDrawing, type Drawing } from './link';
 import { defaultSettings, defaultStrain, type Settings } from './params';
-import { presetById } from './presets';
+import { presetById, shapeRevision } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
 
 /** Bytes or text as a part of the hash: deflate-raw and base64url, as url.ts makes it, but without its limits. */
@@ -117,9 +117,15 @@ describe('URL links with food, light and walls', () => {
     const s = maze?.settings() ?? defaultSettings();
     const drag: EnvEdit = { ...dab(10, 10, 'wall'), to: [40.5, 12.25] };
     const drawings: Drawing[] = [
-      { scene: 'maze', origins: [0], shapes: mazeShapes, strokes: [] },
-      { scene: 'maze', origins: [-1], shapes: mazeShapes.map((_, i) => i > 0), strokes: [dab(100, 50), drag] },
-      { scene: '', origins: [], shapes: [], strokes: [dab(1, 2, 'erase')] },
+      { scene: 'maze', revision: 0, origins: [0], shapes: mazeShapes, strokes: [] },
+      {
+        scene: 'maze',
+        revision: 0,
+        origins: [-1],
+        shapes: mazeShapes.map((_, i) => i > 0),
+        strokes: [dab(100, 50), drag],
+      },
+      { scene: '', revision: 0, origins: [], shapes: [], strokes: [dab(1, 2, 'erase')] },
     ];
     for (const d of drawings) {
       const { hash, dropped } = await encodeLink(s, d);
@@ -128,7 +134,7 @@ describe('URL links with food, light and walls', () => {
       expect(await decodeLink(hash)).toEqual({ settings: s, drawing: d });
     }
     // Without a scene and strokes, the link holds the settings alone, as links did before.
-    const plain = await encodeLink(s, { scene: '', origins: [], shapes: [], strokes: [] });
+    const plain = await encodeLink(s, { scene: '', revision: 0, origins: [], shapes: [], strokes: [] });
     expect(plain).toEqual({ hash: `s=${await encodeSettings(s)}`, dropped: false });
     expect(await decodeLink(plain.hash)).toEqual({ settings: s });
   });
@@ -146,15 +152,21 @@ describe('URL links with food, light and walls', () => {
       grid: [4096, 2304] as [number, number],
     }));
     const s = maze?.settings() ?? defaultSettings();
-    const { hash, dropped } = await encodeLink(s, { scene: 'maze', origins: [0], shapes: mazeShapes, strokes });
+    const { hash, dropped } = await encodeLink(s, {
+      scene: 'maze',
+      revision: 0,
+      origins: [0],
+      shapes: mazeShapes,
+      strokes,
+    });
     expect(dropped).toBe(true);
     expect(hash.length).toBeLessThanOrEqual(8192);
     expect(await decodeLink(hash)).toEqual({
       settings: s,
-      drawing: { scene: 'maze', origins: [0], shapes: mazeShapes, strokes: [] },
+      drawing: { scene: 'maze', revision: 0, origins: [0], shapes: mazeShapes, strokes: [] },
     });
     // Without a scene, the settings alone.
-    const none = await encodeLink(s, { scene: '', origins: [], shapes: [], strokes });
+    const none = await encodeLink(s, { scene: '', revision: 0, origins: [], shapes: [], strokes });
     expect(none).toEqual({ hash: `s=${await encodeSettings(s)}`, dropped: true });
     // 4,096 strokes of 16 bytes each, which compress well: the receiver would refuse more than 64 KiB inflated.
     const far = Array.from({ length: 4096 }, (_, i): EnvEdit => {
@@ -166,9 +178,15 @@ describe('URL links with food, light and walls', () => {
         grid: i % 2 ? [4095, 4095] : [4096, 4096],
       };
     });
-    expect((await encodeLink(s, { scene: '', origins: [], shapes: [], strokes: far })).dropped).toBe(true);
+    expect((await encodeLink(s, { scene: '', revision: 0, origins: [], shapes: [], strokes: far })).dropped).toBe(true);
     // A list that cannot go in a link at all (a value off the steps) is dropped the same way, without an error.
-    const off = await encodeLink(s, { scene: 'maze', origins: [0], shapes: mazeShapes, strokes: [dab(NaN, 1)] });
+    const off = await encodeLink(s, {
+      scene: 'maze',
+      revision: 0,
+      origins: [0],
+      shapes: mazeShapes,
+      strokes: [dab(NaN, 1)],
+    });
     expect(off.dropped).toBe(true);
   });
 
@@ -184,6 +202,7 @@ describe('URL links with food, light and walls', () => {
       });
       const drawing = (n: number) => ({
         scene: 'maze',
+        revision: 0,
         origins: [0],
         shapes: mazeShapes,
         strokes: strokes.slice(0, n),
@@ -213,7 +232,7 @@ describe('URL links with food, light and walls', () => {
         grid: i % 2 ? [4095, 4095] : [4096, 4096],
       };
     });
-    const bytes = packDrawing({ scene: '', origins: [], shapes: [], strokes }) ?? new Uint8Array();
+    const bytes = packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes }) ?? new Uint8Array();
     expect(bytes.length).toBeGreaterThan(64 * 1024);
     expect(unpackDrawing(bytes)?.strokes).toHaveLength(4096);
     const s = defaultSettings();
@@ -228,7 +247,7 @@ describe('URL links with food, light and walls', () => {
 
   it('give each strain no scene role when the origins do not match the strains', async () => {
     const s = { ...defaultSettings(), strains: [defaultStrain(0), defaultStrain(1)] };
-    const { hash } = await encodeLink(s, { scene: 'maze', origins: [0], shapes: mazeShapes, strokes: [] });
+    const { hash } = await encodeLink(s, { scene: 'maze', revision: 0, origins: [0], shapes: mazeShapes, strokes: [] });
     expect((await decodeLink(hash))?.drawing?.origins).toEqual([-1, -1]);
   });
 
@@ -236,6 +255,7 @@ describe('URL links with food, light and walls', () => {
     const s = maze?.settings() ?? defaultSettings();
     const good = await encodeLink(s, {
       scene: 'maze',
+      revision: 0,
       origins: [0],
       shapes: mazeShapes,
       strokes: [dab(100, 50), { ...dab(30, 40, 'light'), boundary: 'wrap' }],
@@ -295,8 +315,11 @@ describe('URL links and the model', () => {
     return { ...old, strains: old.strains.map((st) => ({ ...st, food: 1 })) } as unknown as Settings;
   };
   const open = async (s: Settings, strokes: EnvEdit[] = [], scene = '') => {
-    const shapes = presetById(scene)?.env?.map(() => true) ?? [];
-    const { hash } = await encodeLink(s, { scene, origins: scene ? s.strains.map((_, i) => i) : [], shapes, strokes });
+    const p = presetById(scene);
+    const shapes = p?.env?.map(() => true) ?? [];
+    const revision = p ? shapeRevision(p) : 0;
+    const origins = scene ? s.strains.map((_, i) => i) : [];
+    const { hash } = await encodeLink(s, { scene, revision, origins, shapes, strokes });
     const link = await decodeLink(hash);
     if (!link) throw new Error('no link');
     return link.settings;

@@ -2,7 +2,7 @@
 // link, and tools on the letterboxed view. Steiner tree has 200 × 200 cells and 800 agents: fast on SwiftShader in CI.
 import { expect, test, type Page } from '@playwright/test';
 import type { Settings } from '../../src/model/params';
-import { presetById } from '../../src/model/presets';
+import { presetById, shapeRevision } from '../../src/model/presets';
 import { decodeLink, encodeLink } from '../../src/model/url';
 import { watchErrors } from './helpers';
 
@@ -23,6 +23,7 @@ async function openSteiner(page: Page, query = '') {
   if (!p) throw new Error('no Steiner tree');
   const { hash } = await encodeLink(p.settings(), {
     scene: p.id,
+    revision: shapeRevision(p),
     origins: [0],
     shapes: p.env?.map(() => true) ?? [],
     strokes: [],
@@ -141,7 +142,7 @@ test('the app’s own scenes show no hint and no lattice of a paper', async ({ p
   if (!p) throw new Error('no Maze');
   const { hash } = await encodeLink(
     { ...p.settings(), resolution: 256 },
-    { scene: p.id, origins: [0], shapes: p.env?.map(() => true) ?? [], strokes: [] },
+    { scene: p.id, revision: shapeRevision(p), origins: [0], shapes: p.env?.map(() => true) ?? [], strokes: [] },
   );
   await page.goto(`/#${hash}`);
   await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([256, 144]);
@@ -161,7 +162,9 @@ test('an old link of a scene of Jones opens as it was made, on a grid shaped lik
   if (!p) throw new Error('no Shortest path');
   const old: Partial<Settings> = { ...p.settings(), resolution: 256, speed: 240 };
   delete old.lattice;
-  const { hash } = await encodeLink(old as Settings, { scene: p.id, origins: [0], shapes: [true, true], strokes: [] });
+  // Revision 0 of its shapes, the foods of before ADR 0027.
+  const drawing = { scene: p.id, revision: 0, origins: [0], shapes: [true, true], strokes: [] };
+  const { hash } = await encodeLink(old as Settings, drawing);
   await page.goto(`/#${hash}`);
   await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 0, undefined, { timeout: 120_000 });
   await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([256, 144]);
@@ -188,7 +191,13 @@ test('a lattice the device cannot hold runs on a grid shaped like the screen; th
   const p = presetById('wound');
   if (!p) throw new Error('no Wound healing');
   const s: Settings = { ...p.settings(), lattice: [4096, 4096], resolution: 512 };
-  const { hash } = await encodeLink(s, { scene: p.id, origins: [0], shapes: [], strokes: [] });
+  const { hash } = await encodeLink(s, {
+    scene: p.id,
+    revision: shapeRevision(p),
+    origins: [0],
+    shapes: [],
+    strokes: [],
+  });
   await page.goto(`/#${hash}`);
   await expect(page.getByRole('status')).toContainText(
     'This device cannot hold a lattice of 4096 × 4096 cells. The scene runs on a grid of 512 cells on the long side.',
@@ -217,7 +226,13 @@ test('a device that cannot hold the scene’s own lattice runs a grid shaped lik
   });
   const p = presetById('wound');
   if (!p) throw new Error('no Wound healing');
-  const { hash } = await encodeLink(p.settings(), { scene: p.id, origins: [0], shapes: [], strokes: [] });
+  const { hash } = await encodeLink(p.settings(), {
+    scene: p.id,
+    revision: shapeRevision(p),
+    origins: [0],
+    shapes: [],
+    strokes: [],
+  });
   await page.goto(`/#${hash}`);
   await expect(page.getByRole('status')).toContainText('This device cannot hold a lattice of 300 × 300 cells.', {
     timeout: 60_000,

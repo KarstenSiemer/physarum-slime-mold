@@ -2,9 +2,19 @@
 import { describe, expect, it } from 'vitest';
 import { paintBox, paintSegments } from '../engine/brush';
 import { fromShape, MIN_RADIUS, snap, STEP, strokeOn, type EnvEdit } from '../engine/environment';
-import { drawingOf, MAX_STROKES, MAX_WORK, packDrawing, sceneOnly, unpackDrawing, workOf, type Drawing } from './link';
+import {
+  drawingOf,
+  kindsOf,
+  MAX_STROKES,
+  MAX_WORK,
+  packDrawing,
+  sceneOnly,
+  unpackDrawing,
+  workOf,
+  type Drawing,
+} from './link';
 import { BOUNDARIES, MAX_STRAINS } from './params';
-import { PRESETS, presetById } from './presets';
+import { PRESETS, presetById, shapeRevision, shapesAt } from './presets';
 
 /** mulberry32: a seeded random source, so a failure repeats. */
 function random(seed: number) {
@@ -55,10 +65,13 @@ function drawing(r: () => number, strokes = Math.floor(r() * 300)): Drawing {
     if (work > MAX_WORK) break;
     list.push(e);
   }
+  // Any revision of the scene's shapes (ADR 0027).
+  const revision = p ? Math.floor(r() * (shapeRevision(p) + 1)) : 0;
   return {
     scene: p?.id ?? '',
+    revision,
     origins: p ? Array.from({ length: 1 + Math.floor(r() * 4) }, () => Math.floor(r() * (strains + 1)) - 1) : [],
-    shapes: (p?.env ?? []).map(() => r() < 0.7),
+    shapes: ((p && shapesAt(p, revision)) ?? []).map(() => r() < 0.7),
     strokes: list,
   };
 }
@@ -68,10 +81,11 @@ function valid(d: Drawing) {
   const p = presetById(d.scene);
   expect(d.scene === '' || p !== undefined).toBe(true);
   if (p) {
-    expect(d.shapes).toHaveLength(p.env?.length ?? 0);
+    expect(Number.isInteger(d.revision) && d.revision >= 0 && d.revision <= shapeRevision(p)).toBe(true);
+    expect(d.shapes).toHaveLength(shapesAt(p, d.revision)?.length ?? -1);
     expect(d.origins.length >= 1 && d.origins.length <= MAX_STRAINS).toBe(true);
     for (const o of d.origins) expect(o >= -1 && o < p.settings().strains.length).toBe(true);
-  } else expect(d.origins).toEqual([]);
+  } else expect([d.origins, d.revision]).toEqual([[], 0]);
   expect(d.strokes.length).toBeLessThanOrEqual(MAX_STROKES);
   let work = 0;
   for (const e of d.strokes) {
@@ -118,9 +132,10 @@ describe('the drawing of a link', () => {
     const d = drawingOf([list[0], ...list.slice(2), dab] as EnvEdit[], 'maze', env, 'box', [0]);
     expect(d.shapes).toEqual(env.map((_, i) => i !== 1));
     expect(d.strokes).toEqual([dab]);
-    // A scene alone takes a few bytes: version, id, origins, the number of shapes and one bit each, no stroke.
+    // A scene alone takes a few bytes: version, id, revision, origins, the number of shapes and one bit each, no
+    // stroke.
     const alone = packDrawing({ ...d, strokes: [] }) ?? new Uint8Array();
-    expect(alone.length).toBeLessThan(12);
+    expect(alone.length).toBeLessThan(13);
     expect(unpackDrawing(alone)?.shapes).toEqual(d.shapes);
     // The Maze has 7 shapes: a bit for an eighth is refused, and so is a link that counts 8 shapes.
     const mask = alone.length - 2;
@@ -138,19 +153,26 @@ describe('the drawing of a link', () => {
     );
     expect(other.shapes.every((kept) => !kept)).toBe(true);
     expect(packDrawing(other)).toBeUndefined();
-    expect(sceneOnly(d)).toEqual({ scene: 'maze', origins: [0], shapes: env.map(() => true), strokes: [] });
+    expect(sceneOnly(d)).toEqual({
+      scene: 'maze',
+      revision: 0,
+      origins: [0],
+      shapes: env.map(() => true),
+      strokes: [],
+    });
   });
 
   it('refuses another version, and a scene with no strain or more than four', () => {
     const shapes = presetById('maze')?.env?.map(() => true) ?? [];
-    const four = packDrawing({ scene: 'maze', origins: [0, -1, 0, -1], shapes, strokes: [] }) ?? new Uint8Array();
+    const four =
+      packDrawing({ scene: 'maze', revision: 0, origins: [0, -1, 0, -1], shapes, strokes: [] }) ?? new Uint8Array();
     expect(unpackDrawing(four)?.origins).toEqual([0, -1, 0, -1]);
-    for (const version of [0, 2, 255])
+    for (const version of [0, 3, 255])
       expect(unpackDrawing(Uint8Array.from(four, (v, i) => (i === 0 ? version : v))), `${version}`).toBeUndefined();
-    // The version, the id's length and 'maze', then at index 6 the number of strains, each one's origin plus 1, and
-    // after them the shapes and the number of strokes.
+    // The version, the id's length and 'maze', at index 6 the revision of its shapes, then the number of strains, each
+    // one's origin plus 1, and after them the shapes and the number of strokes.
     const strains = (n: number) =>
-      Uint8Array.from([...four.slice(0, 6), n, ...Array<number>(n).fill(1), ...four.slice(7 + 4)]);
+      Uint8Array.from([...four.slice(0, 7), n, ...Array<number>(n).fill(1), ...four.slice(8 + 4)]);
     expect(unpackDrawing(strains(1))?.origins).toEqual([0]);
     expect(unpackDrawing(strains(0))).toBeUndefined();
     expect(unpackDrawing(strains(MAX_STRAINS + 1))).toBeUndefined();
@@ -159,7 +181,7 @@ describe('the drawing of a link', () => {
   it('gives up on values off the steps, out of range or not finite, and never throws', () => {
     const base: EnvEdit = { kind: 'wall', from: [5, 5], to: [9, 5], radius: 2, grid: [512, 320], boundary: 'box' };
     const of = (e: Partial<EnvEdit>) =>
-      packDrawing({ scene: '', origins: [], shapes: [], strokes: [{ ...base, ...e }] });
+      packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes: [{ ...base, ...e }] });
     expect(of({})).toBeDefined();
     for (const bad of [NaN, Infinity, -Infinity, 5.01, 2 ** 21]) {
       expect(of({ from: [bad, 5] }), String(bad)).toBeUndefined();
@@ -172,11 +194,12 @@ describe('the drawing of a link', () => {
     expect(of({ grid: [512.5, 320] })).toBeUndefined();
     // An edit without a grid is a preset's shape, not a stroke.
     const { grid: _grid, ...shape } = base;
-    expect(packDrawing({ scene: '', origins: [], shapes: [], strokes: [shape] })).toBeUndefined();
+    expect(packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes: [shape] })).toBeUndefined();
     expect(of({ boundary: 'torus' as never })).toBeUndefined();
     const scene = (patch: Partial<Drawing>) =>
       packDrawing({
         scene: 'maze',
+        revision: 0,
         origins: [0],
         shapes: presetById('maze')?.env?.map(() => true) ?? [],
         strokes: [],
@@ -190,11 +213,86 @@ describe('the drawing of a link', () => {
     expect(scene({ shapes: [true] })).toBeUndefined();
   });
 
+  // ADR 0027: a scene's shapes change, and a link keeps the shapes it was made with. Version 1 links name revision 0;
+  // version 2 writes the revision after the scene's id.
+  it("names the revision of a scene's shapes, and reads a link of version 1 as revision 0", () => {
+    const p = presetById('shrinking');
+    if (!p) throw new Error('no Shrinking plasmodium');
+    expect(shapeRevision(p)).toBe(1);
+    const [old, now] = [shapesAt(p, 0) ?? [], shapesAt(p, 1) ?? []];
+    expect([old.length, now.length, now]).toEqual([8, 19, p.env]);
+    expect([shapesAt(p, 2), shapesAt(p, -1), shapesAt(p, 0.5)]).toEqual([undefined, undefined, undefined]);
+    const of = (revision: number, shapes: readonly unknown[]) => ({
+      scene: 'shrinking',
+      revision,
+      origins: [0],
+      shapes: shapes.map(() => true),
+      strokes: [],
+    });
+    for (const [revision, shapes] of [
+      [0, old],
+      [1, now],
+    ] as const) {
+      const bytes = packDrawing(of(revision, shapes)) ?? new Uint8Array();
+      expect(bytes[0]).toBe(2);
+      expect(bytes[1 + 1 + 'shrinking'.length]).toBe(revision); // after the id
+      expect(unpackDrawing(bytes)).toEqual(of(revision, shapes));
+    }
+    // A revision the scene does not have, or the shape count of another revision, is refused.
+    expect(packDrawing(of(2, now))).toBeUndefined();
+    expect(packDrawing(of(0, now))).toBeUndefined();
+    const two = packDrawing(of(1, now)) ?? new Uint8Array();
+    const at = 2 + 'shrinking'.length;
+    expect(unpackDrawing(Uint8Array.from(two, (v, i) => (i === at ? 2 : v)))).toBeUndefined();
+    expect(unpackDrawing(Uint8Array.from(two, (v, i) => (i === at ? 0 : v)))).toBeUndefined();
+    // Version 1: the same bytes without the revision, read as revision 0 with its 8 shapes.
+    const v2old = packDrawing(of(0, old)) ?? new Uint8Array();
+    const v1 = Uint8Array.from([1, ...v2old.slice(1, at), ...v2old.slice(at + 1)]);
+    expect(unpackDrawing(v1)).toEqual(of(0, old));
+    // A version 1 link with the 19 shapes of revision 1 counts the wrong number of shapes for revision 0.
+    const v1now = Uint8Array.from([1, ...two.slice(1, at), ...two.slice(at + 1)]);
+    expect(unpackDrawing(v1now)).toBeUndefined();
+    // Without a scene there is no revision: the bytes of version 1 and 2 differ only in the version.
+    const plain = packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes: [] }) ?? new Uint8Array();
+    expect(Array.from(plain)).toEqual([2, 0, 0]);
+    expect(unpackDrawing(Uint8Array.from([1, 0, 0]))).toEqual({
+      scene: '',
+      revision: 0,
+      origins: [],
+      shapes: [],
+      strokes: [],
+    });
+  });
+
+  // kindsOf() reads the shapes of the drawing's revision: a scene whose wall became food (a scene of this test only).
+  it('tells the kinds of a drawing from the shapes of its revision', () => {
+    const wall = { kind: 'wall' as const, at: [0, 0] as [number, number], to: [0.1, 0] as [number, number], r: 0.01 };
+    const food = { kind: 'food' as const, at: [0, 0] as [number, number], r: 0.01 };
+    const base = presetById('maze');
+    if (!base) throw new Error('no Maze');
+    PRESETS.push({ ...base, id: 'test-revisions', env: [food], envHistory: [[wall]] });
+    try {
+      const d = (revision: number) => ({
+        scene: 'test-revisions',
+        revision,
+        origins: [0],
+        shapes: [true],
+        strokes: [],
+      });
+      expect([...kindsOf(d(0))]).toEqual(['wall']);
+      expect([...kindsOf(d(1))]).toEqual(['food']);
+      expect(unpackDrawing(packDrawing(d(0)) ?? new Uint8Array())).toEqual(d(0));
+    } finally {
+      PRESETS.pop();
+    }
+  });
+
   it('caps the strokes and the paint work, in the encoder and the decoder', () => {
     // Many small dabs at one place: one head byte each after the first.
     const tiny: EnvEdit = { kind: 'food', from: [99, 99], to: [99, 99], radius: 1, grid: [1536, 864], boundary: 'box' };
     const many = (n: number, e: EnvEdit) => ({
       scene: '',
+      revision: 0,
       origins: [],
       shapes: [],
       strokes: Array(n).fill(e) as EnvEdit[],

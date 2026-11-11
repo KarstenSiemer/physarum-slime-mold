@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { presetById, PRESETS } from '../model/presets';
+import { presetById, PRESETS, shapesAt } from '../model/presets';
 import { dishRadius } from './brush';
 import { fromFrame, fromShape, fromStroke, MIN_RADIUS, periods, strokeOn, toFrame } from './environment';
 import { paintReference } from './paint-reference';
@@ -260,10 +260,12 @@ describe('preset shapes in the canonical frame', () => {
   };
   const boundaryOf = (id: string) => presetById(id)?.settings().boundary ?? 'wrap';
 
+  // Revision 0 of the shapes (ADR 0027): the shapes of 2026-11-10, which old links paint.
   it('land on a 16:10 grid where the fractions of the grid used before put them', () => {
     const [w, h] = [512, 320];
     for (const [id, shapes] of Object.entries(before)) {
-      const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));
+      const p = presetById(id);
+      const now = ((p && shapesAt(p, 0)) ?? []).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));
       expect(now, id).toHaveLength(shapes.length);
       shapes.forEach(([x0, y0, x1, y1, r], i) => {
         const s = now[i];

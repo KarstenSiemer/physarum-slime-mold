@@ -15,7 +15,7 @@ import {
   type Model,
   type Settings,
 } from '../model/params';
-import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
+import { presetById, RULE_MISSING_NOTICE, shapeRevision, shapesAt, usesRule, type Preset } from '../model/presets';
 import { fmt, letter, list, modelChanged, signed } from '../model/scene';
 import type { Link } from '../model/url';
 import { latticeResolution, type GridTuner } from './tune';
@@ -78,6 +78,11 @@ export interface AppState {
   /** The settings the scene loaded with, to tell whether a model parameter changed since. */
   sceneBase: Settings | undefined;
   /**
+   * The revision of the scene's shapes that the engine's list holds (presets.ts `envHistory`, ADR 0027): the newest
+   * after a preset load, a shared link's own after the link. A revision other than the newest is a change of the scene.
+   */
+  sceneRevision: number;
+  /**
    * Food, light or walls differ from the loaded scene's shapes: after a Clear, a recorded stroke or a sweep that
    * deleted a shape (Engine.matches). Kept in step with the engine's edit list (setEngine()).
    */
@@ -133,6 +138,7 @@ export const app = $state<AppState>({
   settings: defaultSettings(),
   scene: '',
   sceneBase: undefined,
+  sceneRevision: 0,
   envChanged: false,
   envVersion: 0,
   strainOrigin: [],
@@ -168,6 +174,7 @@ export function setScene(p: Preset) {
   const base = structuredClone(s);
   app.settings = s;
   app.scene = p.id;
+  app.sceneRevision = shapeRevision(p);
   app.sceneBase = base;
   app.linkBase = undefined;
   // A new load tries the scene's lattice again (ADR 0026).
@@ -215,7 +222,7 @@ export function clearEnvironment() {
   }
   clearedBeforeStart = true;
   app.envVersion++;
-  if (presetById(app.scene)?.env?.length) app.envChanged = true;
+  if (sceneShapes().length) app.envChanged = true;
 }
 
 /**
@@ -235,9 +242,12 @@ export function openLink({ settings, drawing, drawingLost }: Link) {
   const p = drawing && presetById(drawing.scene);
   if (p) {
     app.scene = p.id;
+    app.sceneRevision = drawing.revision;
     app.sceneBase = p.settings();
     app.strainOrigin = [...drawing.origins];
-    app.envChanged = drawing.strokes.length > 0 || drawing.shapes.some((kept) => !kept);
+    // A link made with an earlier revision of the scene's shapes changes the scene too (ADR 0027).
+    app.envChanged =
+      drawing.revision !== shapeRevision(p) || drawing.strokes.length > 0 || drawing.shapes.some((kept) => !kept);
   }
   linkEnv = JSON.stringify(currentDrawing());
 }
@@ -268,9 +278,18 @@ export function startScene(e: Pick<Engine, 'load'>) {
   return e.load($state.snapshot(app.settings), shapes, app.sceneBase?.boundary, strokes);
 }
 
+/**
+ * The loaded scene's shapes of the revision that the engine's list holds (app.sceneRevision): a shared link paints the
+ * shapes it was made with (ADR 0027). None without a scene.
+ */
+function sceneShapes() {
+  const p = presetById(app.scene);
+  return (p && shapesAt(p, app.sceneRevision)) ?? [];
+}
+
 /** What startScene() loads: the scene's shapes that a shared link kept, or all of them, then the link's strokes. */
 function waiting() {
-  const env = clearedBeforeStart ? [] : (presetById(app.scene)?.env ?? []);
+  const env = clearedBeforeStart ? [] : sceneShapes();
   const d = clearedBeforeStart ? undefined : linkDrawing;
   return { shapes: env.filter((_, i) => d?.shapes[i] ?? true), strokes: d?.strokes ?? [] };
 }
@@ -281,11 +300,11 @@ function waiting() {
  */
 export function currentDrawing(): Drawing {
   const p = presetById(app.scene);
-  const [scene, env] = [p?.id ?? '', p?.env ?? []];
+  const [scene, env, revision] = [p?.id ?? '', sceneShapes(), p ? app.sceneRevision : 0];
   const origins = $state.snapshot(app.strainOrigin);
-  if (engine) return drawingOf(engine.envList(), scene, env, sceneArena(), origins);
+  if (engine) return drawingOf(engine.envList(), scene, env, sceneArena(), origins, revision);
   const { shapes, strokes } = waiting();
-  return { scene, origins, shapes: env.map((shape) => shapes.includes(shape)), strokes: [...strokes] };
+  return { scene, revision, origins, shapes: env.map((shape) => shapes.includes(shape)), strokes: [...strokes] };
 }
 
 /**
@@ -549,8 +568,10 @@ export const setEngine = (e: Engine | undefined) => {
   engine = e;
   if (!e) return;
   e.onEdits = () => {
-    const env = presetById(app.scene)?.env ?? [];
-    app.envChanged = !e.matches(env, sceneArena());
+    // The list holds the shapes of the loaded revision; an earlier revision than the scene's newest is a change.
+    const p = presetById(app.scene);
+    const old = !!p && app.sceneRevision !== shapeRevision(p);
+    app.envChanged = old || !e.matches(sceneShapes(), sceneArena());
     app.envVersion++;
   };
 };

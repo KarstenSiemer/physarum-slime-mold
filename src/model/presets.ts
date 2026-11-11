@@ -42,7 +42,24 @@ export interface Preset {
   /** Why these settings. */
   why: string;
   settings: () => Settings;
+  /** The scene's food, light and walls: its newest revision (shapeRevision()). */
   env?: EnvShape[];
+  /**
+   * The scene's shapes before `env`, oldest first: revision 0 is what the scene had when links began to name its shapes
+   * (2026-11-10, ADR 0021). A shared link names the revision it was made with, so it paints its sender's shapes after
+   * the scene's shapes change (ADR 0027).
+   */
+  envHistory?: EnvShape[][];
+}
+
+/** The revision of a scene's shapes that the scene loads now: the number of its earlier shape lists. */
+export const shapeRevision = (p: Preset) => p.envHistory?.length ?? 0;
+
+/** The shapes of revision `revision` of a scene, or undefined for a revision it does not have (ADR 0027). */
+export function shapesAt(p: Preset, revision: number): EnvShape[] | undefined {
+  const newest = shapeRevision(p);
+  if (!Number.isInteger(revision) || revision < 0 || revision > newest) return undefined;
+  return revision === newest ? (p.env ?? []) : p.envHistory?.[revision];
 }
 
 /** The scene the app starts with. */
@@ -250,7 +267,11 @@ PRESETS.push(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
-    env: [food(-0.288, 0, 0.02), food(0.288, 0, 0.02)],
+    // Fig. 18, first image (p. 145): the foods lie 51 cells left and right of the middle of the 200 × 200 lattice
+    // (ADR 0027), with a radius of 4 cells.
+    env: [food(-0.255, 0, 0.02), food(0.255, 0, 0.02)],
+    // Revision 0, this app's choice before ADR 0027: 57.6 cells left and right of the middle.
+    envHistory: [[food(-0.288, 0, 0.02), food(0.288, 0, 0.02)]],
   },
   {
     id: 'steiner',
@@ -269,8 +290,14 @@ PRESETS.push(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
-    // A square with the corners as far from the centre as the 0.32 × 0.26 rectangle of before.
-    env: [food(-0.145, -0.145, 0.02), food(0.145, -0.145, 0.02), food(-0.145, 0.145, 0.02), food(0.145, 0.145, 0.02)],
+    // Fig. 19, second row, first image (p. 146): a square of 60 cells on the 200 × 200 lattice, 0.317 of the dish's
+    // diameter of 189 cells, each food with a radius of 2.7 cells (ADR 0027).
+    env: [food(-0.15, -0.15, 0.0135), food(0.15, -0.15, 0.0135), food(-0.15, 0.15, 0.0135), food(0.15, 0.15, 0.0135)],
+    // Revision 0, this app's choice before ADR 0027: a square of 58 cells with foods of 4 cells, the corners as far
+    // from the centre as the 0.32 × 0.26 rectangle of before.
+    envHistory: [
+      [food(-0.145, -0.145, 0.02), food(0.145, -0.145, 0.02), food(-0.145, 0.145, 0.02), food(0.145, 0.145, 0.02)],
+    ],
   },
   {
     id: 'shrinking',
@@ -289,15 +316,43 @@ PRESETS.push(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L300(), density: 0.5, boundary: 'dish', foodStrength: 0.05, shrink: 0.00025 },
       ),
-    env: [
-      food(0, 0),
-      food(-0.192, -0.18),
-      food(0.192, -0.2),
-      food(-0.272, 0.12),
-      food(0.256, 0.16),
-      food(0, 0.28),
-      food(-0.368, -0.05),
-      food(0.368, -0.03),
+    // Fig. 21, first image (p. 147): 19 foods, measured in cells of the 300 × 300 lattice (ADR 0027). Their radius of
+    // 2.5 cells is this app's choice: the figure shows the trail, not the food cells.
+    env: (
+      [
+        [103, 53],
+        [143, 66],
+        [193, 84],
+        [102, 90],
+        [228, 103],
+        [159, 123],
+        [200, 128],
+        [241, 133],
+        [71, 134],
+        [122, 146],
+        [46, 147],
+        [164, 153],
+        [73, 173],
+        [187, 176],
+        [139, 180],
+        [231, 181],
+        [105, 212],
+        [147, 224],
+        [175, 239],
+      ] as const
+    ).map(([x, y]) => food((x - 150) / 300, (y - 150) / 300, 2.5 / 300)),
+    // Revision 0, this app's choice before ADR 0027: 8 foods.
+    envHistory: [
+      [
+        food(0, 0),
+        food(-0.192, -0.18),
+        food(0.192, -0.2),
+        food(-0.272, 0.12),
+        food(0.256, 0.16),
+        food(0, 0.28),
+        food(-0.368, -0.05),
+        food(0.368, -0.03),
+      ],
     ],
   },
   {
