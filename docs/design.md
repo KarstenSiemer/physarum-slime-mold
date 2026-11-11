@@ -122,7 +122,9 @@ that measure it, and the agent passes that check for walls, are built at the fir
      takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
      agent spends its step there: no move, no deposit;
    - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
-     walls, the outside and a wall on the way to the sensor read as −∞ (ADR 0020);
+     walls, the outside and a wall on the way to the sensor read as −∞ (ADR 0020); with trail
+     saturation K > 0 (extended model only) each lane of `trail` reads as `t / (1 + t / K)`
+     (ADR 0022);
    - **rotate** with the Jones rule (exact, see knowledge base); random turn with `pCD`;
    - **move** by SS; wrap (periodic) or block (closed box, dish, wall, also a wall cell on the
      way);
@@ -137,7 +139,11 @@ that measure it, and the agent passes that check for walls, are built at the fir
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
    repeated `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
    3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
-   `scent` with `food · 255 · wProj` and `light · 255 · wLight` as sources.
+   `scent` with `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources: g = 1 in the
+   Jones model, `g = (d / (1 − d)) / (0.1 / 0.9)` with the scent decay d in the extended model,
+   so a large food reaches the same scent at every decay (ADR 0022). With covered food on, a food
+   cell releases 0.1 % while the 3 × 3 window around it holds an agent after the moves (Adamatzky
+   and Jones 2010; the occupancy comes from collision mode, else from the `occupy` pass).
 
 All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
 deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
@@ -159,10 +165,10 @@ its cells.
 | Area                | Controls                                                                                                         |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Playback            | play/pause, single step, speed (steps per second), reset, new seed                                               |
-| Scene               | presets in groups, scene card, agent count (density readout), resolution, layout, boundary (wrap, box, dish)     |
+| Scene               | presets in groups, scene card, agent count (density readout), resolution, layout, boundary, model (ADR 0022)     |
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |
-| Environment         | collisions (Jones), diffusion passes, food strength (wProj), scent decay, shrinkage                              |
+| Environment         | diffusion passes, food and light strength, scent decay, covered food, trail saturation (extended), shrinkage     |
 | Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light, wall, erase, cut; brush size          |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |

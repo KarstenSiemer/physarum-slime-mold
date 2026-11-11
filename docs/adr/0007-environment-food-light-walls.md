@@ -30,7 +30,8 @@ Option 3, plus:
 - Scent texture `rg32float` (ping-pong): `r` = food scent, `g` = light (repellent) scent.
 - Sensed value: `dot(trail, A[strain]) + food_s · scent.r − light_s · scent.g`.
 - Sources per step: `food(cell) · 255 · wProj` and `light(cell) · 255 · wLight`, so `wProj`
-  keeps Jones' meaning for a full-intensity food pixel.
+  keeps Jones' meaning for a full-intensity food pixel. This is the Jones model; the extended
+  model scales both sources with the scent decay (ADR 0022).
 - Walls: block movement like an occupied cell (random new heading, no deposit), also when a move
   would pass through a wall cell on its way (ADR 0019); sensors read walls and the outside as a
   large negative value, also a sensor whose way from the agent passes through a wall cell, so no
@@ -65,3 +66,19 @@ Option 3, plus:
   food or wall exactly when its centre lies within the brush. Food is drawn below the trail. A
   dish paints no `env` outside itself, and when the boundary changes `env` stays as it is: the
   outlines follow it under the new boundary (ADR 0009, item 10).
+
+## Amendment 2026-11-11: the model switch (ADR 0022)
+
+Decided on 2026-11-11 by the owner: the scenes of Jones must behave exactly as in his papers, so the
+scent of this ADR stays as it is in a model "Jones", and this app's additions go into a model
+"Extended". ADR 0022 records the reasons and every choice made with it.
+
+- The scent of this ADR is the Jones model. The extended model releases
+  `255 · wProj · g(d)` and `255 · wLight · g(d)` with `g(d) = (d / (1 − d)) / (0.1 / 0.9)`, d the
+  scent decay: the scent of a large food is then the same at every decay, 114.75 for wProj 0.05,
+  and only its reach grows. g(0.1) = 1 exactly, so at decay 0.1 both models give the same bytes.
+- Covered food, a rule of Jones' later papers (Adamatzky and Jones 2010), works in both models: a
+  food cell releases 0.1 % of its scent while the 3 × 3 window around it holds an agent. It is off
+  in every scene.
+- Trail saturation (extended model only) makes a sensor read each strain's trail t as
+  `t / (1 + t / K)`, so food can turn agents on a dense trail.
