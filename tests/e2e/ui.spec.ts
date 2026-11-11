@@ -266,6 +266,24 @@ test('the Scent switch and the S key show the scent with its legend, and go into
   expect(errors).toEqual([]);
 });
 
+// Shortcuts work whenever the focus is not on a control that uses the key: before, a click on a toolbar button kept
+// every key from the app until the canvas was clicked.
+test('shortcuts work after a click on a toolbar button', async ({ page }) => {
+  await page.getByRole('button', { name: 'Fit' }).click();
+  await page.keyboard.press('5');
+  await expect(page.getByRole('radio', { name: 'Wall' })).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('radio', { name: 'Move' }).click();
+  await page.keyboard.press('h');
+  await expect(page.getByRole('toolbar', { name: 'Simulation controls' })).toBeHidden();
+  await page.keyboard.press('h');
+  await expect(page.getByRole('toolbar', { name: 'Simulation controls' })).toBeVisible();
+  // Space presses the focused button, not the shortcut.
+  const paused = await page.evaluate(() => globalThis.physarum?.paused);
+  await page.getByRole('button', { name: 'Fit' }).focus();
+  await page.keyboard.press(' ');
+  expect(await page.evaluate(() => globalThis.physarum?.paused)).toBe(paused);
+});
+
 // Inoculate places only dead agents (docs/adr/0023). In the small scene every agent is alive: the tool places nothing
 // and says so. The alive count in the stats is at most 500 ms old.
 test('the inoculate tool says so when no dead agents of its strain are left', async ({ page }) => {

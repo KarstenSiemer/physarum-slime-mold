@@ -315,10 +315,22 @@
     };
   });
 
+  /**
+   * Whether the focused element uses the key itself: a field or a list takes every key, a button, link or switch takes
+   * Space and Enter, a slider and the tabs of Learn the arrows. A modal dialog takes every key. Every other key is a
+   * shortcut, also after a click on a toolbar button.
+   */
+  function keyUsed(t: HTMLElement, key: string): boolean {
+    if (t.closest('dialog, select, textarea, [contenteditable]:not([contenteditable="false"])')) return true;
+    const input = t.closest('input');
+    if (input && !['button', 'checkbox', 'radio', 'range', 'color', 'submit', 'reset'].includes(input.type))
+      return true;
+    if (key === ' ' || key === 'Enter') return t.closest('button, summary, a, input, [role="button"]') !== null;
+    return key.startsWith('Arrow') || key === 'Home' || key === 'End' || key.startsWith('Page');
+  }
+
   function onkeydown(ev: KeyboardEvent) {
-    const t = ev.target as HTMLElement;
-    if (ev.metaKey || ev.ctrlKey || ev.altKey || t.closest('input, select, textarea, button, summary, a, dialog'))
-      return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey || keyUsed(ev.target as HTMLElement, ev.key)) return;
     const tool = toolsFor(app.settings.model).find((x) => x.key === ev.key);
     if (tool) app.tool = tool.id;
     else if (ev.key === ' ') app.paused = !app.paused;
