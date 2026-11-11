@@ -313,8 +313,7 @@
     line-height: 1.55;
   }
   dialog::backdrop {
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(3px);
+    background: rgba(0, 0, 0, 0.6);
   }
   header {
     display: flex;

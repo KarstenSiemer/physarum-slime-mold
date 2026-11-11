@@ -5,8 +5,11 @@
   --muted: #9d9a92;
   --accent: #f2c14e;
   --line: rgba(255, 255, 255, 0.09);
-  /* Opaque enough that --muted text keeps 4.5:1 over a white canvas (the paper style, bright trails); 0.72 gave 2.6:1. */
-  --glass: rgba(13, 14, 19, 0.88);
+  /*
+   * Opaque enough that --muted text keeps 4.5:1 over a white canvas (the paper style, bright trails); 0.72 gave 2.6:1.
+   * No backdrop blur (ADR 0028), so 0.94 instead of 0.88: the moving trails behind a panel show through less.
+   */
+  --glass: rgba(13, 14, 19, 0.94);
   --control: rgba(255, 255, 255, 0.06);
   font:
     13px/1.4 system-ui,
