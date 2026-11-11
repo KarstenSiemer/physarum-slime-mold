@@ -82,6 +82,44 @@ describe('strand level', () => {
     expect(levelWithin(bins, 1010, 0.01)).toBeCloseTo(2 ** (10 + (1 - 10.1 / 20) / 2), 9);
     expect(strandLevel(new Array<number>(64).fill(0), 1000)).toBe(0);
   });
+
+  // Within the bin the cells thin out at the rate of the bins beside it: a tail of the trail as the networks have it
+  // (review of 2026-11-11: a flat share ran up to 20 % high). The trail of 100,000 cells from a log-normal distribution,
+  // binned as histogram.wgsl bins it, against its exact 99th percentile.
+  it.each([
+    [1, 0.5],
+    [2, 0.35],
+    [0.5, 0.8],
+  ])('reads the 99th percentile of a log-normal trail within 3 percent (median %f, sigma %f)', (median, sigma) => {
+    const n = 100_000;
+    // The inverse of the normal distribution by bisection of erf, for quantiles of the log-normal.
+    const erf = (x: number) => {
+      const t = 1 / (1 + 0.3275911 * Math.abs(x));
+      const y =
+        1 -
+        ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+          t *
+          Math.exp(-x * x);
+      return x < 0 ? -y : y;
+    };
+    const z = (q: number) => {
+      let [lo, hi] = [-10, 10];
+      for (let k = 0; k < 60; k++) {
+        const mid = (lo + hi) / 2;
+        if (0.5 * (1 + erf(mid / Math.SQRT2)) < q) lo = mid;
+        else hi = mid;
+      }
+      return lo;
+    };
+    const bins = new Array<number>(64).fill(0);
+    for (let i = 0; i < n; i++) {
+      const v = median * Math.exp(sigma * z((i + 0.5) / n));
+      bins[Math.min(63, Math.max(0, Math.floor((Math.log2(v) + 10) * 2)))]++;
+    }
+    const exact = median * Math.exp(sigma * z(0.99));
+    expect(strandLevel(bins, n) / exact).toBeGreaterThan(0.97);
+    expect(strandLevel(bins, n) / exact).toBeLessThan(1.03);
+  });
 });
 
 describe('scentLevel', () => {

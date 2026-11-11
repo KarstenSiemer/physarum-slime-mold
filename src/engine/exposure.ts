@@ -25,15 +25,24 @@ export function levelAbove(bins: ArrayLike<number>, cells: number, fraction: num
 }
 
 /**
- * The trail level that a `fraction` of all cells exceed, read within its log₂ bin by the share of the bin's cells it
- * needs: levelAbove() gives the bin's centre, steps of √2. The scent view's mark (scent.ts) moves with it, so it must
- * not jump between bins. 0 if fewer cells than that fraction hold any trail.
+ * The trail level that a `fraction` of all cells exceed, read within its log₂ bin: levelAbove() gives the bin's centre,
+ * steps of √2. The scent view's mark (scent.ts) moves with it, so it must not jump between bins. Within the bin the
+ * cells are taken to thin out (or gather) exponentially, at the rate of the bins below and above it: in the tail of the
+ * trail fewer cells hold more, so most of a bin's cells lie at its low end. In 60 states of 15 scenes this read the
+ * 99th percentile within 3.2 % of the exact one; a flat share within the bin read it up to 20 % high (review of
+ * 2026-11-11, ADR 0009). 0 if fewer cells than that fraction hold any trail.
  */
 export function levelWithin(bins: ArrayLike<number>, cells: number, fraction: number): number {
   let above = 0;
   for (let b = BINS - 1; b >= 0; b--) {
     const n = bins[b] ?? 0;
-    if (n > 0 && above + n >= fraction * cells) return 2 ** ((b + 1 - (fraction * cells - above) / n) / 2 - 10);
+    if (n > 0 && above + n >= fraction * cells) {
+      const need = fraction * cells - above; // cells of this bin above the level
+      const rate = Math.min(8, Math.max(-8, 0.5 * Math.log(((bins[b + 1] ?? 0) + 1) / ((bins[b - 1] ?? 0) + 1))));
+      // The share x of the bin below the level: the cells above x are need.
+      const x = Math.abs(rate) < 1e-6 ? 1 - need / n : Math.log(Math.exp(rate) - (need * Math.expm1(rate)) / n) / rate;
+      return 2 ** ((b + Math.min(1, Math.max(0, x))) / 2 - 10);
+    }
     above += n;
   }
   return 0;
