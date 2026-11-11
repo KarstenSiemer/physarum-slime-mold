@@ -17,12 +17,24 @@
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
   import Slider from './Slider.svelte';
-  import { addStrain, app, clearEnvironment, loadPreset, removeStrain, setModel, showNotice } from './state.svelte';
+  import {
+    addStrain,
+    app,
+    clearEnvironment,
+    JONES_LIGHT,
+    lightDrawn,
+    loadPreset,
+    removeStrain,
+    setModel,
+    showNotice,
+  } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
 
   const s = $derived(app.settings);
   /** The Jones model offers only Jones' settings (ADR 0022). */
   const extended = $derived(s.model === 'extended');
+  /** Light that the Jones model draws without effect: the panel says so below the model choice. */
+  const lit = $derived(!extended && lightDrawn());
 
   const LAYOUT_LABEL: Record<(typeof LAYOUTS)[number], string> = {
     mixed: 'Mixed everywhere',
@@ -142,7 +154,8 @@
         <span>{modelHelp.label}</span>
         <select
           value={s.model}
-          aria-describedby={modelHelpOpen ? 'model-help' : undefined}
+          aria-describedby={[modelHelpOpen && 'model-help', lit && 'jones-light'].filter(Boolean).join(' ') ||
+            undefined}
           onchange={(e) => {
             setModel(e.currentTarget.value as (typeof MODELS)[number]);
           }}
@@ -168,6 +181,8 @@
       <!-- The extended model's own settings, where the choice of the model is. -->
       <Slider spec={globalSpec.scentDecay} bind:value={s.scentDecay} id="scent" />
       <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
+    {:else if lit}
+      <p class="helptext" id="jones-light">{JONES_LIGHT}</p>
     {/if}
   </Section>
 

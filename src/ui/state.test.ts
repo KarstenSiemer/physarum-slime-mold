@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CpuBackend } from '../engine/cpu-backend';
 import { Engine } from '../engine/engine';
 import type { EnvEdit } from '../engine/environment';
-import { defaultSettings, type Boundary, type Settings } from '../model/params';
-import { presetById, type EnvShape } from '../model/presets';
+import { decodeLink, encodeLink } from '../model/url';
+import { constrain, defaultSettings, jonesFits, type Boundary, type Settings } from '../model/params';
+import { presetById, PRESETS, type EnvShape } from '../model/presets';
 
 // A fresh module per test: the app state and the once-per-page-load notice live in the module.
 async function fresh() {
@@ -400,3 +401,258 @@ describe('dead agents for the inoculate tool', () => {
     expect(deadLeft(engine)).toBeUndefined();
   });
 });
+
+// Owner rule of 2026-11-11 (ADR 0022): a run labelled Jones is always Jones. A switch to Jones drops the extended values
+// and says what went, a switch to Extended keeps Jones' values, and the tools offered follow the model.
+describe('the model switch', () => {
+  const BASE = 'The Jones model has only Jones’ rules, and light has no effect in it.';
+
+  it('offers every tool in the extended model and all but Light in the Jones model', async () => {
+    const { TOOLS, toolsFor } = await fresh();
+    expect(toolsFor('extended')).toEqual(TOOLS);
+    expect(toolsFor('jones').map((t) => t.id)).toEqual(['pan', 'inoculate', 'food', 'wall', 'erase', 'cut']);
+  });
+
+  it('to Jones keeps strain A, the rule and one diffusion pass, and says what went', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('three-strains');
+    app.strain = 2;
+    app.tool = 'light';
+    setModel('jones');
+    const s = app.settings;
+    expect([s.model, jonesFits(s), s.strains.length, s.collisions, s.diffusion]).toEqual(['jones', true, 1, true, 1]);
+    expect([app.strainOrigin, app.strain, app.tool]).toEqual([[0], 0, 'pan']);
+    expect(app.notice).toBe(
+      `${BASE} It removed strains B to C and agents that share a cell. It changed Agents per cell from 3 to 1, ` +
+        'Diffusion passes from 2 to 1 and Scent decay from 0.1 to 0.6 (the Decay of strain A).',
+    );
+  });
+
+  // Every value that toJones() changes is in the notice, also those that the panel of the extended model shows
+  // elsewhere: the light strength, the weights of strain A and no diffusion.
+  it('to Jones names every value it changed', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('light');
+    const a = app.settings.strains[0];
+    if (!a) throw new Error('no strain');
+    Object.assign(a, { food: 0.4, light: 2, share: 0.5 });
+    a.attraction[0] = 0.5;
+    Object.assign(app.settings, { diffusion: 0, trailSaturation: 30, scentDecay: 0.01 });
+    setModel('jones');
+    expect(app.notice).toBe(
+      `${BASE} It changed Diffusion passes from 0 to 1, Light strength from 0.2 to 0.05, Scent decay from 0.01 to ` +
+        '0.1 (the Decay of strain A), Trail saturation from 30 to 0, the weight of strain A on its own trail from ' +
+        '+0.5 to +1, Food attraction from +0.4 to +1 and Light avoidance from +2 to +1.',
+    );
+    expect(app.settings.strains[0]?.share).toBe(1);
+    // A scene of Jones that is Jones already: nothing changes, and there is no notice.
+    loadPreset('network');
+    app.notice = '';
+    setModel('jones');
+    expect(app.notice).toBe('');
+  });
+
+  it('to Jones turns a weight on the own trail into +1 or −1 by its sign', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    for (const [w, want] of [
+      [-0.5, -1],
+      [-1, -1],
+      [0, 1],
+      [0.5, 1],
+      [2, 1],
+    ] as const) {
+      loadPreset('maze');
+      const a = app.settings.strains[0];
+      if (!a) throw new Error('no strain');
+      a.attraction[0] = w;
+      setModel('jones');
+      expect(app.settings.strains[0]?.attraction[0], `${w}`).toBe(want);
+      expect(jonesFits(app.settings), `${w}`).toBe(true);
+    }
+  });
+
+  // Only the extended model's sensors check walls on their way (ADR 0020): the Maze's walls act differently in Jones.
+  it('to Jones says that drawn walls no longer block the sensors', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('maze');
+    setModel('jones');
+    expect(app.notice).toBe(`${BASE} The walls stop agents, but they do not block sensors.`);
+  });
+
+  it('to Jones is not possible without the rule, and changes nothing then', async () => {
+    const { app, loadPreset, ruleUnavailable, setModel } = await fresh();
+    loadPreset('two-strains');
+    ruleUnavailable();
+    const before = structuredClone(app.settings);
+    setModel('jones');
+    expect(app.settings).toEqual(before);
+    expect(app.notice).toBe('The Jones model needs one agent per cell, and this browser cannot run it.');
+  });
+
+  it('to Extended keeps every value of Jones and the tool, also through a link', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('network');
+    // Jones binds the scent decay to the strain's Decay, whose range reaches below 0.001.
+    const a = app.settings.strains[0];
+    if (!a) throw new Error('no strain');
+    a.decay = 0.0005;
+    app.settings = constrainedJones(app.settings);
+    expect(app.settings.scentDecay).toBe(0.0005);
+    app.tool = 'cut';
+    const before = structuredClone(app.settings);
+    setModel('extended');
+    expect(app.settings).toEqual({ ...before, model: 'extended' });
+    expect(app.tool).toBe('cut');
+    expect(app.notice).toBe('');
+    const link = await decodeLink((await encodeLink(structuredClone(app.settings))).hash);
+    expect(link?.settings).toEqual(app.settings);
+  });
+
+  // The review's case: Extended, then values of its own, then back to Jones. The card shows the scene, and the link holds
+  // the scene's values. Then Extended again is a change of the scene: its model differs.
+  it('to Extended and back leaves a scene of Jones unchanged, after values of the extended model', async () => {
+    const { addStrain, app, loadPreset, sceneChanged, setModel } = await fresh();
+    for (const id of ['network', 'spots', 'shortest-path', 'wound']) {
+      loadPreset(id);
+      setModel('extended');
+      expect(sceneChanged(), id).toBe(true);
+      Object.assign(app.settings, { trailSaturation: 30, scentDecay: 0.01, lightStrength: 0.3, diffusion: 2 });
+      addStrain();
+      const a = app.settings.strains[0];
+      if (!a) throw new Error('no strain');
+      Object.assign(a, { share: 0.5, food: 0.4, light: 2 });
+      setModel('jones');
+      expect(sceneChanged(), id).toBe(false);
+      expect(app.settings, id).toEqual({ ...sceneOf(id), seed: app.settings.seed });
+      setModel('extended');
+      expect(sceneChanged(), id).toBe(true);
+      setModel('jones');
+      expect(sceneChanged(), id).toBe(false);
+    }
+  });
+
+  it('to Jones and back changes an extended scene that fits Jones only for the switch itself', async () => {
+    const { app, loadPreset, sceneChanged, setModel } = await fresh();
+    loadPreset('maze');
+    setModel('jones');
+    expect(sceneChanged()).toBe(true);
+    setModel('extended');
+    expect(sceneChanged()).toBe(false);
+    expect(app.settings).toEqual({ ...sceneOf('maze'), seed: app.settings.seed });
+  });
+
+  it('is undone by Reload scene, which restores the model of the scene', async () => {
+    const { app, loadPreset, sceneChanged, setModel } = await fresh();
+    for (const id of ['network', 'three-strains', 'light']) {
+      loadPreset(id);
+      const model = app.settings.model;
+      setModel(model === 'jones' ? 'extended' : 'jones');
+      loadPreset(id); // the card's Reload scene
+      expect([app.settings.model, sceneChanged()], id).toEqual([model, false]);
+    }
+  });
+});
+
+describe('the tools of the model', () => {
+  it('lose Light when a scene of Jones loads, also by Reload scene', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('light');
+    app.tool = 'light';
+    loadPreset('network');
+    expect(app.tool).toBe('pan');
+    loadPreset('light');
+    app.tool = 'light';
+    setModel('jones');
+    expect(app.tool).toBe('pan');
+    setModel('extended');
+    app.tool = 'light';
+    loadPreset('light'); // Reload scene of an extended scene: the tool stays
+    expect(app.tool).toBe('light');
+    app.tool = 'food';
+    loadPreset('network'); // a tool that both models have stays
+    expect(app.tool).toBe('food');
+  });
+
+  it('lose Light when a Jones link opens', async () => {
+    const { app, openLink } = await fresh();
+    app.tool = 'light';
+    openLink({ settings: sceneOf('network') });
+    expect(app.tool).toBe('pan');
+    app.tool = 'light';
+    openLink({ settings: sceneOf('light') });
+    expect(app.tool).toBe('light');
+  });
+
+  // App.svelte's settings effect: constrain() turns a Jones model with a value Jones does not have into Extended, or
+  // binds it, and adopt() writes only what changed.
+  it('follow what adopt() writes, and adopt() writes only what changed', async () => {
+    const { adopt, app, loadPreset } = await fresh();
+    loadPreset('network');
+    const strains = app.settings.strains;
+    app.tool = 'light'; // as before the fix of decision 25: a tool the model does not offer
+    const a = app.settings.strains[0];
+    if (!a) throw new Error('no strain');
+    a.decay = 0.05;
+    adopt(constrainedJones(app.settings));
+    expect(app.settings.scentDecay).toBe(0.05);
+    expect(app.settings.strains).toBe(strains); // the strains held the bound values already
+    expect(app.tool).toBe('pan');
+    adopt({ ...structuredClone(app.settings), model: 'extended', diffusion: 2 });
+    expect([app.settings.model, app.settings.diffusion]).toEqual(['extended', 2]);
+    app.tool = 'light';
+    adopt(structuredClone(app.settings));
+    expect(app.tool).toBe('light');
+  });
+
+  // Decision 29: the Jones model draws light without effect, and the panel says so while light is drawn.
+  it('say that drawn light has no effect in the Jones model, before and after the engine starts', async () => {
+    const { app, clearEnvironment, lightDrawn, loadPreset, setEngine, setModel, startScene } = await fresh();
+    loadPreset('light');
+    expect(lightDrawn()).toBe(true);
+    setModel('jones');
+    expect(lightDrawn()).toBe(true); // the light stays drawn
+    loadPreset('network');
+    expect(lightDrawn()).toBe(false);
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    expect(lightDrawn()).toBe(false);
+    engine.paint({ kind: 'light', from: [100, 100], to: [100, 100], radius: 5 });
+    expect(lightDrawn()).toBe(true);
+    clearEnvironment();
+    expect(lightDrawn()).toBe(false);
+    setEngine(undefined);
+  });
+});
+
+// A shared link of the Jones model holds only Jones' values, and a link from before the model switch opens as Jones
+// only if the Jones model runs it as it was made (ADR 0022, decision 24).
+describe('a link and the model', () => {
+  it('of every scene, from before the model switch, opens with the scene unchanged', async () => {
+    for (const p of PRESETS) {
+      const { app, openLink, sceneChanged } = await fresh();
+      const { model: _, coveredFood: __, coveredFoodFactor: ___, trailSaturation: ____, ...now } = p.settings();
+      // Before the switch the scenes of Jones weighed food with +1, also the repelling ones (jones() in presets.ts).
+      const jones = p.settings().model === 'jones';
+      const old = { ...now, strains: now.strains.map((st) => (jones ? { ...st, food: 1 } : st)) };
+      const drawing = { scene: p.id, origins: now.strains.map((_s, i) => i), shapes: (p.env ?? []).map(() => true) };
+      const hash = await encodeLink(old as unknown as Settings, { ...drawing, strokes: [] });
+      const link = await decodeLink(hash.hash);
+      if (!link) throw new Error(p.id);
+      openLink(link);
+      expect([app.settings.model, sceneChanged()], p.id).toEqual([p.settings().model, false]);
+    }
+  });
+});
+
+function sceneOf(id: string): Settings {
+  const s = presetById(id)?.settings();
+  if (!s) throw new Error(`no preset ${id}`);
+  return s;
+}
+
+/** The settings as App.svelte's settings effect leaves them (constrain()). */
+function constrainedJones(s: Settings): Settings {
+  return constrain(structuredClone(s));
+}

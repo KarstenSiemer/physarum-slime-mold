@@ -96,11 +96,42 @@ test('a switch to Jones keeps strain A and says what went', async ({ page }) => 
   // The small scene: two strains without the rule, on the extended model.
   await expect(page.getByRole('combobox', { name: 'Model' })).toHaveValue('extended');
   await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
-  await expect(page.getByRole('status')).toContainText('It removed strain B, agents that share a cell');
+  await expect(page.getByRole('status')).toContainText('It removed strain B and agents that share a cell.');
   await page.waitForFunction(() => {
     const s = globalThis.physarum?.settings;
     return s?.model === 'jones' && s.strains.length === 1 && s.collisions;
   });
+  expect(errors).toEqual([]);
+});
+
+// ADR 0022, decisions 25 and 29: the tools follow the model, also after a change of the preset, and the panel says
+// that the Jones model draws light without effect.
+test('the Jones model offers no Light tool, and says that drawn light has no effect', async ({ page }) => {
+  const errors = watchErrors(page);
+  const preset = page.getByRole('combobox', { name: 'Preset' });
+  const light = page.getByRole('radio', { name: 'Light' });
+  const move = page.getByRole('radio', { name: 'Move' });
+  const hint = page.locator('#jones-light');
+  await preset.selectOption('light');
+  await light.click();
+  await preset.selectOption('network');
+  await expect(light).toHaveCount(0);
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  await preset.selectOption('light');
+  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2);
+  await light.click();
+  await expect(hint).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
+  await expect(page.getByRole('status')).toContainText('It changed Light strength from 0.2 to 0.05.');
+  await expect(light).toHaveCount(0);
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  await expect(hint).toHaveText(
+    'The light on the canvas has no effect in the Jones model. To remove it, use the Erase tool. To use it, select Extended.',
+  );
+  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveAttribute('aria-describedby', 'jones-light');
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await page.getByRole('button', { name: 'Clear food, light and walls' }).click();
+  await expect(hint).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

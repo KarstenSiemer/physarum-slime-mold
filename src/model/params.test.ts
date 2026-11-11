@@ -8,6 +8,7 @@ import {
   globalSpec,
   jonesFits,
   MAX_STRAINS,
+  runsAsJones,
   sanitize,
   snap,
   strainLike,
@@ -211,6 +212,120 @@ describe('the Jones model', () => {
   it('turns a Jones model without the rule into the extended model', () => {
     const s = jonesLink();
     expect(constrain({ ...s, collisions: false }).model).toBe('extended');
+  });
+
+  it('fits Jones only with one strain at +1 or −1 on its own trail, the rule and one diffusion pass (jonesFits)', () => {
+    const s = jonesLink();
+    expect(jonesFits(s)).toBe(true);
+    for (const [w, fits] of [
+      [1, true],
+      [-1, true],
+      [0.5, false],
+      [-0.5, false],
+      [0, false],
+      [2, false],
+    ] as const)
+      expect(jonesFits({ ...s, strains: one({ attraction: [w, 0, 0, 0] }) }), `${w}`).toBe(fits);
+    expect(jonesFits({ ...s, strains: [defaultStrain(0), defaultStrain(1)] })).toBe(false);
+    expect(jonesFits({ ...s, collisions: false })).toBe(false);
+    for (const diffusion of [0, 2, 4]) expect(jonesFits({ ...s, diffusion }), `${diffusion}`).toBe(false);
+    // Covered food, Shrinkage, the start layout and the edges are Jones' too.
+    expect(jonesFits({ ...s, coveredFood: true, shrink: 0.001, layout: 'empty', boundary: 'dish' })).toBe(true);
+  });
+
+  // decision 27: one strain has no share, and the panel shows none in the Jones model.
+  it('binds the population share of its one strain to 1', () => {
+    expect(jonesLink({ strains: one({ share: 0.5 }) }).strains[0]?.share).toBe(1);
+    expect(sanitize({ ...jonesLink(), model: 'extended', strains: one({ share: 0.5 }) }).strains[0]?.share).toBe(0.5);
+  });
+
+  // Whatever the input, constrain() leaves a model labelled Jones with Jones' values only, and a second call changes
+  // nothing, so App.svelte's settings effect writes once and the link holds what the engine runs.
+  it('leaves only Jones’ values under the label Jones, and is stable (constrain)', () => {
+    let seed = 11;
+    const r = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    const pick = <T>(list: readonly T[]) => list[Math.floor(r() * list.length)] as T;
+    for (let i = 0; i < 2000; i++) {
+      const strains = Array.from({ length: 1 + Math.floor(r() * 2) }, (_, j) => ({
+        ...defaultStrain(j),
+        decay: pick([0.0001, 0.0005, 0.05, 0.1, 0.6]),
+        food: pick([-1, 0, 0.4, 1]),
+        light: pick([0, 1, 2]),
+        share: pick([0.5, 1]),
+        attraction: [pick([-1, -0.5, 0, 0.5, 1]), 0, 0, 0],
+      }));
+      const s = constrain({
+        ...defaultSettings(),
+        model: pick(['jones', 'extended'] as const),
+        collisions: r() < 0.7,
+        density: pick([0.15, 1, 3]),
+        diffusion: pick([0, 1, 1, 2]),
+        scentDecay: pick([0.001, 0.01, 0.1]),
+        lightStrength: pick([0, 0.05, 0.3]),
+        trailSaturation: pick([0, 30]),
+        strains,
+      });
+      expect(constrain(s)).toBe(s);
+      if (s.model !== 'jones') continue;
+      const st = s.strains[0];
+      expect(jonesFits(s)).toBe(true);
+      expect([s.scentDecay, s.lightStrength, s.trailSaturation, s.density <= 1]).toEqual([
+        st?.decay,
+        defaultSettings().lightStrength,
+        0,
+        true,
+      ]);
+      expect([st?.food, st?.light, st?.share]).toEqual([st?.attraction[0], defaultStrain(0).light, 1]);
+      expect(toJones(s)).toEqual(s);
+    }
+  });
+
+  it('switches to Jones from any settings, and a second switch changes nothing (toJones)', () => {
+    for (const p of PRESETS) {
+      const scene = p.settings();
+      const s = toJones(scene);
+      expect(s.model, p.id).toBe('jones');
+      expect(jonesFits(s), p.id).toBe(true);
+      expect(toJones(s), p.id).toEqual(s);
+      // The Jones scenes are Jones already.
+      if (scene.model === 'jones') expect(s, p.id).toEqual(scene);
+    }
+  });
+
+  // The Jones model sets the scent decay to the strain's Decay, and the extended model keeps it (decision 26).
+  it('has a scent decay range that holds every Decay of a strain', () => {
+    const [a, b] = [globalSpec.scentDecay, strainSpec.decay];
+    expect([a.min, a.max, a.step, a.log]).toEqual([b.min, b.max, b.step, b.log]);
+  });
+});
+
+// An old link holds no model: the code before the switch ran it with this app's additions (decision 24).
+describe('runsAsJones (links from before the model switch)', () => {
+  const s = sanitize({ model: 'jones', collisions: true, density: 0.15 });
+  const drawn = (...kinds: ('food' | 'light' | 'wall' | 'erase')[]) => new Set(kinds);
+  const strain = (patch: Partial<Strain>) => ({ ...s, strains: [{ ...defaultStrain(0), ...patch }] });
+
+  it('is true when the Jones model runs the link as it was made', () => {
+    expect(runsAsJones(s)).toBe(true);
+    expect(runsAsJones(s, drawn('food', 'erase'))).toBe(true);
+    // Without food and light the scent is 0: its decay and the weights on it do not act.
+    expect(runsAsJones({ ...s, scentDecay: 0.01 })).toBe(true);
+    expect(runsAsJones(strain({ food: 0.4, light: 2, decay: 0.05 }))).toBe(true);
+    // Food or light without a source, and light that the strain ignores.
+    expect(runsAsJones({ ...s, foodStrength: 0, scentDecay: 0.01 }, drawn('food'))).toBe(true);
+    expect(runsAsJones({ ...s, lightStrength: 0 }, drawn('light'))).toBe(true);
+    expect(runsAsJones(strain({ light: 0 }), drawn('light'))).toBe(true);
+  });
+
+  it('is false when the Jones model would run the link otherwise', () => {
+    expect(runsAsJones(s, drawn('wall'))).toBe(false);
+    expect(runsAsJones(s, drawn('light'))).toBe(false);
+    expect(runsAsJones({ ...s, scentDecay: 0.01 }, drawn('food'))).toBe(false);
+    expect(runsAsJones(strain({ food: 0.4 }), drawn('food'))).toBe(false);
+    expect(runsAsJones(strain({ attraction: [-1, 0, 0, 0] }), drawn('food'))).toBe(false); // food +1, trail −1
+    expect(runsAsJones({ ...s, trailSaturation: 30 })).toBe(false);
+    expect(runsAsJones({ ...s, diffusion: 2 })).toBe(false);
+    expect(runsAsJones({ ...s, collisions: false })).toBe(false);
   });
 });
 

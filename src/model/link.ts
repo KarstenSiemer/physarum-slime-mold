@@ -94,6 +94,15 @@ export function drawingOf(
   return { scene, origins: [...origins], shapes, strokes: edits.slice(i) };
 }
 
+/**
+ * The kinds of edit that a drawing holds: the scene's shapes it keeps, and its strokes. A stroke counts until the
+ * engine's sweep deletes it from the list, also when an eraser covers a part of it.
+ */
+export function kindsOf(d: Drawing): Set<EnvTool> {
+  const env = presetById(d.scene)?.env ?? [];
+  return new Set([...env.filter((_, i) => d.shapes[i]).map((e) => e.kind), ...d.strokes.map((e) => e.kind)]);
+}
+
 /** The drawing of the scene as it loads: every shape, no stroke. Undefined without a scene. */
 export function sceneOnly(d: Drawing): Drawing | undefined {
   return d.scene

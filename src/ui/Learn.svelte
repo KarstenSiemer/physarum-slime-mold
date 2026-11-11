@@ -160,9 +160,9 @@
       </p>
       <p>
         In the extended model, a lower Scent decay spreads the food scent farther. Food then releases less scent, so the
-        scent reaches farther without getting stronger. Trail saturation makes a dense trail count less, so a weak scent
-        can still turn an agent on it. With Scent decay 0.1 and Trail saturation 0, the extended model runs a scene of
-        Jones as Jones does, until you paint a wall.
+        scent reaches farther, but it does not become stronger. Trail saturation makes a dense trail count less, so a
+        weak scent can still turn an agent on it. With Scent decay 0.1 and Trail saturation 0, the extended model runs a
+        scene of Jones as Jones does, until you paint a wall or use the Cut tool.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

@@ -1,4 +1,5 @@
 // Single source of truth for every parameter: UI controls, URL validation and GPU packing read this.
+import type { EnvTool } from '../engine/types';
 
 export const MAX_STRAINS = 4;
 
@@ -161,12 +162,14 @@ export const globalSpec = {
     max: 0.5,
     step: 0.005,
   },
+  // The range of the strain's Decay: the Jones model sets the scent decay to it, and a switch to the extended model
+  // keeps it (ADR 0022, decision 26).
   scentDecay: {
     label: 'Scent decay',
     help: 'Only the extended model has this setting: in the Jones model the scent decays with the strain’s Decay. It is the fraction of the food and light scent that disappears every step. Lower values spread the scent farther. At 0.1 the scent falls to a third within 2 cells of a food, and at 0.003 within about 9 cells. Food and light release less at a lower decay. So the scent on a large food stays as strong as at 0.1, and the scent on a small food gets weaker.',
-    min: 0.001,
+    min: 0.0001,
     max: 0.9,
-    step: 0.001,
+    step: 0.0001,
     log: true,
   },
   coveredFoodFactor: {
@@ -224,7 +227,7 @@ export type GlobalKey = keyof typeof globalSpec;
 /** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
 export const modelHelp = {
   label: 'Model',
-  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, light, more diffusion passes, a scent decay of its own, sensors that walls block, and Trail saturation. With Scent decay 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
+  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or use the Cut tool. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
   ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014',
 } as const;
 
@@ -362,11 +365,15 @@ const oneOf = <T extends string>(v: unknown, list: readonly T[], fallback: T): T
 const obj = (v: unknown): Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
+/** The kinds of edit that a shared link's food, light and walls hold (kindsOf() in link.ts). */
+export type Drawn = ReadonlySet<EnvTool>;
+
 /**
  * Builds valid Settings from untrusted input (the URL). Only known keys are read,
- * numbers are clamped to their spec, everything else falls back to the default.
+ * numbers are clamped to their spec, everything else falls back to the default. `drawn`: what the link's drawing
+ * holds, which decides the model of a link made before the model switch (runsAsJones()).
  */
-export function sanitize(input: unknown): Settings {
+export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
   const raw = obj(input);
   const d = defaultSettings();
   const out = { ...d };
@@ -378,9 +385,10 @@ export function sanitize(input: unknown): Settings {
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
   out.collisions = raw.collisions === true;
-  // A link made before the model switch holds no model: it was made with Jones' rules, and constrain() makes it
-  // Jones' model if its values fit (ADR 0022).
-  out.model = oneOf(raw.model, MODELS, 'jones');
+  // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
+  // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).
+  const old = !MODELS.includes(raw.model as Model);
+  out.model = old ? 'extended' : (raw.model as Model);
   // K is a whole number (its step): a tiny K such as 1e-300 would pick the saturating passes and pack as 0 in f32.
   out.trailSaturation = Math.round(out.trailSaturation);
   out.coveredFood = raw.coveredFood === true;
@@ -397,7 +405,24 @@ export function sanitize(input: unknown): Settings {
     st.attraction = def.attraction.map((v, j) => num(row[j], v, attractionSpec));
     return st;
   });
+  if (old && runsAsJones(out, drawn)) out.model = 'jones';
   return constrain(out);
+}
+
+/**
+ * Whether the Jones model runs the settings of a link made before the model switch as that code ran them (owner rule
+ * of 2026-11-11, ADR 0022, decision 24). That code ran every link with this app's additions, as the extended model at
+ * a source factor of 1 does. The link must fit Jones' model (jonesFits()), and what Jones' model binds or leaves out
+ * must have had no effect: food weighed as the strain's own trail with the strain's decay, no light with an effect,
+ * no trail saturation, and no walls, because only the extended model's sensors check walls on their way.
+ */
+export function runsAsJones(s: Settings, drawn: Drawn = new Set()): boolean {
+  const st = s.strains[0];
+  if (!st || !jonesFits(s) || s.trailSaturation !== 0 || drawn.has('wall')) return false;
+  const food =
+    !drawn.has('food') || s.foodStrength === 0 || (st.food === st.attraction[0] && s.scentDecay === st.decay);
+  const light = !drawn.has('light') || s.lightStrength === 0 || st.light === 0;
+  return food && light;
 }
 
 /**
@@ -424,7 +449,7 @@ export function jonesFits(s: Settings): boolean {
 
 /**
  * The Jones model's values of the settings that are not Jones' own (ADR 0022). Food goes into his one trail map
- * (Jones 2010, p. 141): its scent decays with the strain's decay, and the strain weighs it as its own trail. Jones'
+ * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. Jones'
  * papers have neither light that releases a repellent nor trail saturation, so their values return to the defaults,
  * and a link holds none of them. Returns `s` itself when it holds these values already.
  */
@@ -434,7 +459,8 @@ function asJones(s: Settings): Settings {
   if (!st) return s;
   const self = st.attraction[0] ?? 1;
   const light = defaultStrain(0).light;
-  const strainOk = st.food === self && st.light === light;
+  // One population: a share means nothing for one strain, and the panel offers none in the Jones model.
+  const strainOk = st.food === self && st.light === light && st.share === 1;
   const ok = strainOk && s.scentDecay === st.decay && s.lightStrength === d.lightStrength && s.trailSaturation === 0;
   if (ok) return s;
   return {
@@ -442,7 +468,7 @@ function asJones(s: Settings): Settings {
     scentDecay: st.decay,
     lightStrength: d.lightStrength,
     trailSaturation: 0,
-    strains: strainOk ? s.strains : [{ ...st, food: self, light }],
+    strains: strainOk ? s.strains : [{ ...st, food: self, light, share: 1 }],
   };
 }
 
