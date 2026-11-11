@@ -231,7 +231,7 @@ the arrows.
   walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and
   models compare. One thin line marks where the food scent weighs as much in a sensor as the trail of a strand (the
   99th percentile of the trail that the auto levels measure). A legend shows the scale, the mark and what the scene
-  holds. Zoomed out the view reads a coarser map of the scent, so it costs about what it costs at fit. It changes
+  holds. Zoomed out the view reads a coarser map of the scent, filled again only when the scent changed. It changes
   nothing in the simulation, goes into the link like the style, stays on when a scene loads, and without it the
   render pass draws the pixels of before at the same cost.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.

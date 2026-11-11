@@ -2,7 +2,8 @@
 
 - Status: accepted (revised 2026-11-08 after the visual review loop; amended 2026-11-10: food,
   light and walls; amended 2026-11-11: scent view, revised the same day: a glow and the mark of a strand, and
-  amended for the lattices of ADR 0026 and for the panels without a backdrop blur of ADR 0028)
+  amended for the lattices of ADR 0026 and for the panels without a backdrop blur of ADR 0028; amended 2026-11-12
+  after the second review of the glow and the mark)
 - Date: 2026-11-08
 
 ## Context
@@ -677,9 +678,10 @@ and its consequences; the rest stays.
   | 8               | +13.0 / +11.6 | +0.30 / −0.34 | +11.84 / +14.7 | +0.93 / −1.89 |
 
   Two more runs before on WebGPU gave +6.1 / +8.0 ms at 4 and +14.8 / +14.6 ms at 8 cells per pixel (the review: +8.5
-  and +11.7). The view now costs about what it costs at fit at every zoom; on WebGL2 at 2 to 4 cells per pixel up to
-  about twice that. At 8 cells per pixel the frame itself takes 20 to 40 ms (the trail's four taps of 4 cells), so the
-  difference lies within the spread there.
+  and +11.7). On this grid of 1024 × 640 the view then cost about what it costs at fit at every zoom; on WebGL2 at 2 to
+  4 cells per pixel up to about twice that. Larger grids cost more, since the coarse map was filled from every cell in
+  every frame (corrected 2026-11-12, see the amendment of that day). At 8 cells per pixel the frame itself takes 20
+  to 40 ms (the trail's four taps of 4 cells), so the difference lies within the spread there.
 
 - Paired in one page (the method of the amendment above: the pass without the scent code (A), the shipped pass with
   the view off (B) and on (C), 21 rounds of 20 frames, Transport network on 1024 × 640 with three dabs, glow style;
@@ -792,3 +794,142 @@ Consequences: an e2e test ("the scent legend keeps its text readable on the glas
 reads the legend's computed background and the colour of each of its visible texts in the paper style, and holds each
 to 4.5:1 over white; it also checks that the legend has no backdrop filter. Mutations, each reverted after its run: a
 thinner glass (0.6: `--muted` at 4.2:1) and the blur back: the test caught both.
+
+## Amendment 2026-11-12: the second review of the glow and the mark
+
+### Context
+
+A review of the glow, the mark and the coarse map on `18858e4` (2026-11-11) confirmed these faults, each with a
+probe:
+
+- On WebGPU the agents style measured no auto levels: `frame()` in `webgpu.ts` ran the histogram only in the styles
+  that use the levels, and `Engine.snapshot()` settled them only there. After a reset in the agents style the strand
+  stayed 0, so the view drew no line and the legend no mark; a switch to the agents style froze the strand. WebGL2
+  measured in every style.
+- Between 1 and 2 cells per pixel the lookup read the cells of walls (it left them out only up to 1 cell per pixel, but
+  the view reads cells up to 2), so the line hugged the walls' faces and the glow dimmed beside them.
+- The coarse map was filled from every cell in every frame while zoomed out, also while paused: +4 ms per frame at
+  4096 × 2560 and +2.4 to 2.7 ms at 3072 × 1920 zoomed out (WebGPU). The revision above said that the view costs about
+  what it costs at fit at every zoom; that held for the grid of 1024 × 640 that it measured, not for large grids.
+- After a WebGL2 context loss, the key S replaced the message "The graphics device was lost" with "GLSL compile error:
+  .": the view's programs compiled on the lost context and reported its empty log as an error. On WebGPU a device that
+  something else destroyed showed no message at all.
+- On a phone the numbers under the legend's bar ran together ("0.010.1", "1k10k+").
+- The strand read within its bin ran up to 18 % high: the bin was taken as holding its cells evenly, but in the tail of
+  the trail most of a bin's cells lie at its low end.
+- The coarse map leaves the cells of walls out, but no test held that (the surviving mutation of the revision above):
+  counting them moved the glow by up to 4.5/255 and the line by 0.1 of its opacity or more at 16 pixels in the Maze.
+- Save PNG settled the levels with a blend of 1, so after an export the live line jumped to the strand of that moment
+  instead of moving to it slowly.
+
+The review also asked what the line and the mark mean (items 3, 8 and 9 of the review). Those wait for the owner and are
+not part of this amendment.
+
+### Decision
+
+Each by this branch on 2026-11-12, on the review's findings.
+
+1. **The strand is measured in every style while the view is on.** On WebGPU the agents style runs the histogram only
+   while the scent view is on: without the view nothing changes, so the agents style keeps its cost (WebGL2 measured
+   in every style before and still does). An export in the agents style measures only with the view on.
+2. **Up to 2 cells per pixel the lookup leaves out the cells of walls** (`render.wgsl` and `render.frag` `scentView`),
+   at every scale that reads the cells, not only up to 1. Reason: the cells around p that a lookup reads include a
+   wall's cell whenever p lies within one cell of it, at any scale; a wall marks the cells its stroke touches, so its
+   cells reach up to half a cell beyond its drawing.
+3. **The coarse map is filled only when what it holds changed**: the scent (a step), the scent or the shape outside a
+   step (a reset, a stroke, clearing, a write or a new hold of the shape, counted by `revision` in `sim.ts` and
+   `gl/sim.ts`), the map level or the arena. A paused simulation keeps it. Reason: the review measured it in every
+   frame, and nothing but those changes what it holds.
+4. **After steps alone the map refreshes only the scent of its texels** (`SUM_ONLY` in `render.wgsl` and
+   `scent-down.frag`, a second pass that writes red and green and keeps blue): a step leaves no scent in walls or
+   outside the dish (`diffuse.wgsl`, `diffuse.frag`), so a texel's sum over all its cells is its sum over the open
+   ones, and the share that holds scent, which only the shape, the level or the arena change, stays from the last full
+   fill. The refresh reads no shape. Reason: a running simulation changes the scent in every frame, so the map is
+   filled in every frame zoomed out, and reading the shape of every cell was half of that pass and more on WebGL2.
+   An experiment on the pass alone (Maze, 2560 × 1600, paused, the map filled in every frame, median of 9 rounds of
+   20 frames, two rounds, load average 4 to 8) found, in ms per frame at 4.4 / 8.8 cells per pixel:
+
+   | Grid, backend      | The pass of the revision above | Without reading the shape | Whole cells per texel    |
+   | ------------------ | ------------------------------ | ------------------------- | ------------------------ |
+   | 4096 × 2560 WebGPU | 1.28 / 1.48; 2.99 / 2.61       | 0.95 / 1.26; 2.26 / 2.41  | 1.38 / 1.83; 2.98 / 2.84 |
+   | 4096 × 2560 WebGL2 | 3.18 / 6.00; 4.01 / 6.03       | 1.78 / 2.29; 1.69 / 1.53  | 3.13 / 6.61; 4.34 / 6.09 |
+   | 3072 × 1920 WebGPU | 1.75 / 1.84; 1.77 / 2.64       | 0.94 / 1.13; 1.68 / 1.77  | 1.63 / 1.72; 2.02 / 2.50 |
+   | 3072 × 1920 WebGL2 | 2.32 / 3.68; 3.59 / 3.88       | 1.17 / 0.74; 1.47 / 1.13  | 2.71 / 3.51; 2.63 / 3.71 |
+
+   A loop over whole cells per texel, which saves the shares of cells at a texel's edge, bought nothing and is not
+   used.
+
+5. **A lost device stays the message.** WebGL2 starts no compile on a lost context, and a compile that a lost context
+   failed throws nothing (`startProgram()` in `gl/gl.ts`); an export does not wait for programs a lost context never
+   builds. On WebGPU only the app's own `destroy()` ends the device without a message (`ending` in `webgpu.ts`); any
+   other end, also a `destroy()` from elsewhere, reports the loss. Reason: the loss is what the user must see; an error
+   of the view after it hides it.
+6. **The legend's numbers keep apart**: the bar is 240 px wide (216 before) and the numbers 6 px and more apart; on a
+   phone and a short screen, where the bar is 180 px wide, the legend shows every other number (0.01, 1, 100, 10k+).
+   Reason: at 216 px the numbers kept 3 px apart on a desktop with the fonts of macOS, less with wider fonts; at 180 px
+   they ran together.
+7. **The strand within its bin** (`levelWithin()` in `exposure.ts`): the cells of the bin are taken to thin out
+   exponentially, at the rate of the bins below and above it. Reason: in 60 states of 15 scenes (each at 200, 600,
+   1,500 and 4,000 steps) this read the 99th percentile of the summed trail within −3.2 to +2.8 % (median 0.6 %), where
+   an even share read it −0.6 to +19.7 % (median 5.1 %); a linear share between the neighbours reached +12.7 %. It costs
+   a logarithm and an exponential per measurement.
+8. **An export measures its own levels** (`Backend.measured()`, `Engine.snapshot()`): it draws with them, and the levels
+   of the frames stay as their smoothing left them. Reason: the line follows the smoothed strand, and an export must not
+   move it.
+
+### Consequences
+
+- GPU tests on both backends (`sim.gpu.test.ts`, "scent view"):
+  - "leaves the cells of walls out of the scent between 1 and 2 cells per pixel": a wall that marks four cells and
+    draws three, a long food beside it, and the line where the food scent is that of the cell before the wall; at 1.01,
+    1.2, 1.5 and 1.9 cells per pixel every pixel follows the CPU reference, which leaves out the wall's cells at every
+    scale up to 2 (fixed in the reference too, which shared the fault).
+  - "leaves the cells of walls out of the coarse maps": the same at 2.05, 2.5, 3, 4.1 and 6 cells per pixel, with a
+    pixel column 1.6 cells before the wall, where a texel that holds part of the wall reaches; then a step before a
+    capture at a level that the map holds (the refresh of decision 4) at each level, and the wall grown by two cells
+    while paused, which must fill the map again in full.
+  - "builds the pipelines or programs of the view once": now four each, with the refresh.
+  - "fills the coarse map again only when the scent, the shape or the level changed": counts the passes of the
+    capture (WebGPU render passes, WebGL2 draws), and checks the view against the reference after steps and a stroke
+    made while the map was kept.
+  - "measures the strand from frames in the … style", for each style: frames as the engine draws them, from a reset,
+    until a measurement landed; the strand against the 99th percentile of the summed trail read from the trail itself,
+    not from the backend's levels: within 10 %.
+  - "measures the levels of an export without changing those of the frames".
+- Unit tests: the strand of a log-normal trail of 100,000 cells (three spreads) within 3 % of its exact 99th
+  percentile.
+- e2e tests (`ui.spec.ts`): a lost device stays reported when the view is asked for, on WebGPU and WebGL2; the numbers
+  under the legend's bar keep 3 px apart at 375 × 812, 812 × 375, 721 × 900, 768 × 1024 and 1280 × 800.
+- Mutations, each reverted after its run, all caught: WebGPU measuring nothing in the agents style; the wall's cells
+  read up to 1 cell per pixel only (WGSL and GLSL); the coarse map counting walls (WGSL and GLSL, the surviving mutation
+  of the revision); the coarse map filled in every frame (WebGPU), or kept over a step (WebGL2) or over a stroke
+  (WebGPU); the refresh clearing the share (WebGPU) or writing it (WebGL2); the refresh in place of the full fill after
+  a stroke (both); an export blending its levels into those of the frames; WebGL2 compiling on a lost context; WebGPU
+  taking a destroyed device for no loss; every number on a phone's legend; an even share within the bin (the unit
+  test).
+- The cost of the view, measured as the review did (draw-only frames of the paused app, off and on, median of 5
+  rounds of 20 frames; the Maze at decay 0.003 on grids of 4096, 3072, 1024 and 768 cells on the long side; 2560 ×
+  1600; M3 Pro with other work on the host, load average 4 to 8; WebGPU at 4096 measured twice). On − off in ms at fit
+  / 4.4 / 8.8 cells per pixel, before (the review's version, `67443e0`) and after (decision 3):
+
+  | Grid              | WebGPU before                           | WebGPU after                            | WebGL2 before      | WebGL2 after        |
+  | ----------------- | --------------------------------------- | --------------------------------------- | ------------------ | ------------------- |
+  | 4096 × 2560 (1.6) | −0.05 / 3.74 / 3.35; 0.72 / 1.93 / 3.03 | 1.06 / −2.97 / 1.96; 1.83 / 0.63 / 0.45 | 1.50 / 3.62 / 5.55 | 0.67 / 0.40 / −0.18 |
+  | 3072 × 1920 (1.2) | 0.35 / 1.53 / −0.17                     | 0.44 / 0.13 / 0.13                      | 0.72 / 1.60 / 2.47 | 0.44 / 0.16 / 0.24  |
+  | 1024 × 640 (0.4)  | 0.38 / 0.10 / 0.10                      | 0.29 / 0.02 / −0.01                     | 0.38 / 0.19 / 0.33 | 0.31 / −0.04 / 0.00 |
+  | 768 × 480 (0.3)   | 0.28 / 0.05 / 0.10                      | 0.30 / 0.06 / 0.04                      | 0.35 / 0.07 / 0.30 | 0.35 / 0.01 / 0.03  |
+
+  Paused, the view zoomed out now costs what it costs at fit or less; the one run of −2.97 ms lies within the spread
+  of frames of 16 to 19 ms then. While the simulation runs, the map is refreshed in every frame zoomed out. The refresh
+  alone, with the map filled again in full (the shape changed) and refreshed after a step (decision 4), in ms at 4.4 /
+  8.8 cells per pixel, two rounds under load average 3 to 6 with frames of 3 to 23 ms:
+
+  | Grid        | Full fill, WebGPU        | After a step, WebGPU     | Full fill, WebGL2        | After a step, WebGL2      |
+  | ----------- | ------------------------ | ------------------------ | ------------------------ | ------------------------- |
+  | 4096 × 2560 | 3.44 / 3.14; 3.40 / 2.95 | 2.51 / 2.02; 3.53 / 3.24 | 5.72 / 6.91; 6.92 / 9.04 | 2.85 / 3.43; 3.63 / 3.94  |
+  | 3072 × 1920 | 2.80 / 2.05; 4.11 / 3.38 | 2.24 / 1.60; 3.02 / 3.39 | 4.54 / 5.58; 5.09 / 5.83 | 3.73 / 1.85; 3.01 / 3.72  |
+  | 1024 × 640  | 0.48 / 1.19; 0.73 / 1.13 | 1.66 / 1.13; 0.32 / 1.06 | 1.49 / 0.08; 0.97 / 1.21 | 0.79 / −0.28; 0.79 / 0.69 |
+
+  On WebGL2 the refresh after a step costs about half the full fill; on WebGPU it costs 70 % to 100 % of it, within
+  the spread. A running simulation at 4096 × 2560 zoomed out thus pays about 2 to 3.5 ms per frame on WebGPU and 3 to
+  4 ms on WebGL2 for the view, against frames of 35 to 70 ms there; at 1024 × 640 below 1 ms.
