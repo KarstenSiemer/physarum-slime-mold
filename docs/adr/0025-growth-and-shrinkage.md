@@ -401,9 +401,15 @@ agent, with variants of the code; the review of this branch) found the causes, a
   scent, so it turns to the food only when a sensor lies on it.
 - The growth and shrinkage rules match the papers; the analysis found no other difference.
 
-This branch changes neither the diffusion nor the Maze: a separate pull request for Jones' model brings the diffusion,
-Jones' order of the stages, the dish and the foods of his figures, and the extended model waits for an owner decision.
-A new scene uses Jones' foraging angle (decision 30, D1b below).
+This branch changes neither the diffusion nor the Maze. The owner decided on 2026-11-11 that Jones' corrections hold
+for both models. Asked whether Jones' order of a step, walls that absorb the trail and Jones' dish size also apply to
+the extended model, he answered "Ja, beide Modelle" (yes, both models). A separate fidelity pull request, in progress,
+brings them to both models: Jones' order of a step (move and deposit, then sense, then diffuse); closed edges that
+absorb the trail in both models; inner walls that are lattice sites of the diffusion in the Jones model and sinks in
+the extended model; and a dish of 0.945 of the short side. That pull request measures the Maze (SA 45°) with growth
+again. It also changes the diffusion under the Foraging maze (the extended model, a closed box, inner walls), so D1b
+holds for the diffusion of this branch and needs a new measurement after it. A new scene uses Jones' foraging angle
+(decision 30, D1b below).
 
 History, the first reading (2026-11-11, before the analysis): the colony grows along the walls and the edges of the
 box (71 to 82 % of its agents within 4 cells of them from step 3,000 on, seed 1, 16:9 and 1:1; without growth 1 %); at
@@ -521,10 +527,12 @@ change: its rows differ by the load of the machine.
 
 See `TODO.md` (M2):
 
-- The Maze with growth from one food passes on the wide screens only along its walls and fails on a square screen
-  (D1): the diffusion reflects the trail at walls where Jones absorbs it, and SA 45° is Jones' minimising angle. A
-  separate pull request brings Jones' diffusion to the Jones model; whether the extended model, and so the Maze, gets
-  it too is open. The Foraging maze (D1b) forages with Jones' angle and does not depend on it.
+- Decided on 2026-11-11, no longer open: the Maze with growth from one food passes on the wide screens only along its
+  walls and fails on a square screen (D1), because the diffusion reflects the trail at walls where Jones absorbs it,
+  and SA 45° is Jones' minimising angle. The owner decided that Jones' corrections hold for both models ("Ja, beide
+  Modelle", yes, both models). The fidelity pull request (in progress) brings them to both models and measures the
+  Maze (SA 45°) with growth again. The Foraging maze (D1b) was measured with the diffusion of this branch and needs a
+  new measurement after that pull request.
 - Growth counts the agent itself, as shrinkage does, so Growth minimum 0 and 1 act the same (decision 3); a child
   gets a random heading, which Jones does not state (decision 6). Both are this branch's readings.
 - Whether a scene or the default settings should hold a Capacity above Agents per cell, so that Inoculate works there
