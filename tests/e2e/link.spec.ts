@@ -33,7 +33,7 @@ async function settled<T>(read: () => Promise<T | undefined>): Promise<T> {
         last = now;
         return same && value !== undefined;
       },
-      { timeout: 60_000, intervals: [1000] },
+      { timeout: 120_000, intervals: [1000] },
     )
     .toBe(true);
   return value as T;
@@ -49,9 +49,9 @@ async function openMaze(page: Page) {
   await page.waitForFunction(
     () => globalThis.physarum?.settings.boundary === 'box' && !globalThis.physarum.busy,
     undefined,
-    { timeout: 60_000 },
+    { timeout: 120_000 },
   );
-  await expect.poll(async () => (await environment(page))?.cells[0] ?? 0, { timeout: 60_000 }).toBeGreaterThan(100);
+  await expect.poll(async () => (await environment(page))?.cells[0] ?? 0, { timeout: 120_000 }).toBeGreaterThan(100);
 }
 
 /** A drag with a tool across the canvas, in fractions of its size, left of the panel and above the toolbar. */
@@ -85,7 +85,7 @@ test('a link holds what was painted: a new page paints the same bytes and shows 
   const other = await context.newPage();
   const otherErrors = watchErrors(other);
   await other.goto(`/${hash}`);
-  await expect.poll(() => environment(other), { timeout: 60_000 }).toEqual(sent);
+  await expect.poll(() => environment(other), { timeout: 120_000 }).toEqual(sent);
   await expect(card(other).getByRole('heading', { name: 'Maze' })).toBeVisible();
   await expect(card(other).getByText('changed', { exact: true })).toBeVisible();
   // The new page writes the same link back.
@@ -110,7 +110,7 @@ test('a link with a drawing this app cannot read: a notice, and the settings loa
   await expect(page.getByRole('status')).toHaveText(
     'This app cannot read the scene and drawing in this link, so only its settings load.',
   );
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
   expect((await settled(() => environment(page))).cells).toEqual([0, 0, 0]);
   await expect(card(page)).toContainText('These settings came from a link that names no scene this app can read');
   // The address keeps the settings and leaves out the part it could not read.
@@ -145,7 +145,7 @@ test('a drawing too large for a link: a notice, and the link holds the settings 
   const otherErrors = watchErrors(other);
   await other.goto(`/${hash}`);
   // The Maze as it loads, without a part of the drawing.
-  await expect.poll(() => environment(other), { timeout: 60_000 }).toEqual(scene);
+  await expect.poll(() => environment(other), { timeout: 120_000 }).toEqual(scene);
   await expect(card(other).getByRole('heading', { name: 'Maze' })).toBeVisible();
   await expect(card(other).getByText('changed', { exact: true })).toBeHidden();
   expect(errors).toEqual([]);

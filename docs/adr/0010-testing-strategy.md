@@ -183,3 +183,59 @@ GPU checks use invariants, not long exact trajectories:
   decision (TODO.md).
 - ADR 0020 joined onto PR 3 (2026-11-10) did not run in the image: by the owner's decision of that
   day, GitHub CI times it after the push. On the M3 Pro its GPU project (419 tests) passed in 17 s.
+- Longer limits, by the owner's decision of 2026-11-10 (TODO.md): each wait that used more than a
+  quarter of its limit in a run of that day now has twice that limit. Above a quarter, a busy host
+  or a slower runner can make the wait fail (above). The times come from two sources. The CI-image
+  runs above logged every test, hook and e2e step; only the runs with one backend per API in the
+  engine tests count (PR 2 and later). The verify jobs on GitHub of PR 2, 3, 5 and 6 (#18 to #21)
+  and of `main` give every GPU test of more than 300 ms, but no e2e times. These limits replace the
+  limits in the notes above.
+
+  | Wait                                                                                                               | Limit         | Longest                                                                                                 | Run                                                                                |
+  | ------------------------------------------------------------------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+  | `tests/e2e/helpers.ts:31`, the start of the app in most e2e tests                                                  | 60 → 120 s    | 63.7 s, failed                                                                                          | image, review of PR 3 on PR 2 (`3a961ce`) beside other containers                  |
+  | `scenes.spec.ts:54`, the start scene                                                                               | 60 → 120 s    | 59.9 s                                                                                                  | image, review of ADR 0020 beside more load                                         |
+  | `scenes.spec.ts:254`, "a preset chosen while the engine starts"                                                    | 60 → 120 s    | 53.7 s                                                                                                  | image, PR 2 alone (`a5631bc`) in the review of PR 3 on PR 2                        |
+  | `app.spec.ts:92` and `app.spec.ts:100`, the starts before and after "Start fresh"                                  | 60 → 120 s    | 45.0 and 49.9 s                                                                                         | image, `3a961ce`, and a review of PR 2 beside more containers                      |
+  | `app.spec.ts:9`, the engine of the boot test                                                                       | 60 → 120 s    | 36.8 s                                                                                                  | image, review of ADR 0020 beside more load                                         |
+  | `app.spec.ts:67`, the start after the grid is fitted to the device memory                                          | 60 → 120 s    | 33.5 s                                                                                                  | image, `3a961ce`                                                                   |
+  | `app.spec.ts:39`, 60 steps on WebGL2                                                                               | 60 → 120 s    | 24.8 s                                                                                                  | image, review of ADR 0020 beside more load                                         |
+  | `app.spec.ts:15`, 30 steps of the boot test                                                                        | 60 → 120 s    | 17.1 s                                                                                                  | image, review of ADR 0020 beside more load                                         |
+  | `ready()` at `scenes.spec.ts:306`, after both page loads of "a boundary or a Clear chosen while the engine starts" | 60 → 120 s    | not timed: the same start as line 254                                                                   | no timed run had this test                                                         |
+  | `link.spec.ts`, the six waits for an engine and its environment (PR 5, #21)                                        | 60 → 120 s    | over 60 s, failed twice on `main` (`9c1f56a`): a new page that opens the link, beside the sender's page | GitHub, run 42970155117                                                            |
+  | `scenes.spec.ts:434`, the notice of the missing rule (it stays 12 s)                                               | 20 → 40 s     | 12.1 s                                                                                                  | image, PR 2 in the review of ADR 0020                                              |
+  | Each e2e test on CI (`playwright.config.ts`)                                                                       | 120 → 240 s   | 1.4 min; 22 of the 28 timed tests above 30 s                                                            | image, `3a961ce` and `a5631bc`                                                     |
+  | `gl/sim.gpu.test.ts`, "counts alive agents exactly", without float blending                                        | 60 → 120 s    | 68.1 s, failed                                                                                          | image, review of ADR 0020 beside more load                                         |
+  | `gl/sim.gpu.test.ts`, "counts deposits exactly far above 2048 agents", without float blending                      | 60 → 120 s    | 27.4 s                                                                                                  | image, review of ADR 0020 beside more load                                         |
+  | `gl/sim.gpu.test.ts`, "never blends into a 32-bit float target"                                                    | 60 → 120 s    | 30.5 s                                                                                                  | image, `3a961ce`                                                                   |
+  | `gl/sim.gpu.test.ts`, "finish() resolves only after the GPU has run the work"                                      | 60 → 120 s    | 26.0 s; on GitHub 22.0 s                                                                                | image, PR 3 on PR 2 after its review fixes (`59a66ee`); GitHub, `main` (`7ac3981`) |
+  | `engine.gpu.test.ts`, "switching one agent per cell restarts the population"                                       | 60 → 120 s    | 26.9 s                                                                                                  | image, `59a66ee`                                                                   |
+  | `engine.gpu.test.ts`, "keep the outlines on the side of env across arena switches", WebGL2                         | 60 → 120 s    | 21.5 s                                                                                                  | GitHub, PR 6 (`17197ac`)                                                           |
+  | `sim.gpu.test.ts`, "paints 5000 strokes in one call", WebGPU                                                       | 60 → 120 s    | 20.3 s; on GitHub 16.1 s                                                                                | image, `3a961ce`; GitHub, PR 3 (21:44 UTC)                                         |
+  | `sim.gpu.test.ts`, "build the passes for walls at the first wall", WebGL2                                          | 60 → 120 s    | 16.6 s                                                                                                  | image, review of ADR 0020 beside more load                                         |
+  | `sim.gpu.test.ts`, Fig. 10, WebGPU                                                                                 | 600 → 1,200 s | 271.3 s                                                                                                 | GitHub, `main` (`5e4d934`)                                                         |
+  | `sim.gpu.test.ts`, the hook that builds the backend, WebGPU                                                        | 180 → 360 s   | 109.2 s                                                                                                 | image, review of ADR 0020 beside more load                                         |
+  | `engine.gpu.test.ts`, the hook that builds both backends                                                           | 180 → 360 s   | 106.5 s                                                                                                 | image, review of ADR 0020 beside more load                                         |
+
+  Each GPU test in the table gets its limit as the third argument of `it()`, so `testTimeout` in
+  `vitest.config.ts` stays 60 s for the other tests. A limit on a line in `describe.each` applies to
+  each backend or counting path: Fig. 10 on WebGL2 (at most 88 s) and the hook for WebGL2 (under
+  1 s) also get the longer limits. `ready()` also serves the two waits after a rebuild in its test,
+  so they get 120 s too. The e2e limit is in `playwright.config.ts`, for every test: each e2e test
+  starts the app, and in all tests but one the start alone may now take 120 s, the old limit of a
+  whole test. "without the rule in this browser" calls `test.slow()` and so gets 720 s. These waits
+  stayed below a quarter and keep their limits: the WebGL2 start at `scenes.spec.ts:426` (4.4 s of
+  60 s), the notices at `app.spec.ts:66` and `scenes.spec.ts:46` (under 1 s), the other waits for a
+  new grid and the polls of the environment (at most 3.5 s of 30 or 60 s), the default 5 s of
+  `expect` (at most 1.1 s), the other GPU tests (at most 14.4 s of 60 s), the hook of the other
+  agent shaders (3.3 s of 180 s), and on GitHub the connection of the test browser (under 6 s of
+  180 s) and the start of the preview server for the e2e tests (under 3 s of 60 s).
+
+- The verify job keeps its limit of 30 min (`.github/workflows/ci.yml`). A limit adds no time to a
+  wait that passes. On GitHub the verify jobs of PR 2, 3, 5 and 6 took 12.8 to 18.0 min. PR 6 on
+  PR 3 (`f099dd1`) took 12.9 min: its GPU project (419 tests) 281 s, Fig. 10 on WebGPU 92 s and its
+  e2e suite 7.1 min. The longer limits only let a slow run go on longer before a test fails. In the
+  slowest of these runs (18.0 min, of which Fig. 10 took 3.4 min), the job's limit ends a run whose
+  Fig. 10 takes more than about 15 min, before the test's own limit of 20 min. An e2e test that runs
+  into its limit now costs up to 8 min with its retry, against 4 min before: one such test fits in
+  that run, two do not.

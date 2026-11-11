@@ -28,5 +28,5 @@ export async function smallScene(patch: Partial<Settings> = {}) {
 
 export async function openSmallScene(page: Page) {
   await page.goto(await smallScene());
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 60_000 });
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
 }

@@ -267,7 +267,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     console.info('backend', backend.description);
     // The first simulation compiles the pipelines: here, under a long timeout, and not in the first test.
     (await backend.createSim(defaultSettings(), 16, 16, 1)).destroy();
-  }, 180_000);
+  }, 360_000);
   afterEach(() => {
     for (const s of live.splice(0)) s.destroy();
   });
@@ -826,7 +826,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       sim.run(2);
       await sim.finish();
       expect(walled(), 'after more walls').toEqual(all);
-    });
+    }, 120_000);
   });
 
   // The passes from the shipped shaders against the same passes from another version of agents.wgsl or agents.frag, on
@@ -1088,7 +1088,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const sim = await make({ layout: 'empty' }, w, h, 1);
       sim.paint(strokes);
       expect(unlike(await sim.readEnv(), ref)).toEqual([]);
-    });
+    }, 120_000);
 
     // One threshold in every shader that reads walls (isWall in common.wgsl and common.glsl): a wall byte of
     // 128 or more. Row 2 + k holds wall byte BYTES[k] in columns 11 to 20.
@@ -2163,7 +2163,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // tile stays because Metal runs it faster (docs/knowledge-base/webgpu-platform.md).
     it(
       'forms networks whose scale grows with the sensor offset (Jones 2010, Fig. 10)',
-      { timeout: 600_000 },
+      { timeout: 1_200_000 },
       async () => {
         const runs = [];
         for (const so of [3, 9, 15, 25]) runs.push(await grow(so));

@@ -246,7 +246,8 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   and 3.4 ms on the new grid. At 100,000 edits (83,420 kept) it took 2.5 to 3.5 ms in every case:
   more than the target of 2 ms per frame, but far less than the 16.7 ms of a frame at 60 Hz. There
   the whole sweep took 20.8 to 24.4 ms over 17 to 20 frames after a rebuild or with a kept
-  placement, and 49.7 and 54.4 ms over 45 and 50 frames on the new grid. The first erase after
+  placement, and 49.7 and 54.4 ms over 45 and 50 frames on the new grid. The owner keeps the
+  frames of 2.5 to 3.5 ms at 100,000 edits (decision of 2026-11-10). The first erase after
   130,000 food dabs, of radius 2,000 over all of them, took 3.9 ms in the pointer handler:
   `near()` and the candidate filter pass over the whole list before the first pause. Its sweep took
   53 ms over 30 frames, the two longest of 9.6 and 8.8 ms. With the largest eraser the pointer
