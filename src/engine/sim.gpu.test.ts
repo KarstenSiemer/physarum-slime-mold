@@ -974,6 +974,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         for (const sim of [walled, blind]) sim.run(steps);
         expect(await state(walled)).not.toEqual(await state(blind));
       },
+      // Up to 27.6 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
+      120_000,
     );
 
     // Sensors of 9, 30 and 64 cells and walls at every distance from the agents: the clearance skips only walks
@@ -1112,6 +1114,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         for (const more of [{ trailSaturation: 20 }, { coveredFood: true }])
           expect(await run({ ...ext, ...more }), JSON.stringify(more)).not.toEqual(expected);
       },
+      // Up to 62.8 s on SwiftShader in CI (#28): 300 s keeps it under a quarter (ADR 0010).
+      300_000,
     );
 
     const cellAtFor = (boundary: Boundary, w: number, h: number) => (x: number, y: number) => {
@@ -1128,61 +1132,66 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       ['attraction, closed box with a wall', 1, 'box', 0.05],
       ['chemorepulsion, periodic grid', -1, 'wrap', 0.1],
       ['attraction, dish', 1, 'dish', 0.2],
-    ] as const)('keep trail + scent equal to Jones’ one trail map (%s)', async (_, self, boundary, decay) => {
-      const [w, h] = [48, 40];
-      const strain = { ...defaultStrain(0), decay, food: self, attraction: [self, 0, 0, 0] };
-      const settings: Settings = {
-        ...defaultSettings(),
-        seed: 3,
-        model: 'jones',
-        collisions: true,
-        density: 0.15,
-        boundary,
-        foodStrength: 0.05,
-        // Past constrain(): packParams() must bind the scent to the strain's decay itself.
-        scentDecay: 0.1,
-        strains: [strain],
-      };
-      const cells = boundary === 'dish' ? Math.min(w, h) ** 2 : w * h;
-      const sim = await build(settings, w, h, Math.round(0.15 * cells));
-      sim.paint([
-        { kind: 'food', from: [10, 12], to: [30, 14], radius: 3 },
-        { kind: 'food', from: [1, 30], to: [1, 30], radius: 2 }, // across the seam of the periodic grid
-        { kind: 'wall', from: [24, 20], to: [24, 34], radius: 1 },
-      ]);
-      sim.reset();
-      const env = await sim.readEnv();
-      const cellAt = cellAtFor(boundary, w, h);
-      const open = (c: number) => c >= 0 && (env[c * 4] ?? 0) < 128;
-      const keep = 1 - decay;
-      let map = new Float64Array(w * h);
-      for (let k = 0; k < 40; k++) {
-        sim.run(1);
-        const counts = await sim.readCounts();
-        const src = map.map((v, c) =>
-          open(c) ? v + (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 : 0,
-        );
-        map = src.map((_, c) => {
-          const [x, y] = [c % w, Math.floor(c / w)];
-          if (!open(cellAt(x, y))) return 0;
-          let [sum, n] = [0, 0];
-          for (let dy = -1; dy <= 1; dy++)
-            for (let dx = -1; dx <= 1; dx++) {
-              const q = cellAt(x + dx, y + dy);
-              if (!open(q)) continue;
-              sum += src[q] ?? 0;
-              n++;
-            }
-          return (keep * sum) / n;
-        });
-      }
-      const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
-      const sum = Float32Array.from({ length: w * h }, (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0));
-      expect(maxRelError(sum, map)).toBeLessThan(1e-5);
-      // Food and agents both count: the map without the deposits or without the food is far off.
-      expect(Math.max(...Array.from(scent))).toBeGreaterThan(1);
-      expect(Math.max(...Array.from(trail))).toBeGreaterThan(1);
-    });
+    ] as const)(
+      'keep trail + scent equal to Jones’ one trail map (%s)',
+      async (_, self, boundary, decay) => {
+        const [w, h] = [48, 40];
+        const strain = { ...defaultStrain(0), decay, food: self, attraction: [self, 0, 0, 0] };
+        const settings: Settings = {
+          ...defaultSettings(),
+          seed: 3,
+          model: 'jones',
+          collisions: true,
+          density: 0.15,
+          boundary,
+          foodStrength: 0.05,
+          // Past constrain(): packParams() must bind the scent to the strain's decay itself.
+          scentDecay: 0.1,
+          strains: [strain],
+        };
+        const cells = boundary === 'dish' ? Math.min(w, h) ** 2 : w * h;
+        const sim = await build(settings, w, h, Math.round(0.15 * cells));
+        sim.paint([
+          { kind: 'food', from: [10, 12], to: [30, 14], radius: 3 },
+          { kind: 'food', from: [1, 30], to: [1, 30], radius: 2 }, // across the seam of the periodic grid
+          { kind: 'wall', from: [24, 20], to: [24, 34], radius: 1 },
+        ]);
+        sim.reset();
+        const env = await sim.readEnv();
+        const cellAt = cellAtFor(boundary, w, h);
+        const open = (c: number) => c >= 0 && (env[c * 4] ?? 0) < 128;
+        const keep = 1 - decay;
+        let map = new Float64Array(w * h);
+        for (let k = 0; k < 40; k++) {
+          sim.run(1);
+          const counts = await sim.readCounts();
+          const src = map.map((v, c) =>
+            open(c) ? v + (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 : 0,
+          );
+          map = src.map((_, c) => {
+            const [x, y] = [c % w, Math.floor(c / w)];
+            if (!open(cellAt(x, y))) return 0;
+            let [sum, n] = [0, 0];
+            for (let dy = -1; dy <= 1; dy++)
+              for (let dx = -1; dx <= 1; dx++) {
+                const q = cellAt(x + dx, y + dy);
+                if (!open(q)) continue;
+                sum += src[q] ?? 0;
+                n++;
+              }
+            return (keep * sum) / n;
+          });
+        }
+        const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
+        const sum = Float32Array.from({ length: w * h }, (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0));
+        expect(maxRelError(sum, map)).toBeLessThan(1e-5);
+        // Food and agents both count: the map without the deposits or without the food is far off.
+        expect(Math.max(...Array.from(scent))).toBeGreaterThan(1);
+        expect(Math.max(...Array.from(trail))).toBeGreaterThan(1);
+      },
+      // Up to 20.4 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
+      120_000,
+    );
 
     // Jones does not say what a sensor reads behind a wall (ADR 0020): only the extended model's sensors check the
     // cells on the way for walls, and the Jones model reads the sensor's cell (ADR 0022). Without walls both agree.
@@ -1337,7 +1346,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const scent = await run({ model: 'extended', scentDecay: d });
         for (let c = 0; c < w * h; c++) expect(Math.abs((scent[c * 2] ?? 0) / expected - 1), `${d}`).toBeLessThan(1e-4);
       }
-    });
+    }, 120_000); // Up to 25.5 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
 
     // Agents near and on food: a food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it
     // holds an alive agent after the step's moves (Adamatzky and Jones 2010, ADR 0022). With and without the rule of
@@ -2894,7 +2903,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const again = (await inoculation(false)).sim;
       expect(await again.readAgents()).toEqual(await sim.readAgents());
       expect(Array.from(await again.readTrail())).toEqual(Array.from(await sim.readTrail()));
-    });
+    }, 120_000); // Up to 24.0 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
 
     // Agents that never leave their cell (step 0), half of them dead, and a brush across the wrap seam. Before,
     // the tool also moved living agents of its strain from anywhere into the brush.
