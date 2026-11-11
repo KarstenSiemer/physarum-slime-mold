@@ -754,8 +754,8 @@ fn openCells(p: vec2f, cells: array<u32, 9>) -> vec4f {
 }
 
 // The view over colour c: the glow of the food scent, its line at the mark, then the glow of the repellent over them.
-// Zoomed in near walls the lookup leaves out their cells (`near`, `cells`: as in scene()); zoomed out to 2 cells per
-// pixel or more it reads the coarse map. The repellent shows only where the model reads it: the extended model.
+// Up to 2 cells per pixel it reads the 4 cells around p and, near walls, leaves out theirs (`near`, `cells`: as in
+// scene()); zoomed out to 2 cells per pixel or more it reads the coarse map, whose texels leave them out. The repellent shows only where the model reads it: the extended model.
 fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
   let level = u32(V.scentFx.x);
   var s: Scent;
@@ -765,7 +765,7 @@ fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
     // In a box, within half a cell of the edge, the scent of the outer cells' centres goes on with their slope.
     let q = select(p, clamp(p, vec2f(0.5), vec2f(size()) - 0.5), V.boundary == 1u);
     var open = vec4f(1.0);
-    if (ENV && near && V.scale <= 1.0) { open = openCells(q, cells); }
+    if (ENV && near) { open = openCells(q, cells); }
     s = scentFrom(scentBilinear(q, open), p - q);
   }
   let paperStyle = V.style == 2u;

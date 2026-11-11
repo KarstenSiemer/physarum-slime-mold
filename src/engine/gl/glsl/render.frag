@@ -552,7 +552,7 @@ vec3 scene(vec2 p, vec2 s) {
     vec2 q = V.boundary == 1u ? clamp(p, vec2(0.5), vec2(gridSize()) - 0.5) : p;
     vec4 open = vec4(1.0);
 #if ENV
-    if (near && V.scale <= 1.0) open = openCells(q, cells);
+    if (near) open = openCells(q, cells);
 #endif
     sc = scentFrom(scentBilinear(q, open), p - q);
   }
