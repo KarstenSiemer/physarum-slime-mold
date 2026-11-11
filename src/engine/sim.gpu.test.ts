@@ -3189,8 +3189,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         }
         expect(born).toBeGreaterThan(20);
       },
-      150_000,
-    ); // up to 2.3 s on Metal (WebGPU writes back 700 agents a step); see ADR 0010.
+    ); // At most 0.2 s on SwiftShader on an M3 Pro, after the hook's builds: the default 60 s (ADR 0010).
 
     // Decision 9 of ADR 0025: when dead agents run out, the births that get one spread over the grid. Checked on the
     // children themselves, not with the CPU copy of place(): 40 dead agents for a few hundred births all over a grid.
@@ -3268,7 +3267,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
       expect(most).toBe(1);
       expect(peak).toBeGreaterThan(300);
-    }, 150_000); // 1.0 s on Metal (WebGL2), so 10 to 31 s on SwiftShader: under a quarter of 150 s (ADR 0010).
+    }, 150_000); // Up to 4.6 s on SwiftShader on an M3 Pro under load (WebGL2): see ADR 0010.
 
     // Growth every 3 steps and shrinkage every 5: agents come to life only on steps 0, 3, 6, … and die only on
     // steps 0, 5, 10, … (step numbers from 0).
