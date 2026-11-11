@@ -36,6 +36,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   private heights: Target | undefined;
   /** The scent view's coarse map (scent-down.frag): half the grid's sides, rounded up. */
   private coarse: Target | undefined;
+  /** What the coarse map holds: it is filled again only when the scent or the shape changed, or the level or arena. */
+  private coarseHolds: { sim: GlSim; step: number; revision: number; level: number; boundary: string } | undefined;
   private frame = 0;
   private gain = 0;
   private black = 0;
@@ -166,6 +168,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   }
 
   forget() {
+    this.coarseHolds = undefined;
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
@@ -278,7 +281,15 @@ export class WebGl2Backend implements Backend<GlSim> {
     const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
     const level = scentLevel(view.scale);
     const coarse = scent ? this.coarseFor(sim) : undefined;
-    if (scent && coarse && level > 0) {
+    const holds = this.coarseHolds;
+    const fresh =
+      holds?.sim === sim &&
+      holds.step === sim.step &&
+      holds.revision === sim.revision &&
+      holds.level === level &&
+      holds.boundary === s.boundary;
+    if (scent && coarse && level > 0 && !fresh) {
+      this.coarseHolds = { sim, step: sim.step, revision: sim.revision, level, boundary: s.boundary };
       gl.bindFramebuffer(gl.FRAMEBUFFER, coarse.fbo);
       gl.viewport(0, 0, scentLevelSize(sim.width, level), scentLevelSize(sim.height, level));
       gl.useProgram(scent.down.program);
@@ -305,6 +316,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     if (this.coarse?.width !== w || this.coarse.height !== h) {
       if (this.coarse) destroyTarget(this.gl, this.coarse);
       this.coarse = target(this.gl, w, h, this.gl.RGBA32F);
+      this.coarseHolds = undefined;
     }
     return this.coarse;
   }

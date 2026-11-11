@@ -4494,6 +4494,50 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(near).toBeGreaterThan(100); // the line runs beside the wall
     });
 
+    // A paused simulation keeps its coarse map: the first version filled it in every frame, reading every cell (review
+    // of 2026-11-11: 4 ms per frame at 4096 × 2560). A step, a stroke or a new zoom level fill it again, so the view
+    // never shows an old scent.
+    it('fills the coarse map again only when the scent, the shape or the level changed', async () => {
+      const settings = { ...extended({ style: 'paper', layout: 'empty', strains: [defaultStrain(0)] }), bloom: 0 };
+      const sim = await make(settings, W, H, 1);
+      sim.paint([{ kind: 'food', from: [20, 24], to: [20, 24], radius: 3 }]);
+      sim.run(100);
+      await backend.settle(sim);
+      const view: View = { center: [32.0137, 24.0291], scale: 3 };
+      const on = { ...settings, showScent: true };
+      await backend.capture(sim, on, view, 32, 24); // builds the view and fills the map
+      const gl = (backend as unknown as { gl?: WebGL2RenderingContext }).gl;
+      if (kind === 'webgl2' && !gl) throw new Error('no WebGL2 context');
+      const passes = gl ? vi.spyOn(gl, 'drawArrays') : vi.spyOn(GPUCommandEncoder.prototype, 'beginRenderPass');
+      onTestFinished(() => {
+        vi.restoreAllMocks();
+      });
+      const count = async (v: View = view) => {
+        const before = passes.mock.calls.length;
+        await backend.capture(sim, on, v, 32, 24);
+        return passes.mock.calls.length - before;
+      };
+      const kept = await count();
+      expect(await count()).toBe(kept);
+      sim.run(1);
+      expect(await count()).toBe(kept + 1);
+      expect(await count()).toBe(kept);
+      sim.paint([{ kind: 'food', from: [44, 24], to: [44, 24], radius: 3 }]);
+      expect(await count()).toBe(kept + 1);
+      expect(await count({ ...view, scale: 6 })).toBe(kept + 1);
+      expect(await count({ ...view, scale: 6 })).toBe(kept);
+      vi.restoreAllMocks();
+      // Steps and a stroke while the map was kept: the view shows the scent of now.
+      sim.run(20);
+      sim.paint([{ kind: 'food', from: [52, 12], to: [52, 12], radius: 2 }]);
+      const foods = [
+        { at: [20, 24] as [number, number], r: 3 },
+        { at: [44, 24] as [number, number], r: 3 },
+        { at: [52, 12] as [number, number], r: 2 },
+      ];
+      for (const scale of [3, 6]) expect((await follows(sim, settings, { ...view, scale }, foods)).failed).toEqual([]);
+    });
+
     // The scent view's mark needs the strand in every style. WebGPU measured auto levels only in the styles that use
     // them, so in the agents style the strand stayed 0 after a reset: no line and no mark (review of 2026-11-11). The
     // reference is the 99th percentile of the summed trail, read from the trail, not from the backend's levels.

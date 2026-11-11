@@ -130,6 +130,11 @@ export class Renderer {
   private readonly downLayout: GPUBindGroupLayout;
   /** The scent view's coarse map (scentDown), made at the first frame that draws the view. */
   private coarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  /**
+   * What the coarse map holds: it is filled again only when the scent or the shape changed, or the level or the arena;
+   * a paused simulation keeps it (review of 2026-11-11: it read every cell in every frame).
+   */
+  private coarseHolds: { sim: Simulation; step: number; revision: number; level: number; boundary: number } | undefined;
   /** Bound in its place until then. */
   private readonly noCoarse: GPUTexture;
   private readonly module: GPUShaderModule;
@@ -335,7 +340,16 @@ export class Renderer {
     }
     // Zoomed out, the scent view reads a coarser map of the scent, filled here (scentDown in render.wgsl).
     const level = scentLevel(f.view.scale);
-    if (view && coarse && level > 0) {
+    const boundary = BOUNDARIES.indexOf(f.settings.boundary);
+    const holds = this.coarseHolds;
+    const fresh =
+      holds?.sim === sim &&
+      holds.step === sim.step &&
+      holds.revision === sim.revision &&
+      holds.level === level &&
+      holds.boundary === boundary;
+    if (view && coarse && level > 0 && !fresh) {
+      this.coarseHolds = { sim, step: sim.step, revision: sim.revision, level, boundary };
       const down = enc.beginRenderPass({ colorAttachments: [{ view: coarse, loadOp: 'clear', storeOp: 'store' }] });
       down.setViewport(0, 0, scentLevelSize(trail.width, level), scentLevelSize(trail.height, level), 0, 1);
       down.setPipeline(view.down);
@@ -393,6 +407,7 @@ export class Renderer {
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
       });
       this.coarse = { texture, view: texture.createView() };
+      this.coarseHolds = undefined;
       this.groups.clear();
     }
     return this.coarse.view;
@@ -417,6 +432,7 @@ export class Renderer {
   /** Bind groups hold textures of one Simulation; drop them when it is replaced. */
   forget() {
     this.groups.clear();
+    this.coarseHolds = undefined;
   }
 
   destroy() {
