@@ -49,6 +49,13 @@ floats (10-bit mantissa, relative step ≈ 0.001), so slow decay stops working.
   collision claim key (ADR 0008) is a hash of `(seed, step, agent id)`. Nothing in the model
   reads the buffer slot.
 - Agent dispatch is 2-D when it needs more than 65 535 workgroups.
+- Capacity (2026-11-11, ADR 0025): the agent buffers hold the capacity, the most agents alive and dead. The first agents
+  of each strain's ids, as many as Agents per cell gives, start alive (`P.startEnd`); the others start dead. The dead
+  agents are the free list: Inoculate (ADR 0023) and growth bring them to life, by id, never by slot. Without a
+  capacity above the start population the buffers hold the start population, as before.
+- Growth and shrinkage (2026-11-11, ADR 0025) keep their own buffers while growth is on: the window counts, the claims
+  and the births per cell, a flag per agent id for the dead agents, and two pyramids of sums over the births and the
+  dead flags. A birth matches the dead agent of its rank, so ids stay a permutation and no agent is lost or doubled.
 
 ## Consequences
 

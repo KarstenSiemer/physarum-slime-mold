@@ -1,10 +1,21 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, trailSaturation, type AgentTool } from './pack';
+import {
+  CLEAR_TILE,
+  growthOn,
+  growthTests,
+  packParams,
+  PARAMS_BYTES,
+  pyramidLevels,
+  startRounds,
+  trailSaturation,
+  type AgentTool,
+} from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
+import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
@@ -29,6 +40,19 @@ const SORT_TILE = 8;
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
 const flip = (b: Bit): Bit => (b === 0 ? 1 : 0);
+
+/** The buffers of growth and shrinkage (growth.wgsl), allocated while growth is on. */
+interface GrowthBuffers {
+  rows: GPUBuffer;
+  windows: GPUBuffer;
+  claims: GPUBuffer;
+  births: GPUBuffer;
+  cellSums: GPUBuffer;
+  dead: GPUBuffer;
+  deadSums: GPUBuffer;
+  /** One uniform per pyramid level that a build pass writes (growth.wgsl `level`). */
+  levels: GPUBuffer[];
+}
 /** All simulation state on the GPU for one grid size and agent count (WebGPU). */
 export class Simulation implements Sim {
   step = 0;
@@ -72,6 +96,8 @@ export class Simulation implements Sim {
   private shapeHeld: Boundary | undefined;
   readonly stats: GPUBuffer;
   private collision?: { occ: Pair<GPUBuffer>; claims: GPUBuffer };
+  /** The buffers of growth and shrinkage, while growth is on (ADR 0025). */
+  private growth?: GrowthBuffers | undefined;
   private paintGroup?: GPUBindGroup;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.wgsl
@@ -92,6 +118,8 @@ export class Simulation implements Sim {
     readonly width: number,
     readonly height: number,
     readonly agents: number,
+    /** Agents alive at the start: fewer than `agents` when the capacity holds more (ADR 0025). */
+    readonly start: number,
   ) {
     this.settings = settings;
     this.shapeHeld = settings.boundary;
@@ -139,8 +167,9 @@ export class Simulation implements Sim {
   }
 
   /**
-   * `agentsSource` and `diffuseSource` replace shaders/agents.wgsl and shaders/diffuse.wgsl, for tests that compare
-   * the passes with another version of them.
+   * `agentsSource`, `diffuseSource` and `initSource` replace shaders/agents.wgsl, shaders/diffuse.wgsl and
+   * shaders/init.wgsl, for tests that compare the passes with another version of them. `start`: the agents alive at the
+   * start (ADR 0025).
    */
   static async create(
     device: GPUDevice,
@@ -150,9 +179,11 @@ export class Simulation implements Sim {
     agents: number,
     agentsSource = agentsWgsl,
     diffuseSource = diffuseWgsl,
+    start = agents,
+    initSource = initWgsl,
   ) {
-    const kernels = await Kernels.get(device, agentsSource, diffuseSource);
-    const sim = new Simulation(device, kernels, settings, width, height, agents);
+    const kernels = await Kernels.get(device, agentsSource, diffuseSource, initSource);
+    const sim = new Simulation(device, kernels, settings, width, height, agents, Math.min(start, agents));
     sim.reset();
     return sim;
   }
@@ -204,6 +235,13 @@ export class Simulation implements Sim {
     const switchedOn = settings.collisions && !this.settings.collisions;
     this.settings = settings;
     if (switchedOn) this.rebuildOccupancy();
+    // The memory fit counts the buffers of growth only while it is on (sizing.ts).
+    if (!growthOn(settings) && this.growth) {
+      const g = this.growth;
+      for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
+      this.growth = undefined;
+      for (const key of [...this.bindCache.keys()]) if (key.startsWith('grow')) this.bindCache.delete(key);
+    }
   }
 
   reset() {
@@ -221,10 +259,17 @@ export class Simulation implements Sim {
     }
     enc.clearBuffer(this.counts);
     const pass = enc.beginComputePass();
-    pass.setPipeline(this.kernels.init);
+    const init = this.starts().init;
+    pass.setPipeline(init);
     pass.setBindGroup(
       0,
-      this.bind(`init${this.agentParity}`, this.kernels.init, [this.params, this.agentBuffer, null, null, this.env]),
+      this.bind(`init${this.agentParity}${this.start < this.agents ? 'c' : ''}`, init, [
+        this.params,
+        this.agentBuffer,
+        null,
+        null,
+        this.env,
+      ]),
     );
     pass.dispatchWorkgroups(...this.groups);
     pass.end();
@@ -267,10 +312,11 @@ export class Simulation implements Sim {
     const col = this.ensureCollision();
     const q = flip(this.occParity);
     const occ = col.occ[q];
-    const k = this.kernels;
+    const k = this.starts();
+    const c = this.start < this.agents ? 'c' : '';
     const resources = [this.params, this.agentBuffer, null, null, this.env, null, null, occ, col.claims];
-    const claim = this.bind(`claimStart${this.agentParity}${q}`, k.claimStart, resources);
-    const settle = this.bind(`settleStart${this.agentParity}${q}`, k.settleStart, resources);
+    const claim = this.bind(`claimStart${this.agentParity}${q}${c}`, k.claimStart, resources);
+    const settle = this.bind(`settleStart${this.agentParity}${q}${c}`, k.settleStart, resources);
     const rounds = startRounds(this.settings, this.walls);
     for (let round = 0; round < rounds; round++) {
       this.writeParams(undefined, round);
@@ -287,6 +333,14 @@ export class Simulation implements Sim {
       pass.end();
       this.device.queue.submit([enc.finish()]);
     }
+  }
+
+  /**
+   * The start passes: with a capacity above the start population the ones that start only the first agents of each
+   * strain (init.wgsl CAPACITY), else the ones of the code before (ADR 0025).
+   */
+  private starts(): Starts {
+    return this.start < this.agents ? this.kernels.capacity() : this.kernels;
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -528,6 +582,9 @@ export class Simulation implements Sim {
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
+    const g = this.growth;
+    if (g)
+      for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
     this.collision?.occ.forEach((b) => {
       b.destroy();
     });
@@ -545,6 +602,7 @@ export class Simulation implements Sim {
       tool,
       walls: this.walls,
       round,
+      start: this.start,
     };
     this.device.queue.writeBuffer(this.params, 0, packParams(s, rt, this.paramData));
   }
@@ -565,7 +623,14 @@ export class Simulation implements Sim {
     const occ = this.ensureCollision().occ[q];
     if (col) enc.clearBuffer(col.claims);
     if (col || covered) enc.clearBuffer(this.ensureCollision().occ[flip(q)]);
-    const pass = enc.beginComputePass();
+    // Growth and shrinkage only with the rule, on the steps that test them (ADR 0025).
+    const tests = growthTests(this.settings, this.step);
+    const growth = col && (tests.grow || tests.shrink) ? this.ensureGrowth() : undefined;
+    if (growth && tests.grow) {
+      enc.clearBuffer(growth.claims);
+      enc.clearBuffer(growth.births);
+    }
+    let pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
     const [trail, scent] = [this.trailViews[p], this.scentViews[p]];
@@ -648,6 +713,7 @@ export class Simulation implements Sim {
       );
       pass.dispatchWorkgroups(...this.groups);
       this.occParity = flip(q);
+      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow);
     }
     let d = p;
     for (const v of diffusePlan(this.settings.diffusion)) {
@@ -658,6 +724,121 @@ export class Simulation implements Sim {
     }
     pass.end();
     this.parity = d;
+  }
+
+  /**
+   * Growth and shrinkage after the moves of a test step (growth.wgsl, ADR 0025), in `pass`, which settle ended. The
+   * occupancy after the moves (current, from settle) gives the window counts and the empty cells. The births need
+   * the alive count and the occupancy anew: the pass ends for their clears, and a new one returns, for the diffusion.
+   * The occupancy at the start of the step holds the one after this step then.
+   */
+  private encodeGrowth(enc: GPUCommandEncoder, pass: GPUComputePassEncoder, g: GrowthBuffers, grow: boolean) {
+    const k = this.kernels.growth();
+    const a = this.agentParity;
+    const moved = this.occParity;
+    const after = this.ensureCollision().occ[moved];
+    const next = this.ensureCollision().occ[flip(moved)];
+    const cellGroups = this.cellGroups;
+    const resources = [
+      this.params,
+      this.agentBuffer,
+      this.env,
+      after,
+      this.counts,
+      g.rows,
+      g.windows,
+      g.claims,
+      g.births,
+      g.cellSums,
+      g.dead,
+      g.deadSums,
+      next,
+      this.stats,
+    ];
+    // An 'auto' layout holds only the bindings that its entry point uses (GROWTH_BINDINGS).
+    const used = (name: keyof GrowthKernels, extra: GPUBuffer | null = null) =>
+      [...resources, extra].map((r, i) => (GROWTH_BINDINGS[name].includes(i) ? r : null));
+    const run = (name: keyof GrowthKernels, groups: [number, number]) => {
+      const pipeline = k[name];
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, this.bind(`grow-${name}${a}${moved}`, pipeline, used(name)));
+      pass.dispatchWorkgroups(...groups);
+    };
+    run('rowSums', cellGroups);
+    run('windowSums', cellGroups);
+    run('test', this.groups);
+    if (grow) {
+      run('win', this.groups);
+      const build = (name: 'buildCells' | 'buildDead', n: number) => {
+        const pipeline = k[name];
+        pass.setPipeline(pipeline);
+        pyramidLevels(n).forEach((size, i) => {
+          const level = g.levels[i + 1];
+          if (!level) throw new Error(`No uniform for pyramid level ${i + 1}`);
+          pass.setBindGroup(0, this.bind(`grow-${name}${i + 1}`, pipeline, used(name, level)));
+          pass.dispatchWorkgroups(...this.groupsFor(size));
+        });
+      };
+      build('buildCells', this.width * this.height);
+      build('buildDead', this.agents);
+    }
+    pass.end();
+    enc.clearBuffer(this.stats);
+    enc.clearBuffer(next);
+    const after2 = enc.beginComputePass();
+    after2.setPipeline(k.birth);
+    after2.setBindGroup(0, this.bind(`grow-birth${a}${moved}`, k.birth, used('birth')));
+    after2.dispatchWorkgroups(...this.groups);
+    this.occParity = flip(moved);
+    return after2;
+  }
+
+  /** Workgroups of 256 for `n` invocations, in two dimensions beyond the limit of one (as `groups`). */
+  private groupsFor(n: number): [number, number] {
+    const groups = Math.max(1, Math.ceil(n / GROUP));
+    const x = Math.min(groups, this.device.limits.maxComputeWorkgroupsPerDimension);
+    return [x, Math.ceil(groups / x)];
+  }
+
+  /** Workgroups of 256 for one invocation per cell (growth.wgsl box sums). */
+  private get cellGroups(): [number, number] {
+    return this.groupsFor(this.width * this.height);
+  }
+
+  /** The buffers of growth and shrinkage, at their first use while growth is on (ADR 0025). */
+  private ensureGrowth(): GrowthBuffers {
+    if (!this.growth) {
+      const { STORAGE, COPY_SRC, COPY_DST, UNIFORM } = GPUBufferUsage;
+      const cells = this.width * this.height;
+      const make = (size: number, usage = STORAGE | COPY_SRC | COPY_DST) =>
+        this.device.createBuffer({ size: Math.max(16, size), usage });
+      const sum = (n: number) => pyramidLevels(n).reduce((t, m) => t + m, 0);
+      const top = Math.max(pyramidLevels(cells).length, pyramidLevels(this.agents).length);
+      const levels = Array.from({ length: top + 1 }, (_, k) => {
+        const b = make(16, UNIFORM | COPY_DST);
+        this.device.queue.writeBuffer(b, 0, new Uint32Array([k, 0, 0, 0]));
+        return b;
+      });
+      this.growth = {
+        rows: make(cells * 8),
+        windows: make(cells * 8),
+        claims: make(cells * 4),
+        births: make(cells * 8),
+        cellSums: make(sum(cells) * 16),
+        dead: make(this.agents * 4),
+        deadSums: make(sum(this.agents) * 4),
+        levels,
+      };
+    }
+    return this.growth;
+  }
+
+  /**
+   * For tests: the agents in the growth and the shrinkage window around each cell (2 per cell), as the last step
+   * that tested growth or shrinkage counted them after its moves. Empty before such a step.
+   */
+  async readWindows(): Promise<Uint32Array> {
+    return this.growth ? new Uint32Array(await readBuffer(this.device, this.growth.windows)) : new Uint32Array(0);
   }
 
   /**
@@ -743,6 +924,35 @@ function entry(binding: number, r: GPUBuffer | GPUTextureView): GPUBindGroupEntr
   return { binding, resource: r instanceof GPUBuffer ? { buffer: r } : r };
 }
 
+/** The start passes (init.wgsl): the code before, or the ones for a capacity above the start (CAPACITY). */
+interface Starts {
+  init: GPUComputePipeline;
+  claimStart: GPUComputePipeline;
+  settleStart: GPUComputePipeline;
+}
+
+/** The bindings that each pass of growth.wgsl uses: the 'auto' layout of its pipeline holds only these. */
+export const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
+  rowSums: [0, 3, 5],
+  windowSums: [0, 5, 6],
+  test: [0, 1, 2, 3, 4, 6, 7],
+  win: [0, 1, 2, 3, 4, 6, 7, 8, 10],
+  buildCells: [0, 8, 9, 14],
+  buildDead: [0, 10, 11, 14],
+  birth: [0, 1, 8, 9, 10, 11, 12, 13],
+};
+
+/** The passes of growth and shrinkage (growth.wgsl, ADR 0025). */
+interface GrowthKernels {
+  rowSums: GPUComputePipeline;
+  windowSums: GPUComputePipeline;
+  test: GPUComputePipeline;
+  win: GPUComputePipeline;
+  buildCells: GPUComputePipeline;
+  buildDead: GPUComputePipeline;
+  birth: GPUComputePipeline;
+}
+
 /** `advance` (move) and `claim`, the agent passes that steer. */
 interface Steering {
   move: GPUComputePipeline;
@@ -765,6 +975,8 @@ class Kernels {
   private readonly saturatedPipelines: [Steering?, Steering?] = [];
   /** The first diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
+  private capacityPipelines?: Starts;
+  private growthPipelines?: GrowthKernels;
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -788,7 +1000,47 @@ class Kernels {
     private readonly agents: GPUShaderModule,
     private readonly walls: GPUShaderModule,
     private readonly diffuseModule: GPUShaderModule,
+    private readonly startModule: GPUShaderModule,
   ) {}
+
+  /**
+   * The start passes for a capacity above the start population (init.wgsl CAPACITY, ADR 0025), built at their first
+   * use as walled() builds its passes: no scene of this app starts with more capacity than agents.
+   */
+  capacity(): Starts {
+    if (!this.capacityPipelines) {
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({
+          layout: 'auto',
+          compute: { module: this.startModule, entryPoint, constants: { CAPACITY: 1 } },
+        });
+      this.capacityPipelines = {
+        init: pipeline('init'),
+        claimStart: pipeline('claimStart'),
+        settleStart: pipeline('settleStart'),
+      };
+    }
+    return this.capacityPipelines;
+  }
+
+  /** The passes of growth and shrinkage (growth.wgsl), built at their first use: every scene has growth off. */
+  growth(): GrowthKernels {
+    if (!this.growthPipelines) {
+      const module = this.device.createShaderModule({ code: common + growthWgsl });
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+      this.growthPipelines = {
+        rowSums: pipeline('rowSums'),
+        windowSums: pipeline('windowSums'),
+        test: pipeline('test'),
+        win: pipeline('win'),
+        buildCells: pipeline('buildCells'),
+        buildDead: pipeline('buildDead'),
+        birth: pipeline('birth'),
+      };
+    }
+    return this.growthPipelines;
+  }
 
   /**
    * The pipelines for walls, built at their first use: a simulation without walls never needs them, and built at
@@ -843,16 +1095,16 @@ class Kernels {
     return p;
   }
 
-  static get(device: GPUDevice, agentsSource: string, diffuseSource: string): Promise<Kernels> {
+  static get(device: GPUDevice, agentsSource: string, diffuseSource: string, initSource: string): Promise<Kernels> {
     let built = Kernels.cache.get(device);
     if (!built) {
       built = new Map();
       Kernels.cache.set(device, built);
     }
-    const key = `${agentsSource}\0${diffuseSource}`;
+    const key = `${agentsSource}\0${diffuseSource}\0${initSource}`;
     let k = built.get(key);
     if (!k) {
-      k = Kernels.build(device, agentsSource, diffuseSource);
+      k = Kernels.build(device, agentsSource, diffuseSource, initSource);
       built.set(key, k);
     }
     return k;
@@ -864,7 +1116,12 @@ class Kernels {
     return p;
   }
 
-  private static async build(device: GPUDevice, agentsSource: string, diffuseSource: string): Promise<Kernels> {
+  private static async build(
+    device: GPUDevice,
+    agentsSource: string,
+    diffuseSource: string,
+    initSource: string,
+  ): Promise<Kernels> {
     const module = (code: string) => device.createShaderModule({ code: common + code });
     const agents = module(agentsSource);
     const compute = (m: GPUShaderModule, entryPoint: string, constants: Record<string, number> = {}) =>
@@ -913,7 +1170,7 @@ class Kernels {
       ),
     );
     const sort = module(sortWgsl);
-    const start = module(initWgsl);
+    const start = module(initSource);
     const brush = module(paintWgsl);
     const paintPipeline = (entryPoint: string, constants?: Record<string, number>) =>
       device.createComputePipelineAsync({
@@ -985,6 +1242,7 @@ class Kernels {
       agents,
       module(wallsWgsl),
       diffuseModule,
+      start,
     );
   }
 }

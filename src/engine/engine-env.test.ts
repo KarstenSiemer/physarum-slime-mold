@@ -10,6 +10,7 @@ import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
 import { OutOfMemoryError } from './gpu';
+import { BYTES_PER_AGENT, memoryBudget } from './sizing';
 import { compact, Placement, sweep } from './sweep';
 import { paintReference } from './paint-reference';
 import type { Backend, Stroke } from './types';
@@ -1276,6 +1277,62 @@ describe('lattices', () => {
     told.length = 0;
     await engine.apply({ ...s, lattice: [100, 100] });
     expect([engine.sim.width, engine.sim.height, told]).toEqual([100, 100, []]);
+  });
+
+  // ADR 0025, decisions 12 and 16: while growth is on, the fit counts 34 B more per cell and 6 B more per agent, and
+  // it counts every agent that the simulation holds (the capacity), also for a lattice (ADR 0026).
+  it('count the bytes of growth and the capacity when they decide whether a lattice fits', async () => {
+    const s = jones('shrinking').settings(); // 300 × 300 cells, a dish with 45,000 agents (0.5 · 300²)
+    const growth = { ...s, growth: true };
+    const cells = 300 * 300;
+    const budget = memoryBudget(); // Node has no device memory hint
+    // The most bytes per cell of the backend at which 300 × 300 cells still fit.
+    const most = (agents: number, perAgent: number, extra: number) =>
+      Math.floor((budget - agents * perAgent) / cells) - extra;
+    for (const [what, settings, bytesPerCell, rule] of [
+      ['growth off', s, most(45_000, BYTES_PER_AGENT, 0), true],
+      ['growth on', growth, most(45_000, BYTES_PER_AGENT + 6, 34), true],
+      ['growth on, Capacity 1', { ...growth, capacity: 1 }, most(cells, BYTES_PER_AGENT + 6, 34), true],
+      // A backend without the rule (WebGL2 without float blending) runs Capacity 2 as 2 agents per cell, and no growth.
+      ['no rule here, Capacity 2', { ...growth, capacity: 2 }, most(2 * cells, BYTES_PER_AGENT, 0), false],
+    ] as const) {
+      for (const [more, holds] of [
+        [0, true],
+        [1, false],
+      ] as const) {
+        const backend = new CpuBackend();
+        backend.bytesPerCell = bytesPerCell + more;
+        if (!rule) Object.defineProperty(backend, 'supportsCollisions', { value: false });
+        const told: string[] = [];
+        const engine = await Engine.create(canvas(1280, 720), settings, (m) => told.push(m), backend);
+        const at = `${what}, ${bytesPerCell + more} B per cell`;
+        expect(engine.settings.lattice, at).toEqual(holds ? [300, 300] : null);
+        expect([engine.sim.width, engine.sim.height], at).toEqual(holds ? [300, 300] : [256, 144]);
+        expect(told.length, at).toBe(holds ? 0 : 1);
+      }
+    }
+    // Each case lies on its own boundary: without the 6 B per agent, with the start population in place of the
+    // capacity, or with the rule's capacity of 1 on a backend without the rule, the case's second grid would hold.
+    expect(most(cells, BYTES_PER_AGENT, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
+    expect(most(45_000, BYTES_PER_AGENT + 6, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
+    expect(most(cells, BYTES_PER_AGENT, 0)).toBeGreaterThan(most(2 * cells, BYTES_PER_AGENT, 0));
+  });
+
+  // ADR 0025, decision 12, and ADR 0026: a new capacity rebuilds the simulation, on the same lattice.
+  it('rebuild on the same lattice when the capacity that runs changes, and only then', async () => {
+    const engine = await Engine.create(canvas(1280, 720), jones('shrinking').settings(), undefined, new CpuBackend());
+    const first = engine.sim;
+    expect([first.width, first.height, first.agents]).toEqual([300, 300, 45_000]);
+    await engine.apply({ ...engine.settings, capacity: 0.3 }); // below Agents per cell 0.5: it holds 0.5 per cell
+    expect(engine.sim).toBe(first);
+    await engine.apply({ ...engine.settings, capacity: 1 });
+    expect(engine.sim).not.toBe(first);
+    expect([engine.settings.lattice, engine.sim.width, engine.sim.height, engine.sim.agents]).toEqual([
+      [300, 300],
+      300,
+      300,
+      90_000,
+    ]);
   });
 
   // ADR 0026: out of memory steps a lattice down to the largest grid shaped like the screen with fewer cells.

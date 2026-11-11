@@ -121,7 +121,8 @@ for (const [backend, query] of [
           },
           [x, y] as const,
         );
-      await expect.poll(() => food(cx, cy)).toBeGreaterThan(0);
+      // One read of the environment took 3.6 s on GitHub (PR #32): the default 5 s of expect left room for one read.
+      await expect.poll(() => food(cx, cy), { timeout: 60_000 }).toBeGreaterThan(0);
       // The free space beside the dish's lattice paints nothing.
       const [fx, fy] =
         viewport.width > viewport.height

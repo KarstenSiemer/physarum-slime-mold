@@ -4,11 +4,14 @@ import { defaultSettings, defaultStrain, emissionScale, strainSpec, type Setting
 import {
   AgentToolKind,
   CLEAR_TILE,
+  growthTests,
   inoculateRate,
   packParams,
   PARAM_SLOTS,
   PARAMS_BYTES,
+  pyramidLevels,
   START_ROUNDS,
+  startEnds,
   startRounds,
   STEP_OFFSET,
   stepChance,
@@ -32,7 +35,7 @@ describe('Params layout', () => {
     const body = /struct Params \{([\s\S]*?)\n\}/.exec(wgsl)?.[1] ?? '';
     const types = [...body.matchAll(/:\s*([\w<>, ]+?),\s*(?:\/\/|$)/gm)].map((m) => m[1]);
     expect(types.every((t) => /^vec4[uf]$|^array<vec4f, 4>$/.test(t ?? ''))).toBe(true);
-    expect(PARAMS_BYTES).toBe(21 * 16);
+    expect(PARAMS_BYTES).toBe(24 * 16);
   });
 
   it('packs grid, config and strain lanes at the right offsets', () => {
@@ -110,7 +113,7 @@ describe('model slot and sources', () => {
   const rt = { width: 8, height: 8, agents: 1, step: 0 };
   const floats = (s: Settings, tool?: AgentTool) => new Float32Array(packParams(s, { ...rt, tool }));
   const scent = (s: Settings) => [...floats(s).slice(15 * 4, 16 * 4)];
-  const model = (s: Settings) => [...floats(s).slice(20 * 4)];
+  const model = (s: Settings) => [...floats(s).slice(20 * 4, 21 * 4)];
   const jones = (patch: Partial<Settings> = {}): Settings => ({
     ...defaultSettings(),
     model: 'jones',
@@ -228,5 +231,68 @@ describe('wall walks and clearance', () => {
     expect(far).toBeLessThanOrEqual((search - 1) * CLEAR_TILE + 2);
     // A walk of a sensor 64 cells away spans up to 65 cells along an axis; it can skip only below the clearance.
     expect(far).toBeGreaterThan(Math.floor(strainSpec.sensorOffset.max) + 1);
+  });
+});
+
+describe('growth and shrinkage (ADR 0025)', () => {
+  const rt = { width: 8, height: 8, agents: 100, step: 0 };
+  const words = (s: Settings, start?: number) =>
+    new Uint32Array(packParams(s, start === undefined ? rt : { ...rt, start }));
+  const slotOf = (name: (typeof PARAM_SLOTS)[number]) => {
+    const i = PARAM_SLOTS.indexOf(name);
+    return (i > PARAM_SLOTS.indexOf('attraction') ? i + 3 : i) * 4;
+  };
+  const lanes = (s: Settings, name: (typeof PARAM_SLOTS)[number], start?: number) => [
+    ...words(s, start).slice(slotOf(name), slotOf(name) + 4),
+  ];
+
+  it('packs the tests only while growth is on with the rule: an interval of 0 turns a test off', () => {
+    const on = { ...defaultSettings(), collisions: true, growth: true };
+    expect(lanes(on, 'growth')).toEqual([3, 9, 1, 10]);
+    expect(lanes(on, 'shrinkage')).toEqual([3, 5, 0, 20]);
+    expect(lanes({ ...on, growth: false }, 'growth')).toEqual([0, 9, 1, 10]);
+    expect(lanes({ ...on, growth: false }, 'shrinkage')).toEqual([0, 5, 0, 20]);
+    expect(lanes({ ...on, collisions: false }, 'growth')[0]).toBe(0);
+    const tsp = { ...on, growthEvery: 5, shrinkEvery: 10, shrinkWindow: 9, shrinkMax: 80 };
+    expect(lanes(tsp, 'shrinkage')).toEqual([10, 9, 0, 80]);
+  });
+
+  it('tests on the steps whose number is a multiple of the interval, from step 0', () => {
+    const on = { ...defaultSettings(), collisions: true, growth: true, growthEvery: 3, shrinkEvery: 5 };
+    const steps = (k: 'grow' | 'shrink') =>
+      Array.from({ length: 16 }, (_, i) => i).filter((i) => growthTests(on, i)[k]);
+    expect(steps('grow')).toEqual([0, 3, 6, 9, 12, 15]);
+    expect(steps('shrink')).toEqual([0, 5, 10, 15]);
+    expect(growthTests({ ...on, growthEvery: 0 }, 0).grow).toBe(false);
+    expect(growthTests({ ...on, growth: false }, 0)).toEqual({ grow: false, shrink: false });
+    expect(growthTests({ ...on, collisions: false }, 0)).toEqual({ grow: false, shrink: false });
+  });
+
+  it('starts the first agents of each strain: at the full start the start ends are the strain ends', () => {
+    const strains = [defaultStrain(0, 3), { ...defaultStrain(1, 3), share: 0.5 }, defaultStrain(2, 3)];
+    for (const n of [1, 7, 100, 1001]) expect(startEnds(strains, n), `${n}`).toEqual(strainEnds(strains, n));
+    const s = { ...defaultSettings(), strains };
+    expect(lanes(s, 'startEnd')).toEqual(strainEnds(strains, 100));
+    // 100 agents: 40, 20 and 40 per strain; 30 alive at the start: 12, 6 and 12.
+    expect(strainEnds(strains, 100)).toEqual([40, 60, 100, 100]);
+    expect(startEnds(strains, 100, 30)).toEqual([12, 46, 72, 100]);
+    expect(lanes(s, 'startEnd', 30)).toEqual([12, 46, 72, 100]);
+    for (let n = 1; n < 60; n++)
+      for (let m = 0; m <= n; m++) {
+        const [ends, starts] = [strainEnds(strains, n), startEnds(strains, n, m)];
+        starts.forEach((e, i) => {
+          expect(e).toBeLessThanOrEqual(ends[i] ?? 0);
+          expect(e).toBeGreaterThanOrEqual(i > 0 ? (ends[i - 1] ?? 0) : 0);
+        });
+      }
+  });
+
+  it('builds pyramids of sums with a fan-in of 4 down to one node', () => {
+    expect(pyramidLevels(1)).toEqual([1]);
+    expect(pyramidLevels(4)).toEqual([1]);
+    expect(pyramidLevels(5)).toEqual([2, 1]);
+    expect(pyramidLevels(512 * 288)).toEqual([36864, 9216, 2304, 576, 144, 36, 9, 3, 1]);
+    // The largest grid has 13 levels with its cells: the arrays of 13 in growth.frag hold them.
+    expect(pyramidLevels(4096 * 4096).length + 1).toBe(13);
   });
 });

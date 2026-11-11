@@ -188,8 +188,8 @@
   let held: [number, number] | undefined;
   /** The notice that no dead agents are left came during this press of the inoculate tool. */
   let toldNoDead = false;
-  /** The notice has 36 words: 10 s to read them, not the usual 7 s. */
-  const NO_DEAD_NOTICE_MS = 10_000;
+  /** The notice has 47 words: 0.3 s per word to read them (ADR 0023, ADR 0025), not the usual 7 s. */
+  const NO_DEAD_NOTICE_MS = 14_100;
   let pinch = 0;
 
   function twoPointers(): [[number, number], [number, number]] {
@@ -280,8 +280,9 @@
             toldNoDead = true;
             const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);
             showNotice(
-              `All agents of strain ${letter} are alive. Inoculate uses only dead agents. To get dead agents, set ` +
-                'Shrinkage above 0, or select the start layout Empty. In that layout all agents are dead at the start.',
+              `All agents of strain ${letter} are alive. Inoculate uses only dead agents. To get dead agents, raise ` +
+                'Capacity in the section Growth (this restarts the scene), set Random shrinkage above 0, or select the ' +
+                'start layout Empty. In that layout all agents are dead at the start.',
               NO_DEAD_NOTICE_MS,
             );
           }

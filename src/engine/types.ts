@@ -59,6 +59,11 @@ export interface Sim {
   readScent(): Promise<Float32Array>;
   /** Agents that moved into each cell in the last step, 4 lanes per cell. */
   readCounts(): Promise<Float32Array>;
+  /**
+   * For tests: the agents in the growth and the shrinkage window around each cell (2 per cell), as the last step that
+   * tested growth or shrinkage counted them after its moves (ADR 0025). Empty before such a step.
+   */
+  readWindows(): Promise<Uint32Array>;
   /** Wall, food, light, unused per cell (0–255). */
   readEnv(): Promise<Uint8Array>;
   /**
@@ -103,7 +108,11 @@ export interface Backend<S extends Sim = Sim> {
   readonly supportsCollisions: boolean;
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;
-  createSim(settings: Settings, width: number, height: number, agents: number): Promise<S>;
+  /**
+   * A simulation of `agents` agents, alive and dead. `start`: how many the layout places at the start, the first ones
+   * of each strain (default all). Fewer when the capacity holds more agents than the start population (ADR 0025).
+   */
+  createSim(settings: Settings, width: number, height: number, agents: number, start?: number): Promise<S>;
   /** Draws a frame; `measure` lets auto levels sample the trail. */
   draw(sim: S, settings: Settings, view: View, measure: boolean): void;
   capture(sim: S, settings: Settings, view: View, width: number, height: number): Promise<ImageData>;
