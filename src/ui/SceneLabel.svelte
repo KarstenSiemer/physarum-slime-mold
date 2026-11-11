@@ -32,7 +32,6 @@
     padding: 4px 12px;
     border-radius: 999px;
     background: var(--glass);
-    backdrop-filter: blur(14px) saturate(140%);
     text-align: left;
   }
   /* The label sits on the canvas: a ring outside it would vanish on the light paper style, so it goes on its glass. */
