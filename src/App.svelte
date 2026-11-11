@@ -205,6 +205,8 @@
   let held: [number, number] | undefined;
   /** The notice that no dead agents are left came during this press of the inoculate tool. */
   let toldNoDead = false;
+  /** The notice has 36 words: 10 s to read them, not the usual 7 s. */
+  const NO_DEAD_NOTICE_MS = 10_000;
   let pinch = 0;
 
   function twoPointers(): [[number, number], [number, number]] {
@@ -293,7 +295,9 @@
             toldNoDead = true;
             const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);
             showNotice(
-              `All agents of strain ${letter} are alive. Inoculate places only dead agents. Agents die with Shrinkage, and the start layout Empty starts with no agents.`,
+              `All agents of strain ${letter} are alive. Inoculate uses only dead agents. To get dead agents, set ` +
+                'Shrinkage above 0, or select the start layout Empty. In that layout all agents are dead at the start.',
+              NO_DEAD_NOTICE_MS,
             );
           }
         }
