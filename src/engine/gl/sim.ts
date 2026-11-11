@@ -110,7 +110,7 @@ export class GlSim implements Sim {
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
    * (diffuse.frag COVERED). Allocated at its first use.
    */
-  private presence?: Target;
+  private presence: Target | undefined;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
@@ -205,6 +205,11 @@ export class GlSim implements Sim {
     const switchedOn = settings.collisions && !this.settings.collisions;
     this.settings = settings;
     if (switchedOn) this.rebuildOccupancy();
+    // The memory fit counts `presence` only while covered food is on (sizing.ts).
+    if (!settings.coveredFood && this.presence) {
+      destroyTarget(this.gl, this.presence);
+      this.presence = undefined;
+    }
   }
 
   reset() {

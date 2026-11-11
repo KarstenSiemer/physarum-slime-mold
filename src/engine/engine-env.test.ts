@@ -109,6 +109,25 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, square.sim().env)).toBe(0);
   });
 
+  // ADR 0022: WebGL2 without float blending needs 1 B more per cell while covered food is on (sizing.ts). The first
+  // version counted it always, which gave smaller grids than on main with covered food off.
+  it('count the bytes of covered food only while it is on, and rebuild when they lower the grid', async () => {
+    // 1000 B per cell fit 768 × 480 into the 512 MiB budget; with 500 more, only 512 × 320 fits.
+    const backend = new CpuBackend();
+    backend.bytesPerCell = 1000;
+    backend.coveredBytesPerCell = 500;
+    const { engine, sim } = await engineWith({ ...maze.settings(), resolution: 768 }, mazeEnv, canvas(), backend);
+    expect([sim().width, sim().height]).toEqual([768, 480]);
+    const before = sim();
+    await engine.apply({ ...engine.settings, speed: 60 });
+    expect(sim()).toBe(before);
+    await engine.apply({ ...engine.settings, coveredFood: true });
+    expect([sim().width, sim().height]).toEqual([512, 320]);
+    expect(engine.settings.resolution).toBe(512);
+    const fresh = await engineWith({ ...maze.settings(), resolution: 512 });
+    expect(differing(sim().env, fresh.sim().env)).toBe(0);
+  });
+
   it('survive a switch between the dish and another arena, which changes the agent count', async () => {
     const { engine, sim } = await engineWith(shrinking.settings(), shrinking.env);
     const before = sim().env.slice();

@@ -98,6 +98,7 @@ export class CpuBackend implements Backend<CpuSim> {
   readonly maxBufferBytes = 2 ** 30;
   readonly maxGridSide = 8192;
   bytesPerCell = BYTES_PER_CELL; // as the WebGPU backend
+  coveredBytesPerCell = 0;
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);
   /** Runs before the next allocation only: a test can hold it or make it fail. */

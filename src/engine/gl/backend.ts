@@ -3,7 +3,7 @@ import { at } from '../at';
 import { levels } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
-import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
+import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
 import { compile, VIEW_BINDING, type Programs } from './programs';
@@ -23,6 +23,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly maxBufferBytes: number;
   readonly maxGridSide: number;
   readonly bytesPerCell: number;
+  readonly coveredBytesPerCell: number;
   private readonly prog: Programs;
   private readonly viewUbo: WebGLBuffer;
   private readonly viewData = new ArrayBuffer(VIEW_BYTES);
@@ -60,6 +61,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     );
     this.maxGridSide = Math.min(maxTex - 2, floatBlend ? maxTex : Math.floor(side / 2));
     this.bytesPerCell = floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT;
+    this.coveredBytesPerCell = floatBlend ? 0 : COVERED_BYTES_PER_CELL_HALF_FLOAT;
     this.maxBufferBytes = maxTex * maxTex * 16;
     this.description = `WebGL2 · ${String(gl.getParameter(gl.RENDERER))}`;
     this.lost = new Promise((resolve) => {

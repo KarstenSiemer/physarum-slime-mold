@@ -16,6 +16,8 @@ export class WebGpuBackend implements Backend<Simulation> {
   readonly kind = 'webgpu';
   readonly supportsCollisions = true;
   readonly bytesPerCell = BYTES_PER_CELL;
+  readonly coveredBytesPerCell = 0; // covered food counts into the collision buffers
+
   readonly description: string;
   readonly lost: Promise<string>;
   private readonly renderer: Renderer;

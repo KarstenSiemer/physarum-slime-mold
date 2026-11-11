@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BOUNDARIES, defaultSettings, defaultStrain, STYLES, type Settings } from '../../model/params';
 import { AgentToolKind } from '../pack';
-import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
+import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
 import { fence } from './gl';
@@ -314,6 +314,8 @@ describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
   it('reports the memory and grid limits of its counting path', () => {
     expect(backend.supportsCollisions).toBe(floatBlend);
     expect(backend.bytesPerCell).toBe(floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT);
+    // Covered food needs the 8-bit `presence` target only without float blending (ADR 0022).
+    expect(backend.coveredBytesPerCell).toBe(floatBlend ? 0 : COVERED_BYTES_PER_CELL_HALF_FLOAT);
   });
 
   // The gel height field has a one-cell border, so it is two texels larger than the grid (backend.ts).
