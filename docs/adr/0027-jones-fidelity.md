@@ -88,3 +88,26 @@ Each decision with its date, who made it, and why.
    0.9 / (1 − d) (−10 % at decay 0.001); the new factor keeps the plateau and makes the scent outside a food
    (1 − d) / 0.9 of before (+11 % at decay 0.001). Decision 13 names the plateau, so the plateau it is. Owner question
    (below).
+
+### Dish
+
+6. **Every dish is 0.945 of the grid's short side, in both models** (owner, 2026-11-11, with the rule above; the fidelity
+   check measured 0.947 in Fig. 18 and 0.944 in Fig. 19, so 0.945 lies between them). `DISH_FILL` in `common.wgsl`,
+   `common.glsl`, `render.wgsl`, `view.glsl` and `src/engine/brush.ts` (`dishRadius()`), which the sweep, the brush,
+   the CPU paint reference and the tests use; `render.frag` takes it from `view.glsl`. A unit test (`pack.test.ts`,
+   "the dish") checks that every shader holds the same value and that no rim of the old formula is left. Before, the
+   rim lay at half the short side less 1 cell (ADR 0019). Options the check listed: 0.945 for every dish; 0.92; 0.945
+   only on Jones' lattices; the old dish with density 0.6 for Shrinking plasmodium. The owner's rule decides: a dish is
+   Jones' dish, whatever grid it runs on.
+7. **The agent count stays Jones' %p of the square around the dish** (this branch, 2026-11-11; `agentCount()`,
+   unchanged). Jones counts his population over the lattice (p. 134), and 45,000 agents for %p 50 on 300 × 300 (p. 147)
+   is the count of Fig. 21. In Jones' dish they fill 71 % of the cells (64.5 % of the old dish). The food positions
+   keep their frame, the short side (ADR 0019), so no food moves with the rim, and a link keeps its strokes in that
+   frame. A stroke of an old link that reached past 0.945 of the side now paints only its cells inside the new rim.
+8. **64 claim rounds at the start** (this branch, 2026-11-11; `START_ROUNDS` in `src/engine/pack.ts`, before 32).
+   Jones starts every agent on a free cell (p. 132). In a claim round a waiting agent finds a free cell with about the
+   share of the free cells, so N · f^n of N agents still wait after n rounds at the filled share f. At 71 % and 32
+   rounds, 0 to 2 of Shrinking plasmodium's 45,000 agents started dead in 15 of 61 seeds on WebGPU and 13 of 61 on
+   WebGL2 (seeds 0 to 60); with 64 rounds none in 61 seeds on either backend. A round is one claim and one settle pass
+   over the agents at a reset, only in an arena with the rule that is not a periodic or box grid with the mixed layout
+   and no walls. A GPU test starts Shrinking plasmodium with seed 6, which left 2 agents dead with 32 rounds.

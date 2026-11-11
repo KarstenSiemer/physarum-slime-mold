@@ -839,14 +839,16 @@ describe('the sweep', () => {
     const c = canvas(1000, 1000);
     const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'dish' }, [], c);
     expect([sim().width, sim().height]).toEqual([512, 512]);
-    engine.paint({ kind: 'food', from: [511.186, 270.546], to: [511.186, 270.546], radius: 0.75 });
+    // Just outside the rim of radius 241.92 (ADR 0027): it reaches cell (496, 278), 0.37 cells inside the rim.
+    engine.paint({ kind: 'food', from: [497.125, 278.5], to: [497.125, 278.5], radius: 0.75 });
     engine.frame(0, 0);
     const fine = sim().env.slice();
     expect(count(fine, 1)).toBeGreaterThan(0);
     await engine.apply({ ...engine.settings, resolution: 256 });
     expect([sim().width, sim().height, count(sim().env, 1)]).toEqual([256, 256, 0]);
-    // Just inside the rim, beside the dab at (255.6, 135.3): the erase clears nothing and goes, the dab stays.
-    engine.paint({ kind: 'erase', from: [252.5, 135.3], to: [252.5, 135.3], radius: 2.5 });
+    // On 256 × 256 the dab lies at (248.6, 139.25) with radius 0.375: its one cell, (248, 139), lies 0.09 cells outside
+    // the rim of radius 120.96. Just inside the rim, beside it: the erase clears nothing and goes, the dab stays.
+    engine.paint({ kind: 'erase', from: [245.5, 139.25], to: [245.5, 139.25], radius: 2.5 });
     expect(edits(engine).map((e) => e.kind)).toEqual(['food']);
     await engine.apply({ ...engine.settings, resolution: 512 });
     expect(differing(sim().env, fine)).toBe(0);

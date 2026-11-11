@@ -15,9 +15,9 @@ const roomy: Limits = { maxAgents: 2 ** 24, maxBufferBytes: 2 ** 30, maxGridSide
 
 describe('agentCount', () => {
   it('counts a dish over the square of the short side, as Jones counts %p (p. 134, p. 147)', () => {
-    // Jones: %p 50 on a 300 × 300 lattice that his dish fills is 45,000 agents.
+    // Jones: %p 50 on a 300 × 300 lattice is 45,000 agents; his dish spans 0.945 of its side (ADR 0027).
     expect(agentCount({ density: 0.5, boundary: 'dish' }, 300, 300)).toBe(45_000);
-    // Shrinking plasmodium on 512 × 320: 0.64 agents per dish cell, not 1.03 as with every cell of the grid.
+    // Shrinking plasmodium on 512 × 320: 0.71 agents per cell of the dish, not 1.13 as with every cell of the grid.
     expect(agentCount({ density: 0.5, boundary: 'dish' }, 512, 320)).toBe(51_200);
     expect(agentCount({ density: 0.5, boundary: 'dish' }, 320, 512)).toBe(51_200);
   });

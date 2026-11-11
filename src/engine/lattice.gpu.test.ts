@@ -5,6 +5,7 @@ import { hexToLinear } from '../model/color';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById, type Preset } from '../model/presets';
 import { BrushDrag } from '../ui/drag';
+import { dishRadius } from './brush';
 import { Engine } from './engine';
 import { WebGl2Backend } from './gl/backend';
 import { AgentToolKind, type AgentTool } from './pack';
@@ -201,7 +202,7 @@ describe.each(['webgpu', 'webgl2'] as const)('lattices on %s', (kind) => {
           for (let x = 1; x < w - 1; x += 2) {
             const [gx, gy] = [(x + 0.5 - box.left) / box.px, (y + 0.5 - box.top) / box.px];
             // The free space beside the lattice, and the lattice's corners: farther than 2 pixels from the dish.
-            const r = Math.hypot(gx - side / 2, gy - side / 2) - (side / 2 - 1);
+            const r = Math.hypot(gx - side / 2, gy - side / 2) - dishRadius(side, side);
             if (r * box.px < 2) {
               inside++;
               continue;

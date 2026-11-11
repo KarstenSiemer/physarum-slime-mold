@@ -17,6 +17,9 @@ struct View {
   fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), unused
 }
 
+// The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
+const DISH_FILL = 0.945;
+
 @group(0) @binding(0) var<uniform> V: View;
 @group(0) @binding(1) var trail: texture_2d<f32>;
 @group(0) @binding(2) var<storage, read> shape: array<u32>; // outline distances and light (paint.wgsl `outline`)
@@ -239,7 +242,7 @@ fn shapeIndex(c: vec2i) -> i32 {
   } else if (V.boundary == 2u) {
     let o = 0.5 * vec2f(s);
     let m = vec2f(c) + 0.5 - o;
-    let rim = 0.5 * f32(min(s.x, s.y)) - 1.0; // dishRadius() in common.wgsl
+    let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y)); // dishRadius() in common.wgsl
     if (dot(m, m) > rim * rim) { q = vec2i(floor(o + m * ((rim - 0.75) * inverseSqrt(dot(m, m))))); }
   }
   return q.y * s.x + q.x;
@@ -252,7 +255,7 @@ fn shapeCells(c: vec2i) -> array<u32, 9> {
   var w: array<u32, 9>;
   if (V.boundary == 2u) {
     let m = vec2f(c) + 0.5 - 0.5 * vec2f(s);
-    let rim = 0.5 * f32(min(s.x, s.y)) - 1.0;
+    let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y));
     if (dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
       // Near the rim: some of the 3 × 3 cells may lie outside the dish.
       for (var j = 0; j < 3; j++) {
@@ -569,7 +572,7 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   if (V.boundary == 1u) {
     inside = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
   } else if (V.boundary == 2u) {
-    inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
+    inside = cover(DISH_FILL * 0.5 * min(s.x, s.y) - distance(p, 0.5 * s));
   }
   let space = V.background.rgb * select(0.55, 0.92, V.style == 2u);
   var c = space;

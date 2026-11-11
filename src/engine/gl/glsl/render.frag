@@ -165,7 +165,7 @@ void shapeCells(ivec2 c, out vec4 cells[9]) {
   ivec2 s = gridSize();
   if (V.boundary == 2u) {
     vec2 m = vec2(c) + 0.5 - 0.5 * vec2(s);
-    float rim = 0.5 * float(min(s.x, s.y)) - 1.0;
+    float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
     if (dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
       for (int j = 0; j < 3; j++) {
         for (int i = 0; i < 3; i++) cells[j * 3 + i] = shapeAt(c + ivec2(i - 1, j - 1));
@@ -394,7 +394,7 @@ void main() {
   // How much of the pixel lies in the arena: a ramp one pixel wide across the box edge and the dish rim.
   float inside = 1.0;
   if (V.boundary == 1u) inside = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
-  else if (V.boundary == 2u) inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
+  else if (V.boundary == 2u) inside = cover(DISH_FILL * 0.5 * min(s.x, s.y) - distance(p, 0.5 * s));
   vec3 space = V.background.rgb * (V.style == 2u ? 0.92 : 0.55);
   vec3 c = space;
   // One call: a GPU that runs both sides of a branch (SwiftShader in CI) would draw the scene twice.

@@ -18,6 +18,9 @@ layout(std140) uniform View {
   vec4 fx;     // bloom strength, black level, copies (packView), unused
 } V;
 
+// The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
+const float DISH_FILL = 0.945;
+
 uniform sampler2D trail;
 uniform sampler2D shape; // outline distances and light (shape.frag)
 uniform sampler2D occ;   // agents per cell, kept in collision mode only
@@ -63,7 +66,7 @@ vec4 shapeAt(ivec2 c) {
   } else if (V.boundary == 2u) {
     vec2 o = 0.5 * vec2(s);
     vec2 m = vec2(c) + 0.5 - o;
-    float rim = 0.5 * float(min(s.x, s.y)) - 1.0;
+    float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
     if (dot(m, m) > rim * rim) q = ivec2(floor(o + m * ((rim - 0.75) * inversesqrt(dot(m, m)))));
   }
   return texelFetch(shape, q, 0);

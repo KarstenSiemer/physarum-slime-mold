@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { presetById, PRESETS } from '../model/presets';
+import { dishRadius } from './brush';
 import { fromFrame, fromShape, fromStroke, MIN_RADIUS, periods, strokeOn, toFrame } from './environment';
 import { paintReference } from './paint-reference';
 import { gridSize } from './sizing';
@@ -321,7 +322,7 @@ describe('preset shapes in the canonical frame', () => {
         for (const e of p.env ?? []) {
           const s = strokeOn(fromShape(e, 'dish'), w, h);
           const r = Math.hypot((s?.from[0] ?? 0) - w / 2, (s?.from[1] ?? 0) - h / 2) + (s?.radius ?? 0);
-          expect(r, `${p.id} on ${name}`).toBeLessThan(Math.min(w, h) / 2 - 1);
+          expect(r, `${p.id} on ${name}`).toBeLessThan(dishRadius(w, h));
         }
   });
 

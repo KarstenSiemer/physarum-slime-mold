@@ -13,7 +13,8 @@ import {
   type Boundary,
   type Settings,
 } from '../model/params';
-import { outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
+import { presetById } from '../model/presets';
+import { dishRadius, outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
 import agentsFrag from './gl/glsl/agents.frag?raw';
 import diffuseFrag from './gl/glsl/diffuse.frag?raw';
@@ -234,7 +235,7 @@ function styleReference(
         ? 1
         : boundary === 'box'
           ? ramp(Math.min(px, py, w - px, h - py))
-          : ramp(0.5 * Math.min(w, h) - 1 - Math.hypot(px - w / 2, py - h / 2));
+          : ramp(dishRadius(w, h) - Math.hypot(px - w / 2, py - h / 2));
       let c = outside;
       if (inside > 0) {
         let lit: number[];
@@ -595,9 +596,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
 
     // In a dish only a wall byte inside the dish is a wall (wallIn in agents.wgsl and agents.frag, as cellAt() for
-    // the cell of a move). On a 64 × 64 dish a move of 4.21 cells from (23.5, 2.5) at −18° ends in cell (27, 1) and
-    // enters cell (25, 1) on its way, whose centre lies 31.18 cells from the centre of the dish, outside its radius
-    // of 31. A wall byte there does not block the move; one in cell (25, 2), also on the way, does.
+    // the cell of a move). On a 64 × 64 dish a move of 4.21 cells from (22.5, 3.5) at −18° ends in cell (26, 2) and
+    // enters cell (24, 2) on its way, whose centre lies 30.44 cells from the centre of the dish, outside its radius
+    // of 30.24 (ADR 0027). A wall byte there does not block the move; one in cell (25, 2), also on the way, does.
     it.each([false, true])('lets a move pass a wall byte outside the dish (collisions %s)', async (collisions) => {
       const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1, stepSize: 4.21 }];
       const settings = { ...defaultSettings(), layout: 'empty' as const, boundary: 'dish' as const, strains };
@@ -606,15 +607,15 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const env = new Uint8Array(64 * 64 * 4);
         env[(y * 64 + x) * 4] = 255;
         sim.writeEnv(env);
-        sim.writeAgent(0, { x: 23.5, y: 2.5, heading: (-18 * Math.PI) / 180, bits: 4 });
+        sim.writeAgent(0, { x: 22.5, y: 3.5, heading: (-18 * Math.PI) / 180, bits: 4 });
         // The occupancy is built from the agent written above when the rule is switched on.
         if (collisions) sim.update({ ...settings, collisions: true });
         sim.run(1);
         const [a] = await sim.readAgents();
         return [Math.floor(a?.x ?? -1), Math.floor(a?.y ?? -1)];
       };
-      expect(await move([25, 1])).toEqual([27, 1]);
-      expect(await move([25, 2])).toEqual([23, 2]);
+      expect(await move([24, 2])).toEqual([26, 2]);
+      expect(await move([25, 2])).toEqual([22, 3]);
     });
   });
 
@@ -774,22 +775,22 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(results).toEqual([0, 180].map((hd) => `${hd}°: ${right} ${left} ${left} ${left} ${right}`));
       });
 
-      // In a dish only a wall byte inside the dish is a wall (wallIn). On a 64 × 64 dish, from (23.5, 61.5) at −27°,
-      // the front-right sensor's way to cell (27, 62) enters cell (25, 62), whose centre lies 31.18 cells from the
-      // centre of the dish, outside its radius of 31. A wall byte there does not block the sensor; one in cell (25, 61),
-      // also on the way, does.
+      // In a dish only a wall byte inside the dish is a wall (wallIn). On a 64 × 64 dish, from (22.5, 60.5) at −27°,
+      // the front-right sensor's way to cell (26, 61) enters cell (24, 61), whose centre lies 30.44 cells from the
+      // centre of the dish, outside its radius of 30.24 (ADR 0027). A wall byte there does not block the sensor; one in
+      // cell (25, 61), also on the way, does.
       it(`count no wall byte outside the dish on a sensor's way (collisions ${collisions})`, async () => {
         const probe: Probe = {
           size: [64, 64],
-          at: [23.5, 61.5],
+          at: [22.5, 60.5],
           heading: -27,
           sensorOffset: 4.21,
-          trail: [27, 62],
+          trail: [26, 61],
           boundary: 'dish',
           collisions,
         };
         expect(await turn(probe)).toBe(RA);
-        expect(await turn({ ...probe, walls: [[25, 62]] })).toBe(RA);
+        expect(await turn({ ...probe, walls: [[24, 61]] })).toBe(RA);
         expect(await turn({ ...probe, walls: [[25, 61]] })).toBe(360 - RA);
       });
 
@@ -1215,7 +1216,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     const cellAtFor = (boundary: Boundary, w: number, h: number) => (x: number, y: number) => {
       if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
       if (x < 0 || y < 0 || x >= w || y >= h) return -1;
-      if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > 0.5 * Math.min(w, h) - 1) return -1;
+      if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > dishRadius(w, h)) return -1;
       return y * w + x;
     };
 
@@ -1879,7 +1880,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     /** Cells the simulation has: every cell of a periodic grid or a box, the cells inside the dish (common.wgsl). */
     const inArena = (boundary: string, w: number, h: number, x: number, y: number) =>
-      boundary !== 'dish' || Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= 0.5 * Math.min(w, h) - 1;
+      boundary !== 'dish' || Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= dishRadius(w, h);
 
     /** Index of a cell of the arena (wrapped on the periodic grid), or −1, as common.wgsl `cellAt`. */
     const cellAt = (boundary: string, w: number, h: number, x: number, y: number) => {
@@ -2276,7 +2277,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         for (let n = 0; n < 40; n++) {
           // Within 3 cells of an edge or the rim (start x, y and direction), along it at a shallow angle.
           const [t, off, side] = [rnd(), -3 + 6 * rnd(), Math.floor(rnd() * 4)];
-          const [a, r] = [2 * Math.PI * t, 0.5 * Math.min(w, h) - 1 + off];
+          const [a, r] = [2 * Math.PI * t, dishRadius(w, h) + off];
           const sides: [number, number, number, number][] = [
             [t * w, off, 1, 0],
             [t * w, h + off, 1, 0],
@@ -2310,7 +2311,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       'change no outline byte with a stroke that paints no cell (%s)',
       async (boundary) => {
         const [w, h] = [97, 61];
-        const [cx, cy, rim] = [w / 2, h / 2, 0.5 * Math.min(w, h) - 1];
+        const [cx, cy, rim] = [w / 2, h / 2, dishRadius(w, h)];
         // A point at angle a, `out` cells outside the box edge or the dish rim (inside where negative).
         const at = (a: number, out: number): [number, number] => {
           if (boundary === 'dish') return [cx + (rim + out) * Math.cos(a), cy + (rim + out) * Math.sin(a)];
@@ -2675,7 +2676,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           y >= 0 &&
           x < w &&
           y < h &&
-          (boundary !== 'dish' || Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1);
+          (boundary !== 'dish' || Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= dishRadius(w, h));
         const c = y * w + x;
         if (!inside || (env[c * 4] ?? 0) >= 128) blocked++;
         per.set(c, (per.get(c) ?? 0) + 1);
@@ -2712,19 +2713,29 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
     });
 
-    // Shrinking plasmodium: 0.64 agents per dish cell, and 0.5 % more agents than the dish has free cells for.
-    it('fills a dish to 64 % with every agent on a cell of its own, and starts the rest dead when it is full', async () => {
+    // Shrinking plasmodium: 0.71 agents per cell of Jones' dish (ADR 0027), and 0.5 % more agents than the dish has
+    // free cells for.
+    it('fills a dish to 71 % with every agent on a cell of its own, and starts the rest dead when it is full', async () => {
       const [w, h] = [64, 48];
       const cells = Array.from({ length: w * h }, (_, c) => [c % w, Math.floor(c / w)] as const).filter(
-        ([x, y]) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1,
+        ([x, y]) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= dishRadius(w, h),
       ).length;
-      const dense = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, Math.round(0.64 * cells));
-      expect(await starts(dense, 'dish')).toEqual({ alive: Math.round(0.64 * cells), shared: 0, blocked: 0 });
+      const dense = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, Math.round(0.71 * cells));
+      expect(await starts(dense, 'dish')).toEqual({ alive: Math.round(0.71 * cells), shared: 0, blocked: 0 });
       const full = await make({ boundary: 'dish', collisions: true, seed: 3 }, w, h, cells + 8);
       const s = await starts(full, 'dish');
       expect([s.shared, s.blocked]).toEqual([0, 0]);
       expect(s.alive).toBeGreaterThan(0.97 * cells);
       expect(s.alive).toBeLessThanOrEqual(cells);
+    });
+
+    // Jones places every agent on a free cell (p. 132). Shrinking plasmodium fills 0.71 of Jones' dish (ADR 0027): with
+    // 32 claim rounds seed 6 left 2 of its 45,000 agents dead on both backends, with 64 none (pack.ts START_ROUNDS).
+    it('places every agent of Shrinking plasmodium on a cell of its own in Jones’ dish', async () => {
+      const shrinking = presetById('shrinking')?.settings();
+      if (!shrinking) throw new Error('no Shrinking plasmodium');
+      const sim = await make({ ...shrinking, seed: 6 }, 300, 300, 45_000);
+      expect(await starts(sim, 'dish')).toEqual({ alive: 45_000, shared: 0, blocked: 0 });
     });
 
     // An offset just below 1 rounds into the next cell from coordinate 256 on (f32): with seed 7 the old start
@@ -3336,8 +3347,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         sim.writeTrail(
           Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 ? 2 / (0.4 / equilibrium(settings)) : 0)),
         );
-        // The left edge of the box (x = 0) and the left of the dish rim (x = 9) cross pixel 94 at 4 px per cell.
-        const x = boundary === 'box' ? 0.3 : 9.3;
+        // The left edge of the box (x = 0) and the left of the dish rim (x = 9.32, ADR 0027) cross pixel 94 at 4 px per
+        // cell.
+        const x = (boundary === 'box' ? 0 : W / 2 - dishRadius(W, H)) + 0.3;
         const img = await backend.capture(sim, settings, { center: [x, 24], scale: 1 / 4 }, SIZE, SIZE);
         const [out, edge, inside] = [luma(img, 90, 96, 0), luma(img, 94, 96, 0), luma(img, 100, 96, 0)];
         expect(inside - out, boundary).toBeGreaterThan(100);
@@ -3460,14 +3472,14 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         strains: [defaultStrain(0)],
       };
       const sim = await make(settings, W, H, 1);
-      // Box: down from the top edge (y = 0). Dish: from the middle out through the left of the rim (x = 9).
+      // Box: down from the top edge (y = 0). Dish: from the middle out through the left of the rim (x = 9.32).
       const box = boundary === 'box';
       sim.paint([{ kind: 'food', from: box ? [32, -2] : [32, 24], to: box ? [32, 30] : [2, 24], radius: 2.56 }]);
       const centre: [number, number] = box ? [32, 2] : [11, 24];
       const img = await backend.capture(sim, settings, { center: centre, scale: 1 / 8 }, 96, 96);
       // The first pixel of food on the line `at` cells inside the edge, counted across the stroke.
       const outlineAt = (at: number) => {
-        const k = Math.floor(((box ? 0 : 9) + at - centre[box ? 1 : 0]) * 8 + 48);
+        const k = Math.floor(((box ? 0 : W / 2 - dishRadius(W, H)) + at - centre[box ? 1 : 0]) * 8 + 48);
         for (let s = 0; s < 96; s++) {
           const i = ((box ? k : s) * 96 + (box ? s : k)) * 4;
           if ((img.data[i] ?? 0) - (img.data[i + 2] ?? 0) > 30) return s;

@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
+import { dishRadius } from './brush';
 import { Engine, type HeldTool } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
@@ -426,7 +427,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     const [env, shape] = [await sim.readEnv(), await sim.readShape()];
     const { width: w, height: h } = sim;
     const { boundary } = settings;
-    const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1;
+    const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= dishRadius(w, h);
     const holds = (x: number, y: number, ch: number) => {
       if (boundary === 'wrap') [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
       else if (x < 0 || y < 0 || x >= w || y >= h || (boundary === 'dish' && !inDish(x, y))) return false;
@@ -566,7 +567,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
   it('keep the outlines on the side of env across arena switches from the dish to a box and back', async () => {
     const { engine } = await load('shrinking');
     const [w, h] = [engine.sim.width, engine.sim.height];
-    const rim = Math.min(w, h) / 2 - 1;
+    const rim = dishRadius(w, h);
     const strokes: Stroke[] = [
       // Across the rim: the dish clips it, and its shadow falls on cells outside the dish, which a box shows.
       { kind: 'wall', from: [w * 0.5 + rim - 20, h * 0.5 - 4], to: [w * 0.5 + rim + 20, h * 0.5 - 4], radius: 2.2 },
@@ -718,7 +719,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
       }
       const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
       const c = y * width + x;
-      const outside = dish && Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) > Math.min(width, height) / 2 - 1;
+      const outside = dish && Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) > dishRadius(width, height);
       if (outside || (env[c * 4] ?? 0) >= 128) blocked++;
       per.set(c, (per.get(c) ?? 0) + 1);
     }

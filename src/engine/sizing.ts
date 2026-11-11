@@ -2,7 +2,7 @@ import { RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 
 /**
  * Agents for a `width` × `height` grid: the density times the cells of the arena's square. A dish counts the square
- * of the grid's short side, as Jones counts his population over a square lattice that the dish fills (%p, a share
+ * of the grid's short side, as Jones counts his population over the square lattice around his dish (%p, a share
  * of the image area: Jones 2010, p. 134; 45,000 agents for %p 50 on 300 × 300, p. 147). A box or a periodic grid
  * counts all its cells.
  */

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dishRadius, DISH_FILL } from './brush';
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, emissionScale, strainSpec, type Settings } from '../model/params';
 import {
@@ -197,6 +198,33 @@ describe('strainEnds', () => {
     const s = [defaultStrain(0), { ...defaultStrain(1), share: 3 }];
     expect(strainEnds(s, 1000)).toEqual([250, 1000, 1000, 1000]);
     expect(strainEnds([defaultStrain(0)], 7)).toEqual([7, 7, 7, 7]);
+  });
+});
+
+// Jones' dish, 0.945 of the grid's short side (Jones 2010, Fig. 18 and 19; ADR 0027): one value in every shader.
+describe('the dish', () => {
+  it('has the same share of the short side in every shader and in brush.ts', () => {
+    expect(DISH_FILL).toBe(0.945);
+    expect(dishRadius(300, 300)).toBe(141.75);
+    expect(dishRadius(512, 288)).toBe(0.945 * 144);
+    for (const path of [
+      './shaders/common.wgsl',
+      './shaders/render.wgsl',
+      './gl/glsl/common.glsl',
+      './gl/glsl/view.glsl',
+    ]) {
+      const values = [...read(path).matchAll(/const (?:float )?DISH_FILL = ([\d.]+);/g)].map((m) => Number(m[1]));
+      expect(values, path).toEqual([DISH_FILL]);
+    }
+    // Every rim of the shaders is DISH_FILL times half the short side: no other formula is left.
+    for (const path of [
+      './shaders/common.wgsl',
+      './shaders/render.wgsl',
+      './gl/glsl/common.glsl',
+      './gl/glsl/view.glsl',
+      './gl/glsl/render.frag',
+    ])
+      expect(read(path), path).not.toMatch(/0\.5 \* (?:f32|float)?\(?min\([^)]*\)\)? - 1\.0/);
   });
 });
 

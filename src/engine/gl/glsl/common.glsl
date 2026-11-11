@@ -75,7 +75,9 @@ vec2 wrapPos(vec2 p) {
   return min(p - vec2(c - lo), uintBitsToFloat(floatBitsToUint(vec2(lo) + 1.0) - 1u));
 }
 
-float dishRadius() { return 0.5 * float(min(W(), H())) - 1.0; }
+// The dish of Jones' closed arenas, 0.945 of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
+const float DISH_FILL = 0.945;
+float dishRadius() { return DISH_FILL * 0.5 * float(min(W(), H())); }
 
 // The distance from p to the centre q of an agent tool: to the nearest copy of q on the periodic grid (toolDistance in
 // common.wgsl, ADR 0026).

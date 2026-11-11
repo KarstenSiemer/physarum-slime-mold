@@ -31,10 +31,13 @@ const slot = (name: (typeof PARAM_SLOTS)[number]) => {
 /**
  * Claim rounds that place the agents on cells of their own with one agent per cell (init.wgsl claimStart and
  * settleStart, gl/glsl/init.frag modes 1 and 2). ROUNDS in those shaders is another count: the draws of an agent
- * without the rule. A CPU model of Shrinking plasmodium (0.64 agents per dish cell) placed every agent within 24
- * rounds. On the GPU, 1 to 4 of 61 seeds left one of its agents without a free cell, to start dead (ADR 0019).
+ * without the rule. In each round a waiting agent finds a free cell with about the share of the free cells, so after
+ * n rounds about N · f^n agents of N wait, at the filled share f. Shrinking plasmodium fills 0.71 of Jones' dish
+ * (ADR 0027): after 32 rounds 0 to 2 of its 45,000 agents started dead in 15 of 61 seeds on WebGPU (13 on WebGL2),
+ * and after 64 rounds none in 61 seeds on either backend. Before Jones' dish (0.64 of the app's dish), 32 rounds left
+ * one agent dead in 1 to 4 of 61 seeds (ADR 0019).
  */
-export const START_ROUNDS = 32;
+export const START_ROUNDS = 64;
 
 /**
  * Claim rounds for a start: the mixed layout on a grid without walls and dish gives every agent a free cell of its

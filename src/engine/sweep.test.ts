@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Boundary } from '../model/params';
 import { presetById } from '../model/presets';
-import { paintsCell, SLACK } from './brush';
+import { dishRadius, paintsCell, SLACK } from './brush';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
@@ -63,7 +63,7 @@ function strokeNear(rand: () => number, spots: [number, number][], w: number, h:
 
 /** Spots as fractions of the grid: the edges, the corners, the dish's rim on both axes, the middle. */
 function spotsOf(rand: () => number, w: number, h: number): [number, number][] {
-  const R = Math.min(w, h) / 2 - 1;
+  const R = dishRadius(w, h);
   const all: [number, number][] = [
     [0, 0.5],
     [1, 0.3],
@@ -159,17 +159,19 @@ describe('the sweep', () => {
   }, 120_000);
 });
 
-// Clearing strokes count their cells with the rim moved in by SLACK and a hair of float64 rounding more: on a 652 × 652
-// dish the centre of cell (373, 4) lies 1.5e-7 cells inside the rim moved in by SLACK, within that hair (2026-11-10, a
-// search of grids up to 2,100 cells found no cell within the hair on the other side, where the per-cell rule would
-// count it otherwise). The edit stays (mutant IV4).
+// Clearing strokes count their cells with the rim moved in by SLACK and a hair of float64 rounding more: on a 2201 × 2201
+// dish the centre of cell (1389, 101) lies 6.8e-7 cells inside the rim moved in by SLACK, within that hair of 1.04e-6
+// (2026-11-11, for Jones' dish of ADR 0027: a search of every grid side from 16 to 4,096, square and with sides of
+// either parity, found no smaller grid with such a cell). The edit stays (mutant IV4).
 describe('the sweep at the rim', () => {
   it('keeps an edit whose cell lies within a hair inside the rim moved in, under an erase there', () => {
-    const [w, h] = [652, 652];
-    expect(Math.min(w, h) / 2 - 1 - SLACK - Math.hypot(373.5 - w / 2, 4.5 - h / 2)).toBeLessThan(2e-7);
+    const [w, h] = [2201, 2201];
+    const inside = dishRadius(w, h) - SLACK - Math.hypot(1389.5 - w / 2, 101.5 - h / 2);
+    expect(inside).toBeGreaterThan(0);
+    expect(inside).toBeLessThan(1e-9 * (1 + dishRadius(w, h) - SLACK));
     const list = [
-      fromStroke({ kind: 'food', from: [373.5, 4.5], to: [373.5, 4.5], radius: MIN_RADIUS }, [w, h], 'dish'),
-      fromStroke({ kind: 'erase', from: [374, 6], to: [374, 6], radius: 4 }, [w, h], 'dish'),
+      fromStroke({ kind: 'food', from: [1389.5, 101.5], to: [1389.5, 101.5], radius: MIN_RADIUS }, [w, h], 'dish'),
+      fromStroke({ kind: 'erase', from: [1389, 103], to: [1389, 103], radius: 4 }, [w, h], 'dish'),
     ];
     expect([...sweep(new Placement(w, h, list))]).toEqual([]);
   });
@@ -177,12 +179,12 @@ describe('the sweep at the rim', () => {
   // A dish erase clears no cell beyond the rim, and a box or a periodic edit paints cells there too. So one stroke
   // covers such an edit only when the edit's reach lies inside the rim, not only its ends (inside(), mutant VM11).
   it('keeps a box or periodic edit across the rim under a dish erase that holds both its ends', () => {
-    const [w, h] = [512, 320]; // the dish: radius 159 around (256, 160)
-    const beyond = (c: number) => Math.hypot((c % w) + 0.5 - w / 2, Math.floor(c / w) + 0.5 - h / 2) > 159;
+    const [w, h] = [512, 320]; // the dish: radius 0.945 × 160 = 151.2 around (256, 160)
+    const beyond = (c: number) => Math.hypot((c % w) + 0.5 - w / 2, Math.floor(c / w) + 0.5 - h / 2) > dishRadius(w, h);
     for (const arena of ['box', 'wrap'] as const) {
       const list = [
-        fromStroke({ kind: 'food', from: [412.5, 160.5], to: [412.5, 160.5], radius: 4 }, [w, h], arena),
-        fromStroke({ kind: 'erase', from: [410.5, 160.5], to: [410.5, 160.5], radius: 7 }, [w, h], 'dish'),
+        fromStroke({ kind: 'food', from: [404.5, 160.5], to: [404.5, 160.5], radius: 4 }, [w, h], arena),
+        fromStroke({ kind: 'erase', from: [402.5, 160.5], to: [402.5, 160.5], radius: 7 }, [w, h], 'dish'),
       ];
       // The food's centre lies 156.5 cells from the dish's centre, and its brush reaches 160.5 cells. The erase clears
       // every cell of it inside the rim. The 6 cells beyond the rim keep their food.
