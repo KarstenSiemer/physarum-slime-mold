@@ -80,7 +80,13 @@ describe('modelChanged', () => {
     expect(changed(() => undefined)).toBe(false);
     expect(changed((s) => (s.density = 0.2))).toBe(true);
     expect(changed((s) => (s.collisions = false))).toBe(true);
-    expect(changed((s) => (s.resolution = 512))).toBe(true);
+    // The lattice sets the grid of a scene of Jones (ADR 0026): another lattice or a grid shaped like the screen is a
+    // change, and the resolution on a lattice is not.
+    expect(changed((s) => (s.lattice = null))).toBe(true);
+    expect(changed((s) => (s.lattice = [300, 300]))).toBe(true);
+    expect(changed((s) => (s.lattice = [200, 300]))).toBe(true);
+    expect(changed((s) => (s.resolution = 1024))).toBe(false);
+    expect(modelChanged({ ...base, lattice: null, resolution: 1024 }, { ...base, lattice: null })).toBe(true);
     expect(changed((s) => (s.boundary = 'box'))).toBe(true);
     expect(changed((s) => (s.diffusion = 2))).toBe(true);
     expect(changed((s) => (s.scentDecay = 0.01))).toBe(true);

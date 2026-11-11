@@ -80,6 +80,35 @@ describe('sanitize (untrusted input)', () => {
     expect(s.strains[1]?.color).toBe('#abcdef');
   });
 
+  // ADR 0026: a lattice is two whole numbers of cells from 16 to 4096, the sides gridSize() gives; anything else is a
+  // grid shaped like the screen. A link made before lattices holds none and opens on such a grid, as it was made.
+  it('accepts a lattice of two whole sides from 16 to 4096, else none', () => {
+    expect(sanitize({ lattice: [200, 300] }).lattice).toEqual([200, 300]);
+    expect(sanitize({ lattice: [16, 4096] }).lattice).toEqual([16, 4096]);
+    expect(sanitize({}).lattice).toBeNull();
+    for (const bad of [
+      null,
+      200,
+      '200x200',
+      [200],
+      [200, 200, 1],
+      [15, 200],
+      [200, 4097],
+      [200.5, 200],
+      ['200', '200'],
+      [NaN, 200],
+      [Infinity, 200],
+      [[200], 200],
+      { 0: 200, 1: 200, length: 2 },
+    ])
+      expect(sanitize({ lattice: bad }).lattice, JSON.stringify(bad)).toBeNull();
+    // A new array: the input cannot change the settings later.
+    const raw = [300, 300];
+    const s = sanitize({ lattice: raw });
+    raw[0] = 16;
+    expect(s.lattice).toEqual([300, 300]);
+  });
+
   it('limits strains and matrix rows to MAX_STRAINS', () => {
     const s = sanitize({ strains: Array.from({ length: 9 }, () => ({ attraction: Array(9).fill(5) })) });
     expect(s.strains).toHaveLength(MAX_STRAINS);

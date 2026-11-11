@@ -42,11 +42,11 @@ Spot placement(vec4 a, uint i) {
     vec2 p = randomIn(P.tool.xy, P.tool.z, rng);
     int c = cellOf(p);
     if (openCell(c)) return Spot(wrapPos(p), rand(rng) * TAU, c);
-  } else if (P.tool.w == 2.0 && alive && distance(a.xy, P.tool.xy) < P.tool.z) {
+  } else if (P.tool.w == 2.0 && alive && toolDistance(a.xy, P.tool.xy) < P.tool.z) {
     for (int k = 0; k < 8; k++) {
       vec2 p = vec2(rand(rng) * float(W()), rand(rng) * float(H()));
       int c = cellOf(p);
-      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) return Spot(wrapPos(p), a.z, c);
+      if (openCell(c) && toolDistance(p, P.tool.xy) >= P.tool.z) return Spot(wrapPos(p), a.z, c);
     }
   }
   return Spot(a.xy, a.z, -1);

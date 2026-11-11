@@ -85,7 +85,7 @@ describe('strand level', () => {
 });
 
 describe('scentLevel', () => {
-  it('reads the grid up to 2 cells per pixel, then lattices of 2, 4 and 8 cells', () => {
+  it('reads the grid up to 2 cells per pixel, then maps of 2, 4 and 8 cells', () => {
     expect([0.1, 1, 1.99, 2, 3.9, 4, 8, 64].map(scentLevel)).toEqual([0, 0, 0, 1, 1, 2, 3, 3]);
     expect([scentLevelSize(1024, 1), scentLevelSize(1023, 1), scentLevelSize(236, 3)]).toEqual([512, 512, 30]);
   });

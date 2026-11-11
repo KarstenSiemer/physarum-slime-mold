@@ -15,7 +15,8 @@ layout(std140) uniform View {
   vec4 colors[4];
   vec4 background;
   uvec4 frame; // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
-  vec4 fx;     // bloom strength, black level, scent lattice level (0 to 3) + 4 with the repellent, mark
+  vec4 fx;     // bloom strength, black level, copies (packView), unused
+  vec4 scentFx; // scent view: map level (0 to 3), repellent drawn (1) or not (0), mark (0: none), unused
 } V;
 
 uniform sampler2D trail;

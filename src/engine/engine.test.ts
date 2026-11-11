@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
+import { presetById } from '../model/presets';
 import { CpuBackend } from './cpu-backend';
 import { Engine, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
@@ -142,5 +143,53 @@ describe('the scent view', () => {
     expect(engine.sim).toBe(sim);
     expect(engine.restarts).toBe(restarts);
     expect(engine.sim.step).toBe(6);
+  });
+});
+
+// ADR 0026: beside a closed lattice nothing may happen. A tool there reaches no cell of the arena, so it is idle, and a
+// paused hold runs no step. On a periodic lattice every place shows a cell of the grid.
+describe('agent tools beside a lattice', () => {
+  async function paused(id: string) {
+    const p = presetById(id);
+    if (!p) throw new Error(id);
+    const engine = await Engine.create(
+      { width: 1280, height: 720 } as HTMLCanvasElement,
+      p.settings(),
+      undefined,
+      new CpuBackend(),
+    );
+    engine.paused = true;
+    engine.frame(now, 0);
+    return engine;
+  }
+  let now = 0; // the frame clock runs on across holds: a frame never goes back in time (budget.ts)
+  const hold = (engine: Engine, kind: HeldTool['kind'], x: number, y: number, frames = 30) => {
+    const before = engine.sim.step;
+    for (let k = 1; k <= frames; k++) {
+      engine.agentTool({ kind, x, y, radius: 6, strain: 0, rate: 1 });
+      now += 1000 / 60;
+      engine.frame(now);
+    }
+    return engine.sim.step - before;
+  };
+
+  it('runs no step while a tool is held on the free space beside a closed lattice, and runs them on it', async () => {
+    for (const id of ['steiner', 'shrinking']) {
+      const engine = await paused(id);
+      const side = engine.sim.width;
+      for (const kind of [AgentToolKind.cut, AgentToolKind.inoculate]) {
+        // Left of the lattice, above it, and in its corner outside the dish.
+        expect(hold(engine, kind, -20, side / 2), `${id} left`).toBe(0);
+        expect(hold(engine, kind, side / 2, -30), `${id} above`).toBe(0);
+        expect(hold(engine, kind, 3, 3), `${id} corner`).toBe(0);
+        expect(hold(engine, kind, side / 2, side / 2), `${id} on it`).toBe(30);
+      }
+    }
+  });
+
+  it('runs the steps of a tool held on a copy of a periodic lattice', async () => {
+    const engine = await paused('wound');
+    expect(hold(engine, AgentToolKind.cut, -100, 150)).toBe(30);
+    expect(hold(engine, AgentToolKind.cut, 450, -20)).toBe(30);
   });
 });

@@ -34,7 +34,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   private sampleTarget: Target | undefined;
   /** Gel height field: one texel per cell plus a one-cell border (height.frag). */
   private heights: Target | undefined;
-  /** The scent view's coarse lattice (scent-down.frag): half the grid's sides, rounded up. */
+  /** The scent view's coarse map (scent-down.frag): half the grid's sides, rounded up. */
   private coarse: Target | undefined;
   private frame = 0;
   private gain = 0;
@@ -246,7 +246,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       textures(gl, h.program, cells);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
-    // The scent view once its programs are built; zoomed out it reads a coarser lattice, filled here.
+    // The scent view once its programs are built; zoomed out it reads a coarser map, filled here.
     const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
     const level = scentLevel(view.scale);
     const coarse = scent ? this.coarseFor(sim) : undefined;
@@ -271,7 +271,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  /** The scent view's coarse lattice for this grid size, made anew when the size changes. */
+  /** The scent view's coarse map for this grid size, made anew when the size changes. */
   private coarseFor(sim: GlSim): Target {
     const [w, h] = [scentLevelSize(sim.width, 1), scentLevelSize(sim.height, 1)];
     if (this.coarse?.width !== w || this.coarse.height !== h) {

@@ -7,15 +7,19 @@ import {
   defaultSettings,
   globalSpec,
   MAX_STRAINS,
+  RESOLUTIONS,
+  sameLattice,
   strainLike,
   strainSpec,
   toJones,
+  type Lattice,
   type Model,
   type Settings,
 } from '../model/params';
 import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
 import { fmt, letter, list, modelChanged, signed } from '../model/scene';
 import type { Link } from '../model/url';
+import { latticeResolution, type GridTuner } from './tune';
 
 export const TOOLS = [
   { id: 'pan', key: '1', label: 'Move', help: 'Drag to move the view. Scroll or pinch to zoom.' },
@@ -110,6 +114,16 @@ export interface AppState {
   maxResolution: number;
   /** The user picked a grid in the panel; the startup check never lowers it then. */
   gridPicked: boolean;
+  /**
+   * The lattice of the loaded scene that this device could not hold (ADR 0026), or null. The scene then runs on a grid
+   * shaped like the screen, as with a grid the device lowered, and the panel says so without a way back that fails.
+   */
+  lostLattice: Lattice | null;
+  /**
+   * The settings as a shared link opened them, until a preset loads: while they and the drawing stay as the link has
+   * them, the scene card says that the link changes the scene, not the user (linkUnchanged()).
+   */
+  linkBase: Settings | undefined;
   /** The backend supports one agent per cell (WebGL2 needs EXT_float_blend). */
   canCollide: boolean;
   stats: Stats;
@@ -137,6 +151,8 @@ export const app = $state<AppState>({
   notice: '',
   maxResolution: 4096,
   gridPicked: false,
+  lostLattice: null,
+  linkBase: undefined,
   canCollide: true,
   stats: { fps: 0, stepsPerSecond: 0, step: 0, alive: [], run: -1 },
 });
@@ -156,6 +172,9 @@ export function setScene(p: Preset) {
   app.settings = s;
   app.scene = p.id;
   app.sceneBase = base;
+  app.linkBase = undefined;
+  // A new load tries the scene's lattice again (ADR 0026).
+  app.lostLattice = null;
   app.strainOrigin = s.strains.map((_, i) => i);
   // The inoculate tool places the selected strain, and a scene with fewer strains has no such strain.
   app.strain = Math.min(app.strain, s.strains.length - 1);
@@ -211,16 +230,33 @@ export function clearEnvironment() {
  */
 export function openLink({ settings, drawing, drawingLost }: Link) {
   app.settings = settings;
+  app.linkBase = structuredClone(settings);
   fitTool();
   linkDrawing = drawing;
   app.envVersion++;
   if (drawingLost) showNotice('This app cannot read the scene and drawing in this link, so only its settings load.');
   const p = drawing && presetById(drawing.scene);
-  if (!p) return;
-  app.scene = p.id;
-  app.sceneBase = p.settings();
-  app.strainOrigin = [...drawing.origins];
-  app.envChanged = drawing.strokes.length > 0 || drawing.shapes.some((kept) => !kept);
+  if (p) {
+    app.scene = p.id;
+    app.sceneBase = p.settings();
+    app.strainOrigin = [...drawing.origins];
+    app.envChanged = drawing.strokes.length > 0 || drawing.shapes.some((kept) => !kept);
+  }
+  linkEnv = JSON.stringify(currentDrawing());
+}
+
+/** The drawing as the shared link opened it (openLink()), for linkUnchanged(). */
+let linkEnv = '';
+
+/**
+ * Whether the settings and the drawing are still as the shared link opened them: then the scene card says that the
+ * link changes the scene, as the receiver changed nothing (ADR 0026). A grid the device lowered is no change.
+ */
+export function linkUnchanged(): boolean {
+  const base = app.linkBase;
+  if (!base) return false;
+  const capped = { ...base, resolution: Math.min(base.resolution, app.maxResolution) };
+  return !modelChanged(app.settings, capped) && JSON.stringify(currentDrawing()) === linkEnv;
 }
 
 /**
@@ -383,6 +419,47 @@ export function removeStrain(i: number) {
 }
 
 /**
+ * The lattice of the loaded scene while the grid is another one (ADR 0026): the panel then says why the result
+ * differs from the paper and offers the lattice again. Undefined for a scene without a lattice.
+ */
+export function latticeLeft(): Lattice | undefined {
+  const lattice = app.sceneBase?.lattice;
+  return lattice && !sameLattice(app.settings.lattice, lattice) ? lattice : undefined;
+}
+
+/**
+ * Puts the loaded scene back on its lattice; the other settings stay (the button below the grid). It picks no grid
+ * size: the startup check goes on for the next scenes, and it never lowers the scene's own lattice (ADR 0026).
+ */
+export function useSceneLattice() {
+  const lattice = app.sceneBase?.lattice;
+  if (!lattice) return;
+  app.settings.lattice = [lattice[0], lattice[1]];
+}
+
+/**
+ * The grid choice of the panel: a lattice, "200x200", or a grid shaped like the screen, its cells on the long side.
+ * A pick stops the startup check (`app.gridPicked`), unless it is the scene's own lattice. Unknown values change nothing.
+ */
+export function pickGrid(value: string) {
+  const match = /^(\d+)x(\d+)$/.exec(value);
+  const resolution = Number(value);
+  if (match) {
+    const lattice: Lattice = [Number(match[1]), Number(match[2])];
+    app.settings.lattice = lattice;
+    // The scene's own lattice is no pick of a grid size, as with the button below the grid.
+    if (!sameLattice(lattice, app.sceneBase?.lattice ?? null)) app.gridPicked = true;
+  } else if (RESOLUTIONS.includes(resolution as never)) {
+    app.settings.lattice = null;
+    app.settings.resolution = resolution;
+    app.gridPicked = true;
+  }
+}
+
+/** The value of a lattice in the panel's grid choice (pickGrid()). */
+export const latticeValue = ([w, h]: Lattice) => `${w}x${h}`;
+
+/**
  * True when a model parameter or the food, light and walls differ from the loaded scene. A grid the device lowered
  * (memory, startup check) is no change: the scene asks for at most `app.maxResolution`.
  */
@@ -397,6 +474,60 @@ export function sceneChanged(): boolean {
 export function openLearn(tab: LearnTab) {
   app.learnTab = tab;
   app.learn = true;
+}
+
+/**
+ * The engine could not hold the grid (Engine.onAdjust, App.svelte): it lowered it to `resolution` cells on the long
+ * side. The device's largest grid then caps every later scene. `lattice`: the lattice it could not hold, so the grid is
+ * shaped like the screen now (ADR 0026). A scene chosen meanwhile keeps its own lattice. Such a grid says nothing about
+ * the largest grid the device holds. When it was the scene's own lattice, the scene runs on that grid, as with a grid
+ * the device lowered: no change of the scene, and the panel offers no way back that would fail again.
+ */
+export function deviceAdjusted(message: string, resolution: number, lattice?: Lattice) {
+  if (lattice) {
+    if (sameLattice(app.settings.lattice, lattice)) {
+      app.settings.lattice = null;
+      app.settings.resolution = resolution;
+    }
+    for (const base of [app.sceneBase, app.linkBase])
+      if (base && sameLattice(base.lattice, lattice)) Object.assign(base, { lattice: null, resolution });
+    if (sameLattice(presetById(app.scene)?.settings().lattice ?? null, lattice)) app.lostLattice = [...lattice];
+  } else {
+    app.maxResolution = Math.min(app.maxResolution, resolution);
+    // A scene chosen meanwhile may ask for less than the grid this message is about.
+    app.settings.resolution = Math.min(app.settings.resolution, resolution);
+  }
+  showNotice(message);
+}
+
+/**
+ * One stats tick of the startup check (App.svelte, ui/tune.ts) for engine `e`, while the tab is `visible`. The loaded
+ * scene's own lattice keeps its cells: its time does not count and the check never lowers it. Another lattice, such as
+ * one from a link that sanitize() takes up to 4096 × 4096 cells, counts as the grid shaped like the screen with at least
+ * its cells, and the check lowers it to a grid shaped like the screen (ADR 0026).
+ */
+export function autoTune(tuner: GridTuner, e: Engine, now: number, visible: boolean) {
+  const { lattice } = e.settings;
+  const own = lattice !== null && sameLattice(lattice, app.sceneBase?.lattice ?? null);
+  const aspect = e.canvas.width / Math.max(1, e.canvas.height);
+  const lower = tuner.tick({
+    now,
+    active: visible && !app.paused && !e.busy,
+    lattice: own,
+    run: e.restarts,
+    frames: e.frames,
+    steps: e.sim.step,
+    requested: e.budget.requested,
+    idleFrames: e.budget.idleFrames,
+    idleMs: e.budget.idleMs,
+    resolution: lattice && !own ? latticeResolution(lattice, aspect) : app.settings.resolution,
+    picked: app.gridPicked,
+  });
+  if (lower === undefined) return;
+  app.maxResolution = lower;
+  app.settings.lattice = null;
+  app.settings.resolution = lower;
+  showNotice(`Lowered the grid to ${lower} cells for smooth playback. Change it under Scene → Grid.`);
 }
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;

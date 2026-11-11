@@ -1,7 +1,8 @@
 # 0009: Rendering pipeline
 
 - Status: accepted (revised 2026-11-08 after the visual review loop; amended 2026-11-10: food,
-  light and walls; amended 2026-11-11: scent view, revised the same day: a glow and the mark of a strand)
+  light and walls; amended 2026-11-11: scent view, revised the same day: a glow and the mark of a strand, and
+  amended for the lattices of ADR 0026)
 - Date: 2026-11-08
 
 ## Context
@@ -598,8 +599,8 @@ and its consequences; the rest stays.
    the line shows where that level is on the map. Assessed on the screenshots: one closed line per food, close to the
    flake in Jones at decay 0.1 and farther out in the extended model at 0.003; it does not crowd the picture.
 7. **The repellent only where the model reads it** (coordinator). The pass draws the repellent only in the extended
-   model (`View.fx.z` + 4); the Jones model's agents do not read it. Reason: after a switch from the extended model the
-   repellent decays for about 60 steps, and the view drew pink that no agent felt.
+   model (`View.scentFx.y`, see the merge below); the Jones model's agents do not read it. Reason: after a switch
+   from the extended model the repellent decays for about 60 steps, and the view drew pink that no agent felt.
 8. **The legend names what the scene holds** (coordinator, app review). A row for food when the drawing holds food, and
    for the repellent when the model is extended and the drawing holds light; with neither, one sentence says that the
    scene has no scent to show, so the switch does not look broken. Each row is a gradient of the glow over the bare dish
@@ -611,15 +612,15 @@ and its consequences; the rest stays.
 9. **The view lies below the oat flake** (coordinator), as it lies below the walls; within the view the food's glow,
    then its line, then the repellent's glow over them. Reason: the flake is the marker of the food, and its colour must
    not change; the repellent is the warning, so it lies on top.
-10. **Zoomed out, the view reads a coarser lattice** (this branch, after measuring the cause). From 2 cells per pixel on
-    the pass reads the scent from a lattice of 2, 4 or 8 cells per texel (`scentLevel()`: the power of two at or below
-    the scale, at most 8), filled each frame by a pass at that lattice (`scentDown`: rgba32float, each texel the mean of
+10. **Zoomed out, the view reads a coarser map** (this branch, after measuring the cause). From 2 cells per pixel on
+    the pass reads the scent from a map of 2, 4 or 8 cells per texel (`scentLevel()`: the power of two at or below
+    the scale, at most 8), filled each frame by a pass at that map (`scentDown`: rgba32float, each texel the mean of
     the cells it covers by the share it covers, with walls and cells outside the dish weighing 0, and that share). Its
     texels tile the grid exactly (n = ⌈side / 2^k⌉, each side / n cells wide), so on the periodic grid it wraps with the
     grid. Reason: at 8 cells per pixel each pixel read 4 cells far from those of its neighbours, which missed the
-    cache: 17.2 ms more per frame at 2560 × 1600 against 0.55 ms with the same arithmetic on 4 reads of one texel (paired
-    probe, WebGPU). The lookup weighs each texel by the share that holds scent, so walls and the rim of the dish do not
-    pull it down.
+    cache: 17.2 ms more per frame at 2560 × 1600 against 0.55 ms with the same arithmetic on 4 reads of one texel
+    (paired probe, WebGPU). The lookup weighs each texel by the share that holds scent, so walls and the rim of the
+    dish do not pull it down.
 11. **At the box edge the log of the scent goes on with its slope** (coordinator: a one-sided gradient). Within half a
     cell of the edge the pass takes the scent and its gradient at the centres of the outer cells and goes on with the
     gradient of its logarithm (`scentFrom()`). Reason: the clamped lookup held the scent flat there, so a line that
@@ -649,8 +650,9 @@ and its consequences; the rest stays.
 16. **Texts** (coordinator). The button's title is "Show the scent of food and light (S)", as short as the other titles.
     The help (Learn → Controls), the legend and Learn → The model say what the glow and the line mean in short plain
     sentences, and Learn says that a small food gets weaker at a lower decay, so its line can come closer.
-17. **The uniform**: `View.fx.z` holds the lattice level (0 to 3) plus 4 when the repellent is drawn, `View.fx.w` the
-    mark (0: none). Reason: the struct had these two floats free, and both backends share it.
+17. **The uniform**: `View.fx.z` holds the map level (0 to 3) plus 4 when the repellent is drawn, `View.fx.w` the
+    mark (0: none). Reason: the struct had these two floats free, and both backends share it. Replaced by a field of
+    its own at the merge with ADR 0026 (below).
 18. **The shared path is pinned** (coordinator). A GPU test draws walls and light over the bare dish in glow, gel and
     paper and holds pixels on cell centres to the formulas: the drop shadow (0.75, 0.6, 0.3 per style), the light's
     tint, and the flat top of a wall (albedo, diffuse and specular light). Reason: the test against main cannot see a
@@ -692,12 +694,12 @@ and its consequences; the rest stays.
 - Tests on both backends (`sim.gpu.test.ts`, "scent view"):
   - Without the view, 0 of 255 apart from the shaders of main in every style, on the periodic grid, in a box and in a
     dish, with and without food, light and walls, at four zooms down to 6 cells per pixel. The cut of the scent code
-    still gives main's `render.wgsl` and `render.frag` byte for byte; `view.glsl` differs from main only by its comment
-    on `fx`.
+    still gives main's `render.wgsl` and `render.frag` byte for byte; `view.glsl` differs from main only by the field
+    `scentFx` (since the merge below).
   - With the view, no byte of the simulation changes.
   - Every pixel inside the arena follows the CPU reference of the glow and the line (`scentAt()` with `scentGlow()`,
     `scentLine()`, `scentMark()` and `scentOver()`), in every style, across the seam, at the box edge with the slope of
-    item 11, at the rim of the dish, zoomed in, near fit, and on the lattices of 2 and 4 cells (2.5 and 6 cells per
+    item 11, at the rim of the dish, zoomed in, near fit, and on the maps of 2 and 4 cells (2.5 and 6 cells per
     pixel), with the line at the mark of the settled levels; outside the arena and on the flake no pixel changes by more
     than the dither; in the Jones model no repellent shows.
   - The Jones model at a decay of 0.0001 with food strength 0.5 reaches more than 10,000 (every power of ten from 1,000
@@ -706,7 +708,7 @@ and its consequences; the rest stays.
   - The view's pipelines and programs are built once.
   - The shadow, the light and the flat top of walls follow their formulas in glow, gel and paper (item 18).
   - Unit tests: `scent.test.ts` (the glow, the line, the mark for one and several strains, Jones, saturation, the
-    strand level within its bin, the lattice level), `engine.test.ts`, `pack.test.ts`, `params.test.ts`,
+    strand level within its bin, the map level), `engine.test.ts`, `pack.test.ts`, `params.test.ts`,
     `url.test.ts`, `scene.test.ts`, `state.test.ts`. e2e (`ui.spec.ts`): the button and the key, the legend's rows and
     its sentence for a scene without scent, its description, the link, no change of the scene, no restart, the key
     after a click on a toolbar button and not in a number field, Space on a focused button, and the legend clear of the
@@ -716,11 +718,11 @@ and its consequences; the rest stays.
     clearing the scent (both), a restart on the switch, `packParams()` reading it, the top of the glow at 1,000 instead
     of 10,000 (WGSL and GLSL), the glow's top opacity, the line's opacity, the lowest level, the wrap at the seam, the
     clamp at the box edge, the slope at the box edge, the rim of the dish, the wall cells in the lookup (both), the
-    repellent drawn in the Jones model, the view over the flake, the coarse lattice's gradient in cells, a build of the
+    repellent drawn in the Jones model, the view over the flake, the coarse map's gradient in cells, a build of the
     pipelines or programs in every frame (both), the paper shadow of 0.2, the light's tint, the walls' albedo, the
     switch dropped on a new scene, in the link or counted as a change, the mark without the food weight, the strand
     level at the bin's centre, the key S, and the shortcuts ignored after a click on a button (both e2e). Not caught:
-    the coarse lattice counting walls as cells with scent; its effect stays within one texel of a wall, which is one
+    the coarse map counting walls as cells with scent; its effect stays within one texel of a wall, which is one
     pixel at that zoom and lies under the wall's ramp.
 - On SwiftShader on an M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`; load average 6 to 12),
   the longest new GPU test, the pixels without the view on WebGL2, took 11.4 s of its 240 s limit (the review measured
@@ -730,3 +732,46 @@ and its consequences; the rest stays.
 - The line's width steps a little where a pixel crosses a cell centre, where the bilinear gradient jumps; its place
   does not.
 - The PNG export has the glow and the line, but no legend (owner item).
+
+## Amendment 2026-11-11: merged with the lattices of ADR 0026
+
+### Context
+
+ADR 0026 (PR #29, `f81c4a3`) runs the scenes of Jones on the lattices of their figures. Around a periodic lattice
+the pass shows the copies of the grid at 0.15 of their light (`LATTICE_COPIES`), and it took the third value of
+`View.fx` for that, the value that the scent view used for its map level and the repellent. Beside a closed lattice
+the free space shows only the background. The word "lattice" now names the grid of a figure.
+
+### Decision
+
+Each by this branch on 2026-11-11, at the merge of `main` into it.
+
+1. **A field of its own for the scent view**: `View.scentFx` (x the map level, 0 to 3; y 1 when the repellent is
+   drawn, else 0; z the mark, 0 for none; w unused), after `fx`, on both backends (`render.wgsl`, `view.glsl`,
+   `packView()`; the view uniform grows from 144 to 160 bytes). `fx` stays as main has it. Reason: `fx` has no float
+   left, and two meanings in one float would change main's code of the copies, so the pass without the view could
+   no longer give main's shaders byte for byte. A field that only the scent code reads keeps that cut exact.
+2. **The view on the copies is dimmed with them** (no change of code). The view is drawn inside `scene()`, below the
+   flake and the walls, and the pass dims the copies after `scene()`. So a copy shows the view at 0.15 too, as it
+   shows the trail and the food. The scent lookup wraps on the periodic grid, so each copy shows the scent of the
+   cells it shows. Reason: the copies show where a tool acts (ADR 0026, decision 3), and the scent at full strength
+   on a dimmed copy would hide which picture is the lattice. Beside a closed lattice the pass draws no scene, so no
+   view either.
+3. **The mark on a lattice** (no change of code): the histogram of the auto levels counts the cells of the grid, not
+   the pixels on screen, so the copies and the free space do not change the strand. In the Transport network on its
+   200 × 200 lattice with three dabs the mark is 7.7 (Jones) and 7.7 (extended model at decay 0.003), as on
+   1024 × 640 before (7.6).
+4. **"Map", not "lattice", for the coarser scent that the view reads zoomed out**, in the code, the tests and this
+   ADR. Reason: ADR 0026 gives "lattice" to the grid of a figure.
+
+### Consequences
+
+- A GPU test on both backends draws the view on a periodic lattice with its copies in every style and at four
+  zooms, and holds each pixel of a copy to the CPU reference: the view over the copy's picture before the dimming,
+  dimmed as the pass dims it ("dims the view with the copies around a periodic lattice"). The test without the view
+  now also holds a periodic lattice with its copies against main's shaders (112 captures).
+- Mutations, each reverted after its run: the view drawn after the dimming only on the copies (WGSL), and no view on
+  the copies (WGSL and GLSL): the new test caught each, and no other test did. The repellent always drawn, no mark,
+  and the map level always 0 in `packView()`: caught by the tests of the view.
+- On SwiftShader on an M3 Pro (load average 5 to 10) the test without the view took 10.6 s on WebGL2 for its 112
+  captures (ADR 0010), the test of the copies 0.5 s.

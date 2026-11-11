@@ -16,7 +16,8 @@ struct View {
   colors: array<vec4f, 4>, // strain colors, linear RGB
   background: vec4f,  // linear RGB
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
-  fx: vec4f,          // bloom strength, black level (summed trail), scent lattice level (0 to 3) + 4 with the repellent, mark
+  fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), unused
+  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), mark (0: none), unused
 }
 
 @group(0) @binding(0) var<uniform> V: View;
@@ -29,7 +30,7 @@ struct View {
 @group(0) @binding(7) var heightSampler: sampler;   // bilinear, clamped
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
-@group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser lattice (scentDown), zoomed out
+@group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -572,10 +573,10 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
 // The food scent and the light repellent over the picture, below the flake of food and the walls. Display only. A
 // glow per layer that fades out as the scent gets weaker, on a fixed log scale from 0.01 to 10,000 and more, so two
 // scenes or two models compare directly. One line marks where the food scent weighs as much as the trail of a strand
-// (V.fx.w, scentMark() in scent.ts). src/engine/scent.ts holds the same numbers.
+// (V.scentFx.z, scentMark() in scent.ts). src/engine/scent.ts holds the same numbers.
 
 const SCENT_LOW = -2.0;            // log10 of the lowest level drawn: 0.01
-const SCENT_TOP = 6.0;             // powers of ten from 0.01 to the top of the glow: 10^4, and the glow stays from there up
+const SCENT_TOP = 6.0;             // powers of ten from 0.01 to the top of the glow, 10^4; the glow stays above it
 const SCENT_GLOW = 0.45;           // opacity of the glow at the top
 const SCENT_LINE = 0.8;            // opacity of the line at the mark
 const SCENT_PAPER_FILL = 1.5;      // the glow over paper, times this: a light colour shows the same opacity less
@@ -637,7 +638,7 @@ fn scentBilinear(p: vec2f, open: vec4f) -> Scent {
 }
 
 // The bilinear mix of a (top left), b (top right), c (bottom left) and d (bottom right) at fraction f, without the
-// corners that `open` weighs 0, with its gradient per step of the lattice.
+// corners that `open` weighs 0, with its gradient per step between the samples.
 fn scentMix(a: vec2f, b: vec2f, c: vec2f, d: vec2f, f: vec2f, open: vec4f) -> Scent {
   let w = vec4f((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y) * open;
   let wx = vec4f(f.y - 1.0, 1.0 - f.y, -f.y, f.y) * open;
@@ -659,8 +660,8 @@ fn scentFrom(s: Scent, d: vec2f) -> Scent {
   return Scent(s.v * k, s.gx * k, s.gy * k);
 }
 
-// Texels per side of the coarse lattice of level k (1 to 3): the grid side over 2^k, rounded up. Its texels tile the
-// grid exactly, each s / n cells wide, so on the periodic grid the lattice wraps with the grid.
+// Texels per side of the coarse map of level k (1 to 3): the grid side over 2^k, rounded up. Its texels tile the
+// grid exactly, each s / n cells wide, so on the periodic grid the map wraps with the grid.
 fn scentLevelSize(k: u32) -> vec2i {
   return (size() + i32((1u << k) - 1u)) >> vec2u(k);
 }
@@ -673,14 +674,15 @@ fn scentOpen(c: vec2i) -> f32 {
   return 1.0;
 }
 
-// The scent on the coarse lattice of level V.fx.z & 3, one texel per fragment: the mean over the cells of the arena that
-// the texel covers, each by the share it covers (walls and cells outside the dish count 0), times the share that holds
-// scent (z). Zoomed out, a pixel reads 4 texels of this lattice instead of 4 cells far apart from those of the pixels
-// beside it, which missed the cache (8 cells per pixel at 2560 × 1600: 17 ms against 0.6 ms with the reads together).
+// The scent on the coarse map of level V.scentFx.x, one texel per fragment: the mean over the cells of the arena
+// that the texel covers, each by the share it covers (walls and cells outside the dish count 0), times the share that
+// holds scent (z). Zoomed out, a pixel reads 4 texels of this map instead of 4 cells far apart from those of the
+// pixels beside it, which missed the cache (8 cells per pixel at 2560 × 1600: 17 ms against 0.6 ms with the reads
+// together).
 @fragment
 fn scentDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let s = size();
-  let span = vec2f(s) / vec2f(scentLevelSize(u32(V.fx.z) & 3u)); // cells per texel
+  let span = vec2f(s) / vec2f(scentLevelSize(u32(V.scentFx.x))); // cells per texel
   let lo = floor(frag.xy) * span;
   let hi = lo + span;
   var sum = vec3f(0.0);
@@ -695,7 +697,7 @@ fn scentDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   return vec4f(sum / (span.x * span.y), 0.0);
 }
 
-// The scent at p on the coarse lattice of level k: bilinear over its 4 texels around p, each weighed by the share of
+// The scent at p on the coarse map of level k: bilinear over its 4 texels around p, each weighed by the share of
 // it that holds scent, and the gradient per cell.
 fn scentCoarse(p: vec2f, k: u32) -> Scent {
   let s = size();
@@ -727,8 +729,8 @@ fn scentCoarse(p: vec2f, k: u32) -> Scent {
   return r;
 }
 
-// The opacity of the glow for a scent v: from 0 at 0.01 it rises in a straight line with log10(v) to SCENT_GLOW at 10^4,
-// and stays there above it.
+// The opacity of the glow for a scent v: from 0 at 0.01 it rises in a straight line with log10(v) to SCENT_GLOW at
+// 10^4, and stays there above it.
 fn scentGlow(v: f32) -> f32 {
   if (!(v > 0.0)) { return 0.0; }
   return SCENT_GLOW * clamp((log2(v) / log2(10.0) - SCENT_LOW) / SCENT_TOP, 0.0, 1.0);
@@ -753,10 +755,9 @@ fn openCells(p: vec2f, cells: array<u32, 9>) -> vec4f {
 
 // The view over colour c: the glow of the food scent, its line at the mark, then the glow of the repellent over them.
 // Zoomed in near walls the lookup leaves out their cells (`near`, `cells`: as in scene()); zoomed out to 2 cells per
-// pixel or more it reads the coarse lattice. The repellent shows only where the model reads it: the extended model.
+// pixel or more it reads the coarse map. The repellent shows only where the model reads it: the extended model.
 fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
-  let flags = u32(V.fx.z);
-  let level = flags & 3u;
+  let level = u32(V.scentFx.x);
   var s: Scent;
   if (level > 0u) {
     s = scentCoarse(p, level);
@@ -769,11 +770,11 @@ fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
   }
   let paperStyle = V.style == 2u;
   let fill = select(1.0, SCENT_PAPER_FILL, paperStyle);
-  let repellent = select(0.0, scentGlow(s.v.y), flags >= 4u);
+  let repellent = select(0.0, scentGlow(s.v.y), V.scentFx.y > 0.5);
   let food = scentGlow(s.v.x) * fill;
   var o = mix(c, select(vec3f(0.1383, 0.7091, 0.1623), vec3f(0.0207, 0.2429, 0.033), paperStyle), food);
   o = mix(o, select(vec3f(0.3553, 0.9273, 0.3684), vec3f(0.0063, 0.1096, 0.0124), paperStyle),
-          scentLine(s.v.x, vec2f(s.gx.x, s.gy.x), V.fx.w));
+          scentLine(s.v.x, vec2f(s.gx.x, s.gy.x), V.scentFx.z));
   return mix(o, select(vec3f(0.9216, 0.1742, 0.6301), vec3f(0.4023, 0.024, 0.2555), paperStyle), repellent * fill);
 }
 
@@ -788,11 +789,18 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   } else if (V.boundary == 2u) {
     inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
   }
-  var c = V.background.rgb * select(0.55, 0.92, V.style == 2u);
+  let space = V.background.rgb * select(0.55, 0.92, V.style == 2u);
+  var c = space;
   // One call: a GPU that runs both sides of a branch (SwiftShader in CI) would draw the scene twice.
   if (inside > 0.0) {
     let inner = scene(p, s);
     c = select(mix(c, inner, inside), inner, inside >= 1.0);
+  }
+  // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it, with a ramp one pixel wide
+  // across its edge. A grid shaped like the screen shows them as they are (copies 1).
+  if (V.fx.z < 1.0) {
+    let edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
+    c = mix(mix(space, c, V.fx.z), c, edge);
   }
   // Triangular dither of ±1 LSB against banding in dark gradients.
   let n = hash(vec2u(frag.xy)) - hash(vec2u(frag.xy) + vec2u(7919u, 104729u));

@@ -44,7 +44,7 @@ export interface Walled {
 export interface ScentPrograms {
   /** The render pass with the view (SCENT in render.frag), without (index 0) and with (1) the food, light and walls. */
   render: [Program, Program];
-  /** The pass that fills its coarse lattice (scent-down.frag). */
+  /** The pass that fills its coarse map (scent-down.frag). */
   down: Program;
 }
 

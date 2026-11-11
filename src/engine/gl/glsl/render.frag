@@ -350,7 +350,7 @@ vec3 walls(vec3 c, Env e) {
 // ---- Scent view (SCENT; see render.wgsl and src/engine/scent.ts) ----
 
 uniform sampler2D scent;       // food scent (r) and light repellent (g)
-uniform sampler2D scentLevels; // the scent on a coarser lattice (scent-down.frag), zoomed out
+uniform sampler2D scentLevels; // the scent on a coarser map (scent-down.frag), zoomed out
 
 const float SCENT_LOW = -2.0;              // log10 of the lowest level drawn: 0.01
 const float SCENT_TOP = 6.0;               // powers of ten from 0.01 to the top of the glow: 10^4
@@ -437,10 +437,10 @@ Scent scentFrom(Scent s, vec2 d) {
   return Scent(s.v * k, s.gx * k, s.gy * k);
 }
 
-// Texels per side of the coarse lattice of level k (see scentLevelSize in render.wgsl).
+// Texels per side of the coarse map of level k (see scentLevelSize in render.wgsl).
 ivec2 scentLevelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
 
-// The scent at p on the coarse lattice of level k, with the gradient per cell (see scentCoarse in render.wgsl).
+// The scent at p on the coarse map of level k, with the gradient per cell (see scentCoarse in render.wgsl).
 Scent scentCoarse(vec2 p, int k) {
   ivec2 s = gridSize();
   ivec2 n = scentLevelSize(k);
@@ -498,10 +498,10 @@ vec4 openCells(vec2 p, vec4 cells[9]) {
 vec3 scentView(Scent s, vec3 c) {
   bool paperStyle = V.style == 2u;
   float fill = paperStyle ? SCENT_PAPER_FILL : 1.0;
-  float repellent = int(V.fx.z) >= 4 ? scentGlow(s.v.y) : 0.0;
+  float repellent = V.scentFx.y > 0.5 ? scentGlow(s.v.y) : 0.0;
   vec3 o = mix(c, paperStyle ? vec3(0.0207, 0.2429, 0.033) : vec3(0.1383, 0.7091, 0.1623), scentGlow(s.v.x) * fill);
   o = mix(o, paperStyle ? vec3(0.0063, 0.1096, 0.0124) : vec3(0.3553, 0.9273, 0.3684),
-          scentLine(s.v.x, vec2(s.gx.x, s.gy.x), V.fx.w));
+          scentLine(s.v.x, vec2(s.gx.x, s.gy.x), V.scentFx.z));
   return mix(o, paperStyle ? vec3(0.4023, 0.024, 0.2555) : vec3(0.9216, 0.1742, 0.6301), repellent * fill);
 }
 #endif
@@ -545,7 +545,7 @@ vec3 scene(vec2 p, vec2 s) {
 #ifdef SCENT
   // The view lies below the flake of food and the walls (see scene in render.wgsl).
   Scent sc;
-  int level = int(V.fx.z) & 3;
+  int level = int(V.scentFx.x);
   if (level > 0) {
     sc = scentCoarse(p, level);
   } else {
@@ -575,11 +575,17 @@ void main() {
   float inside = 1.0;
   if (V.boundary == 1u) inside = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
   else if (V.boundary == 2u) inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
-  vec3 c = V.background.rgb * (V.style == 2u ? 0.92 : 0.55);
+  vec3 space = V.background.rgb * (V.style == 2u ? 0.92 : 0.55);
+  vec3 c = space;
   // One call: a GPU that runs both sides of a branch (SwiftShader in CI) would draw the scene twice.
   if (inside > 0.0) {
     vec3 inner = scene(p, s);
     c = inside >= 1.0 ? inner : mix(c, inner, inside);
+  }
+  // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it (see render.wgsl).
+  if (V.fx.z < 1.0) {
+    float edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
+    c = mix(mix(space, c, V.fx.z), c, edge);
   }
   uvec2 px = uvec2(gl_FragCoord.xy);
   float n = hash(px) - hash(px + uvec2(7919u, 104729u));

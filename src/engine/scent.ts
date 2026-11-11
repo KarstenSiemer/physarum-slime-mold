@@ -20,14 +20,14 @@ export const SCENT_LINE = 0.8;
 export const SCENT_PAPER_FILL = 1.5;
 /** Powers of ten per pixel below which the scent counts as flat. */
 export const SCENT_FLAT = 1e-4;
-/** The coarsest lattice the view reads when zoomed out (scentLevel()). */
+/** The coarsest map the view reads when zoomed out (scentLevel()). */
 export const SCENT_LEVELS_MAX = 3;
 
 /** The levels the legend names: 0.01, 0.1, …, 10,000. */
 export const SCENT_LEVELS = Array.from({ length: SCENT_TOP + 1 }, (_, i) => 10 ** (SCENT_LOW + i));
 
 /**
- * The lattice the view reads at `scale` cells per pixel: 0 is the grid, k from 1 to SCENT_LEVELS_MAX a lattice of
+ * The map the view reads at `scale` cells per pixel: 0 is the grid, k from 1 to SCENT_LEVELS_MAX a map of
  * cells over 2^k per side (scentLevelSize()). From 2 cells per pixel a pixel then reads texels next to those of the
  * pixels beside it: 4 cells far apart missed the cache (ADR 0009, amendment 2026-11-11).
  */
@@ -35,7 +35,7 @@ export function scentLevel(scale: number): number {
   return Math.min(SCENT_LEVELS_MAX, Math.max(0, Math.floor(Math.log2(scale))));
 }
 
-/** Texels per side of the lattice of level k: the grid side over 2^k, rounded up. */
+/** Texels per side of the map of level k: the grid side over 2^k, rounded up. */
 export const scentLevelSize = (side: number, k: number) => (side + (1 << k) - 1) >> k;
 
 type Rgb = readonly [number, number, number];

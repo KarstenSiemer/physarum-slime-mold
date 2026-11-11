@@ -15,8 +15,10 @@
   import {
     adopt,
     app,
+    autoTune,
     currentDrawing,
     deadLeft,
+    deviceAdjusted,
     getEngine,
     openLink,
     ruleUnavailable,
@@ -65,12 +67,7 @@
       addressRead = true;
       try {
         // The engine lowers the grid when the device cannot hold it, also for the first allocation.
-        const engine = await Engine.create(canvas, $state.snapshot(app.settings), (message, resolution) => {
-          app.maxResolution = Math.min(app.maxResolution, resolution);
-          // A scene chosen meanwhile may ask for less than the grid this message is about.
-          app.settings.resolution = Math.min(app.settings.resolution, resolution);
-          showNotice(message);
-        });
+        const engine = await Engine.create(canvas, $state.snapshot(app.settings), deviceAdjusted);
         if (life.signal.aborted) {
           engine.destroy();
           return;
@@ -147,26 +144,9 @@
 
   // Startup check: in the first 15 s of active time, lower the grid (at most twice, not below 512 cells)
   // while the frame rate stays below 40 fps (or below 90 % of a lower rate the browser gives, such as
-  // 30 fps in a power saving mode) or the steps below 3/4 of what the speed asked for (ui/tune.ts).
+  // 30 fps in a power saving mode) or the steps below 3/4 of what the speed asked for (ui/tune.ts). The scene's own
+  // lattice keeps its cells (autoTune() in ui/state.svelte.ts, ADR 0026).
   const tuner = new GridTuner();
-  function autoTune(e: Engine) {
-    const lower = tuner.tick({
-      now: performance.now(),
-      active: document.visibilityState === 'visible' && !app.paused && !e.busy,
-      run: e.restarts,
-      frames: e.frames,
-      steps: e.sim.step,
-      requested: e.budget.requested,
-      idleFrames: e.budget.idleFrames,
-      idleMs: e.budget.idleMs,
-      resolution: app.settings.resolution,
-      picked: app.gridPicked,
-    });
-    if (lower === undefined) return;
-    app.maxResolution = lower;
-    app.settings.resolution = lower;
-    showNotice(`Lowered the grid to ${lower} cells for smooth playback. Change it under Scene → Grid.`);
-  }
 
   function fail(err: unknown) {
     app.error = `The simulation stopped: ${err instanceof Error ? err.message : String(err)}.`;
@@ -183,7 +163,8 @@
   async function updateStats() {
     const e = getEngine();
     if (!e) return;
-    if (tuner.running) autoTune(e); // also while rebuilding: that time must not count
+    // Also while rebuilding: that time must not count.
+    if (tuner.running) autoTune(tuner, e, performance.now(), document.visibilityState === 'visible');
     // The alive count waits for the GPU, which can take longer than the 500 ms interval under load. So
     // time, frames and steps are read together before it, and two counts never overlap.
     if (e.busy || counting) return;

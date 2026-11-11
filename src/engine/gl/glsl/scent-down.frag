@@ -1,5 +1,5 @@
-// The scent on the coarse lattice of the scent view (see scentDown in ../../shaders/render.wgsl), one texel per
-// fragment, at the level V.fx.z & 3. Prepended with view.glsl.
+// The scent on the coarse map of the scent view (see scentDown in ../../shaders/render.wgsl), one texel per
+// fragment, at the level V.scentFx.x. Prepended with view.glsl.
 
 uniform sampler2D scent; // food scent (r) and light repellent (g)
 
@@ -15,7 +15,7 @@ float scentOpen(ivec2 c) {
 
 void main() {
   ivec2 s = gridSize();
-  vec2 span = vec2(s) / vec2(scentLevelSize(int(V.fx.z) & 3));
+  vec2 span = vec2(s) / vec2(scentLevelSize(int(V.scentFx.x)));
   vec2 lo = floor(gl_FragCoord.xy) * span;
   vec2 hi = lo + span;
   vec3 sum = vec3(0.0);

@@ -54,7 +54,8 @@ The specifications found facts that force decisions:
    fits the screen with free space beside it. The grid stays a setting: when the user picks another
    size, the scene says why its result then differs from the paper and which lattice Jones used.
    The app's own scenes (the start scene, the Maze, Three strains) keep a grid that grows with the
-   screen.
+   screen. ADR 0026 implements it: the lattices of Jones 2010, the hint, links, the view and the
+   memory fit.
 4. **Tokyo keeps north up** (owner, 2026-11-11). Its frame does not turn by 90° on a tall screen
    (ADR 0019 turns the others); a tall screen shows free space above and below the map.
 5. **The maze of Adamatzky 2012 starts with a settled scent** (owner, 2026-11-11). The app computes
@@ -83,4 +84,4 @@ paper's values and these readings.
   Jones' method on Tero's map, and its text says so.
 - North-up and the settled scent are per-scene properties that other scenes do not have.
 - The shipped Jones scenes change once they move to their papers' lattices: their bytes differ
-  from today, and their cells look larger on a large screen.
+  from today, and their cells look larger on a large screen. ADR 0026 has the measurements.

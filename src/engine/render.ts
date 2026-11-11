@@ -29,10 +29,10 @@ export interface Frame {
   sampler: GPUSampler;
 }
 
-export const VIEW_BYTES = 144;
+export const VIEW_BYTES = 160;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
-/** The scent view's coarse lattice: the scent of both layers times the share that holds scent, and that share. */
+/** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
 const COARSE_FORMAT: GPUTextureFormat = 'rgba32float';
 
 /**
@@ -62,17 +62,23 @@ export function packView(
   });
   fl.set(hexToLinear(BACKGROUND[settings.style]), 24);
   u.set([frame, strains.length, overlays ? 1 : 0, occupancy ? 1 : 0], 28);
-  // The scent view: the lattice it reads (scentLevel()), plus 4 with the repellent, which only the extended model
-  // reads; and the mark of a strand.
-  const level = (settings.showScent ? scentLevel(view.scale) : 0) + (settings.model === 'extended' ? 4 : 0);
-  fl.set([settings.bloom, black, level, scentMark(settings, strand)], 32);
+  // Copies of the grid around a periodic lattice show at this brightness (ADR 0026); 1 shows them as they are.
+  const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
+  fl.set([settings.bloom, black, copies, 0], 32);
+  // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
+  // mark of a strand.
+  const level = settings.showScent ? scentLevel(view.scale) : 0;
+  fl.set([level, settings.model === 'extended' ? 1 : 0, scentMark(settings, strand), 0], 36);
 }
+
+/** How much of the scene the copies around a periodic lattice show (packView). */
+export const LATTICE_COPIES = 0.15;
 
 interface Groups {
   group: GPUBindGroup;
   /** The gel height pass (`heightField` in render.wgsl). */
   heights: GPUBindGroup;
-  /** The scent view's pass that fills its coarse lattice (`scentDown` in render.wgsl). */
+  /** The scent view's pass that fills its coarse map (`scentDown` in render.wgsl). */
   down: GPUBindGroup;
   bloom: GPUTextureView;
   sampler: GPUSampler;
@@ -122,7 +128,7 @@ export class Renderer {
   private scent: ScentPipelines | undefined;
   private scentBuild: Promise<ScentPipelines> | undefined;
   private readonly downLayout: GPUBindGroupLayout;
-  /** The scent view's coarse lattice (scentDown), made at the first frame that draws the view. */
+  /** The scent view's coarse map (scentDown), made at the first frame that draws the view. */
   private coarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
   /** Bound in its place until then. */
   private readonly noCoarse: GPUTexture;
@@ -327,7 +333,7 @@ export class Renderer {
       pre.draw(3);
       pre.end();
     }
-    // Zoomed out, the scent view reads a coarser lattice of the scent, filled here (scentDown in render.wgsl).
+    // Zoomed out, the scent view reads a coarser map of the scent, filled here (scentDown in render.wgsl).
     const level = scentLevel(f.view.scale);
     if (view && coarse && level > 0) {
       const down = enc.beginRenderPass({ colorAttachments: [{ view: coarse, loadOp: 'clear', storeOp: 'store' }] });
@@ -376,7 +382,7 @@ export class Renderer {
 
   private scentError: Error | undefined;
 
-  /** The scent view's coarse lattice for a trail of this size (half its sides, rounded up), made anew with the size. */
+  /** The scent view's coarse map for a trail of this size (half its sides, rounded up), made anew with the size. */
   private coarseFor(trail: GPUTexture): GPUTextureView {
     const [width, height] = [scentLevelSize(trail.width, 1), scentLevelSize(trail.height, 1)];
     if (this.coarse?.texture.width !== width || this.coarse.texture.height !== height) {

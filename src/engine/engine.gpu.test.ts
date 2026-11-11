@@ -246,6 +246,10 @@ const cells = (env: Uint8Array, channel: number) => env.filter((v, i) => i % 4 =
 // Owner report: load the Maze, change the grid, and the walls and the food were gone (ADR 0019).
 describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kind) => {
   // 320 × 180 gives the 16:9 grids of ADR 0010 (512 × 288 at grid 512); 180 × 390 a 9:19.5 phone.
+  /**
+   * A preset on a canvas of `size`. A scene of Jones keeps the lattice of its figure on every screen (ADR 0026): the
+   * patch `lattice: null` puts it on a grid shaped like the screen, as a pick in the panel does.
+   */
   async function load(id: string, patch: Partial<Settings> = {}, size: [number, number] = [320, 180]) {
     const p = presetById(id);
     if (!p) throw new Error(`no preset ${id}`);
@@ -285,7 +289,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
   // Zoomed out or moved, the view shows copies of a periodic grid around it, and a stroke there paints the grid
   // where the copy shows it (fromStroke in environment.ts). Other grids must find it there too.
   it('keep food painted on copies of a periodic grid, near and far, also on another grid', async () => {
-    const { engine } = await load('network', { resolution: 256 });
+    const { engine } = await load('network', { lattice: null, resolution: 256 });
     expect([engine.sim.width, engine.sim.height, engine.settings.boundary]).toEqual([256, 144, 'wrap']);
     // One period left of the grid, and two periods right and up.
     const strokes: Stroke[] = [
@@ -313,7 +317,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
   // The sweep deletes strokes that later strokes cleared completely on the grid on screen (sweep.ts). The simulation
   // keeps every stroke it painted and a new one paints the list: both must hold the list's bytes.
   it('match the CPU replay of the list after sweeps, and after a rebuild on another grid', async () => {
-    const { engine } = await load('network', { resolution: 256 });
+    const { engine } = await load('network', { lattice: null, resolution: 256 });
     expect([engine.sim.width, engine.sim.height, engine.settings.boundary]).toEqual([256, 144, 'wrap']);
     const list = () => (engine as unknown as { edits: EnvEdit[] }).edits;
     const paint = (kind: Stroke['kind'], from: [number, number], to: [number, number], radius: number) => {
@@ -644,7 +648,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
   // A preset load puts the scene's shapes in place of every edit: on the same grid the simulation clears its
   // environment and paints them in one call, on another grid or under the dish a new simulation paints them.
   it('keep the outlines on the side of env after a preset load, on the same grid and on a new one', async () => {
-    const { engine } = await load('network', { resolution: 512, density: 0.12 });
+    const { engine } = await load('network', { lattice: null, resolution: 512, density: 0.12 });
     engine.paint({ kind: 'food', from: [100.3, 100.7], to: [160.1, 120.4], radius: 9.3 });
     engine.paint({ kind: 'wall', from: [300.2, 40.6], to: [310.4, 240.3], radius: 3.1 });
     engine.frame(performance.now(), 0);
@@ -664,7 +668,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
 
   // The renderer draws food, light and walls only with the pass that has the environment code (ADR 0009, item 9).
   it('count every new simulation that replays food, light or walls as painted and draw it with the environment pass', async () => {
-    const { engine } = await load('network', { resolution: 256 });
+    const { engine } = await load('network', { lattice: null, resolution: 256 });
     expect([engine.sim.hasEnvironment, await drawsEnv(engine)]).toEqual([false, false]);
     for (const k of ['food', 'light', 'wall'] as const) {
       engine.paint({ kind: k, from: [100.3, 70.2], to: [110.4, 72.1], radius: 4.2 });

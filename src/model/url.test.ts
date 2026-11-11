@@ -27,6 +27,18 @@ describe('URL settings', () => {
     expect(await decodeSettings(encoded)).toEqual(s);
   });
 
+  // ADR 0026: a link holds the lattice, and a link made before lattices opens on the grid shaped like the screen of
+  // its resolution, as it was made.
+  it('round-trips the lattice, and opens a link without one on a grid shaped like the screen', async () => {
+    const shrinking = presetById('shrinking')?.settings() ?? defaultSettings();
+    expect(shrinking.lattice).toEqual([300, 300]);
+    expect(await decodeSettings(await encodeSettings(shrinking))).toEqual(shrinking);
+    const old: Record<string, unknown> = { ...shrinking };
+    delete old.lattice;
+    const opened = await decodeSettings(await hashPart(JSON.stringify(old)));
+    expect(opened).toEqual({ ...shrinking, lattice: null });
+  });
+
   // ADR 0022: a link made before the model switch holds no model, covered food or trail saturation. It opens with the
   // Jones model if its values fit Jones' rules, and with the extended model else: then it runs as it was made.
   it('opens links made before the model switch with the Jones model only if they fit it', async () => {

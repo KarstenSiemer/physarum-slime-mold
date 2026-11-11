@@ -121,6 +121,12 @@ export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center
 export const BOUNDARIES = ['wrap', 'box', 'dish'] as const;
 export const STYLES = ['glow', 'gel', 'paper', 'agents'] as const;
 export const RESOLUTIONS = [256, 512, 768, 1024, 1536, 2048, 3072, 4096] as const;
+/**
+ * A grid of fixed size, width × height cells, that does not follow the screen (ADR 0026). Its sides are those of the
+ * grids that gridSize() gives (engine/sizing.ts): 16 to 4096.
+ */
+export type Lattice = [width: number, height: number];
+export const LATTICE_SIDE = { min: 16, max: 4096 } as const;
 /** The rule set (ADR 0022): only Jones' published rules, or Jones' rules and this app's additions. */
 export const MODELS = ['jones', 'extended'] as const;
 
@@ -266,7 +272,13 @@ export const collisionsHelp = {
 
 export interface Settings extends Record<GlobalKey, number> {
   seed: number;
+  /** Cells on the long side of a grid shaped like the screen. A `lattice` replaces it. */
   resolution: number;
+  /**
+   * A grid of fixed size in place of one shaped like the screen, or null (ADR 0026). The scenes of Jones' papers run
+   * on the lattice of their figure, because Jones' lengths are in cells.
+   */
+  lattice: Lattice | null;
   layout: Layout;
   boundary: Boundary;
   collisions: boolean;
@@ -324,6 +336,7 @@ export function defaultSettings(): Settings {
   return {
     seed: 1,
     resolution: 1536,
+    lattice: null,
     layout: 'mixed',
     boundary: 'wrap',
     collisions: false,
@@ -390,6 +403,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
   out.diffusion = Math.round(out.diffusion);
   out.seed = typeof raw.seed === 'number' && Number.isInteger(raw.seed) ? raw.seed >>> 0 : d.seed;
   out.resolution = RESOLUTIONS.includes(raw.resolution as never) ? (raw.resolution as number) : d.resolution;
+  // A link made before lattices holds none: it opens on the grid shaped like the screen that it was made on (ADR 0026).
+  out.lattice = latticeOf(raw.lattice);
   out.layout = oneOf(raw.layout, LAYOUTS, d.layout);
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
@@ -418,6 +433,18 @@ export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
   if (old && runsAsJones(out, drawn)) out.model = 'jones';
   return constrain(out);
 }
+
+/** A lattice from untrusted input: two whole numbers of cells from LATTICE_SIDE, else null. */
+function latticeOf(v: unknown): Lattice | null {
+  if (!Array.isArray(v) || v.length !== 2) return null;
+  const ok = v.every(
+    (n) => Number.isInteger(n) && (n as number) >= LATTICE_SIDE.min && (n as number) <= LATTICE_SIDE.max,
+  );
+  return ok ? [v[0] as number, v[1] as number] : null;
+}
+
+/** Whether two lattices are the same; null for a grid shaped like the screen. */
+export const sameLattice = (a: Lattice | null, b: Lattice | null) => a?.[0] === b?.[0] && a?.[1] === b?.[1];
 
 /**
  * Whether the Jones model runs the settings of a link made before the model switch as that code ran them (owner rule

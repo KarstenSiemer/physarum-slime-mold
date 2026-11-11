@@ -25,7 +25,7 @@ import { GlSim } from './gl/sim';
 import { AgentToolKind, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
-import { BACKGROUND } from './render';
+import { BACKGROUND, LATTICE_COPIES } from './render';
 import { SCENT_LOW, scentGlow, scentLevel, scentLevelSize, scentLine, scentMark, scentOver } from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
@@ -276,8 +276,8 @@ function cutSpan(source: string, start: string, end: string) {
 }
 
 /**
- * The render shaders without the scent view (ADR 0009, amendment 2026-11-11). These give the files of main (45155a8)
- * byte for byte, on both backends; view.glsl differs from main only by the comment on `fx`.
+ * The render shaders without the scent view (ADR 0009, amendment 2026-11-11). These give the files of main (f81c4a3)
+ * byte for byte, on both backends; view.glsl differs from main only by the field `scentFx`, which no code of main reads.
  */
 const WITHOUT_SCENT = {
   wgsl: cutSpan(
@@ -292,8 +292,8 @@ const WITHOUT_SCENT = {
           '  }\n  // The view lies below the flake of food and the walls.\n  if (SCENT) { c = mix(scentView(p, c, near, cells), c, f.cover); }\n  if (near) {\n',
           '',
         ),
-        'black level (summed trail), scent lattice level (0 to 3) + 4 with the repellent, mark',
-        'black level (summed trail), unused, unused',
+        '  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), mark (0: none), unused\n',
+        '',
       ),
       '@group(0) @binding(9) var scent',
       '\n@vertex',
@@ -324,9 +324,9 @@ const toByte = (c: number) => {
  * values per cell). Up to 2 cells per pixel: bilinear at p with its gradient, wrapped on the periodic grid, clamped to
  * the box, and outside the dish from the cell inside the rim on the way to the centre; zoomed in, without the cells
  * that `wall` marks; in a box within half a cell of the edge, the scent of the outer cells' centres going on with its
- * log slope. Zoomed out further, bilinear on the coarse lattice of scentLevel(), each texel the mean of the cells it
+ * log slope. Zoomed out further, bilinear on the coarse map of scentLevel(), each texel the mean of the cells it
  * covers that hold scent. Then scentGlow() for the food scent and its scentLine() at `mark`, and scentGlow() for the
- * repellent if `repellent`. `kink`: p lies within 0.001 of a lattice point, where the bilinear gradient jumps, so
+ * repellent if `repellent`. `kink`: p lies within 0.001 of a sample point, where the bilinear gradient jumps, so
  * float32 on the GPU may take the other side.
  */
 function scentAt(
@@ -373,7 +373,7 @@ function scentAt(
   let layers: Layer[];
   const level = scentLevel(scale);
   if (level > 0) {
-    // The coarse lattice: n texels per side, each the mean over the cells it covers, by the share it covers.
+    // The coarse map: n texels per side, each the mean over the cells it covers, by the share it covers.
     const n = [scentLevelSize(w, level), scentLevelSize(h, level)] as const;
     const span = [w / n[0], h / n[1]] as const;
     const open = (x: number, y: number) =>
@@ -3942,8 +3942,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
      * over the view, no pixel may change by more than the dither. The reference leaves out pixels at a kink and pixels
      * that the pass clamped: the pass clamps to [0, 1] after the view, so there the bytes do not tell the colour below
      * it (highlights of the gel, light over 1, light on paper takes blue below 0). The mark comes from the levels the
-     * captures use. Returns what failed, how many pixels hold food scent, the powers of ten above 0.01 of the food scent
-     * compared (rounded down), and how many pixels the line at the mark covers.
+     * captures use. Around a periodic lattice the pass dims the copies of the grid after the view (ADR 0026): there
+     * the reference is the view over the copy's picture before the dimming, dimmed as the pass dims it. Returns what
+     * failed, how many pixels hold food scent, the powers of ten above 0.01 of the food scent compared (rounded down),
+     * how many pixels the line at the mark covers, and how many pixels of copies were compared and hold food scent.
      */
     async function follows(
       sim: Sim,
@@ -3963,7 +3965,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const flake = (p: [number, number]) =>
         Math.min(...foods.map((f) => Math.hypot(wrapped(p[0] - f.at[0], w), wrapped(p[1] - f.at[1], h)) - f.r));
       const mark = Math.fround(scentMark(settings, backend.levels().strand));
-      let [max, sum, n, still, arena, drawn, lined] = [0, 0, 0, 0, 0, 0, 0];
+      const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
+      const space = hexToLinear(BACKGROUND[settings.style]).map((v) => v * (settings.style === 'paper' ? 0.92 : 0.55));
+      let [max, sum, n, still, arena, drawn, lined, copied, copiedFood] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
       const decades = new Set<number>();
       for (let y = 0; y < ch; y++)
         for (let x = 0; x < cw; x++) {
@@ -3980,6 +3984,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             continue;
           }
           if (inside < 1 || flake(p) < 1 + view.scale) continue; // a ramp mixes in the outside or the flake's rim
+          // 0 on a copy of a periodic lattice, 1 on the lattice, a ramp one pixel wide between them.
+          const edge = copies < 1 ? insideArena('box', [w, h], p, view.scale) : 1;
+          if (edge > 0 && edge < 1) continue;
           arena++;
           const repellent = settings.model === 'extended';
           const ref = scentAt(scent, [w, h], settings.boundary, wall, p, view.scale, repellent, mark);
@@ -3991,7 +3998,19 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             decades.add(Math.floor(Math.log10(ref.values[0]) - SCENT_LOW));
           }
           if (ref.line > 0.5) lined++;
-          const want = scentOver(bytes.map(fromByte) as Vec3, settings.style, ref.food, ref.line, ref.repellent);
+          const over = (c: Vec3) => scentOver(c, settings.style, ref.food, ref.line, ref.repellent);
+          let want = over(bytes.map(fromByte) as Vec3);
+          if (edge === 0) {
+            // A copy shows b + copies · picture, with b = (1 − copies) · space. The view is affine in the picture below
+            // it, over(c) = k c + o, so over the copy's picture the pass gives b + k (copy − b) + copies · o.
+            copied++;
+            if (ref.food > 0) copiedFood++;
+            const [o, one] = [over([0, 0, 0]), over([1, 1, 1])];
+            want = [0, 1, 2].map((k) => {
+              const bg = (1 - copies) * (space[k] ?? 0);
+              return bg + ((one[k] ?? 0) - (o[k] ?? 0)) * (fromByte(bytes[k] ?? 0) - bg) + copies * (o[k] ?? 0);
+            }) as Vec3;
+          }
           for (let k = 0; k < 3; k++) {
             const d = Math.abs((on.data[i + k] ?? 0) - toByte(want[k] ?? 0));
             [max, sum, n] = [Math.max(max, d), sum + d, n + 1];
@@ -4004,12 +4023,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         (max > 3 || sum / n > 0.75) && `${name}: max ${max}, mean ${(sum / n).toFixed(2)}`,
         still > 2 && `${name}: ${still} apart outside the arena or on a flake`,
       ].filter((v): v is string => typeof v === 'string');
-      return { failed, drawn, decades, lined };
+      return { failed, drawn, decades, lined, copied, copiedFood };
     }
 
     // The pass without the view must draw what it drew before the view existed. Against the shaders without the
-    // scent code, with the same state, uniforms and dither: 0 of 255 apart. 2 × 72 captures: on SwiftShader on an
-    // M3 Pro up to 12 s (WebGL2), and GitHub runs SwiftShader up to about 4 times slower (ADR 0010).
+    // scent code, with the same state, uniforms and dither: 0 of 255 apart. 2 × 112 captures: on SwiftShader on an
+    // M3 Pro up to 11 s (WebGL2), and GitHub runs SwiftShader up to about 4 times slower (ADR 0010).
     it('draws the pixels of the shaders without the view while it is off, in every style', async () => {
       const cases: { sim: Sim; settings: Settings; view: View }[] = [];
       for (const boundary of BOUNDARIES)
@@ -4019,8 +4038,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           if (painted) sim.paint([...strokes(boundary), { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 }]);
           sim.run(40);
           expect(sim.hasEnvironment).toBe(painted);
-          for (const style of STYLES)
-            for (const view of views(boundary)) cases.push({ sim, settings: { ...settings, style }, view });
+          // A periodic lattice dims its copies (ADR 0026, the third value of `fx`).
+          const lattices = boundary === 'wrap' && painted ? [null, [W, H] as [number, number]] : [null];
+          for (const lattice of lattices)
+            for (const style of STYLES)
+              for (const view of views(boundary)) cases.push({ sim, settings: { ...settings, lattice, style }, view });
         }
       const captures = async () => {
         const out: ImageData[] = [];
@@ -4050,7 +4072,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const settings: Settings = { ...extended({ layout: 'empty' }), showScent: true };
       const sim = await make(settings, W, H, 1);
       sim.paint(strokes('wrap'));
-      const view = at(views('wrap'), 2); // zoomed out: the coarse lattice too
+      const view = at(views('wrap'), 2); // zoomed out: the coarse map too
       let builds: { mock: { calls: unknown[] } };
       let ready: () => Promise<unknown>;
       let frame: () => void;
@@ -4089,7 +4111,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         frame();
         await ready();
       }
-      expect(first).toBe(3); // the view without and with food, light and walls, and the pass of the coarse lattice
+      expect(first).toBe(3); // the view without and with food, light and walls, and the pass of the coarse map
       expect(builds.mock.calls.length).toBe(first);
     });
 
@@ -4124,7 +4146,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // Every pixel inside the arena against the CPU reference of the view over the picture without it: across the seam
     // of the periodic grid, at the edge of the box and at the rim of the dish, zoomed in, near fit and zoomed out onto
-    // the coarse lattices of levels 1 and 2, with the line where the food scent equals a strand's trail. Outside the
+    // the coarse maps of levels 1 and 2, with the line where the food scent equals a strand's trail. Outside the
     // arena and on the flake of food the view changes nothing. In the Jones model the view draws no repellent: the
     // model does not read it.
     it.each(BOUNDARIES)(
@@ -4154,6 +4176,31 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(lined).toBeGreaterThan(50); // and the line at the mark shows
       },
     );
+
+    // Around a periodic lattice the copies of the grid show at LATTICE_COPIES of their light (ADR 0026), and the pass
+    // dims them after the view: the view on a copy is the view on the grid, dimmed with it. Beside a closed lattice
+    // nothing shows, as beside every closed arena (the tests above: outside the arena no pixel changes).
+    it('dims the view with the copies around a periodic lattice', async () => {
+      const strains = [defaultStrain(0), defaultStrain(1)];
+      const settings = extended({ boundary: 'wrap', lattice: [W, H], strains, exposure: -2, bloom: 0 });
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.paint(strokes('wrap'));
+      sim.run(150);
+      expect((await backend.settle(sim)).strand).toBeGreaterThan(0);
+      const foods = [{ at: [...SCENES.wrap.food] as [number, number], r: 3 }];
+      const worst: string[] = [];
+      let [copied, copiedFood, lined] = [0, 0, 0];
+      for (const style of STYLES)
+        for (const view of views('wrap')) {
+          const r = await follows(sim, { ...settings, style }, view, foods);
+          worst.push(...r.failed);
+          [copied, copiedFood, lined] = [copied + r.copied, copiedFood + r.copiedFood, lined + r.lined];
+        }
+      expect(worst).toEqual([]);
+      expect(copied).toBeGreaterThan(10_000); // every view shows copies
+      expect(copiedFood).toBeGreaterThan(1000); // with the food scent across the seam on them
+      expect(lined).toBeGreaterThan(50);
+    });
 
     // The Jones model at a low decay puts food into its trail map without the extended model's normalisation, so a
     // large food passes 10,000 (ADR 0022, "Plateau"): every power of ten up to the top of the glow. A small closed box
@@ -4286,7 +4333,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const bg = hexToLinear(BACKGROUND.paper);
       const [cw, ch] = [96, 288];
       const worst: string[] = [];
-      // At 3 cells per pixel the view reads the lattice of 2 cells, whose texels weigh only the cells without a wall.
+      // At 3 cells per pixel the view reads the map of 2 cells, whose texels weigh only the cells without a wall.
       for (const scale of [1 / 8, 1 / 2, 3]) {
         const view: View = { center: [29.0137, 24.0291], scale };
         const off = await backend.capture(sim, settings, view, cw, ch);
