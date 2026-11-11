@@ -118,7 +118,9 @@ that measure it, and the agent passes that check for walls, are built at the fir
 
 1. `clearBuffer(counts)` (and `claims` in collision mode).
 2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups):
-   - skip dead agents; apply shrinkage (`p_remove`), inoculation and cut tools;
+   - skip dead agents; apply shrinkage (`p_remove`), then the agent tools (ADR 0023): inoculation
+     takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
+     agent spends its step there: no move, no deposit;
    - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
      walls, the outside and a wall on the way to the sensor read as −∞ (ADR 0020);
    - **rotate** with the Jones rule (exact, see knowledge base); random turn with `pCD`;
@@ -128,7 +130,8 @@ that measure it, and the agent passes that check for walls, are built at the fir
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the
    heading and calls `atomicMax(claims[target], key)` with a unique per-step key (bijective
    hash of the agent id). Pass 2b moves the winners. Free target = empty at step start.
-   Deterministic: integer atomics and unique keys.
+   An agent that a tool places or moves claims its cell the same way, and a loser stays dead or
+   where it was (ADR 0023). Deterministic: integer atomics and unique keys.
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
    tile saves about 25 % of this pass, see
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
@@ -145,10 +148,11 @@ the buffer slot.
 ### Initial layouts
 
 `mixed` (uniform), `bands` (strains side by side), `sectors`, `colonies` (one disc per strain),
-`ring`, `center`, `empty` (paint with the inoculate tool). An agent whose cell is a wall or outside
-the arena draws again in its layout's region. In collision mode claim rounds give every alive agent
-a cell of its own, in every layout (ADR 0008, ADR 0019). A dish counts its agents over the square of
-its short side, as Jones counts %p; a box or a periodic grid over all its cells.
+`ring`, `center`, `empty` (every agent starts dead; the inoculate tool places them). An agent whose
+cell is a wall or outside the arena draws again in its layout's region. In collision mode claim
+rounds give every alive agent a cell of its own, in every layout (ADR 0008, ADR 0019). A dish counts
+its agents over the square of its short side, as Jones counts %p; a box or a periodic grid over all
+its cells.
 
 ## 4. Interaction
 
@@ -159,7 +163,7 @@ its short side, as Jones counts %p; a box or a periodic grid over all its cells.
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |
 | Environment         | collisions (Jones), diffusion passes, food strength (wProj), scent decay, shrinkage                              |
-| Tools               | pan/zoom, inoculate (selected strain), food, light, wall, erase, cut; brush size                                 |
+| Tools               | pan/zoom, inoculate (dead agents of the selected strain), food, light, wall, erase, cut; brush size              |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                        |
@@ -169,6 +173,10 @@ dynamic network (Fig. 4), hexagonal minimization (Fig. 5), scale by SO (Fig. 10)
 classes (Fig. 13), repulsion spots and stripes (Fig. 16), shortest path between two foods
 (Fig. 18), Steiner tree (Fig. 19), shrinking sheet (Fig. 21), wound repair (Fig. 22–23),
 competing strains (Fogleman presets).
+
+While the pointer is held, inoculate and cut act on every step. Inoculate places only dead agents,
+an amount per second of holding at any frame rate; with none left a notice says so. While paused, a
+held tool runs 60 steps per second (ADR 0023).
 
 Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
 
