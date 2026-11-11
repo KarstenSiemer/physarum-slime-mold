@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
 import { packDrawing, unpackDrawing, type Drawing } from './link';
-import { defaultSettings, defaultStrain } from './params';
+import { defaultSettings, defaultStrain, type Settings } from './params';
 import { presetById } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
 
@@ -20,9 +20,39 @@ describe('URL settings', () => {
     const s = defaultSettings();
     s.strains = [defaultStrain(0), { ...defaultStrain(1), sensorOffset: 33, color: '#123456' }];
     s.boundary = 'dish';
+    Object.assign(s, { model: 'extended', coveredFood: true, coveredFoodFactor: 0.01, trailSaturation: 40 });
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);
     expect(await decodeSettings(encoded)).toEqual(s);
+  });
+
+  // ADR 0022: a link made before the model switch holds no model, covered food or trail saturation. It opens with the
+  // Jones model if its values fit Jones' rules, and with the extended model else: then it runs as it was made.
+  it('opens links made before the model switch with the Jones model only if they fit it', async () => {
+    const strip = (s: Settings) => {
+      const { model, coveredFood, coveredFoodFactor, trailSaturation, ...old } = s;
+      expect([coveredFood, coveredFoodFactor, trailSaturation]).toEqual([false, 0.001, 0]);
+      return { model, old };
+    };
+    const ext = strip({ ...defaultSettings(), scentDecay: 0.01 });
+    expect(ext.model).toBe('extended');
+    expect(await decodeSettings(await hashPart(JSON.stringify(ext.old)))).toEqual({
+      ...defaultSettings(),
+      scentDecay: 0.01,
+    });
+    const network = presetById('network')?.settings();
+    if (!network) throw new Error('no preset network');
+    const jones = strip(network);
+    expect(jones.model).toBe('jones');
+    expect(await decodeSettings(await hashPart(JSON.stringify(jones.old)))).toEqual(network);
+  });
+
+  // The reviewer's case: Extended, K 30, then back to Jones. A Jones link holds no K.
+  it('drops trail saturation from a Jones link', async () => {
+    const network = presetById('network')?.settings();
+    if (!network) throw new Error('no preset network');
+    const s = await decodeSettings(await hashPart(JSON.stringify({ ...network, trailSaturation: 30 })));
+    expect(s).toEqual(network);
   });
 
   it('rejects malformed, oversized and non-base64url input', async () => {
@@ -239,5 +269,88 @@ describe('URL links with food, light and walls', () => {
     expect(link?.settings.speed).toBe(defaultSettings().speed);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(link?.drawing).toBeUndefined();
+  });
+});
+
+// Owner rule of 2026-11-11 (ADR 0022): a link from before the model switch opens as Jones only if the Jones model runs
+// it as it was made, and a link that claims Jones cannot run rules that are not Jones' under that label.
+describe('URL links and the model', () => {
+  const network = presetById('network')?.settings() ?? defaultSettings();
+  const spots = presetById('spots')?.settings() ?? defaultSettings();
+  /** A link made before the model switch: no model, covered food or trail saturation, and food weighed +1. */
+  const before = (s: Settings, patch: Partial<Settings> = {}) => {
+    const { model: _, coveredFood: __, coveredFoodFactor: ___, trailSaturation: ____, ...old } = { ...s, ...patch };
+    return { ...old, strains: old.strains.map((st) => ({ ...st, food: 1 })) } as unknown as Settings;
+  };
+  const open = async (s: Settings, strokes: EnvEdit[] = [], scene = '') => {
+    const shapes = presetById(scene)?.env?.map(() => true) ?? [];
+    const { hash } = await encodeLink(s, { scene, origins: scene ? s.strains.map((_, i) => i) : [], shapes, strokes });
+    const link = await decodeLink(hash);
+    if (!link) throw new Error('no link');
+    return link.settings;
+  };
+  const wrap = (kind: EnvEdit['kind']): EnvEdit => ({ ...dab(30, 40, kind), boundary: 'wrap' });
+
+  it('from before the switch open as Jones when the Jones model runs them as they were made', async () => {
+    expect(await open(before(network))).toEqual(network);
+    expect(await open(before(network), [wrap('food')], 'network')).toEqual(network);
+    // Light without an effect, and a trail decay of its own without food: the scent is 0, and Jones binds it.
+    expect((await open(before(network, { lightStrength: 0 }), [wrap('light')])).model).toBe('jones');
+    const slow = await open(before(network, { strains: [{ ...network.strains[0], decay: 0.05 } as never] }));
+    expect([slow.model, slow.scentDecay]).toEqual(['jones', 0.05]);
+    // Chemorepulsion without food: Jones weighs food as the own trail, −1, and the run has no food.
+    expect(await open(before(spots), [], 'spots')).toEqual(spots);
+    expect((await open(before(spots), [wrap('erase')], 'spots')).model).toBe('jones');
+  });
+
+  it('from before the switch open as Extended when the Jones model would run them otherwise', async () => {
+    const extended = async (s: Settings, strokes: EnvEdit[] = [], scene = '') => (await open(s, strokes, scene)).model;
+    // Walls: only the extended model's sensors check walls on their way (ADR 0020). The Maze has walls.
+    expect(await extended(before(network), [wrap('wall')])).toBe('extended');
+    expect(await extended(before(presetById('maze')?.settings() ?? network), [], 'maze')).toBe('extended');
+    // Light with an effect: Fleeing light, and light painted on a scene of Jones.
+    expect(await extended(before(presetById('light')?.settings() ?? network), [], 'light')).toBe('extended');
+    expect(await extended(before(network), [wrap('light')], 'network')).toBe('extended');
+    // Food with a scent decay of its own, or weighed other than the own trail.
+    expect(await extended(before(network, { scentDecay: 0.01 }), [wrap('food')], 'network')).toBe('extended');
+    expect(await extended(before(spots), [wrap('food')], 'spots')).toBe('extended');
+    // Values that the Jones model does not have.
+    for (const patch of [{ collisions: false }, { diffusion: 0 }, { diffusion: 2 }])
+      expect(await extended(before(network, patch)), JSON.stringify(patch)).toBe('extended');
+    // No link before the switch held K, but a link without a model can.
+    expect(await extended({ ...before(network), trailSaturation: 30 })).toBe('extended');
+    const own = (w: number) => ({ strains: [{ ...network.strains[0], attraction: [w, 0, 0, 0] } as never] });
+    expect(await extended(before(network, own(0.5)))).toBe('extended');
+    expect(await extended(before(network, own(-0.5)))).toBe('extended');
+    // And it runs as it was made: the extended model keeps the values.
+    const kept = await open(before(network, { scentDecay: 0.01 }), [wrap('food')], 'network');
+    expect([kept.scentDecay, kept.strains[0]?.food]).toEqual([0.01, 1]);
+  });
+
+  it('that claims Jones runs Jones’ rules only: Extended for what changes the run, Jones’ values for the rest', async () => {
+    const claims = (patch: Record<string, unknown>) => open({ ...network, ...patch });
+    for (const patch of [
+      { strains: [network.strains[0], defaultStrain(1)] },
+      { collisions: false },
+      { diffusion: 0 },
+      { diffusion: 2 },
+      { strains: [{ ...network.strains[0], attraction: [0.5, 0, 0, 0] }] },
+    ])
+      expect((await claims(patch)).model, JSON.stringify(patch)).toBe('extended');
+    const bound = await claims({
+      trailSaturation: 30,
+      lightStrength: 0.3,
+      scentDecay: 0.01,
+      strains: [{ ...network.strains[0], attraction: [-1, 0, 0, 0], food: 0.4, light: 2, share: 0.5 }],
+    });
+    expect(bound).toEqual({ ...network, strains: [{ ...network.strains[0], attraction: [-1, 0, 0, 0], food: -1 }] });
+    // Its walls and light stay drawn: Jones' obstacles, and light without an effect (packParams()).
+    expect((await open(network, [wrap('wall'), wrap('light')])).model).toBe('jones');
+  });
+
+  it('keeps a scent decay that the Jones model bound below 0.001 in the extended model', async () => {
+    const strain = { ...defaultStrain(0), decay: 0.0005 };
+    const s = { ...network, model: 'extended' as const, scentDecay: 0.0005, strains: [strain] };
+    expect(await open(s)).toEqual(s);
   });
 });

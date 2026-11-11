@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { decodeLink } from '../../src/model/url';
 import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -33,6 +34,136 @@ test('a preset reaches the engine and updates the shareable link', async ({ page
   // The settings, and the scene with its food, light and walls (docs/adr/0021).
   await expect.poll(() => page.evaluate(() => location.hash)).toMatch(/^#s=[\w-]+&e=[\w-]+$/);
   expect(errors).toEqual([]);
+});
+
+// Owner decision 2026-11-11 (ADR 0022): the Jones model offers only Jones' settings. The extended model shows its
+// own settings beside the choice, and a switch back to Jones drops them from the settings and from the link.
+test('the Jones model offers only Jones’ settings, and a switch back to it drops the extended ones', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('network');
+  await page.waitForFunction(() => globalThis.physarum?.settings.model === 'jones');
+  const model = page.getByRole('combobox', { name: 'Model' });
+  const saturation = page.getByLabel('Trail saturation', { exact: true });
+  const light = page.getByRole('radio', { name: 'Light' });
+  const rule = page.getByRole('checkbox', { name: /^One agent per cell/ });
+  const covered = page.getByRole('checkbox', { name: 'Covered food releases less' });
+  const changed = page.getByRole('region', { name: 'Scene', exact: true }).getByText('changed', { exact: true });
+  await expect(model).toHaveValue('jones');
+  await expect(saturation).toHaveCount(0);
+  await expect(page.getByLabel('Scent decay', { exact: true })).toHaveCount(0);
+  await expect(light).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add strain' })).toHaveCount(0);
+  await expect(rule).toBeChecked();
+  await expect(rule).toBeDisabled();
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await expect(covered).toBeVisible();
+  // Extended shows its settings beside the choice.
+  await model.selectOption('extended');
+  await expect(saturation).toBeVisible();
+  await expect(page.getByLabel('Scent decay', { exact: true })).toBeVisible();
+  await expect(light).toBeVisible();
+  await expect(rule).toBeEnabled();
+  await page.getByLabel('Trail saturation value').fill('30');
+  await page.getByLabel('Trail saturation value').press('Enter');
+  await covered.check();
+  await page.waitForFunction(() => {
+    const s = globalThis.physarum?.settings;
+    return s?.trailSaturation === 30 && s.coveredFood;
+  });
+  // The page address follows the settings a little later.
+  const link = async () => {
+    const s = (await decodeLink((await page.evaluate(() => location.hash)).slice(1)))?.settings;
+    return [s?.model, s?.trailSaturation, s?.coveredFood];
+  };
+  await expect.poll(link).toEqual(['extended', 30, true]);
+  await covered.uncheck();
+  // Back to Jones: K goes from the settings and the link, and the scene is the scene again.
+  await model.selectOption('jones');
+  await page.waitForFunction(() => {
+    const s = globalThis.physarum?.settings;
+    return s?.model === 'jones' && s.trailSaturation === 0;
+  });
+  await expect(saturation).toHaveCount(0);
+  await expect(changed).toBeHidden();
+  await expect.poll(link).toEqual(['jones', 0, false]);
+  expect(errors).toEqual([]);
+});
+
+test('a switch to Jones keeps strain A and says what went', async ({ page }) => {
+  const errors = watchErrors(page);
+  // The small scene: two strains without the rule, on the extended model.
+  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveValue('extended');
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
+  await expect(page.getByRole('status')).toContainText('It removed strain B and agents that share a cell.');
+  await page.waitForFunction(() => {
+    const s = globalThis.physarum?.settings;
+    return s?.model === 'jones' && s.strains.length === 1 && s.collisions;
+  });
+  expect(errors).toEqual([]);
+});
+
+// ADR 0022, decisions 25 and 29: the tools follow the model, also after a change of the preset, and the panel says
+// that the Jones model draws light without effect.
+test('the Jones model offers no Light tool, and says that drawn light has no effect', async ({ page }) => {
+  const errors = watchErrors(page);
+  const preset = page.getByRole('combobox', { name: 'Preset' });
+  const light = page.getByRole('radio', { name: 'Light' });
+  const move = page.getByRole('radio', { name: 'Move' });
+  const hint = page.locator('#jones-light');
+  await preset.selectOption('light');
+  await light.click();
+  await preset.selectOption('network');
+  await expect(light).toHaveCount(0);
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  await preset.selectOption('light');
+  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2);
+  await light.click();
+  await expect(hint).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
+  await expect(page.getByRole('status')).toContainText('It changed Light strength from 0.2 to 0.05.');
+  await expect(light).toHaveCount(0);
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  await expect(hint).toHaveText(
+    'The light on the canvas has no effect in the Jones model. To remove it, use the Erase tool. To use it, select Extended.',
+  );
+  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveAttribute('aria-describedby', 'jones-light');
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await page.getByRole('button', { name: 'Clear food, light and walls' }).click();
+  await expect(hint).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+// A key can select another tool while the inoculate or cut tool is held: the held tool then stops (decision 31).
+test('a held agent tool acts only while it is selected', async ({ page }) => {
+  await page.evaluate(() => {
+    const e = globalThis.physarum;
+    if (!e) throw new Error('no engine');
+    const agentTool = e.agentTool.bind(e);
+    const g = globalThis as unknown as { held: number };
+    g.held = 0;
+    e.agentTool = (t) => {
+      g.held++;
+      agentTool(t);
+    };
+  });
+  const held = () => page.evaluate(() => (globalThis as unknown as { held: number }).held);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect.poll(held, { timeout: 60_000 }).toBeGreaterThan(2);
+  await page.keyboard.press('3');
+  await expect(page.getByRole('radio', { name: 'Food' })).toHaveAttribute('aria-checked', 'true');
+  const stopped = await held();
+  // Longer than a few frames, also on SwiftShader.
+  await page.waitForTimeout(1000);
+  expect(await held()).toBe(stopped);
+  await page.keyboard.press('7');
+  await expect.poll(held, { timeout: 60_000 }).toBeGreaterThan(stopped);
+  await page.mouse.up();
 });
 
 test('the food tool paints food into the environment', async ({ page }) => {

@@ -39,6 +39,14 @@ export interface Walled {
   walls: Program;
 }
 
+/** The agent passes with the saturating trail perception (SATURATE in agents.frag, ADR 0022). */
+export interface Saturated {
+  /** Without the wall check of the sensors. */
+  agents: Program;
+  /** With the wall check of the sensors (SENSE_WALLS). */
+  walled: Program;
+}
+
 export interface Programs {
   /** The agent pass without the wall check of the sensors, for an environment without walls. */
   agents: Program;
@@ -47,11 +55,15 @@ export interface Programs {
    * in sim.ts).
    */
   walled: () => Walled;
+  /** The agent passes that saturate the trail, compiled at their first use: most scenes never saturate. */
+  saturated: () => Saturated;
   points: Program;
   counts: Program;
   fill: Program;
   init: Program;
   diffuse: Program;
+  /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
+  covered: () => Program;
   paint: Program;
   shape: Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
@@ -79,9 +91,18 @@ function simProgram(gl: GL, frag: string): Program {
   return wrap(gl, program(gl, V + common + fullscreen, V + common + frag));
 }
 
-/** The agent pass from `frag` (agents.frag or a version of it), with the agent tools (tools.glsl). */
-export function agentsProgram(gl: GL, frag: string, senseWalls: boolean): Program {
-  return simProgram(gl, (senseWalls ? '#define SENSE_WALLS 1\n' : '') + toolsGlsl + frag);
+/**
+ * The agent pass from `frag` (agents.frag or a version of it), with the agent tools (tools.glsl). `senseWalls`: the
+ * sensors check for walls (SENSE_WALLS); `saturate`: the sensors saturate the trail (SATURATE, ADR 0022).
+ */
+export function agentsProgram(gl: GL, frag: string, senseWalls: boolean, saturate = false): Program {
+  const defines = (senseWalls ? '#define SENSE_WALLS 1\n' : '') + (saturate ? '#define SATURATE 1\n' : '');
+  return simProgram(gl, defines + toolsGlsl + frag);
+}
+
+/** The diffusion pass from `frag` (diffuse.frag or a version of it); `covered`: with covered food (COVERED, ADR 0022). */
+export function diffuseProgram(gl: GL, frag: string, covered: boolean): Program {
+  return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + frag);
 }
 
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
@@ -93,11 +114,19 @@ export function compile(gl: GL): Programs {
     plain('#define ENV 1\n' + viewGlsl + frag),
   ];
   let walled: Walled | undefined;
+  let saturated: Saturated | undefined;
+  let covered: Program | undefined;
   return {
     agents: agentsProgram(gl, agentsFrag, false),
     walled: () => (walled ??= { agents: agentsProgram(gl, agentsFrag, true), walls: sim(wallsFrag) }),
+    saturated: () =>
+      (saturated ??= {
+        agents: agentsProgram(gl, agentsFrag, false, true),
+        walled: agentsProgram(gl, agentsFrag, true, true),
+      }),
     init: sim(initFrag),
-    diffuse: sim(diffuseFrag),
+    diffuse: diffuseProgram(gl, diffuseFrag, false),
+    covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
     paint: sim(brushGlsl + paintFrag),
     shape: sim(brushGlsl + shapeFrag),
     counts: sim(countsFrag),

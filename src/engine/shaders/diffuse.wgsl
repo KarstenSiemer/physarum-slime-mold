@@ -5,6 +5,10 @@
 override FIRST: bool = true;
 override LAST: bool = true;
 override BLUR: bool = true;
+// Covered food (Adamatzky and Jones 2010; ADR 0022): a food cell releases P.model.y of its scent while the
+// 3 × 3 window around it holds an agent. sim.ts builds the FIRST pass with it only while the option is on, so the
+// passes without it keep the trail and scent of the code before it, bit for bit (sim.gpu.test.ts).
+override COVERED: bool = false;
 
 @group(0) @binding(1) var trailIn: texture_2d<f32>;
 @group(0) @binding(2) var scentIn: texture_2d<f32>;
@@ -12,6 +16,7 @@ override BLUR: bool = true;
 @group(0) @binding(4) var scentOut: texture_storage_2d<rg32float, write>;
 @group(0) @binding(5) var<storage, read> env: array<u32>;
 @group(0) @binding(6) var<storage, read> counts: array<vec4u>;
+@group(0) @binding(7) var<storage, read> occ: array<u32>; // agents per cell after this step's moves (COVERED)
 
 const T = 16u;
 const SIDE = 18u; // tile plus a one-cell halo
@@ -20,6 +25,17 @@ const N = 324u;
 var<workgroup> tileTrail: array<vec4f, N>;
 var<workgroup> tileScent: array<vec2f, N>;
 var<workgroup> tileOpen: array<f32, N>; // 1 for habitable cells, 0 for walls and outside
+
+// True if the 3 × 3 window around cell q holds an agent. Cells outside a closed arena hold none.
+fn covered(q: vec2i) -> bool {
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let c = cellAt(q + vec2i(dx, dy));
+      if (c >= 0 && occ[c] > 0u) { return true; }
+    }
+  }
+  return false;
+}
 
 @compute @workgroup_size(16, 16)
 fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: vec3u,
@@ -37,10 +53,16 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
       if (FIRST) {
         t += vec4f(counts[c]) * P.deposit;
         let e = envOf(env[c]);
-        s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
-        // Cut tool: the wound also loses its chemicals. This app's choice: Jones 2010 (Sec. 4.3,
-        // p. 148) only removes the agents from the wound and places them elsewhere.
-        if (P.tool.w == 2.0 && distance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z) {
+        if (COVERED) {
+          let food = select(1.0, P.model.y, e.y > 0.0 && covered(q));
+          s += vec2f(e.y * P.scent.x * food, e.z * P.scent.y);
+        } else {
+          s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
+        }
+        // Cut tool: in the extended model the wound also loses its chemicals, this app's choice. Jones 2010
+        // (Sec. 4.3, p. 148) only removes the agents from the wound and places them elsewhere: the Jones model
+        // packs P.tool2.z = 1 and keeps them (pack.ts).
+        if (P.tool.w == 2.0 && P.tool2.z == 0.0 && distance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z) {
           t = vec4f(0.0);
           s = vec2f(0.0);
         }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, getEngine, showNotice, TOOLS } from './state.svelte';
+  import { app, getEngine, showNotice, toolsFor } from './state.svelte';
 
   const letter = (i: number) => 'ABCD'[i] ?? String(i + 1);
 
@@ -36,7 +36,7 @@
   </div>
 
   <div class="group" role="radiogroup" aria-label="Tool">
-    {#each TOOLS as t (t.id)}
+    {#each toolsFor(app.settings.model) as t (t.id)}
       <button
         type="button"
         role="radio"

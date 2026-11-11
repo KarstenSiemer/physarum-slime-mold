@@ -1,4 +1,4 @@
-import { BOUNDARIES, LAYOUTS, MAX_STRAINS, type Settings, type Strain } from '../model/params';
+import { BOUNDARIES, emissionScale, LAYOUTS, MAX_STRAINS, type Settings, type Strain } from '../model/params';
 
 // Slot order of `struct Params` in shaders/common.wgsl (16 bytes each); a test checks it.
 export const PARAM_SLOTS = [
@@ -19,6 +19,7 @@ export const PARAM_SLOTS = [
   'tool2',
   'strainEnd',
   'extra',
+  'model',
 ] as const;
 export const PARAMS_BYTES = (PARAM_SLOTS.length + 3) * 16;
 
@@ -120,15 +121,33 @@ export function strainEnds(strains: readonly Strain[], agents: number): number[]
 
 const DEG = Math.PI / 180;
 
+/**
+ * K of the saturating trail perception (agents.wgsl sense()), or 0 when the sensors read the trail as it is: the
+ * Jones model never saturates (ADR 0022). Above 0 the agent passes are built with SATURATE. A K below 1 is off: the
+ * slider's steps are whole numbers, and a K that f32 cannot hold (1e-300 packs as 0) would divide every lane by 0.
+ */
+export const trailSaturation = (s: Pick<Settings, 'model' | 'trailSaturation'>) =>
+  s.model === 'extended' && s.trailSaturation >= 1 ? s.trailSaturation : 0;
+
+/** Factor on the food and light sources: 1 in the Jones model, emissionScale() in the extended model (ADR 0022). */
+export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay'>) =>
+  s.model === 'extended' ? emissionScale(s.scentDecay) : 1;
+
+/**
+ * Packs the settings for the GPU. In the Jones model the GPU runs Jones' one trail map whatever the settings hold
+ * (ADR 0022): the scent decays with the strain's decay, the strain weighs food as its own trail, light has no source
+ * and no weight, and the cut tool leaves the chemicals in the wound (Jones 2010, p. 148).
+ */
 export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAMS_BYTES)): ArrayBuffer {
+  const jones = s.model === 'jones';
   const u = new Uint32Array(buf);
   const f = new Float32Array(buf);
   u.fill(0);
   const strains = s.strains.slice(0, MAX_STRAINS); // 4 lanes per slot: a fifth would spill into the next slot
   u.set([rt.width, rt.height, rt.agents, rt.step], slot('grid'));
   u.set([s.seed, strains.length, BOUNDARIES.indexOf(s.boundary), s.collisions ? 1 : 0], slot('cfg'));
-  const lanes = (name: Parameters<typeof slot>[0], get: (st: Strain) => number) => {
-    strains.forEach((st, i) => (f[slot(name) + i] = get(st)));
+  const lanes = (name: Parameters<typeof slot>[0], get: (st: Strain, i: number) => number) => {
+    strains.forEach((st, i) => (f[slot(name) + i] = get(st, i)));
   };
   lanes('sensorAngle', (st) => st.sensorAngle * DEG);
   lanes('sensorOffset', (st) => st.sensorOffset);
@@ -137,19 +156,24 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   lanes('deposit', (st) => st.deposit);
   lanes('keep', (st) => 1 - st.decay);
   lanes('randomTurn', (st) => st.randomTurn);
-  lanes('food', (st) => st.food);
-  lanes('light', (st) => st.light);
+  lanes('food', (st, i) => (jones ? (st.attraction[i] ?? 0) : st.food));
+  lanes('light', (st) => (jones ? 0 : st.light));
   strains.forEach((st, r) => {
     st.attraction.slice(0, strains.length).forEach((v, c) => (f[slot('attraction') + r * 4 + c] = v));
   });
-  f.set([255 * s.foodStrength, 255 * s.lightStrength, 1 - s.scentDecay, s.shrink], slot('scent'));
+  const g = sourceScale(s);
+  const light = jones ? 0 : 255 * s.lightStrength * g;
+  const scentDecay = jones ? (strains[0]?.decay ?? s.scentDecay) : s.scentDecay;
+  f.set([255 * s.foodStrength * g, light, 1 - scentDecay, s.shrink], slot('scent'));
   const t = rt.tool;
   if (t) {
     f.set([t.x, t.y, t.radius, t.kind], slot('tool'));
-    f.set([t.strain, t.revive, 0, 0], slot('tool2'));
+    // tool2.z: 1 keeps the chemicals in a cut (diffuse.wgsl), as Jones did; the extended model clears them.
+    f.set([t.strain, t.revive, jones && t.kind === AgentToolKind.cut ? 1 : 0, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
   u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
+  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1], slot('model'));
   return buf;
 }
 

@@ -30,11 +30,12 @@ Option 3, plus:
 - Scent texture `rg32float` (ping-pong): `r` = food scent, `g` = light (repellent) scent.
 - Sensed value: `dot(trail, A[strain]) + food_s · scent.r − light_s · scent.g`.
 - Sources per step: `food(cell) · 255 · wProj` and `light(cell) · 255 · wLight`, so `wProj`
-  keeps Jones' meaning for a full-intensity food pixel.
+  keeps Jones' meaning for a full-intensity food pixel. The extended model scales both sources with
+  the scent decay; the Jones model binds the scent to the trail (ADR 0022 and the amendment below).
 - Walls: block movement like an occupied cell (random new heading, no deposit), also when a move
   would pass through a wall cell on its way (ADR 0019); sensors read walls and the outside as a
-  large negative value, also a sensor whose way from the agent passes through a wall cell, so no
-  agent senses the trail behind a wall (ADR 0020); diffusion averages only over non-wall cells (no
+  large negative value, and in the extended model also a sensor whose way from the agent passes
+  through a wall cell, so no agent senses the trail behind a wall (ADR 0020, ADR 0022); diffusion averages only over non-wall cells (no
   flux into walls). A cell is a wall when its wall byte is at least 128 (0.5), in WGSL and GLSL
   alike (ADR 0019).
 - Boundary modes: periodic (Jones default), closed box, dish (circle, Jones Fig. 9 and 17–21).
@@ -65,3 +66,29 @@ Option 3, plus:
   food or wall exactly when its centre lies within the brush. Food is drawn below the trail. A
   dish paints no `env` outside itself, and when the boundary changes `env` stays as it is: the
   outlines follow it under the new boundary (ADR 0009, item 10).
+
+## Amendment 2026-11-11: the model switch (ADR 0022)
+
+Decided on 2026-11-11 by the owner: a model "Jones" holds only Jones' published rules, and a model
+"Extended" holds Jones' rules and this app's additions. ADR 0022 records the reasons and every
+choice made with it.
+
+- The separate scent field stays in both models. For one strain whose food weight is its own trail
+  weight and whose scent decays with the trail, trail + scent is Jones' one trail map (p. 144): both
+  fields take their sources in the same pass and get the same means and the same decay. A GPU test
+  checks the sum against a CPU reference of the one map (within 1e-5). The Jones model has only
+  this case: one strain, the scent decay equal to the strain's decay, the food weight equal to the
+  strain's own trail weight, and no light (ADR 0022, decision 3).
+- Option 3 serves the extended model: several strains, light, a scent decay of its own and a food
+  and light weight per strain. There the extended model releases `255 · wProj · g(d)` and
+  `255 · wLight · g(d)` with `g(d) = (d / (1 − d)) / (0.1 / 0.9)`, d the scent decay: the scent of
+  a large food is then the same at every decay, 114.75 for wProj 0.05, and only its reach grows.
+  g(0.1) = 1 exactly, so at decay 0.1 it releases the scent of the Jones model.
+- Covered food, a rule of Jones' later papers (Adamatzky and Jones 2010, Jones and Adamatzky 2014),
+  works in both models: a food cell releases a small share of its scent (0.001 by default, a
+  setting per scene) while the 3 × 3 window around it holds an agent. It is off in every scene.
+- Trail saturation (extended model only) makes a sensor read each strain's trail t as
+  `t / (1 + t / K)`, so food can turn agents on a dense trail.
+- Sensors that a wall on their way blocks (ADR 0020) and a cut that clears the chemicals are the
+  extended model's only. In the Jones model a sensor reads its own cell, and the wound keeps its
+  trail and scent (Jones 2010, p. 148).

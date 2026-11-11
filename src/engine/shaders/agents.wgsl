@@ -21,6 +21,11 @@
 // code before it, bit for bit, where no wall was painted (sim.gpu.test.ts).
 override SENSE_WALLS: bool = false;
 
+// Saturating trail perception of the extended model (ADR 0022): each sensor reads the trail t of each strain as
+// t / (1 + t / K), K = P.model.x. sim.ts builds `advance` and `claim` with it only while K > 0, so the passes without
+// it keep the agents and trail of the code before it, bit for bit (sim.gpu.test.ts).
+override SATURATE: bool = false;
+
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
 const STEER = 0u;
 const TOOL = 1u;
@@ -123,7 +128,9 @@ fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
   if (!habitable(c) || (SENSE_WALLS && !clearPath(pos, p, clear))) { return BLOCKED; }
   let q = cellCoord(u32(c));
   let sc = textureLoad(scent, q, 0).xy;
-  return dot(textureLoad(trail, q, 0), P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
+  var t = textureLoad(trail, q, 0);
+  if (SATURATE) { t = t / (1.0 + t / P.model.x); }
+  return dot(t, P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
 }
 
 // Sense and rotate (Jones 2010, Fig. 3), then the random turn pCD. Returns the new heading.

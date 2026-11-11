@@ -12,6 +12,7 @@
   import SceneLabel from './ui/SceneLabel.svelte';
   import { constrain } from './model/params';
   import {
+    adopt,
     app,
     currentDrawing,
     deadLeft,
@@ -22,7 +23,7 @@
     setScene,
     showNotice,
     startScene,
-    TOOLS,
+    toolsFor,
     type Tool,
   } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
@@ -103,8 +104,9 @@
   $effect(() => {
     const snapshot = $state.snapshot(app.settings);
     const valid = constrain(snapshot);
-    // Keep the UI consistent with what a shared link would load (e.g. collisions cap density at 1).
-    if (valid.density !== snapshot.density) app.settings.density = valid.density;
+    // Keep the UI consistent with what a shared link would load (e.g. collisions cap density at 1, and the Jones
+    // model binds its scent to the trail).
+    if (valid !== snapshot) adopt(valid);
     getEngine()?.apply(valid).catch(fail);
   });
 
@@ -262,8 +264,9 @@
       e.panBy(p[0] - prev[0], p[1] - prev[1]);
     } else {
       paintTo(e, p);
-      if (held) held = p;
     }
+    // Also while another tool is selected: a key can select the held tool again before the pointer goes up.
+    if (held) held = p;
   }
 
   function onpointerup(ev: PointerEvent) {
@@ -277,12 +280,13 @@
     getEngine()?.zoomAt(...pos(ev), Math.exp(-ev.deltaY * 0.0015));
   }
 
-  // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame).
+  // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame). Only
+  // while that tool is selected: a key can select another tool during the hold (ADR 0022, decision 31).
   $effect(() => {
     let raf = 0;
     const tick = () => {
       const e = getEngine();
-      if (e && held) {
+      if (e && held && (app.tool === 'cut' || app.tool === 'inoculate')) {
         const [x, y] = e.toGrid(...held);
         const radius = brushCells(e);
         if (app.tool === 'cut') e.agentTool({ kind: AgentToolKind.cut, x, y, radius, strain: 0, rate: 0 });
@@ -314,7 +318,7 @@
     const t = ev.target as HTMLElement;
     if (ev.metaKey || ev.ctrlKey || ev.altKey || t.closest('input, select, textarea, button, summary, a, dialog'))
       return;
-    const tool = TOOLS.find((x) => x.key === ev.key);
+    const tool = toolsFor(app.settings.model).find((x) => x.key === ev.key);
     if (tool) app.tool = tool.id;
     else if (ev.key === ' ') app.paused = !app.paused;
     else if (ev.key === '.') {

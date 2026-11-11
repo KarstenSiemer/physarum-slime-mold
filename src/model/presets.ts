@@ -85,9 +85,17 @@ function fogleman(rows: number[][], perStrainDensity: number): Settings {
 
 // Jones' model: Table 1 (p. 134), 15 % of cells with an agent as in Fig. 4 and 5, and his rule of one agent per
 // cell (p. 133). Sensor offset and step size are in cells, so the grid sets the scale of the model: 512 here;
-// scenes that need another grid set it themselves.
+// scenes that need another grid set it themselves. The scenes of Jones' papers run on the Jones model, which weighs
+// food as the strain's own trail (ADR 0022); the app's scenes with these agents set the extended model.
 const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
-  settings({ resolution: 512, density: 0.15, collisions: true, strains: strains([patch]), ...extra });
+  settings({
+    resolution: 512,
+    density: 0.15,
+    collisions: true,
+    model: 'jones',
+    strains: strains([{ food: patch.attraction?.[0] ?? 1, ...patch }]),
+    ...extra,
+  });
 
 // Grid 1024 shows about four times as many holes as 512, and without glow they stay dark (decided 2026-11-09).
 const network = { resolution: 1024, bloom: 0 } satisfies Partial<Settings>;
@@ -289,7 +297,7 @@ PRESETS.push(
     about:
       'A regular spot pattern made by chemorepulsion, like Turing spots with a shorter sensor distance. Jones cut a square hole into it. The agents flowed back in, and the undamaged pattern around the wound guided the regrowth until it matched the old one (p. 148). A network made by attraction also heals, but into a different pattern (Fig. 23).',
     strainRoles: ['Jones’ repelled agent'],
-    why: 'Jones’ values for Fig. 22 (p. 148): 10 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 27, one agent per cell. The Cut tool differs from his method: Jones kept agents out of the wound until all were placed elsewhere, while here they may flow back at once, and the wound also loses its trail.',
+    why: 'Jones’ values for Fig. 22 (p. 148): 10 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 27, one agent per cell. The Cut tool differs from his method in one point: Jones kept agents out of the wound until all were placed elsewhere, while here they flow back as soon as you release the tool. As in his method, the wound keeps its trail.',
     settings: () =>
       jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 27, attraction: [-1, 0, 0, 0] }, { density: 0.1 }),
   },
@@ -305,7 +313,9 @@ PRESETS.push(
       'Real Physarum avoids light. A lamp in the middle releases a repellent that spreads and fades, so agents feel it before they enter the lit disc. The network itself uses Jones’ settings for Fig. 4.',
     strainRoles: ['Jones’ standard agent, flees light'],
     why: 'The network uses Jones’ values for Fig. 4 with one agent per cell. The light is this app’s simplification: a spreading repellent with strength 0.2. Jones 2010 has no light.',
-    settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, { lightStrength: 0.2 }),
+    // Light that releases a repellent is no rule of Jones: the extended model (ADR 0022).
+    settings: () =>
+      jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, { model: 'extended', lightStrength: 0.2 }),
     env: [{ kind: 'light', at: [0, 0], r: 0.16 }],
   },
   {
@@ -323,7 +333,8 @@ PRESETS.push(
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },
-        { density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001 },
+        // Sensors that walls block are the owner's rule for the Maze, not Jones': the extended model (ADR 0020, 0022).
+        { model: 'extended', density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001 },
       ),
     env: [
       wall(-0.4, -0.5, -0.4, 0.2),
@@ -406,7 +417,7 @@ export const usesRule = (p: Preset) => p.settings().collisions;
 
 /** Shown once per page load when a scene made for the rule loads on a backend without it. */
 export const RULE_MISSING_NOTICE =
-  'This browser cannot run one agent per cell (it lacks the GPU feature EXT_float_blend). Jones’ scenes run without the rule here: his networks contract into a few lines, and other patterns can look different.';
+  'This browser cannot run one agent per cell (it lacks the GPU feature EXT_float_blend). Jones’ scenes run here without the rule, on the extended model: his networks contract into a few lines, and other patterns can look different.';
 
 /**
  * Shown when the user switches the rule off in a scene made for it. The collapse is measured for the

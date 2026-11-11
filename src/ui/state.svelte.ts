@@ -1,9 +1,19 @@
 import type { Engine } from '../engine/engine';
 import { strainAgents } from '../engine/pack';
-import { drawingOf, type Drawing } from '../model/link';
-import { defaultSettings, MAX_STRAINS, strainLike, type Settings } from '../model/params';
+import { drawingOf, kindsOf, type Drawing } from '../model/link';
+import {
+  constrain,
+  defaultSettings,
+  globalSpec,
+  MAX_STRAINS,
+  strainLike,
+  strainSpec,
+  toJones,
+  type Model,
+  type Settings,
+} from '../model/params';
 import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
-import { modelChanged } from '../model/scene';
+import { fmt, letter, list, modelChanged, signed } from '../model/scene';
 import type { Link } from '../model/url';
 
 export const TOOLS = [
@@ -15,13 +25,34 @@ export const TOOLS = [
     help: 'Hold to place agents of the selected strain. The tool uses only dead agents.',
   },
   { id: 'food', key: '3', label: 'Food', help: 'Place oat flakes. Food releases an attracting scent.' },
-  { id: 'light', key: '4', label: 'Light', help: 'Shine light. Physarum flees from it.' },
+  {
+    id: 'light',
+    key: '4',
+    label: 'Light',
+    help: 'Shine light. Physarum flees from it. Only the extended model has light.',
+  },
   { id: 'wall', key: '5', label: 'Wall', help: 'Draw walls that agents cannot cross or sense through.' },
   { id: 'erase', key: '6', label: 'Erase', help: 'Remove food, light and walls.' },
-  { id: 'cut', key: '7', label: 'Cut', help: 'Wound the network: clears an area and moves its agents away.' },
+  {
+    id: 'cut',
+    key: '7',
+    label: 'Cut',
+    help: 'Wound the network: moves the agents in an area away. In the extended model the area also loses its trail.',
+  },
 ] as const;
 
 export type Tool = (typeof TOOLS)[number]['id'];
+
+/** The tools of a model: Jones' papers have no light that releases a repellent (ADR 0022). */
+export const toolsFor = (model: Model) => TOOLS.filter((t) => model === 'extended' || t.id !== 'light');
+
+/**
+ * Keeps the selected tool one that the current model offers (toolsFor()): every change of the model calls it, a load
+ * of a scene or a link too. Light in the Jones model selects Move (ADR 0022, decision 25).
+ */
+function fitTool() {
+  if (!toolsFor(app.settings.model).some((t) => t.id === app.tool)) app.tool = 'pan';
+}
 
 export const LEARN_TABS = ['Physarum', 'The model', 'Controls', 'Scenes', 'About'] as const;
 
@@ -114,9 +145,10 @@ export const app = $state<AppState>({
  * one-agent-per-cell rule). The caller hands the settings and the environment to the engine.
  */
 export function setScene(p: Preset) {
-  const s = p.settings();
+  let s = p.settings();
   s.resolution = Math.min(s.resolution, app.maxResolution);
-  if (!app.canCollide) s.collisions = false;
+  // Without the rule a scene of Jones runs on the extended model: the Jones model always has it (constrain()).
+  if (!app.canCollide) s = constrain({ ...s, collisions: false });
   const base = structuredClone(s);
   app.settings = s;
   app.scene = p.id;
@@ -124,6 +156,7 @@ export function setScene(p: Preset) {
   app.strainOrigin = s.strains.map((_, i) => i);
   // The inoculate tool places the selected strain, and a scene with fewer strains has no such strain.
   app.strain = Math.min(app.strain, s.strains.length - 1);
+  fitTool();
 }
 
 let ruleNoticeShown = false;
@@ -175,6 +208,7 @@ export function clearEnvironment() {
  */
 export function openLink({ settings, drawing, drawingLost }: Link) {
   app.settings = settings;
+  fitTool();
   linkDrawing = drawing;
   app.envVersion++;
   if (drawingLost) showNotice('This app cannot read the scene and drawing in this link, so only its settings load.');
@@ -218,6 +252,19 @@ export function currentDrawing(): Drawing {
   return { scene, origins, shapes: env.map((shape) => shapes.includes(shape)), strokes: [...strokes] };
 }
 
+/**
+ * Whether the food, light and walls hold light, which the Jones model draws without effect: the panel says so below
+ * the model choice (ADR 0022, decision 29). The engine changes its list outside Svelte, and app.envVersion counts the
+ * changes: the read of it lets a derived value follow them.
+ */
+export function lightDrawn(): boolean {
+  return app.envVersion >= 0 && kindsOf(currentDrawing()).has('light');
+}
+
+/** Shown below the model choice while the Jones model draws light (lightDrawn()). */
+export const JONES_LIGHT =
+  'The light on the canvas has no effect in the Jones model. To remove it, use the Erase tool. To use it, select Extended.';
+
 /** The arena of the scene's shapes in the engine's list: the scene's own (startScene(), loadPreset()). */
 const sceneArena = () => app.sceneBase?.boundary ?? app.settings.boundary;
 
@@ -227,9 +274,81 @@ const sceneArena = () => app.sceneBase?.boundary ?? app.settings.boundary;
  */
 export function ruleUnavailable() {
   app.canCollide = false;
-  app.settings.collisions = false;
-  if (app.sceneBase) app.sceneBase.collisions = false;
+  app.settings = constrain({ ...$state.snapshot(app.settings), collisions: false });
+  fitTool();
+  if (app.sceneBase) app.sceneBase = constrain({ ...app.sceneBase, collisions: false });
   noteMissingRule();
+}
+
+/**
+ * The panel's model choice. A switch to Jones keeps only what Jones' model has (toJones()): strain A, one agent per
+ * cell, one diffusion pass, and the scent bound to the trail. A notice says what went (jonesChanges()). The extended
+ * model takes the settings as they are. With a scent decay of 0.1 it then runs as Jones does, until a setting of its
+ * own changes, a wall is drawn or the Cut tool acts: its sensors check walls on their way, and its cut clears the
+ * chemicals.
+ */
+export function setModel(model: Model) {
+  const s = $state.snapshot(app.settings);
+  if (model === s.model) return;
+  if (model === 'extended') {
+    app.settings.model = 'extended';
+    return;
+  }
+  if (!app.canCollide) {
+    showNotice('The Jones model needs one agent per cell, and this browser cannot run it.');
+    return;
+  }
+  const next = toJones(s);
+  app.settings = next;
+  app.strainOrigin = app.strainOrigin.slice(0, 1);
+  app.strain = 0;
+  fitTool();
+  // Only the extended model's sensors check walls on their way (ADR 0020): drawn walls act differently now.
+  const walls = kindsOf(currentDrawing()).has('wall') ? ' The walls stop agents, but they do not block sensors.' : '';
+  const text = `The Jones model has only Jones’ rules, and light has no effect in it.${walls}${jonesChanges(s, next)}`;
+  // About 3.3 words per second, as for the other long notices.
+  showNotice(text, Math.max(10_000, text.split(' ').length * 300));
+}
+
+/**
+ * What toJones() changed, for the notice of the switch (ADR 0022, decision 28): the strains and the agents that share
+ * a cell it removed, and every number it changed, from the difference of the settings, so that the notice cannot miss
+ * one. The population share of strain A is not in it: one strain has no share.
+ */
+function jonesChanges(s: Settings, next: Settings): string {
+  const n = s.strains.length;
+  const removed = [
+    n > 1 && (n === 2 ? 'strain B' : `strains B to ${letter(n - 1)}`),
+    !s.collisions && 'agents that share a cell',
+  ].filter((v): v is string => typeof v === 'string');
+  const changed: string[] = [];
+  for (const k of Object.keys(globalSpec) as (keyof typeof globalSpec)[]) {
+    const why = k === 'scentDecay' ? ' (the Decay of strain A)' : '';
+    if (s[k] !== next[k]) changed.push(`${globalSpec[k].label} from ${fmt(s[k])} to ${fmt(next[k])}${why}`);
+  }
+  const [a, b] = [s.strains[0], next.strains[0]];
+  if (a && b) {
+    const [from, to] = [a.attraction[0] ?? 0, b.attraction[0] ?? 0];
+    if (from !== to) changed.push(`the weight of strain A on its own trail from ${signed(from)} to ${signed(to)}`);
+    for (const k of ['food', 'light'] as const)
+      if (a[k] !== b[k]) changed.push(`${strainSpec[k].label} from ${signed(a[k])} to ${signed(b[k])}`);
+  }
+  return [
+    removed.length ? ` It removed ${list(removed)}.` : '',
+    changed.length ? ` It changed ${list(changed)}.` : '',
+  ].join('');
+}
+
+/**
+ * Keeps the panel on what the engine runs: constrain() binds the Jones model's values and turns a Jones model with a
+ * value Jones does not have into the extended one (App.svelte's settings effect). Writes only what changed.
+ */
+export function adopt(valid: Settings) {
+  const s = app.settings as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(valid)) {
+    if (JSON.stringify(s[k]) !== JSON.stringify(v)) s[k] = structuredClone(v);
+  }
+  fitTool();
 }
 
 /** Adds a strain that copies strain A: the defaults are Jones' values without the rule, which collapse. */

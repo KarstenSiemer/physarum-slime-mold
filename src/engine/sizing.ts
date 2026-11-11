@@ -44,6 +44,12 @@ export function diffusePlan(passes: number): Diffuse[] {
  */
 export const BYTES_PER_CELL = 90;
 export const BYTES_PER_CELL_HALF_FLOAT = 110;
+/**
+ * More bytes per cell while covered food is on (ADR 0022): WebGL2 without float blending marks the cells with an agent
+ * in a target of 1 B (gl/sim.ts `presence`). Elsewhere covered food counts into the collision buffers, which
+ * BYTES_PER_CELL holds already.
+ */
+export const COVERED_BYTES_PER_CELL_HALF_FLOAT = 1;
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 const BYTES_PER_AGENT = 32;
 

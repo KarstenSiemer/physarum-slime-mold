@@ -189,7 +189,9 @@ export class Engine {
   fit(s: Settings): Settings {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
-    const { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell } = this.backend;
+    const { maxAgents, maxBufferBytes, maxGridSide, coveredBytesPerCell } = this.backend;
+    // Covered food needs more memory only on some backends, and only while it is on.
+    const bytesPerCell = this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, budget: memoryBudget(memory) };
     return constrain({
       ...s,

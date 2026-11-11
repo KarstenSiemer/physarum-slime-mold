@@ -1,6 +1,6 @@
 import type { Boundary, Settings } from '../../model/params';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, type AgentTool } from '../pack';
+import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, trailSaturation, type AgentTool } from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
@@ -107,6 +107,11 @@ export class GlSim implements Sim {
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
   /**
+   * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
+   * (diffuse.frag COVERED). Allocated at its first use.
+   */
+  private presence: Target | undefined;
+  /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
    */
@@ -200,6 +205,11 @@ export class GlSim implements Sim {
     const switchedOn = settings.collisions && !this.settings.collisions;
     this.settings = settings;
     if (switchedOn) this.rebuildOccupancy();
+    // The memory fit counts `presence` only while covered food is on (sizing.ts).
+    if (!settings.coveredFood && this.presence) {
+      destroyTarget(this.gl, this.presence);
+      this.presence = undefined;
+    }
   }
 
   reset() {
@@ -425,6 +435,14 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.currentTrail) as Float32Array);
   }
 
+  readScent(): Promise<Float32Array> {
+    // readTarget() reads 4 channels per cell; the scent target holds 2.
+    const rgba = readTarget(this.gl, this.scent[this.p]);
+    return Promise.resolve(
+      Float32Array.from({ length: (rgba.length / 4) * 2 }, (_, i) => rgba[(i >> 1) * 4 + (i & 1)] ?? 0),
+    );
+  }
+
   readCounts(): Promise<Float32Array> {
     return Promise.resolve(readTarget(this.gl, this.counts) as Float32Array);
   }
@@ -474,6 +492,7 @@ export class GlSim implements Sim {
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
     all.push(this.walled, this.clearance);
     if (this.panels) all.push(this.panels);
+    if (this.presence) all.push(this.presence);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
@@ -556,12 +575,47 @@ export class GlSim implements Sim {
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(s, rt, this.paramData)));
   }
 
+  /**
+   * The agent pass for the walls and the trail saturation of the current settings. Only the extended model's sensors
+   * check for walls on the way (SENSE_WALLS, ADR 0020 and 0022).
+   */
+  private agentProgram(): Program {
+    const senseWalls = this.walls && this.settings.model === 'extended';
+    if (trailSaturation(this.settings) > 0) {
+      const p = this.prog.saturated();
+      return senseWalls ? p.walled : p.agents;
+    }
+    return senseWalls ? this.prog.walled().agents : this.prog.agents;
+  }
+
+  /**
+   * The agents per cell after this step's moves, for covered food (diffuse.frag COVERED): collision mode counts them
+   * anyway. Without it they are counted here, into the collision target that is not current (additive, which needs
+   * float blending), or else into `presence` (1 per cell with an agent, in 8 bits).
+   */
+  private occupancyAfterMoves(): WebGLTexture {
+    const gl = this.gl;
+    if (this.settings.collisions) return this.ensureCollision().occ[this.q].texture;
+    if (this.floatBlend && this.collision) {
+      const next = this.collision.occ[flip(this.q)];
+      clear(gl, next);
+      this.points(2, next, gl.FUNC_ADD);
+      this.q = flip(this.q);
+      return next.texture;
+    }
+    this.presence ??= target(gl, this.width, this.height, gl.R8);
+    clear(gl, this.presence);
+    this.points(2, this.presence, gl.FUNC_ADD);
+    return this.presence.texture;
+  }
+
   private encodeStep() {
     const gl = this.gl;
     const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
+    const agentProgram = this.agentProgram();
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
-        this.walls ? this.prog.walled().agents : this.prog.agents,
+        agentProgram,
         dst,
         {
           agentsIn: src.texture,
@@ -593,17 +647,21 @@ export class GlSim implements Sim {
       this.q = flip(this.q);
     }
     this.deposit();
+    const covered = this.settings.coveredFood;
+    // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
+    const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
     for (const v of diffusePlan(this.settings.diffusion)) {
       const out = flip(this.p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.mrt[out]);
       gl.viewport(0, 0, this.width, this.height);
-      const d = this.prog.diffuse;
+      const d = covered && v.first ? this.prog.covered() : this.prog.diffuse;
       gl.useProgram(d.program);
       textures(gl, d.program, {
         trailIn: this.trail[this.p].texture,
         scentIn: this.scent[this.p].texture,
         counts: this.counts.texture,
         env: this.env.texture,
+        occ,
       });
       gl.uniform1i(d.loc('first'), Number(v.first));
       gl.uniform1i(d.loc('last'), Number(v.last));

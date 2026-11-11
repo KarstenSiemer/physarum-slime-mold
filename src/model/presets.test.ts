@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { constrain, MAX_STRAINS, sanitize, type Settings } from './params';
+import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
 import {
   GROUPS,
   PRESETS,
@@ -32,6 +32,24 @@ describe('presets', () => {
     const s = p.settings();
     expect(sanitize(JSON.parse(JSON.stringify(s)))).toEqual(s);
     expect(constrain(s)).toBe(s);
+  });
+
+  // Owner decision 2026-11-11 (ADR 0022): a scene from one of Jones' papers runs on the Jones model, every other scene
+  // on the extended model. Every scene keeps the bytes of the code before the model switch: covered food off, no
+  // trail saturation and scent decay 0.1, where the extended model releases the scent of the Jones model.
+  it('run on the Jones model if they come from Jones’ papers, else on the extended model', () => {
+    const fromJones = ['network', 'hexagons', 'spots', 'stripes', 'shortest-path', 'steiner', 'shrinking', 'wound'];
+    for (const p of PRESETS) {
+      const s = p.settings();
+      const jones = fromJones.includes(p.id);
+      expect(p.source.startsWith('Jones'), p.id).toBe(jones);
+      expect(s.model, p.id).toBe(jones ? 'jones' : 'extended');
+      if (jones) expect(jonesFits(s), p.id).toBe(true);
+      // No scene of Jones paints light: his papers have no light that releases a repellent.
+      if (jones) expect(p.env?.some((e) => e.kind === 'light') ?? false, p.id).toBe(false);
+      expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, 0.1]);
+    }
+    expect(defaultSettings().model).toBe('extended');
   });
 
   it('sit in the four groups, in group order, with the start scene under Start here', () => {

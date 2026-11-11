@@ -6,7 +6,9 @@ import {
   BOUNDARIES,
   defaultSettings,
   defaultStrain,
+  emissionScale,
   LAYOUTS,
+  MODELS,
   STYLES,
   type Boundary,
   type Settings,
@@ -14,8 +16,9 @@ import {
 import { outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
 import agentsFrag from './gl/glsl/agents.frag?raw';
+import diffuseFrag from './gl/glsl/diffuse.frag?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
-import { agentsProgram, compile, type Programs, type Walled } from './gl/programs';
+import { agentsProgram, compile, diffuseProgram, type Programs, type Walled } from './gl/programs';
 import { GlSim } from './gl/sim';
 import { AgentToolKind, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
@@ -971,6 +974,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         for (const sim of [walled, blind]) sim.run(steps);
         expect(await state(walled)).not.toEqual(await state(blind));
       },
+      // Up to 27.6 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
+      120_000,
     );
 
     // Sensors of 9, 30 and 64 cells and walls at every distance from the agents: the clearance skips only walks
@@ -984,6 +989,598 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const [shipped, every] = await pair('everyWalk', patch, w, h, Math.round(patch.density * w * h), WALLS);
         for (const sim of [shipped, every]) sim.run(48);
         expect(await state(shipped)).toEqual(await state(every));
+      },
+    );
+  });
+
+  // The model switch (ADR 0022): the scaled sources of the extended model, covered food and the saturating trail
+  // perception, each against a CPU reference, and the passes without them against the sources without them.
+  describe('model switch (ADR 0022)', () => {
+    /** `source` with the one match of `from` replaced by `to`. */
+    const cut = (source: string, from: RegExp, to: string) => {
+      if ((source.match(new RegExp(from.source, 'g')) ?? []).length !== 1)
+        throw new Error(`Not found once in the shader: ${from.source}`);
+      return source.replace(from, to);
+    };
+    // The shipped sources with the saturation and covered food cut out: the code of sense() and of the sources
+    // before ADR 0022. The patterns match whatever the saturating and covering branches hold.
+    const PLAIN = {
+      agentsWgsl: cut(
+        agentsWgsl,
+        / {2}var t = textureLoad\(trail, q, 0\);\n {2}if \(SATURATE\) \{[^\n]*\}\n {2}return dot\(t, P\.attraction\[s\]\)/,
+        '  return dot(textureLoad(trail, q, 0), P.attraction[s])',
+      ),
+      diffuseWgsl: cut(
+        diffuseWgsl,
+        / {8}if \(COVERED\) \{\n[\s\S]*?\n {8}\} else \{\n {10}(s \+= vec2f\(e\.y \* P\.scent\.x, e\.z \* P\.scent\.y\);)\n {8}\}/,
+        '        $1',
+      ),
+      agentsFrag: cut(
+        agentsFrag,
+        /#if SATURATE\n[\s\S]*?#else\n( {2}return dot\(texelFetch\(trail, q, 0\)[^\n]*)\n#endif/,
+        '$1',
+      ),
+      diffuseFrag: cut(
+        diffuseFrag,
+        /#if COVERED\n {4}float food[\s\S]*?#else\n( {4}s \+= vec2\(e\.g \* P\.scent\.x, e\.b \* P\.scent\.y\);)\n#endif/,
+        '$1',
+      ),
+    };
+    let plainGl: { gl: WebGL2RenderingContext; floatBlend: boolean; shipped: Programs; plain: Programs } | undefined;
+
+    beforeAll(async () => {
+      if (kind === 'webgpu') {
+        const { device } = (backend as WebGpuBackend).gpu;
+        (await Simulation.create(device, defaultSettings(), 16, 16, 1, PLAIN.agentsWgsl, PLAIN.diffuseWgsl)).destroy();
+        return;
+      }
+      const context = document.createElement('canvas').getContext('webgl2');
+      if (!context?.getExtension('EXT_color_buffer_float')) throw new Error('WebGL2 with float render targets needed');
+      const shipped = compile(context);
+      const plain: Programs = {
+        ...shipped,
+        agents: agentsProgram(context, PLAIN.agentsFrag, false),
+        diffuse: diffuseProgram(context, PLAIN.diffuseFrag, false),
+      };
+      plainGl = { gl: context, floatBlend: context.getExtension('EXT_float_blend') !== null, shipped, plain };
+    }, 180_000);
+
+    /** A simulation from the shipped shaders, or with `plain` from the sources without saturation and covered food. */
+    async function build(s: Settings, w: number, h: number, n: number, plain = false) {
+      let sim: Sim;
+      if (kind === 'webgpu') {
+        const { device } = (backend as WebGpuBackend).gpu;
+        device.pushErrorScope('validation');
+        sim = plain
+          ? await Simulation.create(device, s, w, h, n, PLAIN.agentsWgsl, PLAIN.diffuseWgsl)
+          : await backend.createSim(s, w, h, n);
+        expect((await device.popErrorScope())?.message).toBeUndefined();
+      } else {
+        const g = plainGl;
+        if (!g) throw new Error('no WebGL2 context');
+        sim = new GlSim(g.gl, plain ? g.plain : g.shipped, s, w, h, n, g.floatBlend);
+      }
+      live.push(sim);
+      return sim;
+    }
+
+    const state = async (sim: Sim) => ({
+      agents: await sim.readAgents(),
+      trail: Array.from(await sim.readTrail()),
+      scent: Array.from(await sim.readScent()),
+    });
+    const FOOD: Stroke[] = [
+      { kind: 'food', from: [20, 20], to: [60, 30], radius: 4 },
+      { kind: 'light', from: [80, 40], to: [80, 40], radius: 6 },
+    ];
+    const rivals = [0, 1, 2].map((i) => ({
+      ...defaultStrain(i),
+      sensorAngle: 35,
+      rotationAngle: 40,
+      sensorOffset: 18,
+      stepSize: 1.4,
+      decay: 0.6,
+      attraction: [0, 1, 2].map((j) => (j === i ? 1 : -0.7)),
+    }));
+    // The scenes of the comparison with other versions of the agent shader (above), with food and light.
+    const SCENES = [
+      ['three strains', { seed: 7, density: 3, diffusion: 2, layout: 'sectors', strains: rivals }, [160, 144], 8],
+      ['one agent per cell', { seed: 7, density: 0.5, collisions: true }, [96, 64], 64],
+    ] as const;
+
+    // Overrides that are off build the passes from the shipped sources: in both models they must give the bytes of
+    // the sources without saturation and covered food. The GPU runs what packParams() packs, the same for both.
+    it.each(SCENES)(
+      'give the agents, trail and scent of the sources without the switch while it changes nothing (%s)',
+      async (_, patch, [w, h], steps) => {
+        const n = Math.round(patch.density * w * h);
+        const run = async (s: Settings, plain = false) => {
+          const sim = await build(s, w, h, n, plain);
+          sim.paint(FOOD);
+          sim.reset();
+          sim.run(steps);
+          return state(sim);
+        };
+        for (const model of MODELS) {
+          const s: Settings = { ...defaultSettings(), ...patch, model, trailSaturation: 0 };
+          const expected = await run(s, true);
+          expect(await run(s), model).toEqual(expected);
+          // A K that reached the settings past sanitize(): the Jones model never saturates (pack.ts trailSaturation()).
+          if (model === 'jones') expect(await run({ ...s, trailSaturation: 20 }), 'Jones with K').toEqual(expected);
+        }
+        // K and covered food change them.
+        const ext: Settings = { ...defaultSettings(), ...patch, model: 'extended', trailSaturation: 0 };
+        const expected = await run(ext, true);
+        for (const more of [{ trailSaturation: 20 }, { coveredFood: true }])
+          expect(await run({ ...ext, ...more }), JSON.stringify(more)).not.toEqual(expected);
+      },
+      // Up to 62.8 s on SwiftShader in CI (#28): 300 s keeps it under a quarter (ADR 0010).
+      300_000,
+    );
+
+    const cellAtFor = (boundary: Boundary, w: number, h: number) => (x: number, y: number) => {
+      if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
+      if (x < 0 || y < 0 || x >= w || y >= h) return -1;
+      if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > 0.5 * Math.min(w, h) - 1) return -1;
+      return y * w + x;
+    };
+
+    // Jones 2010, p. 144: food goes into the one trail map and diffuses and decays with it. The app keeps food in a
+    // scent field of its own (ADR 0007); the Jones model gives it the strain's decay (pack.ts), so trail + scent must
+    // be Jones' map. CPU reference of that one map, stepped with the deposits that the GPU's agents made in each step.
+    it.each([
+      ['attraction, closed box with a wall', 1, 'box', 0.05],
+      ['chemorepulsion, periodic grid', -1, 'wrap', 0.1],
+      ['attraction, dish', 1, 'dish', 0.2],
+    ] as const)(
+      'keep trail + scent equal to Jones’ one trail map (%s)',
+      async (_, self, boundary, decay) => {
+        const [w, h] = [48, 40];
+        const strain = { ...defaultStrain(0), decay, food: self, attraction: [self, 0, 0, 0] };
+        const settings: Settings = {
+          ...defaultSettings(),
+          seed: 3,
+          model: 'jones',
+          collisions: true,
+          density: 0.15,
+          boundary,
+          foodStrength: 0.05,
+          // Past constrain(): packParams() must bind the scent to the strain's decay itself.
+          scentDecay: 0.1,
+          strains: [strain],
+        };
+        const cells = boundary === 'dish' ? Math.min(w, h) ** 2 : w * h;
+        const sim = await build(settings, w, h, Math.round(0.15 * cells));
+        sim.paint([
+          { kind: 'food', from: [10, 12], to: [30, 14], radius: 3 },
+          { kind: 'food', from: [1, 30], to: [1, 30], radius: 2 }, // across the seam of the periodic grid
+          { kind: 'wall', from: [24, 20], to: [24, 34], radius: 1 },
+        ]);
+        sim.reset();
+        const env = await sim.readEnv();
+        const cellAt = cellAtFor(boundary, w, h);
+        const open = (c: number) => c >= 0 && (env[c * 4] ?? 0) < 128;
+        const keep = 1 - decay;
+        let map = new Float64Array(w * h);
+        for (let k = 0; k < 40; k++) {
+          sim.run(1);
+          const counts = await sim.readCounts();
+          const src = map.map((v, c) =>
+            open(c) ? v + (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 : 0,
+          );
+          map = src.map((_, c) => {
+            const [x, y] = [c % w, Math.floor(c / w)];
+            if (!open(cellAt(x, y))) return 0;
+            let [sum, n] = [0, 0];
+            for (let dy = -1; dy <= 1; dy++)
+              for (let dx = -1; dx <= 1; dx++) {
+                const q = cellAt(x + dx, y + dy);
+                if (!open(q)) continue;
+                sum += src[q] ?? 0;
+                n++;
+              }
+            return (keep * sum) / n;
+          });
+        }
+        const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
+        const sum = Float32Array.from({ length: w * h }, (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0));
+        expect(maxRelError(sum, map)).toBeLessThan(1e-5);
+        // Food and agents both count: the map without the deposits or without the food is far off.
+        expect(Math.max(...Array.from(scent))).toBeGreaterThan(1);
+        expect(Math.max(...Array.from(trail))).toBeGreaterThan(1);
+      },
+      // Up to 20.4 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
+      120_000,
+    );
+
+    // Jones does not say what a sensor reads behind a wall (ADR 0020): only the extended model's sensors check the
+    // cells on the way for walls, and the Jones model reads the sensor's cell (ADR 0022). Without walls both agree.
+    it('check the sensors for walls on the way in the extended model only', async () => {
+      const [w, h] = [64, 48];
+      const settings: Settings = {
+        ...defaultSettings(),
+        seed: 7,
+        model: 'jones',
+        collisions: true,
+        density: 0.3,
+        strains: [{ ...defaultStrain(0), sensorOffset: 12 }],
+      };
+      const run = async (model: Settings['model'], walls: boolean) => {
+        const sim = await build({ ...settings, model }, w, h, Math.round(0.3 * w * h));
+        if (walls) sim.paint(WALLS);
+        sim.reset();
+        sim.run(48);
+        return state(sim);
+      };
+      expect(await run('jones', false)).toEqual(await run('extended', false));
+      expect(await run('jones', true)).not.toEqual(await run('extended', true));
+    });
+
+    // Jones 2010, p. 148: the wound loses its agents, which go elsewhere. The extended model also clears its chemicals.
+    it('clear the trail and scent in a cut in the extended model only', async () => {
+      const [w, h] = [64, 48];
+      const settings: Settings = {
+        ...defaultSettings(),
+        seed: 4,
+        model: 'jones',
+        collisions: true,
+        density: 0.3,
+      };
+      const inWound = async (model: Settings['model']) => {
+        const sim = await build({ ...settings, model }, w, h, Math.round(0.3 * w * h));
+        sim.paint([{ kind: 'food', from: [32, 24], to: [32, 24], radius: 4 }]);
+        sim.reset();
+        sim.run(30);
+        const cut: AgentTool = { kind: AgentToolKind.cut, x: 32, y: 24, radius: 8, strain: 0, revive: 0 };
+        sim.run(1, cut);
+        const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
+        const c = 24 * w + 32;
+        return { trail: trail[c * 4] ?? 0, scent: scent[c * 2] ?? 0 };
+      };
+      const jones = await inWound('jones');
+      const ext = await inWound('extended');
+      expect(jones.scent).toBeGreaterThan(1);
+      expect(jones.trail).toBeGreaterThan(0);
+      expect([ext.trail, ext.scent]).toEqual([0, 0]);
+    });
+
+    /**
+     * One step of the scent on the CPU, on a periodic grid: sources (food × `covered` factor; with `coverLight` the
+     * light too, which the shaders must not do), the 3 × 3 means, then the decay. The Jones model has no light, and its
+     * scent decays with the strain's decay (pack.ts).
+     */
+    function scentStep(
+      s: Float64Array,
+      env: Uint8Array,
+      [w, h]: [number, number],
+      settings: Settings,
+      coveredAt: (c: number) => boolean = () => false,
+      coverLight = false,
+    ) {
+      const jones = settings.model === 'jones';
+      const g = jones ? 1 : emissionScale(settings.scentDecay);
+      const decay = jones ? (settings.strains[0]?.decay ?? 0) : settings.scentDecay;
+      const factor = settings.coveredFood ? settings.coveredFoodFactor : 1;
+      let cur = Float64Array.from(s);
+      for (let c = 0; c < w * h; c++) {
+        const food = ((env[c * 4 + 1] ?? 0) / 255) * 255 * settings.foodStrength * g;
+        const f = coveredAt(c) && (env[c * 4 + 1] ?? 0) > 0 ? factor : 1;
+        cur[c * 2] = (cur[c * 2] ?? 0) + food * f;
+        const light = jones ? 0 : ((env[c * 4 + 2] ?? 0) / 255) * 255 * settings.lightStrength * g;
+        cur[c * 2 + 1] = (cur[c * 2 + 1] ?? 0) + light * (coverLight ? f : 1);
+      }
+      for (let pass = 0; pass < settings.diffusion; pass++) {
+        const next = new Float64Array(cur.length);
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++)
+            for (let k = 0; k < 2; k++) {
+              let sum = 0;
+              for (let dy = -1; dy <= 1; dy++)
+                for (let dx = -1; dx <= 1; dx++) sum += cur[(((y + dy + h) % h) * w + ((x + dx + w) % w)) * 2 + k] ?? 0;
+              next[(y * w + x) * 2 + k] = sum / 9;
+            }
+        cur = next;
+      }
+      return cur.map((v) => v * (1 - decay));
+    }
+
+    const maxRelError = (gpu: Float32Array, cpu: Float64Array) => {
+      const scale = Math.max(...Array.from(cpu, Math.abs), 1e-30);
+      return Math.max(...Array.from(cpu, (v, i) => Math.abs((gpu[i] ?? 0) - v))) / scale;
+    };
+
+    // A food and a light disc on a periodic grid, 30 steps: the GPU scent within 1e-4 of the CPU reference, in both
+    // models and at three decays. In the Jones model the decay is the strain's, Scent decay stays at 0.1 and the light
+    // releases nothing.
+    it.each(MODELS.flatMap((model) => [0.1, 0.01, 0.001].map((d) => [model, d] as const)))(
+      'release food and light scent as the CPU reference does (%s model, scent decay %s)',
+      async (model, d) => {
+        const [w, h] = [48, 32];
+        const jones = model === 'jones';
+        const settings: Settings = {
+          ...defaultSettings(),
+          layout: 'empty',
+          model,
+          scentDecay: jones ? 0.1 : d,
+          lightStrength: 0.2,
+          strains: [{ ...defaultStrain(0), decay: jones ? d : 0.1 }],
+        };
+        const sim = await build(settings, w, h, 1);
+        sim.paint([
+          { kind: 'food', from: [12, 10], to: [12, 10], radius: 3.5 },
+          { kind: 'light', from: [34, 20], to: [38, 22], radius: 2.5 },
+        ]);
+        const env = await sim.readEnv();
+        let cpu = new Float64Array(w * h * 2);
+        for (let k = 0; k < 30; k++) cpu = scentStep(cpu, env, [w, h], settings);
+        sim.run(30);
+        const scent = await sim.readScent();
+        expect(maxRelError(scent, cpu)).toBeLessThan(1e-4);
+        const light = Math.max(...Array.from(scent).filter((_, i) => i % 2 === 1));
+        if (jones) expect(light).toBe(0);
+        else expect(light).toBeGreaterThan(1);
+      },
+    );
+
+    // Food on every cell: no gradient, so the scent follows s′ = (1 − d) · (s + source) exactly, with or without the
+    // blur, which runs here not at all, so that no rounding of the 3 × 3 sums adds up over 1200 steps. At decay 0.1 the
+    // extended model releases the bytes of the Jones model; at every decay it tends to the plateau of decay 0.1.
+    it('keep the plateau of a large food at every scent decay in the extended model', async () => {
+      const [w, h] = [16, 16];
+      const steps = 1200;
+      const env = new Uint8Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) env[c * 4 + 1] = 255;
+      const run = async (patch: Partial<Settings>) => {
+        const sim = await build({ ...defaultSettings(), layout: 'empty', diffusion: 0, ...patch }, w, h, 1);
+        sim.writeEnv(env);
+        sim.run(steps);
+        return sim.readScent();
+      };
+      expect(await run({ model: 'extended' })).toEqual(await run({ model: 'jones' }));
+      const plateau = (255 * 0.05 * 0.9) / 0.1;
+      for (const d of [0.1, 0.01, 0.001]) {
+        const keep = 1 - d;
+        const source = 255 * 0.05 * emissionScale(d);
+        expect((source * keep) / d / plateau, `plateau at ${d}`).toBeCloseTo(1, 12);
+        const expected = (source * keep * (1 - keep ** steps)) / d;
+        const scent = await run({ model: 'extended', scentDecay: d });
+        for (let c = 0; c < w * h; c++) expect(Math.abs((scent[c * 2] ?? 0) / expected - 1), `${d}`).toBeLessThan(1e-4);
+      }
+    }, 120_000); // Up to 25.5 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
+
+    // Agents near and on food: a food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it
+    // holds an alive agent after the step's moves (Adamatzky and Jones 2010, ADR 0022). With and without the rule of
+    // one agent per cell, with 1 and 2 blur passes. Food lies across both seams of the periodic grid, light lies on
+    // food, and shrinkage leaves dead agents: the references with an unwrapped window, with dead agents and with
+    // covered light are each far off, so a pass that did any of these would fail.
+    it.each([false, true].flatMap((collisions) => [1, 2].map((diffusion) => [collisions, diffusion] as const)))(
+      'release the covered-food factor of the scent where an agent covers it (collisions %s, diffusion %s)',
+      async (collisions, diffusion) => {
+        const [w, h] = [64, 48];
+        // Two blur passes with the factor of Jones and Adamatzky 2014 and the extended model at decay 0.003 (g ≠ 1),
+        // one with the default of 2010.
+        const coveredFoodFactor = diffusion === 2 ? 0.01 : 0.001;
+        const settings: Settings = {
+          ...defaultSettings(),
+          seed: 5,
+          density: 0.08,
+          collisions,
+          diffusion,
+          shrink: 0.02,
+          lightStrength: 0.2,
+          scentDecay: diffusion === 2 ? 0.003 : 0.1,
+          coveredFood: true,
+          coveredFoodFactor,
+          // Agents that ignore light also cover the lit food.
+          strains: [{ ...defaultStrain(0), light: 0 }],
+        };
+        const sim = await build(settings, w, h, Math.round(0.08 * w * h));
+        sim.paint([
+          { kind: 'food', from: [6, 6], to: [58, 40], radius: 3 },
+          { kind: 'food', from: [6, 40], to: [58, 6], radius: 1.5 },
+          { kind: 'food', from: [0.5, 4], to: [0.5, 44], radius: 2.5 }, // across the x seam
+          { kind: 'food', from: [8, 0.5], to: [56, 0.5], radius: 2 }, // across the y seam
+          { kind: 'light', from: [6, 6], to: [58, 40], radius: 2 }, // on the first food stroke
+        ]);
+        sim.reset();
+        sim.run(20);
+        const env = await sim.readEnv();
+        const before = Float64Array.from(await sim.readScent());
+        sim.run(1);
+        const after = await sim.readScent();
+        const agents = await sim.readAgents();
+        const [alive, dead] = [new Uint8Array(w * h), new Uint8Array(w * h)];
+        for (const a of agents) ((a.bits & 4) !== 0 ? alive : dead)[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
+        const windowOf = (held: (c: number) => boolean, wrap: boolean) => (c: number) => {
+          const [x, y] = [c % w, Math.floor(c / w)];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const [nx, ny] = [x + dx, y + dy];
+              if (!wrap && (nx < 0 || ny < 0 || nx >= w || ny >= h)) continue;
+              if (held(((ny + h) % h) * w + ((nx + w) % w))) return true;
+            }
+          return false;
+        };
+        const coveredAt = windowOf((c) => alive[c] === 1, true);
+        const cpu = scentStep(before, env, [w, h], settings, coveredAt);
+        expect(maxRelError(after, cpu)).toBeLessThan(1e-4);
+        // Some food is covered and some is not: the reference without the rule is far off.
+        const foodCells = Array.from({ length: w * h }, (_, c) => c).filter((c) => (env[c * 4 + 1] ?? 0) > 0);
+        const covered = foodCells.filter(coveredAt).length;
+        expect(covered).toBeGreaterThan(10);
+        expect(foodCells.length - covered).toBeGreaterThan(10);
+        const far = (other: Float64Array) => {
+          expect(maxRelError(after, other)).toBeGreaterThan(1e-3);
+        };
+        far(scentStep(before, env, [w, h], { ...settings, coveredFood: false }));
+        // The window wraps at the seams: some food cells are covered only through a seam.
+        const unwrapped = windowOf((c) => alive[c] === 1, false);
+        expect(foodCells.filter((c) => coveredAt(c) !== unwrapped(c)).length).toBeGreaterThan(0);
+        far(scentStep(before, env, [w, h], settings, unwrapped));
+        // Dead agents cover nothing.
+        const withDead = windowOf((c) => alive[c] === 1 || dead[c] === 1, true);
+        expect(foodCells.filter((c) => coveredAt(c) !== withDead(c)).length).toBeGreaterThan(0);
+        far(scentStep(before, env, [w, h], settings, withDead));
+        // Light keeps its full source on covered food.
+        expect(foodCells.filter((c) => coveredAt(c) && (env[c * 4 + 2] ?? 0) > 0).length).toBeGreaterThan(0);
+        far(scentStep(before, env, [w, h], settings, coveredAt, true));
+      },
+    );
+
+    // WebGL2 without float blending marks the cells with an agent in a target of its own (gl/sim.ts `presence`).
+    it.runIf(kind === 'webgl2')(
+      'release the covered-food factor of the scent where an agent covers it without float blending',
+      async () => {
+        const g = plainGl;
+        if (!g) throw new Error('no WebGL2 context');
+        const [w, h] = [64, 48];
+        const settings = { ...defaultSettings(), seed: 5, density: 0.08, diffusion: 1, coveredFood: true };
+        const make = (cover: boolean) => {
+          const sim = new GlSim(
+            g.gl,
+            g.shipped,
+            { ...settings, coveredFood: cover },
+            w,
+            h,
+            Math.round(0.08 * w * h),
+            false,
+          );
+          live.push(sim);
+          sim.paint([{ kind: 'food', from: [6, 6], to: [58, 40], radius: 3 }]);
+          sim.reset();
+          sim.run(20);
+          return sim;
+        };
+        const sim = make(true);
+        const env = await sim.readEnv();
+        const before = Float64Array.from(await sim.readScent());
+        sim.run(1);
+        const held = new Uint8Array(w * h);
+        for (const a of await sim.readAgents()) if (a.bits & 4) held[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
+        const coveredAt = (c: number) => {
+          const [x, y] = [c % w, Math.floor(c / w)];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) if (held[((y + dy + h) % h) * w + ((x + dx + w) % w)]) return true;
+          return false;
+        };
+        expect(maxRelError(await sim.readScent(), scentStep(before, env, [w, h], settings, coveredAt))).toBeLessThan(
+          1e-4,
+        );
+      },
+    );
+
+    // PCG and the random stream of agents.wgsl, for the random turn of an agent whose front sensor is weakest.
+    const pcg = (v: number) => {
+      const state = (Math.imul(v >>> 0, 747796405) + 2891336453) >>> 0;
+      const word = Math.imul(((state >>> ((state >>> 28) + 4)) ^ state) >>> 0, 277803737) >>> 0;
+      return ((word >>> 22) ^ word) >>> 0;
+    };
+    const firstDraw = (id: number, step: number, seed: number) => {
+      const s = pcg((id ^ pcg((step ^ pcg((seed ^ 0) >>> 0)) >>> 0)) >>> 0);
+      return (pcg(s) >>> 8) / 16777216;
+    };
+
+    // Two strains with weights on both trails, on a random trail: every agent's turn in one step against the CPU
+    // reference of sense() and steer() with t / (1 + t / K) per lane. Agents whose sensors lie within 1e-3 of a cell
+    // edge or whose two strongest sensors differ by less than 1e-4 are left out: float rounding could decide them.
+    // With a wall painted, the passes whose sensors check for walls (SENSE_WALLS) saturate too; agents near the wall
+    // are left out, so no sensor of the rest meets it.
+    it.each([false, true].flatMap((collisions) => [false, true].map((walls) => [collisions, walls] as const)))(
+      'saturate the trail per lane as the CPU reference does (collisions %s, walls %s)',
+      async (collisions, walls) => {
+        const [w, h] = [64, 64];
+        const K = 120;
+        const RA = 30;
+        const strains = [
+          { ...defaultStrain(0, 2), sensorAngle: 40, rotationAngle: RA, sensorOffset: 7, attraction: [1, 0.6, 0, 0] },
+          { ...defaultStrain(1, 2), sensorAngle: 40, rotationAngle: RA, sensorOffset: 7, attraction: [-0.5, 1, 0, 0] },
+        ];
+        const n = 400;
+        // Collisions are switched on after the agents are written: the switch builds the occupancy from them.
+        const settings = {
+          ...defaultSettings(),
+          seed: 11,
+          layout: 'empty' as const,
+          density: n / (w * h),
+          model: 'extended' as const,
+          trailSaturation: K,
+          strains,
+        };
+        const sim = await build(settings, w, h, n);
+        const wall = { x: 30, y: 30, r: 2 };
+        if (walls) sim.paint([{ kind: 'wall', from: [wall.x, wall.y], to: [wall.x, wall.y], radius: wall.r }]);
+        let r = 99;
+        const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+        const trail = Float32Array.from({ length: w * h * 4 }, (_, i) =>
+          i % 4 < 2 ? Math.fround(1 + 2000 * rnd() ** 2) : 0,
+        );
+        sim.writeTrail(trail);
+        const placed = Array.from({ length: n }, (_, i) => ({
+          x: Math.floor(rnd() * w) + 0.5,
+          y: Math.floor(rnd() * h) + 0.5,
+          heading: Math.fround(rnd() * 2 * Math.PI),
+          bits: 4 | (i % 2),
+        }));
+        // At most one agent per cell, so that no claim fails for lack of a free cell.
+        const taken = new Set<number>();
+        const agents = placed.filter((a) => {
+          const c = Math.floor(a.y) * w + Math.floor(a.x);
+          return taken.has(c) ? false : (taken.add(c), true);
+        });
+        agents.forEach((a, i) => {
+          sim.writeAgent(i, a);
+        });
+        if (collisions) sim.update({ ...settings, collisions: true });
+        sim.run(1);
+        const after = await sim.readAgents();
+        const DEG = Math.PI / 180;
+        const sat = (t: number) => t / (1 + t / K);
+        let checked = 0;
+        let changedByK = 0;
+        agents.forEach((a, i) => {
+          const st = strains[a.bits & 1];
+          const b = after[i];
+          if (!st || !b) return;
+          // In collision mode a blocked agent takes a random heading: only agents that moved show their turn.
+          if (collisions && b.x === a.x && b.y === a.y) return;
+          if (walls && Math.hypot(a.x - wall.x, a.y - wall.y) < wall.r + st.sensorOffset + 3) return;
+          const near = { edge: false };
+          const read = (angle: number, saturate: boolean) => {
+            const [px, py] = [a.x + st.sensorOffset * Math.cos(angle), a.y + st.sensorOffset * Math.sin(angle)];
+            const [fx, fy] = [px - Math.floor(px), py - Math.floor(py)];
+            if (Math.min(fx, 1 - fx, fy, 1 - fy) < 1e-3) near.edge = true;
+            const c = (((Math.floor(py) % h) + h) % h) * w + (((Math.floor(px) % w) + w) % w);
+            let v = 0;
+            for (let k = 0; k < 2; k++) {
+              const t = trail[c * 4 + k] ?? 0;
+              v += (saturate ? sat(t) : t) * (st.attraction[k] ?? 0);
+            }
+            return v;
+          };
+          const turn = (saturate: boolean) => {
+            const sa = st.sensorAngle * DEG;
+            const [f, l, rr] = [
+              read(a.heading, saturate),
+              read(a.heading - sa, saturate),
+              read(a.heading + sa, saturate),
+            ];
+            const gap = Math.min(Math.abs(f - l), Math.abs(f - rr), Math.abs(l - rr));
+            const close = gap / Math.max(1, Math.abs(f), Math.abs(l), Math.abs(rr)) < 1e-4;
+            if (f > l && f > rr) return { by: 0, close };
+            if (f < l && f < rr) return { by: firstDraw(i, 0, settings.seed) < 0.5 ? RA : -RA, close };
+            return { by: l < rr ? RA : rr < l ? -RA : 0, close };
+          };
+          const withK = turn(true);
+          const withoutK = turn(false);
+          if (near.edge || withK.close) return;
+          checked++;
+          if (withK.by !== withoutK.by) changedByK++;
+          const expected = a.heading + withK.by * DEG;
+          const diff = Math.abs(((b.heading - expected + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+          expect(diff, `agent ${i}`).toBeLessThan(1e-4);
+        });
+        expect(checked).toBeGreaterThan(0.4 * agents.length);
+        expect(changedByK).toBeGreaterThan(0.1 * checked);
       },
     );
   });
@@ -2306,7 +2903,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const again = (await inoculation(false)).sim;
       expect(await again.readAgents()).toEqual(await sim.readAgents());
       expect(Array.from(await again.readTrail())).toEqual(Array.from(await sim.readTrail()));
-    });
+    }, 120_000); // Up to 24.0 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
 
     // Agents that never leave their cell (step 0), half of them dead, and a brush across the wrap seam. Before,
     // the tool also moved living agents of its strain from anywhere into the brush.

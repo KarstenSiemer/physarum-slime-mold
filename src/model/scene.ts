@@ -11,10 +11,10 @@ export function fmt(v: number): string {
 }
 
 /** A weight with its sign, with a real minus sign: +1, −0.7. */
-const signed = (v: number) => (v > 0 ? `+${fmt(v)}` : v < 0 ? `−${fmt(-v)}` : '0');
+export const signed = (v: number) => (v > 0 ? `+${fmt(v)}` : v < 0 ? `−${fmt(-v)}` : '0');
 
 /** "A", "A and B", "A, B and C". */
-function list(items: string[]): string {
+export function list(items: string[]): string {
   return items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`;
 }
 

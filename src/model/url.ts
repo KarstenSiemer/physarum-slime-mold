@@ -1,5 +1,5 @@
-import { packDrawing, sceneOnly, unpackDrawing, type Drawing } from './link';
-import { sanitize, type Settings } from './params';
+import { kindsOf, packDrawing, sceneOnly, unpackDrawing, type Drawing } from './link';
+import { sanitize, type Drawn, type Settings } from './params';
 
 // Shared links carry the full settings as deflated JSON in the URL hash, and the scene with its food, light and walls
 // as deflated bytes (link.ts): #s=<base64url>&e=<base64url> (docs/adr/0021).
@@ -54,10 +54,13 @@ export async function encodeSettings(s: Settings): Promise<string> {
   return toB64url(await deflate(JSON.stringify(s), MAX_JSON));
 }
 
-/** Untrusted input: returns sanitized settings, or undefined for anything malformed. */
-export async function decodeSettings(encoded: string): Promise<Settings | undefined> {
+/**
+ * Untrusted input: returns sanitized settings, or undefined for anything malformed. `drawn`: what the link's drawing
+ * holds, for a link made before the model switch (sanitize()).
+ */
+export async function decodeSettings(encoded: string, drawn?: Drawn): Promise<Settings | undefined> {
   try {
-    return sanitize(JSON.parse(new TextDecoder().decode(await inflate(encoded))));
+    return sanitize(JSON.parse(new TextDecoder().decode(await inflate(encoded))), drawn);
   } catch {
     return undefined;
   }
@@ -105,7 +108,8 @@ export async function encodeLink(settings: Settings, drawing?: Drawing): Promise
 /**
  * Untrusted input: the hash of a shared link without its '#'. Undefined unless it holds valid settings (`s`). A
  * drawing (`e`) that is malformed, names an unknown scene or exceeds the caps is left out: the settings load alone, as
- * from a link that holds only settings, and `drawingLost` is true.
+ * from a link that holds only settings, and `drawingLost` is true. The drawing is read first: what it holds decides
+ * the model of a link made before the model switch (ADR 0022).
  */
 export async function decodeLink(hash: string): Promise<Link | undefined> {
   if (hash.length > MAX_HASH) return undefined;
@@ -114,21 +118,23 @@ export async function decodeLink(hash: string): Promise<Link | undefined> {
     const [key = '', value = ''] = part.split('=', 2);
     if (!parts.has(key)) parts.set(key, value);
   }
-  const s = parts.get('s');
-  const settings = s === undefined ? undefined : await decodeSettings(s);
+  const [s, e] = [parts.get('s'), parts.get('e')];
+  if (s === undefined) return undefined;
+  const drawing = e === undefined ? undefined : await decodeDrawing(e);
+  const settings = await decodeSettings(s, drawing && kindsOf(drawing));
   if (!settings) return undefined;
-  const e = parts.get('e');
   if (e === undefined) return { settings };
-  const drawing = await decodeDrawing(e, settings.strains.length);
-  return drawing ? { settings, drawing } : { settings, drawingLost: true };
+  if (!drawing) return { settings, drawingLost: true };
+  // Each strain's origin, checked against the settings: one per strain, else none known.
+  if (drawing.scene && drawing.origins.length !== settings.strains.length)
+    drawing.origins = Array.from({ length: settings.strains.length }, () => -1);
+  return { settings, drawing };
 }
 
-/** The `e` part, with each strain's origin checked against the settings: one per strain, else none known. */
-async function decodeDrawing(encoded: string, strains: number): Promise<Drawing | undefined> {
+/** The `e` part, or undefined for anything malformed. */
+async function decodeDrawing(encoded: string): Promise<Drawing | undefined> {
   try {
-    const d = unpackDrawing(await inflate(encoded));
-    if (d?.scene && d.origins.length !== strains) d.origins = Array.from({ length: strains }, () => -1);
-    return d;
+    return unpackDrawing(await inflate(encoded));
   } catch {
     return undefined;
   }
