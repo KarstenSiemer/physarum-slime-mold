@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { collisionsHelp, coveredFoodHelp, globalSpec, modelHelp, strainSpec } from '../model/params';
+  import { collisionsHelp, coveredFoodHelp, globalSpec, growthHelp, modelHelp, strainSpec } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
@@ -23,6 +23,7 @@
     collisionsHelp,
     modelHelp,
     coveredFoodHelp,
+    growthHelp,
   ];
 
   // Each scene's strains with the numbers of its own settings (not the live ones).
@@ -85,10 +86,15 @@
       </p>
       <p>
         It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food
-        runs out, it shrinks onto the remaining food sources. In the simulation food never runs out. With Shrinkage
-        turned on, agents die off and a full sheet shrinks onto the food, as in the scene Shrinking plasmodium. A
-        network with few agents contracts between the food sources even without it, as in Shortest path and Steiner
-        tree.
+        runs out, it shrinks onto the remaining food sources. In the simulation food never runs out. With Random
+        shrinkage turned on, agents die off and a full sheet shrinks onto the food, as in the scene Shrinking
+        plasmodium. A network with few agents contracts between the food sources even without it, as in Shortest path
+        and Steiner tree.
+      </p>
+      <p>
+        A real plasmodium also grows: from one oat flake it spreads a fan of fine veins over the agar until it finds
+        more food. Agents do not grow by themselves. The switch Growth and shrinkage adds Jones’ rule for this from his
+        later papers: agents divide at the thin edge of the colony and die where they crowd.
       </p>
     {:else if app.learnTab === 'The model'}
       <p>
@@ -144,6 +150,14 @@
         spreads and fades with the trail. Walls mark where agents cannot go. Agents can die off, as in Shrinking
         plasmodium. In later papers Jones lets food release almost no scent while agents cover it: the switch Covered
         food releases less.
+      </p>
+      <p>
+        From 2011 on, Jones also lets the population grow and shrink (Nat. Comput. 10: 1345). Every few steps, an agent
+        that moved counts the agents in a square around it, itself included. If the square holds few agents, the agent
+        divides: a new agent appears in an empty cell next to it. If a smaller square holds too many agents, the agent
+        dies. So a colony grows at its thin edge, and crowded paths stay thin. Each of his later papers uses its own
+        window sizes, limits and intervals. The switch Growth and shrinkage has the values of 2011 as its defaults.
+        Capacity sets how many agents the simulation can hold.
       </p>
       <p>
         The extended model adds what Jones did not publish. Several strains can share the dish, each with its own trail.

@@ -1,9 +1,11 @@
 <script lang="ts">
   import {
     BOUNDARIES,
+    capacityOf,
     collisionsHelp,
     coveredFoodHelp,
     globalSpec,
+    growthHelp,
     LAYOUTS,
     MAX_STRAINS,
     modelHelp,
@@ -64,14 +66,22 @@
   let ruleHelp = $state(false);
   let modelHelpOpen = $state(false);
   let coveredHelp = $state(false);
+  let growthHelpOpen = $state(false);
+  /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
+  const canGrow = $derived(app.canCollide && s.collisions);
 
   // The engine restarts the population on every switch, so agents stacked without the rule do not stay
   // stacked (ADR 0008).
   function setRule(on: boolean) {
+    const growing = s.growth;
     s.collisions = on;
     const scene = presetById(app.scene);
     if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene), 12_000);
+    else if (!on && growing) showNotice(GROWTH_OFF);
   }
+
+  /** Shown when the rule goes off while growth is on: constrain() turns growth off with it. */
+  const GROWTH_OFF = 'Growth and shrinkage need one agent per cell, so they are off now.';
 </script>
 
 <aside class="panel" aria-label="Simulation settings">
@@ -243,6 +253,51 @@
     {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
     <button type="button" onclick={clearEnvironment}>Clear food, light and walls</button>
+  </Section>
+
+  <Section title="Growth">
+    <div class="check">
+      <label>
+        <input
+          type="checkbox"
+          checked={s.growth && canGrow}
+          disabled={!canGrow}
+          aria-describedby={growthHelpOpen ? 'growth-help' : undefined}
+          onchange={(e) => {
+            s.growth = e.currentTarget.checked;
+          }}
+        />
+        <span>{growthHelp.label} (Jones 2011){canGrow ? '' : ': needs one agent per cell'}</span>
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={growthHelpOpen}
+        aria-controls="growth-help"
+        aria-label="About {growthHelp.label}"
+        onclick={() => (growthHelpOpen = !growthHelpOpen)}>?</button
+      >
+    </div>
+    {#if growthHelpOpen}
+      <p class="helptext" id="growth-help">{growthHelp.help} <cite>{growthHelp.ref}</cite></p>
+    {/if}
+    {#if s.growth && canGrow}
+      <Slider spec={globalSpec.growthEvery} bind:value={s.growthEvery} id="growth-every" />
+      <Slider spec={globalSpec.growthWindow} bind:value={s.growthWindow} id="growth-window" />
+      <Slider spec={globalSpec.growthMin} bind:value={s.growthMin} id="growth-min" />
+      <Slider spec={globalSpec.growthMax} bind:value={s.growthMax} id="growth-max" />
+      <Slider spec={globalSpec.shrinkEvery} bind:value={s.shrinkEvery} id="shrink-every" />
+      <Slider spec={globalSpec.shrinkWindow} bind:value={s.shrinkWindow} id="shrink-window" />
+      <Slider spec={globalSpec.shrinkMin} bind:value={s.shrinkMin} id="shrink-min" />
+      <Slider spec={globalSpec.shrinkMax} bind:value={s.shrinkMax} id="shrink-max" />
+    {/if}
+    <!-- Capacity is at least Agents per cell: the slider shows what the simulation holds (capacityOf()). -->
+    <Slider
+      spec={globalSpec.capacity}
+      bind:value={() => capacityOf(s), (v: number) => (s.capacity = v)}
+      id="capacity"
+      live={false}
+    />
   </Section>
 
   <Section title="Look">

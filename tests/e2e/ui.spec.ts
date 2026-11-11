@@ -315,3 +315,61 @@ test('the inoculate tool brings dead agents to life in the empty start layout', 
   await expect(page.getByRole('status').filter({ hasText: 'are alive' })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+// Growth and shrinkage need one agent per cell (ADR 0025): without the rule the switch is off and disabled. A scene of
+// Jones offers it, its values show while it is on, the card names it and counts it as a change, and the link holds it.
+test('the Growth section offers growth with the rule, and the scene card and the link follow it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.locator('summary', { hasText: 'Growth' }).click();
+  const growth = page.getByRole('checkbox', { name: /^Growth and shrinkage/ });
+  await expect(growth).toBeDisabled();
+  await expect(growth).not.toBeChecked();
+  await expect(page.getByText('Growth and shrinkage (Jones 2011): needs one agent per cell')).toBeVisible();
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('network');
+  await page.waitForFunction(() => globalThis.physarum?.settings.model === 'jones');
+  await expect(growth).toBeEnabled();
+  await expect(page.getByLabel('Growth window', { exact: true })).toHaveCount(0);
+  await growth.check();
+  await expect(page.getByLabel('Growth window', { exact: true })).toHaveValue('9');
+  await expect(page.getByLabel('Shrinkage maximum', { exact: true })).toHaveValue('20');
+  await page.waitForFunction(() => globalThis.physarum?.settings.growth === true);
+  const card = page.getByRole('region', { name: 'Scene', exact: true });
+  await expect(card.getByText('Growth and shrinkage', { exact: true })).toBeVisible();
+  await expect(card.getByText('changed', { exact: true })).toBeVisible();
+  await expect
+    .poll(async () => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.settings.growth)
+    .toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// A Capacity above Agents per cell keeps dead agents in a full scene (ADR 0025): Inoculate places them.
+test('a higher capacity gives the inoculate tool agents in a full scene', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('about:blank');
+  await page.goto(await smallScene({ capacity: 1 }));
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
+  const alive = () => page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.reduce((a, b) => a + b, 0));
+  const start = (await alive()) ?? 0;
+  expect(await page.evaluate(() => globalThis.physarum?.sim.agents)).toBeGreaterThan(start);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect.poll(alive, { timeout: 60_000 }).toBeGreaterThan(start + 50);
+  await page.mouse.up();
+  await expect(page.getByRole('status').filter({ hasText: 'are alive' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+// Growth brings dead agents to life from 1 % of the cells, with one agent per cell (ADR 0025).
+test('growth adds agents from a small start', async ({ page }) => {
+  const errors = watchErrors(page);
+  const alive = () => page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.reduce((a, b) => a + b, 0));
+  await page.goto('about:blank');
+  await page.goto(await smallScene({ collisions: true, density: 0.01, capacity: 1, growth: true, layout: 'center' }));
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
+  const first = (await alive()) ?? 0;
+  await expect.poll(alive, { timeout: 60_000 }).toBeGreaterThan(2 * first);
+  expect(errors).toEqual([]);
+});

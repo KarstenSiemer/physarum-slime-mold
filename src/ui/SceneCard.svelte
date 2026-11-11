@@ -48,6 +48,7 @@
       >
       <span class="chip">{app.settings.model === 'jones' ? 'Only Jones’ rules' : 'Jones plus this app’s rules'}</span>
       {#if app.settings.collisions}<span class="chip">One agent per cell</span>{/if}
+      {#if app.settings.growth}<span class="chip">Growth and shrinkage</span>{/if}
     </div>
     {#if sourceOpen}
       <div class="source-text" id="scene-source">
