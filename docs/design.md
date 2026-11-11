@@ -184,11 +184,12 @@ the buffer slot.
 ### Initial layouts
 
 `mixed` (uniform), `bands` (strains side by side), `sectors`, `colonies` (one disc per strain),
-`ring`, `center`, `empty` (every agent starts dead; the inoculate tool places them). An agent whose
-cell is a wall or outside the arena draws again in its layout's region. In collision mode claim
-rounds give every alive agent a cell of its own, in every layout (ADR 0008, ADR 0019). A dish counts
-its agents over the square of its short side, as Jones counts %p; a box or a periodic grid over all
-its cells.
+`ring`, `center`, `empty` (every agent starts dead; the inoculate tool places them), `food` (every
+agent starts dead, and one step of the inoculate tool places about 50 agents of strain A on the
+first food, at half the density of a full sheet; ADR 0025). An agent whose cell is a wall or outside
+the arena draws again in its layout's region. In collision mode claim rounds give every alive agent
+a cell of its own, in every layout (ADR 0008, ADR 0019). A dish counts its agents over the square of
+its short side, as Jones counts %p; a box or a periodic grid over all its cells.
 
 ## 4. Interaction
 

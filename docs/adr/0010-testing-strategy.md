@@ -225,6 +225,11 @@ GPU checks use invariants, not long exact trajectories:
   | `lattice.gpu.test.ts`, each test (ADR 0026, new)                                                                          | 240 s            | at most 26.8 s; 21.1 s in the review, 38.0 s for an earlier, heavier version                            | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
   | `lattice.gpu.test.ts`, the hook that builds both backends (ADR 0026, new)                                                 | 360 s            | about 24 s; about 21 s in the review                                                                    | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
   | `tests/e2e/lattice.spec.ts`, each test (ADR 0026, new)                                                                    | 240 s (CI)       | at most 39.8 s (the pointer on 1280 × 720, WebGPU)                                                      | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
+  | `sim.gpu.test.ts`, growth and shrinkage, the hook that builds the passes of growth, a capacity and walls (ADR 0025, new)  | 180 s            | 4.7 s (WebGL2), 2.0 s (WebGPU)                                                                          | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
+  | `sim.gpu.test.ts`, the hook of the start passes without the capacity (ADR 0025, new)                                      | 180 s            | 4.4 s (WebGL2), 2.0 s (WebGPU)                                                                          | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
+  | `sim.gpu.test.ts`, "keeps one agent per cell and the alive count of the stats after every step" (ADR 0025, new)           | 150 s            | 4.6 s in the review (WebGL2), 2.1 s after the hooks                                                     | SwiftShader on an M3 Pro (macOS) under load, 2026-11-11                            |
+  | `engine.gpu.test.ts`, "starts about 50 agents on the bottom-right food of the Foraging maze" (ADR 0025, new)              | 150 s            | 7.6 s (WebGL2), 5.0 s (WebGPU); 6.3 and 2.6 s in a later run                                            | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
+  | `tests/e2e/growth.spec.ts`, the start of the app in each test (ADR 0025, new)                                             | 150 s            | 32.0 s in the review; each whole test at most 27.0 s of 240 s (the Foraging maze)                       | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
 
   Each GPU test in the table gets its limit as the third argument of `it()`, so `testTimeout` in
   `vitest.config.ts` stays 60 s for the other tests. A limit on a line in `describe.each` applies to
@@ -239,6 +244,11 @@ GPU checks use invariants, not long exact trajectories:
   `expect` (at most 1.1 s), the other GPU tests (at most 14.4 s of 60 s), the hook of the other
   agent shaders (3.3 s of 180 s), and on GitHub the connection of the test browser (under 6 s of
   180 s) and the start of the preview server for the e2e tests (under 3 s of 60 s).
+
+  The other GPU tests of growth and shrinkage (ADR 0025) keep 60 s: at most 2.4 s on SwiftShader on
+  an M3 Pro beside other work (2026-11-11), once the two hooks above have built the passes that the
+  first test paid for before (12.8 s in the review). The four growth steps against the CPU copy took
+  0.2 s, and their limit of 150 s went back to 60 s.
 
 - The verify job keeps its limit of 30 min (`.github/workflows/ci.yml`). A limit adds no time to a
   wait that passes. On GitHub the verify jobs of PR 2, 3, 5 and 6 took 12.8 to 18.0 min. PR 6 on
