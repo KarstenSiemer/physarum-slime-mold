@@ -163,7 +163,7 @@ its cells.
 | Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |
 | Environment         | collisions (Jones), diffusion passes, food strength (wProj), scent decay, shrinkage                              |
-| Tools               | pan/zoom, inoculate (dead agents of the selected strain), food, light, wall, erase, cut; brush size              |
+| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light, wall, erase, cut; brush size          |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                        |
@@ -174,9 +174,10 @@ classes (Fig. 13), repulsion spots and stripes (Fig. 16), shortest path between 
 (Fig. 18), Steiner tree (Fig. 19), shrinking sheet (Fig. 21), wound repair (Fig. 22–23),
 competing strains (Fogleman presets).
 
-While the pointer is held, inoculate and cut act on every step. Inoculate places only dead agents,
-an amount per second of holding at any frame rate; with none left a notice says so. While paused, a
-held tool runs 60 steps per second (ADR 0023).
+While the pointer is held, inoculate and cut act on every step. Inoculate uses only dead agents. It
+places an amount per second of holding at any frame rate. With none left, a notice says so. While
+paused, a held tool runs 60 steps per second; inoculate runs none while every agent of its strain
+lives (ADR 0023).
 
 Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
 

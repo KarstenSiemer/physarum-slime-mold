@@ -48,8 +48,13 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
 - A move across the wrap seam keeps the agent in the cell it claimed: wrapped in f32, a position a
   hair below 0 rounded up to x = W, into cell 0, while WebGPU counted the agent in cell W − 1, and a
   second agent could enter cell 0 (fixed on 2026-11-10, ADR 0019). A position a hair below −1 rounded
-  up the same way, from cell W − 2 into cell W − 1: since 2026-11-11 every move lands in the cell it
-  claimed (`landed()` in `common.wgsl` and `common.glsl`, ADR 0023).
+  up the same way, from cell W − 2 into cell W − 1. Since 2026-11-11 every move lands in the cell it
+  claimed. `wrapPos()` in `common.wgsl` and `common.glsl` takes the whole periods from integers. It
+  keeps the result below the upper edge of its cell (ADR 0023).
+- On WebGL2 the rule also failed at the seams of some grid sides, also on `main` before 2026-11-11.
+  The shaders wrapped cells with a float division, which is not exact on every GPU. On an Apple M3
+  Pro, row H of a grid 246 cells high was outside the grid. So no agent crossed the top seam under
+  the rule. Since 2026-11-11 the wrap uses integers (ADR 0023).
 - Since 2026-11-11 the rule also holds for the agent tools (ADR 0023). An agent that inoculate places
   or cut moves claims a cell that was empty at the start of the step, with the claim key of a move,
   and only the winner goes there. A loser stays dead or stays where it was. Before, both tools checked
