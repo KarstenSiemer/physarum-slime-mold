@@ -197,7 +197,9 @@ competing strains (Fogleman presets).
 While the pointer is held, inoculate and cut act on every step. Inoculate uses only dead agents. It
 places an amount per second of holding at any frame rate. With none left, a notice says so. While
 paused, a held tool runs 60 steps per second; inoculate runs none while every agent of its strain
-lives (ADR 0023).
+lives (ADR 0023), and no tool runs any beside a closed arena, where it reaches no cell. On a
+periodic grid the tools act on the cells under the pointer, also on a copy of the grid and across
+its edges (ADR 0026).
 
 Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
 

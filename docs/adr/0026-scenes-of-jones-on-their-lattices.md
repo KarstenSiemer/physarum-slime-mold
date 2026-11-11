@@ -57,15 +57,20 @@ Option 1, with these decisions of this app, on 2026-11-11 under the owner's rule
 2. **An old link opens as it was made.** A link from before this change holds no lattice, so it opens on the grid
    shaped like the screen of its resolution, with the sender's bytes on the sender's grid (ADR 0021). The scene card
    shows the scene as changed, and the hint (item 6) offers Jones' lattice. To open it on the lattice instead would
-   change the picture that the sender shared.
+   change the picture that the sender shared. Known exception, open (review of 2026-11-11): a link names a scene's
+   shapes by the scene and one bit each (ADR 0021), so an old link of Steiner tree paints the foods of decision 10, not
+   those its sender saw. The fix waits for the comparison of the scenes with Jones' figures, which may move these
+   foods again; it will give a scene's shapes a revision that a link holds.
 3. **The view fits the lattice** (`Engine.fitView()`, unchanged): the lattice fits the canvas, centred (a square one
-   fills the canvas's short side), with free space beside it, at every zoom and on both backends. Outside a closed arena the free space shows the
-   background, as it did beside a dish. Around a periodic lattice the copies of the lattice show at 0.15 of their light
-   (`LATTICE_COPIES` in `src/engine/render.ts`, the third value of `fx` in the view uniform; `render.wgsl` and
-   `render.frag`), with a ramp one pixel wide at the lattice's edge. A grid shaped like the screen shows its copies as
-   before, when zoomed out. Reason: a tool on a copy paints the cell that the copy shows (ADR 0019). A plain free space
-   beside a periodic lattice would hide that paint at the pointer and show it at the other edge. Dimmed, the copies
-   show where the paint goes, and the lattice and its number of meshes stay clear.
+   fills the canvas's short side), with free space beside it, at every zoom and on both backends. Beside a closed
+   arena, and in a square lattice's corners outside the dish, the free space shows only the background, as it did
+   beside a dish (`lattice.gpu.test.ts` reads these pixels). Around a periodic lattice the copies of the lattice show
+   at 0.15 of their light (`LATTICE_COPIES` in `src/engine/render.ts`, the third value of `fx` in the view uniform;
+   `render.wgsl` and `render.frag`), with a ramp one pixel wide at the lattice's edge. A grid shaped like the screen
+   shows its copies as before, when zoomed out. Reason: every tool on a copy acts on the cells that the copy shows
+   (ADR 0019 for the paint tools, decision 12 for the agent tools). A plain free space beside a periodic lattice would
+   hide that at the pointer and show it at the other edge. Dimmed, the copies show where a tool acts, and the lattice
+   and its number of meshes stay clear.
 4. **A lattice does not turn by 90°.** It keeps the orientation of the figure, and a tall screen shows free space
    above and below it, as Tokyo does (ADR 0024, decision 4). The canonical frames of ADR 0019 follow the shape of the
    grid, not of the screen: they turn only on a grid that is taller than wide. Every lattice of Jones 2010 is square,
@@ -76,37 +81,73 @@ Option 1, with these decisions of this app, on 2026-11-11 under the owner's rule
    lattice: Shrinking plasmodium's foods lie inside the dish, and the box and the periodic grid give the dish's bytes on
    every screen. A stroke painted on the lattice goes to a grid shaped like the screen through the frame of its arena,
    and comes back byte for byte on the lattice (`engine-env.test.ts`, "lattices").
-6. **The hint** (`latticeNotice()` in `src/model/presets.ts`, `src/ui/Panel.svelte`): while the loaded scene has a
-   lattice and the grid is another one, a text below the grid choice says: "Jones gives all lengths in cells, for
-   example the sensor distance and the step. On a different grid, the pattern has a different scale, and the result
-   is different from the paper. For this figure, Jones used a lattice of 200 × 200 cells." A button "Use 200 × 200
-   cells" puts the lattice back and keeps every other setting (`useSceneLattice()`). The grid choice names the text
-   with `aria-describedby`. The text follows ASD-STE100: at most 20 words per sentence (`presets.test.ts`). It shows
-   also for an old link and when the device cannot hold the lattice: the result then differs from the paper too.
+6. **The hint** (`latticeNotice()` in `src/model/presets.ts`, `src/ui/Panel.svelte`; text revised after the review
+   of 2026-11-11): while the loaded scene has a lattice and the grid is another one, a text below the grid choice says
+   what runs, what Jones used and why the result differs, with the names of the panel: "This grid has 512 cells on the
+   long side. For this figure, Jones used 200 × 200 cells. Jones gives lengths in cells, as for Sensor distance and
+   Step size. So the pattern keeps its size in cells, and another grid holds more or less of it. The result is then
+   different from the paper." The first text said that the pattern has another scale, which the measurements below
+   contradict: the lacunae keep their size in cells. It says what runs, not who changed it, so it holds for an old
+   link too. No-break spaces keep "200 × 200" on one line (`latticeText()`). A button "Use 200 × 200 cells", styled
+   as an action like "Reload scene", puts the lattice back and keeps every other setting (`useSceneLattice()`); it
+   removes itself with the hint, so the focus goes to the grid choice, as "Reload scene" moves it to the card's
+   heading. The grid choice names the text with `aria-describedby`. The text follows ASD-STE100: at most 20 words per
+   sentence (`presets.test.ts`). While the device cannot hold the scene's lattice, a note without a button says so
+   (item 8).
 7. **The grid choice** ("Grid"): the lattice that runs and the scene's lattice ("200 × 200 cells, as in the paper"),
-   then the grids shaped like the screen ("512 cells on the long side"). A pick marks the grid as the user's
-   (`app.gridPicked`), as before.
+   then the grids shaped like the screen ("512 cells on the long side"). A pick of a grid size marks the grid as the
+   user's (`app.gridPicked`), as before, and stops the startup check for the session. The scene's own lattice, from
+   the choice or from the hint's button, is no pick of a grid size (review of 2026-11-11): the check never lowers that
+   lattice anyway (item 9), and it must go on for the scenes loaded later. Before, the button stopped the check for
+   the session.
 8. **Memory.** A lattice runs as it is, or the grid becomes one shaped like the screen. `Engine.fit()` checks the
    lattice against the memory budget, the largest buffer and the largest grid side (`fits()` in
    `src/engine/sizing.ts`). If it does not fit, the scene gets the largest grid of its resolution that fits, and a
    notice says: "This device cannot hold a lattice of 300 × 300 cells. The scene runs on a grid of 256 cells on the
-   long side." An out-of-memory error steps a lattice down to the largest grid below its long side, with the notice
-   "The GPU ran out of memory for a lattice of …". A smaller lattice is not the paper's either, and the grids shaped
-   like the screen already have these paths. A lattice that the device cannot hold does not lower `app.maxResolution`:
-   that grid says nothing about the largest grid the device holds. A lattice of Jones 2010 needs at most 9.5 MB
-   (300 × 300 cells at 90 B and 45,000 agents at 32 B, `sizing.ts`), below the smallest budget of 32 MiB (0.25 GB of
-   device memory), so only a link can ask for a lattice that does not fit.
-9. **The startup check and rebuilds.** The startup check (`Tick.lattice` in `src/ui/tune.ts`) does not count time on
-   a lattice and never lowers one: a lattice of Jones has at most 90,000 cells, below the 147,456 cells of its floor
-   (512 × 288). After a lattice the check goes on. A lattice is built again for a new density and a switch to or from
-   the dish, which changes the agent count, not for the resolution or a new shape of the screen
-   (`Engine.needsRebuild()`).
+   long side." An out-of-memory error steps a lattice down to the largest grid shaped like the screen with fewer
+   cells, with the notice "The GPU ran out of memory for a lattice of …". By cells, not by the long side (review of
+   2026-11-11): no resolution lies below 200, so the first version stopped the app for six of the eight scenes, and a
+   lattice of 1000 × 100 would have stepped "down" to three times its cells. On a square screen no grid shaped like it
+   has fewer cells than 200 × 200 (256 × 256 has 65,536), so the error stands there, as it does for the smallest grid
+   shaped like the screen. A smaller lattice is not the paper's either, and the grids shaped like the screen already
+   have these paths. A lattice that the device cannot hold does not lower `app.maxResolution`: that grid says nothing
+   about the largest grid the device holds. When it is the scene's own lattice (`deviceAdjusted()` in
+   `src/ui/state.svelte.ts`), the scene runs on that grid as on a grid the device lowered: the card shows no change and
+   offers no "Reload scene", and the panel says "This device cannot hold Jones' grid of 300 × 300 cells for this
+   figure. The scene runs on a grid of 256 cells on the long side, so the result can be different from the paper.",
+   without a button that would fail the same way (review of 2026-11-11). A new load of the scene tries the lattice
+   again. A lattice from a link that is not the scene's goes the same way, and the hint then offers the scene's own.
+   A lattice of Jones 2010 needs at most 9.5 MB (300 × 300 cells at 90 B and 45,000 agents at 32 B, `sizing.ts`),
+   and 11.3 MB on WebGL2 without float blending (110 B per cell). Both lie below the smallest budget of 32 MiB
+   (0.25 GB of device memory), so only an out-of-memory error or a link can bring a lattice that does not fit.
+9. **The startup check and rebuilds.** The startup check (`autoTune()` in `src/ui/state.svelte.ts`, `Tick.lattice` in
+   `src/ui/tune.ts`) does not count time on the loaded scene's own lattice and never lowers it: Jones' result needs
+   it, and it has at most 90,000 cells, below the 147,456 cells of the check's floor (512 × 288). Another lattice, such
+   as one from a link (`sanitize()` takes up to 4096 × 4096 cells), counts as the smallest grid shaped like the screen
+   with at least its cells (`latticeResolution()`), and the check lowers it, like any grid, to a grid shaped like the
+   screen, with the usual notice (review of 2026-11-11). Before, a link of 2048 × 2048 cells kept running on a slow
+   GPU. After a lattice the check goes on. A lattice is built again for a new density and a switch to or from the dish,
+   which changes the agent count, not for the resolution or a new shape of the screen (`Engine.needsRebuild()`).
 10. **Steiner tree's foods move** to the corners of a square half as wide as the dish (±0.25 of its side in the dish's
     frame, before ±0.145). Jones' positions are not in the text. On his lattice the square of before (58 cells wide)
     kept a ring of trail in 5 of 10 runs up to step 30,000 (table below); half the dish (100 cells) ends as the
     Steiner tree in 10 of 10 by step 6,000, with a bridge of 45 cells, as the shortest tree has (0.42 of the side).
 11. **The other scenes keep their values.** Shortest path keeps its foods, Shrinking plasmodium Jones' density 0.5, the
     networks no glow (decided 2026-11-09).
+12. **The agent tools on a periodic grid** (review of 2026-11-11, also on `main` when zoomed out). Cut, the Cut's
+    clearing of chemicals in the extended model and Inoculate measure the distance from an agent or a cell to the
+    nearest copy of the brush (`toolDistance()` in `common.wgsl` and `common.glsl`, used in `agents.wgsl`,
+    `tools.glsl`, `diffuse.wgsl` and `diffuse.frag`). So a tool held on a copy acts on the cells the copy shows, and
+    a tool across an edge acts on both sides, on both backends. Before, Cut used the plain distance to the position
+    under the pointer: on a copy it cut nothing, and across an edge only the part inside the grid. Inoculate already
+    worked, because it wraps the point it places. The paint tools work by `fromStroke()` (ADR 0019).
+13. **Nothing happens beside a closed arena** (review of 2026-11-11, also on `main` beside a dish). An agent tool
+    whose brush reaches no cell of the arena is idle (`Engine.agentTool()`, `paintsCell()`), so a paused hold runs no
+    step there. Before, a paused Cut or Inoculate held on the free space ran 60 steps per second. Paint tools there
+    record no stroke (ADR 0019).
+14. **"This link changes the scene."** While the settings and the drawing are as a shared link opened them
+    (`linkUnchanged()` in `src/ui/state.svelte.ts`), the scene card says so in place of "You changed the scene." The
+    receiver of an old link changed nothing (review of 2026-11-11). A grid the device lowered is no change.
 
 ## Measurements
 
@@ -176,13 +217,19 @@ often than on 512 × 288 (18 of 31 runs with a hole against 11 of 31). The densi
 - A scene of Jones on a desktop window lies partly below the panel, as the dish did before. The view does not fit the
   lattice into the space beside the panel.
 - A link holds the lattice. The README's image of the Steiner tree is rendered again (`docs/images/steiner.jpg`).
-- Tests: `src/engine/lattice.gpu.test.ts` (both backends: the lattice on 16:9, 1:1 and a phone, the app's scenes on
-  the screen's grid, a tool paints the cell under the pointer on the lattice, on a copy of a periodic lattice and
-  nothing beside a dish, the copies' light), `engine-env.test.ts` ("lattices": the same bytes on every screen, the
-  frames, rebuilds, memory and out of memory), `state.test.ts` (the hint and its button, old links), `params.test.ts`
-  and `url.test.ts` (sanitize and links), `presets.test.ts` (the table above), `tests/e2e/lattice.spec.ts` (the hint,
-  its button and the link in the built app, the pointer on 1280 × 720 and 375 × 812, both backends, an old link).
-  `tune.test.ts` covers the startup check. Each new test fails with a mutation of the code it guards (22 mutations,
-  in the pull request). On SwiftShader on an M3 Pro (macOS) each new GPU test took at most 5.7 s and gets a limit of
-  120 s, and each new e2e test took 6 to 38 s of its 240 s on CI (ADR 0010).
+- Tests: `src/engine/lattice.gpu.test.ts` (both backends: the lattice on 16:9, 1:1 and a phone, also one that is not
+  square, and the app's scenes on the screen's grid; a tool paints the cell under the pointer on the lattice, on a copy
+  of a periodic lattice and on a lattice that is not square, and nothing beside a dish; the pixels beside a closed
+  lattice; Cut, its clearing and Inoculate on a copy and across an edge; the copies' light), `engine-env.test.ts`
+  ("lattices": the same bytes on every screen, a lattice that is not square, the frames, rebuilds, memory, out of memory
+  for 200 × 200 and 300 × 300 and a wide lattice), `engine.test.ts` (no paused step beside a closed lattice),
+  `state.test.ts` (the hint and its button, old links and the card's sentence, the grid picks, a lattice the device
+  cannot hold, the startup check's wiring), `tune.test.ts`, `params.test.ts` and `url.test.ts` (sanitize and links),
+  `presets.test.ts` (the table above, the hint's text), and `tests/e2e/lattice.spec.ts` (both backends: the hint, its
+  button, the focus and the link; the pointer on 1280 × 720 and 375 × 812; the app's scenes without a hint; an old link;
+  a lattice the device cannot hold, from a link and of the scene). Each new test fails with a mutation of the code it
+  guards (22 mutations with the first version, 22 with the review's fixes, in the pull request). On SwiftShader on an M3
+  Pro (macOS), beside other work, each new GPU test took at most 26.8 s and gets 240 s, the hook that builds both
+  backends about 24 s of 360 s, and each new e2e test at most 39.8 s of its 240 s on CI: every limit lies at least 4
+  times above the time (ADR 0010).
 - The view's uniform holds the brightness of the copies in its third `fx` value, which was unused.
