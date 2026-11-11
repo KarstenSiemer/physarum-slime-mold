@@ -93,9 +93,13 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
+| growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
-with float blending). `shape` is written by the brush next to `env`: the signed distances to the
+with float blending). N is the capacity: the most agents the simulation holds, alive and dead
+(ADR 0025). The first agents of each strain, as many as Agents per cell gives, start alive; the
+others wait dead for growth and the inoculate tool. Without a Capacity above Agents per cell, N is the
+start population, as before. `shape` is written by the brush next to `env`: the signed distances to the
 wall and food outlines (±4 cells), the light and the drop shadow of the walls. Only the renderer
 reads it, so outlines are smooth at any zoom while the model stays cell-exact (ADR 0009). Its
 bytes are held to `env`: inside exactly where `env` holds the wall or food, and no outline nearer
@@ -149,6 +153,18 @@ that measure it, and the agent passes that check for walls, are built at the fir
    3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
    else from the `occupy` pass).
 
+Between 3 and 4, on the steps whose number is a multiple of Gf or Sf and only while growth is on
+with the rule, **growth and shrinkage** (Jones 2011, Sec. 5.1; ADR 0025, `growth.wgsl`,
+`gl/glsl/growth.frag`): a separable box sum of the occupancy after the moves gives each cell the
+agents in its Gw × Gw and Sw × Sw window, its own agent included. Shrinkage deletes an agent whose
+count lies outside [Smin, Smax]. A survivor that moved in this step and counts [Gmin, Gmax] claims a
+random empty habitable cell of its 3 × 3 neighbourhood with the key of a move. The winners write
+births; two pyramids of sums with a fan-in of 4, over the births (one lane per strain, in an order
+that a new bijection of the cells gives every step) and over the dead agents (by id), let the dead
+agent with rank r of a strain take the birth with rank r of that strain. The child gets a random
+position in its cell and a random heading and deposits nothing in its step. Then the occupancy and
+the alive count are counted anew. A step without a test runs no new pass.
+
 All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
 deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
 counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each
@@ -172,7 +188,8 @@ its cells.
 | Scene               | presets, scene card, agent count, resolution, layout, boundary, the rule, model; extended: scent decay, K     |
 | Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight    |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)              |
-| Environment         | food strength, covered food, shrinkage; extended: diffusion passes, light strength                            |
+| Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                     |
+| Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                       |
 | Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                          |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings  |
@@ -185,7 +202,9 @@ classes (Fig. 13), repulsion spots and stripes (Fig. 16), shortest path between 
 competing strains (Fogleman presets).
 
 While the pointer is held, inoculate and cut act on every step. Inoculate uses only dead agents. It
-places an amount per second of holding at any frame rate. With none left, a notice says so. While
+places an amount per second of holding at any frame rate. With none left, a notice says so. A
+Capacity above Agents per cell keeps dead agents in a full scene, so the tool works there too, and
+growth brings dead agents to life as well (ADR 0025). While
 paused, a held tool runs 60 steps per second; inoculate runs none while every agent of its strain
 lives (ADR 0023).
 

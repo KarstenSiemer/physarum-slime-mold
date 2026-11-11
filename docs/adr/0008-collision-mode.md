@@ -61,6 +61,10 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
   only for walls: on the Maze a 1 s inoculation put 811 to 852 agents in 234 to 244 cells, up to 18 in
   one cell, and 60 to 73 % were still stacked at step 2,000 (an agent may always move inside its own
   cell). One frame of cut left 9 cells with two agents.
+- Since 2026-11-11 the rule also holds for growth (ADR 0025). A parent claims an empty cell of its 3 × 3
+  neighbourhood with the key of a move, and only the winner of each cell gets a child there. A cell is empty after
+  the moves of the step, so a child never shares a cell. The window counts of growth and shrinkage assume the rule:
+  without it growth is off.
 - Jones' attraction networks need the rule. Without it, agents pile up and the Fig. 4 network
   contracts into a few straight lines that wrap around the edges, usually within 2,000 to
   8,000 steps (measured on 2026-11-09 on WebGPU and WebGL2 and in two CPU ports). Jones ties

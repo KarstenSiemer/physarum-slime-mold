@@ -54,7 +54,11 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] A move across the wrap seam lands in the cell it claimed. On a grid 512 cells wide, x = −1.000001 counted in cell 510 and landed in cell 511. `wrapPos()` now takes the whole periods from integers on both backends. Its float division put x = 479.99997 on a side of 480 at −0.00003 (ADR 0008, ADR 0023, 2026-11-11)
 - [x] WebGL2 wraps cells with integers. Its float division was not exact on an Apple M3 Pro for 291 of the sides 16 to 4096, such as 33, 47 and 246. Cell W was in the next row and row H outside the grid, for moves, sensors, diffusion, wall clearance and the view. On 512 × 246 cells no agent crossed the top seam under the rule. SwiftShader (CI) divides exactly and cannot show it (ADR 0023, 2026-11-11)
 - [x] The alive count of the stats belongs to one run. After a restart the app waits for a new count, and WebGPU counts the agents after each reset. Before, the start layout Empty showed the notice that every agent lives (ADR 0023, 2026-11-11)
-- [ ] Inoculate does nothing where every agent of the strain lives, as in most scenes without shrinkage, and shows a notice (ADR 0023). A paused hold then runs no step. With the rule a hold fills the free cells of the brush and then adds agents only as they walk off. With the default brush on the Maze, WebGPU placed 136 to 158 agents after 1 s and 204 to 296 after 10 s. WebGL2 placed 146 to 151 and 193 to 201. These are too few to reach the far food. Keep this, or let the tool get agents in another way, such as growth (owner decision)
+- [x] Inoculate gets agents in a full scene: a Capacity above Agents per cell keeps dead agents, and growth brings dead agents to life (ADR 0025, 2026-11-11). Without a higher Capacity the tool does nothing where every agent of the strain lives, as before, and its notice now names Capacity first (ADR 0023)
+- [ ] Should a scene or the default settings hold a Capacity above Agents per cell, so that Inoculate works there without a change? It gives the strains other ids and so another run, and costs 32 B per agent more (ADR 0025; owner decision)
+- [x] Growth and shrinkage (Jones 2011, Nat. Comput. 10: 1345, Sec. 5.1): a switch in a section Growth with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax (defaults of 2011) and Capacity; in both models with one agent per cell, off in every scene, which keep their bytes on WebGPU, WebGL2 and WebGL2 without float blending. Exact on both backends: a parent claims an empty neighbour with the key of a move, and the dead agent of rank r of a strain takes the birth of rank r (pyramids of sums). Tested against a CPU copy of the passes (ADR 0025, 2026-11-11)
+- [ ] Growth from 50 agents at the bottom-right food of the Maze (start layout Empty, values of 2011) reaches the top-left food within 15,000 steps on 16:9 and 16:10 in 10 of 10 seeds, on a square screen in 0 of 10, also with the values of 2017 (1 of 10), covered food, or the Jones model. The colony grows along the walls and the edges of the box (about 80 % of its agents lie within 4 cells of them, which hold 7 to 9 % of the open cells; without growth 1 %), and on 512 × 512 the far food lies 42 cells from them, on 512 × 288 24 (ADR 0025). Keep, or give the coming maze scene of Adamatzky 2012 its settled attractant first (ADR 0024, decision 5; owner decision)
+- [ ] A growth count includes the agent itself, as the shrinkage count does (ADR 0024, decision 6), so Growth minimum 0 and 1 act the same; and a child gets a random heading, which Jones does not state (ADR 0025; owner decision)
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)
 - [x] Collision mode (claims, ADR 0008)
 - [x] Brush pass (food, light, wall, erase)
@@ -119,7 +123,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 ## Later (not in scope now)
 
 - Jenson-style contagion between strains; adaptive sensing ("36 Points" idea, own parameters only, license note in knowledge base)
-- Growth and death (Jones 2011), oscillation (Jones 2012), MCPM steering
+- Oscillation (Jones 2012), MCPM steering
 - Tracer agent with path history (shuttle streaming, Jones Fig. 7); video recording
 - Sensor width > 1 and sensitivity threshold `sMin`
 - Custom domain `physarum.karstensiemer.de` (steps in `knowledge-base/github-pages.md`)
