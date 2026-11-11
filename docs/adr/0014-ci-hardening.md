@@ -118,7 +118,10 @@ reporting, CodeQL default setup, and:
 
 - Required check names are job names (`build`, `verify`, `zizmor`, `dependency-review`); renaming a
   job breaks the ruleset.
-- `verify` starts after `build`, so a run takes about one `npm ci` and build longer.
+- `verify` is a gate: it passes only when `build`, `verify-gpu` and `verify-e2e` passed (2026-11-11,
+  owner decision after one job ran into its 30 min on a slow runner). `verify-gpu` (lint, check,
+  unit, GPU) starts at once; `verify-e2e` starts after `build`, so the two test suites run at the
+  same time.
 - Residual risk: a Renovate PR with auto-merge and without code-owned files (npm packages,
   `.node-version`) merges without review once the checks pass (ADR 0015).
 - CodeQL does not read `.svelte` files; logic lives in `.ts`, and ESLint checks components.

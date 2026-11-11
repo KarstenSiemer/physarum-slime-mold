@@ -40,9 +40,10 @@ jobs:
         with:
           path: dist
 
-  verify:
-    name: verify
-    needs: build
+  # The tests run in two jobs at the same time, so each stays well inside its limit on a slow runner
+  # (2026-11-11: GPU project 609 s and e2e suite 1,100 s in one job ran into its 30 min).
+  verify-gpu:
+    name: verify-gpu
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
@@ -62,6 +63,31 @@ jobs:
       - name: Install Chromium for WebGPU tests (SwiftShader on CI)
         run: npx playwright install --with-deps --no-shell chromium
       - run: npm run test:gpu
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-report-gpu
+          path: .vitest/attachments/
+          retention-days: 7
+
+  verify-e2e:
+    name: verify-e2e
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: npm ci
+      - name: Install Chromium for the e2e tests (SwiftShader on CI)
+        run: npx playwright install --with-deps --no-shell chromium
       - name: Download the built site
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -73,11 +99,26 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-report
-          path: |
-            playwright-report/
-            .vitest/attachments/
+          name: test-report-e2e
+          path: playwright-report/
           retention-days: 7
+
+  # The ruleset requires a check named verify (ADR 0014). It passes only when both test jobs passed;
+  # a skipped or failed job fails it.
+  verify:
+    name: verify
+    needs: [build, verify-gpu, verify-e2e]
+    if: always()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require build and both test jobs to pass
+        env:
+          BUILD: ${{ needs.build.result }}
+          GPU: ${{ needs.verify-gpu.result }}
+          E2E: ${{ needs.verify-e2e.result }}
+        run: test "$BUILD" = success && test "$GPU" = success && test "$E2E" = success
 
   deploy:
     name: deploy
