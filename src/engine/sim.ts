@@ -651,7 +651,8 @@ export class Simulation implements Sim {
     }
     let d = p;
     for (const v of diffusePlan(this.settings.diffusion)) {
-      pass.setPipeline(covered && v.first ? k.covered(v) : k.diffuse(v));
+      // The last pass adds the step's sources (diffuse.wgsl), with covered food while it is on.
+      pass.setPipeline(covered && v.last ? k.covered(v) : k.diffuse(v));
       pass.setBindGroup(0, this.diffuseBind(d, this.occParity));
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
@@ -763,7 +764,7 @@ class Kernels {
   private walledPipelines?: Walled;
   /** The steering passes with the saturating trail perception (agents.wgsl SATURATE), without and with walls. */
   private readonly saturatedPipelines: [Steering?, Steering?] = [];
-  /** The first diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
+  /** The last diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
 
   private constructor(
@@ -827,12 +828,12 @@ class Kernels {
     return p;
   }
 
-  /** A first diffusion pass with covered food (diffuse.wgsl COVERED), built at its first use. */
+  /** A last diffusion pass with covered food (diffuse.wgsl COVERED), built at its first use. */
   covered(v: Diffuse): GPUComputePipeline {
     const key = variantKey(v);
     let p = this.coveredPipelines.get(key);
     if (!p) {
-      const constants = { FIRST: 1, LAST: Number(v.last), BLUR: Number(v.blur), COVERED: 1 };
+      const constants = { FIRST: Number(v.first), LAST: 1, BLUR: Number(v.blur), COVERED: 1 };
       const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.diffuseLayout] });
       p = this.device.createComputePipeline({
         layout,

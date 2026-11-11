@@ -248,13 +248,14 @@ export const coveredFoodHelp = {
 export const REFERENCE_SCENT_DECAY = 0.1;
 
 /**
- * Factor on the food and light sources of the extended model (ADR 0022). The scent of a food much larger than its
- * spread settles where the decay removes what the source adds: s = (1 − d) · (s + source), so s = source · (1 − d) / d.
- * This factor scales the source by d / (1 − d), relative to REFERENCE_SCENT_DECAY, so that level is the same at every
- * decay. It is exactly 1 at the reference: x / x for the same x.
+ * Factor on the food and light sources of the extended model (ADR 0022, decision 13; ADR 0027). The scent of a food
+ * much larger than its spread settles where the decay removes what the source adds. The agents sense the map after
+ * the step's sources and before its diffusion (Jones' order): s = (1 − d) · s + source, so s = source / d. This
+ * factor scales the source by d, relative to REFERENCE_SCENT_DECAY, so that level is the same at every decay. It is
+ * exactly 1 at the reference: x / x for the same x.
  */
 export function emissionScale(scentDecay: number): number {
-  return scentDecay / (1 - scentDecay) / (REFERENCE_SCENT_DECAY / (1 - REFERENCE_SCENT_DECAY));
+  return scentDecay / REFERENCE_SCENT_DECAY;
 }
 
 /** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */

@@ -126,12 +126,19 @@ that measure it, and the agent passes that check for walls, are built at the fir
 
 ### One step
 
+Jones' order (p. 132–133, ADR 0027): every agent moves and deposits, then every agent senses and
+turns, then the trail map diffuses. The textures hold the map as the agents sense it: the last
+diffusion plus the deposits, food and light of the last moves. So a step senses and turns for the
+moves of the step before, moves, diffuses, and then adds the deposits and sources of its own
+moves. The first step after a reset moves with the start heading, as Jones' first step does.
+
 1. `clearBuffer(counts)` (and `claims` in collision mode).
 2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups):
    - skip dead agents; apply shrinkage (`p_remove`), then the agent tools (ADR 0023): inoculation
      takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
      agent spends its step there: no move, no deposit;
-   - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
+   - **sense** at F, FL, FR (not in the first step after a reset):
+     `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
      walls and the outside read as −∞; in the extended model also a wall on the way to the
      sensor (ADR 0020). With trail saturation K ≥ 1 (extended model only) each lane of `trail`
      reads as `t / (1 + t / K)`. The Jones model packs Jones' one trail map: its one strain weighs
@@ -148,12 +155,12 @@ that measure it, and the agent passes that check for walls, are built at the fir
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
    tile saves about 25 % of this pass, see
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
-   repeated `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
-   3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
-   `scent` with `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones
-   model g = 1, the scent decays with the strain's decay and light has no source, so trail +
-   scent is Jones' one trail map (ADR 0022). In the extended model `g = (d / (1 − d)) / (0.1 / 0.9)`
-   with the scent decay d, so a large food reaches the same scent at every decay. The cut tool
+   repeated `passes` times (Jones 1, Fogleman 2): 3 × 3 mean over non-wall cells, then on the
+   last pass `× (1 − decay)` and `+ counts · deposit`. The same for `scent` with
+   `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones model g = 1,
+   the scent decays with the strain's decay and light has no source, so trail + scent is Jones'
+   one trail map (ADR 0022). In the extended model `g = d / 0.1` with the scent decay d, so a large
+   food reaches the same scent at every decay (ADR 0027). The cut tool
    clears trail and scent in the wound only in the extended model. With covered food on, a food
    cell releases the covered-food factor (0.001 by default, Adamatzky and Jones 2010) while the
    3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
@@ -241,8 +248,8 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
 
 GPU tests compare against a small CPU reference model and check invariants:
 
-- mass balance: `Σ trail' = (1 − decay) · (Σ trail + deposit · Σ counts)` with periodic
-  boundary;
+- mass balance: `Σ trail' = (1 − decay) · Σ trail + deposit · Σ counts` with periodic
+  boundary (Jones' order, ADR 0027);
 - agent conservation; at most one agent per cell in collision mode;
 - determinism: two runs with the same seed give identical buffers;
 - behaviour: networks form (coefficient of variation rises), pattern wavelength grows with

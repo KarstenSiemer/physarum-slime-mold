@@ -654,7 +654,8 @@ export class GlSim implements Sim {
       const out = flip(this.p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.mrt[out]);
       gl.viewport(0, 0, this.width, this.height);
-      const d = covered && v.first ? this.prog.covered() : this.prog.diffuse;
+      // The last pass adds the step's sources (diffuse.frag), with covered food while it is on.
+      const d = covered && v.last ? this.prog.covered() : this.prog.diffuse;
       gl.useProgram(d.program);
       textures(gl, d.program, {
         trailIn: this.trail[this.p].texture,

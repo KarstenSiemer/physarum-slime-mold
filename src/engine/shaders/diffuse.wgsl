@@ -1,12 +1,16 @@
-// Deposit + 3×3 mean diffusion + decay for trail and scent. Prepended with common.wgsl.
-// One step runs `passes` dispatches: FIRST adds this step's deposits and food/light sources,
-// LAST applies decay, BLUR = false is the zero-diffusion variant (Jones 2010, p. 132).
+// 3×3 mean diffusion + decay for trail and scent, then this step's deposits and food/light sources. Prepended with
+// common.wgsl. Jones' order of a step (Jones 2010, p. 132–133; ADR 0027): every agent moves and deposits, then every
+// agent senses, then the map diffuses. The textures hold the map as the agents sense it: the map after the last
+// diffusion with the deposits and sources of the last moves. A step's agent pass senses it and moves; then its
+// `passes` dispatches diffuse and decay it, and LAST adds the deposits and sources of this step's moves, the map that
+// the agents of the next step sense. FIRST clears the wound of a cut in the extended model; BLUR = false is the
+// zero-diffusion variant (Jones 2010, p. 132).
 
 override FIRST: bool = true;
 override LAST: bool = true;
 override BLUR: bool = true;
 // Covered food (Adamatzky and Jones 2010; ADR 0022): a food cell releases P.model.y of its scent while the
-// 3 × 3 window around it holds an agent. sim.ts builds the FIRST pass with it only while the option is on, so the
+// 3 × 3 window around it holds an agent. sim.ts builds the LAST pass with it only while the option is on, so the
 // passes without it keep the trail and scent of the code before it, bit for bit (sim.gpu.test.ts).
 override COVERED: bool = false;
 
@@ -37,6 +41,13 @@ fn covered(q: vec2i) -> bool {
   return false;
 }
 
+// Cut tool: in the extended model the wound also loses its chemicals, this app's choice. Jones 2010 (Sec. 4.3,
+// p. 148) only removes the agents from the wound and places them elsewhere: the Jones model packs P.tool2.z = 1 and
+// keeps them (pack.ts).
+fn wound(q: vec2i) -> bool {
+  return P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z;
+}
+
 @compute @workgroup_size(16, 16)
 fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: vec3u,
            @builtin(local_invocation_index) li: u32) {
@@ -50,22 +61,10 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
       let q = cellCoord(u32(c));
       t = textureLoad(trailIn, q, 0);
       s = textureLoad(scentIn, q, 0).xy;
-      if (FIRST) {
-        t += vec4f(counts[c]) * P.deposit;
-        let e = envOf(env[c]);
-        if (COVERED) {
-          let food = select(1.0, P.model.y, e.y > 0.0 && covered(q));
-          s += vec2f(e.y * P.scent.x * food, e.z * P.scent.y);
-        } else {
-          s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
-        }
-        // Cut tool: in the extended model the wound also loses its chemicals, this app's choice. Jones 2010
-        // (Sec. 4.3, p. 148) only removes the agents from the wound and places them elsewhere: the Jones model
-        // packs P.tool2.z = 1 and keeps them (pack.ts).
-        if (P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z) {
-          t = vec4f(0.0);
-          s = vec2f(0.0);
-        }
+      // The wound is cleared before the step's diffusion, so no chemical of it spreads out.
+      if (FIRST && wound(q)) {
+        t = vec4f(0.0);
+        s = vec2f(0.0);
       }
       open = 1.0;
     }
@@ -99,6 +98,19 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
   if (LAST) {
     t *= P.keep;
     s *= P.scent.z;
+    // This step's deposits and sources (Jones 2010, p. 133 and 144): after the moves, for the sensors of the next
+    // step, and none in the wound of a cut that clears it.
+    if (tileOpen[center] > 0.0 && !wound(p)) {
+      let c = p.y * i32(W()) + p.x;
+      t += vec4f(counts[c]) * P.deposit;
+      let e = envOf(env[c]);
+      if (COVERED) {
+        let food = select(1.0, P.model.y, e.y > 0.0 && covered(p));
+        s += vec2f(e.y * P.scent.x * food, e.z * P.scent.y);
+      } else {
+        s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
+      }
+    }
   }
   textureStore(trailOut, p, t);
   textureStore(scentOut, p, vec4f(s, 0.0, 0.0));

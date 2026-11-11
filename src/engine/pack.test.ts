@@ -168,15 +168,16 @@ describe('model slot and sources', () => {
     expect(scent(ext)[0]).toBe(scent(s)[0]);
     expect(scent(ext)[1]).toBe(Math.fround(255 * 0.2));
     const [food = 0, light = 0] = scent({ ...ext, scentDecay: 0.001 });
-    expect(food).toBeCloseTo((255 * 0.05 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
-    expect(light).toBeCloseTo((255 * 0.2 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
+    expect(food).toBeCloseTo(255 * 0.05 * (0.001 / 0.1), 4);
+    expect(light).toBeCloseTo(255 * 0.2 * (0.001 / 0.1), 4);
     // The Jones model releases 255 · wProj at every decay of the strain.
     const low = jones({ foodStrength: 0.05, strains: [{ ...defaultStrain(0), decay: 0.001 }], scentDecay: 0.001 });
     expect(scent(low).slice(0, 3)).toEqual([Math.fround(255 * 0.05), 0, Math.fround(0.999)]);
   });
 
-  it('keeps the plateau of a large food at every scent decay: source · (1 − d) / d', () => {
-    const plateau = (d: number) => 255 * 0.05 * emissionScale(d) * ((1 - d) / d);
+  // The agents sense the map after the step's sources, before its diffusion (Jones' order, ADR 0027).
+  it('keeps the plateau of a large food at every scent decay: source / d', () => {
+    const plateau = (d: number) => (255 * 0.05 * emissionScale(d)) / d;
     for (const d of [0.001, 0.003, 0.01, 0.03, 0.3, 0.9]) expect(plateau(d) / plateau(0.1)).toBeCloseTo(1, 12);
   });
 });

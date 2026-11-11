@@ -157,6 +157,13 @@ fn steer(a: Agent, s: u32, rng: ptr<function, u32>, clear: i32) -> f32 {
   return h - TAU * floor(h / TAU);
 }
 
+// Jones' order of a step (Jones 2010, p. 132–133; ADR 0027): every agent moves and deposits, then every agent senses
+// and turns, then the map diffuses. A step of these passes senses and turns for the moves of the step before, then
+// moves (diffuse.wgsl adds the deposits after the diffusion): so its sensors read the map after the last moves and
+// before its diffusion, as Jones' do. The first step after a reset has no moves before it: an agent moves with its
+// start heading, as in Jones' first step.
+fn sensesFirst() -> bool { return P.grid.w > 0u; }
+
 fn randomIn(center: vec2f, radius: f32, rng: ptr<function, u32>) -> vec2f {
   return center + radius * sqrt(rand(rng)) * dir(rand(rng) * TAU);
 }
@@ -234,7 +241,8 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
     } else if (alive) {
       var rng = rngSeed(id, STEER);
       let clear = clearanceAt(a.pos);
-      let h = steer(a, s, &rng, clear);
+      var h = a.heading;
+      if (sensesFirst()) { h = steer(a, s, &rng, clear); }
       let p = a.pos + P.stepSize[s] * dir(h);
       let c = cellOf(p);
       if (habitable(c) && clearPath(a.pos, p, clear)) {
@@ -276,7 +284,7 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   } else if (alive) {
     var rng = rngSeed(id, STEER);
     let clear = clearanceAt(a.pos);
-    a.heading = steer(a, a.bits & 3u, &rng, clear);
+    if (sensesFirst()) { a.heading = steer(a, a.bits & 3u, &rng, clear); }
     let c = cellOf(destination(a));
     if (canClaim(a, c, clear)) { atomicMax(&claims[c], key(id)); }
   }

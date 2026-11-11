@@ -130,9 +130,10 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     const expected = alivePerStrain(await sim.readAgents(), 3);
     expect(expected.every((n) => n > 30_000)).toBe(true); // over 100 carries of 256 each
     expect(counts).toEqual([...expected, 0]);
-    // The deposit uses these counts: trail = keep · deposit · count after one step from zero.
+    // The deposit uses these counts: trail = deposit · count after one step from zero, added after the step's
+    // diffusion (Jones' order, ADR 0027).
     const trail = Array.from(await sim.readTrail());
-    for (let s = 0; s < 3; s++) expect(trail[s] ?? 0).toBeCloseTo(0.9 * 5 * (expected[s] ?? 0), -1);
+    for (let s = 0; s < 3; s++) expect(trail[s] ?? 0).toBeCloseTo(5 * (expected[s] ?? 0), -1);
     sim.destroy();
   }, 120_000);
 

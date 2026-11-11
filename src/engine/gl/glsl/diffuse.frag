@@ -1,5 +1,5 @@
-// Deposit + 3 × 3 mean diffusion + decay. Mirrors ../../shaders/diffuse.wgsl (no tiling: one
-// fragment reads its 3 × 3 neighbourhood).
+// 3 × 3 mean diffusion + decay, then this step's deposits and sources, in Jones' order (ADR 0027). Mirrors
+// ../../shaders/diffuse.wgsl (no tiling: one fragment reads its 3 × 3 neighbourhood).
 
 uniform sampler2D trailIn;
 uniform sampler2D scentIn;
@@ -32,7 +32,13 @@ bool covered(ivec2 q) {
 }
 #endif
 
-// Trail and scent of a cell including this step's sources; `open` is 0 for walls and outside.
+// Cut tool: only in the extended model the wound also loses its chemicals (wound in diffuse.wgsl).
+bool wound(ivec2 q) {
+  return P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2(q) + 0.5, P.tool.xy) < P.tool.z;
+}
+
+// Trail and scent of a cell as the agents sensed them; `open` is 0 for walls and outside. The first pass clears the
+// wound of a cut before the step's diffusion.
 void load(ivec2 c, out vec4 t, out vec2 s, out float open) {
   t = vec4(0.0);
   s = vec2(0.0);
@@ -40,23 +46,12 @@ void load(ivec2 c, out vec4 t, out vec2 s, out float open) {
   int i = cellAt(c);
   if (i < 0) return;
   ivec2 q = cellCoord(i);
-  vec4 e = texelFetch(env, q, 0);
-  if (isWall(e)) return;
+  if (isWall(texelFetch(env, q, 0))) return;
   t = texelFetch(trailIn, q, 0);
   s = texelFetch(scentIn, q, 0).xy;
-  if (first) {
-    t += texelFetch(counts, q, 0) * P.deposit;
-#if COVERED
-    float food = e.g > 0.0 && covered(q) ? P.model.y : 1.0;
-    s += vec2(e.g * P.scent.x * food, e.b * P.scent.y);
-#else
-    s += vec2(e.g * P.scent.x, e.b * P.scent.y);
-#endif
-    // Cut tool: only in the extended model the wound also loses its chemicals (diffuse.wgsl).
-    if (P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2(q) + 0.5, P.tool.xy) < P.tool.z) {
-      t = vec4(0.0);
-      s = vec2(0.0);
-    }
+  if (first && wound(q)) {
+    t = vec4(0.0);
+    s = vec2(0.0);
   }
   open = 1.0;
 }
@@ -88,6 +83,17 @@ void main() {
   if (last) {
     t *= P.keep;
     s *= P.scent.z;
+    // This step's deposits and sources, after the moves, for the sensors of the next step (diffuse.wgsl).
+    if (open > 0.0 && !wound(p)) {
+      vec4 e = texelFetch(env, p, 0);
+      t += texelFetch(counts, p, 0) * P.deposit;
+#if COVERED
+      float food = e.g > 0.0 && covered(p) ? P.model.y : 1.0;
+      s += vec2(e.g * P.scent.x * food, e.b * P.scent.y);
+#else
+      s += vec2(e.g * P.scent.x, e.b * P.scent.y);
+#endif
+    }
   }
   outTrail = t;
   outScent = vec4(s, 0.0, 0.0);
