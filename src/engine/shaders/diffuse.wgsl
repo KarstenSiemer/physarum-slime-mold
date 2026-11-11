@@ -104,12 +104,20 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
         ssum += tileScent[k];
       }
     }
-    t = sum / 9.0;
-    s = ssum / 9.0;
-  }
-  if (LAST) {
+    // The last pass takes the mean and the decay as one factor, (1 − decay) / 9: Metal's compiler turns the mean, then
+    // × (1 − decay), into this product on WebGPU, so diffuse.frag writes it out and both backends round alike (ADR 0027).
+    if (LAST) {
+      t = sum * (P.keep / 9.0);
+      s = ssum * (P.scent.z / 9.0);
+    } else {
+      t = sum / 9.0;
+      s = ssum / 9.0;
+    }
+  } else if (LAST) {
     t *= P.keep;
     s *= P.scent.z;
+  }
+  if (LAST) {
     // This step's deposits and sources (Jones 2010, p. 133 and 144): after the moves, for the sensors of the next
     // step, and none in the wound of a cut that clears it.
     if (kind == OPEN && !wound(p)) {

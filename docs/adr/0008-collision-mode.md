@@ -72,3 +72,12 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
 - A backend without the rule (WebGL2 without `EXT_float_blend`, ADR 0003) runs every scene
   without it. The switch then shows off and disabled, also after a preset load, and a notice says
   so once per page load when a scene made for the rule loads.
+
+## Amendment 2026-11-11: the synchronous rule stays (ADR 0027)
+
+The fidelity check of 2026-11-11 compared every scene of Jones with its figure. Jones' random sequential order of the
+agents (p. 133) against these synchronous claims is a real difference, but after Jones' order of a step, his dish, the
+absorbing edges and the figures' foods (ADR 0027) no figure needs it: Turing spots form their regular array, Shrinking
+plasmodium does not tear, and Steiner tree ends as a tree in every run. It stays the documented difference of this
+ADR. The claims now run in Jones' order of a step: a step senses for the moves of the step before, then claims and
+moves.

@@ -86,12 +86,19 @@ void main() {
         ssum += ss;
       }
     }
-    t = sum / 9.0;
-    s = ssum / 9.0;
-  }
-  if (last) {
+    // The mean and the decay as one factor, as WebGPU computes them (diffuse.wgsl, ADR 0027).
+    if (last) {
+      t = sum * (P.keep / 9.0);
+      s = ssum * (P.scent.z / 9.0);
+    } else {
+      t = sum / 9.0;
+      s = ssum / 9.0;
+    }
+  } else if (last) {
     t *= P.keep;
     s *= P.scent.z;
+  }
+  if (last) {
     // This step's deposits and sources, after the moves, for the sensors of the next step (diffuse.wgsl).
     if (kind == OPEN && !wound(p)) {
       vec4 e = texelFetch(env, p, 0);

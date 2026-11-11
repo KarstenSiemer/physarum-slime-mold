@@ -174,8 +174,15 @@ test('an old link of a scene of Jones opens as it was made, on a grid shaped lik
   await expect(card(page)).toContainText('This link changes the scene.');
   await expect(hint(page)).toContainText('This grid has 256 cells on the long side.');
   await expect(hint(page)).toContainText('For this figure, Jones used 200 × 200 cells.');
+  // It paints the foods it was made with, 57.6 cells left and right of the middle (revision 0, ADR 0027).
+  const foods = () => page.evaluate(() => globalThis.physarum?.envList().map((e) => e.from[0]));
+  expect(await foods()).toEqual([-0.288, 0.288]);
   await hint(page).getByRole('button', { name: 'Use 200 × 200 cells' }).click();
   await expect.poll(() => simGrid(page), { timeout: 120_000 }).toEqual([200, 200]);
+  // The foods of revision 0 stay a change of the scene; Reload scene loads those of Fig. 18.
+  await expect(card(page).getByText('changed', { exact: true })).toBeVisible();
+  await card(page).getByRole('button', { name: 'Reload scene' }).click();
+  await expect.poll(foods, { timeout: 120_000 }).toEqual([-0.255, 0.255]);
   await expect(card(page).getByText('changed', { exact: true })).toBeHidden();
   expect(errors).toEqual([]);
 });
