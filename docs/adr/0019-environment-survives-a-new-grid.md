@@ -405,7 +405,12 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   `common.wgsl` and `common.glsl`, used by every simulation shader that reads walls.
 - **The grid is a model scale.** Sensor offset and step size stay in cells. On another grid the
   same edits cover the same share of the screen, but the agents see them at another scale, so a
-  different grid is a different experiment. This is not changed.
+  different grid is a different experiment. This is not changed. Since ADR 0026 (2026-11-11) the
+  scenes of Jones run on the lattice of their figure, a grid of fixed size on every screen. The
+  canonical frames follow the shape of the grid, so on a lattice they are the same on every
+  screen, and a square lattice turns no frame. An edit painted on a lattice goes to a grid shaped
+  like the screen through the frame of its arena, as between any two grids, and comes back byte
+  for byte.
 
 ## Consequences
 
