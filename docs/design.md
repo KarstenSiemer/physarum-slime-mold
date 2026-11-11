@@ -122,9 +122,10 @@ that measure it, and the agent passes that check for walls, are built at the fir
      takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
      agent spends its step there: no move, no deposit;
    - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
-     walls, the outside and a wall on the way to the sensor read as −∞ (ADR 0020); with trail
-     saturation K > 0 (extended model only) each lane of `trail` reads as `t / (1 + t / K)`
-     (ADR 0022);
+     walls and the outside read as −∞; in the extended model also a wall on the way to the
+     sensor (ADR 0020). With trail saturation K ≥ 1 (extended model only) each lane of `trail`
+     reads as `t / (1 + t / K)`. The Jones model packs Jones' one trail map: its one strain weighs
+     food as its own trail, and light has no weight (ADR 0022);
    - **rotate** with the Jones rule (exact, see knowledge base); random turn with `pCD`;
    - **move** by SS; wrap (periodic) or block (closed box, dish, wall, also a wall cell on the
      way);
@@ -139,9 +140,11 @@ that measure it, and the agent passes that check for walls, are built at the fir
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
    repeated `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
    3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
-   `scent` with `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources: g = 1 in the
-   Jones model, `g = (d / (1 − d)) / (0.1 / 0.9)` with the scent decay d in the extended model,
-   so a large food reaches the same scent at every decay (ADR 0022). With covered food on, a food
+   `scent` with `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones
+   model g = 1, the scent decays with the strain's decay and light has no source, so trail +
+   scent is Jones' one trail map (ADR 0022). In the extended model `g = (d / (1 − d)) / (0.1 / 0.9)`
+   with the scent decay d, so a large food reaches the same scent at every decay. The cut tool
+   clears trail and scent in the wound only in the extended model. With covered food on, a food
    cell releases the covered-food factor (0.001 by default, Adamatzky and Jones 2010) while the
    3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
    else from the `occupy` pass).
@@ -163,17 +166,17 @@ its cells.
 
 ## 4. Interaction
 
-| Area                | Controls                                                                                                         |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                               |
-| Scene               | presets in groups, scene card, agent count (density readout), resolution, layout, boundary, model (ADR 0022)     |
-| Strains (1–4 cards) | color, share, SA, SO, RA, SS, deposit, decay, random turn, food attraction, light avoidance, live sensor diagram |
-| Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets                                                   |
-| Environment         | diffusion passes, food and light strength, scent decay, covered food, trail saturation (extended), shrinkage     |
-| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light, wall, erase, cut; brush size          |
-| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
-| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |
-| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                        |
+| Area                | Controls                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                            |
+| Scene               | presets, scene card, agent count, resolution, layout, boundary, the rule, model; extended: scent decay, K     |
+| Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight    |
+| Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)              |
+| Environment         | food strength, covered food, shrinkage; extended: diffusion passes, light strength                            |
+| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush |
+| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                          |
+| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings  |
+| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                     |
 
 Guided experiments (each sets a preset, an environment and a text that says what to watch):
 dynamic network (Fig. 4), hexagonal minimization (Fig. 5), scale by SO (Fig. 10), SA × RA

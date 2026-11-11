@@ -1,6 +1,7 @@
 # 0022: Jones and extended model
 
-- Status: accepted (owner decision, 2026-11-11: a model switch "Jones" and "Erweitert"; the default changes are open)
+- Status: accepted (owner decisions, 2026-11-11: a model switch "Jones" and "Erweitert"; "Jones streng": the Jones model
+  holds only Jones' published rules; the default changes are open)
 - Date: 2026-11-11
 
 ## Context
@@ -29,6 +30,9 @@ WebGPU, M3 Pro):
     units per step, and 0.01275 (1 %) while the 3 × 3 window around the node holds more than 0 agents, "to ensure a
     uniform concentration within the blob".
 - The real organism senses food over millimetres to centimetres.
+- **The first version of this branch put every scene on "Jones"** and left in both models what the scenes used:
+  several strains, light, the separate scent and the sensor check of ADR 0020. The owner then decided that a run
+  labelled Jones must hold only Jones' rules (below).
 
 ## Options
 
@@ -36,6 +40,78 @@ WebGPU, M3 Pro):
 2. **Change the scent for everyone.** Jones' scenes would no longer run as in his papers.
 3. **A model switch** with two values. Jones' published rules belong to "Jones", this app's additions to "Extended". A
    rule of Jones that a scene does not use is an option with Jones' values, off by default.
+
+For the scope of "Jones" (decision 2), two options:
+
+- **A. Jones holds what the scenes use** (the first version of this branch): several strains, light, the scent of its
+  own and the sensor check stay in both models, so every scene could run on Jones.
+- **B. Jones holds only Jones' published rules**: everything else runs only in Extended, and every scene that uses it
+  moves there. At the values of its scene the extended model gives the bytes of the code before, so no scene changes.
+
+## What is Jones and what is not
+
+Read in Jones 2010 (J. Jones, Characteristics of pattern formation and evolution in approximations of Physarum
+transport networks, Artificial Life 16(2): 127–153) and in the later papers that ADR 0024 lists. Page numbers are those
+of Jones 2010 unless the line names another paper.
+
+**Jones' rules: the Jones model** (`jonesFits()` and `asJones()` in `src/model/params.ts`, `packParams()` in
+`src/engine/pack.ts`):
+
+- One population of one kind of agent (p. 132–133). It follows its own trail, or it flees it: "the agent orients itself
+  away from the source" (chemorepulsion, Sec. 3.5, p. 142–143). Here: one strain with a weight of +1 or −1 on its own
+  trail.
+- Three forward sensors at SO, the side ones at ±SA; the turn by RA (Fig. 3, p. 133); a random turn with pCD (Table 1,
+  p. 134); a step of SS; a deposit of depT after a successful move only (p. 133).
+- One agent per cell (p. 132: "Each grid cell can contain only a single agent"). A blocked agent stays, deposits
+  nothing and takes a random heading (p. 133).
+- Positions are floats rounded to their cell (p. 132), so a sensor reads the cell its point falls in.
+- One 3 × 3 mean per step with the decay decayT (p. 132, Table 1: diffK 3).
+- Food goes into the trail map: stimulus pixels "were projected to the chemoattractant layer", with the weight wProj,
+  and they "are subject to the same diffusion process" (p. 144). So the food scent decays with decayT, and the agent
+  weighs it as its trail.
+- The habitable area and obstacles of the data map (p. 131, Table 1); a periodic boundary (Table 1) or a closed arena
+  such as his dish. Agents start at random unoccupied habitable cells (p. 132), or at start points of the data map
+  (Table 1): the start layouts.
+- Shrinkage: each agent dies with a fixed chance per step (Fig. 21, p. 147, 0.00025).
+- The wound: the agents in it go to random places outside it (p. 148). The trail stays.
+- Later papers: covered food (Adamatzky and Jones 2010, arXiv:0912.3967, p. 6; Jones and Adamatzky 2014,
+  arXiv:1303.4969, Sec. 7.2), built here. Growth and shrinkage windows (Jones 2011; Adamatzky and Jones 2010; Jones and
+  Adamatzky 2014; Jones 2015; Jones, Mayne and Adamatzky 2017), the turn toward the larger side when the front sensor
+  reads least (2014 to 2017), 5 × 5 and 7 × 7 means (2010 road paper, 2017), light that dampens each sensor (2017,
+  ADR 0024, decision 7) and the coverage-gated repellent of obstacles (Jones 2015): Jones' rules, not built yet. They
+  come into the Jones model with Jones' values, and with the 2010 behaviour as their default (ADR 0024).
+
+**This app's readings where Jones leaves a choice** (in both models):
+
+- A sensor whose cell is a wall or lies outside a closed arena reads `BLOCKED` (ADR 0007): Jones does not say what it
+  reads.
+- A move checks the cells on its way for walls (ADR 0019): the habitable area for steps that cross more than one cell.
+- The agents update in parallel, with claims for the rule of one agent per cell (ADR 0008); Jones picks them in random
+  order (p. 133).
+- The cut tool takes the agents out while it is held, with a round brush; Jones cut a square and kept agents out until
+  all were placed (p. 148).
+
+**Not Jones: the extended model only**:
+
+- Several strains and the table of how each weighs the trails of the others (Fogleman 2020; Jenson 2019), and the
+  population share of each strain.
+- Light that releases a repellent scent (this app; ADR 0007). Jones' light (2017) dampens what a sensor reads; Jones
+  2015 lets obstacles release a repellent only while no agent covers them, and a permanent repellent failed there.
+- A scent decay of its own and a food weight or light weight per strain, which decouple the scent from the trail
+  (ADR 0007).
+- Agents that share a cell: no rule of one agent per cell (Jenson, Fogleman).
+- No diffusion, or more than one 3 × 3 mean per step (Fogleman uses 2): not Jones' 5 × 5 or 7 × 7 mean.
+- Sensors that walls block on the way (ADR 0020): the owner's rule for the Maze, not Jones'.
+- A cut that also clears the trail and the scent of the wound (this app).
+- The normalised emission and trail saturation (decisions 4 to 9).
+
+**The separate scent field is Jones' one map.** For one strain the GPU keeps the trail and the food scent in two fields.
+Both take their sources in the first pass, the same means over the same habitable cells, and the same factor
+`1 − decayT`: the operations are linear, so trail + scent is Jones' map exactly, and the sensor reads
+`w · trail + w · scent = w · map` with the strain's own weight w. In float32 the two sums round apart: a GPU test
+(`sim.gpu.test.ts`, "keep trail + scent equal to Jones' one trail map") steps a float64 CPU reference of the one map
+with the deposits of the GPU's agents, 40 steps in a box with a wall, on a periodic grid with chemorepulsion and in a
+dish, and finds trail + scent within 1e-5 of it on both backends. So the implementation stays (decision 3).
 
 ## Decisions
 
@@ -47,55 +123,136 @@ Each decision with its date, who made it, and why.
    and shrinkage of 2011 and covered food) go together into one model rather than one switch per paper, and what is not
    Jones' goes into a model of its own. Growth and shrinkage belong to "Jones" when they come, flow reinforcement to
    "Extended".
-2. **Every scene, the default settings and every old link run on "Jones"** (owner, 2026-11-11). `sanitize()` loads a
-   link without `model` as `'jones'`. Reason: they must keep their bytes, and a link must open as it was made.
-3. **Normalised emission is extended only** (owner, 2026-11-11). In the extended model food and light release
-   255 · strength · g(d) per cell and step, with g(d) = (d / (1 − d)) / (0.1 / 0.9) (`emissionScale()`), d the scent
-   decay. Reason: Jones projects food at a fixed strength into a map with the trail's decay; a source that depends on
-   the decay is not his rule. In the Jones model the scent stays as it was at every decay.
-4. **g normalises the plateau of a large food, at decay 0.1** (owner brief, 2026-11-11). With g the plateau
-   255 · strength · g(d) · (1 − d) / d is 255 · strength · 9 at every decay. Reason: a lower decay should spread the
-   scent, not make it stronger, and every scene and the default settings use 0.1, so at 0.1 the extended model gives the
-   bytes of the Jones model. g(0.1) is exactly 1: the same float divided by itself.
-5. **Light gets the same g** (owner brief, 2026-11-11). Reason: the light repellent lives in the same scent field with
-   the same decay (ADR 0007); without g, a lower decay would make light 111 times as strong.
-6. **Trail saturation is extended only** (owner, 2026-11-11). Each sensor reads the trail t of each strain as
-   t / (1 + t / K) before it weighs the trails (`sense()` in `agents.wgsl`, `agents.frag`). Reason: no paper of Jones
-   saturates the trail.
-7. **K is one value for all strains, 0 to 1,000 in steps of 1, 0 off** (this branch, 2026-11-11). Reason: one number is
-   enough to measure what it does, and the owner decides whether it stays. The range reaches from below the trail of the
-   start scene (median 42 to 82 at an agent) to a tenth of the trail of the default settings (median 3,700 at step
-   2,000 and 10,700 at step 10,000, K 0). The slider is linear, because a log slider cannot reach 0. The panel shows it
-   only in the extended model.
-8. **Covered food is a Jones rule, available in both models, off in every scene** (owner, 2026-11-11). Reason: Jones
-   published it (Context). Off keeps the scenes' bytes.
-9. **Covered food: Jones' form with a fixed window, and a factor per scene, 0.001 by default** (this branch,
-   2026-11-11). A food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it holds at least
-   one alive agent. The switch is "Covered food releases less", and the slider "Covered food factor" (0.0001 to 1) shows
-   while it is on. Reasons: both papers use the 3 × 3 window, so it is fixed. Their factors differ (0.001 in 2010, 0.01
-   in 2014), and ADR 0024 (decision 1) lets each scene set the values of its own paper, so the factor is a setting that
-   links carry. The default is 0.001 of Adamatzky and Jones 2010, because that paper checks each pixel of a food area as
-   this code checks each painted food cell; the 2014 paper projects from points. For a food of strength 0.05 the
-   covered source is then 0.013 per step (0.13 with 0.01), against 12.75 uncovered. Light has no such rule.
-10. **Covered food counts the agents after the step's moves** (this branch, 2026-11-11). Reason: Jones checks the
-    window in every step of his scheduler; on the GPU the positions after the moves are the ones the diffusion pass of
-    the same step can read. Collision mode keeps these counts anyway (ADR 0008). Without it, WebGPU runs the pass
-    `occupy` into the same buffers, and WebGL2 draws one point per agent into the collision target, or without float
-    blending into an 8-bit target `presence`. That target is 1 byte per cell more in `BYTES_PER_CELL_HALF_FLOAT`
-    (110 → 111), so the memory fit counts it.
-11. **The new code is built only where it runs** (this branch, 2026-11-11). The saturation and covered food are override
-    constants in WGSL (`SATURATE`, `COVERED`) and `#define`s in GLSL. The passes with them are built at their first use
-    (`Kernels.saturated`, `Kernels.covered`, `Programs.saturated`, `Programs.covered`) and run only while K > 0 in the
-    extended model or covered food is on. Reason: a check built into a pass but never run changed the float rounding on
-    an M3 Pro (ADR 0020), and the passes without the new code must keep the bytes of the code before.
-12. **What stays in both models** (this branch, 2026-11-11): several strains with the attraction table, light, walls
-    that block sensors (ADR 0020), the separate scent fields (ADR 0007) and the rule of one agent per cell. Reason: the
-    scenes that use them run on "Jones" and must keep their bytes (decision 2).
-13. **Where the switch sits in the panel** (this branch, 2026-11-11): "Model" in the Scene section, beside the rule of
-    one agent per cell; "Covered food releases less" with "Covered food factor", and "Trail saturation", in the
-    Environment section. Reason: the model is a choice of rules like the rule of one agent per cell, and the options
-    act on food and sensing.
-14. **For tests only**, `Sim.readScent()` reads the scent, and `Simulation.create` takes a diffusion source as it takes
+2. **The Jones model holds only Jones' published rules** (owner, 2026-11-11, "Jones streng", option B). Everything this
+   app added runs only in the extended model, which is Jones' rules and this app's additions. The list above is the
+   line. This replaces the first version's decisions that every scene and the default settings run on Jones and that
+   several strains, light, the separate scent and the sensor check stay in both models (option A). Reason: a run
+   labelled Jones must be Jones.
+3. **The Jones model binds what Jones has no setting for** (this branch, 2026-11-11). `constrain()` gives it the
+   strain's decay as the scent decay and the strain's own weight as its food weight, and sets trail saturation 0, the
+   light strength and the light weight to their defaults. `packParams()` packs Jones' map whatever the settings hold:
+   that scent decay and food weight, no light source, a light weight of 0, K 0, and a cut that keeps the chemicals
+   (`tool2.z`, `diffuse.wgsl`). Reason: the panel, the link and the GPU must all hold Jones' values, and a value Jones
+   does not have must not reach his run by another way. The separate scent field stays: it is Jones' map (above).
+4. **Settings that Jones has only one value for make a Jones model Extended** (this branch, 2026-11-11):
+   `jonesFits()` asks for one strain with weight +1 or −1 on its own trail, the rule of one agent per cell and one
+   diffusion pass. `constrain()` turns a Jones model without them into the extended model, for links and changes alike.
+   Reason: these values change the run, so dropping them would run another scene than the one that was made.
+5. **Links** (this branch, 2026-11-11). `sanitize()` reads a link without `model` as Jones' (it was made with Jones'
+   rules and this app's additions together), then `constrain()` applies decisions 3 and 4. So an old link of a scene of
+   Jones opens with Jones, an old link with several strains or without the rule opens with Extended, and a Jones link
+   with K, light or a scent decay of its own holds Jones' values. K is rounded to its whole steps: a link with K 1e-300
+   passed the clamp, picked the saturating passes and packed as 0 in float32, so t / (1 + t / 0) gave NaN in every lane
+   with t = 0 and no agent turned, while the panel showed K 0. `trailSaturation()` also treats a K below 1 as off.
+6. **The panel offers only Jones' settings in the Jones model** (this branch, 2026-11-11): one strain without Add strain,
+   share, food weight or light weight; the rule checked and locked; no Diffusion passes, Light strength, Scent decay or
+   Trail saturation; no Light tool. Covered food and its factor, Food strength and Shrinkage stay. The choice "Model"
+   sits in the Scene section. In the extended model its own settings Scent decay and Trail saturation show directly
+   below the choice, so a switch to it shows what it adds; Light strength and Diffusion passes show in Environment. The
+   scene card shows "Only Jones' rules" or "Jones plus this app's rules". Reason: what the user can set is what the
+   model has.
+7. **A switch to Jones keeps strain A** (this branch, 2026-11-11): `toJones()` keeps strain A with weight ±1 on its own
+   trail, switches the rule on, sets one diffusion pass and binds the rest (decision 3). A notice says what went. A
+   switch to Extended changes no value. Reason: a switch must not leave a Jones label on a run that is not Jones', and
+   the user sees what changed. After Extended, K 30 and back to Jones the scene is the scene again, and the link holds
+   no K: the review found the card "changed" and `trailSaturation: 30` in the link of a plain Jones run.
+8. **Light in the Jones model** (this branch, 2026-11-11): no Light tool, and painted light stays painted but has no
+   effect (source and weight 0). Reason: no paper of Jones has light that releases a repellent (list above). Light that
+   a scene or the user painted in Extended comes back when the user switches back.
+9. **Walls in the Jones model** (this branch, 2026-11-11): the sensors read their own cell only; moves still check the
+   cells on their way. Reason: ADR 0020 was the owner's decision for the Maze, which is not Jones' scene; Jones does not
+   say what a sensor behind a wall reads. No scene of Jones has walls, so none changes.
+10. **Every scene by its source** (this branch, 2026-11-11, from decision 2):
+
+    | Scene                | Source                                   | Model    | Why                                        |
+    | -------------------- | ---------------------------------------- | -------- | ------------------------------------------ |
+    | Three strains        | this app (start scene)                   | Extended | three strains, no rule, 2 diffusion passes |
+    | Two strains          | this app                                 | Extended | two strains, no rule                       |
+    | Transport network    | Jones 2010, Fig. 4                       | Jones    |                                            |
+    | Minimizing network   | Jones 2010, Fig. 5                       | Jones    |                                            |
+    | Turing spots         | Jones 2010, Fig. 16                      | Jones    | chemorepulsion: weight −1                  |
+    | Turing stripes       | Jones 2010, Fig. 16                      | Jones    | chemorepulsion: weight −1                  |
+    | Shortest path        | Jones 2010, Fig. 18                      | Jones    |                                            |
+    | Steiner tree         | Jones 2010, Fig. 19                      | Jones    |                                            |
+    | Shrinking plasmodium | Jones 2010, Fig. 21                      | Jones    | food positions are this app's choice       |
+    | Wound healing        | Jones 2010, Fig. 22                      | Jones    | the cut tool, see below                    |
+    | Fleeing light        | this app                                 | Extended | light that releases a repellent            |
+    | Maze                 | Nakagaki et al. 2000, values of this app | Extended | sensors that walls block (ADR 0020)        |
+    | Cyclones             | Fogleman 2020                            | Extended | several strains, no rule                   |
+    | Dunes                | Fogleman 2020                            | Extended | several strains, no rule                   |
+    | Dot grid             | Fogleman 2020                            | Extended | several strains, no rule                   |
+    | Default settings     | this app                                 | Extended | no rule, 1 agent per cell                  |
+
+    The scenes of Jones held one value that is not his: the repelling scenes weighed food with +1 against −1 on their
+    own trail. They paint no food, so their food weight is now −1 (`jones()` in `src/model/presets.ts`) with the same
+    bytes. Wound healing asks the user to cut: in the Jones model the cut now keeps the trail, as Jones' did (decision
+    3), and its text says so. The default settings move to Extended without a new value: the owner's question whether
+    they get K or another scent decay stays open (TODO.md).
+
+11. **Backends without the rule run Jones' scenes on Extended** (this branch, 2026-11-11). `setScene()` and
+    `ruleUnavailable()` give the scene and the scene's base the extended model with the rule off, so the card shows no
+    change, and the notice says so. Reason: the Jones model always has the rule.
+12. **Normalised emission is extended only** (owner, 2026-11-11). In the extended model food and light release
+    255 · strength · g(d) per cell and step, with g(d) = (d / (1 − d)) / (0.1 / 0.9) (`emissionScale()`), d the scent
+    decay. Reason: Jones projects food at a fixed strength into a map with the trail's decay; a source that depends on
+    the decay is not his rule.
+13. **g normalises the plateau of a large food, at decay 0.1** (owner brief, 2026-11-11). With g the plateau
+    255 · strength · g(d) · (1 − d) / d is 255 · strength · 9 at every decay. Reason: a lower decay should spread the
+    scent, not make it stronger, and every scene and the default settings use 0.1, so at 0.1 the extended model gives the
+    bytes of the Jones model. g(0.1) is exactly 1: the same float divided by itself.
+14. **Light gets the same g** (owner brief, 2026-11-11). Reason: the light repellent lives in the same scent field with
+    the same decay (ADR 0007); without g, a lower decay would make light 111 times as strong.
+15. **Trail saturation is extended only** (owner, 2026-11-11). Each sensor reads the trail t of each strain as
+    t / (1 + t / K) before it weighs the trails (`sense()` in `agents.wgsl`, `agents.frag`). Reason: no paper of Jones
+    saturates the trail.
+16. **K is one value for all strains, 0 to 1,000 in steps of 1, 0 off** (this branch, 2026-11-11). Reason: one number is
+    enough to measure what it does, and the owner decides whether it stays. The range reaches from below the trail of
+    the start scene (median 42 to 82 at an agent) to a tenth of the trail of the default settings (median 3,700 at step
+    2,000 and 10,700 at step 10,000, K 0). The slider is linear, because a log slider cannot reach 0.
+17. **K draws straight paths along the grid axes out of food, and stays as it is** (this branch, 2026-11-11). The review
+    saw them at K 30. A study with 10 seeds (default settings, extended, decay 0.003, 4 UI dabs, WebGPU; WebGL2 gave the
+    same bytes) measured the rank of the cross of rays at 0°, 90°, 180° and 270° among 90 crosses by the trail on them
+    out to 80 cells (0.5: no preference): 0.86 at K 30, 0.57 at K 0 and 0.48 without food. Diagonals are not preferred.
+    Cause: Jones' sensors read the cell their point falls in (p. 132). For a heading within about 2° of an axis, the
+    front and both side sensors (9 cells ahead, and 8.3 ahead and 3.4 to the side) fall in one column in a fifth to a
+    third of all positions. Such an agent moves almost exactly one cell per step, so this lasts for hundreds of steps.
+    It then compares only across the filament and keeps going out: in 92 % of its steps, against 78 % with the front
+    sensor one column farther out. K decides it, because it shrinks the trail difference between the front and the best
+    side sensor from 200 to 1,500 (K 0) to 0.25 to 1.4 (K 30, medians). Exact ties of sensors are not the cause: a
+    float32 replay of 7,059,361 decisions near dabs matched the GPU in all but 0.0001 % and found no step that kept its
+    heading on a tie of three sensors, and a shader that turns at random on a tie kept the spokes. Reason to keep: the
+    cell rule is Jones' rule, and the passes are right. A random offset of the sensors in each step would remove the
+    preference (axis rank 0.39 to 0.57); that would be a new extended rule, not measured for food reach (open below).
+18. **Covered food is a Jones rule, available in both models, off in every scene** (owner, 2026-11-11). Reason: Jones
+    published it (Context). In the Jones model it always runs with the rule of one agent per cell, as in both papers.
+    In the extended model without the rule, agents stack on a food and hold each other there by their own trail, so
+    covered food gathers more agents there (Consequences), and its help says so and what it costs.
+19. **Covered food: Jones' form with a fixed window, and a factor per scene, 0.001 by default** (this branch,
+    2026-11-11). A food cell releases `coveredFoodFactor` of its scent while the 3 × 3 window around it holds at least
+    one alive agent. The switch is "Covered food releases less", and the slider "Covered food factor" (0.0001 to 1)
+    shows while it is on. Reasons: both papers use the 3 × 3 window, so it is fixed. Their factors differ (0.001 in
+    2010, 0.01 in 2014), and ADR 0024 (decision 1) lets each scene set the values of its own paper, so the factor is a
+    setting that links carry. The default is 0.001 of Adamatzky and Jones 2010, because that paper checks each pixel of
+    a food area as this code checks each painted food cell; the 2014 paper projects from points. For a food of strength
+    0.05 the covered source is then 0.013 per step (0.13 with 0.01), against 12.75 uncovered. Light has no such rule.
+20. **Covered food counts the agents after the step's moves** (this branch, 2026-11-11). Reason: Jones checks the window
+    in every step of his scheduler; on the GPU the positions after the moves are the ones the diffusion pass of the same
+    step can read. Collision mode keeps these counts anyway (ADR 0008). Without it, WebGPU runs the pass `occupy` into
+    the same buffers, and WebGL2 draws one point per agent into the collision target, or without float blending into an
+    8-bit target `presence`.
+21. **The memory fit counts `presence` only while covered food is on** (this branch, 2026-11-11):
+    `COVERED_BYTES_PER_CELL_HALF_FLOAT` (1 B) on top of `BYTES_PER_CELL_HALF_FLOAT` (110 B, as on `main`), via
+    `Backend.coveredBytesPerCell`; `GlSim.update()` frees the target when covered food goes off. Reason: the first
+    version counted 111 B always, so on WebGL2 without float blending 413 combinations of scene, device memory and aspect
+    got a smaller grid than on `main` (review), also with covered food off. Covered food switched on can lower the grid,
+    which rebuilds the simulation as every other lowered grid does (`Engine.apply()`).
+22. **The new code is built only where it runs** (this branch, 2026-11-11). The saturation and covered food are
+    override constants in WGSL (`SATURATE`, `COVERED`) and `#define`s in GLSL. The passes with them are built at their
+    first use (`Kernels.saturated`, `Kernels.covered`, `Programs.saturated`, `Programs.covered`; `agentsProgram()` and
+    `diffuseProgram()` in `gl/programs.ts` add the defines, the agent tools of ADR 0023 included) and run only while
+    K ≥ 1 in the extended model or covered food is on. Reason: a check built into a pass but never run changed the float
+    rounding on an M3 Pro (ADR 0020), and the passes without the new code must keep the bytes of the code before.
+23. **For tests only**, `Sim.readScent()` reads the scent, and `Simulation.create` takes a diffusion source as it takes
     an agent source (this branch, 2026-11-11). Reason: the tests compare the scent with a CPU reference, and the shipped
     passes with the sources without the new code.
 
@@ -103,46 +260,57 @@ Each decision with its date, who made it, and why.
 
 See `TODO.md` (M2):
 
-- Whether the default settings or the start scene should use the extended model, K or a lower scent decay. This branch
-  changes no default and no scene. The measurements are below.
-- Whether the extended model should normalise to the plateau of a large food (decision 4), which makes a small food
+- Whether the default settings or the start scene should use K or a lower scent decay. This branch sets neither; the
+  default settings now run on Extended at the values they had. The measurements are below.
+- Whether the extended model should normalise to the plateau of a large food (decision 13), which makes a small food
   weaker at a low decay (below).
 - Whether covered food stays exact without the rule of one agent per cell, where its occupancy pass costs time (below),
   or counts only the agents that moved, which misses agents that a wall blocked.
-- Whether "Jones" should also hide what Jones never had (light, several strains). That would change the scenes that
-  use them, against decision 2.
+- Whether K should get a random offset of the sensors in each step, so that its straight paths out of food lose their
+  preference for the grid axes (decision 17).
+- Old links that set a scent decay other than 0.1 and use something that is not Jones' (several strains, no rule) open
+  in Extended, which scales their food and light by g(d): their scent is weaker than when they were made. An old link of
+  a scene of Jones with a scent decay of its own opens in Jones with the strain's decay. No model keeps the old
+  unscaled, decoupled scent.
 
 ## Consequences
 
-- **The scenes keep their bytes.** Offline check (not a test in the repository): a scratch GPU test built every scene
-  and the default settings as the app does (canvas 1512 × 945, dpr 1), ran 500 steps from seed 7 and wrote the SHA-256
-  of the agents, the trail, the scent and `env`. `main` (`d245ea3`) gave the same digests twice, and this code gave
-  them on WebGPU and WebGL2 (M3 Pro), for all 14 scenes and the default settings. The same scenes switched to the
-  extended model (K = 0, decay 0.1) gave the same digests too. A temporary mutation that switched the saturating code
-  on in every agent pass changed them, so the check sees a change.
+- **The scenes keep their bytes.** Offline check (not a test in the repository): a scratch GPU test built the default
+  settings and all 15 presets as the app does (`Engine.create` and `Engine.load` on a canvas of 1512 × 945, dpr 1), ran
+  500 steps from seed 7 and wrote the SHA-256 of the agents (by id), the trail, the scent and `env`. The reference is
+  #26 (`2805b71`, merged into `main` as `2c355b7` with the same source tree), whose wrap fixes changed some scenes
+  against the `main` before it (ADR 0023). This code gave the reference's digests for all 16 on WebGPU, WebGL2 and WebGL2 without float
+  blending (M3 Pro), with the Jones scenes on Jones and the rest on Extended. The scenes of Jones switched to Extended
+  gave them too. The first version of this branch passed the same check on `main` (`d245ea3`) for 14 scenes and the
+  default settings, and a temporary mutation that switched the saturating code on in every agent pass changed them.
 - **Tests** (`sim.gpu.test.ts`, both backends): the shipped passes against the sources with the saturation and covered
-  food cut out (the bytes of agents, trail and scent are the same in the Jones model and in the extended model with
-  K = 0 at decay 0.1, and differ with K or covered food); the scent of food and light against a CPU reference in both
-  models at decays 0.1, 0.01 and 0.001 (within 1e-4); food on every cell at those decays against
-  s_n = source · (1 − d) · (1 − (1 − d)^n) / d (within 1e-4); covered food against a CPU reference of one step, with and
-  without the rule of one agent per cell, and on WebGL2 without float blending; and the turn of every agent of two
-  strains on a random trail against a CPU reference of `sense()` and `steer()` with K. Each test failed under a
-  temporary mutation of the code it checks.
+  food cut out, in both models, with K 0, and with a K that reached a Jones model past `sanitize()`; trail + scent
+  against a CPU reference of Jones' one map; the sensors check walls only in the extended model; the cut keeps the
+  chemicals only in the Jones model; the scent of food and light against a CPU reference in both models at decays 0.1,
+  0.01 and 0.001 (within 1e-4); food on every cell at those decays against
+  s_n = source · (1 − d) · (1 − (1 − d)^n) / d (within 1e-4); covered food against a CPU reference of one step, with
+  and without the rule, with food across both seams of the periodic grid, light on food and dead agents, and on WebGL2
+  without float blending; and the turn of every agent of two strains on a random trail against a CPU reference of
+  `sense()` and `steer()` with K, with and without a wall. Unit tests: `params.test.ts` (the Jones model's links,
+  `constrain()`, `toJones()`, K's steps), `pack.test.ts`, `presets.test.ts`, `url.test.ts`, `sizing.test.ts`.
 - **Plateau.** A disc of food of radius 300 on 1024 × 1024 cells, Food strength 0.05, after 20 / d steps, on both
   backends: the extended model gave 114.750, 114.748 and 114.736 at decays 0.1, 0.01 and 0.001 (theory 114.75, within
-  1.3e-4); the Jones model 114.75, 1,262.2 and 12,736.
+  1.3e-4); with a source that does not depend on the decay (the Jones model, where d is the strain's decay) 114.75,
+  1,262.2 and 12,736.
 - **A dab is not a large food.** Normalised to the plateau of a large food, a small food releases less at a low decay.
   The UI dab on the 1536 grid (steady state, both backends alike):
 
-  | Model, decay    | On the dab | Edge  | +5 cells | +9 cells | +20 cells | 1/e length | 1/10 length |
-  | --------------- | ---------- | ----- | -------- | -------- | --------- | ---------- | ----------- |
-  | Both, 0.1       | 115        | 62    | 3.7      | 0.36     | 0.001     | 2.0        | 4.2         |
-  | Jones, 0.01     | 1,129      | 557   | 212      | 98       | 12        | 5.2        | 11.9        |
-  | Jones, 0.001    | 5,056      | 3,101 | 2,126    | 1,594    | 743       | 13.7       | 33.4        |
-  | Extended, 0.01  | 103        | 51    | 19       | 9.0      | 1.1       | 5.2        | 11.9        |
-  | Extended, 0.003 | 75         | 40    | 23       | 14       | 4.3       | 8.7        | 20.6        |
-  | Extended, 0.001 | 46         | 28    | 19       | 14       | 6.7       | 13.7       | 33.4        |
+  | Model, decay     | On the dab | Edge  | +5 cells | +9 cells | +20 cells | 1/e length | 1/10 length |
+  | ---------------- | ---------- | ----- | -------- | -------- | --------- | ---------- | ----------- |
+  | Both, 0.1        | 115        | 62    | 3.7      | 0.36     | 0.001     | 2.0        | 4.2         |
+  | Jones, 0.01 (*)  | 1,129      | 557   | 212      | 98       | 12        | 5.2        | 11.9        |
+  | Jones, 0.001 (*) | 5,056      | 3,101 | 2,126    | 1,594    | 743       | 13.7       | 33.4        |
+  | Extended, 0.01   | 103        | 51    | 19       | 9.0      | 1.1       | 5.2        | 11.9        |
+  | Extended, 0.003  | 75         | 40    | 23       | 14       | 4.3       | 8.7        | 20.6        |
+  | Extended, 0.001  | 46         | 28    | 19       | 14       | 6.7       | 13.7       | 33.4        |
 
+  (*) Measured as an unscaled source with that scent decay. In the Jones model of decision 2 the scent decays with the
+  strain's decay, so these rows are the Jones model at a strain decay of 0.01 or 0.001, which also changes the trail.
   The lengths count from the edge of the dab to where the scent falls to 1/e or 1/10 of its value at the edge. They do
   not depend on the model. The 1/e length is one sensor distance (9 cells) at decay 0.003 (8.7 cells; 8.2 on the 1024
   grid), the 1/10 length at about 0.02.
@@ -156,11 +324,11 @@ See `TODO.md` (M2):
 
   | Scene             | Model, K, decay        | Seeds with ratio ≥ 3 | Dabs reached | Agents in a ring (share of all) |
   | ----------------- | ---------------------- | -------------------- | ------------ | ------------------------------- |
-  | Transport network | Jones, decay 0.1       | 10 of 10             | 25 of 40     | 0.25 %                          |
+  | Transport network | Jones (decay 0.1)      | 10 of 10             | 25 of 40     | 0.25 %                          |
   | Transport network | Extended, 0.01         | 10 of 10             | 40 of 40     | 1.5 %                           |
   | Transport network | Extended, 0.003        | 10 of 10             | 40 of 40     | 1.6 %                           |
   | Transport network | Extended, 0.001        | 10 of 10             | 40 of 40     | 1.6 %                           |
-  | Default settings  | Jones, decay 0.1       | 3 of 10              | 17 of 40     | 0.29 %                          |
+  | Default settings  | K 0, decay 0.1 (main)  | 3 of 10              | 17 of 40     | 0.29 %                          |
   | Default settings  | Extended, K 0, 0.01    | 4 of 10              | 26 of 40     | 0.53 %                          |
   | Default settings  | Extended, K 0, 0.003   | 6 of 10              | 28 of 40     | 0.39 %                          |
   | Default settings  | Extended, K 30, 0.1    | 9 of 10              | 24 of 40     | 6.9 %                           |
@@ -170,7 +338,8 @@ See `TODO.md` (M2):
   | Default settings  | Extended, K 100, 0.01  | 5 of 10              | 23 of 40     | 1.2 %                           |
   | Default settings  | Extended, K 100, 0.003 | 5 of 10              | 22 of 40     | 0.95 %                          |
 
-  In the Transport network the seed criterion holds already in the Jones model: without food almost no agent comes near
+  The default settings ran without the rule, so their rows "K 0, decay 0.1" are the extended model at its values of
+  `main`, which give the bytes of `main`. In the Transport network the seed criterion holds already in the Jones model: without food almost no agent comes near
   the sites, so one reached dab is enough. Per dab, the Jones model at decay 0.1 reaches 25 of 40 and leaves the others
   untouched, and every lower decay of the extended model reaches all 40 and fills their rings, one agent per cell. In
   the default settings only K 30 meets the criterion, and there each dab holds 5 to 8 % of all agents, so four dabs take
@@ -179,10 +348,11 @@ See `TODO.md` (M2):
 
 - **Covered food in the same experiment** (factor 0.001). In the Transport network it keeps the reach and lowers the
   pile-up: the extended model at 0.003 reached 40 of 40 dabs with 1.1 % of all agents per ring (1.6 % without), the
-  Jones model 23 of 40 (25 without). In the default settings it does not stop food from taking the network: with K 30 at 0.003 each ring
-  held 9.4 % of all agents (5.5 % without), with K 100 0.69 % (0.95 %), and the Jones model passed 2 seeds of 10 (3
-  without). Agents stacked on a dab hold each other there by their own trail, so a dab that releases almost nothing
-  keeps them.
+  Jones model 23 of 40 (25 without). In the default settings, without the rule, it does not stop food from taking the
+  network: with K 30 at 0.003 each ring held 9.4 % of all agents (5.5 % without), with K 100 0.69 % (0.95 %), and at
+  K 0, decay 0.1 2 seeds of 10 passed (3 without). The review found the same for seed 7 (WebGPU, 2,000 steps after the
+  dabs): the four rings held 21.2 % of all agents without covered food and 36.0 % with it. Agents stacked on a dab hold
+  each other there by their own trail, so a dab that releases almost nothing keeps them.
 - **What K does without food.** With one strain t / (1 + t / K) grows with t, so the strongest sensor stays the
   strongest, and K changes no turn but by float rounding at ties. The default settings (seed 7, WebGPU) kept their
   pattern for K from 0 to 1,000: at step 2,000 57 to 67 agents per occupied cell, 97 to 98 % of the agents in cells of
