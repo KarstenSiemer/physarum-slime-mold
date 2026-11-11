@@ -225,6 +225,30 @@ export class Simulation implements Sim {
       this.placeOnFreeCells();
       this.rebuildOccupancy();
     }
+    this.countAlive();
+  }
+
+  /** The alive agents per strain into `stats`, which alive() reads, before the first step (init.wgsl census). */
+  private countAlive() {
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.stats);
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.kernels.census);
+    pass.setBindGroup(
+      0,
+      this.bind(`census${this.agentParity}`, this.kernels.census, [
+        this.params,
+        this.agentBuffer,
+        null,
+        null,
+        null,
+        null,
+        this.stats,
+      ]),
+    );
+    pass.dispatchWorkgroups(...this.groups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   /**
@@ -709,6 +733,7 @@ class Kernels {
     readonly init: GPUComputePipeline,
     readonly claimStart: GPUComputePipeline,
     readonly settleStart: GPUComputePipeline,
+    readonly census: GPUComputePipeline,
     readonly move: GPUComputePipeline,
     readonly claim: GPUComputePipeline,
     readonly settle: GPUComputePipeline,
@@ -826,6 +851,7 @@ class Kernels {
       init,
       claimStart,
       settleStart,
+      census,
       move,
       claim,
       settle,
@@ -846,6 +872,7 @@ class Kernels {
       compute(start, 'init'),
       compute(start, 'claimStart'),
       compute(start, 'settleStart'),
+      compute(start, 'census'),
       compute(agents, 'advance'),
       compute(agents, 'claim'),
       compute(agents, 'settle'),
@@ -868,6 +895,7 @@ class Kernels {
       init,
       claimStart,
       settleStart,
+      census,
       move,
       claim,
       settle,

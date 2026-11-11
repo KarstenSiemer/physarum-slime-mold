@@ -114,6 +114,39 @@ test('the inoculate tool says so when no dead agents of its strain are left', as
   await page.mouse.up();
 });
 
+// The start layout Empty restarts a scene where every agent lived. For up to 500 ms the stats still hold the count of
+// the run before: the tool must not take it for this one (docs/adr/0023). Paused, the hold waits for the count of the
+// new run, which WebGPU must take after the reset: before, it gave the count of the last step before it.
+for (const paused of [false, true])
+  test(`the inoculate tool places agents right after a restart into the empty start layout (paused ${paused})`, async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    await expect(page.locator('.stats')).toContainText('agents', { timeout: 60_000 });
+    if (paused) {
+      await page.locator('canvas').click();
+      await page.keyboard.press('Space');
+      await expect.poll(() => page.evaluate(() => globalThis.physarum?.paused)).toBe(true);
+    }
+    await page.getByRole('radio', { name: 'Inoculate' }).click();
+    const box = await page.locator('canvas').boundingBox();
+    if (!box) throw new Error('no canvas');
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    const restarts = await page.evaluate(() => globalThis.physarum?.restarts ?? 0);
+    await page.getByLabel('Start layout').selectOption('empty');
+    await page.waitForFunction((r) => (globalThis.physarum?.restarts ?? 0) > r, restarts);
+    await page.mouse.down();
+    // The agents themselves: on WebGPU the alive count of the old code still said that every agent lives.
+    const alive = () =>
+      page.evaluate(async () => (await globalThis.physarum?.sim.readAgents())?.filter((a) => a.bits & 4).length);
+    await expect.poll(alive, { timeout: 60_000 }).toBeGreaterThan(50);
+    // Longer than the stats interval (500 ms): a count that said every agent lives would have shown the notice.
+    await page.waitForTimeout(700);
+    await page.mouse.up();
+    await expect(page.getByRole('status').filter({ hasText: 'are alive' })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
 test('the inoculate tool brings dead agents to life in the empty start layout', async ({ page }) => {
   const errors = watchErrors(page);
   // A new hash alone would not load the page again.

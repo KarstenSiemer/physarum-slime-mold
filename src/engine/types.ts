@@ -50,7 +50,7 @@ export interface Sim {
   destroy(): void;
   /** Resolves when all submitted GPU work is done. */
   finish(): Promise<void>;
-  /** Alive agents per strain after the last step (empty if the backend cannot count). */
+  /** Alive agents per strain after the last step or reset (empty if the backend cannot count). */
   alive(): Promise<number[]>;
   readAgents(): Promise<AgentState[]>;
   /** Trail, 4 lanes per cell, rows from y = 0. */

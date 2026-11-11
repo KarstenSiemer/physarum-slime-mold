@@ -2223,6 +2223,27 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       };
       expect(await place()).toEqual(await place());
     });
+
+    // The app reads the alive count to know whether the inoculate tool has dead agents left (ADR 0023). On WebGPU only
+    // the steps counted them: a new simulation gave 0, and after a reset the count stayed that of the last step before
+    // it, until the next step.
+    it.each([false, true])(
+      'counts the alive agents of a new population before its first step (collisions %s)',
+      async (collisions) => {
+        const n = 300;
+        const patch = { layout: 'mixed', collisions, density: 0.2 } as const;
+        const sim = await make(patch, 64, 48, n);
+        expect(await sim.alive()).toEqual([n]);
+        sim.run(2);
+        expect(await sim.alive()).toEqual([n]);
+        sim.update({ ...defaultSettings(), ...patch, layout: 'empty' });
+        sim.reset();
+        expect(await sim.alive()).toEqual([0]);
+        sim.update({ ...defaultSettings(), ...patch });
+        sim.reset();
+        expect(await sim.alive()).toEqual([n]);
+      },
+    );
   });
 
   // Inoculate places dead agents only, and with one agent per cell a placed or moved agent claims a free cell like

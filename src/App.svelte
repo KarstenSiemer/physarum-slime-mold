@@ -4,7 +4,7 @@
   import { Engine } from './engine/engine';
   import { MIN_RADIUS } from './engine/environment';
   import { GpuUnavailableError } from './engine/gpu';
-  import { AgentToolKind, inoculateRate, strainAgents } from './engine/pack';
+  import { AgentToolKind, inoculateRate } from './engine/pack';
   import { presetById, START } from './model/presets';
   import { decodeLink, encodeLink } from './model/url';
   import Learn from './ui/Learn.svelte';
@@ -14,6 +14,7 @@
   import {
     app,
     currentDrawing,
+    deadLeft,
     getEngine,
     openLink,
     ruleUnavailable,
@@ -185,11 +186,16 @@
     const rates = { fps: (now.frames - last.frames) / dt, stepsPerSecond: Math.max(0, now.step - last.step) / dt };
     last = now;
     counting = true;
-    const alive = await e.sim
+    // The count is of the agents of this run: a restart while it waits for the GPU makes it one of an older run.
+    const run = e.restarts;
+    const counted = await e.sim
       .alive()
-      .catch(() => app.stats.alive)
+      .then(
+        (alive) => ({ alive, run }),
+        () => ({ alive: app.stats.alive, run: app.stats.run }),
+      )
       .finally(() => (counting = false));
-    app.stats = { ...rates, step: now.step, alive };
+    app.stats = { ...rates, step: now.step, ...counted };
   }
 
   // Pointer input: pan, pinch, paint and agent tools.
@@ -269,16 +275,6 @@
     getEngine()?.zoomAt(...pos(ev), Math.exp(-ev.deltaY * 0.0015));
   }
 
-  /**
-   * Inoculate places only dead agents (ADR 0023). With none of the strain left it places nothing, and says so once per
-   * press. The count is the one of the stats, at most 500 ms old.
-   */
-  function noDeadAgents(e: Engine) {
-    const alive = app.stats.alive[app.strain];
-    const agents = strainAgents(e.settings.strains, e.sim.agents)[app.strain];
-    return alive !== undefined && agents !== undefined && alive >= agents;
-  }
-
   // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame).
   $effect(() => {
     let raf = 0;
@@ -290,8 +286,9 @@
         if (app.tool === 'cut') e.agentTool({ kind: AgentToolKind.cut, x, y, radius, strain: 0, rate: 0 });
         else {
           const rate = inoculateRate(radius, app.settings, e.sim.agents, app.strain);
+          const dead = deadLeft(e);
           e.agentTool({ kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, rate });
-          if (!toldNoDead && noDeadAgents(e)) {
+          if (!toldNoDead && dead === false) {
             toldNoDead = true;
             const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);
             showNotice(

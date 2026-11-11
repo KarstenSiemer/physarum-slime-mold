@@ -375,3 +375,28 @@ describe('a shared link', () => {
     setEngine(undefined);
   });
 });
+
+// The inoculate tool uses only dead agents (ADR 0023). Whether one is left comes from the alive count of the stats,
+// and only from a count of the engine's current run. After the start layout Empty restarted a scene where every agent
+// lived, the count of the run before still said so for up to 500 ms, and the app said that no dead agent was left.
+describe('dead agents for the inoculate tool', () => {
+  it('come from the alive count of the current run only', async () => {
+    const { app, deadLeft } = await fresh();
+    const s = { ...defaultSettings(), resolution: 256 };
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, s, undefined, new CpuBackend());
+    const agents = engine.sim.agents;
+    app.strain = 0;
+    app.stats = { ...app.stats, alive: [agents], run: engine.restarts };
+    expect(deadLeft(engine)).toBe(false);
+    app.stats = { ...app.stats, alive: [agents - 1], run: engine.restarts };
+    expect(deadLeft(engine)).toBe(true);
+    app.stats = { ...app.stats, alive: [agents], run: engine.restarts };
+    engine.reset();
+    expect(deadLeft(engine)).toBeUndefined();
+    app.stats = { ...app.stats, alive: [0], run: engine.restarts };
+    expect(deadLeft(engine)).toBe(true);
+    app.strain = 1; // no such strain
+    expect(deadLeft(engine)).toBeUndefined();
+  });
+});
