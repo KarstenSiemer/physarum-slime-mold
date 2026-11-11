@@ -1,6 +1,6 @@
 // The panels are translucent glass over the canvas, and the canvas can be white: the paper style, or white-hot
 // trails behind the panel. Text on the glass keeps WCAG 2.2 contrast (1.4.3: 4.5:1 for small text) even then.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
@@ -46,5 +46,21 @@ describe('glass', () => {
   it.each(['fg', 'muted', 'accent'])('keeps --%s readable on a panel over a white canvas', (name) => {
     expect(contrast(token(name), panel)).toBeGreaterThanOrEqual(4.5);
     expect(contrast(token(name), card)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('no backdrop blur', () => {
+  // A blur behind a panel is drawn again in every frame, because the canvas changes in every frame: it took about two
+  // thirds of the app's own GPU time at a grid of 768 (ADR 0028).
+  const root = new URL('../', import.meta.url);
+  const files = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter((f) => /\.(css|svelte)$/.test(f));
+
+  it('finds the style files', () => {
+    expect(files).toContain('app.css');
+    expect(files).toContain('App.svelte');
+  });
+
+  it.each(files)('%s draws no backdrop-filter', (file) => {
+    expect(readFileSync(new URL(file, root), 'utf8')).not.toMatch(/backdrop-filter/);
   });
 });
