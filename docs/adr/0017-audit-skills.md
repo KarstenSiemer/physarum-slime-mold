@@ -35,5 +35,6 @@ Audits run report-only (no file changes); findings are verified in the code befo
 - Updates are manual: copy a newer upstream commit and read the diff for unsafe instructions.
 - Trail of Bits skills are CC-BY-SA-4.0: changes to those files must keep that license.
 - CodeQL analyses the vendored Python scripts (ADR 0014). An alert in them is checked in the
-  code. If it has no impact on this project, it is dismissed with the reason and reported
-  upstream, and the copy stays unchanged. A new upstream copy can bring new alerts.
+  code. If it has no impact on this project, it is dismissed with the reason, and the copy stays
+  unchanged. The owner decided on 2026-11-11 not to report the findings of the current copy
+  upstream (TODO.md). A new upstream copy can bring new alerts.
