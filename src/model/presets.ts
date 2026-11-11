@@ -259,19 +259,18 @@ PRESETS.push(
     source: 'Jones 2010, Fig. 19',
     summary: 'Four food sources: the network shrinks to a short tree that joins them all.',
     watch:
-      'A loose network wraps around the four food sources, then contracts. It ends as two three-way junctions joined by a bridge, where paths meet at about 120° as in soap films (Plateau’s laws). As in the shortest tree, the bridge is about 0.4 of the side of the square, across or along it.',
+      'A loose network wraps around the four food sources, then contracts. It ends as two three-way junctions joined by a short bridge, where paths meet at about 120° as in soap films (Plateau’s laws). The bridge runs across or along the screen, and a tail to the rim can stay for a few thousand steps.',
     about:
       'The same setup with four food sources at the corners of a square. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. The food positions are this app’s choice: a square half as wide as the dish. On a smaller square a ring of trail stays.',
+    why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. With fewer agents loops and tails to the rim stay for thousands of steps longer.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
-    // A square half as wide as the dish (ADR 0026): on Jones' lattice the network ends as the Steiner tree in 10 of 10
-    // runs. The square of before (0.29 of the dish wide) kept a ring of trail in 5 of 10, a smaller one in 9 of 10.
-    env: [food(-0.25, -0.25, 0.02), food(0.25, -0.25, 0.02), food(-0.25, 0.25, 0.02), food(0.25, 0.25, 0.02)],
+    // A square with the corners as far from the centre as the 0.32 × 0.26 rectangle of before.
+    env: [food(-0.145, -0.145, 0.02), food(0.145, -0.145, 0.02), food(-0.145, 0.145, 0.02), food(0.145, 0.145, 0.02)],
   },
   {
     id: 'shrinking',
