@@ -18,6 +18,7 @@ struct Params {
   tool2: vec4f,          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
   extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
+  model: vec4f,          // trail saturation K (0 off), covered food factor (1 off), unused, unused (ADR 0022)
 }
 
 struct Agent {

@@ -55,6 +55,8 @@ export interface Sim {
   readAgents(): Promise<AgentState[]>;
   /** Trail, 4 lanes per cell, rows from y = 0. */
   readTrail(): Promise<Float32Array>;
+  /** Food scent and light repellent, 2 values per cell, rows from y = 0. */
+  readScent(): Promise<Float32Array>;
   /** Agents that moved into each cell in the last step, 4 lanes per cell. */
   readCounts(): Promise<Float32Array>;
   /** Wall, food, light, unused per cell (0–255). */

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, strainSpec } from '../model/params';
+import { COVERED_FOOD_FACTOR, defaultSettings, defaultStrain, emissionScale, strainSpec } from '../model/params';
 import {
   AgentToolKind,
   CLEAR_TILE,
@@ -30,7 +30,7 @@ describe('Params layout', () => {
     const body = /struct Params \{([\s\S]*?)\n\}/.exec(wgsl)?.[1] ?? '';
     const types = [...body.matchAll(/:\s*([\w<>, ]+?),\s*(?:\/\/|$)/gm)].map((m) => m[1]);
     expect(types.every((t) => /^vec4[uf]$|^array<vec4f, 4>$/.test(t ?? ''))).toBe(true);
-    expect(PARAMS_BYTES).toBe(20 * 16);
+    expect(PARAMS_BYTES).toBe(21 * 16);
   });
 
   it('packs grid, config and strain lanes at the right offsets', () => {
@@ -52,7 +52,7 @@ describe('Params layout', () => {
   it('packs the layout, the walls flag and the start claim round into extra', () => {
     const s = { ...defaultSettings(), layout: 'ring' as const };
     const extra = (more: { walls?: boolean; round?: number }) => [
-      ...new Uint32Array(packParams(s, { width: 8, height: 8, agents: 1, step: 0, ...more })).slice(19 * 4),
+      ...new Uint32Array(packParams(s, { width: 8, height: 8, agents: 1, step: 0, ...more })).slice(19 * 4, 20 * 4),
     ];
     expect(extra({})).toEqual([4, 0, 0, 0]);
     expect(extra({ walls: true, round: 7 })).toEqual([4, 1, 7, 0]);
@@ -99,6 +99,38 @@ describe('agent tools (ADR 0023)', () => {
     const s = [defaultStrain(0), { ...defaultStrain(1), share: 3 }, defaultStrain(2)];
     expect(strainAgents(s, 1000)).toEqual([200, 600, 200]);
     expect(strainAgents([defaultStrain(0)], 7)).toEqual([7]);
+  });
+});
+
+// The model slot and the sources (ADR 0022): the Jones model packs the bytes of the code before it, and the extended
+// model at scent decay 0.1 does too.
+describe('model slot and sources', () => {
+  const rt = { width: 8, height: 8, agents: 1, step: 0 };
+  const floats = (s: Parameters<typeof packParams>[0]) => new Float32Array(packParams(s, rt));
+  const scent = (s: Parameters<typeof packParams>[0]) => [...floats(s).slice(15 * 4, 16 * 4)];
+  const model = (s: Parameters<typeof packParams>[0]) => [...floats(s).slice(20 * 4)];
+
+  it('packs no saturation and full food in the Jones model, whatever K says', () => {
+    const s = { ...defaultSettings(), trailSaturation: 50 };
+    expect(model(s)).toEqual([0, 1, 0, 0]);
+    expect(model({ ...s, model: 'extended' })).toEqual([50, 1, 0, 0]);
+    expect(model({ ...s, coveredFood: true })).toEqual([0, Math.fround(COVERED_FOOD_FACTOR), 0, 0]);
+  });
+
+  it('scales the sources by emissionScale() only in the extended model, by exactly 1 at decay 0.1', () => {
+    expect(emissionScale(0.1)).toBe(1);
+    const s = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2 };
+    expect(scent({ ...s, model: 'extended' })).toEqual(scent(s));
+    const low = { ...s, scentDecay: 0.001 };
+    const [food = 0, light = 0] = scent({ ...low, model: 'extended' });
+    expect(scent(low).slice(0, 2)).toEqual([Math.fround(255 * 0.05), Math.fround(255 * 0.2)]);
+    expect(food).toBeCloseTo((255 * 0.05 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
+    expect(light).toBeCloseTo((255 * 0.2 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
+  });
+
+  it('keeps the plateau of a large food at every scent decay: source · (1 − d) / d', () => {
+    const plateau = (d: number) => 255 * 0.05 * emissionScale(d) * ((1 - d) / d);
+    for (const d of [0.001, 0.003, 0.01, 0.03, 0.3, 0.9]) expect(plateau(d) / plateau(0.1)).toBeCloseTo(1, 12);
   });
 });
 

@@ -57,6 +57,9 @@ export class CpuSim implements Sim {
   readTrail() {
     return Promise.resolve(new Float32Array(0));
   }
+  readScent() {
+    return Promise.resolve(new Float32Array(0));
+  }
   readCounts() {
     return Promise.resolve(new Float32Array(0));
   }

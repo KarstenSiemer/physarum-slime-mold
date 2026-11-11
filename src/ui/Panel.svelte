@@ -2,9 +2,12 @@
   import {
     BOUNDARIES,
     collisionsHelp,
+    coveredFoodHelp,
     globalSpec,
     LAYOUTS,
     MAX_STRAINS,
+    modelHelp,
+    MODELS,
     RESOLUTIONS,
     STYLES,
     type Strain,
@@ -33,6 +36,10 @@
     box: 'Closed box',
     dish: 'Petri dish',
   };
+  const MODEL_LABEL: Record<(typeof MODELS)[number], string> = {
+    jones: 'Jones (published rules)',
+    extended: 'Extended (with this app’s rules)',
+  };
   const STYLE_LABEL: Record<(typeof STYLES)[number], string> = {
     glow: 'Glow',
     gel: 'Gel relief',
@@ -41,6 +48,8 @@
   };
 
   let ruleHelp = $state(false);
+  let modelHelpOpen = $state(false);
+  let coveredHelp = $state(false);
 
   // The engine restarts the population on every switch, so agents stacked without the rule do not stay
   // stacked (ADR 0008).
@@ -120,6 +129,25 @@
         <cite>{collisionsHelp.ref}</cite>
       </p>
     {/if}
+    <div class="check">
+      <label class="field model">
+        <span>{modelHelp.label}</span>
+        <select bind:value={s.model} aria-describedby={modelHelpOpen ? 'model-help' : undefined}>
+          {#each MODELS as m (m)}<option value={m}>{MODEL_LABEL[m]}</option>{/each}
+        </select>
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={modelHelpOpen}
+        aria-controls="model-help"
+        aria-label="About {modelHelp.label}"
+        onclick={() => (modelHelpOpen = !modelHelpOpen)}>?</button
+      >
+    </div>
+    {#if modelHelpOpen}
+      <p class="helptext" id="model-help">{modelHelp.help} <cite>{modelHelp.ref}</cite></p>
+    {/if}
   </Section>
 
   <Section title="Strains" open>
@@ -149,6 +177,30 @@
     <Slider spec={globalSpec.foodStrength} bind:value={s.foodStrength} id="food" />
     <Slider spec={globalSpec.lightStrength} bind:value={s.lightStrength} id="light" />
     <Slider spec={globalSpec.scentDecay} bind:value={s.scentDecay} id="scent" />
+    <div class="check">
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={s.coveredFood}
+          aria-describedby={coveredHelp ? 'covered-help' : undefined}
+        />
+        <span>{coveredFoodHelp.label}</span>
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={coveredHelp}
+        aria-controls="covered-help"
+        aria-label="About {coveredFoodHelp.label}"
+        onclick={() => (coveredHelp = !coveredHelp)}>?</button
+      >
+    </div>
+    {#if coveredHelp}
+      <p class="helptext" id="covered-help">{coveredFoodHelp.help} <cite>{coveredFoodHelp.ref}</cite></p>
+    {/if}
+    {#if s.model === 'extended'}
+      <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
+    {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
     <button type="button" onclick={clearEnvironment}>Clear food, light and walls</button>
   </Section>
@@ -193,6 +245,11 @@
     display: flex;
     gap: 8px;
     align-items: center;
+  }
+  .check label.model {
+    display: grid;
+    gap: 4px;
+    margin: 0;
   }
   /* WCAG 2.2 target size (2.5.8): at least 24 × 24 px. */
   .help {

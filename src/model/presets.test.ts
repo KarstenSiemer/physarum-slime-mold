@@ -34,6 +34,16 @@ describe('presets', () => {
     expect(constrain(s)).toBe(s);
   });
 
+  // ADR 0022: every scene keeps the bytes of the code before the model switch. At scent decay 0.1 the extended model
+  // releases as much scent as the Jones model (pack.test.ts), so a switch to it changes nothing until K or the decay
+  // changes.
+  it('run on the Jones model with covered food off, no trail saturation and scent decay 0.1', () => {
+    for (const p of PRESETS) {
+      const s = p.settings();
+      expect([s.model, s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual(['jones', false, 0, 0.1]);
+    }
+  });
+
   it('sit in the four groups, in group order, with the start scene under Start here', () => {
     const order = GROUPS.map((g) => g.id);
     for (const g of order)

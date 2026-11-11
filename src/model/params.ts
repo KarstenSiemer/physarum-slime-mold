@@ -120,10 +120,13 @@ export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center
 export const BOUNDARIES = ['wrap', 'box', 'dish'] as const;
 export const STYLES = ['glow', 'gel', 'paper', 'agents'] as const;
 export const RESOLUTIONS = [256, 512, 768, 1024, 1536, 2048, 3072, 4096] as const;
+/** The rule set (ADR 0022): Jones' published rules only, or with this app's additions. */
+export const MODELS = ['jones', 'extended'] as const;
 
 export type Layout = (typeof LAYOUTS)[number];
 export type Boundary = (typeof BOUNDARIES)[number];
 export type Style = (typeof STYLES)[number];
+export type Model = (typeof MODELS)[number];
 
 export const globalSpec = {
   density: {
@@ -145,7 +148,7 @@ export const globalSpec = {
   },
   foodStrength: {
     label: 'Food strength',
-    help: 'Scent that each food cell releases per step (wProj): 255 × this value. The scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths leading in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
+    help: 'Scent that each food cell releases per step (wProj): 255 × this value, in the extended model scaled with Scent decay. With Scent decay 0.1 the scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths leading in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
     min: 0,
     max: 0.5,
     step: 0.005,
@@ -153,18 +156,25 @@ export const globalSpec = {
   },
   lightStrength: {
     label: 'Light strength',
-    help: 'Strength of the repellent that light projects per step.',
+    help: 'Repellent that each lit cell releases per step: 255 × this value, in the extended model scaled with Scent decay. It spreads and fades like the food scent, with the same Scent decay.',
     min: 0,
     max: 0.5,
     step: 0.005,
   },
   scentDecay: {
     label: 'Scent decay',
-    help: 'Fraction of the food and light scent that disappears every step. Lower values spread the scent farther, but they also make it much stronger: at 0.001, food keeps pulling in more of the network.',
+    help: 'Fraction of the food and light scent that disappears every step. Lower values spread the scent farther: at 0.1 it falls to a third within 2 cells of a food, at 0.003 within about 9 cells, one sensor distance. In the Jones model a lower decay also makes the scent stronger: at 0.001 the scent on a food is 28 to 111 times as strong as at 0.1, and the food keeps pulling in more of the network. In the extended model, food and light release less at a lower decay. Then the scent on a large food stays as strong as at 0.1, and the scent on a small food gets weaker.',
     min: 0.001,
     max: 0.9,
     step: 0.001,
     log: true,
+  },
+  trailSaturation: {
+    label: 'Trail saturation',
+    help: 'Extended model only. Each sensor reads the trail t of each strain as t / (1 + t / K), with K this value. A trail far above K counts about as much as K, so a weak food scent can still turn an agent on a dense trail. Without food, one strain makes the same turns at every K. 0 turns it off.',
+    min: 0,
+    max: 1000,
+    step: 1,
   },
   shrink: {
     label: 'Shrinkage',
@@ -202,6 +212,40 @@ export const globalSpec = {
 
 export type GlobalKey = keyof typeof globalSpec;
 
+/** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
+export const modelHelp = {
+  label: 'Model',
+  help: 'Jones uses only rules that Jeff Jones published, in his 2010 paper and in later papers. Every scene starts with it. Extended adds rules of this app: food and light release less scent at a lower Scent decay, so a lower decay spreads the scent farther without making it stronger, and Trail saturation is available.',
+  ref: 'ADR 0022',
+} as const;
+
+/**
+ * Adamatzky and Jones 2010 (Road planning with slime mould, arXiv:0912.3967): each pixel of a food area has its
+ * projection multiplied by 0.001 while a particle lies in the 3 × 3 neighbourhood around the pixel. Here every food cell
+ * is such a pixel (ADR 0022). Jones and Adamatzky 2014 keep 1 % for food at a point.
+ */
+export const COVERED_FOOD_FACTOR = 0.001;
+
+/** Help for the switch "Covered food releases less"; Learn → Controls lists it with the sliders. */
+export const coveredFoodHelp = {
+  label: 'Covered food releases less',
+  help: 'A food cell releases 0.1 % of its scent while an agent is on it or on one of its 8 neighbour cells. Food that the network covers then stops pulling in more agents, and uncovered food pulls with full strength. Jones uses this rule in later papers with Adamatzky. It works in both models.',
+  ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
+} as const;
+
+/** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
+export const REFERENCE_SCENT_DECAY = 0.1;
+
+/**
+ * Factor on the food and light sources of the extended model (ADR 0022). The scent of a food much larger than its
+ * spread settles where the decay removes what the source adds: s = (1 − d) · (s + source), so s = source · (1 − d) / d.
+ * This factor scales the source by d / (1 − d), relative to REFERENCE_SCENT_DECAY, so that level is the same at every
+ * decay. It is exactly 1 at the reference: x / x for the same x.
+ */
+export function emissionScale(scentDecay: number): number {
+  return scentDecay / (1 - scentDecay) / (REFERENCE_SCENT_DECAY / (1 - REFERENCE_SCENT_DECAY));
+}
+
 /** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */
 export const collisionsHelp = {
   label: 'One agent per cell',
@@ -215,6 +259,10 @@ export interface Settings extends Record<GlobalKey, number> {
   layout: Layout;
   boundary: Boundary;
   collisions: boolean;
+  /** The rule set (ADR 0022); old links without it load as 'jones'. */
+  model: Model;
+  /** Food under agents releases COVERED_FOOD_FACTOR of its scent (coveredFoodHelp). */
+  coveredFood: boolean;
   style: Style;
   strains: Strain[];
 }
@@ -263,12 +311,15 @@ export function defaultSettings(): Settings {
     layout: 'mixed',
     boundary: 'wrap',
     collisions: false,
+    model: 'jones',
+    coveredFood: false,
     style: 'glow',
     density: 1,
     diffusion: 1,
     foodStrength: 0.05,
     lightStrength: 0.05,
     scentDecay: 0.1,
+    trailSaturation: 0,
     shrink: 0,
     speed: 120,
     exposure: 0,
@@ -319,6 +370,8 @@ export function sanitize(input: unknown): Settings {
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
   out.collisions = raw.collisions === true;
+  out.model = oneOf(raw.model, MODELS, d.model);
+  out.coveredFood = raw.coveredFood === true;
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);

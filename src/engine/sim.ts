@@ -1,6 +1,6 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, type AgentTool } from './pack';
+import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, trailSaturation, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -138,7 +138,10 @@ export class Simulation implements Sim {
     this.ensureCollision();
   }
 
-  /** `agentsSource` replaces shaders/agents.wgsl, for tests that compare the passes with another version of it. */
+  /**
+   * `agentsSource` and `diffuseSource` replace shaders/agents.wgsl and shaders/diffuse.wgsl, for tests that compare
+   * the passes with another version of them.
+   */
   static async create(
     device: GPUDevice,
     settings: Settings,
@@ -146,8 +149,10 @@ export class Simulation implements Sim {
     height: number,
     agents: number,
     agentsSource = agentsWgsl,
+    diffuseSource = diffuseWgsl,
   ) {
-    const sim = new Simulation(device, await Kernels.get(device, agentsSource), settings, width, height, agents);
+    const kernels = await Kernels.get(device, agentsSource, diffuseSource);
+    const sim = new Simulation(device, kernels, settings, width, height, agents);
     sim.reset();
     return sim;
   }
@@ -161,7 +166,10 @@ export class Simulation implements Sim {
     return this.agentBuffers[this.agentParity];
   }
 
-  /** Agents per cell after the last step. Kept up to date only in collision mode, where the renderer reads it. */
+  /**
+   * Agents per cell after the last step. Kept up to date only in collision mode, where the renderer reads it, and
+   * while covered food is on (diffuse.wgsl COVERED).
+   */
   get occupancy(): GPUBuffer {
     return this.ensureCollision().occ[this.occParity];
   }
@@ -452,6 +460,10 @@ export class Simulation implements Sim {
     return readTexture(this.device, this.current.trail, 4);
   }
 
+  readScent(): Promise<Float32Array> {
+    return readTexture(this.device, this.current.scent, 2);
+  }
+
   async readCounts(): Promise<Float32Array> {
     return Float32Array.from(new Uint32Array(await readBuffer(this.device, this.counts)));
   }
@@ -545,21 +557,26 @@ export class Simulation implements Sim {
     enc.clearBuffer(this.counts);
     enc.clearBuffer(this.stats);
     const col = this.settings.collisions ? this.ensureCollision() : undefined;
+    // Covered food reads the agents per cell after the moves (diffuse.wgsl COVERED): collision mode counts them
+    // anyway, and without it `occupy` counts them into the same buffers.
+    const covered = this.settings.coveredFood;
     const q = this.occParity;
     // The occupancy at the start of the step: the rule reads it (agents.wgsl openCell); `advance` binds it unread.
     const occ = this.ensureCollision().occ[q];
-    if (col) {
-      enc.clearBuffer(col.claims);
-      enc.clearBuffer(col.occ[flip(q)]);
-    }
+    if (col) enc.clearBuffer(col.claims);
+    if (col || covered) enc.clearBuffer(this.ensureCollision().occ[flip(q)]);
     const pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
     const [trail, scent] = [this.trailViews[p], this.scentViews[p]];
-    // With walls, the passes whose sensors check the cells on the way for walls (agents.wgsl SENSE_WALLS).
-    const w = this.walls ? 1 : 0;
+    // With walls, the passes whose sensors check the cells on the way for walls (agents.wgsl SENSE_WALLS); with a
+    // trail saturation K above 0, the passes that saturate the trail (SATURATE).
+    const saturate = trailSaturation(this.settings) > 0;
+    // Bind groups of 'auto' layouts belong to their pipeline: the key names the variant.
+    const w = `${this.walls ? 1 : 0}${saturate ? 1 : 0}`;
+    const agentPasses = saturate ? k.saturated(this.walls) : this.walls ? k.walled() : k;
     if (!col) {
-      const move = this.walls ? k.walled().move : k.move;
+      const move = agentPasses.move;
       pass.setPipeline(move);
       pass.setBindGroup(
         0,
@@ -579,9 +596,17 @@ export class Simulation implements Sim {
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
+      if (covered) {
+        const next = this.ensureCollision().occ[flip(q)];
+        pass.setPipeline(k.occupy);
+        const resources = [this.params, this.agentBuffer, null, null, null, null, null, null, null, next];
+        pass.setBindGroup(0, this.bind(`occupy${a}${q}`, k.occupy, resources));
+        pass.dispatchWorkgroups(...this.groups);
+        this.occParity = flip(q);
+      }
     } else {
       const next = col.occ[flip(q)];
-      const claim = this.walls ? k.walled().claim : k.claim;
+      const claim = agentPasses.claim;
       pass.setPipeline(claim);
       pass.setBindGroup(
         0,
@@ -624,8 +649,8 @@ export class Simulation implements Sim {
     }
     let d = p;
     for (const v of diffusePlan(this.settings.diffusion)) {
-      pass.setPipeline(k.diffuse(v));
-      pass.setBindGroup(0, this.diffuseBind(d));
+      pass.setPipeline(covered && v.first ? k.covered(v) : k.diffuse(v));
+      pass.setBindGroup(0, this.diffuseBind(d, this.occParity));
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
     }
@@ -653,14 +678,16 @@ export class Simulation implements Sim {
     this.agentParity = flip(a);
   }
 
-  private diffuseBind(p: Bit) {
-    const key = `diffuse${p}`;
+  /** `q`: the occupancy buffer that holds the agents per cell after this step's moves (diffuse.wgsl COVERED). */
+  private diffuseBind(p: Bit, q: Bit) {
+    const key = `diffuse${p}${q}`;
     let g = this.bindCache.get(key);
     if (!g) {
       const views = [this.trailViews[p], this.scentViews[p], this.trailViews[flip(p)], this.scentViews[flip(p)]];
+      const occ = this.ensureCollision().occ[q];
       g = this.device.createBindGroup({
         layout: this.kernels.diffuseLayout,
-        entries: [this.params, ...views, this.env, this.counts].map((r, binding) => entry(binding, r)),
+        entries: [this.params, ...views, this.env, this.counts, occ].map((r, binding) => entry(binding, r)),
       });
       this.bindCache.set(key, g);
     }
@@ -714,20 +741,28 @@ function entry(binding: number, r: GPUBuffer | GPUTextureView): GPUBindGroupEntr
   return { binding, resource: r instanceof GPUBuffer ? { buffer: r } : r };
 }
 
-/** The pipelines for an environment that may hold walls (Kernels.walled()). */
-interface Walled {
-  markWalls: GPUComputePipeline;
-  measureClearance: GPUComputePipeline;
-  /** `advance` and `claim` whose sensors check for walls (agents.wgsl SENSE_WALLS). */
+/** `advance` (move) and `claim`, the agent passes that steer. */
+interface Steering {
   move: GPUComputePipeline;
   claim: GPUComputePipeline;
 }
 
+/** The pipelines for an environment that may hold walls (Kernels.walled()). */
+interface Walled extends Steering {
+  markWalls: GPUComputePipeline;
+  measureClearance: GPUComputePipeline;
+  // `move` and `claim` here: their sensors check for walls (agents.wgsl SENSE_WALLS).
+}
+
 /** Compiled pipelines, shared by every Simulation on one device. */
 class Kernels {
-  /** Per device, by the source of the agent passes. */
+  /** Per device, by the sources of the agent and diffusion passes. */
   private static readonly cache = new WeakMap<GPUDevice, Map<string, Promise<Kernels>>>();
   private walledPipelines?: Walled;
+  /** The steering passes with the saturating trail perception (agents.wgsl SATURATE), without and with walls. */
+  private readonly saturatedPipelines: [Steering?, Steering?] = [];
+  /** The first diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
+  private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -750,6 +785,7 @@ class Kernels {
     private readonly device: GPUDevice,
     private readonly agents: GPUShaderModule,
     private readonly walls: GPUShaderModule,
+    private readonly diffuseModule: GPUShaderModule,
   ) {}
 
   /**
@@ -772,16 +808,50 @@ class Kernels {
     return this.walledPipelines;
   }
 
-  static get(device: GPUDevice, agentsSource: string): Promise<Kernels> {
+  /**
+   * The steering passes with the saturating trail perception (agents.wgsl SATURATE), built at their first use as
+   * walled() builds its passes: most scenes never saturate. `walls`: their sensors also check for walls.
+   */
+  saturated(walls: boolean): Steering {
+    const i = walls ? 1 : 0;
+    let p = this.saturatedPipelines[i];
+    if (!p) {
+      const constants = { SATURATE: 1, ...(walls ? { SENSE_WALLS: 1 } : {}) };
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module: this.agents, entryPoint, constants } });
+      p = { move: pipeline('advance'), claim: pipeline('claim') };
+      this.saturatedPipelines[i] = p;
+    }
+    return p;
+  }
+
+  /** A first diffusion pass with covered food (diffuse.wgsl COVERED), built at its first use. */
+  covered(v: Diffuse): GPUComputePipeline {
+    const key = variantKey(v);
+    let p = this.coveredPipelines.get(key);
+    if (!p) {
+      const constants = { FIRST: 1, LAST: Number(v.last), BLUR: Number(v.blur), COVERED: 1 };
+      const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.diffuseLayout] });
+      p = this.device.createComputePipeline({
+        layout,
+        compute: { module: this.diffuseModule, entryPoint: 'diffuse', constants },
+      });
+      this.coveredPipelines.set(key, p);
+    }
+    return p;
+  }
+
+  static get(device: GPUDevice, agentsSource: string, diffuseSource: string): Promise<Kernels> {
     let built = Kernels.cache.get(device);
     if (!built) {
       built = new Map();
       Kernels.cache.set(device, built);
     }
-    let k = built.get(agentsSource);
+    const key = `${agentsSource}\0${diffuseSource}`;
+    let k = built.get(key);
     if (!k) {
-      k = Kernels.build(device, agentsSource);
-      built.set(agentsSource, k);
+      k = Kernels.build(device, agentsSource, diffuseSource);
+      built.set(key, k);
     }
     return k;
   }
@@ -792,7 +862,7 @@ class Kernels {
     return p;
   }
 
-  private static async build(device: GPUDevice, agentsSource: string): Promise<Kernels> {
+  private static async build(device: GPUDevice, agentsSource: string, diffuseSource: string): Promise<Kernels> {
     const module = (code: string) => device.createShaderModule({ code: common + code });
     const agents = module(agentsSource);
     const compute = (m: GPUShaderModule, entryPoint: string, constants: Record<string, number> = {}) =>
@@ -807,6 +877,7 @@ class Kernels {
         { binding: 4, visibility: C, storageTexture: { access: 'write-only', format: 'rg32float' } },
         { binding: 5, visibility: C, buffer: { type: 'read-only-storage' } },
         { binding: 6, visibility: C, buffer: { type: 'read-only-storage' } },
+        { binding: 7, visibility: C, buffer: { type: 'read-only-storage' } },
       ],
     });
     // Brush strokes pick their brush and their boundary's parameters by dynamic offset (Simulation.paint), in the
@@ -819,7 +890,7 @@ class Kernels {
         { binding: 3, visibility: C, buffer: { type: 'storage' } },
       ],
     });
-    const diffuseModule = module(diffuseWgsl);
+    const diffuseModule = module(diffuseSource);
     const layout = device.createPipelineLayout({ bindGroupLayouts: [diffuseLayout] });
     const plans = [0, 1, 2, 3, 4].flatMap(diffusePlan);
     const unique = [...new Map(plans.map((v) => [variantKey(v), v])).values()];
@@ -911,6 +982,7 @@ class Kernels {
       device,
       agents,
       module(wallsWgsl),
+      diffuseModule,
     );
   }
 }

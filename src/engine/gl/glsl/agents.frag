@@ -16,6 +16,11 @@ out vec4 result;
 #ifndef SENSE_WALLS
 #define SENSE_WALLS 0
 #endif
+// Saturating trail perception of the extended model (SATURATE in agents.wgsl, ADR 0022): programs.ts compiles the pass
+// with it, and gl/sim.ts uses that one only while K = P.model.x is above 0.
+#ifndef SATURATE
+#define SATURATE 0
+#endif
 
 // A wall at w, a cell that a walk enters, wrapped into the periodic grid; never outside a closed arena (wallIn in
 // agents.wgsl).
@@ -105,7 +110,13 @@ float sense(vec2 pos, vec2 p, int s, int clear) {
 #endif
   ivec2 q = cellCoord(c);
   vec2 sc = texelFetch(scent, q, 0).xy;
+#if SATURATE
+  vec4 t = texelFetch(trail, q, 0);
+  t = t / (1.0 + t / P.model.x);
+  return dot(t, P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
+#else
   return dot(texelFetch(trail, q, 0), P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
+#endif
 }
 
 // Jones 2010, Fig. 3, then the random turn pCD.

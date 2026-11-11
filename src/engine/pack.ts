@@ -1,4 +1,12 @@
-import { BOUNDARIES, LAYOUTS, MAX_STRAINS, type Settings, type Strain } from '../model/params';
+import {
+  BOUNDARIES,
+  COVERED_FOOD_FACTOR,
+  emissionScale,
+  LAYOUTS,
+  MAX_STRAINS,
+  type Settings,
+  type Strain,
+} from '../model/params';
 
 // Slot order of `struct Params` in shaders/common.wgsl (16 bytes each); a test checks it.
 export const PARAM_SLOTS = [
@@ -19,6 +27,7 @@ export const PARAM_SLOTS = [
   'tool2',
   'strainEnd',
   'extra',
+  'model',
 ] as const;
 export const PARAMS_BYTES = (PARAM_SLOTS.length + 3) * 16;
 
@@ -120,6 +129,17 @@ export function strainEnds(strains: readonly Strain[], agents: number): number[]
 
 const DEG = Math.PI / 180;
 
+/**
+ * K of the saturating trail perception (agents.wgsl sense()), or 0 when the sensors read the trail as it is: the
+ * Jones model never saturates (ADR 0022). Above 0 the agent passes are built with SATURATE.
+ */
+export const trailSaturation = (s: Pick<Settings, 'model' | 'trailSaturation'>) =>
+  s.model === 'extended' ? s.trailSaturation : 0;
+
+/** Factor on the food and light sources: 1 in the Jones model, emissionScale() in the extended model (ADR 0022). */
+export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay'>) =>
+  s.model === 'extended' ? emissionScale(s.scentDecay) : 1;
+
 export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAMS_BYTES)): ArrayBuffer {
   const u = new Uint32Array(buf);
   const f = new Float32Array(buf);
@@ -142,7 +162,8 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   strains.forEach((st, r) => {
     st.attraction.slice(0, strains.length).forEach((v, c) => (f[slot('attraction') + r * 4 + c] = v));
   });
-  f.set([255 * s.foodStrength, 255 * s.lightStrength, 1 - s.scentDecay, s.shrink], slot('scent'));
+  const g = sourceScale(s);
+  f.set([255 * s.foodStrength * g, 255 * s.lightStrength * g, 1 - s.scentDecay, s.shrink], slot('scent'));
   const t = rt.tool;
   if (t) {
     f.set([t.x, t.y, t.radius, t.kind], slot('tool'));
@@ -150,6 +171,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
   u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
+  f.set([trailSaturation(s), s.coveredFood ? COVERED_FOOD_FACTOR : 1], slot('model'));
   return buf;
 }
 

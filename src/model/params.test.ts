@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   attractionSpec,
+  COVERED_FOOD_FACTOR,
   defaultSettings,
   fieldText,
   globalSpec,
@@ -80,6 +81,16 @@ describe('sanitize (untrusted input)', () => {
     for (const st of s.strains) expect(st.attraction).toEqual(Array(MAX_STRAINS).fill(attractionSpec.max));
   });
 
+  it('takes the model, covered food and trail saturation, and loads old links as the Jones model', () => {
+    const old = sanitize({ density: 2 });
+    expect([old.model, old.coveredFood, old.trailSaturation]).toEqual(['jones', false, 0]);
+    const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
+    expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);
+    const bad = sanitize({ model: 'Extended', coveredFood: 'yes', trailSaturation: -3 });
+    expect([bad.model, bad.coveredFood, bad.trailSaturation]).toEqual(['jones', false, 0]);
+    expect(sanitize({ trailSaturation: 1e9 }).trailSaturation).toBe(globalSpec.trailSaturation.max);
+  });
+
   it('caps density at one agent per cell in collision mode', () => {
     expect(sanitize({ collisions: true, density: 4 }).density).toBe(1);
   });
@@ -98,10 +109,20 @@ describe('sanitize (untrusted input)', () => {
       const r = rnd();
       if (depth > 1 || r < 0.2) return [rnd() * 1e6, 'x', null, true, Number.NaN][Math.floor(Math.abs(r) * 5) % 5];
       if (r < 0.5) return Array.from({ length: 5 }, () => value(depth + 1));
-      const keys = [...Object.keys(globalSpec), ...Object.keys(strainSpec), 'strains', 'attraction', 'color', 'seed'];
+      const keys = [
+        ...Object.keys(globalSpec),
+        ...Object.keys(strainSpec),
+        ...['strains', 'attraction', 'color', 'seed', 'model', 'coveredFood'],
+      ];
       return Object.fromEntries(keys.map((k) => [k, value(depth + 1)]));
     };
     for (let i = 0; i < 500; i++) expect(() => sanitize(value(0))).not.toThrow();
+  });
+});
+
+describe('covered food (Adamatzky and Jones 2010, ADR 0022)', () => {
+  it('multiplies the source of a covered food cell by Jones’ 0.001', () => {
+    expect(COVERED_FOOD_FACTOR).toBe(0.001);
   });
 });
 

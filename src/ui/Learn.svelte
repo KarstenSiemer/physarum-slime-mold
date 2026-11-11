@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { collisionsHelp, globalSpec, strainSpec } from '../model/params';
+  import { collisionsHelp, coveredFoodHelp, globalSpec, modelHelp, strainSpec } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
@@ -21,6 +21,8 @@
     ...Object.values(strainSpec),
     ...Object.values(globalSpec),
     collisionsHelp,
+    modelHelp,
+    coveredFoodHelp,
   ];
 
   // Each scene's strains with the numbers of its own settings (not the live ones).
@@ -138,11 +140,19 @@
       </p>
       <p>
         Food releases a scent that spreads and fades like the trail. In Jones 2010 the food goes into the trail map
-        itself; here it has a scent of its own, so a strain that flees other strains is not repelled by food. The scent
-        fades within a few cells, so an agent notices food only when a sensor comes close. In a dense network, food
-        becomes a hub with paths leading in, and the rest of the network goes on as before. A whole network reorganizes
-        around food only when agents are few and the network contracts, as in Shortest path and Steiner tree, or when
-        agents die off, as in Shrinking plasmodium.
+        itself; here it has a scent of its own, so a strain that flees other strains is not repelled by food. With Scent
+        decay 0.1 the scent fades within a few cells, so an agent notices food only when a sensor comes close. In a
+        dense network, food becomes a hub with paths leading in, and the rest of the network goes on as before. A whole
+        network reorganizes around food only when agents are few and the network contracts, as in Shortest path and
+        Steiner tree, or when agents die off, as in Shrinking plasmodium.
+      </p>
+      <p>
+        The setting Model chooses the rules. Jones uses only rules that Jones published, and every scene starts with it.
+        There, a lower Scent decay spreads the scent farther, but it also makes the scent much stronger, and the food
+        pulls in more and more of the network. Extended adds rules of this app. Food releases less scent at a lower
+        decay, so the scent reaches farther without getting stronger. Trail saturation makes a dense trail count less,
+        so a weak scent can still turn an agent on it. In later papers, Jones lets food release almost no scent while
+        agents cover it. The switch Covered food releases less adds this rule in both models.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

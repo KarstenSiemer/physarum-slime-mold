@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { decodeLink } from '../../src/model/url';
 import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -32,6 +33,33 @@ test('a preset reaches the engine and updates the shareable link', async ({ page
   expect(s?.strains[0]?.attraction[0]).toBe(-1);
   // The settings, and the scene with its food, light and walls (docs/adr/0021).
   await expect.poll(() => page.evaluate(() => location.hash)).toMatch(/^#s=[\w-]+&e=[\w-]+$/);
+  expect(errors).toEqual([]);
+});
+
+// ADR 0022: Trail saturation exists only in the extended model, and the link carries the model and its settings.
+test('the model switch shows trail saturation in the extended model, and the link carries both', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  const saturation = page.getByLabel('Trail saturation', { exact: true });
+  await expect(page.getByRole('checkbox', { name: 'Covered food releases less' })).toBeVisible();
+  await expect(saturation).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
+  await expect(saturation).toBeVisible();
+  await page.getByLabel('Trail saturation value').fill('40');
+  await page.getByLabel('Trail saturation value').press('Enter');
+  await page.getByRole('checkbox', { name: 'Covered food releases less' }).check();
+  await page.waitForFunction(() => {
+    const s = globalThis.physarum?.settings;
+    return s?.trailSaturation === 40 && s.coveredFood;
+  });
+  // The page address follows the settings a little later.
+  const link = async () => (await decodeLink((await page.evaluate(() => location.hash)).slice(1)))?.settings;
+  await expect
+    .poll(async () => {
+      const s = await link();
+      return [s?.model, s?.trailSaturation, s?.coveredFood];
+    })
+    .toEqual(['extended', 40, true]);
   expect(errors).toEqual([]);
 });
 
