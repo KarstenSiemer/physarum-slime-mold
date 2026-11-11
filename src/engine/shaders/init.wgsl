@@ -4,10 +4,11 @@
 // is free. With the rule, `claimStart` and `settleStart` then run the claim rounds (sim.ts reset(); their number
 // is startRounds() in pack.ts): every agent not placed yet claims its cell with a unique key, the highest key
 // takes the cell, and the others draw again. An agent with no free cell after the last round starts dead. So
-// every alive agent starts in its own cell.
+// every alive agent starts in its own cell. `census` then counts the alive agents.
 
 @group(0) @binding(1) var<storage, read_write> agents: array<Agent>;
 @group(0) @binding(4) var<storage, read> env: array<u32>;
+@group(0) @binding(6) var<storage, read_write> stats: array<atomic<u32>>; // alive agents per strain (agents.wgsl)
 @group(0) @binding(7) var<storage, read_write> occ: array<atomic<u32>>; // cells taken in earlier rounds
 @group(0) @binding(8) var<storage, read_write> claims: array<atomic<u32>>;
 
@@ -169,4 +170,20 @@ fn settleStart(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroup
     a.heading = st.heading;
   }
   agents[i] = a;
+}
+
+var<workgroup> tally: array<atomic<u32>, 4>;
+
+// The alive agents per strain into `stats`, as every step counts them (agents.wgsl count()), so that Sim.alive()
+// gives the new population before its first step. Before, it gave the count of the last step before the reset.
+@compute @workgroup_size(256)
+fn census(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u,
+          @builtin(local_invocation_index) li: u32) {
+  let i = index(gid, groups);
+  if (i < P.grid.z) {
+    let bits = agents[i].bits;
+    if ((bits & ALIVE) != 0u) { atomicAdd(&tally[bits & 3u], 1u); }
+  }
+  workgroupBarrier();
+  if (li < 4u) { atomicAdd(&stats[li], atomicLoad(&tally[li])); }
 }

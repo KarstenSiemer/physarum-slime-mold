@@ -225,6 +225,30 @@ export class Simulation implements Sim {
       this.placeOnFreeCells();
       this.rebuildOccupancy();
     }
+    this.countAlive();
+  }
+
+  /** The alive agents per strain into `stats`, which alive() reads, before the first step (init.wgsl census). */
+  private countAlive() {
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.stats);
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.kernels.census);
+    pass.setBindGroup(
+      0,
+      this.bind(`census${this.agentParity}`, this.kernels.census, [
+        this.params,
+        this.agentBuffer,
+        null,
+        null,
+        null,
+        null,
+        this.stats,
+      ]),
+    );
+    pass.dispatchWorkgroups(...this.groups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   /**
@@ -257,10 +281,10 @@ export class Simulation implements Sim {
     }
   }
 
-  /** Runs `steps` simulation steps. The agent tool acts on the first step only. */
+  /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
     for (let k = 0; k < steps; k++) {
-      this.writeParams(k === 0 ? tool : undefined);
+      this.writeParams(tool);
       const enc = this.device.createCommandEncoder();
       this.encodeStep(enc);
       this.device.queue.submit([enc.finish()]);
@@ -522,6 +546,8 @@ export class Simulation implements Sim {
     enc.clearBuffer(this.stats);
     const col = this.settings.collisions ? this.ensureCollision() : undefined;
     const q = this.occParity;
+    // The occupancy at the start of the step: the rule reads it (agents.wgsl openCell); `advance` binds it unread.
+    const occ = this.ensureCollision().occ[q];
     if (col) {
       enc.clearBuffer(col.claims);
       enc.clearBuffer(col.occ[flip(q)]);
@@ -537,7 +563,7 @@ export class Simulation implements Sim {
       pass.setPipeline(move);
       pass.setBindGroup(
         0,
-        this.bind(`move${p}${a}${w}`, move, [
+        this.bind(`move${p}${q}${a}${w}`, move, [
           this.params,
           this.agentBuffer,
           trail,
@@ -545,7 +571,7 @@ export class Simulation implements Sim {
           this.env,
           this.counts,
           this.stats,
-          null,
+          occ,
           null,
           null,
           null,
@@ -554,7 +580,7 @@ export class Simulation implements Sim {
       );
       pass.dispatchWorkgroups(...this.groups);
     } else {
-      const [occ, next] = [col.occ[q], col.occ[flip(q)]];
+      const next = col.occ[flip(q)];
       const claim = this.walls ? k.walled().claim : k.claim;
       pass.setPipeline(claim);
       pass.setBindGroup(
@@ -707,6 +733,7 @@ class Kernels {
     readonly init: GPUComputePipeline,
     readonly claimStart: GPUComputePipeline,
     readonly settleStart: GPUComputePipeline,
+    readonly census: GPUComputePipeline,
     readonly move: GPUComputePipeline,
     readonly claim: GPUComputePipeline,
     readonly settle: GPUComputePipeline,
@@ -824,6 +851,7 @@ class Kernels {
       init,
       claimStart,
       settleStart,
+      census,
       move,
       claim,
       settle,
@@ -844,6 +872,7 @@ class Kernels {
       compute(start, 'init'),
       compute(start, 'claimStart'),
       compute(start, 'settleStart'),
+      compute(start, 'census'),
       compute(agents, 'advance'),
       compute(agents, 'claim'),
       compute(agents, 'settle'),
@@ -866,6 +895,7 @@ class Kernels {
       init,
       claimStart,
       settleStart,
+      census,
       move,
       claim,
       settle,

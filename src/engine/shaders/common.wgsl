@@ -15,7 +15,7 @@ struct Params {
   attraction: array<vec4f, 4>, // row s: weight of each strain's trail for strain s
   scent: vec4f,          // food source, light source, scent keep, shrink probability
   tool: vec4f,           // x, y (cells), radius, kind (0 none, 1 inoculate, 2 cut)
-  tool2: vec4f,          // strain, revive probability (dead agents), teleport probability (alive), unused
+  tool2: vec4f,          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
   extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
 }
@@ -30,8 +30,7 @@ const PI = 3.14159265358979;
 const TAU = 6.28318530717959;
 const BLOCKED = -1e30; // sensor value for walls and outside; finite on purpose
 const ALIVE = 4u;
-const ID_SHIFT = 3u;
-const ID_BITS = 0xfffffff8u; // the id field; up to 2^24 agents (webgpu.ts MAX_AGENTS)
+const ID_SHIFT = 3u; // the id field starts here; up to 2^24 agents (webgpu.ts MAX_AGENTS)
 
 @group(0) @binding(0) var<uniform> P: Params;
 
@@ -64,11 +63,22 @@ fn dir(a: f32) -> vec2f {
   return vec2f(cos(w), sin(w));
 }
 
-// A position wrapped into the periodic grid, below W and H. A position a hair below 0 would round up to W in f32,
-// in cell 0, while cellOf() of the unwrapped position is cell W − 1: the largest f32 below W keeps it in that cell.
+// A cell coordinate wrapped into a periodic grid of n cells, in integers: % keeps the sign of c (wrapCell in
+// common.glsl).
+fn wrapCell(c: vec2i, n: vec2i) -> vec2i { return ((c % n) + n) % n; }
+
+// A position wrapped into the periodic grid, in the cell of its floor. That cell is the one that cellOf(p) gives on
+// the periodic grid, and for every p inside a closed arena: a move or a tool puts an agent in the cell it claimed and
+// counted (ADR 0023).
+// - The whole periods come from integers. Before, p − size · floor(p / size) took them from a float division, which
+//   is not exact on every GPU: on an Apple M3 Pro, x = 479.99997 on a side of 480 wrapped to −0.00003.
+// - Then one subtraction of two exact f32 values rounds once, as the old formula did where its division was right.
+// - That rounding can reach the next cell: x = −1.000001 lies in cell 510 of a grid 512 cells wide, and wraps to
+//   511.0. The largest f32 below the upper edge of the cell keeps it in its cell.
 fn wrapPos(p: vec2f) -> vec2f {
-  let size = vec2f(f32(W()), f32(H()));
-  return min(p - size * floor(p / size), bitcast<vec2f>(bitcast<vec2u>(size) - 1u));
+  let c = vec2i(floor(p));
+  let lo = wrapCell(c, vec2i(i32(W()), i32(H())));
+  return min(p - vec2f(c - lo), bitcast<vec2f>(bitcast<vec2u>(vec2f(lo) + 1.0) - 1u));
 }
 
 fn dishRadius() -> f32 { return 0.5 * f32(min(W(), H())) - 1.0; }
@@ -79,7 +89,7 @@ fn cellAt(c: vec2i) -> i32 {
   let size = vec2i(i32(W()), i32(H()));
   var q = c;
   if (P.cfg.z == 0u) {
-    q = ((c % size) + size) % size;
+    q = wrapCell(c, size);
   } else {
     if (any(c < vec2i(0)) || any(c >= size)) { return -1; }
     if (P.cfg.z == 2u && distance(vec2f(c) + 0.5, 0.5 * vec2f(size)) > dishRadius()) { return -1; }

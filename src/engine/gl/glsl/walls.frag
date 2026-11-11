@@ -24,9 +24,6 @@ int gap(int a, int b, int cells) {
   return min(here, min(after, before));
 }
 
-// GLSL ES leaves % undefined for negative operands, so wrap with floor (as cellAt).
-int wrapTile(int v, int n) { return v - n * int(floor(float(v) / float(n))); }
-
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy);
   ivec2 size = ivec2(W(), H());
@@ -45,11 +42,11 @@ void main() {
   }
   int d = WALL_FAR;
   for (int dy = -WALL_SEARCH; dy <= WALL_SEARCH; dy++) {
-    int by = wrapTile(t.y + dy, n.y);
+    int by = wrapAxis(t.y + dy, n.y);
     int gy = gap(t.y, by, size.y);
     if (gy >= d) continue;
     for (int dx = -WALL_SEARCH; dx <= WALL_SEARCH; dx++) {
-      int bx = wrapTile(t.x + dx, n.x);
+      int bx = wrapAxis(t.x + dx, n.x);
       if (texelFetch(walled, ivec2(bx, by), 0).r > 0.5) d = min(d, max(gap(t.x, bx, size.x), gy));
     }
   }

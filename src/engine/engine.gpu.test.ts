@@ -2,11 +2,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
-import { Engine } from './engine';
+import { Engine, type HeldTool } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
 import type { GlSim } from './gl/sim';
 import { OutOfMemoryError } from './gpu';
+import { AgentToolKind, stepChance } from './pack';
 import { paintReference } from './paint-reference';
 import type { Simulation } from './sim';
 import type { Backend, Stroke } from './types';
@@ -168,6 +169,69 @@ it('does not restart when a backend without the rule keeps it off', async () => 
   expect(engine.settings.collisions).toBe(false);
   expect(engine.sim.step).toBe(10);
   engine.destroy();
+});
+
+// The inoculate tool places the same amount per second of holding on a 60 Hz and a 120 Hz display (ADR 0023). Before,
+// it acted once per frame with the chance of one frame at 60 Hz, so a 120 Hz display placed twice as many.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: the inoculate tool', (kind) => {
+  // 12,288 dead agents on 256 × 192 cells. The rate places 1 − e^(−0.1) of them in a second: about 1,169.
+  const RATE = 0.1;
+  const expected = 12_288 * stepChance(RATE, 1);
+
+  async function start(collisions: boolean, paused: boolean) {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [160, 120];
+    const patch = { resolution: 256, density: 0.25, layout: 'empty', boundary: 'box', collisions, seed: 8 } as const;
+    const engine = await Engine.create(canvas, { ...defaultSettings(), ...patch }, undefined, lend(kind).lent);
+    expect([engine.sim.width, engine.sim.height, engine.sim.agents]).toEqual([256, 192, 12_288]);
+    engine.paused = paused;
+    return engine;
+  }
+
+  /** Holds the tool at the centre for one second of frames at `fps`, each with `steps` steps or as the engine runs. */
+  async function hold(engine: Engine, fps: number, steps?: number) {
+    const tool: HeldTool = { kind: AgentToolKind.inoculate, x: 128, y: 96, radius: 30, strain: 0, rate: RATE };
+    engine.frame(0, 0); // the frame before the press
+    for (let k = 1; k <= fps; k++) {
+      engine.agentTool(tool);
+      engine.frame((k * 1000) / fps, steps);
+    }
+    const agents = await engine.sim.readAgents();
+    const state = { agents, trail: Array.from(await engine.sim.readTrail()), step: engine.sim.step };
+    engine.destroy();
+    return { ...state, alive: agents.filter((a) => a.bits & 4).length };
+  }
+
+  /** Without the rule the amount is the rate's; with it, the free cells of the brush hold it back. */
+  const amount = (alive: number, collisions: boolean) =>
+    collisions ? alive > 0.6 * expected && alive < expected : Math.abs(alive / expected - 1) < 0.05;
+
+  // At 120 steps per second, a frame at 60 Hz runs 2 steps and one at 120 Hz runs 1: each step gets the same chance.
+  // Running, the budget gives these steps (budget.ts); here the frames ask for them.
+  it.each([false, true])(
+    'places the same agents at 60 and 120 frames per second at the same steps per second (collisions %s)',
+    async (collisions) => {
+      const slow = await hold(await start(collisions, false), 60, 2);
+      const fast = await hold(await start(collisions, false), 120, 1);
+      expect([slow.step, fast.step]).toEqual([120, 120]);
+      expect(amount(slow.alive, collisions), `${slow.alive} of ${expected}`).toBe(true);
+      expect(fast.agents).toEqual(slow.agents);
+      expect(fast.trail).toEqual(slow.trail);
+    },
+  );
+
+  // Paused, a held tool runs 60 steps per second: one per frame at 60 Hz, one every other frame at 120 Hz.
+  it.each([false, true])(
+    'places the same agents at 60 and 120 frames per second while paused (collisions %s)',
+    async (collisions) => {
+      const slow = await hold(await start(collisions, true), 60);
+      const fast = await hold(await start(collisions, true), 120);
+      expect([slow.step, fast.step]).toEqual([60, 60]);
+      expect(amount(slow.alive, collisions), `${slow.alive} of ${expected}`).toBe(true);
+      expect(fast.agents).toEqual(slow.agents);
+      expect(fast.trail).toEqual(slow.trail);
+    },
+  );
 });
 
 /** Bytes that differ (a readable failure instead of a diff of half a million bytes). */

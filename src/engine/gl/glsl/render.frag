@@ -154,7 +154,7 @@ void around(ivec2 c, out ivec3 xs, out ivec3 ys) {
   xs = ivec3(c.x - 1, c.x, c.x + 1);
   ys = ivec3(c.y - 1, c.y, c.y + 1);
   if (V.boundary == 0u) {
-    ivec2 q = c - s * ivec2(floor(vec2(c) / vec2(s)));
+    ivec2 q = wrapCell(c, s);
     xs = ivec3(q.x == 0 ? s.x - 1 : q.x - 1, q.x, q.x == s.x - 1 ? 0 : q.x + 1);
     ys = ivec3(q.y == 0 ? s.y - 1 : q.y - 1, q.y, q.y == s.y - 1 ? 0 : q.y + 1);
   }
@@ -248,14 +248,12 @@ float lattice(ivec2 c) {
   return float((x ^ (x >> 16u)) >> 8u) * (1.0 / 16777216.0);
 }
 
-ivec2 wrapLattice(ivec2 c, ivec2 n) { return c - n * ivec2(floor(vec2(c) / vec2(n))); }
-
 float valueNoise(vec2 q, ivec2 period) {
   ivec2 i = ivec2(floor(q));
   vec2 f = q - floor(q);
   vec2 u = f * f * (3.0 - 2.0 * f);
-  ivec2 i0 = wrapLattice(i, period);
-  ivec2 i1 = wrapLattice(i + 1, period);
+  ivec2 i0 = wrapCell(i, period);
+  ivec2 i1 = wrapCell(i + 1, period);
   float a = mix(lattice(i0), lattice(ivec2(i1.x, i0.y)), u.x);
   float b = mix(lattice(ivec2(i0.x, i1.y)), lattice(i1), u.x);
   return mix(a, b, u.y);

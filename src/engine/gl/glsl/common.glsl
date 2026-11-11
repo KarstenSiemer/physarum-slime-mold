@@ -19,7 +19,7 @@ layout(std140) uniform Params {
   vec4 attraction[4];
   vec4 scent;          // food source, light source, scent keep, shrink probability
   vec4 tool;           // x, y, radius, kind (0 none, 1 inoculate, 2 cut)
-  vec4 tool2;          // strain, revive probability, teleport probability, unused
+  vec4 tool2;          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
   uvec4 strainEnd;
   uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
 } P;
@@ -31,6 +31,7 @@ const float BLOCKED = -1e30;
 const uint ALIVE = 4u;
 const uint MOVED = 8u;  // deposited this step (read by the point pass)
 const uint WANTS = 16u; // claimed a cell this step (collision mode); at init: waits for a start cell
+const uint PLACE = 32u; // with WANTS: claimed the cell of a tool's spot (tools.glsl placement)
 
 int W() { return int(P.grid.x); }
 int H() { return int(P.grid.y); }
@@ -55,20 +56,32 @@ vec2 dir(float a) {
   return vec2(cos(w), sin(w));
 }
 
-// Wrapped below W and H, so that a position a hair below 0 stays in cell W − 1 (wrapPos in common.wgsl).
+// v wrapped into [0, n), in integers. A float floor(v / n) is not exact on every GPU (GLSL ES allows 2.5 ULP for a
+// division): on an Apple M3 Pro, floor(vec2(c) / vec2(size)) was 0 at c = size for 291 of the sides 16 to 4096, such
+// as 33, 47 and 246. Then cell W wrapped to the first cell of the next row, and row H to no cell of the grid (ADR
+// 0023). GLSL ES leaves % undefined for a negative operand, so both operands stay non-negative. view.glsl has the same
+// function.
+int wrapAxis(int v, int n) { return v >= 0 ? v % n : n - 1 - (-1 - v) % n; }
+
+// A cell coordinate wrapped into a periodic grid of n cells (wrapCell in common.wgsl).
+ivec2 wrapCell(ivec2 c, ivec2 n) { return ivec2(wrapAxis(c.x, n.x), wrapAxis(c.y, n.y)); }
+
+// A position wrapped into the periodic grid, in the cell of its floor (wrapPos in common.wgsl). That cell is the one
+// that cellOf(p) gives on the periodic grid, and for every p inside a closed arena.
 vec2 wrapPos(vec2 p) {
-  vec2 size = vec2(W(), H());
-  return min(p - size * floor(p / size), uintBitsToFloat(floatBitsToUint(size) - 1u));
+  ivec2 c = ivec2(floor(p));
+  ivec2 lo = wrapCell(c, ivec2(W(), H()));
+  return min(p - vec2(c - lo), uintBitsToFloat(floatBitsToUint(vec2(lo) + 1.0) - 1u));
 }
 
 float dishRadius() { return 0.5 * float(min(W(), H())) - 1.0; }
 
-// GLSL ES leaves % undefined for negative operands, so wrap with floor.
+// Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (cellAt in common.wgsl).
 int cellAt(ivec2 c) {
   ivec2 size = ivec2(W(), H());
   ivec2 q = c;
   if (P.cfg.z == 0u) {
-    q = c - size * ivec2(floor(vec2(c) / vec2(size)));
+    q = wrapCell(c, size);
   } else {
     if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) return -1;
     if (P.cfg.z == 2u && distance(vec2(c) + 0.5, 0.5 * vec2(size)) > dishRadius()) return -1;

@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { openSmallScene, watchErrors } from './helpers';
+import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await openSmallScene(page);
@@ -100,4 +100,87 @@ test('keyboard shortcuts pause, step and switch tools', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.step ?? 0)).toBe(before + 1);
   await page.keyboard.press('5');
   await expect(page.getByRole('radio', { name: 'Wall' })).toHaveAttribute('aria-checked', 'true');
+});
+
+// Inoculate places only dead agents (docs/adr/0023). In the small scene every agent is alive: the tool places nothing
+// and says so. The alive count in the stats is at most 500 ms old.
+test('the inoculate tool says so when no dead agents of its strain are left', async ({ page }) => {
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('All agents of strain A are alive.', { timeout: 60_000 });
+  await page.mouse.up();
+});
+
+// Paused, a hold runs steps only while a dead agent of the strain is known (docs/adr/0023). Here every agent lives:
+// the steps would only move the paused scene.
+test('a paused hold of the inoculate tool runs no step while every agent of its strain lives', async ({ page }) => {
+  await expect(page.locator('.stats')).toContainText('agents', { timeout: 60_000 }); // a count of this run
+  await page.locator('canvas').click();
+  await page.keyboard.press('Space');
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.paused)).toBe(true);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const step = await page.evaluate(() => globalThis.physarum?.sim.step);
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('All agents of strain A are alive.', { timeout: 60_000 });
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => globalThis.physarum?.sim.step)).toBe(step);
+  await page.mouse.up();
+});
+
+// The start layout Empty restarts a scene where every agent lived. For up to 500 ms the stats still hold the count of
+// the run before: the tool must not take it for this one (docs/adr/0023). Paused, the hold waits for the count of the
+// new run, which WebGPU must take after the reset: before, it gave the count of the last step before it.
+for (const paused of [false, true])
+  test(`the inoculate tool places agents right after a restart into the empty start layout (paused ${paused})`, async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    await expect(page.locator('.stats')).toContainText('agents', { timeout: 60_000 });
+    if (paused) {
+      await page.locator('canvas').click();
+      await page.keyboard.press('Space');
+      await expect.poll(() => page.evaluate(() => globalThis.physarum?.paused)).toBe(true);
+    }
+    await page.getByRole('radio', { name: 'Inoculate' }).click();
+    const box = await page.locator('canvas').boundingBox();
+    if (!box) throw new Error('no canvas');
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    const restarts = await page.evaluate(() => globalThis.physarum?.restarts ?? 0);
+    await page.getByLabel('Start layout').selectOption('empty');
+    await page.waitForFunction((r) => (globalThis.physarum?.restarts ?? 0) > r, restarts);
+    await page.mouse.down();
+    // The agents themselves: on WebGPU the alive count of the old code still said that every agent lives.
+    const alive = () =>
+      page.evaluate(async () => (await globalThis.physarum?.sim.readAgents())?.filter((a) => a.bits & 4).length);
+    await expect.poll(alive, { timeout: 60_000 }).toBeGreaterThan(50);
+    // Longer than the stats interval (500 ms): a count that said every agent lives would have shown the notice.
+    await page.waitForTimeout(700);
+    await page.mouse.up();
+    await expect(page.getByRole('status').filter({ hasText: 'are alive' })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+test('the inoculate tool brings dead agents to life in the empty start layout', async ({ page }) => {
+  const errors = watchErrors(page);
+  // A new hash alone would not load the page again.
+  await page.goto('about:blank');
+  await page.goto(await smallScene({ layout: 'empty' }));
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
+  const alive = () => page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.reduce((a, b) => a + b, 0));
+  expect(await alive()).toBe(0);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect.poll(alive, { timeout: 60_000 }).toBeGreaterThan(50);
+  await page.mouse.up();
+  await expect(page.getByRole('status').filter({ hasText: 'are alive' })).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

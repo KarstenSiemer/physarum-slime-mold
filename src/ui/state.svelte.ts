@@ -1,4 +1,5 @@
 import type { Engine } from '../engine/engine';
+import { strainAgents } from '../engine/pack';
 import { drawingOf, type Drawing } from '../model/link';
 import { defaultSettings, MAX_STRAINS, strainLike, type Settings } from '../model/params';
 import { presetById, RULE_MISSING_NOTICE, usesRule, type Preset } from '../model/presets';
@@ -7,7 +8,12 @@ import type { Link } from '../model/url';
 
 export const TOOLS = [
   { id: 'pan', key: '1', label: 'Move', help: 'Drag to move the view. Scroll or pinch to zoom.' },
-  { id: 'inoculate', key: '2', label: 'Inoculate', help: 'Hold to place agents of the selected strain.' },
+  {
+    id: 'inoculate',
+    key: '2',
+    label: 'Inoculate',
+    help: 'Hold to place agents of the selected strain. The tool uses only dead agents.',
+  },
   { id: 'food', key: '3', label: 'Food', help: 'Place oat flakes. Food releases an attracting scent.' },
   { id: 'light', key: '4', label: 'Light', help: 'Shine light. Physarum flees from it.' },
   { id: 'wall', key: '5', label: 'Wall', help: 'Draw walls that agents cannot cross or sense through.' },
@@ -26,6 +32,8 @@ export interface Stats {
   stepsPerSecond: number;
   step: number;
   alive: number[];
+  /** Engine.restarts when `alive` was counted, −1 before the first count: the run whose agents it counts. */
+  run: number;
 }
 
 export interface AppState {
@@ -98,7 +106,7 @@ export const app = $state<AppState>({
   maxResolution: 4096,
   gridPicked: false,
   canCollide: true,
-  stats: { fps: 0, stepsPerSecond: 0, step: 0, alive: [] },
+  stats: { fps: 0, stepsPerSecond: 0, step: 0, alive: [], run: -1 },
 });
 
 /**
@@ -269,6 +277,18 @@ export function showNotice(text: string, ms = 7000) {
   app.notice = text;
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => (app.notice = ''), ms);
+}
+
+/**
+ * Whether a dead agent of the selected strain is left for the inoculate tool, which uses only dead agents (ADR 0023).
+ * From the alive count of the stats, at most 500 ms old. Undefined while the stats hold no count of the current run
+ * of the engine: a count from before a restart or rebuild is of other agents.
+ */
+export function deadLeft(e: Engine): boolean | undefined {
+  if (app.stats.run !== e.restarts) return undefined;
+  const alive = app.stats.alive[app.strain];
+  const agents = strainAgents(e.settings.strains, e.sim.agents)[app.strain];
+  return alive === undefined || agents === undefined ? undefined : alive < agents;
 }
 
 let engine: Engine | undefined;

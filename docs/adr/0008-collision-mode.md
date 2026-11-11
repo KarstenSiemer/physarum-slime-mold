@@ -47,7 +47,20 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
   scene with the rule starts with none, on both backends.
 - A move across the wrap seam keeps the agent in the cell it claimed: wrapped in f32, a position a
   hair below 0 rounded up to x = W, into cell 0, while WebGPU counted the agent in cell W − 1, and a
-  second agent could enter cell 0 (fixed on 2026-11-10, ADR 0019).
+  second agent could enter cell 0 (fixed on 2026-11-10, ADR 0019). A position a hair below −1 rounded
+  up the same way, from cell W − 2 into cell W − 1. Since 2026-11-11 every move lands in the cell it
+  claimed. `wrapPos()` in `common.wgsl` and `common.glsl` takes the whole periods from integers. It
+  keeps the result below the upper edge of its cell (ADR 0023).
+- On WebGL2 the rule also failed at the seams of some grid sides, also on `main` before 2026-11-11.
+  The shaders wrapped cells with a float division, which is not exact on every GPU. On an Apple M3
+  Pro, row H of a grid 246 cells high was outside the grid. So no agent crossed the top seam under
+  the rule. Since 2026-11-11 the wrap uses integers (ADR 0023).
+- Since 2026-11-11 the rule also holds for the agent tools (ADR 0023). An agent that inoculate places
+  or cut moves claims a cell that was empty at the start of the step, with the claim key of a move,
+  and only the winner goes there. A loser stays dead or stays where it was. Before, both tools checked
+  only for walls: on the Maze a 1 s inoculation put 811 to 852 agents in 234 to 244 cells, up to 18 in
+  one cell, and 60 to 73 % were still stacked at step 2,000 (an agent may always move inside its own
+  cell). One frame of cut left 9 cells with two agents.
 - Jones' attraction networks need the rule. Without it, agents pile up and the Fig. 4 network
   contracts into a few straight lines that wrap around the edges, usually within 2,000 to
   8,000 steps (measured on 2026-11-09 on WebGPU and WebGL2 and in two CPU ports). Jones ties

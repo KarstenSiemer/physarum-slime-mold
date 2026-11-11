@@ -2,13 +2,17 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, strainSpec } from '../model/params';
 import {
+  AgentToolKind,
   CLEAR_TILE,
+  inoculateRate,
   packParams,
   PARAM_SLOTS,
   PARAMS_BYTES,
   START_ROUNDS,
   startRounds,
   STEP_OFFSET,
+  stepChance,
+  strainAgents,
   strainEnds,
 } from './pack';
 
@@ -52,6 +56,49 @@ describe('Params layout', () => {
     ];
     expect(extra({})).toEqual([4, 0, 0, 0]);
     expect(extra({ walls: true, round: 7 })).toEqual([4, 1, 7, 0]);
+  });
+});
+
+describe('agent tools (ADR 0023)', () => {
+  it('packs the tool: position, radius and kind, then strain and the chance per step, nothing for living agents', () => {
+    const tool = { kind: AgentToolKind.inoculate, x: 3.5, y: 4.25, radius: 6, strain: 1, revive: 0.125 };
+    const f = new Float32Array(packParams(defaultSettings(), { width: 8, height: 8, agents: 1, step: 0, tool }));
+    expect([...f.slice(16 * 4, 18 * 4)]).toEqual([3.5, 4.25, 6, 1, 1, 0.125, 0, 0]);
+  });
+
+  it('gives a dead agent the same chance over a second, however frames and steps cut it up', () => {
+    const rate = 0.7;
+    const stays = (parts: number[]) => parts.reduce((p, t) => p * (1 - stepChance(rate, t)), 1);
+    const second = 1 - stepChance(rate, 1);
+    expect(second).toBeCloseTo(Math.exp(-rate), 15);
+    for (const [frames, steps] of [
+      [60, 2],
+      [120, 1],
+      [144, 1],
+      [30, 4],
+    ] as const)
+      expect(stays(Array.from({ length: frames * steps }, () => 1 / frames / steps))).toBeCloseTo(second, 12);
+    expect(stays([0.25, 0.05, 0.7])).toBeCloseTo(second, 12);
+    expect([stepChance(rate, 0), stepChance(0, 1), stepChance(Infinity, 0.01)]).toEqual([0, 0, 1]);
+  });
+
+  it('places in a second what 60 frames placed before: half the brush area times the density in each', () => {
+    const s = { ...defaultSettings(), density: 0.12, strains: [defaultStrain(0), { ...defaultStrain(1), share: 3 }] };
+    const [agents, radius] = [19_661, 6.1];
+    for (const strain of [0, 1]) {
+      const share = strain === 0 ? 0.25 : 0.75;
+      const old = (Math.PI * radius * radius * 0.25) / (2 * agents * share); // App.svelte before, per frame
+      const rate = inoculateRate(radius, s, agents, strain);
+      expect(rate / 60).toBeCloseTo(old, 12);
+      // One frame at 60 Hz gets 1 − e^(−old) ≈ old · (1 − old / 2).
+      expect(Math.abs(stepChance(rate, 1 / 60) / old - 1)).toBeLessThan(old);
+    }
+  });
+
+  it('counts the agents of each strain as strainEnds() splits them', () => {
+    const s = [defaultStrain(0), { ...defaultStrain(1), share: 3 }, defaultStrain(2)];
+    expect(strainAgents(s, 1000)).toEqual([200, 600, 200]);
+    expect(strainAgents([defaultStrain(0)], 7)).toEqual([7]);
   });
 });
 

@@ -1,10 +1,10 @@
 import { constrain, RESOLUTIONS, type Boundary, type Settings } from '../model/params';
 import type { EnvShape } from '../model/presets';
-import { FrameBudget } from './budget';
+import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
-import type { AgentTool } from './pack';
+import { stepChance, type AgentTool } from './pack';
 import { agentCount, fitResolution, gridSize, memoryBudget } from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
@@ -20,10 +20,30 @@ import { WebGpuBackend } from './webgpu';
 const PAINT_ROWS = 256;
 const FRAME_MS = 1;
 
+/**
+ * Steps per second of holding an agent tool while paused, at any frame rate: one per frame at 60 Hz, as before
+ * (ADR 0023). One step per frame gave a 120 Hz display twice the steps, and with the rule twice the free cells that
+ * agents leave in the brush: 22 % more agents after a second.
+ */
+const PAUSED_TOOL_STEPS = 60;
+
 // Changes that need a new population.
 // Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
 // thousands of steps, and a collapsed network would carry over (ADR 0008).
 const RESET_KEYS = ['seed', 'layout', 'boundary', 'collisions'] as const;
+
+/**
+ * An agent tool held on the canvas for one frame. `rate`: for inoculate, placements per dead agent of the strain and
+ * second (pack.ts inoculateRate()); frame() turns it into a chance per step (stepChance()). `idle`: the tool can
+ * change nothing, as inoculate while the app knows no dead agent of its strain (deadLeft() in ui/state.svelte.ts).
+ * A paused hold of an idle tool runs no step (ADR 0023).
+ */
+export type HeldTool = Omit<AgentTool, 'revive'> & { rate: number; idle?: boolean };
+
+/** The tool of one step that stands for `seconds` of holding. */
+function stepTool({ kind, x, y, radius, strain, rate }: HeldTool, seconds: number): AgentTool {
+  return { kind, x, y, radius, strain, revive: stepChance(rate, seconds) };
+}
 
 /** Picks WebGPU, or WebGL2 when WebGPU is missing or `?backend=webgl2` (ADR 0003). */
 async function createBackend(canvas: HTMLCanvasElement): Promise<Backend> {
@@ -52,7 +72,11 @@ export class Engine {
   readonly budget = new FrameBudget();
   /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
   restarts = 0;
-  private pendingTool: AgentTool | undefined;
+  private pendingTool: HeldTool | undefined;
+  /** Seconds of holding that no step has applied yet: a frame that runs no step passes its time on. */
+  private heldFor = 0;
+  /** Steps of a tool held while paused not run yet (PAUSED_TOOL_STEPS), as the budget counts steps. */
+  private pausedSteps = 0;
   /**
    * Every food, light, wall and erase edit since the last clear or preset load, less those the sweep deleted
    * (sweep.ts): each new simulation paints them.
@@ -376,7 +400,8 @@ export class Engine {
     this.sim.paint(strokes.filter((s) => s !== undefined));
   }
 
-  agentTool(tool: AgentTool) {
+  /** The agent tool held during the next frame. Call it every frame while the tool is held (App.svelte). */
+  agentTool(tool: HeldTool) {
     this.pendingTool = tool;
   }
 
@@ -404,18 +429,33 @@ export class Engine {
    * One frame: a slice of a long sweep, new strokes, as many steps as the speed asks for and the GPU keeps up with,
    * then one render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
    * simulation speed instead of the frame rate.
+   *
+   * A held agent tool acts on every step of the frame. The frame stands for its interval (budget.ts, at most 100 ms),
+   * and each step for its share of that time. So without the rule an inoculation places the same amount per second of
+   * holding at any frame rate and speed (ADR 0023). With the rule, only the free cells of the brush take agents, and
+   * a cell becomes free when its agent walks off: the amount then also goes up with the steps per second. The speed
+   * sets these, at any frame rate. A frame without a step passes its time on to the next step. While paused, a held
+   * tool runs PAUSED_TOOL_STEPS steps per second, so that it acts. An idle one (HeldTool) runs none and keeps no
+   * time: its steps would only move the paused scene.
    */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
     if (this.sweepFor(Infinity, performance.now() + FRAME_MS)) this.onEdits?.();
     this.flushEnv();
     const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
+    const pausedHold = this.paused && forceSteps === undefined;
+    const held = this.pendingTool && !(pausedHold && this.pendingTool.idle) ? this.pendingTool : undefined;
+    this.pendingTool = undefined;
+    this.heldFor = held ? this.heldFor + this.budget.interval / 1000 : 0;
     let steps = forceSteps ?? planned;
-    // A held tool while paused still needs one step to act.
-    if (this.pendingTool && steps === 0) steps = 1;
+    if (held && pausedHold) {
+      this.pausedSteps += (this.budget.interval / 1000) * PAUSED_TOOL_STEPS;
+      steps = Math.floor(this.pausedSteps + SLACK);
+      this.pausedSteps -= steps;
+    } else this.pausedSteps = 0;
     if (steps > 0) {
-      this.sim.run(steps, this.pendingTool);
-      this.pendingTool = undefined;
+      this.sim.run(steps, held && stepTool(held, this.heldFor / steps));
+      this.heldFor = 0;
     }
     this.backend.draw(this.sim, this.settings, this.view, true);
     this.frames++;

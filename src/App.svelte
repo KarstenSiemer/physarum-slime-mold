@@ -4,7 +4,7 @@
   import { Engine } from './engine/engine';
   import { MIN_RADIUS } from './engine/environment';
   import { GpuUnavailableError } from './engine/gpu';
-  import { AgentToolKind } from './engine/pack';
+  import { AgentToolKind, inoculateRate } from './engine/pack';
   import { presetById, START } from './model/presets';
   import { decodeLink, encodeLink } from './model/url';
   import Learn from './ui/Learn.svelte';
@@ -14,6 +14,7 @@
   import {
     app,
     currentDrawing,
+    deadLeft,
     getEngine,
     openLink,
     ruleUnavailable,
@@ -185,11 +186,16 @@
     const rates = { fps: (now.frames - last.frames) / dt, stepsPerSecond: Math.max(0, now.step - last.step) / dt };
     last = now;
     counting = true;
-    const alive = await e.sim
+    // The count is of the agents of this run: a restart while it waits for the GPU makes it one of an older run.
+    const run = e.restarts;
+    const counted = await e.sim
       .alive()
-      .catch(() => app.stats.alive)
+      .then(
+        (alive) => ({ alive, run }),
+        () => ({ alive: app.stats.alive, run: app.stats.run }),
+      )
       .finally(() => (counting = false));
-    app.stats = { ...rates, step: now.step, alive };
+    app.stats = { ...rates, step: now.step, ...counted };
   }
 
   // Pointer input: pan, pinch, paint and agent tools.
@@ -197,6 +203,10 @@
   const pointers = new Map<number, [number, number]>();
   const drag = new BrushDrag();
   let held: [number, number] | undefined;
+  /** The notice that no dead agents are left came during this press of the inoculate tool. */
+  let toldNoDead = false;
+  /** The notice has 36 words: 10 s to read them, not the usual 7 s. */
+  const NO_DEAD_NOTICE_MS = 10_000;
   let pinch = 0;
 
   function twoPointers(): [[number, number], [number, number]] {
@@ -233,6 +243,7 @@
     drag.end();
     paintTo(e, p);
     if (app.tool === 'inoculate' || app.tool === 'cut') held = p;
+    toldNoDead = false;
   }
 
   function onpointermove(ev: PointerEvent) {
@@ -266,7 +277,7 @@
     getEngine()?.zoomAt(...pos(ev), Math.exp(-ev.deltaY * 0.0015));
   }
 
-  // While a tool is held, it acts on every frame.
+  // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame).
   $effect(() => {
     let raf = 0;
     const tick = () => {
@@ -274,17 +285,22 @@
       if (e && held) {
         const [x, y] = e.toGrid(...held);
         const radius = brushCells(e);
-        const total = app.settings.strains.reduce((a, s) => a + s.share, 0);
-        const share = (app.settings.strains[app.strain]?.share ?? 1) / total;
-        const p = Math.min(
-          1,
-          (Math.PI * radius * radius * Math.max(0.25, app.settings.density)) / (2 * e.sim.agents * share),
-        );
-        e.agentTool(
-          app.tool === 'cut'
-            ? { kind: AgentToolKind.cut, x, y, radius, strain: 0, revive: 0, teleport: 0 }
-            : { kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, revive: p, teleport: p },
-        );
+        if (app.tool === 'cut') e.agentTool({ kind: AgentToolKind.cut, x, y, radius, strain: 0, rate: 0 });
+        else {
+          const rate = inoculateRate(radius, app.settings, e.sim.agents, app.strain);
+          const dead = deadLeft(e);
+          // Paused, the hold runs steps only while a dead agent is known: else they would only move the scene.
+          e.agentTool({ kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, rate, idle: dead !== true });
+          if (!toldNoDead && dead === false) {
+            toldNoDead = true;
+            const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);
+            showNotice(
+              `All agents of strain ${letter} are alive. Inoculate uses only dead agents. To get dead agents, set ` +
+                'Shrinkage above 0, or select the start layout Empty. In that layout all agents are dead at the start.',
+              NO_DEAD_NOTICE_MS,
+            );
+          }
+        }
       }
       raf = requestAnimationFrame(tick);
     };

@@ -26,7 +26,7 @@
     colonies: 'One colony each',
     ring: 'Ring',
     center: 'Center spot',
-    empty: 'Empty dish (inoculate)',
+    empty: 'Empty (inoculate)',
   };
   const BOUNDARY_LABEL: Record<(typeof BOUNDARIES)[number], string> = {
     wrap: 'Wrap around (no edges)',

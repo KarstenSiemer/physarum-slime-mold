@@ -42,6 +42,7 @@ export interface Sim {
   readonly step: number;
   update(settings: Settings): void;
   reset(): void;
+  /** Runs `steps` steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool): void;
   /** Paints brush strokes in order: the only way food, light and walls reach a simulation. */
   paint(strokes: readonly Stroke[]): void;
@@ -49,7 +50,7 @@ export interface Sim {
   destroy(): void;
   /** Resolves when all submitted GPU work is done. */
   finish(): Promise<void>;
-  /** Alive agents per strain after the last step (empty if the backend cannot count). */
+  /** Alive agents per strain after the last step or reset (empty if the backend cannot count). */
   alive(): Promise<number[]>;
   readAgents(): Promise<AgentState[]>;
   /** Trail, 4 lanes per cell, rows from y = 0. */

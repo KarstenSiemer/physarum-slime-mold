@@ -1,11 +1,9 @@
-// One fragment per agent (texel of the agent texture). Mirrors ../../shaders/agents.wgsl.
+// One fragment per agent (texel of the agent texture), after tools.glsl. Mirrors ../../shaders/agents.wgsl.
 // mode 0 advance (several agents per cell), 1 claim and 2 settle (one agent per cell, ADR 0008).
 
 uniform sampler2D agentsIn;
 uniform sampler2D trail;
 uniform sampler2D scent;
-uniform sampler2D env;
-uniform sampler2D occ;    // occupancy at step start (collision mode)
 uniform sampler2D claims; // highest claim key per cell (collision mode)
 uniform sampler2D clearance; // per clearance tile (walls.frag)
 uniform int agentWidth;
@@ -18,13 +16,6 @@ out vec4 result;
 #ifndef SENSE_WALLS
 #define SENSE_WALLS 0
 #endif
-
-const uint STEER = 0u;
-const uint TOOL = 1u;
-const uint SHRINK = 2u;
-const uint BLOCK = 3u;
-
-bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
 // A wall at w, a cell that a walk enters, wrapped into the periodic grid; never outside a closed arena (wallIn in
 // agents.wgsl).
@@ -78,7 +69,7 @@ bool clearPath(vec2 p, vec2 q, int clear) {
   }
   // w is c wrapped into the periodic grid, kept step by step (cellAt wraps the same way).
   ivec2 size = ivec2(W(), H());
-  ivec2 w = P.cfg.z == 0u ? c - size * ivec2(floor(vec2(c) / vec2(size))) : c;
+  ivec2 w = P.cfg.z == 0u ? wrapCell(c, size) : c;
   for (int k = 0; k < WALK; k++) {
     bool needX = c.x != end.x;
     bool needY = c.y != end.y;
@@ -139,34 +130,11 @@ float steer(vec4 a, int s, inout uint rng, int clear) {
   return h - TAU * floor(h / TAU);
 }
 
-vec2 randomIn(vec2 center, float radius, inout uint rng) {
-  float r = radius * sqrt(rand(rng));
-  return center + r * dir(rand(rng) * TAU);
-}
-
-// Tools and shrinkage; returns false if the agent is dead after this step.
-bool lifecycle(inout vec4 a, uint i) {
-  uint rng = rngSeed(i, TOOL);
+// Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
+// Clears the markers of the last step.
+bool shrinkage(inout vec4 a, uint i) {
   uint s = bitsOf(a) & 3u;
   bool alive = (bitsOf(a) & ALIVE) != 0u;
-  if (P.tool.w == 1.0 && float(s) == P.tool2.x) {
-    if (rand(rng) < (alive ? P.tool2.z : P.tool2.y)) {
-      vec2 p = randomIn(P.tool.xy, P.tool.z, rng);
-      if (habitable(cellOf(p))) {
-        a.xy = wrapPos(p);
-        a.z = rand(rng) * TAU;
-        alive = true;
-      }
-    }
-  } else if (P.tool.w == 2.0 && alive && distance(a.xy, P.tool.xy) < P.tool.z) {
-    for (int k = 0; k < 8; k++) {
-      vec2 p = vec2(rand(rng) * float(W()), rand(rng) * float(H()));
-      if (habitable(cellOf(p)) && distance(p, P.tool.xy) >= P.tool.z) {
-        a.xy = p;
-        break;
-      }
-    }
-  }
   if (alive) {
     uint r = rngSeed(i, SHRINK);
     alive = rand(r) >= P.scent.w;
@@ -174,8 +142,6 @@ bool lifecycle(inout vec4 a, uint i) {
   a.w = float(s | (alive ? ALIVE : 0u));
   return alive;
 }
-
-bool vacant(int c) { return texelFetch(occ, cellCoord(c), 0).r < 0.5; }
 
 bool canClaim(vec4 a, int c, int clear) {
   return habitable(c) && c != cellOf(a.xy) && vacant(c) && clearPath(a.xy, destination(a), clear);
@@ -191,7 +157,12 @@ void main() {
   }
   int s = int(bitsOf(a) & 3u);
   if (mode == 0) {
-    if (lifecycle(a, i)) {
+    bool alive = shrinkage(a, i);
+    Spot spot = placement(a, i);
+    if (spot.cell >= 0) {
+      // A tool puts the agent here instead of its move: it deposits nothing in this step.
+      a = vec4(spot.pos, spot.heading, float(uint(s) | ALIVE));
+    } else if (alive) {
       uint rng = rngSeed(i, STEER);
       int clear = clearanceAt(a.xy);
       float h = steer(a, s, rng, clear);
@@ -206,7 +177,11 @@ void main() {
       }
     }
   } else if (mode == 1) {
-    if (lifecycle(a, i)) {
+    bool alive = shrinkage(a, i);
+    if (placement(a, i).cell >= 0) {
+      // A tool's spot is claimed like a move (points.vert kind 1); the agent stays as it is until mode 2.
+      a.w += float(WANTS | PLACE);
+    } else if (alive) {
       uint rng = rngSeed(i, STEER);
       int clear = clearanceAt(a.xy);
       a.z = steer(a, s, rng, clear);
@@ -214,7 +189,14 @@ void main() {
     }
   } else {
     uint bits = bitsOf(a) & (ALIVE | 3u);
-    if ((bits & ALIVE) != 0u) {
+    if ((bitsOf(a) & PLACE) != 0u) {
+      // The winner of the spot's cell goes there. A loser stays as it is: dead (inoculate), or where it was (cut).
+      Spot spot = placement(vec4(a.xyz, float(bits)), i);
+      if (spot.cell >= 0 && texelFetch(claims, cellCoord(spot.cell), 0).r == claimKey(i)) {
+        a.xyz = vec3(spot.pos, spot.heading);
+        bits |= ALIVE;
+      }
+    } else if ((bits & ALIVE) != 0u) {
       vec2 p = destination(a);
       int c = cellOf(p);
       // Moving inside the own cell is always allowed; otherwise the claim must have won.

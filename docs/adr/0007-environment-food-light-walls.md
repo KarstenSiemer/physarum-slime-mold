@@ -44,7 +44,9 @@ Option 3, plus:
 - For one strain with food weight 1 and equal decay, behaviour matches Jones' single trail
   map.
 - Food acts over a short range (measured on WebGPU on 2026-11-09). With
-  scent decay 0.1 the scent fades within about 2.4 cells, so an agent notices food only when a
+  scent decay 0.1 the scent decreases by a factor of e every 1.6 to 1.7 cells with one diffusion
+  pass (the default settings and Jones' scenes) and every 2.3 to 2.4 cells with two (the start
+  scene; measured on 2026-11-11), so an agent notices food only when a
   sensor comes close. In the dense start scene food becomes a hub, about 6 times the mean agent
   density in the disc with radial paths around it, and the rest of the network stays as it was.
   A whole network reorganizes around food only with few agents and a contracting network
