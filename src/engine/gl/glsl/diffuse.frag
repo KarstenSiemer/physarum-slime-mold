@@ -37,54 +37,63 @@ bool wound(ivec2 q) {
   return P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2(q) + 0.5, P.tool.xy) < P.tool.z;
 }
 
-// Trail and scent of a cell as the agents sensed them; `open` is 0 for walls and outside. The first pass clears the
-// wound of a cut before the step's diffusion.
-void load(ivec2 c, out vec4 t, out vec2 s, out float open) {
+// What a cell is (diffuse.wgsl, ADR 0027): outside the arena and in a wall of the extended model a sink that holds no
+// trail and scent; in the Jones model (P.model.z = 1) a wall is part of the lattice that diffuses, without sources.
+const int SINK = 0;
+const int OPEN = 1;
+const int WALL = 2;
+
+// Trail and scent of a cell as the agents sensed them, and its kind. The first pass clears the wound of a cut before
+// the step's diffusion.
+void load(ivec2 c, out vec4 t, out vec2 s, out int kind) {
   t = vec4(0.0);
   s = vec2(0.0);
-  open = 0.0;
+  kind = SINK;
   int i = cellAt(c);
   if (i < 0) return;
   ivec2 q = cellCoord(i);
-  if (isWall(texelFetch(env, q, 0))) return;
+  if (isWall(texelFetch(env, q, 0))) {
+    if (P.model.z == 0.0) return;
+    kind = WALL;
+  } else {
+    kind = OPEN;
+  }
   t = texelFetch(trailIn, q, 0);
   s = texelFetch(scentIn, q, 0).xy;
   if (first && wound(q)) {
     t = vec4(0.0);
     s = vec2(0.0);
   }
-  open = 1.0;
 }
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec4 t;
   vec2 s;
-  float open;
-  load(p, t, s, open);
-  if (blur && open > 0.0) {
+  int kind;
+  load(p, t, s, kind);
+  if (blur) {
+    // Jones' mean filter at every lattice site: a sink counts as 0 (diffuse.wgsl).
     vec4 sum = vec4(0.0);
     vec2 ssum = vec2(0.0);
-    float n = 0.0;
     for (int dy = -1; dy <= 1; dy++) {
       for (int dx = -1; dx <= 1; dx++) {
         vec4 tt;
         vec2 ss;
-        float o;
-        load(p + ivec2(dx, dy), tt, ss, o);
+        int k;
+        load(p + ivec2(dx, dy), tt, ss, k);
         sum += tt;
         ssum += ss;
-        n += o;
       }
     }
-    t = sum / n;
-    s = ssum / n;
+    t = sum / 9.0;
+    s = ssum / 9.0;
   }
   if (last) {
     t *= P.keep;
     s *= P.scent.z;
     // This step's deposits and sources, after the moves, for the sensors of the next step (diffuse.wgsl).
-    if (open > 0.0 && !wound(p)) {
+    if (kind == OPEN && !wound(p)) {
       vec4 e = texelFetch(env, p, 0);
       t += texelFetch(counts, p, 0) * P.deposit;
 #if COVERED
@@ -94,6 +103,10 @@ void main() {
       s += vec2(e.g * P.scent.x, e.b * P.scent.y);
 #endif
     }
+  }
+  if (kind == SINK) {
+    t = vec4(0.0);
+    s = vec2(0.0);
   }
   outTrail = t;
   outScent = vec4(s, 0.0, 0.0);

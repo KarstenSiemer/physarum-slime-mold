@@ -346,7 +346,7 @@ PRESETS.push(
     about:
       'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends. The model keeps many paths instead of one tube: it has no flow that thickens the shortest one.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a slow shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Walls block movement and sensing, and the trail does not spread through them. No sensor reads the trail behind a wall, so agents on one side of a thin wall do not follow the trail on the other side.',
+    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a slow shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Walls block movement and sensing, and they take in the trail. No sensor reads the trail behind a wall, so agents on one side of a thin wall do not follow the trail on the other side.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },

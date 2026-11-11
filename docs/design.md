@@ -155,8 +155,11 @@ moves. The first step after a reset moves with the start heading, as Jones' firs
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
    tile saves about 25 % of this pass, see
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
-   repeated `passes` times (Jones 1, Fogleman 2): 3 × 3 mean over non-wall cells, then on the
-   last pass `× (1 − decay)` and `+ counts · deposit`. The same for `scent` with
+   repeated `passes` times (Jones 1, Fogleman 2): the 3 × 3 mean of 9 cells at every site of the
+   arena (Jones' mean filter), then on the last pass `× (1 − decay)` and `+ counts · deposit`.
+   Outside a closed arena the cells hold 0, so trail and scent that leave it are lost (absorbing
+   edges, Jones 2011). Walls diffuse as part of the lattice in the Jones model and are sinks that
+   hold 0 in the extended model; they take no deposit or source (ADR 0027). The same for `scent` with
    `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones model g = 1,
    the scent decays with the strain's decay and light has no source, so trail + scent is Jones'
    one trail map (ADR 0022). In the extended model `g = d / 0.1` with the scent decay d, so a large

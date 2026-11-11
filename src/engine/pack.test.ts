@@ -124,7 +124,7 @@ describe('model slot and sources', () => {
     const s = { ...defaultSettings(), trailSaturation: 50 };
     expect(s.model).toBe('extended');
     expect(model(s)).toEqual([50, 1, 0, 0]);
-    expect(model({ ...s, model: 'jones' })).toEqual([0, 1, 0, 0]);
+    expect(model({ ...s, model: 'jones' })).toEqual([0, 1, 1, 0]);
     // A link's 1e-300 would pack as 0 in f32 and divide every lane by 0 (sanitize() rounds it too).
     for (const K of [1e-300, 0.5, 0.999]) {
       expect(trailSaturation({ model: 'extended', trailSaturation: K }), `${K}`).toBe(0);
@@ -134,6 +134,13 @@ describe('model slot and sources', () => {
     expect(model({ ...s, coveredFood: true })).toEqual([50, Math.fround(0.001), 0, 0]);
     expect(model({ ...s, coveredFood: true, coveredFoodFactor: 0.01 })).toEqual([50, Math.fround(0.01), 0, 0]);
     expect(model({ ...s, coveredFoodFactor: 0.01 })).toEqual([50, 1, 0, 0]);
+  });
+
+  // Jones' lattice diffuses at every site, walls too; the extended model's walls are sinks (ADR 0027).
+  it('packs whether walls diffuse: 1 in the Jones model, 0 in the extended model', () => {
+    expect(model(jones())[2]).toBe(1);
+    expect(model({ ...jones(), model: 'extended' })[2]).toBe(0);
+    expect(model(defaultSettings())[2]).toBe(0);
   });
 
   // Jones 2010, p. 144: food goes into the trail map, which decays with decayT, and the strain weighs it as its trail.

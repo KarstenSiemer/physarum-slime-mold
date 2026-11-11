@@ -233,7 +233,7 @@ export type GlobalKey = keyof typeof globalSpec;
 /** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
 export const modelHelp = {
   label: 'Model',
-  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or use the Cut tool. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
+  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, walls that take in the trail, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or use the Cut tool. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
   ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014',
 } as const;
 

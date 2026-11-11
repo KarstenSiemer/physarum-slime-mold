@@ -176,7 +176,8 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
   u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
-  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1], slot('model'));
+  // model.z: walls diffuse as part of Jones' lattice in the Jones model, and are sinks in the extended model (ADR 0027).
+  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1, jones ? 1 : 0], slot('model'));
   return buf;
 }
 

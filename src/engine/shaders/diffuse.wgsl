@@ -26,9 +26,15 @@ const T = 16u;
 const SIDE = 18u; // tile plus a one-cell halo
 const N = 324u;
 
+// What a cell of the tile is (ADR 0027): outside the arena and in a wall of the extended model it is a sink that holds
+// no trail and scent; in the Jones model a wall is part of the lattice that diffuses, but takes no deposit or source.
+const SINK = 0u;
+const OPEN = 1u;
+const WALL = 2u;
+
 var<workgroup> tileTrail: array<vec4f, N>;
 var<workgroup> tileScent: array<vec2f, N>;
-var<workgroup> tileOpen: array<f32, N>; // 1 for habitable cells, 0 for walls and outside
+var<workgroup> tileKind: array<u32, N>;
 
 // True if the 3 × 3 window around cell q holds an agent. Cells outside a closed arena hold none.
 fn covered(q: vec2i) -> bool {
@@ -48,16 +54,23 @@ fn wound(q: vec2i) -> bool {
   return P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2f(q) + 0.5, P.tool.xy) < P.tool.z;
 }
 
+// The kind of cell c (cellAt), SINK for −1. P.model.z is 1 where walls diffuse: in the Jones model (pack.ts).
+fn kindOf(c: i32) -> u32 {
+  if (c < 0) { return SINK; }
+  if (!isWall(env[c])) { return OPEN; }
+  return select(SINK, WALL, P.model.z > 0.0);
+}
+
 @compute @workgroup_size(16, 16)
 fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: vec3u,
            @builtin(local_invocation_index) li: u32) {
   let origin = vec2i(wg.xy * T) - 1;
   for (var k = li; k < N; k += 256u) {
     let c = cellAt(origin + vec2i(i32(k % SIDE), i32(k / SIDE)));
+    let kind = kindOf(c);
     var t = vec4f(0.0);
     var s = vec2f(0.0);
-    var open = 0.0;
-    if (c >= 0 && !isWall(env[c])) {
+    if (kind != SINK) {
       let q = cellCoord(u32(c));
       t = textureLoad(trailIn, q, 0);
       s = textureLoad(scentIn, q, 0).xy;
@@ -66,41 +79,40 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
         t = vec4f(0.0);
         s = vec2f(0.0);
       }
-      open = 1.0;
     }
     tileTrail[k] = t;
     tileScent[k] = s;
-    tileOpen[k] = open;
+    tileKind[k] = kind;
   }
   workgroupBarrier();
 
   let p = vec2i(wg.xy * T + lid.xy);
   if (p.x >= i32(W()) || p.y >= i32(H())) { return; }
   let center = (lid.y + 1u) * SIDE + lid.x + 1u;
+  let kind = tileKind[center];
   var t = tileTrail[center];
   var s = tileScent[center];
-  if (BLUR && tileOpen[center] > 0.0) {
-    // Mean over habitable neighbours only: no flux into walls or out of the arena.
+  if (BLUR) {
+    // Jones' mean filter at every lattice site (ADR 0027): a sink counts as 0, so trail and scent that leave the
+    // arena or enter a wall of the extended model are lost.
     var sum = vec4f(0.0);
     var ssum = vec2f(0.0);
-    var n = 0.0;
     for (var dy = 0u; dy < 3u; dy++) {
       for (var dx = 0u; dx < 3u; dx++) {
         let k = (lid.y + dy) * SIDE + lid.x + dx;
         sum += tileTrail[k];
         ssum += tileScent[k];
-        n += tileOpen[k];
       }
     }
-    t = sum / n;
-    s = ssum / n;
+    t = sum / 9.0;
+    s = ssum / 9.0;
   }
   if (LAST) {
     t *= P.keep;
     s *= P.scent.z;
     // This step's deposits and sources (Jones 2010, p. 133 and 144): after the moves, for the sensors of the next
     // step, and none in the wound of a cut that clears it.
-    if (tileOpen[center] > 0.0 && !wound(p)) {
+    if (kind == OPEN && !wound(p)) {
       let c = p.y * i32(W()) + p.x;
       t += vec4f(counts[c]) * P.deposit;
       let e = envOf(env[c]);
@@ -111,6 +123,10 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
         s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
       }
     }
+  }
+  if (kind == SINK) {
+    t = vec4f(0.0);
+    s = vec2f(0.0);
   }
   textureStore(trailOut, p, t);
   textureStore(scentOut, p, vec4f(s, 0.0, 0.0));

@@ -156,8 +156,9 @@ fn heightField(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   return vec4f(clamp(y, -6e4, 6e4), 0.0, 0.0, 1.0);
 }
 
-// The height of a wall cell: the mean of its neighbours outside walls. Walls hold no trail, so their cells
-// would pull the filtered height down in steps of whole cells along a slanted wall, and the gel would light
+// The height of a wall cell: the mean of its neighbours outside walls. Walls hold no trail in the extended model and
+// less than the cells beside them in the Jones model (diffuse.wgsl, ADR 0027), so their cells would pull the filtered
+// height down in steps of whole cells along a slanted wall, and the gel would light
 // that staircase where the smooth outline of the wall no longer covers it. The wall is drawn over this.
 fn besideWall(c: vec2i, y: f32) -> f32 {
   var sum = 0.0;
@@ -489,8 +490,8 @@ fn walls(c: vec3f, e: Env) -> vec3f {
 }
 
 // The trail at p, bilinear over the 4 cells around it but without the cells of walls (`cells`: shapeCells of the
-// cell under p, which holds those 4). Walls hold no trail, so the plain filter fell to nothing towards their
-// cells, in steps along a slanted wall that its smooth outline no longer covers. The weights of the other cells
+// cell under p, which holds those 4). Walls hold no trail in the extended model and less than the cells beside them
+// in the Jones model (ADR 0027), so the plain filter fell towards their cells, in steps along a slanted wall that its smooth outline no longer covers. The weights of the other cells
 // are scaled up to 1, as if the trail went on up to the wall. Only for one bilinear lookup (zoomed in).
 fn trailBesideWalls(p: vec2f, cells: array<u32, 9>) -> vec4f {
   let q = p - 0.5;

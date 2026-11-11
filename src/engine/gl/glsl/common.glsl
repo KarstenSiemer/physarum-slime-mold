@@ -22,7 +22,7 @@ layout(std140) uniform Params {
   vec4 tool2;          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   uvec4 strainEnd;
   uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
-  vec4 model;          // trail saturation K (0 off), covered food factor (1 off) (ADR 0022)
+  vec4 model;          // K (0 off), covered food factor (1 off), 1 if walls diffuse (Jones) (ADR 0022, 0027)
 } P;
 
 const float PI = 3.14159265358979;

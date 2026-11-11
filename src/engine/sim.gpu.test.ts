@@ -1213,6 +1213,37 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       300_000,
     );
 
+    /**
+     * One step of one lane of the map on the CPU after the moves, with the boundaries of ADR 0027: the 3 × 3 mean of
+     * 9 cells at every site of the arena, a cell outside it counting 0; a wall diffuses where `wallsDiffuse` (the
+     * Jones model) and is a sink holding 0 otherwise; then the decay; then `source` at the cells that are no wall.
+     */
+    const siteStep = (
+      map: Float64Array,
+      env: Uint8Array,
+      w: number,
+      cellAt: (x: number, y: number) => number,
+      wallsDiffuse: boolean,
+      keep: number,
+      source: (c: number) => number,
+      reflective = false,
+    ) => {
+      const wall = (c: number) => (env[c * 4] ?? 0) >= 128;
+      const site = (c: number) => c >= 0 && (wallsDiffuse || !wall(c));
+      return map.map((_, c) => {
+        const [x, y] = [c % w, Math.floor(c / w)];
+        if (!site(cellAt(x, y))) return 0;
+        let [sum, n] = [0, 0];
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const q = cellAt(x + dx, y + dy);
+            if (site(q)) [sum, n] = [sum + (map[q] ?? 0), n + 1];
+          }
+        // `reflective`: the mean over the sites only, the rule before ADR 0027 (for the tests that it is gone).
+        return (keep * sum) / (reflective ? n : 9) + (wall(c) ? 0 : source(c));
+      });
+    };
+
     const cellAtFor = (boundary: Boundary, w: number, h: number) => (x: number, y: number) => {
       if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
       if (x < 0 || y < 0 || x >= w || y >= h) return -1;
@@ -1254,30 +1285,17 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         sim.reset();
         const env = await sim.readEnv();
         const cellAt = cellAtFor(boundary, w, h);
-        const open = (c: number) => c >= 0 && (env[c * 4] ?? 0) < 128;
         const keep = 1 - decay;
         // Jones' order (p. 132–133, ADR 0027): the map diffuses and decays, then takes the deposits of the next moves
-        // and the food (p. 144), and the agents sense it.
+        // and the food (p. 144), and the agents sense it. The mean runs at every site of the lattice, the wall too, and
+        // the outside of a closed arena holds 0 (ADR 0027).
         let map = new Float64Array(w * h);
         for (let k = 0; k < 40; k++) {
           sim.run(1);
           const counts = await sim.readCounts();
-          const diffused = map.map((_, c) => {
-            const [x, y] = [c % w, Math.floor(c / w)];
-            if (!open(cellAt(x, y))) return 0;
-            let [sum, n] = [0, 0];
-            for (let dy = -1; dy <= 1; dy++)
-              for (let dx = -1; dx <= 1; dx++) {
-                const q = cellAt(x + dx, y + dy);
-                if (!open(q)) continue;
-                sum += map[q] ?? 0;
-                n++;
-              }
-            return (keep * sum) / n;
-          });
-          map = diffused.map((v, c) =>
-            open(c) ? v + (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 : 0,
-          );
+          const source = (c: number) =>
+            (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05;
+          map = siteStep(map, env, w, cellAt, true, keep, source);
         }
         const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
         const sum = Float32Array.from({ length: w * h }, (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0));
@@ -1288,6 +1306,89 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       },
       // Up to 20.4 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
       120_000,
+    );
+
+    // ADR 0027: trail and scent that leave a closed arena are lost (Jones 2011, p. 1353), and the mean runs at every
+    // site of the lattice (Jones and Adamatzky 2014, p. 23; Jones 2015, p. 14). In the Jones model walls are such sites;
+    // in the extended model they are sinks. Food and light follow the trail's rule. A random trail, food along
+    // and across the edges and beside the walls, light, and walls across the middle and at the edge; 20 steps without
+    // agents against a float64 CPU reference, in both models and every arena.
+    it.each(MODELS.flatMap((model) => BOUNDARIES.map((boundary) => [model, boundary] as const)))(
+      'diffuse trail, food and light at the edges and walls as the CPU reference does (%s model, %s)',
+      async (model, boundary) => {
+        const [w, h] = [48, 40];
+        const jones = model === 'jones';
+        const settings: Settings = {
+          ...defaultSettings(),
+          layout: 'empty',
+          model,
+          collisions: jones,
+          boundary,
+          foodStrength: 0.05,
+          lightStrength: 0.2,
+          strains: [defaultStrain(0)],
+        };
+        const sim = await build(settings, w, h, 1);
+        sim.paint([
+          { kind: 'food', from: [1, 4], to: [1, 36], radius: 2.5 }, // along the left edge
+          { kind: 'food', from: [46, 30], to: [50, 33], radius: 3 }, // across the right edge
+          { kind: 'food', from: [20, 10], to: [20, 10], radius: 3 }, // beside the wall
+          { kind: 'light', from: [30, 1], to: [40, 2], radius: 3 }, // along the top edge
+          { kind: 'wall', from: [24, 5], to: [24, 30], radius: 1 },
+          { kind: 'wall', from: [10, 39], to: [16, 39], radius: 1.5 }, // at the bottom edge
+        ]);
+        const env = await sim.readEnv();
+        let r = 5;
+        const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+        const trail = Float32Array.from({ length: w * h * 4 }, () => Math.fround(100 * rnd()));
+        sim.writeTrail(trail);
+        const steps = 20;
+        sim.run(steps);
+        const [gpuTrail, gpuScent] = [await sim.readTrail(), await sim.readScent()];
+        const cellAt = cellAtFor(boundary, w, h);
+        const keep = 1 - 0.1;
+        const g = jones ? 1 : emissionScale(settings.scentDecay);
+        const food = (c: number) => ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 * g;
+        const light = (c: number) => (jones ? 0 : ((env[c * 4 + 2] ?? 0) / 255) * 255 * 0.2 * g);
+        const run = (lane: Float64Array, source: (c: number) => number, walls: boolean, reflective = false) => {
+          let v = lane;
+          for (let k = 0; k < steps; k++) v = siteStep(v, env, w, cellAt, walls, keep, source, reflective);
+          return v;
+        };
+        // The lane of the one strain (the others have no decay of a strain and keep nothing).
+        const lanes = [0].map((l) => Float64Array.from({ length: w * h }, (_, c) => trail[c * 4 + l] ?? 0));
+        const zero = new Float64Array(w * h);
+        const none = () => 0;
+        const expected = {
+          trail: lanes.map((lane) => run(lane, none, jones)),
+          food: run(zero, food, jones),
+          light: run(zero, light, jones),
+        };
+        const gpu = (data: Float32Array, stride: number, l: number) =>
+          Float32Array.from({ length: w * h }, (_, c) => data[c * stride + l] ?? 0);
+        expected.trail.forEach((cpu, l) => {
+          expect(maxRelError(gpu(gpuTrail, 4, l), cpu), `trail lane ${l}`).toBeLessThan(1e-5);
+        });
+        expect(maxRelError(gpu(gpuScent, 2, 0), expected.food), 'food').toBeLessThan(1e-5);
+        if (jones) expect(Math.max(...gpu(gpuScent, 2, 1))).toBe(0);
+        else expect(maxRelError(gpu(gpuScent, 2, 1), expected.light), 'light').toBeLessThan(1e-5);
+        // The rule of the other model at walls, and the reflective mean of before, are far off. On the periodic grid of
+        // the Jones model every neighbour is a site, so there the reflective mean is the same.
+        expect(maxRelError(gpu(gpuTrail, 4, 0), run(lanes[0] ?? zero, none, !jones))).toBeGreaterThan(1e-3);
+        expect(maxRelError(gpu(gpuScent, 2, 0), run(zero, food, !jones))).toBeGreaterThan(1e-3);
+        if (!jones || boundary !== 'wrap') {
+          expect(maxRelError(gpu(gpuTrail, 4, 0), run(lanes[0] ?? zero, none, jones, true))).toBeGreaterThan(1e-3);
+          expect(maxRelError(gpu(gpuScent, 2, 0), run(zero, food, jones, true))).toBeGreaterThan(1e-3);
+        }
+        // Outside a closed arena and in a wall of the extended model no trail stays; in the Jones model a wall holds it.
+        const wallCells = Array.from({ length: w * h }, (_, c) => c).filter((c) => (env[c * 4] ?? 0) >= 128);
+        const inWalls = wallCells.reduce((sum, c) => sum + (gpuTrail[c * 4] ?? 0), 0);
+        if (jones) expect(inWalls).toBeGreaterThan(0);
+        else expect(inWalls).toBe(0);
+        if (boundary === 'dish')
+          for (let c = 0; c < w * h; c++)
+            if (cellAt(c % w, Math.floor(c / w)) < 0) expect(gpuTrail[c * 4] ?? 0, `cell ${c}`).toBe(0);
+      },
     );
 
     // Jones does not say what a sensor reads behind a wall (ADR 0020): only the extended model's sensors check the
@@ -1827,16 +1928,27 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect((await sim.readAgents()).map((a) => Math.floor(a.x) === 10)).toEqual(wall);
       });
 
-      it('for diffusion', async () => {
-        const sim = await make({ layout: 'empty' }, w, h, 1);
-        sim.writeEnv(env);
+      // A wall cell takes no source in either model, and in the extended model it is a sink that holds no trail; in
+      // the Jones model the trail diffuses into it (ADR 0027).
+      it.each(MODELS)('for diffusion (%s model)', async (model) => {
+        const sim = await make({ layout: 'empty', model, collisions: model === 'jones' }, w, h, 1);
+        const food = env.slice();
+        for (let c = 0; c < w * h; c++) food[c * 4 + 1] = 255;
+        sim.writeEnv(food);
+        // The first step adds the sources to a map of zeros; the next one diffuses a trail of ones.
+        sim.run(1);
+        const scent = await sim.readScent();
         sim.writeTrail(new Float32Array(w * h * 4).fill(1));
         sim.run(1);
         const trail = await sim.readTrail();
-        // A wall holds no trail; an open cell keeps the mean of its open neighbours, all 1, times 1 − decay.
-        const at = BYTES.map((_, k) => trail[((2 + k) * w + 15) * 4] ?? -1);
-        expect(at.map((v) => (v === 0 ? 'wall' : Math.abs(v - 0.9) < 1e-6 ? 'open' : v))).toEqual(
-          wall.map((x) => (x ? 'wall' : 'open')),
+        const kinds = BYTES.map((_, k) => {
+          const c = (2 + k) * w + 15;
+          const source = (scent[c * 2] ?? 0) > 0;
+          const t = trail[c * 4] ?? 0;
+          return `${source ? 'source' : 'none'} ${t > 0 ? 'trail' : 'no trail'}`;
+        });
+        expect(kinds).toEqual(
+          wall.map((x) => (x ? `none ${model === 'jones' ? 'trail' : 'no trail'}` : 'source trail')),
         );
       });
 

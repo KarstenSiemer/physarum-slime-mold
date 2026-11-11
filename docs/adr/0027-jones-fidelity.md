@@ -111,3 +111,34 @@ Each decision with its date, who made it, and why.
    WebGL2 (seeds 0 to 60); with 64 rounds none in 61 seeds on either backend. A round is one claim and one settle pass
    over the agents at a reset, only in an arena with the rule that is not a periodic or box grid with the mixed layout
    and no walls. A GPU test starts Shrinking plasmodium with seed 6, which left 2 agents dead with 32 rounds.
+
+### Diffusion at closed edges and walls
+
+9. **Closed edges absorb, in both models** (owner, 2026-11-11). Jones absorbs the chemoattractant at the edges (Jones
+   2011, p. 1353), and Fig. 18 fits an absorbing rim. The mean is now always the sum of 9 cells divided by 9; a cell
+   outside the arena (the box's edge, the dish's rim, the edge of a closed lattice) counts as 0 and holds 0. Before, the
+   mean divided by the habitable cells of the 3 × 3 (reflective, ADR 0007). The fidelity check measured the effect on
+   Shortest path: a side branch to the rim beyond r = 85 of the 99-cell dish in 2 of 20 runs before, in 0 of 20 with
+   either absorbing rule. Its reference simulator, written from the paper, also tried a third rule (the trail spreads
+   outside the dish up to the lattice's edge): Shrinking plasmodium tore in 10 of 31 runs there, 17 of 31 absorbing and
+   19 of 31 reflective, all with the old dish; the dish was the cause of the tears (decision 6).
+10. **Walls in the Jones model are part of the diffusing lattice** (owner, 2026-11-11, "literal Jones"). Jones' later
+    papers run the mean filter at every lattice site (Jones and Adamatzky 2014, p. 23; Jones 2015, p. 14; Jones, Mayne
+    and Adamatzky 2017, p. 25). A wall cell takes the mean of its 9 cells and decays like any cell, and takes no deposit
+    (no agent enters it) and no food or light. The growth analysis of 2026-11-11 measured this rule as "T". Jones'
+    papers have no wall that reflects.
+11. **Walls in the extended model are sinks** (owner, 2026-11-11). A wall cell holds 0 and counts 0 in the means of its
+    neighbours, as the outside does, so no trail or scent passes a thin wall. This matches the extended model's sensors,
+    which a wall on their way blocks (ADR 0020): neither the sensor nor the trail reaches the other side of a wall. The
+    growth analysis measured this rule as "A": the share of a growing colony's agents within 4 cells of a wall fell from
+    71 % (reflective) to 10.5 % on 16:9.
+12. **Food and light follow the trail's rule in each model** (owner, 2026-11-11). The scent field takes the same means
+    over the same cells, so in the Jones model trail + scent stays Jones' one map (ADR 0022) also at edges and walls.
+13. **A wall is a wall for the sensors in both models, as before** (this branch, 2026-11-11). In the Jones model a wall
+    cell now holds trail, but a sensor in a wall cell still reads `BLOCKED` (ADR 0007): Jones does not say what a sensor
+    in an obstacle reads, and ADR 0020 rejected sensors that read the trail behind a wall. Only the diffusion changes.
+14. **One uniform for the wall rule** (this branch, 2026-11-11). `packParams()` packs 1 in `model.z` for the Jones model
+    and 0 for the extended model (`src/engine/pack.ts`); `diffuse.wgsl` and `diffuse.frag` read it per cell. Reason: the
+    rule is the model's, and an override constant would double the diffusion pipelines for a branch that costs nothing
+    measurable (below). No scene of Jones has walls, so the Jones rule acts only where a user paints a wall into a
+    scene of Jones.
