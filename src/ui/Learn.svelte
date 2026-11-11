@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { collisionsHelp, coveredFoodHelp, globalSpec, modelHelp, strainSpec } from '../model/params';
+  import { collisionsHelp, coveredFoodHelp, globalSpec, modelHelp, scentViewHelp, strainSpec } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
@@ -23,6 +23,7 @@
     collisionsHelp,
     modelHelp,
     coveredFoodHelp,
+    scentViewHelp,
   ];
 
   // Each scene's strains with the numbers of its own settings (not the live ones).
@@ -164,6 +165,12 @@
         weak scent can still turn an agent on it. With Scent decay 0.1 and Trail saturation 0, the extended model runs a
         scene of Jones as Jones does, until you paint a wall or use the Cut tool.
       </p>
+      <p>
+        To see how far the scent reaches, select Scent in the toolbar or press S. The view draws the food scent in green
+        and the light repellent in pink, with one band for each power of ten. The scale is the same in every scene and
+        in both models. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the green bands
+        reach farther. The view changes only the picture, not the simulation.
+      </p>
     {:else if app.learnTab === 'Controls'}
       <dl>
         {#each specs as spec (spec.label)}
@@ -174,8 +181,8 @@
         {/each}
       </dl>
       <p>
-        Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, H hide panels, L this
-        dialog.
+        Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
+        this dialog.
       </p>
       <p>
         The page address is a link to what you see: the settings, the scene, and the food, light and walls you painted.

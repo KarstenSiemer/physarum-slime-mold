@@ -36,6 +36,22 @@ describe('the current scene', () => {
     expect(sceneChanged()).toBe(false);
   });
 
+  // The scent view is the user's, not the scene's (ADR 0009, amendment 2026-11-11): it survives a new scene, so two
+  // scenes compare, and it is no change to a scene.
+  it('keeps the scent view on a new scene, and does not count it as a change', async () => {
+    const { app, loadPreset, sceneChanged } = await fresh();
+    loadPreset('network');
+    app.settings.showScent = true;
+    expect(sceneChanged()).toBe(false);
+    loadPreset('light');
+    expect(app.settings.showScent).toBe(true);
+    expect(app.sceneBase?.showScent).toBe(true);
+    expect(sceneChanged()).toBe(false);
+    app.settings.showScent = false;
+    loadPreset('maze');
+    expect(app.settings.showScent).toBe(false);
+  });
+
   it('does not count a grid the device lowered as a change', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
     loadPreset('network');

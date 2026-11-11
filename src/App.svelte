@@ -10,6 +10,7 @@
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
   import SceneLabel from './ui/SceneLabel.svelte';
+  import ScentLegend from './ui/ScentLegend.svelte';
   import { constrain } from './model/params';
   import {
     adopt,
@@ -327,6 +328,7 @@
     } else if (ev.key === 'r') getEngine()?.reset();
     else if (ev.key === 'f') getEngine()?.fitView();
     else if (ev.key === 'h') app.hideUi = !app.hideUi;
+    else if (ev.key === 's') app.settings.showScent = !app.settings.showScent;
     else if (ev.key === 'l') app.learn = true;
     else if (ev.key === '[') app.brush = Math.max(4, app.brush - 4);
     else if (ev.key === ']') app.brush = Math.min(120, app.brush + 4);
@@ -376,6 +378,10 @@
     {app.stats.fps.toFixed(0)} fps · {app.stats.stepsPerSecond.toFixed(0)} steps/s · step {app.stats.step}
     {#if app.stats.alive.length}· {fmt(app.stats.alive.reduce((a, b) => a + b, 0))} agents{/if}
   </p>
+
+  {#if app.settings.showScent}
+    <div class="legend-wrap ui"><ScentLegend /></div>
+  {/if}
 
   {#if app.error}
     <div class="error" role="alert">
@@ -498,6 +504,12 @@
     color: var(--muted);
     pointer-events: none;
   }
+  /* Above the stats, on the left: the panel opens on the right. */
+  .legend-wrap {
+    position: absolute;
+    left: 10px;
+    bottom: 80px;
+  }
   .notice {
     align-self: center;
     box-sizing: border-box;
@@ -544,6 +556,9 @@
     }
     .stats {
       display: none;
+    }
+    .legend-wrap {
+      bottom: 60px;
     }
   }
 </style>

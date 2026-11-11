@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scentViewHelp } from '../model/params';
   import { app, getEngine, showNotice, toolsFor } from './state.svelte';
 
   const letter = (i: number) => 'ABCD'[i] ?? String(i + 1);
@@ -72,6 +73,12 @@
 
   <div class="group">
     <button type="button" onclick={() => getEngine()?.fitView()} title="F">Fit</button>
+    <button
+      type="button"
+      aria-pressed={app.settings.showScent}
+      title="{scentViewHelp.help} (S)"
+      onclick={() => (app.settings.showScent = !app.settings.showScent)}>Scent</button
+    >
     <button type="button" onclick={savePng}>Save PNG</button>
   </div>
 </div>

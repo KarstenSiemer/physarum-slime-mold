@@ -233,6 +233,39 @@ test('keyboard shortcuts pause, step and switch tools', async ({ page }) => {
   await expect(page.getByRole('radio', { name: 'Wall' })).toHaveAttribute('aria-checked', 'true');
 });
 
+// The scent view (ADR 0009, amendment 2026-11-11): a switch of the look, with a key and a legend. It goes into the
+// link as the style does, changes no scene and does not restart the simulation.
+test('the Scent switch and the S key show the scent with its legend, and go into the link', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('light');
+  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2);
+  const button = page.getByRole('button', { name: 'Scent', exact: true });
+  const legend = page.getByRole('figure', { name: 'Scent per cell' });
+  const changed = page.getByRole('region', { name: 'Scene', exact: true }).getByText('changed', { exact: true });
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await expect(legend).toHaveCount(0);
+  const restarts = await page.evaluate(() => globalThis.physarum?.restarts);
+  await button.click();
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await expect(legend).toBeVisible();
+  await expect(legend.getByText('Food scent')).toBeVisible();
+  await expect(legend.getByText('Light repellent')).toBeVisible();
+  await page.waitForFunction(() => globalThis.physarum?.settings.showScent === true);
+  await expect(changed).toHaveCount(0);
+  await expect
+    .poll(async () => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.settings.showScent)
+    .toBe(true);
+  const axe = await new AxeBuilder({ page }).include('figure').analyze();
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([]);
+  await page.locator('canvas').click();
+  await page.keyboard.press('s');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await expect(legend).toHaveCount(0);
+  await page.waitForFunction(() => globalThis.physarum?.settings.showScent === false);
+  expect(await page.evaluate(() => globalThis.physarum?.restarts)).toBe(restarts);
+  expect(errors).toEqual([]);
+});
+
 // Inoculate places only dead agents (docs/adr/0023). In the small scene every agent is alive: the tool places nothing
 // and says so. The alive count in the stats is at most 500 ms old.
 test('the inoculate tool says so when no dead agents of its strain are left', async ({ page }) => {
