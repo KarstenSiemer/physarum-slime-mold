@@ -67,7 +67,10 @@ test('growth without a dead agent says so, and the offered Capacity makes room',
   await expect(offer).toHaveCount(0);
   await expect(page.getByRole('slider', { name: 'Capacity', exact: true })).toBeFocused();
   await page.waitForFunction(() => globalThis.physarum?.settings.capacity === 1);
-  await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.agents ?? 0)).toBeGreaterThan(50 * agents);
+  // A new Capacity rebuilds the simulation, a start of its own (ADR 0010: up to 32 s on SwiftShader).
+  await expect
+    .poll(() => page.evaluate(() => globalThis.physarum?.sim.agents ?? 0), { timeout: 120_000 })
+    .toBeGreaterThan(50 * agents);
   await expect.poll(() => alive(page), { timeout: 60_000 }).toBeGreaterThan(2 * start);
   await expect(page.getByText(/Growth has no room/)).toHaveCount(0);
   expect(errors).toEqual([]);
