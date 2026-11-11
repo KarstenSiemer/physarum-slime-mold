@@ -1,7 +1,7 @@
 # 0009: Rendering pipeline
 
 - Status: accepted (revised 2026-11-08 after the visual review loop; amended 2026-11-10: food,
-  light and walls)
+  light and walls; amended 2026-11-11: scent view)
 - Date: 2026-11-08
 
 ## Context
@@ -392,3 +392,134 @@ presence for food (decision D2) and the bevelled ridge with light for walls (D3)
   counts as painted and draws with the variant of item 9 that has the environment code; after a
   Clear, or with an eraser alone, it draws without. Each was checked with a deliberate mutation of
   the code it guards.
+
+## Amendment 2026-11-11: scent view
+
+### Context
+
+The owner decided on 2026-11-11 that a switch in the view draws the food scent and the light's repellent, and that it
+changes nothing in the simulation (ADR 0024, decision 10). The owner wants to see how far food really smells, and to
+compare the two models: in the Jones model the scent decays with the trail, in the extended model a lower scent decay
+reaches farther with a normalised strength (ADR 0022). The scent spans many powers of ten. On a UI dab at decay 0.1 it
+is 115 on the dab and 0.36 nine cells out; a large food in the Jones model reaches 1,262 at decay 0.01 and 12,736 at
+0.001 (ADR 0022, "Plateau"), and at decay 0.0001 and Food strength 0.5 the plateau is 255 · 0.5 · 0.9999 / 0.0001, about
+1.27 million. Auto levels would scale each scene to itself, so two scenes would not compare.
+
+### Decision
+
+Each decision is this branch's (2026-11-11) and is open to the owner (TODO.md).
+
+1. **A setting of the look, `Settings.showScent`.** `packParams()` does not read it, `Engine.apply()` neither restarts
+   nor rebuilds for it, and `modelChanged()` does not count it (`NOT_MODEL` in `src/model/scene.ts`), so the scene card
+   does not say "changed". Reason: the owner's rule that the view changes nothing in the simulation. Tests: the same
+   bytes of `packParams()` with the view on and off (`pack.test.ts`), no restart and no new simulation in the engine
+   (`engine.test.ts`), and on both backends two simulations from one seed, one of them drawn with the view after every 5
+   steps in every style, give the same agents, trail, scent, `env` and `shape` (`sim.gpu.test.ts`).
+2. **The link carries it, as it carries the style.** `sanitize()` takes it only as `true`; a link without it opens with
+   the view off. Reason: the repo keeps the look in the link (style, exposure, glow) and keeps the view (pan and zoom)
+   out of it. Pan and zoom depend on the receiver's screen and grid; the scent view, like the style, draws the same on
+   every screen. A link then shows the receiver what the sender saw, such as how far a food smells.
+3. **The switch stays on when a scene loads** (`setScene()` in `src/ui/state.svelte.ts`). A scene sets its style to
+   its own; it never sets the scent view. Reason: the view serves to compare scenes and models, and a switch that turned
+   itself off with every new scene would get in the way. The owner can choose the behaviour of the style instead.
+4. **A fixed logarithmic scale.** One band per power of ten from 0.01 up, 7 bands, and the last holds everything from
+   10,000 up; a line marks each power of ten from 0.01 to 10,000. Below 0.01 the view draws nothing. The numbers are in
+   `src/engine/scent.ts` (`SCENT_LOW`, `SCENT_BANDS`, `SCENT_FILL`, `SCENT_LINE`), and both passes hold the same
+   (`scentView` in `render.wgsl` and `gl/glsl/render.frag`). Reason: fixed levels let two scenes or the two models
+   compare directly. 0.01 lies four powers of ten below the plateau of a food at decay 0.1 (115), and 10,000 holds the
+   Jones model's large foods at low decays. The bands give the value at a place, the lines show the reach.
+5. **Colours.** Food scent green (OKLCH hue 145), light repellent pink (hue 340); light colours over glow, gel and
+   agents, dark ones over paper, and each line a lighter (over paper: darker) shade of its fill (`SCENT_COLOURS`).
+   Reason: the strain palette has hues 24, 85, 201 and 294, so green lies 60° and pink 45° from the nearest strain; the
+   oat flake is brown, walls grey and the light a warm yellow. A strain colour that the user picks near green or pink
+   can still look alike.
+6. **Opacity.** The fill of the first band is 0.1, and each band adds 0.05 (0.1 to 0.4); a line has 0.75. Over paper the
+   fill has 1.5 times that (`SCENT_PAPER_FILL`). Reason: the trail stays visible through the bands. Over a light colour
+   the same opacity shows less: the first band took the paper from 243 to 232 of 255 (red) and the glow's black from 6
+   to 76 (green); with 1.5 times the paper goes to 227. The legend draws each band as it looks over the bare dish of
+   the style on screen.
+7. **One bilinear lookup per pixel, filtered over the pixel.** The pass reads the 4 cells around the pixel centre once,
+   at every zoom, and takes the gradient from the same weights. The band count is filtered over the pixel by its exact
+   integral (`scentStairs`) over the width of one pixel in powers of ten, so bands closer than a pixel give their mean.
+   Lines are about one pixel wide and fade out where they lie closer than 4 pixels. At fit the Jones model at decay 0.1
+   has a power of ten every 4.6 cells. Reason: the cost. With four taps when zoomed out, as the trail has, and a
+   remainder per cell on the periodic grid, the view cost 1.2 to 1.4 ms at 2560 × 1600 fitted and 4.4 to 4.8 ms zoomed
+   out 3 times; with one lookup and one remainder per axis 0.5 to 0.6 ms and 0.6 to 0.85 ms (both backends). The scent
+   is smooth over cells, and the filter of the bands covers the pixel already.
+8. **After the light, below the walls.** Walls hold no scent and draw over the view. Zoomed in, the lookup leaves out
+   the cells of walls and scales the other weights up to 1, as the trail's filter does (item 5 of the amendment of
+   2026-11-10). Reason: without that, the value fell to half at a wall's outline, and a band edge or line ran along the
+   wall.
+9. **The edges of the arena.** On the periodic grid the cells wrap; in a box they are clamped to it; outside the dish
+   a cell reads the cell inside the rim on the way to the centre, as `shapeIndex` does. Reason: the arena has no flux
+   across its edge, so the scent of its outer cells goes on up to the edge with no drop, there is no seam, and outside
+   the arena the pass draws what it drew before: no halo.
+10. **No cost without the view.** The override constant `SCENT` (WGSL) and `#define SCENT` (GLSL) compile the view
+    in; its pipelines and programs are built at the first frame with the view. Without the view the pipelines get only
+    `ENV`, as before. Reason: without the view the frame must not change, in pixels or in cost.
+11. **The legend is HTML** (`src/ui/ScentLegend.svelte`): over the canvas at the bottom left, "Scent per cell", a bar
+    of the 7 bands per layer with the value where each band starts, and one sentence. The bar of the repellent shows
+    only in the extended model, which alone has light. It hides with the panels (H). Reason: text in HTML reads at any
+    size and reaches screen readers; the render pass has no text. The PNG export therefore has no legend (TODO.md).
+12. **The switch** is the button Scent in the toolbar group of the view, beside Fit, with the key S (the view keys are F
+    and H); its help shows in its title and in Learn → Controls, and Learn → The model says how to compare the models
+    with it. Reason: one press, beside the other control of the view, to compare a scene before and after a change.
+13. **For tests only**, `WebGpuBackend.renderFrom(code)` and `WebGl2Backend.renderFrom(frag)` draw every frame with
+    another version of the render shader, as the code before the view did. Reason: a GPU test compares the pass
+    without the view with the shaders of main at the same state, uniforms and dither. The test makes those shaders from
+    the shipped ones by cutting out the scent code (`WITHOUT_SCENT` in `sim.gpu.test.ts`); when the view was added, that
+    gave the files of 45155a8 byte for byte on both backends. The same pattern as ADR 0022, decision 23.
+
+### Consequences
+
+- Cost of one frame of the glow style, paired in one page against the render pass without the scent code (A, the
+  shaders of main) and the shipped pass with the view off (B) and on (C), Transport network on 1024 × 640 with three
+  UI dabs of food after 1,500 steps, median of 21 rounds of 20 frames, M3 Pro (Metal), other work on the host (load
+  average 7 to 11). "Fit" and "zoomed out 3 times" show the whole grid, "zoomed in 6 times" a dab:
+
+  | Canvas, scene, view                             | WebGPU: off; on − off (ms), two runs | WebGL2: off; on − off (ms), two runs |
+  | ----------------------------------------------- | ------------------------------------ | ------------------------------------ |
+  | 1280 × 800, Jones, fit                          | 0.42; +0.07 / 0.61; +0.10            | 0.58; +0.14 / 0.76; +0.06            |
+  | 1280 × 800, Jones, zoomed out 3 times           | 1.37; +0.45 / 1.70; +0.53            | 1.64; +0.45 / 2.19; +0.60            |
+  | 1280 × 800, Jones, zoomed in 6 times            | 0.53; +0.07 / 0.61; +0.11            | 0.61; +0.14 / 0.84; +0.14            |
+  | 1280 × 800, Extended 0.003, fit                 | 0.47; +0.07 / 0.57; +0.10            | 0.58; +0.12 / 0.79; +0.12            |
+  | 1280 × 800, Extended 0.003, zoomed out 3 times  | 1.40; +0.35 / 1.67; +0.41            | 1.68; +0.42 / 2.12; +0.53            |
+  | 1280 × 800, Extended 0.003, zoomed in 6 times   | 0.43; +0.08 / 0.54; +0.16            | 0.60; +0.14 / 0.77; +0.18            |
+  | 2560 × 1600, Jones, fit                         | 1.55; +0.33 / 2.17; +0.29            | 2.48; +0.50 / 2.71; +0.51            |
+  | 2560 × 1600, Jones, zoomed out 3 times          | 4.76; +0.49 / 5.54; +0.60            | 6.19; +0.81 / 6.22; +0.84            |
+  | 2560 × 1600, Jones, zoomed in 6 times           | 1.62; +0.35 / 2.10; +0.41            | 2.63; +0.58 / 2.75; +0.60            |
+  | 2560 × 1600, Extended 0.003, fit                | 1.54; +0.34 / 2.08; +0.39            | 2.40; +0.64 / 2.67; +0.54            |
+  | 2560 × 1600, Extended 0.003, zoomed out 3 times | 4.66; +0.55 / 5.49; +0.55            | 6.16; +0.95 / 6.26; +0.87            |
+  | 2560 × 1600, Extended 0.003, zoomed in 6 times  | 1.60; +0.36 / 2.29; +0.41            | 2.65; +0.60 / 2.81; +0.61            |
+
+  B − A lies within the spread of the rounds (−0.07 to +0.09 ms over all cases): without the view the frame costs
+  what it cost before. With it, a frame costs 0.06 to 0.18 ms more at 1280 × 800 and 0.3 to 0.65 ms more at
+  2560 × 1600, fitted or zoomed in; zoomed out 3 times, where each pixel reads 4 cells of its own, 0.35 to 0.6 ms and
+  0.5 to 0.95 ms.
+
+- Pixels without the view: 0 of 255 apart from the shaders of main in every style, on the periodic grid, in a box and in
+  a dish, with and without food, light and walls, zoomed in 8 times, at 0.6 cells per pixel and zoomed out 2.5 times
+  (`sim.gpu.test.ts`, both backends).
+- GPU tests on both backends (`sim.gpu.test.ts`, "scent view"): the pixels without the view, as above; no byte of the
+  simulation changes with the view; every pixel inside the arena follows a CPU reference of the view over the picture
+  without it (`scentAt()` with `scentBands()` and `scentOver()` of `scent.ts`), in every style, across the seam of the
+  periodic grid, at the edge of the box and at the rim of the dish, at three zooms, within 3 of 255, and outside the
+  arena the view changes no pixel by more than the dither; zoomed in beside a wall the view follows the reference that
+  leaves the wall's cells out. The reference leaves out pixels within 0.001 cells of a cell centre, where the bilinear
+  gradient jumps and float32 may take the other side, and pixels the pass clamps (the gel's highlights, light on
+  paper); at least 90 % of the pixels of each view stay in. Unit tests: `scent.test.ts` (the levels, the bands, the
+  lines, the filter, the colours), `params.test.ts`, `url.test.ts` (the link), `scene.test.ts` and `state.test.ts` (no
+  change of the scene; the switch stays on a new scene), `pack.test.ts`, `engine.test.ts`. e2e (`ui.spec.ts`): the
+  button and the key S switch the view and its legend, the link holds it, the scene shows no change, the simulation
+  does not restart, and axe finds nothing serious in the legend. Each test was checked with a deliberate mutation of
+  the code it guards: the pass without the view built with `SCENT` (WebGPU: a validation error of the pipeline of
+  main's shader; WebGL2: other pixels), the frame without the view on the pipelines of the view, the view clearing the
+  scent, a restart on the switch, `packParams()` reading it, the opacity of a band or a line, the lowest level, the wrap
+  at the seam, the clamp at the box edge, the rim of the dish, the wall cells in the lookup, the switch dropped on a
+  new scene, in the link or counted as a change, and the key S (e2e).
+- On SwiftShader on an M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`) the new GPU tests took
+  at most 11.1 s (the pixels without the view, WebGL2) of their 240 s limit, the test of the simulation's bytes 5.0 s
+  of 120 s, the others under 0.7 s of 60 s (ADR 0010).
+- The width of a line steps a little where the pixel crosses a cell centre: the gradient of a bilinear lookup jumps
+  there. The line's place does not. At 10 pixels per cell the lines look round in the screenshots of the pull request.
+- The PNG export has the bands and lines, but no legend.

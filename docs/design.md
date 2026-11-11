@@ -174,7 +174,7 @@ its cells.
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)              |
 | Environment         | food strength, covered food, shrinkage; extended: diffusion passes, light strength                            |
 | Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush |
-| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                          |
+| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom; scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings  |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                     |
 
@@ -189,7 +189,7 @@ places an amount per second of holding at any frame rate. With none left, a noti
 paused, a held tool runs 60 steps per second; inoculate runs none while every agent of its strain
 lives (ADR 0023).
 
-Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
+Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn.
 
 ## 5. Look
 
@@ -208,6 +208,11 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
   (they deposit nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
+- Scent view (ADR 0009, amendment 2026-11-11): a switch of the look draws the food scent (green) and the light
+  repellent (pink) over the picture, below the walls, in bands of one power of ten from 0.01 up with a line at each
+  power of ten. The scale is fixed, so scenes and models compare; a legend gives the values. It changes nothing in
+  the simulation, goes into the link like the style, stays on when a scene loads, and without it the render pass
+  draws the pixels of before at the same cost.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.
