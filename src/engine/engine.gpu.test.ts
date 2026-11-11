@@ -218,6 +218,8 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the inoculate tool', (kind) 
       expect(fast.agents).toEqual(slow.agents);
       expect(fast.trail).toEqual(slow.trail);
     },
+    // Up to 59.7 s of 60 s on SwiftShader in CI (#26), over 60 s on #28: 240 s keeps it under a quarter (ADR 0010).
+    240_000,
   );
 
   // Paused, a held tool runs 60 steps per second: one per frame at 60 Hz, one every other frame at 120 Hz.
@@ -231,6 +233,8 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the inoculate tool', (kind) 
       expect(fast.agents).toEqual(slow.agents);
       expect(fast.trail).toEqual(slow.trail);
     },
+    // Up to 32.3 s of 60 s on SwiftShader in CI (#26): 240 s keeps it under a quarter (ADR 0010).
+    240_000,
   );
 });
 
