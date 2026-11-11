@@ -264,8 +264,9 @@
       e.panBy(p[0] - prev[0], p[1] - prev[1]);
     } else {
       paintTo(e, p);
-      if (held) held = p;
     }
+    // Also while another tool is selected: a key can select the held tool again before the pointer goes up.
+    if (held) held = p;
   }
 
   function onpointerup(ev: PointerEvent) {
@@ -279,12 +280,13 @@
     getEngine()?.zoomAt(...pos(ev), Math.exp(-ev.deltaY * 0.0015));
   }
 
-  // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame).
+  // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame). Only
+  // while that tool is selected: a key can select another tool during the hold (ADR 0022, decision 31).
   $effect(() => {
     let raf = 0;
     const tick = () => {
       const e = getEngine();
-      if (e && held) {
+      if (e && held && (app.tool === 'cut' || app.tool === 'inoculate')) {
         const [x, y] = e.toGrid(...held);
         const radius = brushCells(e);
         if (app.tool === 'cut') e.agentTool({ kind: AgentToolKind.cut, x, y, radius, strain: 0, rate: 0 });

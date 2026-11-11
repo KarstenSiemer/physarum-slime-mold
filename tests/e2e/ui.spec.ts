@@ -135,6 +135,37 @@ test('the Jones model offers no Light tool, and says that drawn light has no eff
   expect(errors).toEqual([]);
 });
 
+// A key can select another tool while the inoculate or cut tool is held: the held tool then stops (decision 31).
+test('a held agent tool acts only while it is selected', async ({ page }) => {
+  await page.evaluate(() => {
+    const e = globalThis.physarum;
+    if (!e) throw new Error('no engine');
+    const agentTool = e.agentTool.bind(e);
+    const g = globalThis as unknown as { held: number };
+    g.held = 0;
+    e.agentTool = (t) => {
+      g.held++;
+      agentTool(t);
+    };
+  });
+  const held = () => page.evaluate(() => (globalThis as unknown as { held: number }).held);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect.poll(held, { timeout: 60_000 }).toBeGreaterThan(2);
+  await page.keyboard.press('3');
+  await expect(page.getByRole('radio', { name: 'Food' })).toHaveAttribute('aria-checked', 'true');
+  const stopped = await held();
+  // Longer than a few frames, also on SwiftShader.
+  await page.waitForTimeout(1000);
+  expect(await held()).toBe(stopped);
+  await page.keyboard.press('7');
+  await expect.poll(held, { timeout: 60_000 }).toBeGreaterThan(stopped);
+  await page.mouse.up();
+});
+
 test('the food tool paints food into the environment', async ({ page }) => {
   await page.getByRole('radio', { name: 'Food' }).click();
   const box = await page.locator('canvas').boundingBox();
