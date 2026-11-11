@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CpuBackend } from '../engine/cpu-backend';
 import { Engine } from '../engine/engine';
-import type { Boundary, Settings } from '../model/params';
-import type { EnvShape } from '../model/presets';
+import type { EnvEdit } from '../engine/environment';
+import { defaultSettings, type Boundary, type Settings } from '../model/params';
+import { presetById, type EnvShape } from '../model/presets';
 
 // A fresh module per test: the app state and the once-per-page-load notice live in the module.
 async function fresh() {
@@ -249,5 +250,128 @@ describe('the start of the engine', () => {
     const { calls, engine } = recorder();
     await startScene(engine);
     expect(calls).toEqual([['load', 'dish', 0, undefined]]);
+  });
+});
+
+// A shared link names the scene, which of its shapes the list holds and the strokes after them (docs/adr/0021).
+describe('a shared link', () => {
+  const dab: EnvEdit = { kind: 'food', from: [100, 60], to: [100, 60], radius: 4, grid: [512, 320], boundary: 'box' };
+  const mazeShapes = () => (presetById('maze')?.env ?? []).map(() => true);
+  const canvas = () => ({ width: 1600, height: 1000 }) as HTMLCanvasElement;
+  const loads = () => {
+    const calls: [number, number, (string | undefined)?][] = [];
+    const engine = {
+      load: (_s: Settings, env: readonly EnvShape[] = [], arena?: Boundary, strokes: readonly EnvEdit[] = []) => {
+        calls.push([env.length, strokes.length, arena]);
+        return Promise.resolve();
+      },
+    };
+    return { calls, engine };
+  };
+
+  it('loads once with its settings, the shapes it kept and its strokes, and the card says the scene changed', async () => {
+    const { app, currentDrawing, openLink, sceneChanged, setEngine, startScene } = await fresh();
+    const settings = presetById('maze')?.settings() ?? defaultSettings();
+    const shapes = mazeShapes().map((_, i) => i !== 1);
+    const drawing = { scene: 'maze', origins: [0], shapes, strokes: [dab] };
+    openLink({ settings, drawing });
+    expect(app.scene).toBe('maze');
+    expect(app.strainOrigin).toEqual([0]);
+    expect(sceneChanged()).toBe(true); // before the engine exists
+    expect(currentDrawing()).toEqual(drawing);
+    const { calls, engine } = loads();
+    await startScene(engine);
+    expect(calls).toEqual([[shapes.length - 1, 1, 'box']]);
+    // With an engine: its list is the sender's, and the flag stays.
+    openLink({ settings, drawing });
+    const real = await Engine.create(canvas(), structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(real);
+    await startScene(real);
+    expect(real.envList().at(-1)).toEqual(dab);
+    expect(real.envList()).toHaveLength(shapes.length);
+    expect(sceneChanged()).toBe(true);
+    expect(currentDrawing()).toEqual(drawing);
+    setEngine(undefined);
+  });
+
+  it("gives each strain the role it had in the sender's scene", async () => {
+    const { app, openLink } = await fresh();
+    const s = presetById('dot-grid')?.settings() ?? defaultSettings();
+    // The sender removed strain A and added one: B and C moved up a letter.
+    const settings = { ...s, strains: [...s.strains.slice(1), s.strains[0] ?? s.strains[1]] } as Settings;
+    openLink({ settings, drawing: { scene: 'dot-grid', origins: [1, 2, -1], shapes: [], strokes: [] } });
+    expect(app.strainOrigin).toEqual([1, 2, -1]);
+  });
+
+  it('of the scene as it loads is the scene unchanged, until a model setting differs', async () => {
+    const { app, openLink, sceneChanged, setEngine, startScene } = await fresh();
+    const settings = presetById('maze')?.settings() ?? defaultSettings();
+    openLink({ settings, drawing: { scene: 'maze', origins: [0], shapes: mazeShapes(), strokes: [] } });
+    expect(sceneChanged()).toBe(false);
+    const engine = await Engine.create(canvas(), structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    expect(sceneChanged()).toBe(false);
+    setEngine(undefined);
+    const other = { ...settings, diffusion: 3 };
+    openLink({ settings: other, drawing: { scene: 'maze', origins: [0], shapes: mazeShapes(), strokes: [] } });
+    expect(sceneChanged()).toBe(true);
+  });
+
+  it('with settings only loads them alone, as before, and names no scene', async () => {
+    const { app, currentDrawing, openLink, sceneChanged, startScene } = await fresh();
+    const settings = { ...defaultSettings(), boundary: 'dish' as const };
+    openLink({ settings });
+    expect(app.scene).toBe('');
+    expect(app.notice).toBe('');
+    expect(sceneChanged()).toBe(false);
+    expect(currentDrawing()).toEqual({ scene: '', origins: [], shapes: [], strokes: [] });
+    const { calls, engine } = loads();
+    await startScene(engine);
+    expect(calls).toEqual([[0, 0, undefined]]);
+  });
+
+  it('with a drawing this app cannot read loads the settings alone, and says so', async () => {
+    const { app, currentDrawing, openLink, startScene } = await fresh();
+    const settings = { ...defaultSettings(), boundary: 'dish' as const };
+    openLink({ settings, drawingLost: true });
+    expect(app.notice).toBe('This app cannot read the scene and drawing in this link, so only its settings load.');
+    expect(app.scene).toBe('');
+    expect(currentDrawing()).toEqual({ scene: '', origins: [], shapes: [], strokes: [] });
+    const { calls, engine } = loads();
+    await startScene(engine);
+    expect(calls).toEqual([[0, 0, undefined]]);
+  });
+
+  it('loses its drawing to a preset or a Clear chosen before the engine starts', async () => {
+    const { clearEnvironment, currentDrawing, loadPreset, openLink, startScene } = await fresh();
+    const settings = presetById('maze')?.settings() ?? defaultSettings();
+    const drawing = { scene: 'maze', origins: [0], shapes: mazeShapes(), strokes: [dab] };
+    openLink({ settings, drawing });
+    clearEnvironment();
+    expect(currentDrawing()).toEqual({ ...drawing, shapes: mazeShapes().map(() => false), strokes: [] });
+    const cleared = loads();
+    await startScene(cleared.engine);
+    expect(cleared.calls).toEqual([[0, 0, 'box']]);
+    openLink({ settings, drawing });
+    loadPreset('steiner');
+    const loaded = loads();
+    await startScene(loaded.engine);
+    expect(loaded.calls).toEqual([[4, 0, 'dish']]);
+  });
+
+  it('counts every change of the food, light and walls for the page address', async () => {
+    const { app, clearEnvironment, loadPreset, setEngine, startScene } = await fresh();
+    const before = app.envVersion;
+    loadPreset('maze');
+    clearEnvironment();
+    expect(app.envVersion).toBe(before + 2);
+    const engine = await Engine.create(canvas(), structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    const loaded = app.envVersion;
+    engine.paint(dab);
+    expect(app.envVersion).toBe(loaded + 1);
+    setEngine(undefined);
   });
 });

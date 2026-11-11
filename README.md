@@ -19,8 +19,8 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 - Run **experiments**: shortest path, Steiner tree, shrinking plasmodium and wound healing from
   the paper, plus light avoidance and a maze.
 - Read what each scene shows: where its settings come from, what to watch, and why it uses them.
-- Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the exact
-  state as a link.
+- Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the settings,
+  the scene and its food, light and walls as a link.
 - Learn: the biology, the paper behind the model and its six steps, every control and every
   scene, with references.
 

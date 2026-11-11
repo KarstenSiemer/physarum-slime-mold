@@ -31,7 +31,7 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
                              └── engine/engine.ts   settings, frame loop, view, tools (backend-independent)
                                     ├── webgpu.ts   WebGPU backend: sim.ts, render.ts, bloom.ts, exposure.ts, shaders/*.wgsl
                                     └── gl/         WebGL2 fallback: sim.ts, backend.ts, glsl/*.{vert,frag} (ADR 0003)
-                             model/ params.ts (schema = single source of truth), presets.ts, url.ts, color.ts
+                             model/ params.ts (schema = single source of truth), presets.ts, url.ts, link.ts, color.ts
 ```
 
 - `model/params.ts` defines every parameter once: key, label, unit, range, default, help
@@ -50,6 +50,12 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   hold yet in one call and writes `env` and the renderer's outlines together: WebGPU outlines each
   segment right after its paint, WebGL2 a run of segments after the run's paint, with the bytes of
   one segment after another (ADR 0009, item 11).
+- The page address is a link to the settings, the scene and the engine's edit list:
+  `#s=<settings>&e=<drawing>` (`model/url.ts`, `model/link.ts`, ADR 0021). The engine paints and
+  records every stroke on whole steps of 1/16 cell, so the link holds the list exactly and paints
+  the sender's bytes on the sender's grid. It names the scene's shapes by the scene and one bit
+  each. A drawing too large for a link stays out of it: the link then holds the settings and the
+  scene as it loads, and the app says so.
 - One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
@@ -156,7 +162,7 @@ its short side, as Jones counts %p; a box or a periodic grid over all its cells.
 | Tools               | pan/zoom, inoculate (selected strain), food, light, wall, erase, cut; brush size                                 |
 | Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                             |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings     |
-| Share               | URL with full state, PNG export                                                                                  |
+| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                        |
 
 Guided experiments (each sets a preset, an environment and a text that says what to watch):
 dynamic network (Fig. 4), hexagonal minimization (Fig. 5), scale by SO (Fig. 10), SA × RA

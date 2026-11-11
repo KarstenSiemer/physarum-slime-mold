@@ -6,14 +6,16 @@
   import { GpuUnavailableError } from './engine/gpu';
   import { AgentToolKind } from './engine/pack';
   import { presetById, START } from './model/presets';
-  import { decodeSettings, encodeSettings } from './model/url';
+  import { decodeLink, encodeLink } from './model/url';
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
   import SceneLabel from './ui/SceneLabel.svelte';
   import { constrain } from './model/params';
   import {
     app,
+    currentDrawing,
     getEngine,
+    openLink,
     ruleUnavailable,
     setEngine,
     setScene,
@@ -31,6 +33,8 @@
   let ready = $state(false);
   /** Height of the header, scene name and notice; the phone panel starts below them. */
   let topHeight = $state(72);
+  /** The page address was read: from then on it follows the state. */
+  let addressRead = $state(false);
 
   onMount(() => {
     const life = new AbortController();
@@ -47,10 +51,12 @@
     observer.observe(canvas);
 
     void (async () => {
-      const fromUrl = location.hash.startsWith('#s=') ? await decodeSettings(location.hash.slice(3)) : undefined;
+      // A shared link: its settings, and the scene with its food, light and walls, which startScene() loads.
+      const link = location.hash.length > 1 ? await decodeLink(location.hash.slice(1)) : undefined;
       const start = presetById(START);
-      if (fromUrl) app.settings = fromUrl;
+      if (link) openLink(link);
       else if (start) setScene(start);
+      addressRead = true;
       try {
         // The engine lowers the grid when the device cannot hold it, also for the first allocation.
         const engine = await Engine.create(canvas, $state.snapshot(app.settings), (message, resolution) => {
@@ -108,14 +114,26 @@
     if (engine) engine.paused = paused;
   });
 
-  // Settings → URL hash, debounced, so the address is always a shareable link.
+  // Settings, scene and food, light and walls → URL hash, debounced, so the address is always a shareable link. The
+  // engine changes its edit list outside Svelte: app.envVersion counts the changes (state.svelte.ts). A scene and its
+  // strains' origins change only with the settings or that count. The drawing is read when the timer fires, so a
+  // drag records many segments for one encoding. Until the address was read at startup, it is left as it is.
   let urlTimer: ReturnType<typeof setTimeout> | undefined;
+  let urlRuns = 0;
+  /** The last link left the drawing out: the notice comes once each time a drawing grows too large. */
+  let dropped = false;
+  const shared = $derived({ settings: $state.snapshot(app.settings), edits: app.envVersion });
   $effect(() => {
-    const snapshot = $state.snapshot(app.settings);
+    const { settings } = shared;
     clearTimeout(urlTimer);
+    if (!addressRead) return;
     urlTimer = setTimeout(() => {
-      void encodeSettings(snapshot).then((h) => {
-        history.replaceState(null, '', `#s=${h}`);
+      const run = ++urlRuns;
+      void encodeLink(settings, currentDrawing()).then(({ hash, dropped: lost }) => {
+        if (run !== urlRuns) return; // a later encoding started meanwhile
+        history.replaceState(null, '', `#${hash}`);
+        if (lost && !dropped) showNotice('The drawing is too large for a link.');
+        dropped = lost;
       });
     }, 400);
   });

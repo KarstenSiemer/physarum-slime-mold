@@ -30,7 +30,8 @@ test('a preset reaches the engine and updates the shareable link', async ({ page
   await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
   const s = await page.evaluate(() => globalThis.physarum?.settings);
   expect(s?.strains[0]?.attraction[0]).toBe(-1);
-  await expect.poll(() => page.evaluate(() => location.hash)).toMatch(/^#s=[\w-]+$/);
+  // The settings, and the scene with its food, light and walls (docs/adr/0021).
+  await expect.poll(() => page.evaluate(() => location.hash)).toMatch(/^#s=[\w-]+&e=[\w-]+$/);
   expect(errors).toEqual([]);
 });
 

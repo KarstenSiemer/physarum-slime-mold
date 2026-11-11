@@ -157,6 +157,12 @@
         Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, H hide panels, L this
         dialog.
       </p>
+      <p>
+        The page address is a link to what you see: the settings, the scene, and the food, light and walls you painted.
+        Copy it to share the scene or to come back to it. The agents and their trails start again when the link opens.
+        If the drawing is too large for a link, a notice says so. The link then opens the scene as it loads, without the
+        drawing. If this app cannot read the drawing in a link, a notice says so, and only the settings load.
+      </p>
     {:else if app.learnTab === 'Scenes'}
       <p>
         Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a

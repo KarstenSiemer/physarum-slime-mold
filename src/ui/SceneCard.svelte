@@ -93,10 +93,11 @@
       <p>{scene.why}</p>
     </details>
   {:else}
-    <!-- The address holds the settings since the page started, so a reload lands here as well (App.svelte). -->
+    <!-- The address names the scene (docs/adr/0021): a link lands here when it names none, such as an older one, or
+    when this app cannot read its drawing (url.ts decodeLink()). -->
     <p class="summary">
-      These settings came from the page address, after a reload or from a shared link. The address names no scene, so
-      there is no scene text. Choose a preset to load one.
+      These settings came from a link that names no scene this app can read, so there is no scene text. Choose a preset
+      to load one.
     </p>
   {/if}
 </section>

@@ -1,8 +1,10 @@
 // The engine keeps food, light and walls across new simulations (ADR 0019), checked in Node with a CPU backend
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it } from 'vitest';
+import { drawingOf } from '../model/link';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
+import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
@@ -825,35 +827,37 @@ describe('the sweep', () => {
     expect(differing(sim().env, fine)).toBe(0);
   });
 
-  // The GPU computes in float32: a cell this close to the edge of a brush may go either way there.
+  // The GPU computes in float32: a cell this close to the edge of a brush may go either way there. Engine.paint() puts
+  // positions and radii on whole steps of 1/16 cell (STEP), so the probes lie on them too.
   it('deletes a stroke only when its cells lie inside the clearing strokes by SLACK', async () => {
     const { engine } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
     const dab = (kind: Stroke['kind'], radius: number, at: [number, number] = [100.5, 100.5]) => {
       engine.paint({ kind, from: at, to: at, radius });
     };
-    // Four cells lie exactly 3 cells from the food's centre. An erase a hair beside it, with a segment of its own,
-    // paints them, but clears them only within its last 0.005 cells.
+    // An erase with a segment of its own paints every cell of the food, but one of them lies only 0.004 cells inside
+    // its edge: it does not clear that cell by SLACK.
     dab('food', 3);
-    dab('erase', 3.005, [100.5001, 100.5]);
+    dab('erase', 3.9375, [99.6875, 101.25]);
     expect(edits(engine)).toHaveLength(2);
     engine.clearEnvironment();
-    // Not painted by the food on the CPU, but within SLACK of its brush, and not cleared.
-    dab('food', 2.995);
-    dab('erase', 2.95);
+    // Twelve cells lie 0.0086 cells outside the food on the CPU, within SLACK of its brush. An erase one step beside
+    // it clears every cell the food paints by 0.06 cells, but leaves one of the twelve 0.008 cells outside its edge.
+    dab('food', 7.0625);
+    dab('erase', 7.125, [100.4375, 100.5]);
     expect(edits(engine)).toHaveLength(2);
     // Cleared well inside.
-    dab('erase', 3.2);
+    dab('erase', 7.25);
     expect(edits(engine)).toHaveLength(0);
     // An erase along the food's middle row clears its rows 98 to 102; the cells (100, 97) and (100, 103) lie exactly 3
     // cells from the food's centre, outside every row the erase clears: both stay.
     dab('food', 3);
-    engine.paint({ kind: 'erase', from: [90.5, 100.5], to: [110.5, 100.5], radius: 2.9 });
+    engine.paint({ kind: 'erase', from: [90.5, 100.5], to: [110.5, 100.5], radius: 2.875 });
     expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
     engine.clearEnvironment();
-    // An erase that reaches the food's cell (102, 100) only within SLACK of its own edge still erases it on the GPU:
-    // it stays as long as the food does.
+    // An erase that reaches the food's cell (102, 100) only on its own edge still erases it on the GPU: it stays as
+    // long as the food does.
     dab('food', 2);
-    dab('erase', 3.005, [105.5, 100.5]);
+    dab('erase', 3, [105.5, 100.5]);
     expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
   });
 
@@ -891,8 +895,8 @@ describe('the sweep', () => {
     expect(await pair(['food', 'box', 3], ['erase', 'box', 3], band)).toEqual([]);
     // A dab at the band's start shares its start, not its segment.
     expect(await pair(['food', 'box', 3], ['erase', 'box', 30], band, [band[0], band[0]])).toEqual(['food', 'erase']);
-    // A smaller radius leaves the edge cells.
-    expect(await pair(['food', 'box', 5], ['erase', 'box', 4.999])).toEqual(['food', 'erase']);
+    // A radius one step (STEP) smaller leaves the edge cells.
+    expect(await pair(['food', 'box', 5], ['erase', 'box', 4.9375])).toEqual(['food', 'erase']);
     // Arenas: a box or a periodic erase holds a dish edit, a periodic one a box edit; not the other way round.
     expect(await pair(['food', 'dish', 5], ['erase', 'box', 5])).toEqual([]);
     expect(await pair(['food', 'dish', 5], ['erase', 'wrap', 5])).toEqual([]);
@@ -924,25 +928,6 @@ describe('the sweep', () => {
     // The food's own brush clears every cell of it, (95, 100) too: the food goes, and both erases with it.
     dab('erase', [100.5, 100.5], 5);
     expect(edits(engine)).toEqual([]);
-  });
-
-  // A radius a hair smaller: 5 − 5e-7 is 4.9999995 in float32 too, less than the distance of the 12 cells that lie
-  // exactly 5 cells from the centre. The erase leaves their food, so the food stays in the list (mutant VM8).
-  it('keeps a stroke under a later one with its segment and a radius a hair smaller, which leaves its edge cells', async () => {
-    const at: [number, number] = [200.5, 160.5];
-    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
-    engine.paint({ kind: 'food', from: at, to: at, radius: 5 });
-    engine.frame(0, 0);
-    engine.paint({ kind: 'erase', from: at, to: at, radius: 5 - 5e-7 });
-    engine.frame(0, 0);
-    expect(Math.fround(5 - 5e-7)).toBeLessThan(5);
-    expect(foodNear(sim(), at, 5)).toBe(12);
-    expect(edits(engine).map((e) => e.kind)).toEqual(['food', 'erase']);
-    // A new simulation paints the list again: the 12 cells keep their food.
-    const first = sim();
-    await engine.apply({ ...engine.settings, density: 0.3 });
-    expect(sim()).not.toBe(first);
-    expect(foodNear(sim(), at, 5)).toBe(12);
   });
 
   // Spread into Math.min, V8 throws from about 125,000 arguments: an erase over 130,000 edits threw out of
@@ -1046,5 +1031,87 @@ describe('the sweep', () => {
     fresh.engine.frame(0, 0);
     engine.frame(0, 0);
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
+  });
+});
+
+// Engine.paint() records strokes on whole steps of 1/16 cell (STEP), so a shared link can hold them exactly.
+describe('strokes on whole steps', () => {
+  it('records strokes on whole steps of 1/16 cell, as painted', async () => {
+    const { engine, sim } = await engineWith({ ...three.settings(), resolution: 512, boundary: 'box' }, []);
+    engine.paint({ kind: 'food', from: [100.3, 100.71], to: [130.1, 90.2], radius: 2.53 });
+    expect(edits(engine)[0]).toMatchObject({ from: [100.3125, 100.6875], to: [130.125, 90.1875], radius: 2.5 });
+    engine.frame(0, 0);
+    const expected = new Uint8Array(512 * 320 * 4);
+    paintReference(
+      expected,
+      512,
+      320,
+      { kind: 'food', from: [100.3125, 100.6875], to: [130.125, 90.1875], radius: 2.5 },
+      'box',
+    );
+    expect(differing(sim().env, expected)).toBe(0);
+  });
+});
+
+// A shared link holds the edit list exactly (docs/adr/0021): on the sender's grid it paints the sender's bytes, and on
+// another grid what the sender's list paints there.
+describe('a shared link', () => {
+  /** mulberry32: a seeded random source, so a failure repeats. */
+  const random = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+  };
+
+  it("paints the sender's bytes on the sender's grid and the sender's list on other grids", async () => {
+    const r = random(11);
+    const kinds = ['food', 'light', 'wall', 'erase'] as const;
+    for (let trial = 0; trial < 4; trial++) {
+      const c = canvas();
+      const sender = await engineWith(maze.settings(), mazeEnv, c);
+      // Strokes of every kind, across the edges, in the box, the dish and the periodic grid, on two grids, with sweeps.
+      for (let i = 0; i < 120; i++) {
+        if (i === 40) await sender.engine.apply({ ...sender.engine.settings, boundary: 'dish' });
+        if (i === 60) await sender.engine.apply({ ...sender.engine.settings, resolution: 768 });
+        if (i === 80) await sender.engine.apply({ ...sender.engine.settings, boundary: 'wrap' });
+        const [w, h] = [sender.sim().width, sender.sim().height];
+        const from: [number, number] = [r() * w * 1.2 - 0.1 * w, r() * h * 1.2 - 0.1 * h];
+        const to: [number, number] = r() < 0.3 ? from : [from[0] + (r() - 0.5) * 80, from[1] + (r() - 0.5) * 80];
+        const kind = kinds[Math.floor(r() * kinds.length)] ?? 'food';
+        sender.engine.paint({ kind, from, to, radius: 0.5 + r() * 14 });
+        if (i % 7 === 0) sender.engine.frame(0, 0);
+      }
+      sender.engine.frame(0, 0);
+      const list = sender.engine.envList();
+      const { hash, dropped } = await encodeLink(sender.engine.settings, drawingOf(list, 'maze', mazeEnv, 'box', [0]));
+      expect(dropped).toBe(false);
+      const link = await decodeLink(hash);
+      const d = link?.drawing;
+      if (!link || !d) throw new Error('no drawing in the link');
+      const rc = canvas();
+      const receiver = await Engine.create(rc, link.settings, undefined, new CpuBackend());
+      await receiver.load(
+        link.settings,
+        mazeEnv.filter((_, i) => d.shapes[i]),
+        'box',
+        d.strokes,
+      );
+      expect(receiver.envList()).toEqual(list);
+      const env = () => (receiver.sim as CpuSim).env;
+      expect([receiver.sim.width, receiver.sim.height]).toEqual([sender.sim().width, sender.sim().height]);
+      expect(differing(env(), sender.sim().env), `trial ${trial}, the sender's grid`).toBe(0);
+      // Another screen shape and grid for both: a square, then a phone turned upright.
+      for (const [width, height, resolution] of [
+        [1000, 1000, 512],
+        [1000, 1600, 256],
+      ] as const) {
+        for (const x of [c, rc]) [x.width, x.height] = [width, height];
+        await sender.engine.apply({ ...sender.engine.settings, resolution });
+        await receiver.apply({ ...receiver.settings, resolution });
+        expect(differing(env(), sender.sim().env), `trial ${trial}, ${width} × ${height}`).toBe(0);
+        expect(count(env(), 0) + count(env(), 1) + count(env(), 2)).toBeGreaterThan(0);
+      }
+    }
   });
 });

@@ -91,16 +91,16 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
 
 - **Edit list.** `Engine` (`src/engine/engine.ts`) keeps every edit since the last "Clear" or preset
   load that the sweep left: preset shapes in the canonical frame of the preset's own arena
-  (`fromShape`; `load()` at line 118 takes that arena, also when the settings hold another
-  boundary), strokes in the cells of the grid the view shows (`fromStroke`, `paint()` at line 289),
+  (`fromShape`; `load()` at line 119 takes that arena, also when the settings hold another
+  boundary), strokes in the cells of the grid the view shows (`fromStroke`, `paint()` at line 294),
   each with the arena it was painted in (`EnvEdit.boundary`; both backends write it into the
   parameters of the paint pass, which cuts the stroke at that arena's rim or wraps it around its
-  edges). Every new simulation paints the whole list (`flushEnv()`, line 353) before it places its
-  agents (`rebuild()`, line 197; `load()`). A frame paints the edits added since. "Clear" empties
+  edges). Every new simulation paints the whole list (`flushEnv()`, line 363) before it places its
+  agents (`rebuild()`, line 201; `load()`). A frame paints the edits added since. "Clear" empties
   the list, also during a rebuild; a preset load replaces it. At startup the engine loads once what
-  the panel holds (`startScene` in `src/ui/state.svelte.ts`, line 153): the panel's settings, and
-  the scene's shapes in the scene's own arena, or none after a Clear before the engine existed.
-  Before, a second step applied a copy of the settings taken before the load and could undo a
+  the panel holds (`startScene` in `src/ui/state.svelte.ts`, line 187): the panel's settings, and
+  the scene's shapes in the scene's own arena, or none after a Clear before the engine existed; for
+  a shared link, the shapes it kept and its strokes (ADR 0021). Before, a second step applied a copy of the settings taken before the load and could undo a
   setting changed during it on WebGPU. `Engine.paint` before the first simulation exists drops the
   stroke: no grid is on screen yet. So does it with a stroke that does not clearly paint a cell
   (`paintsCell` in `src/engine/brush.ts`, line 344): a cell inside the brush and the rim of a dish by
@@ -114,7 +114,7 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   until it starts inside the grid. Before, its raw coordinates lay beside the grid, and every other
   grid skipped it as outside: 131 food cells painted left of a 512 × 320 grid were none on
   1024 × 640 (CPU engine test; the GPU engine test failed the same way on both backends).
-- **Mapping** (`strokeOn`, `src/engine/environment.ts`, line 126). On the grid an edit was made on,
+- **Mapping** (`strokeOn`, `src/engine/environment.ts`, line 148). On the grid an edit was made on,
   it is painted with its original coordinates, byte for byte. On another grid it goes through the
   canonical frame of the arena it was painted in (`toFrame` and `fromFrame`), whatever arena the
   simulation runs in: landscape, origin at the grid's centre. A dish is the circle on the grid's
@@ -145,7 +145,7 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   1,672 cells lie across the edge at the opposite rim, 26 of them inside the dish (built app, both
   backends).
 - **The sweep** (`sweeping` in `src/engine/sweep.ts`, line 469, after every recorded erase or wall;
-  `Engine.sweepFor` at line 313). On the grid on screen: (1) an older food, light or wall edit is
+  `Engine.sweepFor` at line 323). On the grid on screen: (1) an older food, light or wall edit is
   deleted when every cell it paints is cleared by a stroke recorded after it: an erase clears every
   kind, a wall food and light. An edit that paints no cell of that grid is kept: that grid cannot
   judge it. (2) Then an erase is deleted when no older food, light or wall edit that stays paints a
@@ -255,7 +255,7 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
 
 - **Scene changed.** The scene card shows "changed" and "Reload scene" when a model setting or the
   food, light and walls differ from the loaded scene: when the engine's list is not the scene's
-  shapes in the scene's arena (`Engine.matches`, line 143; `Engine.onEdits` after every change of
+  shapes in the scene's arena (`Engine.matches`, line 154; `Engine.onEdits` after every change of
   the list; `app.envChanged` in `src/ui/state.svelte.ts`). A Clear of a scene with shapes, a
   recorded stroke or a sweep that deleted a shape changes the scene; a stroke and an erase that the
   sweep took back leave it unchanged. Before the engine exists, a Clear of a scene with shapes sets
@@ -494,5 +494,8 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   grids that it never erased on screen.
 - If a later model changes the environment on the GPU (food that gets eaten), the edit list no
   longer describes it, and that part needs a readback for a new grid.
-- Shared links still carry only the settings, not the edits (owner decision D8, its own pull
-  request).
+- Shared links carry the edit list, exactly as the sweep left it (owner decision D8, ADR 0021). For
+  that, `Engine.paint` puts the positions and the radius of every stroke on whole steps of 1/16 cell
+  (`STEP` and `snap` in `src/engine/environment.ts`, line 18) before it paints and records it: a
+  stroke moves by at most 1/32 of a cell. The sweep's tests that put a cell a hair beside a brush's
+  edge now use values on those steps (`engine-env.test.ts`).
