@@ -1,6 +1,6 @@
 # 0024: Scenes from later papers and from experiments
 
-- Status: accepted (the grid of a scene, item 3, is open)
+- Status: accepted
 - Date: 2026-11-11
 
 ## Context
@@ -46,10 +46,15 @@ The specifications found facts that force decisions:
    the behaviour of 2010, so the shipped scenes keep their bytes.
 2. **The turn rule is a setting of each scene** (owner, 2026-11-11). The default is random, as
    in 2010. Scenes of the papers of 2014 to 2017 turn toward the larger side.
-3. **The grid of a scene: open.** The owner first kept every scene on a grid that grows with the
-   screen (2026-11-11), then asked whether results should not stay comparable. Only the paper's
-   lattice gives the paper's result: scaling every length with the grid is not Jones' model,
-   because diffusion acts over one cell per step. The question is asked again (TODO.md).
+3. **A scene of Jones' papers runs on the lattice of its paper** (owner, 2026-11-11), for the
+   shipped scenes too. The owner first kept every scene on a grid that grows with the screen, then
+   asked whether results should not stay comparable. Only the paper's lattice gives the paper's
+   result: Jones' lengths are in cells, and scaling every length with the grid is not his model,
+   because diffusion acts over one cell per step. The arena keeps its cells on every screen and
+   fits the screen with free space beside it. The grid stays a setting: when the user picks another
+   size, the scene says why its result then differs from the paper and which lattice Jones used.
+   The app's own scenes (the start scene, the Maze, Three strains) keep a grid that grows with the
+   screen.
 4. **Tokyo keeps north up** (owner, 2026-11-11). Its frame does not turn by 90° on a tall screen
    (ADR 0019 turns the others); a tall screen shows free space above and below the map.
 5. **The maze of Adamatzky 2012 starts with a settled scent** (owner, 2026-11-11). The app computes
@@ -77,4 +82,5 @@ paper's values and these readings.
 - A faithful Tokyo network needs flow reinforcement (Tero et al. 2007). Without it, the scene shows
   Jones' method on Tero's map, and its text says so.
 - North-up and the settled scent are per-scene properties that other scenes do not have.
-- Until item 3 is decided, the numbers of a Jones scene depend on the screen and the grid.
+- The shipped Jones scenes change once they move to their papers' lattices: their bytes differ
+  from today, and their cells look larger on a large screen.
