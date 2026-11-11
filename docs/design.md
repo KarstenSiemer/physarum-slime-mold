@@ -53,9 +53,10 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
 - The page address is a link to the settings, the scene and the engine's edit list:
   `#s=<settings>&e=<drawing>` (`model/url.ts`, `model/link.ts`, ADR 0021). The engine paints and
   records every stroke on whole steps of 1/16 cell, so the link holds the list exactly and paints
-  the sender's bytes on the sender's grid. It names the scene's shapes by the scene and one bit
-  each. A drawing too large for a link stays out of it: the link then holds the settings and the
-  scene as it loads, and the app says so.
+  the sender's grid as the sender's list. It names the scene's shapes by the scene, the revision
+  of its shapes and one bit each, so an old link paints the shapes it was made with after a scene's
+  shapes change (ADR 0027). A drawing too large for a link stays out of it: the link then holds the
+  settings and the scene as it loads, and the app says so.
 - One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a

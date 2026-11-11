@@ -228,9 +228,13 @@ describe('presets', () => {
     const side = Math.abs(foods[0]?.at[0] ?? 0);
     for (const f of foods) expect(f.at.map(Math.abs)).toEqual([side, side]);
     expect(p.about).toMatch(/corners of a square/);
-    // With this app's foods on Jones' lattice: an X in about half of the runs, a ring in the others (ADR 0026).
-    expect(p.watch).toMatch(/about half of the runs it ends as an X/);
-    expect(p.watch).toMatch(/a ring through the four foods stays/);
+    // The foods of Fig. 19 (ADR 0027): a square of 60 cells on 200 × 200, foods of 2.7 cells. On Jones' lattice the
+    // network ends as a tree in 20 of 20 runs from step 6,000, as in the figure.
+    for (const f of foods) expect([...f.at.map(Math.abs), f.r * 200]).toEqual([0.15, 0.15, 2.7]);
+    expect(p.watch).toMatch(
+      /a tree through the middle of the square: two three-way junctions joined by a short bridge/,
+    );
+    expect(p.watch).not.toMatch(/ring/);
   });
 
   it('have one strain role per strain', () => {

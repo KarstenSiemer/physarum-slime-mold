@@ -447,3 +447,16 @@ See `TODO.md` (M2):
   WebGPU, 5.4 and 23 ms on WebGL2, which draws a point per agent. At 120 steps per second the app runs 2 steps per
   frame. With the rule the occupancy is there already, and covered food costs nothing measurable. It is off in every
   scene.
+
+## Amendment 2026-11-11: Jones' order, the emission factor and the walls (ADR 0027)
+
+- Both models now run Jones' order of a step (ADR 0027, decisions 1 to 4): the agents sense the map after the step's
+  moves, with the deposits and the food and light of those moves, before its diffusion.
+- Decision 13 keeps the plateau of a large food at every decay. In Jones' order that plateau is source / d, not
+  source · (1 − d) / d, so `emissionScale()` is now d / 0.1 (ADR 0027, decision 5). It is 1 at decay 0.1, where every
+  scene runs. The plateau of a food of strength 0.05 is now 127.5 at every decay (114.75 before, the map after the
+  diffusion). The table of the UI dab above holds the values of the old order.
+- Walls: in the Jones model a wall is a cell of the lattice that diffuses (Jones' later papers run the mean filter at
+  every site); in the extended model a wall is a sink. Both change the extended model's list of what is not Jones':
+  walls that absorb the trail and scent are the extended model's only (ADR 0027, decisions 10 and 11). The closed edges
+  of both models absorb.

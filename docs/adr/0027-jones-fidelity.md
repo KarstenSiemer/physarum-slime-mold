@@ -142,3 +142,58 @@ Each decision with its date, who made it, and why.
     rule is the model's, and an override constant would double the diffusion pipelines for a branch that costs nothing
     measurable (below). No scene of Jones has walls, so the Jones rule acts only where a user paints a wall into a
     scene of Jones.
+
+### The figures' foods
+
+15. **The foods of Fig. 18, 19 and 21** (owner, 2026-11-11, with the rule above; the positions measured in the figures
+    by the fidelity check). Shortest path (Fig. 18): 51 cells left and right of the middle of 200 × 200 (±0.255 of the
+    side), radius 4 cells as before; before ±57.6 cells. Steiner tree (Fig. 19, second row): a square of 60 cells
+    (±0.15 of the side, 0.317 of the dish's 189 cells) with foods of 2.7 cells (0.0135 of the side); before 58 cells
+    with foods of 4 cells. Shrinking plasmodium (Fig. 21): the 19 foods of the figure, at the cell positions measured in
+    it on 300 × 300, each `(x − 150) / 300` of the side from the middle; before 8 foods of this app's choice.
+16. **Shrinking plasmodium's food radius of 2.5 cells and weight 0.05 are this app's choice** (this branch, 2026-11-11).
+    Fig. 21 shows the trail, not the food cells, and the text gives neither. The fidelity check measured 0 of 31 runs
+    torn with weight 0.01 and with 0.05; 0.05 stays, the scene's value before. A radius of 2.5 cells around a lattice
+    corner paints 16 cells, the same as its first version's 2.49 cells.
+17. **The scene texts say what the scenes now show** (this branch, 2026-11-11, from the measurements below): Steiner tree
+    ends as a tree through the middle of the square with two junctions and a short bridge, as in Fig. 19, row 2; Turing
+    spots settle as a regular array of about 20 spots; Shrinking plasmodium no longer tears; Shortest path keeps no
+    branch to the rim.
+
+### Links keep the shapes they were made with
+
+18. **Shape revisions** (owner, 2026-11-11, from ADR 0026 decision 2; the design proposed by the lattice branch). A link
+    names a scene's shapes by the scene's id and one bit each (ADR 0021), so moving a scene's foods would make an old
+    link paint other foods than its sender had. Each preset keeps its earlier shape lists, oldest first
+    (`envHistory` in `src/model/presets.ts`); `env` is the newest. Revision 0 is the list of every scene when links
+    began to name shapes on 2026-11-10 (`9c1f56a`); a check of the presets at `9c1f56a`, `12c7078`, `45155a8` and
+    `f81c4a3` found every list unchanged until this change. Shortest path, Steiner tree and Shrinking plasmodium now have
+    revision 1. `shapeRevision()` gives a scene's newest revision and `shapesAt()` the shapes of one.
+19. **Link format version 2** (this branch, 2026-11-11; `src/model/link.ts`). After the scene's id it writes the revision
+    as a varint. A link of version 1 means revision 0. The decoder refuses a revision that the scene does not have and a
+    count of shapes other than the revision's, as it refused a wrong count before; the drawing is then lost and the
+    settings load alone, with the notice of ADR 0021. Without a scene no revision is written. `Drawing.revision` holds
+    it; `drawingOf()`, `kindsOf()`, `sceneOnly()`, `waiting()`, `currentDrawing()` and the engine's match
+    (`Engine.matches()` with the shapes of that revision) read it.
+20. **An old revision is a change of the scene** (this branch, 2026-11-11; `app.sceneRevision` in
+    `src/ui/state.svelte.ts`). The app keeps the revision that the engine's list holds: the newest after a preset load or
+    Reload scene, a link's own after the link. While it is not the newest, the scene card counts the scene as changed:
+    it says "This link changes the scene." while the link is as opened (ADR 0026, decision 14), and Reload scene loads
+    the newest shapes. The address keeps writing the link's revision, so a reload paints the same shapes.
+21. **An old link keeps its settings and its shapes, not the engine's old rules** (owner, 2026-11-11: the model change
+    applies to both models). Old links run with Jones' order, Jones' dish and the new boundaries, so they no longer give
+    the bytes they gave when they were made, also on the sender's grid (ADR 0021 promised those bytes). A stroke of an old
+    dish link that reached past 0.945 of the short side now paints only its cells inside the new rim. No setting brings
+    the old rules back.
+
+### What the view shows
+
+22. **The view shows the map as the agents sense it** (this branch, 2026-11-11). The textures hold the map after the
+    step's moves and before its diffusion (decision 2), and the renderer, the auto levels and `Sim.readTrail()` read them
+    as they are: fresh deposits show undiffused. Options: (a) this; (b) a pass per frame that writes the diffused map
+    for the view (a pass more per frame); (c) the mean in the render pass (nine taps per bilinear tap). The images of
+    Jones' figures are grainy at the scale of single agents (Fig. 16 next to the app's map before and after its
+    diffusion, the comparison images of the pull request), so (a) is also the closer picture. The scenes of Jones look
+    grainier than before at their lattices' scale (the contact sheets), and the app's scenes keep their character, apart
+    from the two scenes below. The metrics of this ADR run on Jones' map after his diffusion, computed from the dumps:
+    (1 − decay) times the mean of 9 cells, as the fidelity check measured.

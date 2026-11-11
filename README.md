@@ -30,9 +30,10 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 
 ## How it works
 
-Each agent has three forward sensors. Every step it senses the trail, turns toward the
-strongest sensor (Jones' rule), moves, and deposits trail. The trail spreads to neighbor cells
-and decays. Strong trails attract more agents, which strengthen the trail: a network forms.
+Each agent has three forward sensors. In every step all agents move and deposit trail, then
+they sense the trail and turn toward the strongest sensor (Jones' rule), then the trail spreads
+to neighbor cells and decays. Strong trails attract more agents, which strengthen the trail: a
+network forms.
 
 - Simulation: WebGPU compute shaders (WGSL) with integer atomics; deterministic for a seed.
   Optional one-agent-per-cell rule as in the paper, with a deterministic GPU claim method.
