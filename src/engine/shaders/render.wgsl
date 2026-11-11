@@ -674,6 +674,11 @@ fn scentOpen(c: vec2i) -> f32 {
   return 1.0;
 }
 
+// After steps only, the coarse map's pass refreshes the scent of its texels (x, y) and keeps their share (z), which
+// only the shape changes (render.ts): a step leaves no scent in walls or outside the dish (diffuse.wgsl `diffuse`), so
+// the sum over every cell of a texel is the sum over its open cells, and the pass reads no shape.
+override SUM_ONLY: bool = false;
+
 // The scent on the coarse map of level V.scentFx.x, one texel per fragment: the mean over the cells of the arena
 // that the texel covers, each by the share it covers (walls and cells outside the dish count 0), times the share that
 // holds scent (z). Zoomed out, a pixel reads 4 texels of this map instead of 4 cells far apart from those of the
@@ -690,7 +695,8 @@ fn scentDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
     for (var x = i32(floor(lo.x)); f32(x) < hi.x && x < s.x; x++) {
       let c = vec2i(x, y);
-      let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy * scentOpen(c);
+      var w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
+      if (!SUM_ONLY) { w *= scentOpen(c); }
       sum += w * vec3f(textureLoad(scent, c, 0).xy, 1.0);
     }
   }

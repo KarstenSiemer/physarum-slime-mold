@@ -87,7 +87,10 @@ interface Groups {
 /** The scent view: the render pass with it, without (index 0) or with (1) the food, light and walls, and `scentDown`. */
 interface ScentPipelines {
   render: Variants;
+  /** Fills the coarse map: the scent of its texels and the share of them that holds scent. */
   down: GPURenderPipeline;
+  /** Refreshes the scent of its texels after steps and keeps their share (SUM_ONLY in render.wgsl). */
+  sum: GPURenderPipeline;
 }
 
 /** A render pass and the gel height pass, without (index 0) or with (1) the food, light and walls. */
@@ -342,17 +345,17 @@ export class Renderer {
     const level = scentLevel(f.view.scale);
     const boundary = BOUNDARIES.indexOf(f.settings.boundary);
     const holds = this.coarseHolds;
-    const fresh =
-      holds?.sim === sim &&
-      holds.step === sim.step &&
-      holds.revision === sim.revision &&
-      holds.level === level &&
-      holds.boundary === boundary;
-    if (view && coarse && level > 0 && !fresh) {
+    // The share of a texel that holds scent changes only with the shape, the level or the arena; steps change only
+    // the scent, and they leave none in walls or outside the dish (render.wgsl SUM_ONLY).
+    const shaped =
+      holds?.sim === sim && holds.revision === sim.revision && holds.level === level && holds.boundary === boundary;
+    if (view && coarse && level > 0 && !(shaped && holds.step === sim.step)) {
       this.coarseHolds = { sim, step: sim.step, revision: sim.revision, level, boundary };
-      const down = enc.beginRenderPass({ colorAttachments: [{ view: coarse, loadOp: 'clear', storeOp: 'store' }] });
+      const down = enc.beginRenderPass({
+        colorAttachments: [{ view: coarse, loadOp: shaped ? 'load' : 'clear', storeOp: 'store' }],
+      });
       down.setViewport(0, 0, scentLevelSize(trail.width, level), scentLevelSize(trail.height, level), 0, 1);
-      down.setPipeline(view.down);
+      down.setPipeline(shaped ? view.sum : view.down);
       down.setBindGroup(0, cached.down);
       down.draw(3);
       down.end();
@@ -378,15 +381,23 @@ export class Renderer {
       const { device, module, layout, format } = this;
       const render = (env: boolean) =>
         device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, true));
-      this.scentBuild = Promise.all([
-        render(false),
-        render(true),
+      const fill = (sum: boolean) =>
         device.createRenderPipelineAsync({
           layout: device.createPipelineLayout({ bindGroupLayouts: [this.downLayout] }),
           vertex: { module, entryPoint: 'vs' },
-          fragment: { module, entryPoint: 'scentDown', targets: [{ format: COARSE_FORMAT }] },
-        }),
-      ]).then(([off, on, down]) => (this.scent = { render: [off, on], down }));
+          fragment: {
+            module,
+            entryPoint: 'scentDown',
+            constants: { SUM_ONLY: sum ? 1 : 0 },
+            // The sum writes the scent alone and keeps the share.
+            targets: [
+              { format: COARSE_FORMAT, writeMask: sum ? GPUColorWrite.RED | GPUColorWrite.GREEN : GPUColorWrite.ALL },
+            ],
+          },
+        });
+      this.scentBuild = Promise.all([render(false), render(true), fill(false), fill(true)]).then(
+        ([off, on, down, sum]) => (this.scent = { render: [off, on], down, sum }),
+      );
       // A failed build shows in the next frame that asks for the view.
       this.scentBuild.catch((err: unknown) => (this.scentError = err instanceof Error ? err : new Error(String(err))));
     }

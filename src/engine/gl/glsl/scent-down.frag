@@ -1,5 +1,6 @@
 // The scent on the coarse map of the scent view (see scentDown in ../../shaders/render.wgsl), one texel per
-// fragment, at the level V.scentFx.x. Prepended with view.glsl.
+// fragment, at the level V.scentFx.x. Prepended with view.glsl. SUM_ONLY (programs.ts): after steps only, the scent
+// of the texels without reading the shape, whose share the draw keeps (see SUM_ONLY in render.wgsl).
 
 uniform sampler2D scent; // food scent (r) and light repellent (g)
 
@@ -23,7 +24,10 @@ void main() {
     float wy = min(hi.y, float(y + 1)) - max(lo.y, float(y));
     for (int x = int(floor(lo.x)); float(x) < hi.x && x < s.x; x++) {
       ivec2 c = ivec2(x, y);
-      float w = (min(hi.x, float(x + 1)) - max(lo.x, float(x))) * wy * scentOpen(c);
+      float w = (min(hi.x, float(x + 1)) - max(lo.x, float(x))) * wy;
+#ifndef SUM_ONLY
+      w *= scentOpen(c);
+#endif
       sum += w * vec3(texelFetch(scent, c, 0).xy, 1.0);
     }
   }

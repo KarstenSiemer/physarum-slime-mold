@@ -44,8 +44,10 @@ export interface Walled {
 export interface ScentPrograms {
   /** The render pass with the view (SCENT in render.frag), without (index 0) and with (1) the food, light and walls. */
   render: [Program, Program];
-  /** The pass that fills its coarse map (scent-down.frag). */
+  /** The pass that fills its coarse map (scent-down.frag): the scent of its texels and the share that holds scent. */
   down: Program;
+  /** The pass that refreshes the scent of its texels after steps and keeps their share (SUM_ONLY). */
+  sum: Program;
 }
 
 /** The agent passes with the saturating trail perception (SATURATE in agents.frag, ADR 0022). */
@@ -169,12 +171,13 @@ export function compile(gl: GL): Programs {
         startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 0\n' + viewGlsl + renderFrag),
         startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 1\n' + viewGlsl + renderFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + scentDownFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n#define SUM_ONLY 1\n' + viewGlsl + scentDownFrag),
       ];
       if (!scentStarted.every((p) => p.done())) return undefined;
       for (const p of scentStarted) p.check();
-      const [off, on, down] = scentStarted.map((p) => wrap(gl, p.program));
-      if (!off || !on || !down) return undefined;
-      return (scent = { render: [off, on], down });
+      const [off, on, down, sum] = scentStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !down || !sum) return undefined;
+      return (scent = { render: [off, on], down, sum });
     },
     height: view(heightFrag),
     bloom: plain(bloomFrag),

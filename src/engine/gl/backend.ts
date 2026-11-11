@@ -282,23 +282,24 @@ export class WebGl2Backend implements Backend<GlSim> {
     const level = scentLevel(view.scale);
     const coarse = scent ? this.coarseFor(sim) : undefined;
     const holds = this.coarseHolds;
-    const fresh =
-      holds?.sim === sim &&
-      holds.step === sim.step &&
-      holds.revision === sim.revision &&
-      holds.level === level &&
-      holds.boundary === s.boundary;
-    if (scent && coarse && level > 0 && !fresh) {
+    // The share of a texel that holds scent changes only with the shape, the level or the arena; steps change only
+    // the scent, and they leave none in walls or outside the dish (SUM_ONLY in scent-down.frag).
+    const shaped =
+      holds?.sim === sim && holds.revision === sim.revision && holds.level === level && holds.boundary === s.boundary;
+    if (scent && coarse && level > 0 && !(shaped && holds.step === sim.step)) {
       this.coarseHolds = { sim, step: sim.step, revision: sim.revision, level, boundary: s.boundary };
+      const fill = shaped ? scent.sum : scent.down;
       gl.bindFramebuffer(gl.FRAMEBUFFER, coarse.fbo);
       gl.viewport(0, 0, scentLevelSize(sim.width, level), scentLevelSize(sim.height, level));
-      gl.useProgram(scent.down.program);
-      textures(gl, scent.down.program, {
+      gl.useProgram(fill.program);
+      textures(gl, fill.program, {
         trail: sim.currentTrail.texture,
         shape: sim.shapeTexture,
         scent: sim.currentScent.texture,
       });
+      if (shaped) gl.colorMask(true, true, false, false); // the share stays
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.colorMask(true, true, true, true);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);

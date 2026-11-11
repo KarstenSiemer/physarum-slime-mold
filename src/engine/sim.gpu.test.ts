@@ -4111,7 +4111,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         frame();
         await ready();
       }
-      expect(first).toBe(3); // the view without and with food, light and walls, and the pass of the coarse map
+      // The view without and with food, light and walls, and the two passes of the coarse map: its fill and its sum.
+      expect(first).toBe(4);
       expect(builds.mock.calls.length).toBe(first);
     });
 
@@ -4444,7 +4445,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       sim.run(300);
       sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
       const strand = (await backend.settle(sim)).strand;
-      const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+      let env = await sim.readEnv();
+      let scent = await sim.readScent();
       const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
       expect(wall(31, 24) && wall(32, 24) && !wall(30, 24) && !wall(33, 24)).toBe(true);
       expect(scent[(24 * W + 31) * 2]).toBe(0); // the wall holds no scent
@@ -4460,35 +4462,66 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const [cw, ch] = [96, 72];
       const worst: string[] = [];
       let near = 0;
-      for (const scale of [2.05, 2.5, 3, 4.1, 6]) {
-        // A pixel column 1.6 cells before the wall's face, beside the texels that hold part of the wall.
-        const view: View = { center: [29.4 - 0.5 * scale, 24.0291], scale };
-        const off = await backend.capture(sim, viewed, view, cw, ch);
-        const on = await backend.capture(sim, { ...viewed, showScent: true }, view, cw, ch);
-        let [max, n] = [0, 0];
-        for (let y = 0; y < ch; y++)
-          for (let x = 0; x < cw; x++) {
-            const p: [number, number] = [
-              (x + 0.5 - cw / 2) * scale + view.center[0],
-              (y + 0.5 - ch / 2) * scale + view.center[1],
-            ];
-            const wrapped = (d: number) => d - W * Math.round(d / W);
-            // The wall with its ramp of one pixel, the food's flake and the trail that sets the mark.
-            if (Math.abs(wrapped(p[0] - 32)) < 1 + 0.5 * scale + 0.1) continue;
-            if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
-            if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
-            const i = (y * cw + x) * 4;
-            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, mark);
-            if (kink) continue;
-            if (line > 0.1 && Math.abs(wrapped(p[0] - 31)) < 3 * scale) near++;
-            const want = scentOver(bg, 'paper', f, line, repellent);
-            for (let k = 0; k < 3; k++) {
-              const shade = fromByte(off.data[i + k] ?? 0) / (bg[k] ?? 1);
-              const d = Math.abs((on.data[i + k] ?? 0) - toByte((want[k] ?? 0) * shade));
-              [max, n] = [Math.max(max, d), n + 1];
+      // After steps the map refreshes only the scent of its texels and keeps their share (SUM_ONLY in render.wgsl): a
+      // capture fills a level, a step follows, and the same level again refreshes it; steps leave no scent in the wall.
+      // Then the wall grows by two cells to the left while paused: the share changes, and the cells under the new wall
+      // still hold scent until a step, so the map must be filled again in full. `face`: where the wall's drawing
+      // begins on the left. Each entry: the scale, the steps before it, and whether the wall grows before it.
+      let face = 31;
+      const phases: [number[], number, boolean][] = [
+        [[2.05, 2.5, 3, 4.1, 6], 0, false],
+        [[6], 1, false],
+        [[2.5], 0, false],
+        [[2.5], 1, false],
+        [[3], 2, false],
+        [[4.1], 0, true],
+        [[2.5, 2.05], 0, false],
+      ];
+      for (const [scales, steps, grow] of phases) {
+        if (steps > 0) {
+          sim.run(steps);
+          scent = await sim.readScent();
+          expect(scent[(24 * W + 31) * 2]).toBe(0);
+        }
+        if (grow) {
+          sim.paint([{ kind: 'wall', from: [30, 0], to: [30, 47], radius: 1 }]);
+          env = await sim.readEnv();
+          expect(wall(29, 24) && !wall(28, 24)).toBe(true);
+          expect(scent[(24 * W + 29) * 2]).toBeGreaterThan(0); // no step yet
+          face = 29;
+        }
+        for (const scale of scales) {
+          // A pixel column 1.6 cells before the wall's face, beside the texels that hold part of the wall.
+          const view: View = { center: [29.4 - 0.5 * scale, 24.0291], scale };
+          const off = await backend.capture(sim, viewed, view, cw, ch);
+          const on = await backend.capture(sim, { ...viewed, showScent: true }, view, cw, ch);
+          let [max, n] = [0, 0];
+          for (let y = 0; y < ch; y++)
+            for (let x = 0; x < cw; x++) {
+              const p: [number, number] = [
+                (x + 0.5 - cw / 2) * scale + view.center[0],
+                (y + 0.5 - ch / 2) * scale + view.center[1],
+              ];
+              const wrapped = (d: number) => d - W * Math.round(d / W);
+              // The wall with its ramp of one pixel, the food's flake and the trail that sets the mark.
+              const edge = 0.5 * scale + 0.1;
+              if (wrapped(p[0] - face) > -edge && wrapped(p[0] - 33) < edge) continue;
+              if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
+              if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
+              const i = (y * cw + x) * 4;
+              const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, mark);
+              if (kink) continue;
+              if (line > 0.1 && Math.abs(wrapped(p[0] - 31)) < 3 * scale) near++;
+              const want = scentOver(bg, 'paper', f, line, repellent);
+              for (let k = 0; k < 3; k++) {
+                const shade = fromByte(off.data[i + k] ?? 0) / (bg[k] ?? 1);
+                const d = Math.abs((on.data[i + k] ?? 0) - toByte((want[k] ?? 0) * shade));
+                [max, n] = [Math.max(max, d), n + 1];
+              }
             }
-          }
-        if (max > 3) worst.push(`at ${scale}: max ${max} over ${n / 3} pixels`);
+          if (max > 3)
+            worst.push(`at ${scale}, ${steps} steps, ${grow ? 'grown' : 'as painted'}: max ${max} over ${n / 3}`);
+        }
       }
       expect(worst).toEqual([]);
       expect(near).toBeGreaterThan(100); // the line runs beside the wall
@@ -4527,14 +4560,16 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(await count({ ...view, scale: 6 })).toBe(kept + 1);
       expect(await count({ ...view, scale: 6 })).toBe(kept);
       vi.restoreAllMocks();
-      // Steps and a stroke while the map was kept: the view shows the scent of now.
-      sim.run(20);
-      sim.paint([{ kind: 'food', from: [52, 12], to: [52, 12], radius: 2 }]);
+      // Steps while the map was kept (the map of 4 cells refreshes only its scent), then a stroke: the view shows the
+      // scent of now.
       const foods = [
         { at: [20, 24] as [number, number], r: 3 },
         { at: [44, 24] as [number, number], r: 3 },
         { at: [52, 12] as [number, number], r: 2 },
       ];
+      sim.run(20);
+      expect((await follows(sim, settings, { ...view, scale: 6 }, foods.slice(0, 2))).failed).toEqual([]);
+      sim.paint([{ kind: 'food', from: [52, 12], to: [52, 12], radius: 2 }]);
       for (const scale of [3, 6]) expect((await follows(sim, settings, { ...view, scale }, foods)).failed).toEqual([]);
     });
 
