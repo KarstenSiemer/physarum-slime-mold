@@ -96,9 +96,9 @@
     margin: 0;
     padding: 6px 8px;
     border-radius: 8px;
+    /* The glass of the other panels, without a backdrop blur (ADR 0028). */
     background: var(--glass);
     border: 1px solid var(--line);
-    backdrop-filter: blur(14px);
     font-size: 11px;
     pointer-events: none;
     max-width: 300px;

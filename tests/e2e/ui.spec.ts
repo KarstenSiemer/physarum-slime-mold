@@ -337,6 +337,39 @@ for (const [width, height] of [
     if (width <= 720 || height <= 500) expect(box.height).toBeLessThan(110); // compact
   });
 
+// The legend lies on the glass of the other panels, without a backdrop blur (ADR 0028), and its text keeps WCAG 2.2
+// contrast (1.4.3: 4.5:1) over a white canvas, as glass.test.ts asks of the panels: the worst case of the paper style.
+test('the scent legend keeps its text readable on the glass over a white canvas', async ({ page }) => {
+  await page.locator('summary', { hasText: 'Look' }).click();
+  await page.getByRole('combobox', { name: 'Style' }).selectOption('paper');
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('light');
+  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2);
+  await page.getByRole('button', { name: 'Scent', exact: true }).click();
+  const legend = page.getByRole('figure', { name: 'Scent per cell' });
+  await expect(legend).toBeVisible();
+  const { glass, blur, texts } = await legend.evaluate((figure) => {
+    const rgba = (v: string) => (v.match(/[\d.]+/g) ?? []).map(Number);
+    const style = getComputedStyle(figure);
+    const texts = [...figure.querySelectorAll('*')]
+      .filter((el) => [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()))
+      .filter((el) => el.checkVisibility())
+      .map((el) => ({ text: el.textContent.trim(), color: rgba(getComputedStyle(el).color) }));
+    return { glass: rgba(style.backgroundColor), blur: style.backdropFilter, texts };
+  });
+  expect(blur).toBe('none');
+  const lin = (v: number) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+  const luminance = ([r = 0, g = 0, b = 0]: number[]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const [r = 0, g = 0, b = 0, a = 1] = glass;
+  const panel = [r, g, b].map((v) => a * v + (1 - a) * 255); // the glass over white
+  expect(texts.length).toBeGreaterThan(5);
+  for (const { text, color } of texts) {
+    const [cr = 0, cg = 0, cb = 0, ca = 1] = color;
+    const shown = [cr, cg, cb].map((v, k) => ca * v + (1 - ca) * (panel[k] ?? 0)); // a text colour with alpha
+    const [hi, lo] = [luminance(shown), luminance(panel)].sort((x, y) => y - x);
+    expect(((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05), text).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
 // Inoculate places only dead agents (docs/adr/0023). In the small scene every agent is alive: the tool places nothing
 // and says so. The alive count in the stats is at most 500 ms old.
 test('the inoculate tool says so when no dead agents of its strain are left', async ({ page }) => {

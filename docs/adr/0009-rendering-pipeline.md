@@ -2,7 +2,7 @@
 
 - Status: accepted (revised 2026-11-08 after the visual review loop; amended 2026-11-10: food,
   light and walls; amended 2026-11-11: scent view, revised the same day: a glow and the mark of a strand, and
-  amended for the lattices of ADR 0026)
+  amended for the lattices of ADR 0026 and for the panels without a backdrop blur of ADR 0028)
 - Date: 2026-11-08
 
 ## Context
@@ -775,3 +775,20 @@ Each by this branch on 2026-11-11, at the merge of `main` into it.
   and the map level always 0 in `packView()`: caught by the tests of the view.
 - On SwiftShader on an M3 Pro (load average 5 to 10) the test without the view took 10.6 s on WebGL2 for its 112
   captures (ADR 0010), the test of the copies 0.5 s.
+
+## Amendment 2026-11-11: the legend without a backdrop blur (ADR 0028)
+
+The owner decided that the panels draw no backdrop blur (ADR 0028, PR #30, `83d0567`): a blur behind a panel is drawn
+again in every frame, because the canvas changes in every frame. `--glass` went from 0.88 to 0.94, and
+`src/ui/glass.test.ts` fails for any `backdrop-filter` in a style file of `src/`.
+
+Decision (this branch, 2026-11-11, at the merge of `main` into it): the scent legend drops its `blur(14px)` and keeps
+the background of the other panels, `var(--glass)`, with `--fg` and `--muted` for its text. Reason: the owner's
+decision holds for every panel, and the legend lies over the moving picture as they do. Over a white canvas, the
+worst case of the paper style, the glass gives `--fg` 14.2:1 and `--muted` 6.0:1 (11.9:1 and 5.0:1 at 0.88); WCAG 2.2
+asks 4.5:1 for small text (1.4.3).
+
+Consequences: an e2e test ("the scent legend keeps its text readable on the glass over a white canvas", `ui.spec.ts`)
+reads the legend's computed background and the colour of each of its visible texts in the paper style, and holds each
+to 4.5:1 over white; it also checks that the legend has no backdrop filter. Mutations, each reverted after its run: a
+thinner glass (0.6: `--muted` at 4.2:1) and the blur back: the test caught both.

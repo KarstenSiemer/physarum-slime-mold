@@ -98,7 +98,6 @@
     border-radius: 10px;
     background: var(--glass);
     border: 1px solid var(--line);
-    backdrop-filter: blur(14px) saturate(140%);
   }
   .group button {
     border: 0;

@@ -451,7 +451,6 @@
     border-radius: 10px;
     background: var(--glass);
     border: 1px solid var(--line);
-    backdrop-filter: blur(14px) saturate(140%);
   }
   .brand button {
     border: 0;
@@ -476,7 +475,6 @@
     border-radius: 14px;
     background: var(--glass);
     border: 1px solid var(--line);
-    backdrop-filter: blur(16px) saturate(140%);
     overflow: hidden;
   }
   .toolbar-wrap {
@@ -499,7 +497,6 @@
     padding: 2px 6px;
     border-radius: 6px;
     background: var(--glass);
-    backdrop-filter: blur(14px);
     font:
       11px/1.4 ui-monospace,
       SFMono-Regular,
@@ -523,7 +520,6 @@
     border-radius: 10px;
     background: var(--glass);
     border: 1px solid var(--line);
-    backdrop-filter: blur(14px);
   }
   .error {
     position: absolute;
