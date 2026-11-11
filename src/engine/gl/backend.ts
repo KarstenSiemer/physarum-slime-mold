@@ -120,13 +120,20 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.frame++;
   }
 
-  async capture(sim: GlSim, settings: Settings, view: View, width: number, height: number): Promise<ImageData> {
+  async capture(
+    sim: GlSim,
+    settings: Settings,
+    view: View,
+    width: number,
+    height: number,
+    levels?: Levels,
+  ): Promise<ImageData> {
     const gl = this.gl;
     // An export shows the scent view as asked: wait for its programs, unless the context is lost.
     while (settings.showScent && !this.fixed && !this.prog.scent() && !gl.isContextLost())
       await new Promise((r) => setTimeout(r, 2));
     const t = target(gl, width, height, gl.RGBA8);
-    this.encode(sim, settings, view, width, height, t);
+    this.encode(sim, settings, view, width, height, t, levels);
     const pixels = new Uint8ClampedArray(width * height * 4);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
     destroyTarget(gl, t);
@@ -144,6 +151,10 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   levels(): Levels {
     return { gain: this.gain, black: this.black, strand: this.strand };
+  }
+
+  async measured(sim: GlSim): Promise<Levels> {
+    return (await this.read(sim)) ?? this.levels();
   }
 
   /**
@@ -174,12 +185,31 @@ export class WebGl2Backend implements Backend<GlSim> {
    * Waits for a measurement that is still running, so `blend` 1 (settle) always gets its own.
    */
   private async measure(sim: GlSim, blend: number): Promise<void> {
-    while (this.measuring) await this.measuring;
-    this.measuring = this.sample(sim, blend).finally(() => (this.measuring = undefined));
-    return this.measuring;
+    const l = await this.read(sim);
+    if (!l) return;
+    this.gain += (l.gain - this.gain) * blend;
+    this.black += (l.black - this.black) * blend;
+    this.strand += (l.strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
   }
 
-  private async sample(sim: GlSim, blend: number) {
+  /**
+   * The levels measured now, without changing the levels that frames use: an export draws with them, and the line of
+   * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field, a replaced
+   * simulation or a lost context.
+   */
+  private async read(sim: GlSim): Promise<Levels | undefined> {
+    while (this.measuring) await this.measuring;
+    const run = this.sample(sim);
+    this.measuring = run
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => (this.measuring = undefined));
+    return run;
+  }
+
+  private async sample(sim: GlSim): Promise<Levels | undefined> {
     const gl = this.gl;
     const generation = this.generation;
     const h = Math.max(1, Math.round((SAMPLES * sim.height) / sim.width));
@@ -199,9 +229,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     try {
       px = await readTargetAsync(gl, t);
     } catch {
-      return; // context lost: nothing to measure
+      return undefined; // context lost: nothing to measure
     }
-    if (generation !== this.generation) return;
+    if (generation !== this.generation) return undefined;
     const bins = new Array<number>(BINS).fill(0);
     for (let i = 0; i < px.length; i += 4) {
       const v = px[i] ?? 0;
@@ -210,25 +240,22 @@ export class WebGl2Backend implements Backend<GlSim> {
       bins[b] = (bins[b] ?? 0) + 1;
     }
     const l = levels(bins, t.width * t.height);
-    if (l) {
-      this.gain += (l.gain - this.gain) * blend;
-      this.black += (l.black - this.black) * blend;
-      const strand = strandLevel(bins, t.width * t.height);
-      this.strand += (strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
-    }
+    return l && { ...l, strand: strandLevel(bins, t.width * t.height) };
   }
 
-  private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target) {
+  /** `given`: levels measured for this frame alone (an export), in place of those of the frames. */
+  private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target, given?: Levels) {
     const gl = this.gl;
     sim.syncShape();
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
-    const exposure = (agents ? 0.4 / s.density : this.gain || fallback) * 2 ** s.exposure;
-    const black = agents ? 0 : this.black;
+    const l = given ?? this.levels();
+    const exposure = (agents ? 0.4 / s.density : l.gain || fallback) * 2 ** s.exposure;
+    const black = agents ? 0 : l.black;
     const bloom = this.runBloom(sim, s, exposure, black);
     // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
     const occ = s.collisions ? sim.occupancyTexture : undefined;
-    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined, this.strand);
+    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined, l.strand);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
     const heights = this.heightsFor(sim);

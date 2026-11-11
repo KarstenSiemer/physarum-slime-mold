@@ -4369,6 +4369,51 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
       expect(worst).toEqual([]);
     });
+
+    // The scent view's mark needs the strand in every style. WebGPU measured auto levels only in the styles that use
+    // them, so in the agents style the strand stayed 0 after a reset: no line and no mark (review of 2026-11-11). The
+    // reference is the 99th percentile of the summed trail, read from the trail, not from the backend's levels.
+    it.each(STYLES)('measures the strand from frames in the %s style', async (style) => {
+      const settings: Settings = {
+        ...extended({ style, strains: [defaultStrain(0), defaultStrain(1)] }),
+        showScent: true,
+      };
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.run(150);
+      backend.forget();
+      const view: View = { center: [32, 24], scale: 0.5 };
+      for (let k = 0; k < 200 && backend.levels().strand === 0; k++) {
+        backend.draw(sim, settings, view, true);
+        await sim.finish();
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      const trail = await sim.readTrail();
+      const sums = Array.from({ length: W * H }, (_, i) =>
+        [0, 1, 2, 3].reduce((t, c) => t + (trail[i * 4 + c] ?? 0), 0),
+      );
+      sums.sort((a, b) => a - b);
+      const p99 = sums[W * H - Math.ceil(0.01 * W * H)] ?? 0;
+      expect(p99).toBeGreaterThan(0);
+      // Read within its log2 bin (exposure.ts levelWithin()); WebGL2 reads a grid of samples.
+      expect(backend.levels().strand / p99).toBeGreaterThan(0.9);
+      expect(backend.levels().strand / p99).toBeLessThan(1.1);
+    });
+
+    // An export measures its own levels (Engine.snapshot(), Backend.measured()); the levels of the frames, and with
+    // them the line of the view, stay as the smoothing left them (review of 2026-11-11: the line jumped after an export).
+    it('measures the levels of an export without changing those of the frames', async () => {
+      const settings: Settings = { ...extended({ strains: [defaultStrain(0)] }), showScent: true };
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.run(60);
+      await backend.settle(sim);
+      sim.run(200);
+      const live = backend.levels();
+      const own = await backend.measured(sim);
+      expect(backend.levels()).toEqual(live);
+      expect(own.strand).not.toBe(live.strand);
+      const settled = await backend.settle(sim); // what a settled frame uses
+      for (const k of ['gain', 'black', 'strand'] as const) expect(own[k] / settled[k]).toBeCloseTo(1, 9);
+    });
   });
 
   // Without food, light or walls the renderer takes the pass without them (`ENV` off), which must draw the pixels

@@ -93,8 +93,8 @@ export class WebGpuBackend implements Backend<Simulation> {
     this.renderer.draw(this.frame(sim, settings, view, measure));
   }
 
-  capture(sim: Simulation, settings: Settings, view: View, width: number, height: number) {
-    return this.renderer.capture(this.frame(sim, settings, view, false), width, height);
+  capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
+    return this.renderer.capture(this.frame(sim, settings, view, false, levels), width, height);
   }
 
   async settle(sim: Simulation): Promise<Levels> {
@@ -104,6 +104,10 @@ export class WebGpuBackend implements Backend<Simulation> {
 
   levels(): Levels {
     return { gain: this.auto.gain, black: this.auto.black, strand: this.auto.strand };
+  }
+
+  async measured(sim: Simulation): Promise<Levels> {
+    return (await this.auto.read(sim.current.trail)) ?? this.levels();
   }
 
   /**
@@ -129,18 +133,24 @@ export class WebGpuBackend implements Backend<Simulation> {
     this.gpu.device.destroy();
   }
 
-  /** Exposure and bloom for the current state; `measure` runs the auto-levels histogram. */
-  private frame(sim: Simulation, s: Settings, view: View, measure: boolean): Frame {
+  /**
+   * Exposure and bloom for the current state; `measure` runs the auto-levels histogram. `given`: levels measured for
+   * this frame alone (an export), in place of those of the frames.
+   */
+  private frame(sim: Simulation, s: Settings, view: View, measure: boolean, given?: Levels): Frame {
     const trail = sim.current.trail;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
-    const base = agents ? 0.4 / s.density : measure ? this.auto.update(trail, fallback) : this.auto.gain || fallback;
+    // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009).
+    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback);
+    const l = given ?? this.levels();
+    const base = agents ? 0.4 / s.density : l.gain || fallback;
     const exposure = base * 2 ** s.exposure;
-    const black = agents ? 0 : this.auto.black;
+    const black = agents ? 0 : l.black;
     const wrap = s.boundary === 'wrap';
     const bloom =
       s.bloom > 0 && s.style === 'glow' ? this.bloom.run(trail, exposure, black, wrap) : this.bloom.view(trail);
     const sampler = at(this.bloom.samplers, wrap ? 1 : 0);
-    return { sim, settings: s, view, exposure, black, strand: this.auto.strand, bloom, sampler };
+    return { sim, settings: s, view, exposure, black, strand: l.strand, bloom, sampler };
   }
 }

@@ -508,10 +508,10 @@ export class Engine {
     this.sim.finish().then(done, done);
   }
 
-  /** The current frame as pixels, rendered offscreen at canvas size. */
-  async capture(): Promise<ImageData> {
+  /** The current frame as pixels, rendered offscreen at canvas size; `levels` in place of those of the frames. */
+  async capture(levels?: Levels): Promise<ImageData> {
     await this.rebuilding;
-    return this.backend.capture(this.sim, this.settings, this.view, this.canvas.width, this.canvas.height);
+    return this.backend.capture(this.sim, this.settings, this.view, this.canvas.width, this.canvas.height, levels);
   }
 
   /** The auto levels frames use now; the scent view's legend reads its mark from them (Levels.strand). */
@@ -525,10 +525,15 @@ export class Engine {
     return this.backend.settle(this.sim);
   }
 
-  /** PNG of the current frame, with settled levels. */
+  /**
+   * PNG of the current frame, with levels measured for it. The levels of the frames stay as they are: the scent view's
+   * line goes on from its smoothed strand instead of jumping after an export (ADR 0009). The agents style draws without
+   * levels; only the scent view's mark needs them there.
+   */
   async snapshot(): Promise<Blob> {
-    if (this.settings.style !== 'agents') await this.settle();
-    const img = await this.capture();
+    await this.rebuilding;
+    const measure = this.settings.style !== 'agents' || this.settings.showScent;
+    const img = await this.capture(measure ? await this.backend.measured(this.sim) : undefined);
     const canvas = new OffscreenCanvas(img.width, img.height);
     canvas.getContext('2d')?.putImageData(img, 0, 0);
     return canvas.convertToBlob({ type: 'image/png' });

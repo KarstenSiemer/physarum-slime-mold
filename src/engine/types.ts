@@ -109,9 +109,15 @@ export interface Backend<S extends Sim = Sim> {
   createSim(settings: Settings, width: number, height: number, agents: number): Promise<S>;
   /** Draws a frame; `measure` lets auto levels sample the trail. */
   draw(sim: S, settings: Settings, view: View, measure: boolean): void;
-  capture(sim: S, settings: Settings, view: View, width: number, height: number): Promise<ImageData>;
+  /** `levels`: levels for this picture alone (measured()), in place of those of the frames. */
+  capture(sim: S, settings: Settings, view: View, width: number, height: number, levels?: Levels): Promise<ImageData>;
   /** Measures auto levels now instead of smoothing over frames; resolves with the levels frames now use. */
   settle(sim: S): Promise<Levels>;
+  /**
+   * Measures auto levels now for one picture, an export, and resolves with them; the levels frames use stay as they
+   * are, so the scent view's line goes on from its smoothed strand. The levels frames use if nothing could be measured.
+   */
+  measured(sim: S): Promise<Levels>;
   /** The levels frames use now. */
   levels(): Levels;
   /** Drops caches tied to a replaced simulation and restarts auto levels. */

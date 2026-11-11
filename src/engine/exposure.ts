@@ -1,4 +1,5 @@
 import histogramWgsl from './shaders/histogram.wgsl?raw';
+import type { Levels } from './types';
 
 const BINS = 64;
 /** Fraction of cells allowed above the white level. */
@@ -100,16 +101,38 @@ export class AutoExposure {
   }
 
   /**
-   * Measures now; `blend` 1 jumps to the result (exports, tests), smaller values smooth. Waits for a
-   * measurement that is still running, so `blend` 1 always gets its own.
+   * Measures now; `blend` 1 jumps to the result (tests), smaller values smooth. Waits for a measurement that is still
+   * running, so `blend` 1 always gets its own.
    */
   async measure(trail: GPUTexture, blend = 1): Promise<void> {
-    while (this.pending) await this.pending;
-    this.pending = this.sample(trail, blend).finally(() => (this.pending = undefined));
-    return this.pending;
+    const l = await this.read(trail);
+    if (l) this.apply(l, blend);
   }
 
-  private async sample(trail: GPUTexture, blend: number) {
+  /**
+   * The levels measured now, without changing the levels that frames use: an export draws with them, and the line of
+   * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field or a replaced
+   * simulation.
+   */
+  async read(trail: GPUTexture): Promise<Levels | undefined> {
+    while (this.pending) await this.pending;
+    const run = this.histogram(trail);
+    this.pending = run
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => (this.pending = undefined));
+    return run;
+  }
+
+  private apply(l: Levels, blend: number) {
+    this.gain += (l.gain - this.gain) * blend;
+    this.black += (l.black - this.black) * blend;
+    this.strand += (l.strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
+  }
+
+  private async histogram(trail: GPUTexture): Promise<Levels | undefined> {
     const generation = this.generation;
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.bins);
@@ -136,13 +159,9 @@ export class AutoExposure {
       const l = levels(bins, cells);
       const strand = strandLevel(bins, cells);
       this.readback.unmap();
-      if (l && generation === this.generation) {
-        this.gain += (l.gain - this.gain) * blend;
-        this.black += (l.black - this.black) * blend;
-        this.strand += (strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
-      }
+      return l && generation === this.generation ? { ...l, strand } : undefined;
     } catch {
-      // device lost or buffer destroyed: nothing to measure
+      return undefined; // device lost or buffer destroyed: nothing to measure
     }
   }
 

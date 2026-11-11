@@ -124,6 +124,9 @@ export class CpuBackend implements Backend<CpuSim> {
   settle() {
     return Promise.resolve(this.levels());
   }
+  measured() {
+    return Promise.resolve(this.levels());
+  }
   levels() {
     return { gain: 0, black: 0, strand: 0 };
   }
