@@ -399,6 +399,7 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   within 0.001 cells of a grid corner counts both cells beside the corner. `advance`, `claim` and
   `settle` and the GLSL agent pass use it. A blocked agent behaves as before: random new heading, no
   deposit. The walk is skipped while no wall was painted since the last clear (`Params.extra.y`).
+  Since ADR 0020 the sensors use the same walk, and a wall on a sensor's way reads `BLOCKED`.
 - **One wall threshold.** A cell is a wall when its wall byte is at least 128 (0.5): `isWall` in
   `common.wgsl` and `common.glsl`, used by every simulation shader that reads walls.
 - **The grid is a model scale.** Sensor offset and step size stay in cells. On another grid the
@@ -422,7 +423,7 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   0.169 ms per step (WebGPU) and 0.352 against 0.344 ms (WebGL2); Transport network 1024 × 576 with a
   wall 0.897 against 0.891 and 1.588 against 1.589 ms; Three strains 1536 × 864, 4 million agents,
   step 1.4, with a wall 5.13 against 4.27 and 22.0 against 19.2 ms. Without its env reads the walk
-  cost nothing measurable.
+  cost nothing measurable. ADR 0020 has the cost with the sensors' walk and the clearance.
 - On WebGPU (M3 Pro, 16:9 and 9:19.5, 5 to 10 seeds): Shortest path ends as one band in 4 of 5 wide and 5
   of 5 tall runs by step 12,000; Steiner tree as two three-way junctions joined by a short bridge in
   10 of 10 runs; Shrinking plasmodium in the same network in 7 of 10 wide and 9 of 10 tall runs, the
@@ -435,15 +436,16 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   512 × 410, 366 on 512 × 427, 530 on 512 × 512 and 112 on 236 × 512 (CPU, `strokeOn` and
   `paint-reference.ts`). On every landscape grid these are the cells of the base commit.
 - Maze walls are 0.008 short sides thick in radius. On WebGPU the painted walls are 4 cells across
-  at 512 × 288 (the two short walls 5), 6 at 512 × 320, 4 at 236 × 512 and 8 at 512 × 512. The
-  sensor distance of 7 reaches across them on the first three grids, not on 512 × 512. At step
+  at 512 × 288 (the two short walls 5), 6 at 512 × 320, 4 at 236 × 512 and 8 at 512 × 512. Before
+  walls blocked sensors (ADR 0020), the sensor distance of 7 reached across them on the first three
+  grids, not on 512 × 512, and the numbers below are of that code. At step
   10,000 on 512 × 288 (seeds 31 to 42) the trail 1 to 3 cells beside a wall was 0.9 to 3.4 times
   the mean of open cells. A path (trail above twice that mean) ran within 3 cells of a wall on both
   sides along 2.7 to 12.5 % of the long walls' rows, and along 3.5 to 12.2 % with walls 8 cells
-  across: such paths do not need agents that sense across the wall. The table counts the runs of 12
-  with a path of trail from food to food: a flood fill from one food over open cells whose 3 × 3
-  mean trail is above the mean of open cells reaches the other food (WebGPU on an M3 Pro, the built
-  app, seeds 31 to 42; in brackets at half that threshold).
+  across: such paths do not need agents that sense across the wall. The table, before walls blocked
+  sensors, counts the runs of 12 with a path of trail from food to food: a flood fill from one food
+  over open cells whose 3 × 3 mean trail is above the mean of open cells reaches the other food
+  (WebGPU on an M3 Pro, the built app, seeds 31 to 42; in brackets at half that threshold).
 
   | Grid (window)                  | Walls across | Step 2,000 | Step 5,000 | Step 10,000 | Step 15,000 |
   | ------------------------------ | ------------ | ---------- | ---------- | ----------- | ----------- |
@@ -458,8 +460,9 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   (4.10 cells on 512 × 288, 2.30 on 512 × 512). Walls 8 cells across kept the path on 16:9, and
   walls 4 cells across broke it on 1:1 in 7 of 12 runs at step 15,000. So the walls' thickness
   against the sensor distance decides more than the shape of the screen. A second run of seeds 31
-  and 37 on 16:9, 9:19.5 and 1:1 gave the same trail byte for byte. The scene text says that the
-  path holds on a square screen and breaks sooner on a wider or taller one.
+  and 37 on 16:9, 9:19.5 and 1:1 gave the same trail byte for byte. Since walls block sensors
+  (ADR 0020), the same runs keep the path in 12 of 12 runs on all four grids at every step, at the
+  threshold and at half of it: ADR 0020 has the table, and the scene text says so.
 
 - Tests: the engine runs in Node with a CPU backend that paints with `paint-reference.ts`, the CPU
   copy of the paint shaders (`cpu-backend.ts`; `engine-env.test.ts`, `sweep.test.ts`);

@@ -86,6 +86,7 @@ Grid `W × H` cells (any size, not only powers of two). Up to 4 strains (one `ve
 | `shape`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: outline distances, light, wall shadow  |
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
+| `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). `shape` is written by the brush next to `env`: the signed distances to the
@@ -101,13 +102,19 @@ the boundary on screen.
 `rgba32float` and not `rgba16float`: with half floats `x · (1 − 0.0001)` rounds back to `x`,
 so the small decay values from Jones Fig. 12 would stop working.
 
+`clearance` (with `walled`, which marks the tiles that hold a wall cell) is measured again after
+every paint with a wall, after a paint with the eraser while a wall was painted since the last
+clear, and after `writeEnv` with walls. A walk of a move or a sensor whose cells all lie nearer to
+its start than the clearance of the start's tile cannot meet a wall and is skipped. The passes
+that measure it, and the agent passes that check for walls, are built at the first wall (ADR 0020).
+
 ### One step
 
 1. `clearBuffer(counts)` (and `claims` in collision mode).
 2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups):
    - skip dead agents; apply shrinkage (`p_remove`), inoculation and cut tools;
    - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
-     walls and outside read as −∞;
+     walls, the outside and a wall on the way to the sensor read as −∞ (ADR 0020);
    - **rotate** with the Jones rule (exact, see knowledge base); random turn with `pCD`;
    - **move** by SS; wrap (periodic) or block (closed box, dish, wall, also a wall cell on the
      way);

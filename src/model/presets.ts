@@ -313,13 +313,13 @@ PRESETS.push(
     name: 'Maze',
     group: 'experiments',
     source: 'Nakagaki et al. 2000',
-    summary: 'Food at both ends of a winding corridor: the network fills it, then thins to a few paths.',
+    summary: 'Food at both ends of a winding corridor: the network fills it, then thins to many paths.',
     watch:
-      'The network first fills every corridor. Then loops close and agents slowly die, so it thins to a few paths along the walls and the edges of the box. A path from food to food forms early. On a square screen it still holds at step 15,000. The wider or taller the screen, the sooner it breaks.',
+      'The network first fills every corridor. Then loops close and agents slowly die, so it thins to a mesh of paths that runs through the gaps between the walls. A path from food to food forms early and still holds at step 15,000, on wide, tall and square screens alike.',
     about:
-      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends. The model keeps a few paths instead of one tube: it has no flow that thickens the shortest one.',
+      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends. The model keeps many paths instead of one tube: it has no flow that thickens the shortest one.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a slow shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Walls block movement, and the trail does not spread through them. Walls are thinner than the sensor distance on a wide or tall screen: agents sense across them, and the path from food to food breaks sooner.',
+    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a slow shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Walls block movement and sensing, and the trail does not spread through them. No sensor reads the trail behind a wall, so agents on one side of a thin wall do not follow the trail on the other side.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },

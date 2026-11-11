@@ -68,7 +68,7 @@ floats (10-bit mantissa, relative step ≈ 0.001), so slow decay stops working.
 - 32 B per agent on both backends (two copies), as the memory estimate assumes.
 - Memory per cell: 32 B trail + 16 B scent + 16 B counts + 4 B env + 4 B outline distances for
   the renderer (ADR 0009) = 72 B, plus 12 B of collision buffers (ADR 0008), which WebGPU
-  allocates even with collisions off (`src/engine/sim.ts:126–127`). A 2048² grid needs about
+  allocates even with collisions off (`src/engine/sim.ts:137–138`). A 2048² grid needs about
   336 MiB; the budget estimate of 90 B per cell adds the bloom chain and the gel height field
   (ADR 0009, ADR 0013, `BYTES_PER_CELL` in `src/engine/sizing.ts`). WebGL2 without float blending
   needs 110 B per cell for its exact counts (ADR 0003). The grid size must follow the adapter

@@ -96,3 +96,7 @@ fn envOf(e: u32) -> vec4f { return unpack4x8unorm(e); }
 // A cell is a wall when its wall byte is at least 128 (0.5). isWall in common.glsl uses the same threshold.
 const WALL_BYTE = 128u;
 fn isWall(e: u32) -> bool { return (e & 0xffu) >= WALL_BYTE; }
+
+// Cells per side of a clearance tile (walls.wgsl, ADR 0020); CLEAR_TILE in common.glsl and src/engine/pack.ts is the
+// same.
+const CLEAR_TILE = 8;

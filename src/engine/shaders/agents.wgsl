@@ -13,6 +13,13 @@
 @group(0) @binding(8) var<storage, read_write> claims: array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read_write> occNext: array<atomic<u32>>;
 @group(0) @binding(10) var<uniform> replacement: Agent;
+@group(0) @binding(11) var<storage, read> clearance: array<u32>; // per clearance tile (walls.wgsl)
+
+// Sensors check the cells between the agent and the sensor for walls (ADR 0020): sim.ts builds `advance` and `claim`
+// with the check for an environment that may hold walls, and without it otherwise. The check alone, never run, changes
+// how the compiler rounds the sensor positions, so a pass built with it would not give the agents and trail of the
+// code before it, bit for bit, where no wall was painted (sim.gpu.test.ts).
+override SENSE_WALLS: bool = false;
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
 const STEER = 0u;
@@ -26,23 +33,52 @@ fn index(gid: vec3u, groups: vec3u) -> u32 { return gid.x + gid.y * groups.x * 2
 
 fn habitable(c: i32) -> bool { return c >= 0 && !isWall(env[c]); }
 
-fn wallAt(c: vec2i) -> bool {
-  let i = cellAt(c);
-  return i >= 0 && isWall(env[i]);
+// A wall at w, a cell that a walk enters, wrapped into the periodic grid. A cell outside a closed arena is never a
+// wall: cellAt() gives it no index.
+fn wallIn(w: vec2i) -> bool {
+  let size = vec2i(i32(W()), i32(H()));
+  if (any(w < vec2i(0)) || any(w >= size)) { return false; }
+  if (!isWall(env[w.y * size.x + w.x])) { return false; }
+  return P.cfg.z != 2u || distance(vec2f(w) + 0.5, 0.5 * vec2f(size)) <= dishRadius();
+}
+
+// The next cell along an axis of n cells: around the periodic grid, or past the edge of a closed arena.
+fn stepAxis(v: i32, s: i32, n: i32) -> i32 {
+  let u = v + s;
+  if (P.cfg.z != 0u) { return u; }
+  return select(select(u, u - n, u >= n), u + n, u < 0);
 }
 
 // Where a segment passes closer than this to a grid corner (in cells), it touches both cells beside the corner.
 const CORNER = 1e-3;
 
-// False if a move from p to q passes through a wall: a supercover walk over every cell the segment enters
-// between its start cell and its end cell. The caller checks the end cell. A step longer than a wall is thick
-// would otherwise jump it. Skipped while the environment holds no walls.
-fn clearPath(p: vec2f, q: vec2f) -> bool {
+// The most cells a walk enters. A segment with sides dx and dy enters fewer than |dx| + |dy| + 2 cells. A sensor of
+// the longest sensor distance (64 cells, src/model/params.ts) enters up to floor(64 · √2) + 2 = 92, a move of the
+// longest step (8 cells) up to 13. WALK in agents.frag is the same; pack.test.ts checks both against params.ts.
+const WALK = 92;
+
+// The clearance of the tile that holds the cell of p (walls.wgsl): no wall lies closer to that cell. 0 outside a
+// closed arena. Read once per agent and pass, and only while the environment may hold walls.
+fn clearanceAt(p: vec2f) -> i32 {
+  if (P.extra.y == 0u) { return 0; }
+  let c = cellOf(p);
+  if (c < 0) { return 0; }
+  let t = cellCoord(u32(c)) / CLEAR_TILE;
+  return i32(clearance[t.y * ((i32(W()) + CLEAR_TILE - 1) / CLEAR_TILE) + t.x]);
+}
+
+// False if the segment from p to q passes through a wall: a supercover walk over every cell the segment enters
+// between its start cell and its end cell. The caller checks the end cell. Moves and sensors use it (ADR 0019,
+// ADR 0020): a step longer than a wall is thick would jump it, and a sensor would read the trail behind it. Every
+// cell of the walk lies at most max(|Δx|, |Δy|) cells from the start cell (Chebyshev distance), so below `clear`, the
+// start cell's clearance (clearanceAt()), the walk cannot meet a wall. Skipped while the environment holds no walls.
+fn clearPath(p: vec2f, q: vec2f, clear: i32) -> bool {
   if (P.extra.y == 0u) { return true; }
   var c = vec2i(floor(p));
   let end = vec2i(floor(q));
-  // The end cell is the start cell or beside it: there is no cell in between.
-  if (abs(end.x - c.x) + abs(end.y - c.y) < 2) { return true; }
+  let span = abs(end - c);
+  // The end cell is the start cell or beside it, so there is no cell in between, or no wall is near enough.
+  if (span.x + span.y < 2 || max(span.x, span.y) < clear) { return true; }
   let d = q - p;
   let s = vec2i(sign(d));
   let len = length(d);
@@ -50,43 +86,54 @@ fn clearPath(p: vec2f, q: vec2f) -> bool {
   let next = vec2f(c) + select(vec2f(0.0), vec2f(1.0), d > vec2f(0.0));
   var t = select(vec2f(2.0), (next - p) / d, s != vec2i(0));
   let dt = select(vec2f(2.0), 1.0 / abs(d), s != vec2i(0));
-  // Every iteration enters one cell toward the end: |Δx| + |Δy| of them, at most 18 for a step of 8.
-  for (var k = 0; k < 24; k++) {
+  // w is c wrapped into the periodic grid, kept step by step, so that the walk does not divide.
+  let size = vec2i(i32(W()), i32(H()));
+  var w = select(c, ((c % size) + size) % size, P.cfg.z == 0u);
+  // Every iteration enters one cell toward the end, or at a corner checks the two cells beside it and enters the
+  // cell past it.
+  for (var k = 0; k < WALK; k++) {
     let needX = c.x != end.x;
     let needY = c.y != end.y;
     if (!needX && !needY) { break; }
     if (needX && needY && abs(t.x - t.y) * len < CORNER) {
-      if (wallAt(c + vec2i(s.x, 0)) || wallAt(c + vec2i(0, s.y))) { return false; }
+      let wx = stepAxis(w.x, s.x, size.x);
+      let wy = stepAxis(w.y, s.y, size.y);
+      if (wallIn(vec2i(wx, w.y)) || wallIn(vec2i(w.x, wy))) { return false; }
       c += s;
+      w = vec2i(wx, wy);
       t += dt;
     } else if (needX && (!needY || t.x < t.y)) {
       c.x += s.x;
+      w.x = stepAxis(w.x, s.x, size.x);
       t.x += dt.x;
     } else {
       c.y += s.y;
+      w.y = stepAxis(w.y, s.y, size.y);
       t.y += dt.y;
     }
-    if (any(c != end) && wallAt(c)) { return false; }
+    if (any(c != end) && wallIn(w)) { return false; }
   }
   return true;
 }
 
-fn sense(p: vec2f, s: u32) -> f32 {
+// What the sensor at p of an agent at pos reads for strain s. A wall, a cell outside a closed arena and a wall
+// between the agent and the sensor read BLOCKED (ADR 0020). `clear` is the agent's clearance (clearPath).
+fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
   let c = cellOf(p);
-  if (!habitable(c)) { return BLOCKED; }
+  if (!habitable(c) || (SENSE_WALLS && !clearPath(pos, p, clear))) { return BLOCKED; }
   let q = cellCoord(u32(c));
   let sc = textureLoad(scent, q, 0).xy;
   return dot(textureLoad(trail, q, 0), P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
 }
 
 // Sense and rotate (Jones 2010, Fig. 3), then the random turn pCD. Returns the new heading.
-fn steer(a: Agent, s: u32, rng: ptr<function, u32>) -> f32 {
+fn steer(a: Agent, s: u32, rng: ptr<function, u32>, clear: i32) -> f32 {
   let sa = P.sensorAngle[s];
   let so = P.sensorOffset[s];
   let ra = P.rotationAngle[s];
-  let f = sense(a.pos + so * dir(a.heading), s);
-  let l = sense(a.pos + so * dir(a.heading - sa), s);
-  let r = sense(a.pos + so * dir(a.heading + sa), s);
+  let f = sense(a.pos, a.pos + so * dir(a.heading), s, clear);
+  let l = sense(a.pos, a.pos + so * dir(a.heading - sa), s, clear);
+  let r = sense(a.pos, a.pos + so * dir(a.heading + sa), s, clear);
   var h = a.heading;
   if (f > l && f > r) {
     // keep heading
@@ -160,10 +207,11 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
     let alive = lifecycle(&a, id);
     if (alive) {
       var rng = rngSeed(id, STEER);
-      let h = steer(a, s, &rng);
+      let clear = clearanceAt(a.pos);
+      let h = steer(a, s, &rng, clear);
       let p = a.pos + P.stepSize[s] * dir(h);
       let c = cellOf(p);
-      if (habitable(c) && clearPath(a.pos, p)) {
+      if (habitable(c) && clearPath(a.pos, p, clear)) {
         a.pos = wrapPos(p);
         a.heading = h;
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
@@ -184,8 +232,8 @@ fn key(id: u32) -> u32 { return pcg(id ^ pcg(P.grid.w ^ 0x9e3779b9u ^ P.cfg.x));
 fn destination(a: Agent) -> vec2f { return a.pos + P.stepSize[a.bits & 3u] * dir(a.heading); }
 
 // A move needs a free target: habitable, empty at the start of the step, and no wall on the way.
-fn canClaim(a: Agent, c: i32) -> bool {
-  return habitable(c) && c != cellOf(a.pos) && occ[c] == 0u && clearPath(a.pos, destination(a));
+fn canClaim(a: Agent, c: i32, clear: i32) -> bool {
+  return habitable(c) && c != cellOf(a.pos) && occ[c] == 0u && clearPath(a.pos, destination(a), clear);
 }
 
 @compute @workgroup_size(256)
@@ -196,9 +244,10 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   let id = agentId(a);
   if (lifecycle(&a, id)) {
     var rng = rngSeed(id, STEER);
-    a.heading = steer(a, a.bits & 3u, &rng);
+    let clear = clearanceAt(a.pos);
+    a.heading = steer(a, a.bits & 3u, &rng, clear);
     let c = cellOf(destination(a));
-    if (canClaim(a, c)) { atomicMax(&claims[c], key(id)); }
+    if (canClaim(a, c, clear)) { atomicMax(&claims[c], key(id)); }
   }
   agents[i] = a;
 }
@@ -217,7 +266,7 @@ fn settle(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
       let c = cellOf(p);
       // Moving inside the own cell is always allowed; otherwise the claim must have won.
       var ok = habitable(c) && c == cellOf(a.pos);
-      if (!ok && canClaim(a, c)) { ok = atomicLoad(&claims[c]) == key(id); }
+      if (!ok && canClaim(a, c, clearanceAt(a.pos))) { ok = atomicLoad(&claims[c]) == key(id); }
       if (ok) {
         a.pos = wrapPos(p);
         atomicAdd(&counts[u32(c) * 4u + s], 1u);

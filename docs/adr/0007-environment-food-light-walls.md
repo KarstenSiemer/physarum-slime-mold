@@ -33,8 +33,10 @@ Option 3, plus:
   keeps Jones' meaning for a full-intensity food pixel.
 - Walls: block movement like an occupied cell (random new heading, no deposit), also when a move
   would pass through a wall cell on its way (ADR 0019); sensors read walls and the outside as a
-  large negative value; diffusion averages only over non-wall cells (no flux into walls). A cell
-  is a wall when its wall byte is at least 128 (0.5), in WGSL and GLSL alike (ADR 0019).
+  large negative value, also a sensor whose way from the agent passes through a wall cell, so no
+  agent senses the trail behind a wall (ADR 0020); diffusion averages only over non-wall cells (no
+  flux into walls). A cell is a wall when its wall byte is at least 128 (0.5), in WGSL and GLSL
+  alike (ADR 0019).
 - Boundary modes: periodic (Jones default), closed box, dish (circle, Jones Fig. 9 and 17–21).
 
 ## Consequences

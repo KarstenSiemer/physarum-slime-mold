@@ -15,6 +15,7 @@ import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import viewGlsl from './glsl/view.glsl?raw';
+import wallsFrag from './glsl/walls.frag?raw';
 import { bindBlock, program, type GL } from './gl';
 
 /** Uniform block binding points. */
@@ -29,8 +30,22 @@ export interface Program {
   loc: (name: string) => WebGLUniformLocation | null;
 }
 
-export interface Programs {
+/** The programs for an environment that may hold walls (Programs.walled()). */
+export interface Walled {
+  /** The agent pass whose sensors check for walls (SENSE_WALLS in agents.frag, ADR 0020). */
   agents: Program;
+  /** The clearance passes (walls.frag). */
+  walls: Program;
+}
+
+export interface Programs {
+  /** The agent pass without the wall check of the sensors, for an environment without walls. */
+  agents: Program;
+  /**
+   * The programs for walls, compiled at their first use: a simulation without walls never needs them (Kernels.walled
+   * in sim.ts).
+   */
+  walled: () => Walled;
   points: Program;
   counts: Program;
   fill: Program;
@@ -58,16 +73,23 @@ function wrap(gl: GL, p: WebGLProgram): Program {
   };
 }
 
+/** A simulation program: a full-screen pass with the shared prelude (common.glsl). */
+export function simProgram(gl: GL, frag: string): Program {
+  return wrap(gl, program(gl, V + common + fullscreen, V + common + frag));
+}
+
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
 export function compile(gl: GL): Programs {
-  const sim = (frag: string) => wrap(gl, program(gl, V + common + fullscreen, V + common + frag));
+  const sim = (frag: string) => simProgram(gl, frag);
   const plain = (frag: string) => wrap(gl, program(gl, V + 'precision highp float;\n' + fullscreen, V + frag));
   const view = (frag: string): [Program, Program] => [
     plain('#define ENV 0\n' + viewGlsl + frag),
     plain('#define ENV 1\n' + viewGlsl + frag),
   ];
+  let walled: Walled | undefined;
   return {
     agents: sim(agentsFrag),
+    walled: () => (walled ??= { agents: sim('#define SENSE_WALLS 1\n' + agentsFrag), walls: sim(wallsFrag) }),
     init: sim(initFrag),
     diffuse: sim(diffuseFrag),
     paint: sim(brushGlsl + paintFrag),

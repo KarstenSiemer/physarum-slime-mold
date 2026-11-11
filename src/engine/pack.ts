@@ -43,6 +43,12 @@ export function startRounds(s: Pick<Settings, 'layout' | 'boundary'>, walls: boo
   return s.layout === 'mixed' && s.boundary !== 'dish' && !walls ? 1 : START_ROUNDS;
 }
 
+/**
+ * Cells per side of a clearance tile (shaders/walls.wgsl, gl/glsl/walls.frag, ADR 0020): each tile keeps how far the
+ * nearest wall lies at least, so that agents far from every wall skip the walks of their sensors and moves.
+ */
+export const CLEAR_TILE = 8;
+
 /** Agent-pass tools (`Params.tool.w`). */
 export const AgentToolKind = { inoculate: 1, cut: 2 } as const;
 
@@ -62,7 +68,7 @@ export interface Runtime {
   agents: number;
   step: number;
   tool?: AgentTool | undefined;
-  /** The environment may hold walls: moves then check every cell they cross (agents.wgsl `clearPath`). */
+  /** The environment may hold walls: moves and sensors then check every cell they cross (agents.wgsl `clearPath`). */
   walls?: boolean;
   /** The claim round of the start placement with one agent per cell (init.wgsl). */
   round?: number;

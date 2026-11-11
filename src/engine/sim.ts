@@ -1,6 +1,6 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { packParams, PARAMS_BYTES, startRounds, type AgentTool } from './pack';
+import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, type AgentTool } from './pack';
 import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -8,6 +8,7 @@ import diffuseWgsl from './shaders/diffuse.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlan, type Diffuse } from './sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
@@ -72,8 +73,15 @@ export class Simulation implements Sim {
   readonly stats: GPUBuffer;
   private collision?: { occ: Pair<GPUBuffer>; claims: GPUBuffer };
   private paintGroup?: GPUBindGroup;
-  /** A wall was painted since the last clear: moves then check every cell they cross (agents.wgsl clearPath). */
+  /**
+   * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.wgsl
+   * clearPath, ADR 0020).
+   */
   private walls = false;
+  /** Per clearance tile: whether it holds a wall cell, and how far the nearest wall lies at least (walls.wgsl). */
+  private readonly walled: GPUBuffer;
+  private readonly clearance: GPUBuffer;
+  private readonly clearTiles: [number, number];
   private readonly groups: [number, number];
   private readonly bindCache = new Map<string, GPUBindGroup>();
 
@@ -105,6 +113,9 @@ export class Simulation implements Sim {
     this.env = buffer(cells * 4, STORAGE | COPY_SRC | COPY_DST);
     this.shapeBuffer = buffer(cells * 4, STORAGE | COPY_SRC | COPY_DST);
     this.stats = buffer(16, STORAGE | COPY_SRC | COPY_DST);
+    this.clearTiles = [Math.ceil(width / CLEAR_TILE), Math.ceil(height / CLEAR_TILE)];
+    this.walled = buffer(this.clearTiles[0] * this.clearTiles[1] * 4, STORAGE);
+    this.clearance = buffer(this.clearTiles[0] * this.clearTiles[1] * 4, STORAGE);
     const texture = (format: GPUTextureFormat) =>
       device.createTexture({
         size: [width, height],
@@ -127,8 +138,16 @@ export class Simulation implements Sim {
     this.ensureCollision();
   }
 
-  static async create(device: GPUDevice, settings: Settings, width: number, height: number, agents: number) {
-    const sim = new Simulation(device, await Kernels.get(device), settings, width, height, agents);
+  /** `agentsSource` replaces shaders/agents.wgsl, for tests that compare the passes with another version of it. */
+  static async create(
+    device: GPUDevice,
+    settings: Settings,
+    width: number,
+    height: number,
+    agents: number,
+    agentsSource = agentsWgsl,
+  ) {
+    const sim = new Simulation(device, await Kernels.get(device, agentsSource), settings, width, height, agents);
     sim.reset();
     return sim;
   }
@@ -342,6 +361,29 @@ export class Simulation implements Sim {
       this.device.queue.submit([enc.finish()]);
     }
     if (foreign) this.shapeHeld = undefined;
+    // Without walls no pass reads the clearance: an erase then needs none, and builds no pass for walls.
+    if (this.walls && strokes.some((s) => s.kind === 'wall' || s.kind === 'erase')) this.updateClearance();
+  }
+
+  /**
+   * The clearance of every tile from the walls in `env` (walls.wgsl): the agent passes read it to skip walks that
+   * cannot meet a wall. Needed again after every change of the walls. Without it, a new wall could lie inside the
+   * clearance and be skipped; after an erase, walks would only run where they are not needed.
+   */
+  private updateClearance() {
+    const k = this.kernels.walled();
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    const groups: [number, number] = [Math.ceil(this.clearTiles[0] / 8), Math.ceil(this.clearTiles[1] / 8)];
+    pass.setPipeline(k.markWalls);
+    pass.setBindGroup(0, this.bind('markWalls', k.markWalls, [this.params, this.env, this.walled]));
+    pass.dispatchWorkgroups(...groups);
+    pass.setPipeline(k.measureClearance);
+    const measure = [this.params, null, this.walled, this.clearance];
+    pass.setBindGroup(0, this.bind('measureClearance', k.measureClearance, measure));
+    pass.dispatchWorkgroups(...groups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   clearEnvironment() {
@@ -442,13 +484,14 @@ export class Simulation implements Sim {
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
     this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
     this.shapeHeld = undefined;
+    if (this.walls) this.updateClearance();
   }
 
   destroy() {
     for (const t of [...this.trail, ...this.scent]) t.destroy();
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
-    for (const b of [this.counts, this.env, this.shapeBuffer, this.stats]) b.destroy();
+    for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
     this.collision?.occ.forEach((b) => {
       b.destroy();
     });
@@ -487,11 +530,14 @@ export class Simulation implements Sim {
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
     const [trail, scent] = [this.trailViews[p], this.scentViews[p]];
+    // With walls, the passes whose sensors check the cells on the way for walls (agents.wgsl SENSE_WALLS).
+    const w = this.walls ? 1 : 0;
     if (!col) {
-      pass.setPipeline(k.move);
+      const move = this.walls ? k.walled().move : k.move;
+      pass.setPipeline(move);
       pass.setBindGroup(
         0,
-        this.bind(`move${p}${a}`, k.move, [
+        this.bind(`move${p}${a}${w}`, move, [
           this.params,
           this.agentBuffer,
           trail,
@@ -499,15 +545,21 @@ export class Simulation implements Sim {
           this.env,
           this.counts,
           this.stats,
+          null,
+          null,
+          null,
+          null,
+          this.clearance,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
     } else {
       const [occ, next] = [col.occ[q], col.occ[flip(q)]];
-      pass.setPipeline(k.claim);
+      const claim = this.walls ? k.walled().claim : k.claim;
+      pass.setPipeline(claim);
       pass.setBindGroup(
         0,
-        this.bind(`claim${p}${q}${a}`, k.claim, [
+        this.bind(`claim${p}${q}${a}${w}`, claim, [
           this.params,
           this.agentBuffer,
           trail,
@@ -517,6 +569,9 @@ export class Simulation implements Sim {
           null,
           occ,
           col.claims,
+          null,
+          null,
+          this.clearance,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
@@ -534,6 +589,8 @@ export class Simulation implements Sim {
           occ,
           col.claims,
           next,
+          null,
+          this.clearance,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
@@ -631,9 +688,20 @@ function entry(binding: number, r: GPUBuffer | GPUTextureView): GPUBindGroupEntr
   return { binding, resource: r instanceof GPUBuffer ? { buffer: r } : r };
 }
 
+/** The pipelines for an environment that may hold walls (Kernels.walled()). */
+interface Walled {
+  markWalls: GPUComputePipeline;
+  measureClearance: GPUComputePipeline;
+  /** `advance` and `claim` whose sensors check for walls (agents.wgsl SENSE_WALLS). */
+  move: GPUComputePipeline;
+  claim: GPUComputePipeline;
+}
+
 /** Compiled pipelines, shared by every Simulation on one device. */
 class Kernels {
-  private static readonly cache = new WeakMap<GPUDevice, Promise<Kernels>>();
+  /** Per device, by the source of the agent passes. */
+  private static readonly cache = new WeakMap<GPUDevice, Map<string, Promise<Kernels>>>();
+  private walledPipelines?: Walled;
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -652,13 +720,41 @@ class Kernels {
     readonly diffuseLayout: GPUBindGroupLayout,
     readonly paintLayout: GPUBindGroupLayout,
     private readonly variants: Map<string, GPUComputePipeline>,
+    private readonly device: GPUDevice,
+    private readonly agents: GPUShaderModule,
+    private readonly walls: GPUShaderModule,
   ) {}
 
-  static get(device: GPUDevice): Promise<Kernels> {
-    let k = Kernels.cache.get(device);
+  /**
+   * The pipelines for walls, built at their first use: a simulation without walls never needs them, and built at
+   * the start they made the first start of a page 2.6 s longer on SwiftShader (CI, ADR 0010). They are created
+   * without waiting, so the queue, not the page, waits for the compiler before the first pass with walls.
+   */
+  walled(): Walled {
+    if (!this.walledPipelines) {
+      const pipeline = (module: GPUShaderModule, entryPoint: string, constants: Record<string, number> = {}) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
+      const sensing = { SENSE_WALLS: 1 };
+      this.walledPipelines = {
+        markWalls: pipeline(this.walls, 'markWalls'),
+        measureClearance: pipeline(this.walls, 'measureClearance'),
+        move: pipeline(this.agents, 'advance', sensing),
+        claim: pipeline(this.agents, 'claim', sensing),
+      };
+    }
+    return this.walledPipelines;
+  }
+
+  static get(device: GPUDevice, agentsSource: string): Promise<Kernels> {
+    let built = Kernels.cache.get(device);
+    if (!built) {
+      built = new Map();
+      Kernels.cache.set(device, built);
+    }
+    let k = built.get(agentsSource);
     if (!k) {
-      k = Kernels.build(device);
-      Kernels.cache.set(device, k);
+      k = Kernels.build(device, agentsSource);
+      built.set(agentsSource, k);
     }
     return k;
   }
@@ -669,11 +765,11 @@ class Kernels {
     return p;
   }
 
-  private static async build(device: GPUDevice): Promise<Kernels> {
+  private static async build(device: GPUDevice, agentsSource: string): Promise<Kernels> {
     const module = (code: string) => device.createShaderModule({ code: common + code });
-    const agents = module(agentsWgsl);
-    const compute = (m: GPUShaderModule, entryPoint: string) =>
-      device.createComputePipelineAsync({ layout: 'auto', compute: { module: m, entryPoint } });
+    const agents = module(agentsSource);
+    const compute = (m: GPUShaderModule, entryPoint: string, constants: Record<string, number> = {}) =>
+      device.createComputePipelineAsync({ layout: 'auto', compute: { module: m, entryPoint, constants } });
     const C = GPUShaderStage.COMPUTE;
     const diffuseLayout = device.createBindGroupLayout({
       entries: [
@@ -782,6 +878,9 @@ class Kernels {
       diffuseLayout,
       paintLayout,
       new Map(await variants),
+      device,
+      agents,
+      module(wallsWgsl),
     );
   }
 }
