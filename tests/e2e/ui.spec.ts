@@ -335,6 +335,17 @@ for (const [width, height] of [
       expect(apart, `${JSON.stringify(box)} against ${JSON.stringify(o)}`).toBe(true);
     }
     if (width <= 720 || height <= 500) expect(box.height).toBeLessThan(110); // compact
+    // The numbers below the bar keep at least 3 px apart (the review of 2026-11-11 read "0.010.1" and "1k10k+").
+    const ticks = await legend.locator('.ticks > span').evaluateAll((spans) =>
+      spans
+        .filter((s) => s.checkVisibility())
+        .map((s) => s.getBoundingClientRect())
+        .map((r) => [r.left, r.right] as const)
+        .sort((a, b) => a[0] - b[0]),
+    );
+    expect(ticks.length).toBeGreaterThanOrEqual(4);
+    for (let k = 1; k < ticks.length; k++)
+      expect((ticks[k]?.[0] ?? 0) - (ticks[k - 1]?.[1] ?? 0), JSON.stringify(ticks)).toBeGreaterThanOrEqual(3);
   });
 
 // The legend lies on the glass of the other panels, without a backdrop blur (ADR 0028), and its text keeps WCAG 2.2

@@ -75,7 +75,9 @@
       <span class="name"></span>
       <span class="scale ticks">
         {#each SCENT_LEVELS as v, i (v)}
-          <span style:left="{(i / SCENT_TOP) * 100}%">{label(v)}{i === SCENT_TOP ? '+' : ''}</span>
+          <span class:odd={i % 2 === 1} style:left="{(i / SCENT_TOP) * 100}%"
+            >{label(v)}{i === SCENT_TOP ? '+' : ''}</span
+          >
         {/each}
       </span>
     </div>
@@ -101,15 +103,16 @@
     border: 1px solid var(--line);
     font-size: 11px;
     pointer-events: none;
-    max-width: 300px;
+    max-width: 310px;
   }
   figcaption {
     font-weight: 600;
     margin-bottom: 4px;
   }
+  /* The bar is 240 px wide, so the numbers below it keep apart (6 px and more with the fonts of macOS and Linux). */
   .row {
     display: grid;
-    grid-template-columns: 40px 216px;
+    grid-template-columns: 40px 240px;
     align-items: center;
     gap: 6px;
   }
@@ -157,13 +160,19 @@
     margin: 4px 0 0;
     color: var(--muted);
   }
-  /* Phones and short screens: no note, so the legend covers little of the picture. */
+  /*
+   * Phones and short screens: no note, so the legend covers little of the picture, and every other number, so the
+   * numbers keep apart on the shorter bar (0.01, 1, 100 and 10k+).
+   */
   @media (max-width: 720px), (max-height: 500px) {
     .note {
       display: none;
     }
     .row {
       grid-template-columns: 34px 180px;
+    }
+    .ticks > .odd {
+      display: none;
     }
   }
 </style>
