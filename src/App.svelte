@@ -287,7 +287,8 @@
         else {
           const rate = inoculateRate(radius, app.settings, e.sim.agents, app.strain);
           const dead = deadLeft(e);
-          e.agentTool({ kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, rate });
+          // Paused, the hold runs steps only while a dead agent is known: else they would only move the scene.
+          e.agentTool({ kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, rate, idle: dead !== true });
           if (!toldNoDead && dead === false) {
             toldNoDead = true;
             const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);

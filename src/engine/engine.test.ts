@@ -57,9 +57,9 @@ describe('agent tools held over frames', () => {
   }
 
   /** Frames at `fps` from the first one after the press; the tool is held in those where `held` says so. */
-  function frames(engine: Engine, fps: number, n: number, steps?: number, held = (_: number) => true) {
+  function frames(engine: Engine, fps: number, n: number, steps?: number, held = (_: number) => true, t = tool) {
     for (let k = 1; k <= n; k++) {
-      if (held(k)) engine.agentTool(tool);
+      if (held(k)) engine.agentTool(t);
       engine.frame((k * 1000) / fps, steps);
     }
   }
@@ -92,6 +92,31 @@ describe('agent tools held over frames', () => {
       expect(engine.sim.step - before, `${fps} fps`).toBe(perFrame.reduce<number>((a, b) => a + b, 0));
       for (const r of runs) expect(r.revive, `${fps} fps`).toBeCloseTo(stepChance(RATE, 1 / 60), 12);
     }
+  });
+
+  // Idle: the app knows no dead agent of the strain (ui/state.svelte.ts deadLeft()). Steps would only move the paused
+  // scene.
+  it('runs no step for an idle tool held while paused, and keeps none of its time', async () => {
+    const { engine, runs } = await start({});
+    engine.paused = true;
+    frames(engine, 60, 30, undefined, () => true, { ...tool, idle: true });
+    expect(runs).toEqual([]);
+    // A dead agent is known again: the next frame runs one step with the time of that frame only.
+    engine.agentTool(tool);
+    engine.frame((31 * 1000) / 60);
+    expect(runs.map((r) => r.steps)).toEqual([1]);
+    expect(runs[0]?.revive).toBeCloseTo(stepChance(RATE, 1 / 60), 12);
+  });
+
+  it('runs an idle tool held while running, and a forced step of it while paused', async () => {
+    const { engine, runs } = await start({});
+    frames(engine, 60, 3, 2, () => true, { ...tool, idle: true });
+    expect(runs.map((r) => r.steps)).toEqual([2, 2, 2]);
+    for (const r of runs) expect(r.revive).toBeCloseTo(stepChance(RATE, 1 / 60 / 2), 12);
+    engine.paused = true;
+    engine.agentTool({ ...tool, idle: true });
+    engine.frame(4000 / 60, 1);
+    expect(runs.map((r) => r.steps)).toEqual([2, 2, 2, 1]);
   });
 
   it('runs no step for a tool held while running when the speed asks for none, and forgets its time on release', async () => {

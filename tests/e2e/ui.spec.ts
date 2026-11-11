@@ -114,6 +114,25 @@ test('the inoculate tool says so when no dead agents of its strain are left', as
   await page.mouse.up();
 });
 
+// Paused, a hold runs steps only while a dead agent of the strain is known (docs/adr/0023). Here every agent lives:
+// the steps would only move the paused scene.
+test('a paused hold of the inoculate tool runs no step while every agent of its strain lives', async ({ page }) => {
+  await expect(page.locator('.stats')).toContainText('agents', { timeout: 60_000 }); // a count of this run
+  await page.locator('canvas').click();
+  await page.keyboard.press('Space');
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.paused)).toBe(true);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const step = await page.evaluate(() => globalThis.physarum?.sim.step);
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('All agents of strain A are alive.', { timeout: 60_000 });
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => globalThis.physarum?.sim.step)).toBe(step);
+  await page.mouse.up();
+});
+
 // The start layout Empty restarts a scene where every agent lived. For up to 500 ms the stats still hold the count of
 // the run before: the tool must not take it for this one (docs/adr/0023). Paused, the hold waits for the count of the
 // new run, which WebGPU must take after the reset: before, it gave the count of the last step before it.

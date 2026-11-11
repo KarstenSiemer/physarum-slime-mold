@@ -34,13 +34,15 @@ const RESET_KEYS = ['seed', 'layout', 'boundary', 'collisions'] as const;
 
 /**
  * An agent tool held on the canvas for one frame. `rate`: for inoculate, placements per dead agent of the strain and
- * second (pack.ts inoculateRate()); frame() turns it into a chance per step (stepChance()).
+ * second (pack.ts inoculateRate()); frame() turns it into a chance per step (stepChance()). `idle`: the tool can
+ * change nothing, as inoculate while the app knows no dead agent of its strain (deadLeft() in ui/state.svelte.ts).
+ * A paused hold of an idle tool runs no step (ADR 0023).
  */
-export type HeldTool = Omit<AgentTool, 'revive'> & { rate: number };
+export type HeldTool = Omit<AgentTool, 'revive'> & { rate: number; idle?: boolean };
 
 /** The tool of one step that stands for `seconds` of holding. */
-function stepTool({ rate, ...tool }: HeldTool, seconds: number): AgentTool {
-  return { ...tool, revive: stepChance(rate, seconds) };
+function stepTool({ kind, x, y, radius, strain, rate }: HeldTool, seconds: number): AgentTool {
+  return { kind, x, y, radius, strain, revive: stepChance(rate, seconds) };
 }
 
 /** Picks WebGPU, or WebGL2 when WebGPU is missing or `?backend=webgl2` (ADR 0003). */
@@ -433,18 +435,20 @@ export class Engine {
    * holding at any frame rate and speed (ADR 0023). With the rule, only the free cells of the brush take agents, and
    * a cell becomes free when its agent walks off: the amount then also goes up with the steps per second. The speed
    * sets these, at any frame rate. A frame without a step passes its time on to the next step. While paused, a held
-   * tool runs PAUSED_TOOL_STEPS steps per second, so that it acts.
+   * tool runs PAUSED_TOOL_STEPS steps per second, so that it acts. An idle one (HeldTool) runs none and keeps no
+   * time: its steps would only move the paused scene.
    */
   frame(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
     if (this.sweepFor(Infinity, performance.now() + FRAME_MS)) this.onEdits?.();
     this.flushEnv();
     const planned = this.budget.next(now, this.paused || forceSteps !== undefined ? 0 : this.settings.speed);
-    const held = this.pendingTool;
+    const pausedHold = this.paused && forceSteps === undefined;
+    const held = this.pendingTool && !(pausedHold && this.pendingTool.idle) ? this.pendingTool : undefined;
     this.pendingTool = undefined;
     this.heldFor = held ? this.heldFor + this.budget.interval / 1000 : 0;
     let steps = forceSteps ?? planned;
-    if (held && this.paused && forceSteps === undefined) {
+    if (held && pausedHold) {
       this.pausedSteps += (this.budget.interval / 1000) * PAUSED_TOOL_STEPS;
       steps = Math.floor(this.pausedSteps + SLACK);
       this.pausedSteps -= steps;
