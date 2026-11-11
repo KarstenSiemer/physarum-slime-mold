@@ -15,12 +15,12 @@ Dependabot alerts, CodeQL, rulesets, auto-merge and SHA-pinning enforcement off.
 
 Workflows (`.github/workflows/`):
 
-| File                    | Trigger          | Jobs                                                                                                                                                                            |
-| ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                | PR, push to main | `build`: npm ci, signatures, audit, build, Pages artifact; `verify` (needs `build`): lint, svelte-check, unit, GPU (SwiftShader), e2e on the `build` artifact; `deploy` on main |
-| `security.yml`          | PR, main, weekly | `zizmor` (SARIF), `scorecard` (not on PRs)                                                                                                                                      |
-| `dependency-review.yml` | PR               | blocks moderate+ vulnerabilities and unlisted licenses                                                                                                                          |
-| `renovate.yml`          | hourly           | self-hosted Renovate (ADR 0015)                                                                                                                                                 |
+| File                    | Trigger          | Jobs                                                                                                                                                                                                                                                                                     |
+| ----------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`                | PR, push to main | `build`: npm ci, signatures, audit, build, Pages artifact; `verify-gpu`: lint, svelte-check, unit, GPU (SwiftShader); `verify-e2e` (needs `build`): e2e on the `build` artifact; both in the Playwright image; `verify`: passes when `build` and both test jobs passed; `deploy` on main |
+| `security.yml`          | PR, main, weekly | `zizmor` (SARIF), `scorecard` (not on PRs)                                                                                                                                                                                                                                               |
+| `dependency-review.yml` | PR               | blocks moderate+ vulnerabilities and unlisted licenses                                                                                                                                                                                                                                   |
+| `renovate.yml`          | hourly           | self-hosted Renovate (ADR 0015)                                                                                                                                                                                                                                                          |
 
 Rules applied in every workflow (zizmor `--persona=pedantic` checks them in CI and in
 pre-commit; actionlint runs in pre-commit only):
@@ -32,8 +32,9 @@ pre-commit; actionlint runs in pre-commit only):
 - No `pull_request_target`, no `workflow_run`, no secrets in PR workflows.
 - The deployed site is built in its own job, `build`, which runs only the build chain:
   `vite.config.ts` loads Vite, the Svelte plugin and the CSP plugin, and the test settings live
-  in `vitest.config.ts`. Linters, test runners and Playwright's downloaded Chromium run in
-  `verify`, which downloads the artifact and runs the e2e tests against exactly those files.
+  in `vitest.config.ts`. Linters, test runners and Chromium run in the test jobs `verify-gpu`
+  and `verify-e2e`; `verify-e2e` downloads the artifact and runs the e2e tests against exactly
+  those files.
   `deploy` publishes the artifact of `build`. Before this split, every dev tool ran in the job
   that uploaded `dist/` (supply-chain audit, 2026-11-08).
 - No dependency cache: `package-manager-cache: false` is set explicitly, because
@@ -113,6 +114,17 @@ reporting, CodeQL default setup, and:
   more approval for a pull request that Copilot opens without attribution to a person. With 0
   required approvals it has no effect.
 - The script can run again: rulesets are created or updated by name.
+
+- The test jobs run in the Playwright image `mcr.microsoft.com/playwright`, pinned by version and
+  digest (owner decision, 2026-11-11). Before, each run installed Chromium and about 50 system
+  packages with `npx playwright install --with-deps`, which needs an Ubuntu mirror. On 2026-11-11
+  the runners could not resolve `archive.ubuntu.com` and `security.ubuntu.com` from 14:20 to at
+  least 15:05 UTC, in two regions, while `packages.microsoft.com` resolved; three runs failed
+  before a test started. The image comes from Microsoft's registry and holds the browsers. Its
+  version must equal `@playwright/test` in `package.json`, so Renovate groups the image with
+  `@playwright/test` and `playwright` in one pull request that is not auto-merged. The image is
+  Ubuntu 24.04 on an Ubuntu 26.04 runner, the same image that local checks in the CI image use
+  (ADR 0010). `--ipc=host` gives Chromium the shared memory it needs in a container.
 
 ## Consequences
 

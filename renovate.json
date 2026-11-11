@@ -60,6 +60,12 @@
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "npm non-major"
+    },
+    {
+      "description": "Playwright's npm packages and the CI image of the test jobs move together: the image holds the browsers of one Playwright version (docs/adr/0014-ci-hardening.md).",
+      "matchPackageNames": ["@playwright/test", "playwright", "mcr.microsoft.com/playwright"],
+      "groupName": "Playwright",
+      "automerge": false
     }
   ]
 }
