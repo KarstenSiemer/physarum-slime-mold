@@ -14,6 +14,7 @@ import pointsVert from './glsl/points.vert?raw';
 import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
+import toolsGlsl from './glsl/tools.glsl?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import wallsFrag from './glsl/walls.frag?raw';
 import { bindBlock, program, type GL } from './gl';
@@ -74,8 +75,13 @@ function wrap(gl: GL, p: WebGLProgram): Program {
 }
 
 /** A simulation program: a full-screen pass with the shared prelude (common.glsl). */
-export function simProgram(gl: GL, frag: string): Program {
+function simProgram(gl: GL, frag: string): Program {
   return wrap(gl, program(gl, V + common + fullscreen, V + common + frag));
+}
+
+/** The agent pass from `frag` (agents.frag or a version of it), with the agent tools (tools.glsl). */
+export function agentsProgram(gl: GL, frag: string, senseWalls: boolean): Program {
+  return simProgram(gl, (senseWalls ? '#define SENSE_WALLS 1\n' : '') + toolsGlsl + frag);
 }
 
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
@@ -88,15 +94,15 @@ export function compile(gl: GL): Programs {
   ];
   let walled: Walled | undefined;
   return {
-    agents: sim(agentsFrag),
-    walled: () => (walled ??= { agents: sim('#define SENSE_WALLS 1\n' + agentsFrag), walls: sim(wallsFrag) }),
+    agents: agentsProgram(gl, agentsFrag, false),
+    walled: () => (walled ??= { agents: agentsProgram(gl, agentsFrag, true), walls: sim(wallsFrag) }),
     init: sim(initFrag),
     diffuse: sim(diffuseFrag),
     paint: sim(brushGlsl + paintFrag),
     shape: sim(brushGlsl + shapeFrag),
     counts: sim(countsFrag),
     fill: plain(fillFrag),
-    points: wrap(gl, program(gl, V + common + pointsVert, V + common + pointsFrag)),
+    points: wrap(gl, program(gl, V + common + toolsGlsl + pointsVert, V + common + pointsFrag)),
     render: view(renderFrag),
     height: view(heightFrag),
     bloom: plain(bloomFrag),

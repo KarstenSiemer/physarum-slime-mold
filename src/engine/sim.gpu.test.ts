@@ -15,9 +15,9 @@ import { outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './br
 import { WebGl2Backend } from './gl/backend';
 import agentsFrag from './gl/glsl/agents.frag?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
-import { compile, simProgram, type Programs, type Walled } from './gl/programs';
+import { agentsProgram, compile, type Programs, type Walled } from './gl/programs';
 import { GlSim } from './gl/sim';
-import { AgentToolKind } from './pack';
+import { AgentToolKind, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND } from './render';
@@ -872,10 +872,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         let walled: Walled | undefined;
         return {
           ...shipped,
-          agents: simProgram(context, glsl),
+          agents: agentsProgram(context, glsl, false),
           walled: () =>
             (walled ??= {
-              agents: simProgram(context, '#define SENSE_WALLS 1\n' + glsl),
+              agents: agentsProgram(context, glsl, true),
               walls: shipped.walled().walls,
             }),
         };
@@ -2096,12 +2096,150 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(await cells()).toEqual([w - 1, 0]);
     });
 
+    // x = 0.999999 − 2 = −1.000001 lies in cell −2, which is cell W − 2 on the periodic grid, and the move counts
+    // there. Wrapped in float32 the position rounded up to 511.0, into cell W − 1, where another agent could
+    // claim the same cell (common.wgsl and common.glsl landed()).
+    it.each([false, true])(
+      'lands a move that ends just below x = −1 in the cell it counted (collisions %s)',
+      async (collisions) => {
+        const [w, h] = [512, 8];
+        const straight = { sensorAngle: 0, sensorOffset: 1, randomTurn: 0, stepSize: 2 };
+        const strains = [{ ...defaultStrain(0), ...straight }];
+        const sim = await make({ layout: 'empty', strains }, w, h, 1);
+        sim.writeAgent(0, { x: 0.999999, y: 0.5, heading: Math.PI, bits: 4 });
+        if (collisions) sim.update({ ...defaultSettings(), layout: 'empty', strains, collisions: true });
+        sim.run(1);
+        const [a] = await sim.readAgents();
+        const counts = await sim.readCounts();
+        const counted = Array.from({ length: w * h }, (_, c) => c).filter((c) => (counts[c * 4] ?? 0) > 0);
+        expect([Math.floor(a?.x ?? -1), Math.floor(a?.y ?? -1)]).toEqual([w - 2, 0]);
+        expect(counted).toEqual([w - 2]);
+      },
+    );
+
     it('places the same agents again for the same seed', async () => {
       const place = async () => {
         const sim = await make({ layout: 'center', boundary: 'dish', collisions: true, seed: 9 }, 64, 48, 30);
         return sim.readAgents();
       };
       expect(await place()).toEqual(await place());
+    });
+  });
+
+  // Inoculate places dead agents only, and with one agent per cell a placed or moved agent claims a free cell like
+  // a move (ADR 0008, ADR 0023). A tool acts on every step of a run() call; the frames here have 2 steps each, as at
+  // 120 steps per second on a 60 Hz display.
+  describe('agent tools (ADR 0023)', () => {
+    const inoculate = (x: number, y: number, radius: number, strain: number, revive: number): AgentTool => ({
+      kind: AgentToolKind.inoculate,
+      ...{ x, y, radius, strain, revive },
+    });
+    const cut = (x: number, y: number, radius: number): AgentTool => ({
+      kind: AgentToolKind.cut,
+      ...{ x, y, radius, strain: 0, revive: 0 },
+    });
+
+    /** The agents with their ids, the alive ones, the most alive agents in one cell, and alive agents in a wall. */
+    async function census(sim: Sim, env: Uint8Array) {
+      const { width: w, height: h } = sim;
+      const agents = (await sim.readAgents()).map((a, id) => ({ ...a, id }));
+      const alive = agents.filter((a) => a.bits & 4);
+      const per = new Map<number, number>();
+      let walled = 0;
+      for (const a of alive) {
+        const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
+        const c = y * w + x;
+        if (x < 0 || y < 0 || x >= w || y >= h || (env[c * 4] ?? 0) >= 128) walled++;
+        per.set(c, (per.get(c) ?? 0) + 1);
+      }
+      return { agents, alive, most: Math.max(0, ...per.values()), walled };
+    }
+
+    // 300 frames at one spot of a box, through a wall: the brush fills, its agents walk off, and dead agents take
+    // the cells they leave. Strain 0 is never placed: the tool places its own strain only.
+    async function inoculation(check: boolean) {
+      const strains = [defaultStrain(0), defaultStrain(1)];
+      const patch = { layout: 'empty', boundary: 'box', collisions: true, strains, shrink: 0.002, seed: 21 } as const;
+      const sim = await make(patch, 64, 48, 1500);
+      sim.paint([{ kind: 'wall', from: [20, 24], to: [44, 24], radius: 1.5 }]);
+      const env = await sim.readEnv();
+      let most = 0;
+      let placed = 0;
+      for (let step = 0; step < 600; step++) {
+        sim.run(1, inoculate(32, 24, 10, 1, 0.05));
+        if (!check) continue;
+        const c = await census(sim, env);
+        most = Math.max(most, c.most);
+        expect(c.most, `step ${step}`).toBeLessThanOrEqual(1);
+        expect(c.walled, `step ${step}`).toBe(0);
+        expect(c.alive.filter((a) => (a.bits & 3) === 0)).toEqual([]);
+        placed = Math.max(placed, c.alive.length);
+      }
+      return { sim, most, placed };
+    }
+
+    it('places agents on free cells only: one agent per cell after every step of a 300-frame hold', async () => {
+      const { sim, most, placed } = await inoculation(true);
+      expect(most).toBe(1);
+      // About 250 open cells in the brush; agents walk off and others take their cells.
+      expect(placed).toBeGreaterThan(200);
+      const again = (await inoculation(false)).sim;
+      expect(await again.readAgents()).toEqual(await sim.readAgents());
+      expect(Array.from(await again.readTrail())).toEqual(Array.from(await sim.readTrail()));
+    });
+
+    // Agents that never leave their cell (step 0), half of them dead, and a brush across the wrap seam. Before,
+    // the tool also moved living agents of its strain from anywhere into the brush.
+    it.each([false, true])(
+      'takes dead agents only: the living agents outside the brush stay where they are (collisions %s)',
+      async (collisions) => {
+        const [w, h] = [64, 48];
+        const strains = [{ ...defaultStrain(0), stepSize: 0 }];
+        const patch = { layout: 'mixed', collisions, strains, shrink: 0.5, seed: 4 } as const;
+        const sim = await make(patch, w, h, 900);
+        sim.run(1);
+        sim.update({ ...defaultSettings(), ...patch, shrink: 0 });
+        const [cx, cy, r] = [2, 24, 9];
+        const near = (d: number, n: number) => Math.abs((((d % n) + 1.5 * n) % n) - n / 2);
+        // A hair past the rim: a float32 position placed on the rim can read as just outside it.
+        const outside = (a: { x: number; y: number }) => Math.hypot(near(a.x - cx, w), near(a.y - cy, h)) > r + 0.01;
+        const where = (list: { id: number; x: number; y: number; bits: number }[]) =>
+          list.filter(outside).map(({ id, x, y, bits }) => ({ id, x, y, bits }));
+        const env = await sim.readEnv();
+        const start = await census(sim, env);
+        const before = where(start.alive);
+        expect(before.length).toBeGreaterThan(300);
+        expect(start.agents.length - start.alive.length).toBeGreaterThan(300);
+        for (let step = 0; step < 600; step++) {
+          sim.run(1, inoculate(cx, cy, r, 0, 0.05));
+          const c = await census(sim, env);
+          expect(where(c.alive), `step ${step}`).toEqual(before);
+          if (collisions) expect(c.most, `step ${step}`).toBeLessThanOrEqual(1);
+        }
+        const end = await census(sim, env);
+        expect(end.alive.length - start.alive.length).toBeGreaterThan(100);
+      },
+    );
+
+    it('moves the agents of a cut to free cells: one agent per cell after every step', async () => {
+      const [w, h, n] = [64, 48, 1843];
+      const sim = await make({ layout: 'mixed', boundary: 'box', collisions: true, density: 0.6, seed: 6 }, w, h, n);
+      sim.run(10);
+      const env = await sim.readEnv();
+      const wound = (a: { x: number; y: number }) => Math.hypot(a.x - 32, a.y - 24) < 8;
+      const inside = (await census(sim, env)).alive.filter(wound).length;
+      expect(inside).toBeGreaterThan(100);
+      let left = inside;
+      for (let step = 0; step < 300; step++) {
+        sim.run(1, cut(32, 24, 8));
+        const c = await census(sim, env);
+        expect(c.most, `step ${step}`).toBe(1);
+        expect(c.alive.length, `step ${step}`).toBe(n);
+        expect(c.walled, `step ${step}`).toBe(0);
+        left = c.alive.filter(wound).length;
+      }
+      // Agents keep walking in, and each step moves them out again.
+      expect(left).toBeLessThan(inside / 4);
     });
   });
 
@@ -2852,9 +2990,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         sim.sortInterval = sortInterval;
         sim.paint([{ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 }]);
         sim.run(20);
-        sim.run(1, { kind: AgentToolKind.inoculate, x: 30, y: 22, radius: 8, strain: 1, revive: 0.5, teleport: 0.3 });
+        sim.run(1, { kind: AgentToolKind.inoculate, x: 30, y: 22, radius: 8, strain: 1, revive: 0.5 });
         sim.run(15);
-        sim.run(1, { kind: AgentToolKind.cut, x: 20, y: 20, radius: 6, strain: 0, revive: 0, teleport: 0 });
+        sim.run(1, { kind: AgentToolKind.cut, x: 20, y: 20, radius: 6, strain: 0, revive: 0 });
         sim.run(35);
         return sim;
       }

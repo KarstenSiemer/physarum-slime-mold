@@ -15,7 +15,7 @@ struct Params {
   attraction: array<vec4f, 4>, // row s: weight of each strain's trail for strain s
   scent: vec4f,          // food source, light source, scent keep, shrink probability
   tool: vec4f,           // x, y (cells), radius, kind (0 none, 1 inoculate, 2 cut)
-  tool2: vec4f,          // strain, revive probability (dead agents), teleport probability (alive), unused
+  tool2: vec4f,          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
   extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
 }
@@ -30,8 +30,7 @@ const PI = 3.14159265358979;
 const TAU = 6.28318530717959;
 const BLOCKED = -1e30; // sensor value for walls and outside; finite on purpose
 const ALIVE = 4u;
-const ID_SHIFT = 3u;
-const ID_BITS = 0xfffffff8u; // the id field; up to 2^24 agents (webgpu.ts MAX_AGENTS)
+const ID_SHIFT = 3u; // the id field starts here; up to 2^24 agents (webgpu.ts MAX_AGENTS)
 
 @group(0) @binding(0) var<uniform> P: Params;
 
@@ -90,6 +89,22 @@ fn cellAt(c: vec2i) -> i32 {
 fn cellOf(p: vec2f) -> i32 { return cellAt(vec2i(floor(p))); }
 
 fn cellCoord(i: u32) -> vec2i { return vec2i(i32(i % W()), i32(i / W())); }
+
+// A position in cell c at offset f in [0, 1]². c + f alone can round up into the next cell: f32 has 24 bits,
+// so from coordinate 256 on an offset just below 1 lands on c + 1. Clamped to the largest f32 below c + 1.
+fn inCell(c: vec2i, f: vec2f) -> vec2f {
+  let lo = vec2f(c);
+  let hi = bitcast<vec2f>(bitcast<vec2u>(lo + 1.0) - 1u);
+  return clamp(lo + f, lo, hi);
+}
+
+// Where an agent that goes to p lands: p wrapped into the grid, in c = cellOf(p), the cell its move or placement
+// claimed and counted. wrapPos() alone can round up into the next cell: on a grid 512 cells wide, x = −1.000001
+// (cell 510) wraps to 511.0, in cell 511. Bit for bit the same as wrapPos(p) wherever that stays in c.
+fn landed(p: vec2f, c: i32) -> vec2f {
+  let lo = cellCoord(u32(c));
+  return inCell(lo, wrapPos(p) - vec2f(lo));
+}
 
 // Environment bytes: x wall, y food, z light (0…1).
 fn envOf(e: u32) -> vec4f { return unpack4x8unorm(e); }

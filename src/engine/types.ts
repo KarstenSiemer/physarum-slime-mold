@@ -42,6 +42,7 @@ export interface Sim {
   readonly step: number;
   update(settings: Settings): void;
   reset(): void;
+  /** Runs `steps` steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool): void;
   /** Paints brush strokes in order: the only way food, light and walls reach a simulation. */
   paint(strokes: readonly Stroke[]): void;

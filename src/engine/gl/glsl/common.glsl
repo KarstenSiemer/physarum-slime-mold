@@ -19,7 +19,7 @@ layout(std140) uniform Params {
   vec4 attraction[4];
   vec4 scent;          // food source, light source, scent keep, shrink probability
   vec4 tool;           // x, y, radius, kind (0 none, 1 inoculate, 2 cut)
-  vec4 tool2;          // strain, revive probability, teleport probability, unused
+  vec4 tool2;          // strain, chance per step to place a dead agent of the strain (inoculate), unused, unused
   uvec4 strainEnd;
   uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
 } P;
@@ -31,6 +31,7 @@ const float BLOCKED = -1e30;
 const uint ALIVE = 4u;
 const uint MOVED = 8u;  // deposited this step (read by the point pass)
 const uint WANTS = 16u; // claimed a cell this step (collision mode); at init: waits for a start cell
+const uint PLACE = 32u; // with WANTS: claimed the cell of a tool's spot (tools.glsl placement)
 
 int W() { return int(P.grid.x); }
 int H() { return int(P.grid.y); }
@@ -79,6 +80,20 @@ int cellAt(ivec2 c) {
 int cellOf(vec2 p) { return cellAt(ivec2(floor(p))); }
 
 ivec2 cellCoord(int i) { return ivec2(i % W(), i / W()); }
+
+// A position in cell c at offset f in [0, 1]², clamped below c + 1 (see inCell in common.wgsl).
+vec2 inCell(ivec2 c, vec2 f) {
+  vec2 lo = vec2(c);
+  vec2 hi = uintBitsToFloat(floatBitsToUint(lo + 1.0) - 1u);
+  return clamp(lo + f, lo, hi);
+}
+
+// Where an agent that goes to p lands: wrapped, and in c = cellOf(p), the cell its move or placement claimed
+// (landed in common.wgsl).
+vec2 landed(vec2 p, int c) {
+  ivec2 lo = cellCoord(c);
+  return inCell(lo, wrapPos(p) - vec2(lo));
+}
 
 uint bitsOf(vec4 a) { return uint(a.w + 0.5); }
 

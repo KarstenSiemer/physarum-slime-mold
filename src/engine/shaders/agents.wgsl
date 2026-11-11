@@ -9,7 +9,7 @@
 @group(0) @binding(4) var<storage, read> env: array<u32>;
 @group(0) @binding(5) var<storage, read_write> counts: array<atomic<u32>>;
 @group(0) @binding(6) var<storage, read_write> stats: array<atomic<u32>>;
-@group(0) @binding(7) var<storage, read> occ: array<u32>;
+@group(0) @binding(7) var<storage, read> occ: array<u32>; // agents per cell at the start of the step (the rule)
 @group(0) @binding(8) var<storage, read_write> claims: array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read_write> occNext: array<atomic<u32>>;
 @group(0) @binding(10) var<uniform> replacement: Agent;
@@ -154,37 +154,49 @@ fn randomIn(center: vec2f, radius: f32, rng: ptr<function, u32>) -> vec2f {
   return center + radius * sqrt(rand(rng)) * dir(rand(rng) * TAU);
 }
 
-// Tools and shrinkage. Returns false if the agent is dead after this step.
-fn lifecycle(a: ptr<function, Agent>, id: u32) -> bool {
-  var rng = rngSeed(id, TOOL);
-  let s = (*a).bits & 3u;
+// Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
+fn shrinkage(a: ptr<function, Agent>, id: u32) -> bool {
   var alive = ((*a).bits & ALIVE) != 0u;
-  if (P.tool.w == 1.0 && f32(s) == P.tool2.x) {
-    // Inoculate: revive dead agents of this strain, or move living ones, into the brush.
-    if (rand(&rng) < select(P.tool2.z, P.tool2.y, !alive)) {
-      let p = randomIn(P.tool.xy, P.tool.z, &rng);
-      if (habitable(cellOf(p))) {
-        (*a).pos = wrapPos(p);
-        (*a).heading = rand(&rng) * TAU;
-        alive = true;
-      }
-    }
-  } else if (P.tool.w == 2.0 && alive && distance((*a).pos, P.tool.xy) < P.tool.z) {
-    // Cut: agents in the wound are re-seeded at random outside it (Jones 2010, Sec. 4.3).
-    for (var k = 0u; k < 8u; k++) {
-      let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
-      if (habitable(cellOf(p)) && distance(p, P.tool.xy) >= P.tool.z) {
-        (*a).pos = p;
-        break;
-      }
-    }
-  }
   if (alive) {
     var r = rngSeed(id, SHRINK);
     alive = rand(&r) >= P.scent.w;
   }
-  (*a).bits = ((*a).bits & ID_BITS) | s | select(0u, ALIVE, alive);
+  (*a).bits = ((*a).bits & ~ALIVE) | select(0u, ALIVE, alive);
   return alive;
+}
+
+// Where a tool puts an agent in this step (ADR 0023): a position, its heading and its cell, or cell −1 for none.
+struct Spot {
+  pos: vec2f,
+  heading: f32,
+  cell: i32,
+}
+
+// A cell a tool may put an agent in: habitable, and with the rule empty at the start of the step (ADR 0008). Only
+// the rule reads `occ`, which `advance` binds but never reads.
+fn openCell(c: i32) -> bool { return habitable(c) && (P.cfg.w == 0u || occ[c] == 0u); }
+
+// Inoculate takes a dead agent of the tool's strain, with the chance P.tool2.y, to a random point of the brush, and
+// never a living one. Cut takes a living agent in the wound to the first of 8 random points outside it whose cell
+// is open (Jones 2010, Sec. 4.3). After shrinkage, so a pure function of the agent as `claim` leaves it, the
+// parameters, `env` and `occ`: `claim` and `settle` find the same spot. With the rule the agent claims the cell like
+// a move (`claim`), and only the winner goes there (`settle`).
+fn placement(a: Agent, id: u32) -> Spot {
+  if (P.tool.w == 0.0) { return Spot(a.pos, a.heading, -1); } // no tool held: the usual step
+  var rng = rngSeed(id, TOOL);
+  let alive = (a.bits & ALIVE) != 0u;
+  if (P.tool.w == 1.0 && !alive && f32(a.bits & 3u) == P.tool2.x && rand(&rng) < P.tool2.y) {
+    let p = randomIn(P.tool.xy, P.tool.z, &rng);
+    let c = cellOf(p);
+    if (openCell(c)) { return Spot(landed(p, c), rand(&rng) * TAU, c); }
+  } else if (P.tool.w == 2.0 && alive && distance(a.pos, P.tool.xy) < P.tool.z) {
+    for (var k = 0u; k < 8u; k++) {
+      let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
+      let c = cellOf(p);
+      if (openCell(c) && distance(p, P.tool.xy) >= P.tool.z) { return Spot(landed(p, c), a.heading, c); }
+    }
+  }
+  return Spot(a.pos, a.heading, -1);
 }
 
 fn count(alive: bool, s: u32) {
@@ -204,15 +216,22 @@ fn advance(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) g
     var a = agents[i];
     let s = a.bits & 3u;
     let id = agentId(a);
-    let alive = lifecycle(&a, id);
-    if (alive) {
+    var alive = shrinkage(&a, id);
+    let spot = placement(a, id);
+    if (spot.cell >= 0) {
+      // A tool puts the agent here instead of its move: it deposits nothing in this step.
+      a.pos = spot.pos;
+      a.heading = spot.heading;
+      a.bits |= ALIVE;
+      alive = true;
+    } else if (alive) {
       var rng = rngSeed(id, STEER);
       let clear = clearanceAt(a.pos);
       let h = steer(a, s, &rng, clear);
       let p = a.pos + P.stepSize[s] * dir(h);
       let c = cellOf(p);
       if (habitable(c) && clearPath(a.pos, p, clear)) {
-        a.pos = wrapPos(p);
+        a.pos = landed(p, c);
         a.heading = h;
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
       } else {
@@ -242,7 +261,12 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   if (i >= P.grid.z) { return; }
   var a = agents[i];
   let id = agentId(a);
-  if (lifecycle(&a, id)) {
+  let alive = shrinkage(&a, id);
+  let spot = placement(a, id);
+  if (spot.cell >= 0) {
+    // A tool's spot is claimed like a move; the agent stays as it is until `settle`.
+    atomicMax(&claims[spot.cell], key(id));
+  } else if (alive) {
     var rng = rngSeed(id, STEER);
     let clear = clearanceAt(a.pos);
     a.heading = steer(a, a.bits & 3u, &rng, clear);
@@ -260,15 +284,29 @@ fn settle(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
     var a = agents[i];
     let s = a.bits & 3u;
     let id = agentId(a);
-    let alive = (a.bits & ALIVE) != 0u;
-    if (alive) {
+    var alive = (a.bits & ALIVE) != 0u;
+    let spot = placement(a, id);
+    if (spot.cell >= 0) {
+      // The winner of the spot's cell goes there. A loser stays as it is: dead (inoculate), or where it was (cut).
+      if (atomicLoad(&claims[spot.cell]) == key(id)) {
+        a.pos = spot.pos;
+        a.heading = spot.heading;
+        a.bits |= ALIVE;
+        alive = true;
+        atomicAdd(&occNext[spot.cell], 1u);
+      } else if (alive) {
+        let here = cellOf(a.pos);
+        if (here >= 0) { atomicAdd(&occNext[here], 1u); }
+      }
+      agents[i] = a;
+    } else if (alive) {
       let p = destination(a);
       let c = cellOf(p);
       // Moving inside the own cell is always allowed; otherwise the claim must have won.
       var ok = habitable(c) && c == cellOf(a.pos);
       if (!ok && canClaim(a, c, clearanceAt(a.pos))) { ok = atomicLoad(&claims[c]) == key(id); }
       if (ok) {
-        a.pos = wrapPos(p);
+        a.pos = landed(p, c);
         atomicAdd(&counts[u32(c) * 4u + s], 1u);
         atomicAdd(&occNext[c], 1u);
       } else {

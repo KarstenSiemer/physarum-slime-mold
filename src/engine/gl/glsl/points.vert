@@ -1,13 +1,11 @@
-// One point per agent into a per-cell target, combined by blending (gl/sim.ts):
-// kind 0 deposit (moved agents, additive, one lane per strain), 1 claims (MAX of keys),
+// One point per agent into a per-cell target, combined by blending (gl/sim.ts), after tools.glsl:
+// kind 0 deposit (moved agents, additive, one lane per strain), 1 claims (MAX of keys) of moves and of tools' spots,
 // 2 occupancy (additive), 3 tally of alive agents per strain (additive, see below),
 // 4 deposit into one panel per strain (2 × 2 panels of the grid size), for exact counts without
 // float blending (gl/sim.ts deposit()), 5 start claims (MAX of keys) of agents that wait for a free cell of
 // their own (init.frag).
 
 uniform sampler2D agents;
-uniform sampler2D env; // kind 5
-uniform sampler2D occ; // kind 5: cells taken in earlier rounds
 uniform int agentWidth;
 uniform int kind;
 uniform int tallySide; // kind 3: side of the square tally target
@@ -33,6 +31,10 @@ void main() {
       c = cell;
       value = vec4(startKey(uint(i)));
     }
+  } else if (kind == 1 && (bits & WANTS) != 0u && uint(i) < P.grid.z) {
+    // A tool's spot (agents.frag mode 1 marks it with PLACE; the agent may be dead), or the target of a move.
+    c = (bits & PLACE) != 0u ? placement(a, uint(i)).cell : cellOf(destination(a));
+    value = vec4(claimKey(uint(i)));
   } else if (alive) {
     if ((kind == 0 || kind == 4) && (bits & MOVED) != 0u) {
       c = cellOf(a.xy);
@@ -43,9 +45,6 @@ void main() {
         panel = ivec2(s & 1, s >> 1);
         panels = 2.0;
       }
-    } else if (kind == 1 && (bits & WANTS) != 0u) {
-      c = cellOf(destination(a));
-      value = vec4(claimKey(uint(i)));
     } else if (kind == 2) {
       c = cellOf(a.xy);
       value = vec4(1.0);

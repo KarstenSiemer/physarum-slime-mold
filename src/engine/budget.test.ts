@@ -245,4 +245,13 @@ describe('FrameBudget', () => {
     expect(paused.idleFrames).toBe(0);
     expect(paused.idleMs).toBe(0);
   });
+
+  it('reports the time a frame stands for, at most 100 ms, as its steps count it', () => {
+    const b = new FrameBudget();
+    const intervals = [0, 16, 32, 140, 148].map((t) => {
+      b.next(t, 120);
+      return b.interval;
+    });
+    expect(intervals).toEqual([0, 16, 16, 100, 8]);
+  });
 });

@@ -5,7 +5,7 @@ export const MAX_STEPS_PER_FRAME = 16;
 const MAX_INTERVAL_MS = 100;
 
 /** Frame timing jitter, in steps, that does not change the step count: 2.0 ± 0.06 runs 2, 2, 2 and not 1, 3. */
-const SLACK = 1 / 16;
+export const SLACK = 1 / 16;
 
 /**
  * Steps per frame: as many as the speed asks for and the GPU keeps up with (Engine.frame).
@@ -44,6 +44,11 @@ export class FrameBudget {
    */
   idleFrames = 0;
   idleMs = 0;
+  /**
+   * The time the last frame stands for (ms): its interval, at most MAX_INTERVAL_MS, as its steps count it. A held agent
+   * tool spreads it over the frame's steps (Engine.frame).
+   */
+  interval = 0;
   /** Allowed steps not run yet, in [−SLACK, 1 − SLACK). */
   private wanted = 0;
   private inFlight = 0;
@@ -62,7 +67,8 @@ export class FrameBudget {
     // A frame from a key press can carry a later time than the next animation frame: time never runs back.
     const interval = this.last === undefined ? 0 : Math.max(0, now - this.last);
     this.last = Math.max(this.last ?? now, now);
-    const demand = Math.min((Math.min(interval, MAX_INTERVAL_MS) / 1000) * speed, this.max);
+    this.interval = Math.min(interval, MAX_INTERVAL_MS);
+    const demand = Math.min((this.interval / 1000) * speed, this.max);
     if (this.inFlight === 0 && interval > 0 && interval <= MAX_INTERVAL_MS) {
       this.idleFrames++;
       this.idleMs += interval;

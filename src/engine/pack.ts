@@ -52,14 +52,42 @@ export const CLEAR_TILE = 8;
 /** Agent-pass tools (`Params.tool.w`). */
 export const AgentToolKind = { inoculate: 1, cut: 2 } as const;
 
+/** An agent tool for the steps of one `Sim.run()` call: it acts on every one of them (ADR 0023). */
 export interface AgentTool {
   kind: (typeof AgentToolKind)[keyof typeof AgentToolKind];
   x: number;
   y: number;
   radius: number;
   strain: number;
+  /** Inoculate: the chance per step that a dead agent of the strain is placed. Living agents never move. */
   revive: number;
-  teleport: number;
+}
+
+/**
+ * The chance that a dead agent is placed in one step that stands for `seconds` of holding the inoculate tool, at
+ * `rate` placements per dead agent and second. Over any time t the agent stays dead with the chance e^(−rate · t),
+ * however frames and steps cut t up: so the amount per second of holding does not depend on the frame rate or the
+ * steps per second (ADR 0023).
+ */
+export function stepChance(rate: number, seconds: number): number {
+  return rate > 0 && seconds > 0 ? -Math.expm1(-rate * seconds) : 0;
+}
+
+/**
+ * The rate of the inoculate tool, in placements per dead agent of `strain` and second, for a brush of `radius` cells.
+ * While every agent of the strain is dead, a second of holding places 30 times the brush area times the density (at
+ * least 0.25): the brush fills to the density in about 1/30 s. A frame at 60 Hz placed the same before (2026-11-11).
+ * With the rule, the free cells of the brush limit it (ADR 0008).
+ */
+export function inoculateRate(
+  radius: number,
+  s: Pick<Settings, 'density' | 'strains'>,
+  agents: number,
+  strain: number,
+) {
+  const total = s.strains.reduce((a, st) => a + st.share, 0);
+  const share = (s.strains[strain]?.share ?? 1) / total;
+  return (30 * Math.PI * radius * radius * Math.max(0.25, s.density)) / (agents * share);
 }
 
 export interface Runtime {
@@ -72,6 +100,12 @@ export interface Runtime {
   walls?: boolean;
   /** The claim round of the start placement with one agent per cell (init.wgsl). */
   round?: number;
+}
+
+/** Agents of each strain: alive and dead, as strainEnds() splits them. A strain keeps its agents for good. */
+export function strainAgents(strains: readonly Strain[], agents: number): number[] {
+  const ends = strainEnds(strains, agents);
+  return strains.slice(0, MAX_STRAINS).map((_, i) => (ends[i] ?? 0) - (i > 0 ? (ends[i - 1] ?? 0) : 0));
 }
 
 /** Exclusive end index of each strain's agents, proportional to the population shares. */
@@ -112,7 +146,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   const t = rt.tool;
   if (t) {
     f.set([t.x, t.y, t.radius, t.kind], slot('tool'));
-    f.set([t.strain, t.revive, t.teleport, 0], slot('tool2'));
+    f.set([t.strain, t.revive, 0, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
   u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));

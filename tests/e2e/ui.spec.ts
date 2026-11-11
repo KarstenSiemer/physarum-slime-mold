@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { openSmallScene, watchErrors } from './helpers';
+import { openSmallScene, smallScene, watchErrors } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await openSmallScene(page);
@@ -100,4 +100,35 @@ test('keyboard shortcuts pause, step and switch tools', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => globalThis.physarum?.sim.step ?? 0)).toBe(before + 1);
   await page.keyboard.press('5');
   await expect(page.getByRole('radio', { name: 'Wall' })).toHaveAttribute('aria-checked', 'true');
+});
+
+// Inoculate places only dead agents (docs/adr/0023). In the small scene every agent is alive: the tool places nothing
+// and says so. The alive count in the stats is at most 500 ms old.
+test('the inoculate tool says so when no dead agents of its strain are left', async ({ page }) => {
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('All agents of strain A are alive.', { timeout: 60_000 });
+  await page.mouse.up();
+});
+
+test('the inoculate tool brings dead agents to life in the empty start layout', async ({ page }) => {
+  const errors = watchErrors(page);
+  // A new hash alone would not load the page again.
+  await page.goto('about:blank');
+  await page.goto(await smallScene({ layout: 'empty' }));
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
+  const alive = () => page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.reduce((a, b) => a + b, 0));
+  expect(await alive()).toBe(0);
+  await page.getByRole('radio', { name: 'Inoculate' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect.poll(alive, { timeout: 60_000 }).toBeGreaterThan(50);
+  await page.mouse.up();
+  await expect(page.getByRole('status').filter({ hasText: 'are alive' })).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

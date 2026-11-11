@@ -247,9 +247,10 @@ export class GlSim implements Sim {
     }
   }
 
+  /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
     for (let k = 0; k < steps; k++) {
-      this.writeParams(k === 0 ? tool : undefined);
+      this.writeParams(tool);
       this.encodeStep();
       this.step++;
     }
@@ -583,7 +584,8 @@ export class GlSim implements Sim {
       const occ = col.occ[this.q];
       agentPass(1, A, B, occ.texture, dummy);
       clear(gl, col.claims);
-      this.points(1, col.claims, gl.MAX, B);
+      // A tool's spot needs the occupancy (tools.glsl placement).
+      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture });
       agentPass(2, B, A, occ.texture, col.claims.texture);
       const next = col.occ[flip(this.q)];
       clear(gl, next);
@@ -667,7 +669,7 @@ export class GlSim implements Sim {
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
     gl.viewport(0, 0, dst.width, dst.height);
     gl.useProgram(p.program);
-    // env and occ are read for kind 5 only, but bound always: an active sampler on the target is a feedback loop.
+    // Kinds 1 and 5 read env and occ. Both are bound always: an active sampler on the target is a feedback loop.
     textures(gl, p.program, { agents: agents.texture, env: this.env.texture, occ: this.env.texture, ...more });
     gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
     gl.uniform1i(p.loc('kind'), kind);

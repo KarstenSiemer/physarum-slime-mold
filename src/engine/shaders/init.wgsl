@@ -50,14 +50,6 @@ fn disc(c: vec2f, r: f32, rng: ptr<function, u32>) -> vec2f {
   return c + r * sqrt(rand(rng)) * dir(rand(rng) * TAU);
 }
 
-// A position in cell c at offset f in [0, 1]². c + f alone can round up into the next cell: f32 has 24 bits,
-// so from coordinate 256 on an offset just below 1 lands on c + 1. Clamped to the largest f32 below c + 1.
-fn inCell(c: vec2i, f: vec2f) -> vec2f {
-  let lo = vec2f(c);
-  let hi = bitcast<vec2f>(bitcast<vec2u>(lo + 1.0) - 1u);
-  return clamp(lo + f, lo, hi);
-}
-
 fn habitable(c: i32) -> bool { return c >= 0 && !isWall(env[c]); }
 
 struct Start {

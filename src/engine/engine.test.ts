@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings } from '../model/params';
+import { defaultSettings, type Settings } from '../model/params';
+import { CpuBackend } from './cpu-backend';
+import { Engine, type HeldTool } from './engine';
+import { AgentToolKind, stepChance } from './pack';
 import { diffusePlan, equilibrium, gridSize } from './sizing';
 
 describe('gridSize', () => {
@@ -26,5 +29,75 @@ describe('diffusePlan', () => {
       [false, false],
       [false, true],
     ]);
+  });
+});
+
+// How Engine.frame() hands a held tool to the steps it runs (ADR 0023). The CPU backend runs no agents; the calls of
+// Sim.run() show what the GPU would get.
+describe('agent tools held over frames', () => {
+  const RATE = 2;
+  const tool: HeldTool = { kind: AgentToolKind.inoculate, x: 10, y: 10, radius: 5, strain: 0, rate: RATE };
+
+  async function start(patch: Partial<Settings>) {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const engine = await Engine.create(
+      canvas,
+      { ...defaultSettings(), resolution: 256, ...patch },
+      undefined,
+      new CpuBackend(),
+    );
+    const runs: { steps: number; revive: number | undefined }[] = [];
+    const run = engine.sim.run.bind(engine.sim);
+    engine.sim.run = (steps, t) => {
+      runs.push({ steps, revive: t?.revive });
+      run(steps, t);
+    };
+    engine.frame(0, 0); // the frame before the press
+    return { engine, runs };
+  }
+
+  /** Frames at `fps` from the first one after the press; the tool is held in those where `held` says so. */
+  function frames(engine: Engine, fps: number, n: number, steps?: number, held = (_: number) => true) {
+    for (let k = 1; k <= n; k++) {
+      if (held(k)) engine.agentTool(tool);
+      engine.frame((k * 1000) / fps, steps);
+    }
+  }
+
+  it('gives every step of a frame its share of the frame time', async () => {
+    const { engine, runs } = await start({});
+    frames(engine, 60, 3, 4);
+    expect(runs.map((r) => r.steps)).toEqual([4, 4, 4]);
+    for (const r of runs) expect(r.revive).toBeCloseTo(stepChance(RATE, 1 / 60 / 4), 12);
+  });
+
+  it('passes the time of a frame without a step on to the next step', async () => {
+    // 30 steps per second at 60 Hz: every other frame runs a step (budget.ts).
+    const { engine, runs } = await start({ speed: 30 });
+    frames(engine, 60, 6);
+    expect(runs.map((r) => r.steps)).toEqual([1, 1, 1]);
+    for (const r of runs) expect(r.revive).toBeCloseTo(stepChance(RATE, 2 / 60), 12);
+  });
+
+  it('runs 60 steps per second of a tool held while paused, at any frame rate', async () => {
+    for (const [fps, perFrame] of [
+      [120, [0, 1, 0, 1, 0, 1]],
+      [60, [1, 1, 1, 1, 1, 1]],
+      [30, [2, 2, 2, 2, 2, 2]],
+    ] as const) {
+      const { engine, runs } = await start({});
+      engine.paused = true;
+      const before = engine.sim.step;
+      frames(engine, fps, 6);
+      expect(engine.sim.step - before, `${fps} fps`).toBe(perFrame.reduce<number>((a, b) => a + b, 0));
+      for (const r of runs) expect(r.revive, `${fps} fps`).toBeCloseTo(stepChance(RATE, 1 / 60), 12);
+    }
+  });
+
+  it('runs no step for a tool held while running when the speed asks for none, and forgets its time on release', async () => {
+    const { engine, runs } = await start({ speed: 30 });
+    // Held in the first frame only: the step of the second frame gets no tool.
+    frames(engine, 60, 2, undefined, (k) => k === 1);
+    expect(runs).toEqual([{ steps: 1, revive: undefined }]);
   });
 });

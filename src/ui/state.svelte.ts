@@ -7,7 +7,7 @@ import type { Link } from '../model/url';
 
 export const TOOLS = [
   { id: 'pan', key: '1', label: 'Move', help: 'Drag to move the view. Scroll or pinch to zoom.' },
-  { id: 'inoculate', key: '2', label: 'Inoculate', help: 'Hold to place agents of the selected strain.' },
+  { id: 'inoculate', key: '2', label: 'Inoculate', help: 'Hold to place dead agents of the selected strain.' },
   { id: 'food', key: '3', label: 'Food', help: 'Place oat flakes. Food releases an attracting scent.' },
   { id: 'light', key: '4', label: 'Light', help: 'Shine light. Physarum flees from it.' },
   { id: 'wall', key: '5', label: 'Wall', help: 'Draw walls that agents cannot cross or sense through.' },

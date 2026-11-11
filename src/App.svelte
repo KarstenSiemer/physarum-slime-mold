@@ -4,7 +4,7 @@
   import { Engine } from './engine/engine';
   import { MIN_RADIUS } from './engine/environment';
   import { GpuUnavailableError } from './engine/gpu';
-  import { AgentToolKind } from './engine/pack';
+  import { AgentToolKind, inoculateRate, strainAgents } from './engine/pack';
   import { presetById, START } from './model/presets';
   import { decodeLink, encodeLink } from './model/url';
   import Learn from './ui/Learn.svelte';
@@ -197,6 +197,8 @@
   const pointers = new Map<number, [number, number]>();
   const drag = new BrushDrag();
   let held: [number, number] | undefined;
+  /** The notice that no dead agents are left came during this press of the inoculate tool. */
+  let toldNoDead = false;
   let pinch = 0;
 
   function twoPointers(): [[number, number], [number, number]] {
@@ -233,6 +235,7 @@
     drag.end();
     paintTo(e, p);
     if (app.tool === 'inoculate' || app.tool === 'cut') held = p;
+    toldNoDead = false;
   }
 
   function onpointermove(ev: PointerEvent) {
@@ -266,7 +269,17 @@
     getEngine()?.zoomAt(...pos(ev), Math.exp(-ev.deltaY * 0.0015));
   }
 
-  // While a tool is held, it acts on every frame.
+  /**
+   * Inoculate places only dead agents (ADR 0023). With none of the strain left it places nothing, and says so once per
+   * press. The count is the one of the stats, at most 500 ms old.
+   */
+  function noDeadAgents(e: Engine) {
+    const alive = app.stats.alive[app.strain];
+    const agents = strainAgents(e.settings.strains, e.sim.agents)[app.strain];
+    return alive !== undefined && agents !== undefined && alive >= agents;
+  }
+
+  // While a tool is held, the engine applies it in every frame, by the time the frame stands for (Engine.frame).
   $effect(() => {
     let raf = 0;
     const tick = () => {
@@ -274,17 +287,18 @@
       if (e && held) {
         const [x, y] = e.toGrid(...held);
         const radius = brushCells(e);
-        const total = app.settings.strains.reduce((a, s) => a + s.share, 0);
-        const share = (app.settings.strains[app.strain]?.share ?? 1) / total;
-        const p = Math.min(
-          1,
-          (Math.PI * radius * radius * Math.max(0.25, app.settings.density)) / (2 * e.sim.agents * share),
-        );
-        e.agentTool(
-          app.tool === 'cut'
-            ? { kind: AgentToolKind.cut, x, y, radius, strain: 0, revive: 0, teleport: 0 }
-            : { kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, revive: p, teleport: p },
-        );
+        if (app.tool === 'cut') e.agentTool({ kind: AgentToolKind.cut, x, y, radius, strain: 0, rate: 0 });
+        else {
+          const rate = inoculateRate(radius, app.settings, e.sim.agents, app.strain);
+          e.agentTool({ kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, rate });
+          if (!toldNoDead && noDeadAgents(e)) {
+            toldNoDead = true;
+            const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);
+            showNotice(
+              `All agents of strain ${letter} are alive. Inoculate places only dead agents. Agents die with Shrinkage, and the start layout Empty starts with no agents.`,
+            );
+          }
+        }
       }
       raf = requestAnimationFrame(tick);
     };
