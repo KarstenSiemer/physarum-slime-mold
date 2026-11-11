@@ -114,7 +114,8 @@ describe('strand level', () => {
     const bins = new Array<number>(64).fill(0);
     for (let i = 0; i < n; i++) {
       const v = median * Math.exp(sigma * z((i + 0.5) / n));
-      bins[Math.min(63, Math.max(0, Math.floor((Math.log2(v) + 10) * 2)))]++;
+      const b = Math.min(63, Math.max(0, Math.floor((Math.log2(v) + 10) * 2)));
+      bins[b] = (bins[b] ?? 0) + 1;
     }
     const exact = median * Math.exp(sigma * z(0.99));
     expect(strandLevel(bins, n) / exact).toBeGreaterThan(0.97);
