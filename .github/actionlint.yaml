@@ -1,0 +1,4 @@
+# GitHub hosts ubuntu-26.04 (every CI run since Renovate #16 used it), but this actionlint does not list it yet.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
