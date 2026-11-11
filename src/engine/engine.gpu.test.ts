@@ -756,6 +756,10 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
       expect(Math.hypot(a.x - 0.9 * w, a.y - 0.9 * h)).toBeLessThan(5.7);
       expect(a.bits & 3).toBe(0);
     }
+    // At half the density the colony fills its disc up to the middle. A full disc would lose its middle to the
+    // shrinkage test of step 0: every cell within 2.8 cells of the centre counts 25 in its 5 × 5 window, above 20.
+    const middle = first.filter((a) => Math.hypot(a.x - 0.9 * w, a.y - 0.9 * h) < 2.5).length;
+    expect(middle, `${first.length} agents`).toBeGreaterThanOrEqual(4);
     engine.reset();
     expect(await start()).toEqual(first);
     // Another start layout starts no colony.
