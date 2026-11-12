@@ -1009,7 +1009,9 @@ scent falls off over less than that (in Jones over about 1.6 cells).
   saturation and with another food weight, the lowest hold of several strains, a fleeing strain), with shared and own
   spreads. `scentLine()` (`scent.ts`, `render.wgsl`, `render.frag`) draws the line where its ratio is 1: it has no
   mark any more (2026-11-12, the coordinator's review of the branch).
-- e2e: the legend's sentence shows once a strand is measured, and the legend reads "Scent per cell", then "Food".
+- e2e: the legend's sentence shows once a strand is measured, and the legend reads "Scent per cell", then "Food". The
+  layout test waits for a strand of the Maze's own simulation first (up to 90 s; 2.5 to 4.5 s on SwiftShader on an M3
+  Pro): on GitHub's runners the default of 5 s ran out before the first measurement (2026-11-12, ADR 0010).
 - Mutations, each reverted after its run, all caught: the first pair only (WGSL and GLSL); the sensors reading the
   cells of walls (WGSL and GLSL); a sensor in a wall still counted (WGSL); the coarse map's sensors reading cells
   (WGSL); the full spread in place of the half (WGSL); a shortcut of 0.8 to 1.25 in place of 0.05 to 20 (WGSL); the

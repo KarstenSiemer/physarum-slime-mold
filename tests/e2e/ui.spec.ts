@@ -324,9 +324,19 @@ for (const [width, height] of [
       await page.getByRole('button', { name: 'Hide settings' }).click();
     }
     await expect(legend).toBeVisible();
-    // What the line means, read after the bars (the review of 2026-11-11 heard "a strand" before "Food"); the row
-    // shows once a strand is measured.
-    await expect(legend.getByText('Inside the line, food steers an agent more than a strand holds it.')).toBeVisible();
+    // What the line means, read after the bars (the review of 2026-11-11 heard "a strand" before "Food"). The row
+    // shows once the auto levels measured a strand of the Maze's own simulation (ScentLegend.svelte reads it every
+    // 500 ms): on SwiftShader on an M3 Pro 2.5 to 4.5 s after the switch, on GitHub's runners more (ADR 0010).
+    await page.waitForFunction(
+      () => {
+        const e = globalThis.physarum;
+        return !!e && !e.busy && e.levels().strand > 0;
+      },
+      undefined,
+      { timeout: 90_000 },
+    );
+    const line = legend.getByText('Inside the line, food steers an agent more than a strand holds it.');
+    await expect(line).toBeVisible({ timeout: 10_000 });
     await expect(legend).toHaveText(/^Scent per cell\s*Food/);
     const box = await legend.boundingBox();
     if (!box) throw new Error('no legend');
