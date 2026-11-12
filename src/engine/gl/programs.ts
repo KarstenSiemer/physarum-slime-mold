@@ -16,11 +16,12 @@ import pointsFrag from './glsl/points.frag?raw';
 import pointsVert from './glsl/points.vert?raw';
 import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
+import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import wallsFrag from './glsl/walls.frag?raw';
-import { bindBlock, program, type GL } from './gl';
+import { bindBlock, program, startProgram, type GL } from './gl';
 
 /** Uniform block binding points. */
 export const PARAMS_BINDING = 0;
@@ -40,6 +41,16 @@ export interface Walled {
   agents: Program;
   /** The clearance passes (walls.frag). */
   walls: Program;
+}
+
+/** The programs of the scent view (ADR 0009, amendment 2026-11-11). */
+export interface ScentPrograms {
+  /** The render pass with the view (SCENT in render.frag), without (index 0) and with (1) the food, light and walls. */
+  render: [Program, Program];
+  /** The pass that fills its coarse map (scent-down.frag): the scent of its texels and the share that holds scent. */
+  down: Program;
+  /** The pass that refreshes the scent of its texels after steps and keeps their share (SUM_ONLY). */
+  sum: Program;
 }
 
 /** The agent passes with the saturating trail perception (SATURATE in agents.frag, ADR 0022). */
@@ -90,6 +101,12 @@ export interface Programs {
   shape: Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
   render: [Program, Program];
+  /**
+   * The programs of the scent view once they are built, else undefined. The first call starts their build, and with
+   * KHR_parallel_shader_compile the driver builds them beside the frames, which draw without the view until then.
+   * Most frames never draw it.
+   */
+  scent: () => ScentPrograms | undefined;
   height: [Program, Program];
   bloom: Program;
   sample: Program;
@@ -132,17 +149,30 @@ export function diffuseProgram(gl: GL, frag: string, covered: boolean): Program 
   return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + frag);
 }
 
+const plainProgram = (gl: GL, frag: string) =>
+  wrap(gl, program(gl, V + 'precision highp float;\n' + fullscreen, V + frag));
+
+/**
+ * A view pass from `frag` (render.frag, height.frag or a version of them, after view.glsl) without (index 0) and with
+ * (1) the food, light and walls; `defines` go first, such as SCENT for the scent view.
+ */
+export function viewPrograms(gl: GL, frag: string, defines = ''): [Program, Program] {
+  return [
+    plainProgram(gl, defines + '#define ENV 0\n' + viewGlsl + frag),
+    plainProgram(gl, defines + '#define ENV 1\n' + viewGlsl + frag),
+  ];
+}
+
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
 export function compile(gl: GL): Programs {
   const sim = (frag: string) => simProgram(gl, frag);
-  const plain = (frag: string) => wrap(gl, program(gl, V + 'precision highp float;\n' + fullscreen, V + frag));
-  const view = (frag: string): [Program, Program] => [
-    plain('#define ENV 0\n' + viewGlsl + frag),
-    plain('#define ENV 1\n' + viewGlsl + frag),
-  ];
+  const plain = (frag: string) => plainProgram(gl, frag);
+  const view = (frag: string) => viewPrograms(gl, frag);
   let walled: Walled | undefined;
   let saturated: Saturated | undefined;
   let covered: Program | undefined;
+  let scentStarted: ReturnType<typeof startProgram>[] | undefined;
+  let scent: ScentPrograms | undefined;
   let capacity: Program | undefined;
   let growth: Growth | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
@@ -173,6 +203,22 @@ export function compile(gl: GL): Programs {
     fill: plain(fillFrag),
     points: wrap(gl, program(gl, V + common + toolsGlsl + pointsVert, V + common + pointsFrag)),
     render: view(renderFrag),
+    scent: () => {
+      // A lost context builds nothing: the frames draw without the view, and the app reports the loss.
+      if (scent || gl.isContextLost()) return scent;
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      scentStarted ??= [
+        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 1\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + scentDownFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n#define SUM_ONLY 1\n' + viewGlsl + scentDownFrag),
+      ];
+      if (!scentStarted.every((p) => p.done())) return undefined;
+      for (const p of scentStarted) p.check();
+      const [off, on, down, sum] = scentStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !down || !sum) return undefined;
+      return (scent = { render: [off, on], down, sum });
+    },
     height: view(heightFrag),
     bloom: plain(bloomFrag),
     sample: plain(sampleFrag),

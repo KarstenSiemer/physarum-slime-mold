@@ -1,12 +1,13 @@
 import type { Settings } from '../../model/params';
 import { at } from '../at';
-import { levels } from '../exposure';
+import { levels, STRAND_BLEND, strandLevel } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, VIEW_BYTES } from '../render';
+import { scentLevel, scentLevelSize } from '../scent';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
-import { compile, VIEW_BINDING, type Programs } from './programs';
+import { compile, VIEW_BINDING, viewPrograms, type Program, type Programs } from './programs';
 import { GlSim } from './sim';
 
 const BLOOM_LEVELS = 5;
@@ -25,15 +26,23 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly bytesPerCell: number;
   readonly coveredBytesPerCell: number;
   private readonly prog: Programs;
+  /** For tests: the render programs of another version of render.frag that draw every frame (renderFrom()). */
+  private fixed: [Program, Program] | undefined;
   private readonly viewUbo: WebGLBuffer;
   private readonly viewData = new ArrayBuffer(VIEW_BYTES);
   private bloomChain: Target[] = [];
   private sampleTarget: Target | undefined;
   /** Gel height field: one texel per cell plus a one-cell border (height.frag). */
   private heights: Target | undefined;
+  /** The scent view's coarse map (scent-down.frag): half the grid's sides, rounded up. */
+  private coarse: Target | undefined;
+  /** What the coarse map holds: it is filled again only when the scent or the shape changed, or the level or arena. */
+  private coarseHolds: { sim: GlSim; step: number; revision: number; level: number; boundary: string } | undefined;
   private frame = 0;
   private gain = 0;
   private black = 0;
+  /** The trail of a strand (Levels.strand). */
+  private strand = 0;
   /** The auto-levels measurement whose readback is still on its way. */
   private measuring: Promise<void> | undefined;
   /** Counts forget() calls: a readback of a replaced simulation must not change the new levels. */
@@ -113,10 +122,20 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.frame++;
   }
 
-  capture(sim: GlSim, settings: Settings, view: View, width: number, height: number): Promise<ImageData> {
+  async capture(
+    sim: GlSim,
+    settings: Settings,
+    view: View,
+    width: number,
+    height: number,
+    levels?: Levels,
+  ): Promise<ImageData> {
     const gl = this.gl;
+    // An export shows the scent view as asked: wait for its programs, unless the context is lost.
+    while (settings.showScent && !this.fixed && !this.prog.scent() && !gl.isContextLost())
+      await new Promise((r) => setTimeout(r, 2));
     const t = target(gl, width, height, gl.RGBA8);
-    this.encode(sim, settings, view, width, height, t);
+    this.encode(sim, settings, view, width, height, t, levels);
     const pixels = new Uint8ClampedArray(width * height * 4);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
     destroyTarget(gl, t);
@@ -124,17 +143,35 @@ export class WebGl2Backend implements Backend<GlSim> {
     const out = new Uint8ClampedArray(pixels.length);
     const row = width * 4;
     for (let y = 0; y < height; y++) out.set(pixels.subarray(y * row, (y + 1) * row), (height - 1 - y) * row);
-    return Promise.resolve(new ImageData(out, width, height));
+    return new ImageData(out, width, height);
   }
 
   async settle(sim: GlSim): Promise<Levels> {
     await this.measure(sim, 1);
-    return { gain: this.gain, black: this.black };
+    return this.levels();
+  }
+
+  levels(): Levels {
+    return { gain: this.gain, black: this.black, strand: this.strand };
+  }
+
+  async measured(sim: GlSim): Promise<Levels> {
+    return (await this.read(sim)) ?? this.levels();
+  }
+
+  /**
+   * For tests: draws every frame with another version of render.frag from now on, as the code before the scent view
+   * did, or as shipped again when `frag` is undefined.
+   */
+  renderFrom(frag?: string) {
+    this.fixed = frag === undefined ? undefined : viewPrograms(this.gl, frag);
   }
 
   forget() {
+    this.coarseHolds = undefined;
     this.gain = 0;
     this.black = 0;
+    this.strand = 0;
     this.generation++;
   }
 
@@ -142,6 +179,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     for (const t of this.bloomChain) destroyTarget(this.gl, t);
     if (this.sampleTarget) destroyTarget(this.gl, this.sampleTarget);
     if (this.heights) destroyTarget(this.gl, this.heights);
+    if (this.coarse) destroyTarget(this.gl, this.coarse);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
@@ -150,12 +188,31 @@ export class WebGl2Backend implements Backend<GlSim> {
    * Waits for a measurement that is still running, so `blend` 1 (settle) always gets its own.
    */
   private async measure(sim: GlSim, blend: number): Promise<void> {
-    while (this.measuring) await this.measuring;
-    this.measuring = this.sample(sim, blend).finally(() => (this.measuring = undefined));
-    return this.measuring;
+    const l = await this.read(sim);
+    if (!l) return;
+    this.gain += (l.gain - this.gain) * blend;
+    this.black += (l.black - this.black) * blend;
+    this.strand += (l.strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
   }
 
-  private async sample(sim: GlSim, blend: number) {
+  /**
+   * The levels measured now, without changing the levels that frames use: an export draws with them, and the line of
+   * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field, a replaced
+   * simulation or a lost context.
+   */
+  private async read(sim: GlSim): Promise<Levels | undefined> {
+    while (this.measuring) await this.measuring;
+    const run = this.sample(sim);
+    this.measuring = run
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => (this.measuring = undefined));
+    return run;
+  }
+
+  private async sample(sim: GlSim): Promise<Levels | undefined> {
     const gl = this.gl;
     const generation = this.generation;
     const h = Math.max(1, Math.round((SAMPLES * sim.height) / sim.width));
@@ -175,9 +232,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     try {
       px = await readTargetAsync(gl, t);
     } catch {
-      return; // context lost: nothing to measure
+      return undefined; // context lost: nothing to measure
     }
-    if (generation !== this.generation) return;
+    if (generation !== this.generation) return undefined;
     const bins = new Array<number>(BINS).fill(0);
     for (let i = 0; i < px.length; i += 4) {
       const v = px[i] ?? 0;
@@ -186,23 +243,22 @@ export class WebGl2Backend implements Backend<GlSim> {
       bins[b] = (bins[b] ?? 0) + 1;
     }
     const l = levels(bins, t.width * t.height);
-    if (l) {
-      this.gain += (l.gain - this.gain) * blend;
-      this.black += (l.black - this.black) * blend;
-    }
+    return l && { ...l, strand: strandLevel(bins, t.width * t.height) };
   }
 
-  private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target) {
+  /** `given`: levels measured for this frame alone (an export), in place of those of the frames. */
+  private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target, given?: Levels) {
     const gl = this.gl;
     sim.syncShape();
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
-    const exposure = (agents ? 0.4 / s.density : this.gain || fallback) * 2 ** s.exposure;
-    const black = agents ? 0 : this.black;
+    const l = given ?? this.levels();
+    const exposure = (agents ? 0.4 / s.density : l.gain || fallback) * 2 ** s.exposure;
+    const black = agents ? 0 : l.black;
     const bloom = this.runBloom(sim, s, exposure, black);
     // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
     const occ = s.collisions ? sim.occupancyTexture : undefined;
-    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined);
+    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined, l.strand);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
     const heights = this.heightsFor(sim);
@@ -221,12 +277,49 @@ export class WebGl2Backend implements Backend<GlSim> {
       textures(gl, h.program, cells);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    // The scent view once its programs are built; zoomed out it reads a coarser map, filled here.
+    const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
+    const level = scentLevel(view.scale);
+    const coarse = scent ? this.coarseFor(sim) : undefined;
+    const holds = this.coarseHolds;
+    // The share of a texel that holds scent changes only with the shape, the level or the arena; steps change only
+    // the scent, and they leave none in walls or outside the dish (SUM_ONLY in scent-down.frag).
+    const shaped =
+      holds?.sim === sim && holds.revision === sim.revision && holds.level === level && holds.boundary === s.boundary;
+    if (scent && coarse && level > 0 && !(shaped && holds.step === sim.step)) {
+      this.coarseHolds = { sim, step: sim.step, revision: sim.revision, level, boundary: s.boundary };
+      const fill = shaped ? scent.sum : scent.down;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, coarse.fbo);
+      gl.viewport(0, 0, scentLevelSize(sim.width, level), scentLevelSize(sim.height, level));
+      gl.useProgram(fill.program);
+      textures(gl, fill.program, {
+        trail: sim.currentTrail.texture,
+        shape: sim.shapeTexture,
+        scent: sim.currentScent.texture,
+      });
+      if (shaped) gl.colorMask(true, true, false, false); // the share stays
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.colorMask(true, true, true, true);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    const p = this.prog.render[variant];
+    const p = (this.fixed ?? scent?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
-    textures(gl, p.program, { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture });
+    const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture };
+    const scentLevels = coarse?.texture ?? sim.currentScent.texture;
+    textures(gl, p.program, scent ? { ...all, scent: sim.currentScent.texture, scentLevels } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** The scent view's coarse map for this grid size, made anew when the size changes. */
+  private coarseFor(sim: GlSim): Target {
+    const [w, h] = [scentLevelSize(sim.width, 1), scentLevelSize(sim.height, 1)];
+    if (this.coarse?.width !== w || this.coarse.height !== h) {
+      if (this.coarse) destroyTarget(this.gl, this.coarse);
+      this.coarse = target(this.gl, w, h, this.gl.RGBA32F);
+      this.coarseHolds = undefined;
+    }
+    return this.coarse;
   }
 
   /** The gel height field for this grid size, made anew when the size changes. */

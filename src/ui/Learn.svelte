@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { collisionsHelp, coveredFoodHelp, globalSpec, growthHelp, modelHelp, strainSpec } from '../model/params';
+  import {
+    collisionsHelp,
+    coveredFoodHelp,
+    globalSpec,
+    growthHelp,
+    modelHelp,
+    scentViewHelp,
+    strainSpec,
+  } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
@@ -41,6 +49,8 @@
     ...Object.entries(globalSpec)
       .filter(([k]) => GROWTH_KEYS.has(k))
       .map(([, v]) => v),
+    // The view switch last: it changes only the picture.
+    scentViewHelp,
   ];
 
   // Each scene's strains with the numbers of its own settings (not the live ones).
@@ -206,6 +216,15 @@
         weak scent can still turn an agent on it. With Scent decay 0.1 and Trail saturation 0, the extended model runs a
         scene of Jones as Jones does, until you paint a wall or use the Cut tool.
       </p>
+      <p>
+        To see the scent, select Scent in the toolbar or press S. A green glow shows the scent of food, and a pink glow
+        the repellent of light. The glow fades out as the scent gets weaker, down to 0.01 per cell. The scale is the
+        same in every scene and in both models. An agent steers by the difference between its left and right sensors. A
+        thin green line shows where food steers an agent as strongly as a strand of trail holds it. Inside the line,
+        food steers it more. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the glow
+        reaches much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does
+        not steer from farther away. The view changes only the picture, not the simulation.
+      </p>
     {:else if app.learnTab === 'Controls'}
       <dl>
         {#each specs as spec (spec.label)}
@@ -216,8 +235,8 @@
         {/each}
       </dl>
       <p>
-        Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, H hide panels, L this
-        dialog.
+        Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
+        this dialog.
       </p>
       <p>
         The page address is a link to what you see: the settings, the scene, and the food, light and walls you painted.

@@ -10,6 +10,7 @@
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
   import SceneLabel from './ui/SceneLabel.svelte';
+  import ScentLegend from './ui/ScentLegend.svelte';
   import { constrain } from './model/params';
   import {
     adopt,
@@ -37,6 +38,9 @@
   let ready = $state(false);
   /** Height of the header, scene name and notice; the phone panel starts below them. */
   let topHeight = $state(72);
+  /** Heights of the toolbar (one row or more) and the stats: the stats and the scent legend sit above them. */
+  let toolbarHeight = $state(52);
+  let statsHeight = $state(20);
   /** The page address was read: from then on it follows the state. */
   let addressRead = $state(false);
 
@@ -296,10 +300,22 @@
     };
   });
 
+  /**
+   * Whether the focused element uses the key itself: a field or a list takes every key, a button, link or switch takes
+   * Space and Enter, a slider and the tabs of Learn the arrows. A modal dialog takes every key. Every other key is a
+   * shortcut, also after a click on a toolbar button.
+   */
+  function keyUsed(t: HTMLElement, key: string): boolean {
+    if (t.closest('dialog, select, textarea, [contenteditable]:not([contenteditable="false"])')) return true;
+    const input = t.closest('input');
+    if (input && !['button', 'checkbox', 'radio', 'range', 'color', 'submit', 'reset'].includes(input.type))
+      return true;
+    if (key === ' ' || key === 'Enter') return t.closest('button, summary, a, input, [role="button"]') !== null;
+    return key.startsWith('Arrow') || key === 'Home' || key === 'End' || key.startsWith('Page');
+  }
+
   function onkeydown(ev: KeyboardEvent) {
-    const t = ev.target as HTMLElement;
-    if (ev.metaKey || ev.ctrlKey || ev.altKey || t.closest('input, select, textarea, button, summary, a, dialog'))
-      return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey || keyUsed(ev.target as HTMLElement, ev.key)) return;
     const tool = toolsFor(app.settings.model).find((x) => x.key === ev.key);
     if (tool) app.tool = tool.id;
     else if (ev.key === ' ') app.paused = !app.paused;
@@ -309,6 +325,7 @@
     } else if (ev.key === 'r') getEngine()?.reset();
     else if (ev.key === 'f') getEngine()?.fitView();
     else if (ev.key === 'h') app.hideUi = !app.hideUi;
+    else if (ev.key === 's') app.settings.showScent = !app.settings.showScent;
     else if (ev.key === 'l') app.learn = true;
     else if (ev.key === '[') app.brush = Math.max(4, app.brush - 4);
     else if (ev.key === ']') app.brush = Math.min(120, app.brush + 4);
@@ -321,7 +338,14 @@
 
 <svelte:window {onkeydown} />
 
-<main class="app" class:hide={app.hideUi} class:with-panel={app.panel} style:--top-height="{topHeight}px">
+<main
+  class="app"
+  class:hide={app.hideUi}
+  class:with-panel={app.panel}
+  style:--top-height="{topHeight}px"
+  style:--toolbar-height="{toolbarHeight}px"
+  style:--stats-height="{statsHeight}px"
+>
   <canvas
     bind:this={canvas}
     class="tool-{app.tool}"
@@ -352,12 +376,16 @@
     <div class="panel-wrap ui" id="settings"><Panel /></div>
   {/if}
 
-  <div class="toolbar-wrap ui"><Toolbar /></div>
+  <div class="toolbar-wrap ui" bind:clientHeight={toolbarHeight}><Toolbar /></div>
 
-  <p class="stats ui" aria-live="off">
+  <p class="stats ui" aria-live="off" bind:clientHeight={statsHeight}>
     {app.stats.fps.toFixed(0)} fps · {app.stats.stepsPerSecond.toFixed(0)} steps/s · step {app.stats.step}
     {#if app.stats.alive.length}· {fmt(app.stats.alive.reduce((a, b) => a + b, 0))} agents{/if}
   </p>
+
+  {#if app.settings.showScent}
+    <div class="legend-wrap ui"><ScentLegend /></div>
+  {/if}
 
   {#if app.error}
     <div class="error" role="alert">
@@ -461,10 +489,11 @@
     pointer-events: auto;
   }
   /* On glass like the scene name: --muted straight on the canvas had about 2.3:1 over the paper style. */
+  /* Above the toolbar, which wraps into more rows on a narrow screen with the panel open. */
   .stats {
     position: absolute;
     left: 10px;
-    bottom: 56px;
+    bottom: calc(4px + var(--toolbar-height));
     margin: 0;
     padding: 2px 6px;
     border-radius: 6px;
@@ -476,6 +505,12 @@
       monospace;
     color: var(--muted);
     pointer-events: none;
+  }
+  /* Above the stats and the toolbar, at any height of either, on the left: the panel opens on the right. */
+  .legend-wrap {
+    position: absolute;
+    left: 10px;
+    bottom: calc(4px + var(--toolbar-height) + var(--stats-height) + 6px);
   }
   .notice {
     align-self: center;
@@ -521,6 +556,10 @@
       width: 100%;
     }
     .stats {
+      display: none;
+    }
+    /* The panel covers the picture: its legend would cover the panel. */
+    .with-panel .legend-wrap {
       display: none;
     }
   }

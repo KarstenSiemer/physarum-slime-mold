@@ -56,6 +56,11 @@ interface GrowthBuffers {
 /** All simulation state on the GPU for one grid size and agent count (WebGPU). */
 export class Simulation implements Sim {
   step = 0;
+  /**
+   * Counts the changes of the scent and the shape outside steps (reset, strokes, clearing, writes, a new hold of the
+   * shape); `step` counts the steps. Together they tell a cache of them when it is old: the scent view's coarse map.
+   */
+  revision = 0;
   private parity: Bit = 0;
   private occParity: Bit = 0;
   private settings: Settings;
@@ -218,6 +223,7 @@ export class Simulation implements Sim {
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
+    this.revision++;
     this.shapeHeld = this.settings.boundary;
     if (!this.hasEnvironment) return; // nothing painted: `shape` holds only zeros, under every boundary
     this.writeParams();
@@ -245,6 +251,7 @@ export class Simulation implements Sim {
   }
 
   reset() {
+    this.revision++;
     this.step = 0;
     this.parity = 0;
     this.agentParity = 0;
@@ -368,6 +375,7 @@ export class Simulation implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    this.revision++;
     // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
     // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
@@ -473,6 +481,7 @@ export class Simulation implements Sim {
   }
 
   clearEnvironment() {
+    this.revision++;
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
     enc.clearBuffer(this.shapeBuffer);
@@ -567,6 +576,7 @@ export class Simulation implements Sim {
    * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`.
    */
   writeEnv(data: Uint8Array) {
+    this.revision++;
     this.device.queue.writeBuffer(this.env, 0, data);
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.shapeBuffer);

@@ -1,6 +1,6 @@
 // Runs in Chromium with real GPU APIs (Metal locally, SwiftShader in CI). See ADR 0010.
 // Every model test runs against both backends, so WGSL and GLSL cannot drift apart (ADR 0003).
-import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hexToLinear } from '../model/color';
 import {
   BOUNDARIES,
@@ -13,11 +13,13 @@ import {
   type Boundary,
   type Settings,
 } from '../model/params';
+import { at } from './at';
 import { outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
 import agentsFrag from './gl/glsl/agents.frag?raw';
 import diffuseFrag from './gl/glsl/diffuse.frag?raw';
 import initFrag from './gl/glsl/init.frag?raw';
+import renderFrag from './gl/glsl/render.frag?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
 import { agentsProgram, compile, diffuseProgram, initProgram, type Programs, type Walled } from './gl/programs';
 import { GlSim } from './gl/sim';
@@ -25,7 +27,8 @@ import { grid, growthStep, occupancy } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
-import { BACKGROUND } from './render';
+import { BACKGROUND, LATTICE_COPIES } from './render';
+import { SCENT_LOW, scentGlow, scentLevel, scentLevelSize, scentLine, scentOver, scentSensors } from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -258,6 +261,303 @@ function styleReference(
 function smoothstep(a: number, b: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
+}
+
+/** `source` with the one match of `from` replaced by `to`. */
+function once(source: string, from: string, to: string) {
+  if (source.split(from).length !== 2) throw new Error(`Not found once: ${from}`);
+  return source.replace(from, to);
+}
+
+/** `source` without the text from the one match of `start` up to the next match of `end`. */
+function cutSpan(source: string, start: string, end: string) {
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
+  if (a < 0 || b < 0 || source.includes(start, a + 1)) throw new Error(`Not found once: ${start}`);
+  return source.slice(0, a) + source.slice(b);
+}
+
+/**
+ * The render shaders without the scent view (ADR 0009, amendment 2026-11-11). These give the files of main (f81c4a3)
+ * byte for byte, on both backends; view.glsl differs from main only by the fields of the scent view, which no code of
+ * main reads.
+ */
+const WITHOUT_SCENT = {
+  wgsl: cutSpan(
+    cutSpan(
+      once(
+        once(
+          once(
+            renderWgsl,
+            '// The scent view (ADR 0009, amendment 2026-11-11), compiled in only while it is on (render.ts).\noverride SCENT: bool = false;\n',
+            '',
+          ),
+          '  }\n  // The view lies below the flake of food and the walls.\n  if (SCENT) { c = mix(scentView(p, c, near, cells), c, f.cover); }\n  if (near) {\n',
+          '',
+        ),
+        '  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused\n' +
+          '  scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells\n' +
+          '  scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())\n',
+        '',
+      ),
+      '@group(0) @binding(9) var scent',
+      '\n@vertex',
+    ),
+    '// ---- Scent view (SCENT) ---',
+    '@fragment\nfn fs',
+  ),
+  glsl: cutSpan(
+    cutSpan(renderFrag, '  }\n#endif\n#ifdef SCENT\n  // The view lies below', '    c = walls(c, e);'),
+    '#ifdef SCENT\n// ---- Scent view',
+    'vec3 scene(vec2 p, vec2 s) {',
+  ),
+};
+
+/** sRGB byte → linear light. */
+const fromByte = (b: number) => {
+  const x = b / 255;
+  return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+};
+/** Linear light → sRGB byte, without the dither. */
+const toByte = (c: number) => {
+  const x = Math.min(1, Math.max(0, c));
+  return Math.round((x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055) * 255);
+};
+
+/**
+ * The scent at grid position p on the CPU, as render.wgsl `scentView` reads it, from `scent` (2 values per cell), with
+ * its gradient and the weight of the cells that hold scent among those read. Up to 2 cells per pixel: bilinear at p,
+ * wrapped on the periodic grid, clamped to the box, and outside the dish from the cell inside the rim on the way to the
+ * centre; without the cells that `wall` marks, which hold no scent; in a box within half a cell of the edge, the scent
+ * of the outer cells' centres going on with its log slope. Zoomed out further, bilinear on the coarse map of
+ * scentLevel(), each texel the mean of the cells it covers that hold scent. `kink`: p lies within 0.001 of a sample
+ * point, where the bilinear gradient jumps, so float32 on the GPU may take the other side.
+ */
+function scentLookup(
+  scent: Float32Array,
+  [w, h]: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  [px, py]: [number, number],
+  scale: number,
+) {
+  let kink: boolean;
+  let weight = 0; // of the cells that hold scent among those read (render.wgsl Scent.w)
+  type Layer = [number, number, number]; // value, gradient x, gradient y
+  // The bilinear mix of corners [value of each layer, weight] at fraction (fx, fy), with its gradient per step.
+  const mix = (corners: [number[], number][], fx: number, fy: number): Layer[] => {
+    const bil = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
+    const bx = [fy - 1, 1 - fy, -fy, fy];
+    const by = [fx - 1, -fx, 1 - fx, fx];
+    let [total, totalX, totalY] = [0, 0, 0];
+    const [sum, sumX, sumY] = [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ];
+    corners.forEach(([v, open], i) => {
+      const [wt, wx, wy] = [(bil[i] ?? 0) * open, (bx[i] ?? 0) * open, (by[i] ?? 0) * open];
+      [total, totalX, totalY] = [total + wt, totalX + wx, totalY + wy];
+      for (const k of [0, 1]) {
+        sum[k] = (sum[k] ?? 0) + (v[k] ?? 0) * wt;
+        sumX[k] = (sumX[k] ?? 0) + (v[k] ?? 0) * wx;
+        sumY[k] = (sumY[k] ?? 0) + (v[k] ?? 0) * wy;
+      }
+    });
+    weight = total;
+    return [0, 1].map((k): Layer => {
+      if (total <= 0) return [0, 0, 0];
+      const v = (sum[k] ?? 0) / total;
+      return [v, ((sumX[k] ?? 0) - v * totalX) / total, ((sumY[k] ?? 0) - v * totalY) / total];
+    });
+  };
+  const near = (f: number) => Math.min(f, 1 - f) < 1e-3;
+  const at = (x: number, y: number) => [scent[(y * w + x) * 2] ?? 0, scent[(y * w + x) * 2 + 1] ?? 0];
+  const rim = 0.5 * Math.min(w, h) - 1;
+  let layers: Layer[];
+  const level = scentLevel(scale);
+  if (level > 0) {
+    // The coarse map: n texels per side, each the mean over the cells it covers, by the share it covers.
+    const n = [scentLevelSize(w, level), scentLevelSize(h, level)] as const;
+    const span = [w / n[0], h / n[1]] as const;
+    const open = (x: number, y: number) =>
+      wall(x, y) || (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > rim) ? 0 : 1;
+    const texel = (i: number, j: number): [number[], number] => {
+      const [lo, hi] = [
+        [i * span[0], j * span[1]],
+        [(i + 1) * span[0], (j + 1) * span[1]],
+      ] as const;
+      const sum = [0, 0, 0];
+      for (let y = Math.floor(lo[1]); y < hi[1] && y < h; y++)
+        for (let x = Math.floor(lo[0]); x < hi[0] && x < w; x++) {
+          const wt =
+            (Math.min(hi[0], x + 1) - Math.max(lo[0], x)) * (Math.min(hi[1], y + 1) - Math.max(lo[1], y)) * open(x, y);
+          const v = at(x, y);
+          sum[0] = (sum[0] ?? 0) + wt * (v[0] ?? 0);
+          sum[1] = (sum[1] ?? 0) + wt * (v[1] ?? 0);
+          sum[2] = (sum[2] ?? 0) + wt;
+        }
+      const share = (sum[2] ?? 0) / (span[0] * span[1]);
+      return [share > 0 ? [(sum[0] ?? 0) / (sum[2] ?? 1), (sum[1] ?? 0) / (sum[2] ?? 1)] : [0, 0], share];
+    };
+    const [qx, qy] = [(px * n[0]) / w - 0.5, (py * n[1]) / h - 0.5];
+    const [i, j] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - i, qy - j];
+    kink = near(fx) || near(fy);
+    const index = (v: number, m: number) => (boundary === 'wrap' ? ((v % m) + m) % m : Math.min(Math.max(v, 0), m - 1));
+    const corners = [
+      [i, j],
+      [i + 1, j],
+      [i, j + 1],
+      [i + 1, j + 1],
+    ].map(([x = 0, y = 0]) => texel(index(x, n[0]), index(y, n[1])));
+    layers = mix(corners, fx, fy).map(([v, gx, gy]) => [v, (gx * n[0]) / w, (gy * n[1]) / h]);
+  } else {
+    const texel = (x: number, y: number): [number, number] => {
+      if (boundary === 'wrap') return [((x % w) + w) % w, ((y % h) + h) % h];
+      let q: [number, number] = [Math.min(Math.max(x, 0), w - 1), Math.min(Math.max(y, 0), h - 1)];
+      if (boundary === 'dish') {
+        const [mx, my] = [x + 0.5 - w / 2, y + 0.5 - h / 2];
+        const d2 = mx * mx + my * my;
+        if (d2 > rim * rim) {
+          const k = (rim - 0.75) / Math.sqrt(d2);
+          q = [Math.floor(w / 2 + mx * k), Math.floor(h / 2 + my * k)];
+        }
+      }
+      return q;
+    };
+    // In a box, within half a cell of the edge: the scent at the outer cells' centres, going on with its log slope.
+    const [ex, ey] =
+      boundary === 'box' ? [Math.min(Math.max(px, 0.5), w - 0.5), Math.min(Math.max(py, 0.5), h - 0.5)] : [px, py];
+    const [qx, qy] = [ex - 0.5, ey - 0.5];
+    const [i, j] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - i, qy - j];
+    kink = (ex === px && near(fx)) || (ey === py && near(fy));
+    const corners = [
+      [i, j],
+      [i + 1, j],
+      [i, j + 1],
+      [i + 1, j + 1],
+    ].map(([x = 0, y = 0]): [number[], number] => {
+      const [tx, ty] = texel(x, y);
+      return [at(tx, ty), wall(tx, ty) ? 0 : 1];
+    });
+    layers = mix(corners, fx, fy).map(([v, gx, gy]) => {
+      const k = v > 0 ? Math.exp((gx * (px - ex) + gy * (py - ey)) / v) : 1;
+      return [v * k, gx * k, gy * k];
+    });
+  }
+  return { layers, weight, kink };
+}
+
+/** No line: no strand measured, or no strain that follows food (scentSensors()). */
+const NO_SENSORS = { half: [0, 0, 0, 0], holds: [0, 0, 0, 0] };
+
+/** scentSensors() in float32, as the uniform holds it. */
+const sensorsOf = (s: Settings, strand: number) => {
+  const { half, holds } = scentSensors(s, strand);
+  return { half: half.map(Math.fround), holds: holds.map(Math.fround) };
+};
+
+/**
+ * The food's difference across sensors `half` cells up and down the gradient at p (render.wgsl `scentSensorLine`),
+ * with its change along the gradient, per cell; undefined where the gradient is flat or a sensor senses no food (no
+ * cell that holds scent: in a wall). `kink`: a sensor point lies within 0.001 of a sample point.
+ */
+function sensorDifference(
+  scent: Float32Array,
+  size: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  p: [number, number],
+  scale: number,
+  half: number,
+) {
+  const [, gx = 0, gy = 0] = scentLookup(scent, size, boundary, wall, p, scale).layers[0] ?? [];
+  const slope = Math.hypot(gx, gy);
+  if (!(slope > 0)) return undefined;
+  const n = [gx / slope, gy / slope] as const;
+  const at = (k: number) =>
+    scentLookup(scent, size, boundary, wall, [p[0] + k * half * n[0], p[1] + k * half * n[1]], scale);
+  const [up, down] = [at(1), at(-1)];
+  if (up.weight <= 0 || down.weight <= 0) return undefined;
+  const [u = [0, 0, 0], d = [0, 0, 0]] = [up.layers[0], down.layers[0]];
+  return {
+    difference: u[0] - d[0],
+    change: (u[1] - d[1]) * n[0] + (u[2] - d[2]) * n[1],
+    slope,
+    kink: up.kink || down.kink,
+  };
+}
+
+/**
+ * The scent view's opacities at grid position p on the CPU (scentLookup()): the glow of the food scent and of the
+ * repellent if `repellent`, and the line where the food steers across the sensors as hard as a strand holds
+ * (`sensors`, scentSensors()): for each pair the difference across the sensors over the hold, the line where the
+ * largest is 1 (render.wgsl `scentSensorLine`, with its shortcut where the gradient puts the ratio more than 20 times
+ * off). `kink`: p, or a sensor point of the line, lies within 0.001 of a sample point.
+ */
+function scentAt(
+  scent: Float32Array,
+  size: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  p: [number, number],
+  scale: number,
+  repellent = true,
+  sensors: { half: number[]; holds: number[] } = NO_SENSORS,
+) {
+  const here = scentLookup(scent, size, boundary, wall, p, scale);
+  const [food = [0, 0, 0], light = [0, 0, 0]] = here.layers;
+  let [best, change, kink] = [0, 0, here.kink];
+  sensors.half.forEach((half, j) => {
+    const hold = sensors.holds[j] ?? 0;
+    if (!(half > 0) || !(hold > 0)) return;
+    const guess = (Math.hypot(food[1], food[2]) * 2 * half) / hold;
+    if (guess < 0.05 || guess > 20) return;
+    const d = sensorDifference(scent, size, boundary, wall, p, scale, half);
+    if (!d) return;
+    kink ||= d.kink;
+    if (d.difference / hold > best) [best, change] = [d.difference / hold, d.change / hold];
+  });
+  const line = scentLine(best, Math.abs(change), scale);
+  return {
+    food: scentGlow(food[0]),
+    line,
+    repellent: repellent ? scentGlow(light[0]) : 0,
+    /** The scent of both layers at p. */
+    values: [food[0], light[0]] as const,
+    kink: here.kink || (kink && line > 0.01),
+  };
+}
+
+/**
+ * `s` with the food weight of its one strain that puts the view's line at p: the hold of a strand (scentSensors())
+ * equals the food's difference across the strain's sensors there (sensorDifference(), the grid's cells).
+ */
+function aimLine(
+  s: Settings,
+  strand: number,
+  scent: Float32Array,
+  size: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  p: [number, number],
+): Settings {
+  const st = s.strains[0] ?? defaultStrain(0);
+  const half = st.sensorOffset * Math.sin((st.sensorAngle * Math.PI) / 180);
+  const d = sensorDifference(scent, size, boundary, wall, p, 1, half);
+  if (!d || !(d.difference > 0)) throw new Error(`no difference across the sensors at ${p.join(', ')}`);
+  const hold = scentSensors(s, strand).holds[0] ?? 0;
+  return { ...s, strains: [{ ...st, food: (st.food * hold) / d.difference }] };
+}
+
+/** The share of the pixel at grid position p inside the arena, as render.wgsl `fs` draws the box edge and the rim. */
+function insideArena(boundary: Boundary, [w, h]: [number, number], [px, py]: [number, number], scale: number) {
+  const ramp = (sd: number) => smoothstep(-0.5 * scale, 0.5 * scale, sd);
+  if (boundary === 'wrap') return 1;
+  if (boundary === 'box') return ramp(Math.min(px, py, w - px, h - py));
+  return ramp(0.5 * Math.min(w, h) - 1 - Math.hypot(px - w / 2, py - h / 2));
 }
 
 const BACKENDS = {
@@ -3549,6 +3849,73 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     const SIZE = 192;
     const cyan = { ...defaultStrain(0), color: '#3fc1c9' };
 
+    // The drop shadow, the light and the body of a wall against the formulas of scene() and walls(), so that a change
+    // of their numbers fails a test: in the review of the scent view (2026-11-11) a paper shadow of 0.2 instead of 0.3
+    // passed all of them. No trail, so the bare dish lies below the light and the walls. Each pixel looked at sits on a
+    // cell centre, where the spline weighs the 3 × 3 cells 0.125, 0.75 and 0.125 per axis.
+    it.each(['glow', 'gel', 'paper'] as const)(
+      'draw the shadow and body of walls and the light as their formulas say (%s)',
+      async (style) => {
+        const settings: Settings = {
+          ...defaultSettings(),
+          style,
+          layout: 'empty',
+          strains: [defaultStrain(0)],
+          bloom: 0,
+        };
+        backend.forget();
+        const sim = await make(settings, W, H, 1);
+        sim.paint([
+          { kind: 'wall', from: [20, 10], to: [20, 38], radius: 7 },
+          { kind: 'light', from: [46, 30], to: [46, 30], radius: 6 },
+        ]);
+        const shape = await sim.readShape();
+        // 8 pixels per cell; the pixel 8c, 8r − 96 has its centre on the centre of cell c, r.
+        const [cw, ch] = [512, 192];
+        const img = await backend.capture(sim, settings, { center: [32.4375, 24.4375], scale: 1 / 8 }, cw, ch);
+        const bg = hexToLinear(BACKGROUND[style]);
+        const k = { glow: 0.75, gel: 0.6, paper: 0.3 }[style];
+        const tint = style === 'paper' ? [-0.04, -0.03, -0.12] : [0.22, 0.2, 0.12];
+        const albedo = { glow: [0.05, 0.055, 0.065], gel: [0.11, 0.1, 0.08], paper: [0.68, 0.66, 0.62] }[style];
+        const specular = { glow: 0.06, gel: 0.3, paper: 0.04 }[style];
+        const sun = Math.hypot(-0.45, -0.6, 0.65);
+        const half = Math.hypot(-0.45 / sun, -0.6 / sun, 0.65 / sun + 1);
+        // A flat top (rimNormal() is (0, 0, 1) from 1.5 cells inside the outline on): the light from above.
+        const body = albedo.map((a) => a * (0.35 + 0.9 * (0.65 / sun)) + specular * ((0.65 / sun + 1) / half) ** 40);
+        const CENTRE = [0.125, 0.75, 0.125];
+        const spline = (c: number, r: number, lane: number) => {
+          let v = 0;
+          for (let j = 0; j < 3; j++)
+            for (let i = 0; i < 3; i++)
+              v += (CENTRE[i] ?? 0) * (CENTRE[j] ?? 0) * ((shape[((r + j - 1) * W + c + i - 1) * 4 + lane] ?? 0) / 255);
+          return v;
+        };
+        let [worst, shadowed, lit, walls] = [0, 0, 0, 0];
+        for (let r = 13; r < 35; r++)
+          for (let c = 1; c < 63; c++) {
+            const [x, y] = [8 * c, 8 * r - 96];
+            const own = ((shape[(r * W + c) * 4] ?? 0) / 255 - 0.5) * 8;
+            const wall = (spline(c, r, 0) - 0.5) * 8;
+            const cover = own > 0 !== wall > 0 ? own : wall;
+            let want: number[];
+            if (cover < -0.1) {
+              const shadow = Math.min(Math.max(spline(c, r, 3), 0), 1);
+              const light = Math.min(Math.max(spline(c, r, 2), 0), 1);
+              want = bg.map((b, i) => (b + light * (tint[i] ?? 0)) * (1 - k * shadow));
+              if (shadow > 0.05) shadowed++;
+              if (light > 0.5) lit++;
+            } else if (cover > 0.1 && wall >= 1.5) {
+              want = body;
+              walls++;
+            } else continue; // the outline and the bevel
+            for (let i = 0; i < 3; i++)
+              worst = Math.max(worst, Math.abs((img.data[(y * cw + x) * 4 + i] ?? 0) - toByte(want[i] ?? 0)));
+          }
+        expect([shadowed > 20, lit > 20, walls > 100]).toEqual([true, true, true]);
+        expect(worst).toBeLessThanOrEqual(2);
+      },
+    );
+
     // With food over the trail at 90 % opacity (before), the trail changed the colour on food by a tenth of
     // what it changes on the bare dish. The gel style lets 60 % of the flake show through its trail
     // (GEL_CLEAR), so there the trail changes the colour on food by less: 23 % of the bare change on Metal.
@@ -4132,6 +4499,761 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
       expect(max).toBeLessThanOrEqual(3);
       expect(sum / ((ref.length / 4) * 3)).toBeLessThan(0.75);
+    });
+  });
+
+  // The scent view (ADR 0009, amendment 2026-11-11): display only, on a fixed scale, in every style and at every zoom.
+  // The captures use the fallback exposure: forget() drops the levels and a readback that an earlier test started.
+  describe('scent view', () => {
+    beforeEach(() => {
+      backend.forget();
+    });
+    const [W, H] = [64, 48];
+    const [CW, CH] = [96, 72];
+    // Food strong enough that its pull across the sensors passes the hold of a strand, so the line shows.
+    const extended = (patch: Partial<Settings>): Settings => ({
+      ...defaultSettings(),
+      model: 'extended',
+      foodStrength: 0.5,
+      scentDecay: 0.02,
+      lightStrength: 0.2,
+      density: 0.5,
+      ...patch,
+    });
+    /** Food across the seam or the edge, or at the rim of the dish, and light inside: what each view looks at. */
+    const SCENES = {
+      wrap: { food: [1, 24], light: [40, 12], centre: [0, 24] },
+      box: { food: [2, 24], light: [40, 12], centre: [0, 24] },
+      dish: { food: [32, 3.5], light: [40, 30], centre: [32, 1] },
+    } as const satisfies Record<
+      Boundary,
+      { food: [number, number]; light: [number, number]; centre: [number, number] }
+    >;
+    const strokes = (b: Boundary): Stroke[] => [
+      { kind: 'food', from: [...SCENES[b].food], to: [...SCENES[b].food], radius: 3 },
+      { kind: 'light', from: [...SCENES[b].light], to: [...SCENES[b].light], radius: 3 },
+    ];
+    // Off the cell centres by a little: there the bilinear gradient jumps (scentAt `kink`), and these pixel grids would
+    // put whole columns and rows on them.
+    const views = (b: Boundary): View[] => [
+      { center: [SCENES[b].centre[0] + 0.0137, SCENES[b].centre[1] + 0.0291], scale: 1 / 8 },
+      { center: [SCENES[b].centre[0] + 0.0137, SCENES[b].centre[1] + 0.0291], scale: 0.6 },
+      { center: [32.0137, 24.0291], scale: 2.5 },
+      { center: [32.0137, 24.0291], scale: 6 },
+    ];
+
+    /**
+     * Every pixel of a capture with the view inside the arena against the CPU reference of the view over the capture
+     * without it (scentAt(), scentOver()). Outside the arena and on the flakes of `foods` (circles in cells), which lie
+     * over the view, no pixel may change by more than the dither. The reference leaves out pixels at a kink and pixels
+     * that the pass clamped: the pass clamps to [0, 1] after the view, so there the bytes do not tell the colour below
+     * it (highlights of the gel, light over 1, light on paper takes blue below 0). The hold of a strand comes from the
+     * levels the captures use. Around a periodic lattice the pass dims the copies of the grid after the view (ADR 0026): there
+     * the reference is the view over the copy's picture before the dimming, dimmed as the pass dims it. Returns what
+     * failed, how many pixels hold food scent, the powers of ten above 0.01 of the food scent compared (rounded down),
+     * how many pixels the line covers, and how many pixels of copies were compared and hold food scent.
+     */
+    async function follows(
+      sim: Sim,
+      settings: Settings,
+      view: View,
+      foods: { at: [number, number]; r: number }[],
+      size: [number, number] = [CW, CH],
+    ) {
+      const [cw, ch] = size;
+      const [w, h] = [sim.width, sim.height];
+      const scent = await sim.readScent();
+      const env = await sim.readEnv();
+      const wall = (x: number, y: number) => (env[(y * w + x) * 4] ?? 0) >= 128;
+      const off = await backend.capture(sim, settings, view, cw, ch);
+      const on = await backend.capture(sim, { ...settings, showScent: true }, view, cw, ch);
+      const wrapped = (d: number, m: number) => (settings.boundary === 'wrap' ? d - m * Math.round(d / m) : d);
+      const flake = (p: [number, number]) =>
+        Math.min(...foods.map((f) => Math.hypot(wrapped(p[0] - f.at[0], w), wrapped(p[1] - f.at[1], h)) - f.r));
+      const sensors = sensorsOf(settings, backend.levels().strand);
+      const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
+      const space = hexToLinear(BACKGROUND[settings.style]).map((v) => v * (settings.style === 'paper' ? 0.92 : 0.55));
+      let [max, sum, n, still, arena, drawn, lined, copied, copiedFood] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+      const decades = new Set<number>();
+      for (let y = 0; y < ch; y++)
+        for (let x = 0; x < cw; x++) {
+          const p: [number, number] = [
+            (x + 0.5 - cw / 2) * view.scale + view.center[0],
+            (y + 0.5 - ch / 2) * view.scale + view.center[1],
+          ];
+          const inside = insideArena(settings.boundary, [w, h], p, view.scale);
+          const i = (y * cw + x) * 4;
+          const apart = () =>
+            Math.max(...[0, 1, 2].map((k) => Math.abs((on.data[i + k] ?? 0) - (off.data[i + k] ?? 0))));
+          if (inside <= 0 || flake(p) < -1 - view.scale) {
+            still = Math.max(still, apart());
+            continue;
+          }
+          if (inside < 1 || flake(p) < 1 + view.scale) continue; // a ramp mixes in the outside or the flake's rim
+          // 0 on a copy of a periodic lattice, 1 on the lattice, a ramp one pixel wide between them.
+          const edge = copies < 1 ? insideArena('box', [w, h], p, view.scale) : 1;
+          if (edge > 0 && edge < 1) continue;
+          arena++;
+          const repellent = settings.model === 'extended';
+          const ref = scentAt(scent, [w, h], settings.boundary, wall, p, view.scale, repellent, sensors);
+          if (ref.kink) continue;
+          const bytes = [0, 1, 2].map((k) => off.data[i + k] ?? 0);
+          if (bytes.some((b) => b >= 254) || (settings.style === 'paper' && bytes.some((b) => b <= 1))) continue;
+          if (ref.food > 0) {
+            drawn++;
+            decades.add(Math.floor(Math.log10(ref.values[0]) - SCENT_LOW));
+          }
+          if (ref.line > 0.5) lined++;
+          const over = (c: Vec3) => scentOver(c, settings.style, ref.food, ref.line, ref.repellent);
+          let want = over(bytes.map(fromByte) as Vec3);
+          if (edge === 0) {
+            // A copy shows b + copies · picture, with b = (1 − copies) · space. The view is affine in the picture below
+            // it, over(c) = k c + o, so over the copy's picture the pass gives b + k (copy − b) + copies · o.
+            copied++;
+            if (ref.food > 0) copiedFood++;
+            const [o, one] = [over([0, 0, 0]), over([1, 1, 1])];
+            want = [0, 1, 2].map((k) => {
+              const bg = (1 - copies) * (space[k] ?? 0);
+              return bg + ((one[k] ?? 0) - (o[k] ?? 0)) * (fromByte(bytes[k] ?? 0) - bg) + copies * (o[k] ?? 0);
+            }) as Vec3;
+          }
+          for (let k = 0; k < 3; k++) {
+            const d = Math.abs((on.data[i + k] ?? 0) - toByte(want[k] ?? 0));
+            [max, sum, n] = [Math.max(max, d), sum + d, n + 1];
+          }
+        }
+      const name = `${settings.style} ${settings.model} at ${view.scale}`;
+      const failed = [
+        // Kinks and clamped pixels leave out at most a tenth.
+        n / 3 < 0.9 * arena && `${name}: ${n / 3} of ${arena} pixels compared`,
+        (max > 3 || sum / n > 0.75) && `${name}: max ${max}, mean ${(sum / n).toFixed(2)}`,
+        still > 2 && `${name}: ${still} apart outside the arena or on a flake`,
+      ].filter((v): v is string => typeof v === 'string');
+      return { failed, drawn, decades, lined, copied, copiedFood };
+    }
+
+    // The pass without the view must draw what it drew before the view existed. Against the shaders without the
+    // scent code, with the same state, uniforms and dither: 0 of 255 apart. 2 × 112 captures: on SwiftShader on an
+    // M3 Pro up to 11 s (WebGL2), and GitHub runs SwiftShader up to about 4 times slower (ADR 0010).
+    it('draws the pixels of the shaders without the view while it is off, in every style', async () => {
+      const cases: { sim: Sim; settings: Settings; view: View }[] = [];
+      for (const boundary of BOUNDARIES)
+        for (const painted of [false, true]) {
+          const settings = extended({ boundary, strains: [defaultStrain(0), defaultStrain(1)] });
+          const sim = await make(settings, W, H, (W * H) / 2);
+          if (painted) sim.paint([...strokes(boundary), { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 }]);
+          sim.run(40);
+          expect(sim.hasEnvironment).toBe(painted);
+          // A periodic lattice dims its copies (ADR 0026, the third value of `fx`).
+          const lattices = boundary === 'wrap' && painted ? [null, [W, H] as [number, number]] : [null];
+          for (const lattice of lattices)
+            for (const style of STYLES)
+              for (const view of views(boundary)) cases.push({ sim, settings: { ...settings, lattice, style }, view });
+        }
+      const captures = async () => {
+        const out: ImageData[] = [];
+        for (const c of cases) out.push(await backend.capture(c.sim, c.settings, c.view, 64, 48));
+        return out;
+      };
+      const hook = backend as WebGpuBackend | WebGl2Backend;
+      onTestFinished(() => {
+        hook.renderFrom();
+      });
+      // A new WebGPU renderer counts frames from 0, so both runs dither alike; WebGL2 captures keep the frame.
+      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      device?.pushErrorScope('validation');
+      hook.renderFrom(kind === 'webgpu' ? WITHOUT_SCENT.wgsl : WITHOUT_SCENT.glsl);
+      const before = await captures();
+      hook.renderFrom();
+      const now = await captures();
+      expect((await device?.popErrorScope())?.message).toBeUndefined();
+      const apart = now.map((img, i) => maxDiff(img, before[i] ?? img));
+      expect(Math.max(...apart), apart.join(' ')).toBe(0);
+    }, 240_000);
+
+    // The view's pipelines (WebGPU) and programs (WebGL2) are built once, from its first frame on and without blocking
+    // it: frames draw without the view until they are ready (ADR 0009, 2026-11-11). Before, a first press on WebGL2
+    // froze a frame for 150 ms.
+    it('builds the pipelines or programs of the view once', async () => {
+      const settings: Settings = { ...extended({ layout: 'empty' }), showScent: true };
+      const sim = await make(settings, W, H, 1);
+      sim.paint(strokes('wrap'));
+      const view = at(views('wrap'), 2); // zoomed out: the coarse map too
+      let builds: { mock: { calls: unknown[] } };
+      let ready: () => Promise<unknown>;
+      let frame: () => void;
+      if (kind === 'webgpu') {
+        const gpu = backend as WebGpuBackend;
+        onTestFinished(() => {
+          vi.restoreAllMocks();
+          gpu.renderFrom();
+        });
+        gpu.renderFrom(); // a new renderer: nothing of the view is built yet
+        builds = vi.spyOn(gpu.gpu.device, 'createRenderPipelineAsync');
+        ready = () => backend.capture(sim, settings, view, 8, 8);
+        frame = () => {
+          backend.draw(sim, settings, view, false);
+        };
+      } else {
+        // Programs of their own, on the backend's context: the backend may have built its own in earlier tests.
+        const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
+        const programs = compile(gl);
+        onTestFinished(() => {
+          vi.restoreAllMocks();
+        });
+        builds = vi.spyOn(gl, 'createProgram');
+        ready = async () => {
+          while (!programs.scent()) await new Promise((r) => setTimeout(r, 1));
+        };
+        // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
+        frame = () => {
+          programs.scent();
+        };
+      }
+      for (let k = 0; k < 3; k++) frame();
+      await ready();
+      const first = builds.mock.calls.length;
+      for (let k = 0; k < 5; k++) {
+        frame();
+        await ready();
+      }
+      // The view without and with food, light and walls, and the two passes of the coarse map: its fill and its sum.
+      expect(first).toBe(4);
+      expect(builds.mock.calls.length).toBe(first);
+    });
+
+    // Two simulations from one seed, one drawn with the view on after every few steps: the same bytes everywhere. Up
+    // to 5 s on SwiftShader on an M3 Pro (WebGL2).
+    it('changes no byte of the simulation', async () => {
+      const settings = extended({ boundary: 'box', collisions: backend.supportsCollisions, seed: 11 });
+      const on = { ...settings, showScent: true };
+      const [viewed, plain] = [await make(settings, W, H, 800), await make(settings, W, H, 800)];
+      for (const sim of [viewed, plain])
+        sim.paint([...strokes('box'), { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 }]);
+      for (let k = 0; k < 6; k++) {
+        viewed.update(on);
+        plain.update(settings);
+        viewed.run(5);
+        plain.run(5);
+        backend.draw(viewed, on, { center: [32, 24], scale: 0.5 }, true);
+        for (const style of STYLES) await backend.capture(viewed, { ...on, style }, at(views('box'), k % 3), 32, 24);
+      }
+      const state = async (sim: Sim) => ({
+        agents: await sim.readAgents(),
+        trail: Array.from(await sim.readTrail()),
+        scent: Array.from(await sim.readScent()),
+        env: Array.from(await sim.readEnv()),
+        shape: Array.from(await sim.readShape()),
+        step: sim.step,
+      });
+      const [a, b] = [await state(viewed), await state(plain)];
+      expect(a.scent.some((v) => v > 1)).toBe(true);
+      expect(a).toEqual(b);
+    }, 120_000);
+
+    // Every pixel inside the arena against the CPU reference of the view over the picture without it: across the seam
+    // of the periodic grid, at the edge of the box and at the rim of the dish, zoomed in, near fit and zoomed out onto
+    // the coarse maps of levels 1 and 2, with the line where the food scent equals a strand's trail. Outside the
+    // arena and on the flake of food the view changes nothing. In the Jones model the view draws no repellent: the
+    // model does not read it.
+    it.each(BOUNDARIES)(
+      'follows the scent by the scale of scent.ts, at every zoom and in every style (%s)',
+      async (boundary) => {
+        // Exposure −2 EV and no glow keep most of the picture below 1, where the pass does not clamp it.
+        const strains = [defaultStrain(0), defaultStrain(1)];
+        const settings = extended({ boundary, strains, exposure: -2, bloom: 0 });
+        const sim = await make(settings, W, H, (W * H) / 2);
+        sim.paint(strokes(boundary));
+        sim.run(150);
+        // The levels of the captures: the hold of a strand comes from them.
+        expect((await backend.settle(sim)).strand).toBeGreaterThan(0);
+        const foods = [{ at: [...SCENES[boundary].food] as [number, number], r: 3 }];
+        const worst: string[] = [];
+        let [drawn, lined] = [0, 0];
+        for (const style of STYLES)
+          for (const view of views(boundary)) {
+            const r = await follows(sim, { ...settings, style }, view, foods);
+            worst.push(...r.failed);
+            [drawn, lined] = [drawn + r.drawn, lined + r.lined];
+          }
+        for (const view of views(boundary))
+          worst.push(...(await follows(sim, { ...settings, model: 'jones' }, view, foods)).failed);
+        expect(worst).toEqual([]);
+        expect(drawn).toBeGreaterThan(1000); // the food scent covers much of the views
+        expect(lined).toBeGreaterThan(50); // and the line shows
+      },
+    );
+
+    // Around a periodic lattice the copies of the grid show at LATTICE_COPIES of their light (ADR 0026), and the pass
+    // dims them after the view: the view on a copy is the view on the grid, dimmed with it. Beside a closed lattice
+    // nothing shows, as beside every closed arena (the tests above: outside the arena no pixel changes).
+    // The line stands for every strain that follows its trail and food (scentSensors()): with sensors of another
+    // spread and another food weight a second strain steers by another difference, and the line lies where food first
+    // steers one of them as hard as a strand holds it. Both pairs reach the shader, and its line follows the reference.
+    it('draws the line where food steers the first of several strains', async () => {
+      const strains = [defaultStrain(0, 2), { ...defaultStrain(1, 2), sensorOffset: 4, food: 2.5 }];
+      const settings = extended({ boundary: 'wrap', strains, exposure: -2, bloom: 0 });
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.paint(strokes('wrap'));
+      sim.run(150);
+      const { strand } = await backend.settle(sim);
+      const { half, holds } = scentSensors(settings, strand);
+      expect(half.filter((h) => h > 0).length).toBe(2);
+      expect(holds[1]).toBeLessThan(holds[0] ?? 0);
+      const foods = [{ at: [...SCENES.wrap.food] as [number, number], r: 3 }];
+      const worst: string[] = [];
+      let lined = 0;
+      for (const style of ['glow', 'paper'] as const)
+        for (const view of views('wrap')) {
+          const r = await follows(sim, { ...settings, style }, view, foods);
+          worst.push(...r.failed);
+          lined += r.lined;
+        }
+      expect(worst).toEqual([]);
+      expect(lined).toBeGreaterThan(50);
+    });
+
+    it('dims the view with the copies around a periodic lattice', async () => {
+      const strains = [defaultStrain(0), defaultStrain(1)];
+      const settings = extended({ boundary: 'wrap', lattice: [W, H], strains, exposure: -2, bloom: 0 });
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.paint(strokes('wrap'));
+      sim.run(150);
+      expect((await backend.settle(sim)).strand).toBeGreaterThan(0);
+      const foods = [{ at: [...SCENES.wrap.food] as [number, number], r: 3 }];
+      const worst: string[] = [];
+      let [copied, copiedFood, lined] = [0, 0, 0];
+      for (const style of STYLES)
+        for (const view of views('wrap')) {
+          const r = await follows(sim, { ...settings, style }, view, foods);
+          worst.push(...r.failed);
+          [copied, copiedFood, lined] = [copied + r.copied, copiedFood + r.copiedFood, lined + r.lined];
+        }
+      expect(worst).toEqual([]);
+      expect(copied).toBeGreaterThan(10_000); // every view shows copies
+      expect(copiedFood).toBeGreaterThan(1000); // with the food scent across the seam on them
+      expect(lined).toBeGreaterThan(50);
+    });
+
+    // The Jones model at a low decay puts food into its trail map without the extended model's normalisation, so a
+    // large food passes 10,000 (ADR 0022, "Plateau"): every power of ten up to the top of the glow. A small closed box
+    // gathers more than 100,000, where the glow stays at its top.
+    const jones = (boundary: Boundary): Settings => ({
+      ...defaultSettings(),
+      model: 'jones',
+      boundary,
+      layout: 'empty',
+      foodStrength: 0.5,
+      exposure: -2,
+      bloom: 0,
+      strains: [{ ...defaultStrain(0), decay: 0.0001 }],
+    });
+    async function upTo(sim: Sim, settings: Settings, views: View[], food: { at: [number, number]; r: number }) {
+      const scent = (await sim.readScent()).filter((_, i) => i % 2 === 0);
+      const [worst, decades] = [[] as string[], new Set<number>()];
+      for (const style of ['glow', 'paper'] as const)
+        for (const view of views) {
+          const r = await follows(sim, { ...settings, style }, view, [food], [128, 72]);
+          worst.push(...r.failed);
+          for (const d of r.decades) decades.add(d);
+        }
+      return { worst, decades: [...decades].sort(), max: Math.max(...scent) };
+    }
+
+    it.each(['wrap', 'box'] as const)('follows the scent up to the top of the glow (%s)', async (boundary) => {
+      const settings = jones(boundary);
+      const sim = await make(settings, 128, 48, 1);
+      const food = { at: [24, 24] as [number, number], r: 12 };
+      sim.paint([{ kind: 'food', from: food.at, to: food.at, radius: food.r }]);
+      sim.run(600);
+      const r = await upTo(
+        sim,
+        settings,
+        [
+          { center: [37.0137, 24.0291], scale: 1 / 8 },
+          { center: [64.0137, 24.0291], scale: 1 },
+          { center: [64.0137, 24.0291], scale: 2.5 },
+        ],
+        food,
+      );
+      expect(r.max).toBeGreaterThan(2e4);
+      expect(r.worst).toEqual([]);
+      expect(r.decades).toEqual(expect.arrayContaining([3, 4, 5, 6]));
+    });
+
+    it('keeps the glow at its top from 10,000 up', async () => {
+      const settings = jones('box');
+      const sim = await make(settings, 32, 24, 1);
+      const food = { at: [16, 12] as [number, number], r: 9 };
+      sim.paint([{ kind: 'food', from: food.at, to: food.at, radius: food.r }]);
+      sim.run(3000);
+      const r = await upTo(
+        sim,
+        settings,
+        [
+          { center: [16.0137, 12.0291], scale: 1 / 2 },
+          { center: [16.0137, 12.0291], scale: 2.5 },
+        ],
+        food,
+      );
+      expect(r.max).toBeGreaterThan(1e5);
+      expect(r.worst).toEqual([]);
+      expect(r.decades).toContain(7);
+      expect(Math.min(...r.decades)).toBeGreaterThanOrEqual(6);
+    });
+
+    // In a box, within half a cell of the edge, the scent goes on with the slope of its logarithm, so the line keeps
+    // its course up to the edge. Food beside the left edge: along its row the scent falls toward the edge, and the food
+    // weight puts the line through the centre of the outer cell of that row (aimLine()), half a cell from the edge,
+    // where one of the sensors lies beyond it. A lookup that holds the scent flat there drew the line across the whole half
+    // cell (review of 2026-11-11). A trail of 1 far from the view gives the strand.
+    it('carries the line up to the box edge', async () => {
+      const base = extended({ style: 'paper', layout: 'empty', boundary: 'box' });
+      const sim = await make(base, W, H, 1);
+      const food: [number, number] = [9, 24];
+      sim.paint([{ kind: 'food', from: food, to: food, radius: 3 }]);
+      sim.run(150);
+      sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
+      const { strand } = await backend.settle(sim);
+      const scent = await sim.readScent();
+      // The line through the centre of the outer cell of the food's row: one sensor beyond the edge.
+      const settings = aimLine(
+        { ...base, strains: [defaultStrain(0)] },
+        strand,
+        scent,
+        [W, H],
+        'box',
+        () => false,
+        [0.5, 24],
+      );
+      const sensors = sensorsOf(settings, strand);
+      const bg = hexToLinear(BACKGROUND.paper);
+      const [cw, ch, scale] = [96, 96, 1 / 10];
+      const view: View = { center: [3.0137, 24.0291], scale };
+      const on = await backend.capture(sim, { ...settings, showScent: true }, view, cw, ch);
+      let [max, lined] = [0, 0];
+      for (let y = 0; y < ch; y++)
+        for (let x = 0; x < cw; x++) {
+          const p: [number, number] = [
+            (x + 0.5 - cw / 2) * scale + view.center[0],
+            (y + 0.5 - ch / 2) * scale + view.center[1],
+          ];
+          if (insideArena('box', [W, H], p, scale) < 1 || Math.hypot(p[0] - food[0], p[1] - food[1]) < 3 + 2) continue;
+          const ref = scentAt(scent, [W, H], 'box', () => false, p, scale, true, sensors);
+          if (ref.kink) continue;
+          if (p[0] < 0.5 && ref.line > 0.5) lined++;
+          const want = scentOver(bg, 'paper', ref.food, ref.line, ref.repellent);
+          for (let k = 0; k < 3; k++)
+            max = Math.max(max, Math.abs((on.data[(y * cw + x) * 4 + k] ?? 0) - toByte(want[k] ?? 0)));
+        }
+      expect(lined).toBeGreaterThan(4);
+      expect(max).toBeLessThanOrEqual(3);
+    });
+
+    // Walls hold no scent. Zoomed in, the filter leaves their cells out, so the glow does not fade and the line does
+    // not bend toward a wall: without that, the value fell to half at the outline. Food up left of a long wall: along
+    // the wall the scent spans several powers of ten, and the food weight puts the line through the strip beside the
+    // wall (aimLine()). Over the bare paper the picture is the background times the walls'
+    // shadow, so the reference is the view over the background times what the picture without the view holds there.
+    it('leaves the cells of walls out of the scent, zoomed in', async () => {
+      const plain = extended({ style: 'paper', layout: 'empty', boundary: 'wrap', strains: [defaultStrain(0)] });
+      const sim = await make(plain, W, H, 1);
+      const food: [number, number] = [24, 8];
+      sim.paint([
+        { kind: 'food', from: food, to: food, radius: 3 },
+        { kind: 'wall', from: [32, 2], to: [32, 46], radius: 1 },
+      ]);
+      sim.run(150);
+      sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
+      const { strand } = await backend.settle(sim);
+      const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+      const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
+      expect(wall(31, 24) && wall(32, 24) && !wall(30, 24) && !wall(33, 24)).toBe(true);
+      // The line through the strip beside the wall.
+      const settings = aimLine(plain, strand, scent, [W, H], 'wrap', wall, [30.7, 10]);
+      const sensors = sensorsOf(settings, strand);
+      const bg = hexToLinear(BACKGROUND.paper);
+      const [cw, ch] = [96, 288];
+      const worst: string[] = [];
+      // At 3 cells per pixel the view reads the map of 2 cells, whose texels weigh only the cells without a wall.
+      for (const scale of [1 / 8, 1 / 2, 3]) {
+        const view: View = { center: [29.0137, 24.0291], scale };
+        const off = await backend.capture(sim, settings, view, cw, ch);
+        const on = await backend.capture(sim, { ...settings, showScent: true }, view, cw, ch);
+        let [max, n, beside, lined] = [0, 0, 0, 0];
+        for (let y = 0; y < ch; y++)
+          for (let x = 0; x < cw; x++) {
+            const p: [number, number] = [
+              (x + 0.5 - cw / 2) * scale + view.center[0],
+              (y + 0.5 - ch / 2) * scale + view.center[1],
+            ];
+            // The wall covers the view from its outline at x = 31 and 33 inward, with a ramp of one pixel, and the
+            // flake of food lies below the view; also their copies on the periodic grid when zoomed out.
+            const wrapped = (d: number, n: number) => d - n * Math.round(d / n);
+            if (Math.abs(wrapped(p[0] - 32, W)) < 1 + 0.5 * scale + 0.1) continue;
+            if (Math.hypot(wrapped(p[0] - food[0], W), wrapped(p[1] - food[1], H)) < 3 + 2 + scale) continue;
+            // The trail that sets the hold lies on columns 56 to 63, with its filter around it: not the bare paper.
+            if (Math.abs(wrapped(p[0] - 60, W)) < 4 + 2 * scale) continue;
+            const i = (y * cw + x) * 4;
+            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
+            if (kink) continue;
+            if (p[0] > 30.5 && p[0] < 31) beside++;
+            if (p[0] > 30 && p[0] < 31 && line > 0.5) lined++;
+            const want = scentOver(bg, 'paper', f, line, repellent);
+            for (let k = 0; k < 3; k++) {
+              const shade = fromByte(off.data[i + k] ?? 0) / (bg[k] ?? 1);
+              const d = Math.abs((on.data[i + k] ?? 0) - toByte((want[k] ?? 0) * shade));
+              [max, n] = [Math.max(max, d), n + 1];
+            }
+          }
+        if (max > 3 || (scale < 0.2 && (beside < 300 || lined < 4)))
+          worst.push(`at ${scale}: max ${max} over ${n / 3} pixels, ${beside} beside the wall, ${lined} on the line`);
+      }
+      expect(worst).toEqual([]);
+    });
+
+    // Up to 2 cells per pixel the lookup reads the 4 cells around p and leaves out those of walls; the first version
+    // did so only up to 1 cell per pixel (review of 2026-11-11), so between 1 and 2 the line hugged the walls' faces.
+    // A wall of radius 1.5 marks the cells its stroke touches, 30 to 33, and draws from 30.5 to 33.5: pixels before
+    // its drawing read cell 30. A long food beside it, and the line where its scent is that of cell 29.
+    it('leaves the cells of walls out of the scent between 1 and 2 cells per pixel', async () => {
+      const settings = extended({ style: 'paper', layout: 'empty', boundary: 'wrap', strains: [defaultStrain(0)] });
+      const sim = await make(settings, W, H, 1);
+      sim.paint([
+        { kind: 'food', from: [22, 0], to: [22, 47], radius: 1.5 },
+        { kind: 'wall', from: [32, 0], to: [32, 47], radius: 1.5 },
+      ]);
+      sim.run(300);
+      sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
+      const strand = (await backend.settle(sim)).strand;
+      const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+      const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
+      expect(wall(30, 24) && wall(33, 24) && !wall(29, 24) && !wall(34, 24)).toBe(true);
+      // The line where the food's sensors beside the wall still sense it: the lower sensor of a pixel at 26 lies at
+      // 29.4, beside the wall's cell 30.
+      const viewed = aimLine(settings, strand, scent, [W, H], 'wrap', wall, [26, 24.5]);
+      const sensors = sensorsOf(viewed, strand);
+      const bg = hexToLinear(BACKGROUND.paper);
+      const [cw, ch] = [96, 72];
+      const worst: string[] = [];
+      let read = 0;
+      for (const scale of [1.01, 1.2, 1.5, 1.9]) {
+        // A pixel column at 29.7, whose 4 cells hold cell 30 of the wall.
+        const view: View = { center: [29.7 - 0.5 * scale, 24.0291], scale };
+        const off = await backend.capture(sim, viewed, view, cw, ch);
+        const on = await backend.capture(sim, { ...viewed, showScent: true }, view, cw, ch);
+        let [max, n] = [0, 0];
+        for (let y = 0; y < ch; y++)
+          for (let x = 0; x < cw; x++) {
+            const p: [number, number] = [
+              (x + 0.5 - cw / 2) * scale + view.center[0],
+              (y + 0.5 - ch / 2) * scale + view.center[1],
+            ];
+            const wrapped = (d: number) => d - W * Math.round(d / W);
+            // The wall's drawing with its ramp of one pixel, the food's flake and the trail that sets the hold.
+            if (Math.abs(wrapped(p[0] - 32)) < 1.5 + 0.5 * scale + 0.1) continue;
+            if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
+            if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
+            const i = (y * cw + x) * 4;
+            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
+            if (kink) continue;
+            if (wrapped(p[0] - 29.5) > 0 && wrapped(p[0] - 30.5) < 0) read++;
+            const want = scentOver(bg, 'paper', f, line, repellent);
+            for (let k = 0; k < 3; k++) {
+              const shade = fromByte(off.data[i + k] ?? 0) / (bg[k] ?? 1);
+              const d = Math.abs((on.data[i + k] ?? 0) - toByte((want[k] ?? 0) * shade));
+              [max, n] = [Math.max(max, d), n + 1];
+            }
+          }
+        if (max > 3) worst.push(`at ${scale}: max ${max} over ${n / 3} pixels`);
+      }
+      expect(worst).toEqual([]);
+      expect(read).toBeGreaterThan(100); // pixels whose lookup holds a cell of the wall
+    });
+
+    // Zoomed out, each texel of the coarse map is the mean of the cells it covers that hold scent: a wall holds none,
+    // and a texel that counted its cells would hold less beside it. The first version's tests did not see that (a
+    // surviving mutation, review of 2026-11-11): the band that the wall covers hid most of it. Here a long food runs
+    // beside a long wall, and the line lies where the food scent is that one cell before the wall's face, so a texel
+    // that counts the wall moves the line beside it.
+    it('leaves the cells of walls out of the coarse maps', async () => {
+      const settings = extended({ style: 'paper', layout: 'empty', boundary: 'wrap', strains: [defaultStrain(0)] });
+      const sim = await make(settings, W, H, 1);
+      sim.paint([
+        { kind: 'food', from: [22, 0], to: [22, 47], radius: 1.5 },
+        { kind: 'wall', from: [32, 0], to: [32, 47], radius: 1 },
+      ]);
+      sim.run(300);
+      sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
+      const strand = (await backend.settle(sim)).strand;
+      let env = await sim.readEnv();
+      let scent = await sim.readScent();
+      const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
+      expect(wall(31, 24) && wall(32, 24) && !wall(30, 24) && !wall(33, 24)).toBe(true);
+      expect(scent[(24 * W + 31) * 2]).toBe(0); // the wall holds no scent
+      // The line where the food's sensors beside the wall still sense it (the lower sensor of a pixel at 26 lies
+      // beside cell 30, the last before the wall's face), and the texels of the coarse maps there hold part of the wall.
+      expect(scent[(24 * W + 30) * 2]).toBeGreaterThan(0.01);
+      const viewed = aimLine(settings, strand, scent, [W, H], 'wrap', wall, [26, 24.5]);
+      const sensors = sensorsOf(viewed, strand);
+      const bg = hexToLinear(BACKGROUND.paper);
+      const [cw, ch] = [96, 72];
+      const worst: string[] = [];
+      let near = 0;
+      // After steps the map refreshes only the scent of its texels and keeps their share (SUM_ONLY in render.wgsl): a
+      // capture fills a level, a step follows, and the same level again refreshes it; steps leave no scent in the wall.
+      // Then the wall grows by two cells to the left while paused: the share changes, and the cells under the new wall
+      // still hold scent until a step, so the map must be filled again in full. `face`: where the wall's drawing
+      // begins on the left. Each entry: the scale, the steps before it, and whether the wall grows before it.
+      let face = 31;
+      const phases: [number[], number, boolean][] = [
+        [[2.05, 2.5, 3, 4.1, 6], 0, false],
+        [[6], 1, false],
+        [[2.5], 0, false],
+        [[2.5], 1, false],
+        [[3], 2, false],
+        [[4.1], 0, true],
+        [[2.5, 2.05], 0, false],
+      ];
+      for (const [scales, steps, grow] of phases) {
+        if (steps > 0) {
+          sim.run(steps);
+          scent = await sim.readScent();
+          expect(scent[(24 * W + 31) * 2]).toBe(0);
+        }
+        if (grow) {
+          sim.paint([{ kind: 'wall', from: [30, 0], to: [30, 47], radius: 1 }]);
+          env = await sim.readEnv();
+          expect(wall(29, 24) && !wall(28, 24)).toBe(true);
+          expect(scent[(24 * W + 29) * 2]).toBeGreaterThan(0); // no step yet
+          face = 29;
+        }
+        for (const scale of scales) {
+          // A pixel column 1.6 cells before the wall's face, beside the texels that hold part of the wall.
+          const view: View = { center: [29.4 - 0.5 * scale, 24.0291], scale };
+          const off = await backend.capture(sim, viewed, view, cw, ch);
+          const on = await backend.capture(sim, { ...viewed, showScent: true }, view, cw, ch);
+          let [max, n] = [0, 0];
+          for (let y = 0; y < ch; y++)
+            for (let x = 0; x < cw; x++) {
+              const p: [number, number] = [
+                (x + 0.5 - cw / 2) * scale + view.center[0],
+                (y + 0.5 - ch / 2) * scale + view.center[1],
+              ];
+              const wrapped = (d: number) => d - W * Math.round(d / W);
+              // The wall with its ramp of one pixel, the food's flake and the trail that sets the hold.
+              const edge = 0.5 * scale + 0.1;
+              if (wrapped(p[0] - face) > -edge && wrapped(p[0] - 33) < edge) continue;
+              if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
+              if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
+              const i = (y * cw + x) * 4;
+              const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
+              if (kink) continue;
+              if (line > 0.1 && Math.abs(wrapped(p[0] - 31)) < 3 * scale) near++;
+              const want = scentOver(bg, 'paper', f, line, repellent);
+              for (let k = 0; k < 3; k++) {
+                const shade = fromByte(off.data[i + k] ?? 0) / (bg[k] ?? 1);
+                const d = Math.abs((on.data[i + k] ?? 0) - toByte((want[k] ?? 0) * shade));
+                [max, n] = [Math.max(max, d), n + 1];
+              }
+            }
+          if (max > 3)
+            worst.push(`at ${scale}, ${steps} steps, ${grow ? 'grown' : 'as painted'}: max ${max} over ${n / 3}`);
+        }
+      }
+      expect(worst).toEqual([]);
+      expect(near).toBeGreaterThan(100); // the line runs beside the wall
+    });
+
+    // A paused simulation keeps its coarse map: the first version filled it in every frame, reading every cell (review
+    // of 2026-11-11: 4 ms per frame at 4096 × 2560). A step, a stroke or a new zoom level fill it again, so the view
+    // never shows an old scent.
+    it('fills the coarse map again only when the scent, the shape or the level changed', async () => {
+      const settings = { ...extended({ style: 'paper', layout: 'empty', strains: [defaultStrain(0)] }), bloom: 0 };
+      const sim = await make(settings, W, H, 1);
+      sim.paint([{ kind: 'food', from: [20, 24], to: [20, 24], radius: 3 }]);
+      sim.run(100);
+      await backend.settle(sim);
+      const view: View = { center: [32.0137, 24.0291], scale: 3 };
+      const on = { ...settings, showScent: true };
+      await backend.capture(sim, on, view, 32, 24); // builds the view and fills the map
+      const gl = (backend as unknown as { gl?: WebGL2RenderingContext }).gl;
+      if (kind === 'webgl2' && !gl) throw new Error('no WebGL2 context');
+      const passes = gl ? vi.spyOn(gl, 'drawArrays') : vi.spyOn(GPUCommandEncoder.prototype, 'beginRenderPass');
+      onTestFinished(() => {
+        vi.restoreAllMocks();
+      });
+      const count = async (v: View = view) => {
+        const before = passes.mock.calls.length;
+        await backend.capture(sim, on, v, 32, 24);
+        return passes.mock.calls.length - before;
+      };
+      const kept = await count();
+      expect(await count()).toBe(kept);
+      sim.run(1);
+      expect(await count()).toBe(kept + 1);
+      expect(await count()).toBe(kept);
+      sim.paint([{ kind: 'food', from: [44, 24], to: [44, 24], radius: 3 }]);
+      expect(await count()).toBe(kept + 1);
+      expect(await count({ ...view, scale: 6 })).toBe(kept + 1);
+      expect(await count({ ...view, scale: 6 })).toBe(kept);
+      vi.restoreAllMocks();
+      // Steps while the map was kept (the map of 4 cells refreshes only its scent), then a stroke: the view shows the
+      // scent of now.
+      const foods = [
+        { at: [20, 24] as [number, number], r: 3 },
+        { at: [44, 24] as [number, number], r: 3 },
+        { at: [52, 12] as [number, number], r: 2 },
+      ];
+      sim.run(20);
+      expect((await follows(sim, settings, { ...view, scale: 6 }, foods.slice(0, 2))).failed).toEqual([]);
+      sim.paint([{ kind: 'food', from: [52, 12], to: [52, 12], radius: 2 }]);
+      for (const scale of [3, 6]) expect((await follows(sim, settings, { ...view, scale }, foods)).failed).toEqual([]);
+    });
+
+    // The scent view's line needs the strand in every style. WebGPU measured auto levels only in the styles that use
+    // them, so in the agents style the strand stayed 0 after a reset: no line (review of 2026-11-11). The
+    // reference is the 99th percentile of the summed trail, read from the trail, not from the backend's levels.
+    it.each(STYLES)('measures the strand from frames in the %s style', async (style) => {
+      const settings: Settings = {
+        ...extended({ style, strains: [defaultStrain(0), defaultStrain(1)] }),
+        showScent: true,
+      };
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.run(150);
+      backend.forget();
+      const view: View = { center: [32, 24], scale: 0.5 };
+      for (let k = 0; k < 200 && backend.levels().strand === 0; k++) {
+        backend.draw(sim, settings, view, true);
+        await sim.finish();
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      const trail = await sim.readTrail();
+      const sums = Array.from({ length: W * H }, (_, i) =>
+        [0, 1, 2, 3].reduce((t, c) => t + (trail[i * 4 + c] ?? 0), 0),
+      );
+      sums.sort((a, b) => a - b);
+      const p99 = sums[W * H - Math.ceil(0.01 * W * H)] ?? 0;
+      expect(p99).toBeGreaterThan(0);
+      // Read within its log2 bin (exposure.ts levelWithin()); WebGL2 reads a grid of samples.
+      expect(backend.levels().strand / p99).toBeGreaterThan(0.9);
+      expect(backend.levels().strand / p99).toBeLessThan(1.1);
+    });
+
+    // An export measures its own levels (Engine.snapshot(), Backend.measured()); the levels of the frames, and with
+    // them the line of the view, stay as the smoothing left them (review of 2026-11-11: the line jumped after an export).
+    it('measures the levels of an export without changing those of the frames', async () => {
+      const settings: Settings = { ...extended({ strains: [defaultStrain(0)] }), showScent: true };
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.run(60);
+      await backend.settle(sim);
+      sim.run(200);
+      const live = backend.levels();
+      const own = await backend.measured(sim);
+      expect(backend.levels()).toEqual(live);
+      expect(own.strand).not.toBe(live.strand);
+      const settled = await backend.settle(sim); // what a settled frame uses
+      for (const k of ['gain', 'black', 'strand'] as const) expect(own[k] / settled[k]).toBeCloseTo(1, 9);
     });
   });
 

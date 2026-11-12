@@ -126,6 +126,11 @@ const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDra
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
   step = 0;
+  /**
+   * Counts the changes of the scent and the shape outside steps (reset, strokes, clearing, writes, a new hold of the
+   * shape); `step` counts the steps. Together they tell a cache of them when it is old: the scent view's coarse map.
+   */
+  revision = 0;
   readonly agentWidth: number;
   private settings: Settings;
   private readonly ubo: WebGLBuffer;
@@ -245,6 +250,11 @@ export class GlSim implements Sim {
     return this.trail[this.p];
   }
 
+  /** The scent of the same state as currentTrail: both alternate together. */
+  get currentScent(): Target {
+    return this.scent[this.p];
+  }
+
   get countsTexture(): WebGLTexture {
     return this.counts.texture;
   }
@@ -275,6 +285,7 @@ export class GlSim implements Sim {
   }
 
   reset() {
+    this.revision++;
     const gl = this.gl;
     this.step = 0;
     this.a = 0;
@@ -347,6 +358,7 @@ export class GlSim implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    this.revision++;
     // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
     // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
@@ -430,6 +442,7 @@ export class GlSim implements Sim {
   }
 
   clearEnvironment() {
+    this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
     this.walls = false;
@@ -445,6 +458,7 @@ export class GlSim implements Sim {
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
+    this.revision++;
     this.shapeHeld = this.settings.boundary;
     if (!this.hasEnvironment) return; // nothing painted: the target holds only zeros, under every boundary
     const gl = this.gl;
@@ -551,6 +565,7 @@ export class GlSim implements Sim {
    * `env`.
    */
   writeEnv(data: Uint8Array) {
+    this.revision++;
     writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
     clear(this.gl, this.shape);
     const any = (channel: number) => data.some((v, i) => i % 4 === channel && v > 0);

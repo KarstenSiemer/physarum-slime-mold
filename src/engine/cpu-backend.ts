@@ -127,7 +127,13 @@ export class CpuBackend implements Backend<CpuSim> {
     return Promise.reject(new Error('not available in Node'));
   }
   settle() {
-    return Promise.resolve({ gain: 0, black: 0 });
+    return Promise.resolve(this.levels());
+  }
+  measured() {
+    return Promise.resolve(this.levels());
+  }
+  levels() {
+    return { gain: 0, black: 0, strand: 0 };
   }
   forget() {
     // no caches

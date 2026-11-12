@@ -202,7 +202,7 @@ its short side, as Jones counts %p; a box or a periodic grid over all its cells.
 | Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                     |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                       |
 | Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush |
-| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                          |
+| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom; scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings  |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                     |
 
@@ -221,7 +221,9 @@ lives (ADR 0023), and no tool runs any beside a closed arena, where it reaches n
 periodic grid the tools act on the cells under the pointer, also on a copy of the grid and across
 its edges (ADR 0026).
 
-Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
+Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn.
+A key is a shortcut unless the focused element uses it: a field takes every key, a button Space and Enter, a slider
+the arrows.
 
 ## 5. Look
 
@@ -244,6 +246,14 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
   (they deposit nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
+- Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
+  glow and the light repellent (extended model only) as a pink glow over the picture, below the oat flake and the
+  walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and
+  models compare. One thin line marks where the food steers an agent across its left and right sensors as hard as a
+  strand of trail holds it (the strand: the 99th percentile of the trail that the auto levels measure). A legend shows
+  the scale, what the line means and what the scene holds. Zoomed out the view reads a coarser map of the scent, filled again only when the scent changed. It changes
+  nothing in the simulation, goes into the link like the style, stays on when a scene loads, and without it the
+  render pass draws the pixels of before at the same cost.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.
