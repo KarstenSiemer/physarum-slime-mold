@@ -6,4 +6,8 @@ Lod = "Lod"
 
 [default]
 # The owner's decision on the scent view, quoted in German in ADR 0009 (revision of 2026-11-11).
-extend-ignore-re = ['"Gerne deine Empfehlung\. Ich hab mir die Visualisierung des\s+Dufts einfach als glow vorgestellt, welcher ausfaded wenn er schwächer wird\."']
+extend-ignore-re = [
+  '"Gerne deine Empfehlung\. Ich hab mir die Visualisierung des\s+Dufts einfach als glow vorgestellt, welcher ausfaded wenn er schwächer wird\."',
+  # The owner's delegation of 2026-11-12, quoted in German in ADR 0009 (the amendment on the line).
+  '"nehm gerne einfach deine empfehlungen und frage\s+mich weniger oder gar nicht"',
+]

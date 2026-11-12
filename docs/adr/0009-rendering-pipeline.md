@@ -3,7 +3,7 @@
 - Status: accepted (revised 2026-11-08 after the visual review loop; amended 2026-11-10: food,
   light and walls; amended 2026-11-11: scent view, revised the same day: a glow and the mark of a strand, and
   amended for the lattices of ADR 0026 and for the panels without a backdrop blur of ADR 0028; amended 2026-11-12
-  after the second review of the glow and the mark)
+  after the second review of the glow and the mark, and for the line where food steers as hard as a strand holds)
 - Date: 2026-11-08
 
 ## Context
@@ -822,8 +822,8 @@ probe:
 - Save PNG settled the levels with a blend of 1, so after an export the live line jumped to the strand of that moment
   instead of moving to it slowly.
 
-The review also asked what the line and the mark mean (items 3, 8 and 9 of the review). Those wait for the owner and are
-not part of this amendment.
+The review also asked what the line and the mark mean (items 3, 8 and 9 of the review): the next amendment, of the
+same day, decides it.
 
 ### Decision
 
@@ -933,3 +933,81 @@ Each by this branch on 2026-11-12, on the review's findings.
   On WebGL2 the refresh after a step costs about half the full fill; on WebGPU it costs 70 % to 100 % of it, within
   the spread. A running simulation at 4096 × 2560 zoomed out thus pays about 2 to 3.5 ms per frame on WebGPU and 3 to
   4 ms on WebGL2 for the view, against frames of 35 to 70 ms there; at 1024 × 640 below 1 ms.
+
+## Amendment 2026-11-12: the line where food steers as hard as a strand holds
+
+### Context
+
+The line of the revision above lay where the food scent equals the hold of a strand (`scentMark()`): a level. The
+second review found that agents steer by the difference between their sensors (`steer()` in `agents.wgsl`: the front,
+left and right sensors, SO cells ahead at 0 and ±SA), not by levels: a scent that is the same at every sensor turns no
+agent. It measured, at that line, the food's difference across the left and right sensor points (2 · SO · sin(SA)
+apart, 6.9 cells with Jones' SO 9 and SA 22.5°) over the hold of the strand: 6.4 to 7.1 in the Jones model, 3.0 in the
+extended model at decay 0.03, 0.94 at 0.003 and 0.63 at 0.001. The line thus meant something ten times different in
+the two models, in the very comparison the owner wants. With several strains one summed strand stood for all, the
+legend said "The mark shows the trail of a strand" where the food weight or saturation made that untrue, screen
+readers heard "Scent per cell a strand Food (green glow)", and a mark outside 0.01 to 10,000 pushed its label past the
+bar (items 3, 8 and 9).
+
+The review proposed a line where w · |∇scent| · d equals the hold. A prototype drew three lines in the Transport
+network on its 200 × 200 lattice with three dabs after 3,000 steps (WebGPU, 24 rays from the dabs), and measured the
+review's ratio where each line lies on the map (the largest lift of the line over the view without it), medians:
+
+| Model                 | The level of the hold | w · \|∇scent\| · d = hold | The sensors' difference = hold |
+| --------------------- | --------------------- | ------------------------- | ------------------------------ |
+| Jones, decay 0.1      | 7.36 (9.1)            | 1.94 (11.5)               | 1.00 (12.6)                    |
+| Extended, decay 0.03  | 3.11 (10.8)           | 1.26 (13.3)               | 1.01 (13.8)                    |
+| Extended, decay 0.003 | 0.95 (12.1)           | 1.06 (11.4)               | 1.01 (11.9)                    |
+
+In brackets the line's distance from a dab in cells. The gradient misses the difference across 6.9 cells where the
+scent falls off over less than that (in Jones over about 1.6 cells).
+
+### Decision
+
+1. **The line lies where the food steers an agent across its sensors as hard as a strand holds it** (2026-11-12, the
+   coordinator's call under the owner's delegation of the same day: "nehm gerne einfach deine empfehlungen und frage
+   mich weniger oder gar nicht"). For a strain: the food scent at the sensor point half = SO · sin(SA) cells up the
+   gradient at p, less that half cells down it, equals the hold of a strand, self · sat(T) / w (`scentSensors()` in
+   `scent.ts`, `scentSensorLine()` in `render.wgsl` and `render.frag`). Inside the line food steers the agent more.
+   Reason: it is the only one of the three that marks the same steering balance in every model, a ratio of 1.00, 1.01
+   and 1.01 in the table above; the level line gave 7.4 against 0.95 and misled.
+2. **Several strains**: each strain that follows its own trail and food has its half spread and its hold; strains of
+   one spread share one pair with the lowest hold, up to 4 pairs (`View.scentHalf`, `View.scentHolds`, after
+   `View.scentFx`, whose third value the line no longer uses; the uniform grows to 192 bytes). The line lies where the
+   largest of the pairs' differences over holds is 1: where food steers at least one strain as hard as its strand holds
+   it. Reason: one line has to stand for every strain, and its sensors differ per strain.
+3. **The sensors read the scent as the glow does**: up to 2 cells per pixel from the 4 cells around the sensor point
+   without the cells of walls (`scentOpenAt()`, from the shape), zoomed out from the coarse map, and in a box beyond
+   the edge with the slope of the outer cells. A sensor point with no cell that holds scent (in a wall) senses no food,
+   so it gives no line, as a sensor in a wall reads no food in `sense()`. Reason: the line belongs to the view's
+   picture of the scent, and the shape of the scent there is what the glow shows.
+4. **A shortcut**: where the gradient at p says that the ratio lies more than 20 times off 1 (|∇scent| · 2 · half /
+   hold below 0.05 or above 20), the pass reads no sensor. Reason: the two sensor lookups are the line's cost, and the
+   difference across 2 · half exceeds the gradient times 2 · half only by a factor 2 sinh(x) / (2x), x = half over the
+   length over which the scent falls off: below 20 for any fall-off longer than 0.8 cells.
+5. **The legend says what the line means** in one plain sentence, under the bars: "Inside the line, food steers an agent
+   more than a strand holds it.", with a short piece of the line in its colour. The mark on the bar and its label are
+   gone: the line no longer lies at a level of the scale. Screen readers hear the caption, then "Food (green glow)",
+   then the line's sentence. Learn → The model says that an agent steers by the difference between its sensors, what
+   the line shows, and that the line stays about 12 to 14 cells from a food in both models while the glow of the
+   extended model reaches much farther. Reason: items 8 and 9 of the review, and the line needs no scale to be read.
+6. **A model topic, not a decision**: the steering reach of food is about 12 to 14 cells from a food in every model
+   (the table above), and the wider scent of the extended model at a low decay does not steer from farther away. It
+   stands in `TODO.md` as an open topic of the model (ADR 0022).
+
+### Consequences
+
+- The CPU reference of the GPU tests (`scentAt()` in `sim.gpu.test.ts`) computes the line as decision 1 to 4 say, from
+  the same lookup as the glow at the sensor points (`scentLookup()`, `sensorDifference()`); the tests that place the
+  line beside a wall or at the box edge aim it there with the food weight (`aimLine()`). Every pixel of the views of
+  "scent view" follows it on both backends. A new test draws two strains of different spreads and food weights.
+- Unit tests of `scentSensors()`: one strain, the Jones model, shared and own spreads, a fleeing strain, no strand.
+- e2e: the legend's sentence shows once a strand is measured, and the legend reads "Scent per cell", then "Food".
+- Mutations, each reverted after its run, all caught: the first pair only (WGSL and GLSL); the sensors reading the
+  cells of walls (WGSL and GLSL); a sensor in a wall still counted (WGSL); the coarse map's sensors reading cells
+  (WGSL); the full spread in place of the half (WGSL); a shortcut of 0.8 to 1.25 in place of 0.05 to 20 (WGSL); the
+  difference down less up (GLSL); the highest hold for a shared spread (the unit test). The mutations of the walls and
+  of the coarse map's refresh of the amendment above still fail their tests.
+- Cost, the Maze at decay 0.003, 2560 × 1600, draw-only, on − off in ms at fit / 4.4 / 8.8 cells per pixel (load
+  average about 7.4): 1024 × 640 WebGPU 0.71 / 0.13 / −0.15, WebGL2 0.66 / 0.05 / −0.19; 4096 × 2560 WebGPU 0.97 /
+  −0.42 / 0.55, WebGL2 1.22 / 0.54 / 0.02. At fit the line adds about 0.3 ms to the view (0.29 to 0.38 ms before).
