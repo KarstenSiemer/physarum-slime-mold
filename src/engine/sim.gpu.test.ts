@@ -28,7 +28,15 @@ import initFrag from './gl/glsl/init.frag?raw';
 import renderFrag from './gl/glsl/render.frag?raw';
 import viewGlsl from './gl/glsl/view.glsl?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
-import { agentsProgram, compile, diffuseProgram, initProgram, type Programs, type Walled } from './gl/programs';
+import {
+  agentsProgram,
+  compile,
+  diffuseProgram,
+  initProgram,
+  ORDER_TILE,
+  type Programs,
+  type Walled,
+} from './gl/programs';
 import { GlSim } from './gl/sim';
 import { grid, growthStep, occupancy } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
@@ -6378,6 +6386,175 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const fresh = await make(patch, 64, 48, 1500);
         fresh.run(40);
         expect(await state(sim)).toEqual(await state(fresh));
+      });
+    });
+
+  // WebGL2 draws its point passes in an order sorted by the tile of each agent's cell (gl/glsl/order.frag, ADR 0028).
+  // Each point pass sums integers or takes a maximum, so the model must not notice the order. The grids hold several
+  // tiles of ORDER_TILE cells, with sides that no tile divides, and agent counts that fill no row of the agents' layout.
+  if (kind === 'webgl2')
+    describe('order of the point passes', () => {
+      const strains = [0, 1, 2].map((i) => defaultStrain(i));
+      const WIDE: Stroke = { kind: 'wall', from: [20, 60], to: [180, 60], radius: 1.5 };
+
+      async function open(collisions: boolean, sortInterval: number) {
+        const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+        const sim = (await make(patch, 200, 150, collisions ? 15_001 : 60_001)) as GlSim;
+        sim.sortInterval = sortInterval;
+        sim.run(72);
+        return sim;
+      }
+
+      // Inoculate and cut place agents (claims of a tool's spot with collisions), shrinkage kills, and the wall and the
+      // box edge block moves.
+      async function arena(collisions: boolean, sortInterval: number) {
+        const patch: Partial<Settings> = {
+          seed: 11,
+          collisions,
+          density: collisions ? 0.4 : 2,
+          strains,
+          boundary: 'box',
+          shrink: 0.01,
+        };
+        const sim = (await make(patch, 197, 141, collisions ? 1_001 : 30_003)) as GlSim;
+        sim.sortInterval = sortInterval;
+        sim.paint([WIDE]);
+        sim.run(20);
+        sim.run(1, { kind: AgentToolKind.inoculate, x: 100, y: 70, radius: 30, strain: 1, revive: 0.5 });
+        sim.run(15);
+        sim.run(1, { kind: AgentToolKind.cut, x: 60, y: 40, radius: 25, strain: 0, revive: 0 });
+        sim.run(35);
+        return sim;
+      }
+
+      // Covered food counts the agents per cell after the moves with a point pass (diffuse.frag COVERED).
+      async function covered(collisions: boolean, sortInterval: number) {
+        const patch = { seed: 13, collisions, coveredFood: true, density: collisions ? 0.5 : 2, strains };
+        const sim = (await make(patch, 150, 130, collisions ? 9_751 : 39_000)) as GlSim;
+        sim.sortInterval = sortInterval;
+        sim.paint([{ kind: 'food', from: [30, 30], to: [120, 100], radius: 6 }]);
+        sim.run(72);
+        return sim;
+      }
+
+      const state = async (sim: Sim) => ({
+        agents: await sim.readAgents(),
+        trail: Array.from(await sim.readTrail()),
+        scent: Array.from(await sim.readScent()),
+        counts: Array.from(await sim.readCounts()),
+      });
+      const BUILDS = { wrap: open, 'box with tools and shrinkage': arena, 'covered food': covered };
+      /** The agent index of each slot of the order. */
+      const indices = (sim: GlSim) => Array.from(sim.readOrder().filter((_, i) => i % 2 === 1));
+
+      it.each([
+        ['wrap', false],
+        ['wrap', true],
+        ['box with tools and shrinkage', false],
+        ['box with tools and shrinkage', true],
+        ['covered food', false],
+        ['covered food', true],
+      ] as const)(
+        "gives the same agents, trails, scent and counts as runs in the agents' order (%s, collisions %s)",
+        async (scene, collisions) => {
+          const build = BUILDS[scene];
+          const plain = await build(collisions, 0);
+          const unsorted = await state(plain);
+          expect(indices(plain), "without a sort the points keep the agents' order").toEqual(
+            indices(plain).map((_, k) => k),
+          );
+          expect(
+            unsorted.counts.some((n) => n > 1),
+            'cells with more than one agent',
+          ).toBe(!collisions);
+          for (const interval of [1, 8, 32]) {
+            const sim = await build(collisions, interval);
+            const order = indices(sim);
+            expect(order.filter((i, k) => i !== k).length, `sort every ${interval} steps`).toBeGreaterThan(
+              order.length / 4,
+            );
+            expect(await state(sim), `sort every ${interval} steps`).toEqual(unsorted);
+          }
+        },
+        180_000, // GitHub: up to 36.0 s, PR #40 (ADR 0010)
+      );
+
+      // The keys of the sort are those of the agents at the sort: the tile of the cell of a living agent, and the key
+      // after the last tile for a dead one and for a slot past the last agent. Equal keys keep the order of the index.
+      it('orders every slot once, by the tile of its agent, and inside a tile by index', async () => {
+        const sim = (await make(
+          { seed: 5, density: 1, strains, boundary: 'box', shrink: 0.01 },
+          197,
+          141,
+          20_001,
+        )) as GlSim;
+        sim.sortInterval = 0;
+        sim.run(64); // the next step sorts with an interval of 32
+        const agents = await sim.readAgents();
+        expect(agents.filter((a) => (a.bits & 4) === 0).length, 'dead agents').toBeGreaterThan(1000);
+        sim.sortInterval = 32;
+        expect(sim.sortDue(1)).toBe(true);
+        sim.sortNow();
+        const order = sim.readOrder();
+        const slots = order.length / 2;
+        expect(slots).toBe(sim.agentWidth * Math.ceil(sim.agents / sim.agentWidth));
+        const [tilesX, tilesY] = [Math.ceil(197 / ORDER_TILE), Math.ceil(141 / ORDER_TILE)];
+        const none = tilesX * tilesY;
+        const key = (i: number) => {
+          const a = agents[i];
+          if (!a || (a.bits & 4) === 0) return none;
+          return Math.floor(Math.floor(a.y) / ORDER_TILE) * tilesX + Math.floor(Math.floor(a.x) / ORDER_TILE);
+        };
+        const seen = new Set<number>();
+        for (let k = 0; k < slots; k++) {
+          const [kk, i] = [order[2 * k] ?? -1, order[2 * k + 1] ?? -1];
+          seen.add(i);
+          expect(kk, `key of slot ${k}`).toBe(key(i));
+          if (k > 0) {
+            const [pk, pi] = [order[2 * k - 2] ?? -1, order[2 * k - 1] ?? -1];
+            expect(pk < kk || (pk === kk && pi < i), `slot ${k} after slot ${k - 1}`).toBe(true);
+          }
+        }
+        expect(seen.size).toBe(slots);
+        expect(Math.max(...seen)).toBe(slots - 1);
+        expect(new Set(Array.from({ length: none + 1 }, (_, t) => t).filter((t) => order.includes(t))).size).toBe(
+          none + 1,
+        );
+      });
+
+      // The engine gives the sort a turn of its own (ADR 0028), as on WebGPU: sortNow() sorts for the next step that
+      // sorts, which then runs without it.
+      it.each([false, true])('sorts ahead of its step with the same state (collisions %s)', async (collisions) => {
+        const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+        const n = collisions ? 7_500 : 30_000;
+        const [inStep, ahead] = [(await make(patch, 150, 100, n)) as GlSim, (await make(patch, 150, 100, n)) as GlSim];
+        inStep.run(70);
+        let sorts = 0;
+        const turn = (steps: number) => {
+          if (ahead.sortDue(steps)) {
+            const before = indices(ahead);
+            ahead.sortNow();
+            sorts++;
+            expect(ahead.sortDue(steps), 'sorted for that step').toBe(false);
+            if (sorts > 1) expect(indices(ahead), 'a new order').not.toEqual(before);
+          }
+          const sorted = indices(ahead);
+          ahead.run(steps);
+          expect(indices(ahead), 'no second sort in the steps').toEqual(sorted);
+        };
+        for (let k = 0; k < 29; k++) turn(1); // step 0 sorts
+        turn(4); // steps 29 to 32: the sort of step 32, three steps ahead
+        for (let k = 0; k < 20; k++) turn(1);
+        turn(17); // steps 53 to 69: the sort of step 64
+        expect(ahead.step).toBe(70);
+        expect(sorts).toBe(3);
+        expect(await state(ahead)).toEqual(await state(inStep));
+        // A reset starts over: the points draw in the agents' order, and step 0 sorts again.
+        ahead.reset();
+        expect(indices(ahead)).toEqual(indices(ahead).map((_, k) => k));
+        expect(ahead.sortDue(1)).toBe(true);
+        ahead.sortInterval = 0;
+        expect(ahead.sortDue(100)).toBe(false);
       });
     });
 });

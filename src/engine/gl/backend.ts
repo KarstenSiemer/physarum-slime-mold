@@ -4,7 +4,13 @@ import { levels, STRAND_BLEND, strandLevel } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, trailLevel, VIEW_BYTES } from '../render';
 import { levelSize, scentLevel, scentLevelSize } from '../scent';
-import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
+import {
+  BYTES_PER_AGENT_GL,
+  BYTES_PER_CELL,
+  BYTES_PER_CELL_HALF_FLOAT,
+  COVERED_BYTES_PER_CELL_HALF_FLOAT,
+  equilibrium,
+} from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
 import { compile, VIEW_BINDING, viewPrograms, type Program, type Programs } from './programs';
@@ -24,6 +30,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly maxBufferBytes: number;
   readonly maxGridSide: number;
   readonly bytesPerCell: number;
+  readonly bytesPerAgent = BYTES_PER_AGENT_GL;
   readonly coveredBytesPerCell: number;
   private readonly prog: Programs;
   /** For tests: the render programs of another version of render.frag that draw every frame (renderFrom()). */

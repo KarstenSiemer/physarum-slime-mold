@@ -71,8 +71,11 @@ floats (10-bit mantissa, relative step ≈ 0.001), so slow decay stops working.
   `reset()`.
 - `readAgents()` returns the agents in id order. `writeAgent(i, …)` replaces the agent with id
   `i` wherever the sort has put it (a compute pass finds it) and keeps the id, so ids stay
-  unique. WebGL2 has no compute shaders and does not sort: there slot and id are the same.
-- 32 B per agent on both backends (two copies), as the memory estimate assumes.
+  unique. WebGL2 has no compute shaders and does not move its agents: there slot and id are the same. Since ADR 0028
+  (decision 14 of 2026-11-12) it sorts only the order in which its point passes draw the agents, every 32 steps, by
+  64 × 64 tiles: every point pass sums integers or takes a maximum, so no order changes a result.
+- 32 B per agent on both backends (two copies), as the memory estimate assumes. WebGL2 holds 22 B more for the order
+  of its point passes since ADR 0028 (54 B, `BYTES_PER_AGENT_GL`).
 - Memory per cell: 32 B trail + 16 B scent + 16 B counts + 4 B env + 4 B outline distances for
   the renderer (ADR 0009) = 72 B, plus 12 B of collision buffers (ADR 0008), which WebGPU
   allocates even with collisions off (`src/engine/sim.ts:137–138`). A 2048² grid needs about

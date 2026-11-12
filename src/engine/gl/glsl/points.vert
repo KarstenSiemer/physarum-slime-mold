@@ -4,8 +4,11 @@
 // 4 deposit into one panel per strain (2 × 2 panels of the grid size), for exact counts without
 // float blending (gl/sim.ts deposit()), 5 start claims (MAX of keys) of agents that wait for a free cell of
 // their own (init.frag).
+// Point k draws the agent of slot k of `order` (order.frag): the agents sorted by the tile of their cell, so that
+// points that follow each other lie close together. Each kind sums integers or takes a maximum, which no order changes.
 
 uniform sampler2D agents;
+uniform sampler2D order;
 uniform int agentWidth;
 uniform int kind;
 uniform int tallySide; // kind 3: side of the square tally target
@@ -14,7 +17,8 @@ uniform vec4 unit;     // kind 4: value per agent
 flat out vec4 value;
 
 void main() {
-  int i = gl_VertexID;
+  int slot = gl_VertexID;
+  int i = int(texelFetch(order, ivec2(slot % agentWidth, slot / agentWidth), 0).y);
   vec4 a = texelFetch(agents, ivec2(i % agentWidth, i / agentWidth), 0);
   uint bits = bitsOf(a);
   int s = int(bits & 3u);

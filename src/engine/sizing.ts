@@ -93,6 +93,12 @@ export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
 
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 export const BYTES_PER_AGENT = 32;
+/**
+ * Per agent on WebGL2: BYTES_PER_AGENT and the order of its point passes (gl/sim.ts sortOrder(), ADR 0028), two copies
+ * of 8 B per agent slot and the pyramid of the sort, 16 B per node of 4 slots and less above: about 5.33 B per slot,
+ * counted as 6.
+ */
+export const BYTES_PER_AGENT_GL = BYTES_PER_AGENT + 22;
 
 /** Memory budget: an eighth of the device memory hint (Chrome only), at most 1 GiB; 512 MiB if unknown. */
 export function memoryBudget(deviceMemoryGb?: number): number {

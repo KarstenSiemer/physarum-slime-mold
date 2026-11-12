@@ -46,8 +46,8 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    blending the same or less, without it 110 B: no collision buffers, but 32 B of counting
    panels, ADR 0003; since ADR 0028, amendment of 2026-11-12, 98 B and 118 B, with the two coarse
    maps of the view at 4 B each) and 32 B per
-   agent. A rebuild frees the old simulation before it allocates the new one, so memory never
-   holds two. Allocations run inside a WebGPU `out-of-memory` error scope (WebGL2:
+   agent (54 B on WebGL2 since decision 14 of ADR 0028). A rebuild frees the old simulation
+   before it allocates the new one, so memory never holds two. Allocations run inside a WebGPU `out-of-memory` error scope (WebGL2:
    `OUT_OF_MEMORY`); a failure frees the partial allocation and steps the grid down instead of
    losing the device. The URL decoder caps the hash at 8,192 characters and each inflated part
    at 64 KiB. A link's drawing holds at most 4,096 strokes and asks for at most 64 passes over

@@ -36,7 +36,9 @@ Option 2. The WebGL2 backend keeps the same parameters, presets, UI and tests:
 - Agents live in `RGBA32F` textures, updated by a full-screen fragment pass (ping-pong).
 - Deposit: agents are drawn as 1-pixel points into a counts texture with additive blending.
   Counts are integers, so blending order does not change the result (deterministic). With
-  `EXT_float_blend` the texture is `RGBA32F`, exact to 2²⁴ agents per cell.
+  `EXT_float_blend` the texture is `RGBA32F`, exact to 2²⁴ agents per cell. Since ADR 0028 (decision 14 of
+  2026-11-12) the points draw in an order sorted by 64 × 64 tiles, which a sort in fragment passes renews every 32
+  steps. That costs 22 B more per agent (54 B).
 - Without `EXT_float_blend` only half floats blend, and they count exactly to 2048 (11
   significant bits), while condensed networks gather more agents of one strain in a cell (in the
   default scene up to 29 083 at step 600, sampled every 50 steps on WebGPU; on WebGL2 5052 to

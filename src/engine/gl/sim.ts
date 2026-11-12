@@ -27,7 +27,7 @@ import {
   type GL,
   type Target,
 } from './gl';
-import { PARAMS_BINDING, type Program, type Programs } from './programs';
+import { ORDER_TILE, PARAMS_BINDING, type Program, type Programs } from './programs';
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -44,6 +44,15 @@ const MASKS: Record<number, [boolean, boolean, boolean, boolean]> = {
 };
 /** Side of the tiles syncShape() copies the outline target in: 1 MiB at a time. */
 const REFRESH_TILE = 512;
+/** Sort the order of the point passes every this many steps, as sim.ts sorts its agents (ADR 0005, ADR 0028). */
+const SORT_INTERVAL = 32;
+/** Nodes in a row of a level of the sort's pyramid (order.frag LEVEL_WIDTH). */
+const LEVEL_WIDTH = 2048;
+/**
+ * Levels of the sort's pyramid that its gather can read (order.frag PASS 2). It has a fan-in of 4, as pyramidLevels():
+ * 4^11 = 2^22 slots, the most agents of WebGL2 (backend.ts maxAgents) in rows of 2048.
+ */
+const ORDER_LEVELS = 11;
 
 /**
  * A pyramid of sums with a fan-in of 4 (growth.frag): level k ≥ 1 lies in texture k mod 2, `width` texels a row, from
@@ -141,6 +150,21 @@ export class GlSim implements Sim {
   private readonly counts: Target;
   /** Without float blending: one panel per strain with a stencil, for exact counts (deposit()). */
   private readonly panels: Target | undefined;
+  /**
+   * The order of the point passes (order.frag, ADR 0028): per slot a key and the agent that its point draws, in the
+   * layout of the agents. The sort writes both in turn; `o` is the one that holds its result, the current order.
+   */
+  private readonly order: Pair<Target>;
+  private o: Bit = 0;
+  /** The levels 1 and up of the sort's pyramid of digit counts (order.frag PASS 1), and their nodes. */
+  private readonly orderLevels: Target[];
+  private readonly orderSizes: number[];
+  /** The points of a point pass: every slot of the agents' layout (order.frag sorts them all). */
+  private readonly slots: number;
+  /** Sort the order of the point passes every this many steps; 0 never (measurements and tests). */
+  sortInterval = SORT_INTERVAL;
+  /** The step whose sort has run already, ahead of it (sortNow()); −1: none. */
+  private sortedFor = -1;
   private readonly env: Target;
   /** Distances to the painted outlines, the light and the walls' drop shadow, for the renderer only (shape.frag). */
   private readonly shape: Target;
@@ -218,6 +242,9 @@ export class GlSim implements Sim {
     this.pending = new PendingOutlines(width, height);
     this.agentWidth = Math.min(agents, AGENT_ROW);
     const agentHeight = Math.ceil(agents / this.agentWidth);
+    this.slots = this.agentWidth * agentHeight;
+    this.orderSizes = pyramidLevels(this.slots);
+    if (this.orderSizes.length > ORDER_LEVELS) throw new RangeError(`No order for ${String(this.slots)} agent slots.`);
     const made: Target[] = [];
     const t = (w: number, h: number, f: number) => {
       const x = target(gl, w, h, f);
@@ -227,6 +254,10 @@ export class GlSim implements Sim {
     this.ubo = uniformBlock(gl, PARAMS_BYTES, PARAMS_BINDING);
     try {
       this.agentsTex = [t(this.agentWidth, agentHeight, gl.RGBA32F), t(this.agentWidth, agentHeight, gl.RGBA32F)];
+      this.order = [t(this.agentWidth, agentHeight, gl.RG32F), t(this.agentWidth, agentHeight, gl.RG32F)];
+      this.orderLevels = this.orderSizes.map((n) =>
+        t(Math.min(n, LEVEL_WIDTH), Math.ceil(n / LEVEL_WIDTH), gl.RGBA32F),
+      );
       this.trail = [t(width, height, gl.RGBA32F), t(width, height, gl.RGBA32F)];
       this.scent = [t(width, height, gl.RG32F), t(width, height, gl.RG32F)];
       this.noScent = t(1, 1, gl.RG32F); // a new texture holds zeros
@@ -409,6 +440,7 @@ export class GlSim implements Sim {
     // The scent targets are cleared below, and without a food or a light no step adds scent.
     this.scentless = !this.sources;
     this.step = 0;
+    this.sortedFor = -1;
     this.a = 0;
     this.p = 0;
     this.writeParams();
@@ -417,6 +449,9 @@ export class GlSim implements Sim {
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
     this.pass(this.initProgram(), this.agentsTex[0], init, { agentWidth: this.agentWidth, mode: 0 });
+    // The point passes of the start draw in the order of the agents' indices: the keys of the sort hold it.
+    this.orderKeys(this.order[0]);
+    this.o = 0;
     if (this.settings.collisions) {
       this.placeOnFreeCells();
       this.rebuildOccupancy();
@@ -464,9 +499,88 @@ export class GlSim implements Sim {
     if (steps > 0) this.viewStale = true;
     for (let k = 0; k < steps; k++) {
       this.writeParams(tool);
+      if (this.sortInterval > 0 && this.step % this.sortInterval === 0 && this.sortedFor !== this.step) {
+        this.sortOrder();
+      }
       this.encodeStep();
       this.step++;
     }
+  }
+
+  /** The next step that sorts: the next multiple of the interval from the current step on (sim.ts sortStep). */
+  private get sortStep() {
+    return Math.ceil(this.step / this.sortInterval) * this.sortInterval;
+  }
+
+  sortDue(steps: number): boolean {
+    if (this.sortInterval <= 0) return false;
+    const next = this.sortStep;
+    return next < this.step + steps && next !== this.sortedFor;
+  }
+
+  /**
+   * The sort of the next step that sorts, now; that step then runs without it (sim.ts sortNow()). The order may be a
+   * few steps older than that step: it only orders the points, and no result depends on their order (ADR 0028).
+   */
+  sortNow() {
+    if (this.sortInterval <= 0) return;
+    this.writeParams();
+    this.sortOrder();
+    this.sortedFor = this.sortStep;
+  }
+
+  /** For tests: the current order of the point passes, a key and an agent index per slot (order.frag). */
+  readOrder(): Float32Array {
+    const rgba = readTarget(this.gl, this.order[this.o]);
+    return Float32Array.from({ length: this.slots * 2 }, (_, i) => rgba[(i >> 1) * 4 + (i & 1)] ?? 0);
+  }
+
+  /** The keys of the sort into `dst`, from the current agents (order.frag PASS 0): its slots in index order. */
+  private orderKeys(dst: Target) {
+    const keys = this.prog.order.keys;
+    const tilesX = Math.ceil(this.width / ORDER_TILE);
+    const none = tilesX * Math.ceil(this.height / ORDER_TILE);
+    this.pass(keys, dst, { agentsIn: this.agentsTex[this.a].texture }, { agentWidth: this.agentWidth, tilesX, none });
+  }
+
+  /**
+   * Sorts the order of the point passes by the tile of each agent's cell (order.frag, ADR 0028): the keys, then one
+   * radix pass per 2 bits of the largest key, each with its pyramid of digit counts. The result is the current order.
+   */
+  private sortOrder() {
+    const { level, gather } = this.prog.order;
+    const keys = Math.ceil(this.width / ORDER_TILE) * Math.ceil(this.height / ORDER_TILE); // the largest key: none
+    let bits = 1;
+    while (2 ** bits <= keys) bits++;
+    let from: Bit = 0;
+    this.orderKeys(this.order[from]);
+    const levels = this.orderLevels;
+    const top = levels.length;
+    for (let shift = 0; shift < bits; shift += 2) {
+      levels.forEach((dst, k) => {
+        const below = k === 0 ? this.order[from] : levels[k - 1];
+        if (!below) throw new Error('No level below');
+        this.pass(
+          level,
+          dst,
+          { below: below.texture },
+          {
+            first: k === 0 ? 1 : 0,
+            belowWidth: below.width,
+            belowSize: k === 0 ? this.slots : (this.orderSizes[k - 1] ?? 1),
+            shift,
+          },
+        );
+      });
+      // Every sampler of the gather gets a texture: the levels above the top read the top level, unused.
+      const tex: Record<string, WebGLTexture> = { orderIn: this.order[from].texture };
+      for (let k = 1; k <= ORDER_LEVELS; k++)
+        tex[`level${String(k)}`] = (levels[k - 1] ?? levels[top - 1] ?? this.counts).texture;
+      const to = flip(from);
+      this.pass(gather, this.order[to], tex, { agentWidth: this.agentWidth, slots: this.slots, shift, top });
+      from = to;
+    }
+    this.o = from;
   }
 
   /**
@@ -721,7 +835,7 @@ export class GlSim implements Sim {
   destroy() {
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
-    all.push(this.noScent);
+    all.push(this.noScent, ...this.order, ...this.orderLevels);
     all.push(this.walled, this.clearance);
     if (this.panels) all.push(this.panels);
     if (this.presence) all.push(this.presence);
@@ -1094,13 +1208,15 @@ export class GlSim implements Sim {
     gl.viewport(0, 0, dst.width, dst.height);
     gl.useProgram(p.program);
     // Kinds 1 and 5 read env and occ. Both are bound always: an active sampler on the target is a feedback loop.
-    textures(gl, p.program, { agents: agents.texture, env: this.env.texture, occ: this.env.texture, ...more });
+    const order = this.order[this.o].texture;
+    textures(gl, p.program, { agents: agents.texture, order, env: this.env.texture, occ: this.env.texture, ...more });
     gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
     gl.uniform1i(p.loc('kind'), kind);
     gl.uniform1i(p.loc('tallySide'), TALLY_SIDE);
     gl.uniform4f(p.loc('unit'), ...unit);
     this.blend(equation);
-    gl.drawArrays(gl.POINTS, 0, this.agents);
+    // Every slot: the slots past the last agent hold the indices past it, which the points drop.
+    gl.drawArrays(gl.POINTS, 0, this.slots);
     gl.disable(gl.BLEND);
   }
 

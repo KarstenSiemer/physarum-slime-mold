@@ -123,7 +123,8 @@ Option 1, with these decisions of this app, on 2026-11-11 under the owner's rule
    again. A lattice from a link that is not the scene's goes the same way, and the hint then offers the scene's own.
    A lattice of Jones 2010 needs at most 9.5 MB (300 × 300 cells at 90 B and 45,000 agents at 32 B, `sizing.ts`),
    and 11.3 MB on WebGL2 without float blending (110 B per cell). Since ADR 0028 (amendment of 2026-11-12) the fit
-   counts the two coarse maps of the view: 10.3 MB (98 B) and 12.1 MB (118 B). Both lie below the smallest budget of 32 MiB
+   counts the two coarse maps of the view: 10.3 MB (98 B) and 12.1 MB (118 B). Since its decision 14 WebGL2 counts
+   54 B per agent: 11.25 MB with float blending, and 13.05 MB without it. All lie below the smallest budget of 32 MiB
    (0.25 GB of device memory), so only an out-of-memory error or a link can bring a lattice that does not fit.
 9. **The startup check and rebuilds.** The startup check (`autoTune()` in `src/ui/state.svelte.ts`, `Tick.lattice` in
    `src/ui/tune.ts`) does not count time on the loaded scene's own lattice and never lowers it: Jones' result needs

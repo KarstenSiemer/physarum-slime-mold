@@ -11,6 +11,7 @@ import growthGlsl from './glsl/growth.glsl?raw';
 import growthVert from './glsl/growth.vert?raw';
 import heightFrag from './glsl/height.frag?raw';
 import initFrag from './glsl/init.frag?raw';
+import orderFrag from './glsl/order.frag?raw';
 import paintFrag from './glsl/paint.frag?raw';
 import pointsFrag from './glsl/points.frag?raw';
 import pointsVert from './glsl/points.vert?raw';
@@ -27,6 +28,11 @@ import { bindBlock, program, startProgram, type GL } from './gl';
 /** Uniform block binding points. */
 export const PARAMS_BINDING = 0;
 export const VIEW_BINDING = 1;
+/**
+ * Side in cells of the tiles that order the point passes (order.frag, ADR 0028): 64 measured best among 8 to 128 in the
+ * start scene.
+ */
+export const ORDER_TILE = 64;
 
 const V = '#version 300 es\n';
 
@@ -62,6 +68,16 @@ export interface Saturated {
   walled: Program;
 }
 
+/** The passes of the sort that orders the point passes (order.frag, ADR 0028). */
+export interface Order {
+  /** PASS 0: per slot the tile of its agent and the agent's index. */
+  keys: Program;
+  /** PASS 1: one level of the pyramid of digit counts. */
+  level: Program;
+  /** PASS 2: the gather of one radix pass. */
+  gather: Program;
+}
+
 /** The programs of growth and shrinkage (growth.frag, growth.vert, ADR 0025). */
 export interface Growth {
   /** PASS 0 and 1: the row sums of the occupancy, then the window counts. */
@@ -88,6 +104,8 @@ export interface Programs {
   /** The agent passes that saturate the trail, compiled at their first use: most scenes never saturate. */
   saturated: () => Saturated;
   points: Program;
+  /** The sort of the points' order (order.frag). */
+  order: Order;
   counts: Program;
   fill: Program;
   init: Program;
@@ -186,6 +204,8 @@ export function compile(gl: GL): Programs {
   let growth: Growth | undefined;
   let trailDown: Program | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
+  const orderPass = (pass: number) =>
+    sim(`#define PASS ${String(pass)}\n#define ORDER_TILE ${String(ORDER_TILE)}\n${orderFrag}`);
   return {
     agents: agentsProgram(gl, agentsFrag, false),
     walled: () => (walled ??= { agents: agentsProgram(gl, agentsFrag, true), walls: sim(wallsFrag) }),
@@ -212,6 +232,7 @@ export function compile(gl: GL): Programs {
     shape: sim(brushGlsl + shapeFrag),
     counts: sim(countsFrag),
     fill: plain(fillFrag),
+    order: { keys: orderPass(0), level: orderPass(1), gather: orderPass(2) },
     points: wrap(gl, program(gl, V + common + toolsGlsl + pointsVert, V + common + pointsFrag)),
     render: view(renderFrag),
     scent: () => {

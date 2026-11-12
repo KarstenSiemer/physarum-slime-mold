@@ -5,7 +5,7 @@ import { AutoExposure } from './exposure';
 import { initGpu, OutOfMemoryError, type Gpu } from './gpu';
 import { Renderer, type Frame } from './render';
 import { Simulation } from './sim';
-import { BYTES_PER_CELL, equilibrium } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_CELL, equilibrium } from './sizing';
 import type { Backend, Levels, View } from './types';
 
 // The agent id has 24 bits (ADR 0005, shaders/common.wgsl).
@@ -16,6 +16,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   readonly kind = 'webgpu';
   readonly supportsCollisions = true;
   readonly bytesPerCell = BYTES_PER_CELL;
+  readonly bytesPerAgent = BYTES_PER_AGENT;
   readonly coveredBytesPerCell = 0; // covered food counts into the collision buffers
 
   readonly description: string;

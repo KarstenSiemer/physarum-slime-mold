@@ -132,6 +132,8 @@ export interface Backend<S extends Sim = Sim> {
   readonly maxGridSide: number;
   /** GPU bytes per grid cell, for the memory estimate (sizing.ts). */
   readonly bytesPerCell: number;
+  /** GPU bytes per agent, for the memory estimate (sizing.ts BYTES_PER_AGENT, BYTES_PER_AGENT_GL). */
+  readonly bytesPerAgent: number;
   /** More GPU bytes per grid cell while covered food is on (sizing.ts COVERED_BYTES_PER_CELL_HALF_FLOAT). */
   readonly coveredBytesPerCell: number;
   readonly supportsCollisions: boolean;

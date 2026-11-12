@@ -16,7 +16,6 @@ import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import { AgentToolKind, growthOn, stepChance, strainAgents, type AgentTool } from './pack';
 import {
   agentCount,
-  BYTES_PER_AGENT,
   capacityCount,
   fitResolution,
   fits,
@@ -295,7 +294,7 @@ export class Engine {
       (s.coveredFood ? coveredBytesPerCell : 0) +
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
-    const bytesPerAgent = BYTES_PER_AGENT + (growth ? GROWTH_BYTES_PER_AGENT : 0);
+    const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
     // With the rule the capacity is at most one agent per cell (capacityOf()): count what this backend runs.

@@ -262,8 +262,8 @@ food. The two frames zoomed out differ only from decision 9 on.
       runs the sort first, in a submission of its own (`Sim.sortNow()`), and one step less. A frame of one step is
       then the sort alone. The step that would have sorted runs without the sort. Steps asked for by hand run as
       asked, with the sort inside its step, and so do the steps of a tool held while paused, which keep their 60
-      steps per second at any frame rate (ADR 0023), and WebGL2, which has no sort. `Engine.sortOwnTurn` turns it
-      off for measurements.
+      steps per second at any frame rate (ADR 0023). WebGL2 had no sort then; since decision 14 it sorts the order of
+      its point passes, in the same turn. `Engine.sortOwnTurn` turns it off for measurements.
     - The sort changes no result (ADR 0005), also up to some steps ahead of its step: with the sort up to 2 steps
       ahead, in its own submission, 8 scenes keep the bytes of `main` on WebGPU at the same step counts, and a test
       holds agents and trail against a run that sorts inside its steps, with and without the rule.
@@ -312,6 +312,143 @@ food. The two frames zoomed out differ only from decision 9 on.
     from those of the pixels beside it. A closed arena fills only a part of a view zoomed out (Maze: 1.0 to 1.3 ms
     at 2 to 8 cells per pixel), so this was not measured further.
   - The agents style zoomed out shows the cell under each pixel's centre, not a mean.
-  - WebGL2 runs a step of the start scene in 21 to 24 ms, WebGPU in 3.7 ms. The wraps are not the cause (a step
-    without any remainder took the same time); the cause was not examined.
+  - WebGL2 ran a step of the start scene in 21 to 24 ms, WebGPU in 3.7 ms. The wraps are not the cause (a step
+    without any remainder took the same time). The amendment below finds the cause and closes most of the gap
+    (decision 14).
   - Other GPUs and browsers, a display of device pixel ratio 1, and an idle machine were not measured.
+
+## Amendment 2026-11-12 (2): the WebGL2 step
+
+### Context
+
+The amendment above left one item open: on the same M3 Pro, WebGL2 ran a step of the start scene in 21 to 24 ms and
+WebGPU in 3.7 ms. The coordinator asked for the cost of each pass, and for a fix or a measured reason why the cost
+stays. Under the owner's delegation of 2026-11-12 the agent that did the work decides, and records its choices here.
+
+Setup: production builds, headed Chromium 158 (Playwright 1.65), WebGPU on Metal and WebGL2 on ANGLE over Metal, a
+canvas of 2560 × 1600, the start scene on 1536 × 960 cells. WebGPU runs 4,423,680 agents, WebGL2 4,194,304 (its limit
+of 2^22). Other sessions used the GPU. A round loads each case in turn into one browser window, in an order that
+rotates. A case runs 400 steps and then measures in samples of 32 steps between fences, so each sample holds one sort.
+A value is the median over 8 rounds, with the smallest and the largest in brackets. "Before" is `12ce1a2`, the tree of
+`main` after #39. All builds of this amendment, before and after, used vite 8.3.6, the version in the `node_modules`
+of the checkout at that time; the lockfile asks for 8.3.7 since #38. The suites of this change (lint, check, the unit
+tests, the GPU tests, the build and the e2e tests) ran with 8.3.7.
+
+The cost of a pass is the wall time of a step that runs only that pass, less that of a step that runs no pass. On
+WebGL2 the times of `EXT_disjoint_timer_query_webgl2` overlap: the queries of one step summed to 60 ms against 27 ms of
+wall time, also with a flush around each query. On WebGPU the timestamps of each dispatch, in a pass of its own, agree
+with the wall time to 0.05 ms.
+
+| Pass, ms per step             | WebGL2 before          | WebGL2 after           | WebGPU                                 |
+| ----------------------------- | ---------------------- | ---------------------- | -------------------------------------- |
+| agent pass                    | 2.43 (2.26 to 2.85)    | 2.65 (2.32 to 3.06)    | 1.68 (1.53 to 1.88), deposits included |
+| clear of the counts           | 0.18 (0.12 to 0.23)    | 0.17 (0.15 to 0.23)    | in the step's clears                   |
+| deposit (one point per agent) | 14.86 (12.99 to 16.43) | 6.84 (5.91 to 8.53)    | in the agent pass (`atomicAdd`)        |
+| sort, one in 32 steps         | none                   | 0.59 (0.57 to 0.75)    | 0.09 (0.07 to 0.10)                    |
+| diffusion, first pass         | 1.16 (1.03 to 1.35)    | 1.13 (1.08 to 1.28)    | 0.89 (0.79 to 0.98)                    |
+| diffusion, second pass        | 0.96 (0.84 to 1.15)    | 0.93 (0.85 to 1.02)    | 0.65 (0.60 to 0.72)                    |
+| a step that runs no pass      | 0.11                   | 0.12                   | 0.26                                   |
+| the whole step                | 18.45 (16.76 to 20.79) | 12.00 (10.60 to 14.48) | 3.58 (3.23 to 3.79)                    |
+
+The details of the measurements below are in
+[webgpu-platform](../knowledge-base/webgpu-platform.md#webgl2-point-passes-on-a-tile-based-gpu-measured-2026-11-12).
+
+- The cause is the deposit. `deposit()` (`src/engine/gl/sim.ts:1050` before this change) draws one point per agent
+  (`gl.drawArrays(gl.POINTS, 0, this.agents)`, `:1103`), and point k draws agent k (`points.vert:17`). A few steps
+  after the start, the agents of that order lie anywhere on the grid. WebGPU adds its deposits with `atomicAdd` in the
+  agent pass and sorts its agents by 8 × 8 tiles every 32 steps (ADR 0005).
+- The deposit alone after 400 steps took 15.7 to 22.2 ms. Without blending, into other formats and with less vertex
+  work it cost the same. With every point culled in the vertex shader it took 1.1 to 1.3 ms. Point k into pixel k
+  modulo the cells, so that points that follow each other lie side by side, took 3.1 to 4.2 ms, and each point into a
+  random pixel of its own tile of 32 × 32 cells took 21.1 ms. So the cost follows the order of the points on the
+  screen. Apple GPUs sort the primitives of a render pass into screen tiles before they shade them. The binning of
+  scattered points is the likely cause; no GPU counters were available to show it.
+- A second cost: after 400 steps 7 % of the cells hold all agents that moved, up to 9602 in one cell. Points on one
+  pixel blend one after the other: every point on one pixel took 357 ms, and the agents sorted by cell, so that the
+  agents of a dense cell follow each other, 58.5 ms.
+- The agent pass costs 2.4 to 2.7 ms on WebGL2 against 1.7 ms on WebGPU with its deposits: WebGL2 does not move its
+  agents, so the sensors read the trail in a scattered order (WebGPU unsorted: 2.6 ms, the amendment above). The
+  diffusion costs 0.5 ms more on WebGL2. These were not examined further.
+
+### Options
+
+1. Keep the cost, as a cost of the design of the fallback.
+2. Sort the agents themselves, as WebGPU does. The random streams then need an id per agent. WebGL2 keeps the bits of
+   an agent as an exact float of 24 bits, of which the strain and the markers take 6, and the id needs 22 more. The
+   tools, growth, `writeAgent()` and the readbacks would find agents by id. The agent pass would gain too.
+3. Sort only the order in which the point passes draw the agents. Every point pass sums integers or takes a maximum,
+   which is exact in 32-bit floats below 2^24, so no order changes a result. The agents stay where they are.
+4. Spread the agents of a cell over more texels by index, then sum them. Alone it gave nothing: 16.4 ms for 2 texels,
+   21.4 for 4 and 28.8 for 8, against 19.4.
+
+### Decision
+
+14. **WebGL2 draws its point passes in an order sorted by tiles** (option 3; my decision, 2026-11-12, under the
+    owner's delegation).
+    - The order (`src/engine/gl/glsl/order.frag`): per agent slot a key and an agent index, in two `RG32F` textures
+      in the layout of the agents. The key is the tile of 64 × 64 cells that holds a living agent's cell; a dead agent
+      and a slot past the last agent get the key after the last tile. An LSD radix sort of 2 bits a pass, in fragment
+      passes: per pass a pyramid of digit counts with a fan-in of 4 (`pyramidLevels()`), then a gather in which each
+      slot of the new order walks down the pyramid to its element. Each pass is stable, so the order is sorted by tile
+      and, inside a tile, by agent index. The start scene has 361 keys: 5 passes.
+    - Point k draws the agent of slot k (`points.vert`). Every point pass uses the order: the deposit, the claims and
+      the occupancy of collision mode, covered food, the alive tally and the start claims.
+    - The sort runs every 32 steps, as on WebGPU, and the engine gives it a turn of its own (decision 13):
+      `GlSim.sortDue()` and `GlSim.sortNow()` work as in `sim.ts`. A reset starts with the agents' own order, and its
+      step 0 sorts.
+    - My choices, with the measurements of the knowledge base.
+      - Tiles of 64 cells: the deposit took 9.2 ms against 10.0 for 128 and 10.3 for 32, in one page.
+      - A fan-in of 4: the sort took 24 ms against 30 to 36 with 16, for 4.3 B more per agent.
+      - A sort every 32 steps. The deposit alone, with its clear, after a sort (3 rounds): 6.4 to 7.5 ms at once, 8.0
+        to 9.4 after 16 steps, 8.3 to 9.0 after 32, 10.7 to 11.3 after 64 and 11.6 to 12.7 after 128; 14.4 to 16.2 in
+        the agents' own order. With the sort's 18.9 ms spread over its interval, a step costs about 9.0 ms at 16, 8.8
+        at 32 and 9.3 at 64. The differences lie inside the spread; 32 is the lowest and keeps the interval of WebGPU.
+      - Not option 2: it needs a new layout of the agents and touches the tools, growth and the readbacks, and option 3
+        gets the gain of the deposit without them.
+      - No second texel per cell. With the order, 2 texels per cell side by side, by the parity of the slot, took the
+        deposit from 9.2 to 6.5 ms in the lab. In the step they gave nothing (8 paired rounds): the deposit 0.57 ms
+        less, the wider clear 0.23 ms and the sum pass 0.64 ms more, the step × 0.995 (0.93 to 1.05). They would cost
+        32 B per cell and half the largest grid side.
+    - Paired against the build before (8 rounds): the WebGL2 step × 0.659 (0.620 to 0.727, the 95 % interval of the
+      median from a bootstrap), the deposit 7.75 ms less (6.36 to 9.20). The agent pass took 0.18 ms more (0.09 to
+      0.28); the cause was not examined. WebGPU × 0.996 (0.977 to 1.054).
+    - The sort in its turn (`sortNow()`) takes 22.8 ms (20.3 to 24.5): the keys 1.5 to 1.9 ms, the 55 level passes
+      7.5 to 7.9 ms and the 5 gathers 11.8 to 12.2 ms.
+    - The app's own loop on WebGL2, on 1536 × 960, 4 paired rounds of 8 s each in a window off the screen. At the
+      scene's speed of 120 steps per second: 58.1 to 59.2 frames and steps per second before, 77.5 to 79.1 frames and
+      75.2 to 76.7 steps per second after. The turn of the sort runs no step (decision 13), so 1 frame in 33 shows no
+      new step. At 960 steps per second: 43.0 to 44.4 steps per second before, 75.1 to 77.9 after. The median time
+      between two frames fell from 19.7 to 19.8 ms to 10.1 to 10.3 ms. Frames more than 30 ms after the frame before:
+      0.6 to 1.7 % at the scene's speed and 10.5 to 16.3 % at 960 before, 0 to 0.8 % after.
+    - Same bytes: the SHA-256 of agents, trail, scent, counts, the view's trail and scent and of 12 captured frames
+      are those of the build before, for 8 scenes (Three strains, Transport network, Maze, Foraging maze, Light,
+      Steiner tree, Wound, Dot grid) on both backends after 300 steps with a cut and an inoculation, with the sort in
+      a turn of its own as the engine runs it, and for 2 scenes with covered food.
+    - Memory: 22 B more per agent on WebGL2, the two orders of 8 B and the pyramid of about 5.33 B per slot
+      (`BYTES_PER_AGENT_GL` = 54, `Backend.bytesPerAgent`). The start scene needs 371 MB on WebGL2 (279 MB before) of
+      a budget of 512 MiB. A grid of 2048 × 1280 with its 4,194,304 agents needs 483 MB, and still fits. Jones'
+      lattice of 300 × 300 fits a budget of 32 MiB (0.25 GB of device memory) on WebGL2 up to a Capacity of 5.09
+      agents per cell with float blending and 4.70 without it with covered food; before, up to 8.59 and 7.93.
+
+### Consequences
+
+- A step of the start scene on WebGL2 takes 12.0 ms instead of 18.5 ms, and WebGPU is unchanged. No byte of the
+  simulation and of a frame changes at a given step.
+- New tests (ADR 0010), on WebGL2: the order holds each slot once, sorted by tile and inside a tile by index, with the
+  keys of the agents at the sort; three scenes, with and without collisions, sorted every 1, 8 and 32 steps, give the
+  agents, trail, scent and counts of a run in the agents' own order (a periodic grid, a box with a wall, shrinkage and
+  both agent tools, covered food); the sort ahead of its step gives the state of the sort inside its step; on both
+  counting paths the counts of a grid of several tiles, in the order of the sort, match a CPU count at steps 1, 33
+  and 64. In Node: the fit counts the backend's bytes per agent. Mutations that the tests caught, on the final shader:
+  a gather that stops one child early (`below + m < r` in `DESCEND`), caught by all 11 tests of the order; the axes of
+  the tile key swapped, caught only by the test of the order itself, because no order changes a result. ADR 0010 has
+  the longer limits on GitHub for these tests and for the WebGL2 test of the paused frames, which timed out there with
+  this change at 120 s (101.4 s before).
+- Still open:
+  - The rest of the gap: WebGL2 12.0 ms against WebGPU 3.6 ms. The deposit with the order still takes 5.9 to 8.5 ms:
+    the floor for 4.2 million points in an order of neighbours without shared pixels was 3.1 to 4.2 ms, and the dense
+    cells add to it. The agent pass reads the trail in the agents' own order; option 2 would order it too.
+  - The sort turn of about 23 ms every 32 steps is a long frame. Spread over several steps it would need a third order
+    texture, 4 B or 8 B more per agent.
+  - A GPU that renders without tiles was not measured: there the scattered order may cost less, and the sort costs its
+    0.6 ms per step all the same.
