@@ -22,7 +22,7 @@ layout(std140) uniform Params {
   vec4 tool2;          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   uvec4 strainEnd;
   uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
-  vec4 model;          // trail saturation K (0 off), covered food factor (1 off) (ADR 0022)
+  vec4 model;          // trail saturation K (0 off), covered food factor (1 off), 1 if walls diffuse (Jones), 1 if a step senses first (ADR 0022, 0027)
   uvec4 growth;        // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   uvec4 shrinkage;     // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   uvec4 startEnd;      // exclusive end index of each strain's agents alive at the start (ADR 0025)
@@ -78,7 +78,9 @@ vec2 wrapPos(vec2 p) {
   return min(p - vec2(c - lo), uintBitsToFloat(floatBitsToUint(vec2(lo) + 1.0) - 1u));
 }
 
-float dishRadius() { return 0.5 * float(min(W(), H())) - 1.0; }
+// The dish of Jones' closed arenas, 0.945 of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
+const float DISH_FILL = 0.945;
+float dishRadius() { return DISH_FILL * 0.5 * float(min(W(), H())); }
 
 // The distance from p to the centre q of an agent tool: to the nearest copy of q on the periodic grid (toolDistance in
 // common.wgsl, ADR 0026).

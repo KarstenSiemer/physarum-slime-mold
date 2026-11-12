@@ -59,6 +59,12 @@ export class CpuSim implements Sim {
   readTrail() {
     return Promise.resolve(new Float32Array(0));
   }
+  readView() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  readViewScent() {
+    return Promise.resolve(new Float32Array(0));
+  }
   readScent() {
     return Promise.resolve(new Float32Array(0));
   }
@@ -89,6 +95,9 @@ export class CpuSim implements Sim {
   }
   writeTrail() {
     // trails are not simulated here
+  }
+  writeScent() {
+    // scents are not simulated here
   }
   writeEnv(data: Uint8Array) {
     this.env.set(data);

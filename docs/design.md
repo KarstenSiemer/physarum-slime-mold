@@ -53,9 +53,10 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
 - The page address is a link to the settings, the scene and the engine's edit list:
   `#s=<settings>&e=<drawing>` (`model/url.ts`, `model/link.ts`, ADR 0021). The engine paints and
   records every stroke on whole steps of 1/16 cell, so the link holds the list exactly and paints
-  the sender's bytes on the sender's grid. It names the scene's shapes by the scene and one bit
-  each. A drawing too large for a link stays out of it: the link then holds the settings and the
-  scene as it loads, and the app says so.
+  the sender's grid as the sender's list. It names the scene's shapes by the scene, the revision
+  of its shapes and one bit each, so an old link paints the shapes it was made with after a scene's
+  shapes change (ADR 0027). A drawing too large for a link stays out of it: the link then holds the
+  settings and the scene as it loads, and the app says so.
 - One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
@@ -104,6 +105,7 @@ strains (one `vec4` lane each).
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
+| view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -130,12 +132,26 @@ that measure it, and the agent passes that check for walls, are built at the fir
 
 ### One step
 
+Each scene runs the order of a step of its paper (`stepOrder`, ADR 0027), in both models. The
+textures always hold the map as the agents sense it.
+
+- **Move first** (the eight scenes of Jones 2010, p. 133): every agent moves and deposits, then
+  every agent senses and turns, then the trail map diffuses. The textures hold the last diffusion
+  plus the deposits, food and light of the last moves. So a step senses and turns for the moves of
+  the step before, moves, diffuses, and then adds the deposits and sources of its own moves. The
+  first step after a reset moves with the start heading, as Jones' first step does.
+- **Sense first** (Jones 2011, p. 1350, and his later papers, Fogleman, every other scene and the
+  default settings): every agent senses and turns, moves and deposits, then the map diffuses with
+  the step's deposits and sources. The textures hold the map after the diffusion, and every step
+  senses, the first too.
+
 1. `clearBuffer(counts)` (and `claims` in collision mode).
 2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups):
    - skip dead agents; apply shrinkage (`p_remove`), then the agent tools (ADR 0023): inoculation
      takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
      agent spends its step there: no move, no deposit;
-   - **sense** at F, FL, FR: `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
+   - **sense** at F, FL, FR (moving first, not in the first step after a reset):
+     `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
      walls and the outside read as −∞; in the extended model also a wall on the way to the
      sensor (ADR 0020). With trail saturation K ≥ 1 (extended model only) each lane of `trail`
      reads as `t / (1 + t / K)`. The Jones model packs Jones' one trail map: its one strain weighs
@@ -152,12 +168,17 @@ that measure it, and the agent passes that check for walls, are built at the fir
 4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
    tile saves about 25 % of this pass, see
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
-   repeated `passes` times (Jones 1, Fogleman 2): `v = trail + counts · deposit` (first pass only),
-   3 × 3 mean over non-wall cells, `× (1 − decay)` on the last pass. The same for
-   `scent` with `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones
-   model g = 1, the scent decays with the strain's decay and light has no source, so trail +
-   scent is Jones' one trail map (ADR 0022). In the extended model `g = (d / (1 − d)) / (0.1 / 0.9)`
-   with the scent decay d, so a large food reaches the same scent at every decay. The cut tool
+   repeated `passes` times (Jones 1, Fogleman 2): the 3 × 3 mean of 9 cells at every site of the
+   arena (Jones' mean filter), then on the last pass `× (1 − decay)`. Moving first, the last pass
+   then adds `counts · deposit`; sensing first, the first pass adds it before the mean.
+   Outside a closed arena the cells hold 0, so trail and scent that leave it are lost (absorbing
+   edges, Jones 2011). Walls diffuse as part of the lattice in the Jones model and are sinks that
+   hold 0 in the extended model; they take no deposit or source (ADR 0027). The same for `scent` with
+   `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones model g = 1,
+   the scent decays with the strain's decay and light has no source, so trail + scent is Jones'
+   one trail map (ADR 0022). In the extended model `g = d / 0.1` moving first and
+   `g = (d / (1 − d)) / (0.1 / 0.9)` sensing first, with the scent decay d, so a large food reaches
+   the same scent at every decay in either order (ADR 0027). The cut tool
    clears trail and scent in the wound only in the extended model. With covered food on, a food
    cell releases the covered-food factor (0.001 by default, Adamatzky and Jones 2010) while the
    3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
@@ -231,6 +252,12 @@ the arrows.
   dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
   on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
   copies as they are when zoomed out.
+- The view draws the map after the step's diffusion in either order (ADR 0027). Sensing first
+  the trail and scent are that map. Moving first they hold the map as the agents sense it; once
+  per frame after a change, the step's diffusion passes without sources (`VIEW`) write the map
+  after the diffusion, trail and scent, into the free pair and, from a second pass on, a third
+  one. The render pass, height field, glow, auto levels, the scent view (its glow, line, coarse
+  map and strand) and PNG read it; the simulation never does.
 - Linear-light compositing: radiance `L = Σ trail_s · gain · color_s`, then tone mapping,
   then sRGB encoding. Overlaps turn white-hot instead of clipping.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed
@@ -271,8 +298,9 @@ the arrows.
 
 GPU tests compare against a small CPU reference model and check invariants:
 
-- mass balance: `Σ trail' = (1 − decay) · (Σ trail + deposit · Σ counts)` with periodic
-  boundary;
+- mass balance: `Σ trail' = (1 − decay) · Σ trail + deposit · Σ counts` with periodic
+  boundary, moving first, and `Σ trail' = (1 − decay) · (Σ trail + deposit · Σ counts)` sensing
+  first (ADR 0027);
 - agent conservation; at most one agent per cell in collision mode;
 - determinism: two runs with the same seed give identical buffers;
 - behaviour: networks form (coefficient of variation rises), pattern wavelength grows with

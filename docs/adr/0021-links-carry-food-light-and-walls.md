@@ -205,3 +205,14 @@ of the grid, the density or the dish (ADR 0019). A new grid also maps the list a
   keeps this, and keeps the caps (4,096 strokes, 64 passes), also for weaker GPUs and phone CPUs
   (2026-11-10, TODO.md).
 - Links of this form do not open in an app from before this ADR, which reads only `#s=`.
+
+## Amendment 2026-11-11: revisions of a scene's shapes, link version 2 (ADR 0027)
+
+The foods of Shortest path, Steiner tree and Shrinking plasmodium moved to the positions of Jones' figures. A link
+names a scene's shapes by the scene's id, so an old link would have painted the new foods. Each preset now keeps its
+earlier shape lists (`envHistory`, revision 0 the lists of 2026-11-10), and the drawing's bytes have version 2: after
+the scene's id, a varint with the revision of the shapes that the list holds. A link of version 1 means revision 0. The
+decoder refuses a revision that the scene does not have and a count of shapes other than that revision's, and accepts
+versions 1 and 2 only. An old revision counts as a change of the scene, and Reload scene loads the newest shapes. The
+consequence above ("a link made before paints the new shapes") no longer holds. A link still does not give its sender's
+bytes after the model changes: Jones' step order, dish and boundaries of ADR 0027 run every link, old ones too.

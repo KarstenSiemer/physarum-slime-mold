@@ -2,7 +2,7 @@ import { capacityOf, RESOLUTIONS, type Lattice, type Settings } from '../model/p
 
 /**
  * Agents for a `width` × `height` grid: the density times the cells of the arena's square. A dish counts the square
- * of the grid's short side, as Jones counts his population over a square lattice that the dish fills (%p, a share
+ * of the grid's short side, as Jones counts his population over the square lattice around his dish (%p, a share
  * of the image area: Jones 2010, p. 134; 45,000 agents for %p 50 on 300 × 300, p. 147). A box or a periodic grid
  * counts all its cells.
  */
@@ -77,6 +77,17 @@ export const COVERED_BYTES_PER_CELL_HALF_FLOAT = 1;
  */
 export const GROWTH_BYTES_PER_CELL = 34;
 export const GROWTH_BYTES_PER_AGENT = 6;
+/**
+ * More bytes per cell for the view of a step that moves first with two diffusion passes or more (ADR 0027): a third
+ * trail of 16 B and scent of 8 B (sim.ts viewTextures, gl/sim.ts viewTargets()). With one pass the view uses the free
+ * pair, and sensing first it uses none.
+ */
+export const VIEW_BYTES_PER_CELL = 24;
+
+/** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
+export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
+  s.stepOrder === 'move-first' && s.diffusion >= 2;
+
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 export const BYTES_PER_AGENT = 32;
 

@@ -249,3 +249,10 @@ and the lattice gives 6.4 ± 0.9.
   backends about 24 s of 360 s, and each new e2e test at most 39.8 s of its 240 s on CI: every limit lies at least 4
   times above the time (ADR 0010).
 - The view's uniform holds the brightness of the copies in its third `fx` value, which was unused.
+
+## Amendment 2026-11-11: the corrections of the fidelity check (ADR 0027)
+
+The later change that this ADR names came with ADR 0027: Jones' order of a step, Jones' dish of 0.945 of the short
+side, absorbing closed edges, and the foods of Fig. 18, 19 and 21 with a revision of a scene's shapes that links hold
+(decision 2: an old link opens with the shapes it was made with). The dish of this ADR (the side less 2 cells) and the
+Steiner tree of decision 10 are replaced there; the measurements above stay the record of the code before.

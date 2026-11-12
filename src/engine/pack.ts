@@ -34,10 +34,13 @@ const slot = (name: (typeof PARAM_SLOTS)[number]) => {
 /**
  * Claim rounds that place the agents on cells of their own with one agent per cell (init.wgsl claimStart and
  * settleStart, gl/glsl/init.frag modes 1 and 2). ROUNDS in those shaders is another count: the draws of an agent
- * without the rule. A CPU model of Shrinking plasmodium (0.64 agents per dish cell) placed every agent within 24
- * rounds. On the GPU, 1 to 4 of 61 seeds left one of its agents without a free cell, to start dead (ADR 0019).
+ * without the rule. In each round a waiting agent finds a free cell with about the share of the free cells, so after
+ * n rounds about N · f^n agents of N wait, at the filled share f. Shrinking plasmodium fills 0.71 of Jones' dish
+ * (ADR 0027): after 32 rounds 0 to 2 of its 45,000 agents started dead in 15 of 61 seeds on WebGPU (13 on WebGL2),
+ * and after 64 rounds none in 61 seeds on either backend. Before Jones' dish (0.64 of the app's dish), 32 rounds left
+ * one agent dead in 1 to 4 of 61 seeds (ADR 0019).
  */
-export const START_ROUNDS = 32;
+export const START_ROUNDS = 64;
 
 /**
  * Claim rounds for a start: the mixed layout on a grid without walls and dish gives every agent a free cell of its
@@ -181,9 +184,12 @@ const DEG = Math.PI / 180;
 export const trailSaturation = (s: Pick<Settings, 'model' | 'trailSaturation'>) =>
   s.model === 'extended' && s.trailSaturation >= 1 ? s.trailSaturation : 0;
 
-/** Factor on the food and light sources: 1 in the Jones model, emissionScale() in the extended model (ADR 0022). */
-export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay'>) =>
-  s.model === 'extended' ? emissionScale(s.scentDecay) : 1;
+/**
+ * Factor on the food and light sources: 1 in the Jones model, emissionScale() of the step order in the extended model
+ * (ADR 0022, ADR 0027).
+ */
+export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay' | 'stepOrder'>) =>
+  s.model === 'extended' ? emissionScale(s.scentDecay, s.stepOrder) : 1;
 
 /**
  * Packs the settings for the GPU. In the Jones model the GPU runs Jones' one trail map whatever the settings hold
@@ -227,7 +233,10 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   // The start layout 'food' starts every agent dead, as 'empty' does; the engine then places the colony (ADR 0025).
   const layout = LAYOUTS.indexOf(s.layout === 'food' ? 'empty' : s.layout);
   u.set([layout, rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
-  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1], slot('model'));
+  // model.z: walls diffuse as part of Jones' lattice in the Jones model, and are sinks in the extended model; model.w:
+  // 1 if a step senses first, in either model (ADR 0027).
+  const senseFirst = s.stepOrder === 'sense-first' ? 1 : 0;
+  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1, jones ? 1 : 0, senseFirst], slot('model'));
   // Growth and shrinkage (ADR 0025): an interval of 0 turns a test off, and both are off without the rule.
   const on = growthOn(s);
   u.set([on ? s.growthEvery : 0, s.growthWindow, s.growthMin, s.growthMax], slot('growth'));

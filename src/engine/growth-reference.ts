@@ -1,6 +1,7 @@
 // The CPU copy of growth and shrinkage (shaders/growth.wgsl, gl/glsl/growth.frag and growth.vert; ADR 0025), for
 // tests only: sim.gpu.test.ts steps it from the state after the moves of a step and compares both GPU backends with it.
 import type { Boundary, Settings } from '../model/params';
+import { DISH_FILL } from './brush';
 import { pyramidLevels, strainEnds } from './pack';
 import type { AgentState } from './types';
 
@@ -51,7 +52,8 @@ function below(x: number) {
 /** The grid with cellAt() of common.wgsl: wrapped on the periodic grid, −1 outside a box or the dish. */
 export function grid(w: number, h: number, boundary: Boundary) {
   const f = Math.fround;
-  const radius = f(0.5 * Math.min(w, h) - 1);
+  // dishRadius() of common.wgsl: DISH_FILL × 0.5 is a constant there, rounded once to f32 (ADR 0027).
+  const radius = f(f(DISH_FILL * 0.5) * Math.min(w, h));
   const [cx, cy] = [f(0.5 * w), f(0.5 * h)];
   const inDish = (x: number, y: number) => {
     const [dx, dy] = [f(f(x + 0.5) - cx), f(f(y + 0.5) - cy)];

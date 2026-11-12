@@ -12,6 +12,7 @@ import {
   sourceKind,
   sourceText,
   START,
+  stepOrderOf,
   usesRule,
   type Preset,
 } from './presets';
@@ -181,6 +182,20 @@ describe('presets', () => {
     expect(text).not.toMatch(/—/);
   });
 
+  // ADR 0027 (owner, 2026-11-12, "Ja, je Paper"): each scene runs the order of a step of its paper.
+  it('run the scenes of Jones 2010 moving first, and every other scene sensing first', () => {
+    const jones2010 = ['network', 'hexagons', 'spots', 'stripes', 'shortest-path', 'steiner', 'shrinking', 'wound'];
+    expect(PRESETS.filter((p) => p.source.startsWith('Jones 2010')).map((p) => p.id)).toEqual(jones2010);
+    for (const p of PRESETS) {
+      const order = jones2010.includes(p.id) ? 'move-first' : 'sense-first';
+      expect(p.settings().stepOrder, p.id).toBe(order);
+      expect(stepOrderOf(p.id), p.id).toBe(order);
+    }
+    expect(stepOrderOf('')).toBe('sense-first');
+    expect(stepOrderOf('no-such-scene')).toBe('sense-first');
+    expect(stepOrderOf(undefined)).toBe('sense-first');
+  });
+
   it('copy the Fogleman presets exactly (cmd/viewer/main.go:31–42, commit 62342a2)', () => {
     // Rows as printed by his PrintConfigs: agents per cell per species, SA (rad), SD, RA (rad), step,
     // deposit, kept fraction, repulsion factor. Written out here because his repository is not in CI.
@@ -233,9 +248,13 @@ describe('presets', () => {
     const side = Math.abs(foods[0]?.at[0] ?? 0);
     for (const f of foods) expect(f.at.map(Math.abs)).toEqual([side, side]);
     expect(p.about).toMatch(/corners of a square/);
-    // With this app's foods on Jones' lattice: an X in about half of the runs, a ring in the others (ADR 0026).
-    expect(p.watch).toMatch(/about half of the runs it ends as an X/);
-    expect(p.watch).toMatch(/a ring through the four foods stays/);
+    // The foods of Fig. 19 (ADR 0027): a square of 60 cells on 200 × 200, foods of 2.7 cells. On Jones' lattice the
+    // network ends as a tree in 20 of 20 runs from step 6,000, as in the figure.
+    for (const f of foods) expect([...f.at.map(Math.abs), f.r * 200]).toEqual([0.15, 0.15, 2.7]);
+    expect(p.watch).toMatch(
+      /a tree through the middle of the square: two three-way junctions joined by a short bridge/,
+    );
+    expect(p.watch).not.toMatch(/ring/);
   });
 
   it('have one strain role per strain', () => {

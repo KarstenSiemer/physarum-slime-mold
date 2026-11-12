@@ -2,12 +2,17 @@
 import { fromShape, MIN_RADIUS, sameEdit, STEP, type EnvEdit } from '../engine/environment';
 import { EnvKind, type EnvTool } from '../engine/types';
 import { BOUNDARIES, MAX_STRAINS, type Boundary } from './params';
-import { presetById, type EnvShape } from './presets';
+import { presetById, shapesAt, type EnvShape } from './presets';
 
 /** What a link holds besides the settings: the scene, and the engine's edit list as the sweep left it. */
 export interface Drawing {
   /** The id of the loaded scene; '' when the settings came from a link that names no scene. */
   scene: string;
+  /**
+   * The revision of the scene's shapes that the list holds (presets.ts `envHistory`, ADR 0027): the scene's newest
+   * after a preset load, a link's own after a link. A link of version 1 holds revision 0. 0 without a scene.
+   */
+  revision: number;
   /** For each strain, its index in the scene, or −1 for a strain added since (app.strainOrigin). */
   origins: number[];
   /** For each of the scene's shapes, whether the list holds it: a Clear and the sweep delete shapes. */
@@ -25,7 +30,11 @@ export const MAX_STROKES = 4096;
  */
 export const MAX_WORK = 64;
 
-const VERSION = 1;
+/**
+ * Version 2 writes the revision of the scene's shapes after the scene's id (ADR 0027). A link of version 1 names
+ * revision 0, the shapes of 2026-11-10.
+ */
+const VERSION = 2;
 /** Grid sides that gridSize() (engine/sizing.ts) gives. */
 const [SIDE_MIN, SIDE_MAX] = [16, 4096];
 /** Largest distance of a position from the grid's origin, in cells. A drag on screen stays below 2^17. */
@@ -76,7 +85,8 @@ class Budget {
 /**
  * The drawing of an edit list: the scene's shapes it holds, in the scene's order, and the strokes after them. A
  * preset load puts the shapes first, and later edits are strokes (Engine.load(), Engine.paint()). An edit without a
- * grid that is not the next shape of the scene stays among the strokes, and packDrawing() then gives up on it.
+ * grid that is not the next shape of the scene stays among the strokes, and packDrawing() then gives up on it. `env`
+ * is the scene's shapes of `revision`, the revision that the list was loaded with.
  */
 export function drawingOf(
   edits: readonly EnvEdit[],
@@ -84,6 +94,7 @@ export function drawingOf(
   env: readonly EnvShape[],
   arena: Boundary,
   origins: readonly number[],
+  revision = 0,
 ): Drawing {
   const shapes = env.map(() => false);
   let i = 0;
@@ -91,7 +102,7 @@ export function drawingOf(
     const e = edits[i];
     if (e && sameEdit(e, fromShape(shape, arena))) [shapes[j], i] = [true, i + 1];
   });
-  return { scene, origins: [...origins], shapes, strokes: edits.slice(i) };
+  return { scene, revision, origins: [...origins], shapes, strokes: edits.slice(i) };
 }
 
 /**
@@ -99,14 +110,15 @@ export function drawingOf(
  * engine's sweep deletes it from the list, also when an eraser covers a part of it.
  */
 export function kindsOf(d: Drawing): Set<EnvTool> {
-  const env = presetById(d.scene)?.env ?? [];
+  const preset = presetById(d.scene);
+  const env = (preset && shapesAt(preset, d.revision)) ?? [];
   return new Set([...env.filter((_, i) => d.shapes[i]).map((e) => e.kind), ...d.strokes.map((e) => e.kind)]);
 }
 
 /** The drawing of the scene as it loads: every shape, no stroke. Undefined without a scene. */
 export function sceneOnly(d: Drawing): Drawing | undefined {
   return d.scene
-    ? { scene: d.scene, origins: [...d.origins], shapes: d.shapes.map(() => true), strokes: [] }
+    ? { scene: d.scene, revision: d.revision, origins: [...d.origins], shapes: d.shapes.map(() => true), strokes: [] }
     : undefined;
 }
 
@@ -169,8 +181,8 @@ class Reader {
 }
 
 /**
- * The drawing as bytes (docs/adr/0021): a version, the scene's id, its strains' origins, which of its shapes the list
- * holds, then the strokes. Each stroke has a head byte (kind, arena, and which of grid, start, end and radius
+ * The drawing as bytes (docs/adr/0021): a version, the scene's id, for a scene the revision of its shapes (ADR 0027),
+ * its strains' origins and which of those shapes the list holds, then the strokes. Each stroke has a head byte (kind, arena, and which of grid, start, end and radius
  * follow), then those that follow: its grid when it differs from the stroke before, its start from the end of the
  * stroke before unless it starts there (a drag), its end from its start unless it is a dab, and its radius unless it
  * is the one before. Positions and radii count whole steps of 1/16 cell (STEP), exactly as the engine records them.
@@ -184,10 +196,13 @@ export function packDrawing(d: Drawing): Uint8Array<ArrayBuffer> | undefined {
   out.byte(d.scene.length);
   for (const c of d.scene) out.byte(c.charCodeAt(0));
   if (preset) {
+    const shapes = shapesAt(preset, d.revision);
+    if (!shapes) return undefined;
+    out.varint(d.revision);
     const strains = preset.settings().strains.length;
     const fine = d.origins.every((o) => Number.isInteger(o) && o >= -1 && o < strains);
     if (!fine || d.origins.length < 1 || d.origins.length > MAX_STRAINS) return undefined;
-    if (d.shapes.length !== (preset.env?.length ?? 0)) return undefined;
+    if (d.shapes.length !== shapes.length) return undefined;
     out.byte(d.origins.length);
     for (const o of d.origins) out.byte(o + 1);
     out.byte(d.shapes.length);
@@ -236,8 +251,9 @@ export function packDrawing(d: Drawing): Uint8Array<ArrayBuffer> | undefined {
 
 /**
  * The drawing from bytes of packDrawing(). Untrusted input (a shared link): never throws, and gives undefined unless
- * every value is in range and the strokes stay within the caps. The scene must be a preset with as many shapes as the
- * link says, and its strains' origins must lie between −1 and the preset's strains.
+ * every value is in range and the strokes stay within the caps. The scene must be a preset with the revision that the
+ * link names (0 for version 1) and as many shapes in it as the link says, and its strains' origins must lie between −1
+ * and the preset's strains.
  */
 export function unpackDrawing(data: Uint8Array): Drawing | undefined {
   try {
@@ -248,20 +264,24 @@ export function unpackDrawing(data: Uint8Array): Drawing | undefined {
 }
 
 function unpack(input: Reader): Drawing | undefined {
-  if (input.byte() !== VERSION) return undefined;
+  const version = input.byte();
+  if (version !== 1 && version !== VERSION) return undefined;
   const length = input.byte();
   const scene = String.fromCharCode(...Array.from({ length }, () => input.byte()));
-  const d: Drawing = { scene, origins: [], shapes: [], strokes: [] };
+  const d: Drawing = { scene, revision: 0, origins: [], shapes: [], strokes: [] };
   if (scene) {
     const preset = SCENE_ID.test(scene) ? presetById(scene) : undefined;
     if (!preset) return undefined;
+    d.revision = version === 1 ? 0 : input.varint();
+    const env = shapesAt(preset, d.revision);
+    if (!env) return undefined;
     const strains = preset.settings().strains.length;
     const n = input.byte();
     if (n < 1 || n > MAX_STRAINS) return undefined;
     d.origins = Array.from({ length: n }, () => input.byte() - 1);
     if (d.origins.some((o) => o >= strains)) return undefined;
     const shapes = input.byte();
-    if (shapes !== (preset.env?.length ?? 0)) return undefined;
+    if (shapes !== env.length) return undefined;
     for (let j = 0; j < shapes; j += 8) {
       const bits = input.byte();
       for (let k = 0; k < 8; k++) {

@@ -2,7 +2,7 @@
 // completely on the grid on screen leave the list, so an erased food stays gone on every screen shape. Deleting them
 // changes no byte on that grid: an erase writes all four bytes of a cell and a wall writes [255, 0, 0, 0], so after
 // the stroke that cleared a cell, it holds what that stroke and later ones wrote, and none of them reads the edit.
-import { joinRuns, paintedAsIs, reachOf, Rows, segmentDistance, SLACK, someCell } from './brush';
+import { dishRadius, joinRuns, paintedAsIs, reachOf, Rows, segmentDistance, SLACK, someCell } from './brush';
 import { strokeOn, type EnvEdit, type Painted } from './environment';
 import type { EnvTool } from './types';
 
@@ -392,7 +392,7 @@ function inside(S: Painted, C: Painted, w: number, h: number): boolean {
   if (S.boundary === 'wrap' && C.boundary !== 'wrap')
     if (ends.some((p) => p[0] - rs < 0 || p[0] + rs > w || p[1] - rs < 0 || p[1] + rs > h)) return false;
   if (C.boundary === 'dish') {
-    const d0 = Math.min(w, h) / 2 - 1 - SLACK;
+    const d0 = dishRadius(w, h) - SLACK;
     const rim = d0 - hair(d0) - rs;
     if (ends.some((p) => Math.hypot(p[0] - w / 2, p[1] - h / 2) > rim)) return false;
   }

@@ -98,7 +98,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async settle(sim: Simulation): Promise<Levels> {
-    await this.auto.measure(sim.current.trail);
+    await this.auto.measure(sim.viewTexture);
     return this.levels();
   }
 
@@ -107,7 +107,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async measured(sim: Simulation): Promise<Levels> {
-    return (await this.auto.read(sim.current.trail)) ?? this.levels();
+    return (await this.auto.read(sim.viewTexture)) ?? this.levels();
   }
 
   /**
@@ -138,7 +138,8 @@ export class WebGpuBackend implements Backend<Simulation> {
    * this frame alone (an export), in place of those of the frames.
    */
   private frame(sim: Simulation, s: Settings, view: View, measure: boolean, given?: Levels): Frame {
-    const trail = sim.current.trail;
+    // The map after the step's diffusion in either order of a step (ADR 0027).
+    const trail = sim.viewTexture;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
     // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009).

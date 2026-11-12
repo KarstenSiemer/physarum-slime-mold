@@ -97,6 +97,8 @@ export interface Programs {
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
   covered: () => Program;
+  /** The view's diffusion of a step that moves first (VIEW in diffuse.frag, ADR 0027), compiled at its first use. */
+  view: () => Program;
   paint: Program;
   shape: Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
@@ -144,9 +146,12 @@ export function initProgram(gl: GL, frag: string, capacity: boolean): Program {
   return simProgram(gl, (capacity ? '#define CAPACITY 1\n' : '') + frag);
 }
 
-/** The diffusion pass from `frag` (diffuse.frag or a version of it); `covered`: with covered food (COVERED, ADR 0022). */
-export function diffuseProgram(gl: GL, frag: string, covered: boolean): Program {
-  return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + frag);
+/**
+ * The diffusion pass from `frag` (diffuse.frag or a version of it); `covered`: with covered food (COVERED, ADR 0022);
+ * `view`: the view's diffusion of a step that moves first (VIEW, ADR 0027).
+ */
+export function diffuseProgram(gl: GL, frag: string, covered: boolean, view = false): Program {
+  return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + (view ? '#define VIEW 1\n' : '') + frag);
 }
 
 const plainProgram = (gl: GL, frag: string) =>
@@ -171,6 +176,7 @@ export function compile(gl: GL): Programs {
   let walled: Walled | undefined;
   let saturated: Saturated | undefined;
   let covered: Program | undefined;
+  let viewDiffuse: Program | undefined;
   let scentStarted: ReturnType<typeof startProgram>[] | undefined;
   let scent: ScentPrograms | undefined;
   let capacity: Program | undefined;
@@ -197,6 +203,7 @@ export function compile(gl: GL): Programs {
       }),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
+    view: () => (viewDiffuse ??= diffuseProgram(gl, diffuseFrag, false, true)),
     paint: sim(brushGlsl + paintFrag),
     shape: sim(brushGlsl + shapeFrag),
     counts: sim(countsFrag),

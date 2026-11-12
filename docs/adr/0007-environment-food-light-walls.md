@@ -92,3 +92,16 @@ choice made with it.
 - Sensors that a wall on their way blocks (ADR 0020) and a cut that clears the chemicals are the
   extended model's only. In the Jones model a sensor reads its own cell, and the wound keeps its
   trail and scent (Jones 2010, p. 148).
+
+## Amendment 2026-11-11: absorbing edges and the walls of each model (ADR 0027)
+
+Decided on 2026-11-11 by the owner, for both models. The diffusion no longer averages over the habitable cells only
+(the "no flux into walls" of the decision above): the mean is the sum of the 9 cells divided by 9 at every site of the
+arena. A cell outside a closed arena counts 0 and holds 0, so trail and scent that leave the box or the dish are lost,
+as in Jones 2011 (p. 1353). In the Jones model a wall cell is a site like any other: the trail and the food scent
+diffuse into it and decay there, and it takes no deposit or source (Jones and Adamatzky 2014, p. 23; Jones 2015,
+p. 14). In the extended model a wall cell is a sink that holds 0, so nothing passes a wall, as its sensors cannot see
+past one (ADR 0020). Food and light follow the trail's rule in each model. A sensor in a wall cell reads the large
+negative value in both models, as before. The reflective rule made a growing colony coat the walls and kept a branch
+to the rim of Shortest path in 2 of 20 runs. ADR 0027 records the measurements, and the agents' step order of Jones,
+which changed on the same day: the scent sources now enter after the step's diffusion.
