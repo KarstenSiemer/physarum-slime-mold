@@ -28,16 +28,7 @@ import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } fr
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND, LATTICE_COPIES } from './render';
-import {
-  SCENT_LOW,
-  scentGlow,
-  scentLevel,
-  scentLevelSize,
-  scentLine,
-  scentMark,
-  scentOver,
-  scentSensors,
-} from './scent';
+import { SCENT_LOW, scentGlow, scentLevel, scentLevelSize, scentLine, scentOver, scentSensors } from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -334,14 +325,13 @@ const toByte = (c: number) => {
 };
 
 /**
- * The scent view's opacities at grid position p on the CPU, as render.wgsl `scentView` draws them, from `scent` (2
- * values per cell). Up to 2 cells per pixel: bilinear at p with its gradient, wrapped on the periodic grid, clamped to
- * the box, and outside the dish from the cell inside the rim on the way to the centre; without the cells that `wall`
- * marks, which hold no scent; in a box within half a cell of the edge, the scent of the outer cells' centres going on with its
- * log slope. Zoomed out further, bilinear on the coarse map of scentLevel(), each texel the mean of the cells it
- * covers that hold scent. Then scentGlow() for the food scent and its scentLine() at `mark`, and scentGlow() for the
- * repellent if `repellent`. `kink`: p lies within 0.001 of a sample point, where the bilinear gradient jumps, so
- * float32 on the GPU may take the other side.
+ * The scent at grid position p on the CPU, as render.wgsl `scentView` reads it, from `scent` (2 values per cell), with
+ * its gradient and the weight of the cells that hold scent among those read. Up to 2 cells per pixel: bilinear at p,
+ * wrapped on the periodic grid, clamped to the box, and outside the dish from the cell inside the rim on the way to the
+ * centre; without the cells that `wall` marks, which hold no scent; in a box within half a cell of the edge, the scent
+ * of the outer cells' centres going on with its log slope. Zoomed out further, bilinear on the coarse map of
+ * scentLevel(), each texel the mean of the cells it covers that hold scent. `kink`: p lies within 0.001 of a sample
+ * point, where the bilinear gradient jumps, so float32 on the GPU may take the other side.
  */
 function scentLookup(
   scent: Float32Array,
@@ -530,7 +520,7 @@ function scentAt(
     kink ||= d.kink;
     if (d.difference / hold > best) [best, change] = [d.difference / hold, d.change / hold];
   });
-  const line = scentLine(best, Math.abs(change), scale, 1);
+  const line = scentLine(best, Math.abs(change), scale);
   return {
     food: scentGlow(food[0]),
     line,
@@ -542,8 +532,8 @@ function scentAt(
 }
 
 /**
- * `s` with the food weight of its one strain that puts the view's line at p: the hold of a strand (scentMark()) equals
- * the food's difference across the strain's sensors there (sensorDifference(), the grid's cells).
+ * `s` with the food weight of its one strain that puts the view's line at p: the hold of a strand (scentSensors())
+ * equals the food's difference across the strain's sensors there (sensorDifference(), the grid's cells).
  */
 function aimLine(
   s: Settings,
@@ -558,7 +548,8 @@ function aimLine(
   const half = st.sensorOffset * Math.sin((st.sensorAngle * Math.PI) / 180);
   const d = sensorDifference(scent, size, boundary, wall, p, 1, half);
   if (!d || !(d.difference > 0)) throw new Error(`no difference across the sensors at ${p.join(', ')}`);
-  return { ...s, strains: [{ ...st, food: (st.food * scentMark(s, strand)) / d.difference }] };
+  const hold = scentSensors(s, strand).holds[0] ?? 0;
+  return { ...s, strains: [{ ...st, food: (st.food * hold) / d.difference }] };
 }
 
 /** The share of the pixel at grid position p inside the arena, as render.wgsl `fs` draws the box edge and the rim. */
@@ -4519,7 +4510,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
     const [W, H] = [64, 48];
     const [CW, CH] = [96, 72];
-    // Food strong enough that its scent passes the mark of a strand, so the line at the mark shows.
+    // Food strong enough that its pull across the sensors passes the hold of a strand, so the line shows.
     const extended = (patch: Partial<Settings>): Settings => ({
       ...defaultSettings(),
       model: 'extended',
@@ -4556,11 +4547,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
      * without it (scentAt(), scentOver()). Outside the arena and on the flakes of `foods` (circles in cells), which lie
      * over the view, no pixel may change by more than the dither. The reference leaves out pixels at a kink and pixels
      * that the pass clamped: the pass clamps to [0, 1] after the view, so there the bytes do not tell the colour below
-     * it (highlights of the gel, light over 1, light on paper takes blue below 0). The mark comes from the levels the
-     * captures use. Around a periodic lattice the pass dims the copies of the grid after the view (ADR 0026): there
+     * it (highlights of the gel, light over 1, light on paper takes blue below 0). The hold of a strand comes from the
+     * levels the captures use. Around a periodic lattice the pass dims the copies of the grid after the view (ADR 0026): there
      * the reference is the view over the copy's picture before the dimming, dimmed as the pass dims it. Returns what
      * failed, how many pixels hold food scent, the powers of ten above 0.01 of the food scent compared (rounded down),
-     * how many pixels the line at the mark covers, and how many pixels of copies were compared and hold food scent.
+     * how many pixels the line covers, and how many pixels of copies were compared and hold food scent.
      */
     async function follows(
       sim: Sim,
@@ -4774,7 +4765,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const sim = await make(settings, W, H, (W * H) / 2);
         sim.paint(strokes(boundary));
         sim.run(150);
-        // The levels of the captures: the mark of a strand comes from them.
+        // The levels of the captures: the hold of a strand comes from them.
         expect((await backend.settle(sim)).strand).toBeGreaterThan(0);
         const foods = [{ at: [...SCENES[boundary].food] as [number, number], r: 3 }];
         const worst: string[] = [];
@@ -4789,7 +4780,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           worst.push(...(await follows(sim, { ...settings, model: 'jones' }, view, foods)).failed);
         expect(worst).toEqual([]);
         expect(drawn).toBeGreaterThan(1000); // the food scent covers much of the views
-        expect(lined).toBeGreaterThan(50); // and the line at the mark shows
+        expect(lined).toBeGreaterThan(50); // and the line shows
       },
     );
 
@@ -4911,12 +4902,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(Math.min(...r.decades)).toBeGreaterThanOrEqual(6);
     });
 
-    // In a box, within half a cell of the edge, the scent goes on with the slope of its logarithm, so the line at the
-    // mark keeps its course up to the edge. Food beside the left edge: along its row the scent falls toward the edge,
-    // and the food weight puts the mark at the scent of the outer cell of that row, so the line runs through that cell's
-    // centre, half a cell from the edge. A lookup that holds the scent flat there drew the line across the whole half
+    // In a box, within half a cell of the edge, the scent goes on with the slope of its logarithm, so the line keeps
+    // its course up to the edge. Food beside the left edge: along its row the scent falls toward the edge, and the food
+    // weight puts the line through the centre of the outer cell of that row (aimLine()), half a cell from the edge,
+    // where one of the sensors lies beyond it. A lookup that holds the scent flat there drew the line across the whole half
     // cell (review of 2026-11-11). A trail of 1 far from the view gives the strand.
-    it('carries the line at the mark up to the box edge', async () => {
+    it('carries the line up to the box edge', async () => {
       const base = extended({ style: 'paper', layout: 'empty', boundary: 'box' });
       const sim = await make(base, W, H, 1);
       const food: [number, number] = [9, 24];
@@ -4959,10 +4950,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(max).toBeLessThanOrEqual(3);
     });
 
-    // Walls hold no scent. Zoomed in, the filter leaves their cells out, so the glow does not fade and the line at the
-    // mark does not bend toward a wall: without that, the value fell to half at the outline. Food up left of a long
-    // wall: along the wall the scent spans several powers of ten, and a trail of 1 beside the views makes the mark 1,
-    // so the line crosses the strip beside the wall. Over the bare paper the picture is the background times the walls'
+    // Walls hold no scent. Zoomed in, the filter leaves their cells out, so the glow does not fade and the line does
+    // not bend toward a wall: without that, the value fell to half at the outline. Food up left of a long wall: along
+    // the wall the scent spans several powers of ten, and the food weight puts the line through the strip beside the
+    // wall (aimLine()). Over the bare paper the picture is the background times the walls'
     // shadow, so the reference is the view over the background times what the picture without the view holds there.
     it('leaves the cells of walls out of the scent, zoomed in', async () => {
       const plain = extended({ style: 'paper', layout: 'empty', boundary: 'wrap', strains: [defaultStrain(0)] });
@@ -5001,7 +4992,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             const wrapped = (d: number, n: number) => d - n * Math.round(d / n);
             if (Math.abs(wrapped(p[0] - 32, W)) < 1 + 0.5 * scale + 0.1) continue;
             if (Math.hypot(wrapped(p[0] - food[0], W), wrapped(p[1] - food[1], H)) < 3 + 2 + scale) continue;
-            // The trail that sets the mark lies on columns 56 to 63, with its filter around it: not the bare paper.
+            // The trail that sets the hold lies on columns 56 to 63, with its filter around it: not the bare paper.
             if (Math.abs(wrapped(p[0] - 60, W)) < 4 + 2 * scale) continue;
             const i = (y * cw + x) * 4;
             const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
@@ -5059,7 +5050,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
               (y + 0.5 - ch / 2) * scale + view.center[1],
             ];
             const wrapped = (d: number) => d - W * Math.round(d / W);
-            // The wall's drawing with its ramp of one pixel, the food's flake and the trail that sets the mark.
+            // The wall's drawing with its ramp of one pixel, the food's flake and the trail that sets the hold.
             if (Math.abs(wrapped(p[0] - 32)) < 1.5 + 0.5 * scale + 0.1) continue;
             if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
             if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
@@ -5150,7 +5141,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
                 (y + 0.5 - ch / 2) * scale + view.center[1],
               ];
               const wrapped = (d: number) => d - W * Math.round(d / W);
-              // The wall with its ramp of one pixel, the food's flake and the trail that sets the mark.
+              // The wall with its ramp of one pixel, the food's flake and the trail that sets the hold.
               const edge = 0.5 * scale + 0.1;
               if (wrapped(p[0] - face) > -edge && wrapped(p[0] - 33) < edge) continue;
               if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
@@ -5220,8 +5211,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       for (const scale of [3, 6]) expect((await follows(sim, settings, { ...view, scale }, foods)).failed).toEqual([]);
     });
 
-    // The scent view's mark needs the strand in every style. WebGPU measured auto levels only in the styles that use
-    // them, so in the agents style the strand stayed 0 after a reset: no line and no mark (review of 2026-11-11). The
+    // The scent view's line needs the strand in every style. WebGPU measured auto levels only in the styles that use
+    // them, so in the agents style the strand stayed 0 after a reset: no line (review of 2026-11-11). The
     // reference is the 99th percentile of the summed trail, read from the trail, not from the backend's levels.
     it.each(STYLES)('measures the strand from frames in the %s style', async (style) => {
       const settings: Settings = {

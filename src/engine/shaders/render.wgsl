@@ -761,11 +761,12 @@ fn scentGlow(v: f32) -> f32 {
   return SCENT_GLOW * clamp((log2(v) / log2(10.0) - SCENT_LOW) / SCENT_TOP, 0.0, 1.0);
 }
 
-// The opacity of the line where v (gradient g per cell) equals the mark: about one pixel wide.
-fn scentLine(v: f32, g: vec2f, mark: f32) -> f32 {
-  if (!(v > 0.0) || !(mark > 0.0)) { return 0.0; }
-  let dt = max(length(g) * V.scale / (v * LN10), SCENT_FLAT); // powers of ten per pixel
-  let d = abs(log2(v / mark) / log2(10.0)) / dt;
+// The opacity of the line where the ratio r (gradient g per cell) is 1: about one pixel wide. scentSensorLine() gives
+// it the food's difference across the sensors over the hold of a strand.
+fn scentLine(r: f32, g: vec2f) -> f32 {
+  if (!(r > 0.0)) { return 0.0; }
+  let dt = max(length(g) * V.scale / (r * LN10), SCENT_FLAT); // powers of ten per pixel
+  let d = abs(log2(r) / log2(10.0)) / dt;
   return (1.0 - smoothstep(0.25, 1.25, d)) * SCENT_LINE;
 }
 
@@ -817,7 +818,7 @@ fn scentSensorLine(p: vec2f, s: Scent, k: u32) -> f32 {
       change = dot(vec2f(up.gx.x, up.gy.x) - vec2f(down.gx.x, down.gy.x), n) / hold;
     }
   }
-  return scentLine(best, change * n, 1.0);
+  return scentLine(best, change * n);
 }
 
 // The view over colour c: the glow of the food scent, its line, then the glow of the repellent over them. Up to 2

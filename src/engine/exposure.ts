@@ -27,7 +27,7 @@ export function levelAbove(bins: ArrayLike<number>, cells: number, fraction: num
 
 /**
  * The trail level that a `fraction` of all cells exceed, read within its log₂ bin: levelAbove() gives the bin's centre,
- * steps of √2. The scent view's mark (scent.ts) moves with it, so it must not jump between bins. Within the bin the
+ * steps of √2. The scent view's line (scent.ts) moves with it, so it must not jump between bins. Within the bin the
  * cells are taken to thin out (or gather) exponentially, at the rate of the bins below and above it: in the tail of the
  * trail fewer cells hold more, so most of a bin's cells lie at its low end. In 60 states of 15 scenes this read the
  * 99th percentile within 3.2 % of the exact one; a flat share within the bin read it up to 20 % high (review of
@@ -49,10 +49,10 @@ export function levelWithin(bins: ArrayLike<number>, cells: number, fraction: nu
   return 0;
 }
 
-/** The trail of a strand for the scent view's mark: the white level's percentile, within its bin (Levels.strand). */
+/** The trail of a strand for the scent view's line: the white level's percentile, within its bin (Levels.strand). */
 export const strandLevel = (bins: ArrayLike<number>, cells: number) => levelWithin(bins, cells, WHITE);
 
-/** Share of a new measurement that the strand level takes: slower than the exposure, so the mark does not jitter. */
+/** Share of a new measurement that the strand level takes: slower than the exposure, so the line does not jitter. */
 export const STRAND_BLEND = 0.1;
 
 /** Auto levels: black at the 65th, white at the 99th percentile (like Fogleman's percentile levels). */

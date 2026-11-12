@@ -583,7 +583,9 @@ and its consequences; the rest stays.
    summed trail: the level that the auto levels draw at full strength, so the trail that the picture shows as a bright
    strand (in the Transport network 7.6, where p90 is 5.4). Reason: it reuses the histogram of the auto levels, so it
    needs no readback of its own, and it holds for sparse networks, where strands cover more than 1 % of the cells but
-   a lower percentile falls into empty cells.
+   a lower percentile falls into empty cells. (The mark was replaced on 2026-11-12 by the line where food steers
+   across the sensors as hard as a strand holds, see the amendment of that day; `scentMark()` is gone, the hold of a
+   strand lives on in `scentSensors()`. The strand T stays as defined here.)
 4. **The strand level is read within its bin and smoothed slowly** (this branch). The auto levels take the centre of a
    bin of half a power of two (steps of 41 %); the mark reads the same percentile within the bin by the share of its
    cells it needs (`levelWithin()` in `exposure.ts`), and each measurement moves it by 0.1 of the way (the levels by
@@ -938,7 +940,8 @@ Each by this branch on 2026-11-12, on the review's findings.
 
 ### Context
 
-The line of the revision above lay where the food scent equals the hold of a strand (`scentMark()`): a level. The
+The line of the revision above lay where the food scent equals the hold of a strand (the mark, `scentMark()`): a
+level. The
 second review found that agents steer by the difference between their sensors (`steer()` in `agents.wgsl`: the front,
 left and right sensors, SO cells ahead at 0 and ±SA), not by levels: a scent that is the same at every sensor turns no
 agent. It measured, at that line, the food's difference across the left and right sensor points (2 · SO · sin(SA)
@@ -1001,7 +1004,11 @@ scent falls off over less than that (in Jones over about 1.6 cells).
   the same lookup as the glow at the sensor points (`scentLookup()`, `sensorDifference()`); the tests that place the
   line beside a wall or at the box edge aim it there with the food weight (`aimLine()`). Every pixel of the views of
   "scent view" follows it on both backends. A new test draws two strains of different spreads and food weights.
-- Unit tests of `scentSensors()`: one strain, the Jones model, shared and own spreads, a fleeing strain, no strand.
+- `scentMark()` is removed: no code read it any more, and `scentSensors()` computes the same hold. Its cases are
+  tests of `scentSensors()` now (nothing measured, food that weighs half, trail saturation, the Jones model without
+  saturation and with another food weight, the lowest hold of several strains, a fleeing strain), with shared and own
+  spreads. `scentLine()` (`scent.ts`, `render.wgsl`, `render.frag`) draws the line where its ratio is 1: it has no
+  mark any more (2026-11-12, the coordinator's review of the branch).
 - e2e: the legend's sentence shows once a strand is measured, and the legend reads "Scent per cell", then "Food".
 - Mutations, each reverted after its run, all caught: the first pair only (WGSL and GLSL); the sensors reading the
   cells of walls (WGSL and GLSL); a sensor in a wall still counted (WGSL); the coarse map's sensors reading cells

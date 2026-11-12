@@ -64,39 +64,19 @@ export function scentGlow(value: number): number {
 }
 
 /**
- * The opacity of the line where the food scent `value`, whose gradient has the length `slope` (per cell), equals
- * `mark`, at `scale` cells per pixel: about one pixel wide, from the distance to the mark in pixels.
+ * The opacity of the line where `ratio`, whose gradient has the length `slope` (per cell), is 1, at `scale` cells per
+ * pixel: about one pixel wide, from the distance to 1 in pixels. The view draws it with the ratio of the food's
+ * difference across the sensors to the hold of a strand (scentSensors()).
  */
-export function scentLine(value: number, slope: number, scale: number, mark: number): number {
-  if (!(value > 0) || !(mark > 0)) return 0;
-  const dt = Math.max((slope * scale) / (value * Math.LN10), SCENT_FLAT); // powers of ten per pixel
-  return (1 - smoothstep(0.25, 1.25, Math.abs(Math.log10(value / mark)) / dt)) * SCENT_LINE;
+export function scentLine(ratio: number, slope: number, scale: number): number {
+  if (!(ratio > 0)) return 0;
+  const dt = Math.max((slope * scale) / (ratio * Math.LN10), SCENT_FLAT); // powers of ten per pixel
+  return (1 - smoothstep(0.25, 1.25, Math.abs(Math.log10(ratio)) / dt)) * SCENT_LINE;
 }
 
 function smoothstep(a: number, b: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
-}
-
-/**
- * The hold of a strand: the food scent that weighs as much in a sensor as the trail of a strand (agents.wgsl `sense()`: a strain
- * reads `attraction · trail + food · scent`). `strand` is the trail of a strand: the summed trail that the auto levels
- * draw at full strength, their 99th percentile (Levels.strand). With trail saturation K, a sensor reads it as
- * strand / (1 + strand / K). The Jones model weighs food as the strain's own trail, so there the mark is the strand
- * itself. With several strains it is the lowest mark of the strains that follow their own trail and food: where food
- * outweighs a strand for at least one of them. 0: no mark (no strand measured, or no strain follows food).
- */
-export function scentMark(s: Pick<Settings, 'model' | 'strains' | 'trailSaturation'>, strand: number): number {
-  if (!(strand > 0)) return 0;
-  const k = trailSaturation(s);
-  const trail = k > 0 ? strand / (1 + strand / k) : strand;
-  let mark = Infinity;
-  s.strains.slice(0, MAX_STRAINS).forEach((st, i) => {
-    const self = st.attraction[i] ?? 0;
-    const food = s.model === 'jones' ? self : st.food;
-    if (self > 0 && food > 0) mark = Math.min(mark, (self * trail) / food);
-  });
-  return Number.isFinite(mark) ? mark : 0;
 }
 
 /** Strains the line can stand for at once: the view's uniform holds 4 pairs (View.scentHalf, View.scentHolds). */
@@ -105,10 +85,12 @@ const SENSOR_PAIRS = 4;
 /**
  * The line of the view (ADR 0009, decision of 2026-11-12): where the food steers an agent as hard as a strand holds
  * it. An agent steers by the difference between its left and right sensors (agents.wgsl `steer()`), which lie
- * 2 · SO · sin(SA) apart; on a strand the trail holds it with self · sat(T), the food pulls with w · Δ, Δ the food scent
- * of the sensor up the gradient less that of the sensor down it. So the line lies where Δ equals the hold of the
- * strand over the food weight (scentMark() per strain), with the sensors `half` = SO · sin(SA) cells up and down the
- * gradient. For each strain that follows its own trail and food (weights above 0): its half spread and that hold;
+ * 2 · SO · sin(SA) apart, and a sensor reads `attraction · trail + food · scent` (`sense()`). On a strand the trail
+ * holds it with self · sat(T), the food pulls with w · Δ, Δ the food scent of the sensor up the gradient less that of
+ * the sensor down it. So the line lies where Δ equals the hold self · sat(T) / w, with the sensors `half` =
+ * SO · sin(SA) cells up and down the gradient. `strand` is the trail of a strand: the summed trail that the auto levels
+ * draw at full strength, their 99th percentile (Levels.strand); with trail saturation K a sensor reads it as
+ * T / (1 + T / K). The Jones model weighs food as the strain's own trail, so there the hold is the strand itself. For each strain that follows its own trail and food (weights above 0): its half spread and that hold;
  * strains of the same spread share one pair with the lowest hold. Up to 4 pairs, the rest 0; all 0 without a strand.
  * The view draws the line where the largest Δ over hold of the pairs is 1: inside it, food steers at least one strain
  * more than a strand holds it.
@@ -143,7 +125,7 @@ const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
 ];
 
 /**
- * The view over linear colour `c`: the glow of the food scent, its line at the mark, then the glow of the repellent.
+ * The view over linear colour `c`: the glow of the food scent, its line, then the glow of the repellent.
  * `food` and `repellent` are opacities of the glow (scentGlow()), `line` the line's (scentLine()); over paper the glow
  * is SCENT_PAPER_FILL times as opaque.
  */

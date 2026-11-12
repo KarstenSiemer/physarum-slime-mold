@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain } from '../model/params';
+import { defaultSettings, defaultStrain, type Strain } from '../model/params';
 import { levelAbove, levelWithin, strandLevel } from './exposure';
 import {
   SCENT_GLOW,
@@ -11,7 +11,6 @@ import {
   scentLevel,
   scentLevelSize,
   scentLine,
-  scentMark,
   scentOver,
   scentSensors,
 } from './scent';
@@ -34,31 +33,39 @@ describe('scentGlow', () => {
 });
 
 describe('scentLine', () => {
-  it('draws about one pixel where the scent equals the mark, and nothing without a mark', () => {
-    const slope = (v: number) => v * Math.LN10 * 0.1; // 0.1 powers of ten per cell, at one cell per pixel
-    expect(scentLine(5, slope(5), 1, 5)).toBeCloseTo(SCENT_LINE, 12);
-    expect(scentLine(5 * 10 ** 0.05, slope(5), 1, 5)).toBeGreaterThan(0.5 * SCENT_LINE); // half a pixel off
-    expect(scentLine(5 * 10 ** 0.2, slope(5), 1, 5)).toBe(0); // two pixels off
-    expect(scentLine(5, slope(5), 1, 0)).toBe(0);
-    expect(scentLine(0, 0, 1, 5)).toBe(0);
+  it('draws about one pixel where the ratio is 1, and nothing without a ratio', () => {
+    const slope = (r: number) => r * Math.LN10 * 0.1; // 0.1 powers of ten per cell, at one cell per pixel
+    expect(scentLine(1, slope(1), 1)).toBeCloseTo(SCENT_LINE, 12);
+    expect(scentLine(10 ** 0.05, slope(1), 1)).toBeGreaterThan(0.5 * SCENT_LINE); // half a pixel off
+    expect(scentLine(10 ** 0.2, slope(1), 1)).toBe(0); // two pixels off
+    expect(scentLine(10 ** -0.2, slope(1), 1)).toBe(0);
+    expect(scentLine(0, 0, 1)).toBe(0);
   });
 });
 
-describe('scentMark', () => {
-  const s = defaultSettings();
-  it('is the trail of a strand, as the sensor weighs it against the food scent', () => {
-    expect(scentMark(s, 0)).toBe(0); // nothing measured yet
-    expect(scentMark(s, 8)).toBe(8); // food and own trail weigh 1
-    const half = { ...s, strains: [{ ...defaultStrain(0), food: 0.5 }] };
-    expect(scentMark(half, 8)).toBe(16); // food that weighs half needs twice the scent
-    const k = { ...s, trailSaturation: 8 };
-    expect(scentMark(k, 8)).toBe(4); // a sensor reads 8 / (1 + 8 / 8)
-    expect(scentMark({ ...k, model: 'jones' }, 8)).toBe(8); // Jones has no saturation
+describe('scentSensors', () => {
+  const s = { ...defaultSettings(), model: 'extended' as const, trailSaturation: 0 };
+  const half = 9 * Math.sin((22.5 * Math.PI) / 180);
+  const one = (patch: Partial<Strain>) => ({ ...s, strains: [{ ...defaultStrain(0, 1), ...patch }] });
+  it('gives each strain that follows food its half spread of sensors and the hold of a strand', () => {
+    const r = scentSensors(one({ food: 2 }), 8);
+    expect(r.half[0]).toBeCloseTo(half, 12);
+    expect(r.holds[0]).toBe(4); // 1 · 8 / 2
+    expect([...r.half.slice(1), ...r.holds.slice(1)]).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(scentSensors(one({}), 0)).toEqual({ half: [0, 0, 0, 0], holds: [0, 0, 0, 0] }); // nothing measured yet
+    expect(scentSensors(one({}), 8).holds[0]).toBe(8); // food and own trail weigh 1
+    expect(scentSensors(one({ food: 0.5 }), 8).holds[0]).toBe(16); // food that weighs half needs twice the scent
   });
 
-  it('weighs food as the own trail in the Jones model, and takes the lowest mark of several strains', () => {
-    const jones = { ...s, model: 'jones' as const, strains: [{ ...defaultStrain(0), food: 0.2 }] };
-    expect(scentMark(jones, 8)).toBe(8);
+  it('reads the strand as a saturated sensor does, and weighs food as the own trail in the Jones model', () => {
+    const k = { ...one({}), trailSaturation: 8 };
+    expect(scentSensors(k, 8).holds[0]).toBe(4); // a sensor reads 8 / (1 + 8 / 8)
+    expect(scentSensors({ ...k, model: 'jones' }, 8).holds[0]).toBe(8); // Jones has no saturation
+    // The Jones model weighs food as the strain's own trail: the hold is the strand, whatever the food weight.
+    expect(scentSensors({ ...one({ food: 0.2 }), model: 'jones' }, 8).holds[0]).toBe(8);
+  });
+
+  it('lets strains of one spread share the lowest hold, and gives other spreads pairs of their own', () => {
     const two = {
       ...s,
       strains: [
@@ -66,38 +73,15 @@ describe('scentMark', () => {
         { ...defaultStrain(1, 2), food: 2 },
       ],
     };
-    expect(scentMark(two, 8)).toBe(4);
-    const fleeing = { ...s, strains: [{ ...defaultStrain(0), food: -1 }] };
-    expect(scentMark(fleeing, 8)).toBe(0); // no strain follows food: no mark
-  });
-});
-
-describe('scentSensors', () => {
-  const s = { ...defaultSettings(), model: 'extended' as const, trailSaturation: 0 };
-  const half = 9 * Math.sin((22.5 * Math.PI) / 180);
-  it('gives each strain that follows food its half spread of sensors and the hold of a strand', () => {
-    const one = { ...s, strains: [{ ...defaultStrain(0, 1), food: 2 }] };
-    const r = scentSensors(one, 8);
-    expect(r.half[0]).toBeCloseTo(half, 12);
-    expect(r.holds[0]).toBe(4); // 1 · 8 / 2
-    expect([...r.half.slice(1), ...r.holds.slice(1)]).toEqual([0, 0, 0, 0, 0, 0]);
-    expect(scentSensors(one, 0).half).toEqual([0, 0, 0, 0]); // no strand
-    // The Jones model weighs food as the strain's own trail: the hold is the strand.
-    expect(scentSensors({ ...one, model: 'jones' }, 8).holds[0]).toBe(8);
-  });
-
-  it('lets strains of one spread share the lowest hold, and gives other spreads pairs of their own', () => {
-    const same = { ...s, strains: [defaultStrain(0, 2), { ...defaultStrain(1, 2), food: 4 }] };
-    const a = scentSensors(same, 8);
+    const a = scentSensors(two, 8);
     expect(a.half.filter((h) => h > 0)).toEqual([a.half[0]]);
-    expect(a.holds[0]).toBe(2);
+    expect(a.holds[0]).toBe(4); // the lower of 16 and 4
     const other = { ...s, strains: [defaultStrain(0, 2), { ...defaultStrain(1, 2), sensorOffset: 4 }] };
     const b = scentSensors(other, 8);
     expect(b.half[1]).toBeCloseTo(4 * Math.sin((22.5 * Math.PI) / 180), 12);
     expect(b.holds.slice(0, 2)).toEqual([8, 8]);
     // A strain that flees food has no line.
-    const fleeing = { ...s, strains: [{ ...defaultStrain(0, 1), food: -1 }] };
-    expect(scentSensors(fleeing, 8).half).toEqual([0, 0, 0, 0]);
+    expect(scentSensors(one({ food: -1 }), 8).half).toEqual([0, 0, 0, 0]);
   });
 });
 

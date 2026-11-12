@@ -493,11 +493,11 @@ float scentGlow(float v) {
   return SCENT_GLOW * clamp((log2(v) / log2(10.0) - SCENT_LOW) / SCENT_TOP, 0.0, 1.0);
 }
 
-// The opacity of the line where v equals the mark (see scentLine in render.wgsl).
-float scentLine(float v, vec2 g, float mark) {
-  if (!(v > 0.0) || !(mark > 0.0)) return 0.0;
-  float dt = max(length(g) * V.scale / (v * LN10), SCENT_FLAT);
-  float d = abs(log2(v / mark) / log2(10.0)) / dt;
+// The opacity of the line where the ratio r (gradient g per cell) is 1 (see scentLine in render.wgsl).
+float scentLine(float r, vec2 g) {
+  if (!(r > 0.0)) return 0.0;
+  float dt = max(length(g) * V.scale / (r * LN10), SCENT_FLAT);
+  float d = abs(log2(r) / log2(10.0)) / dt;
   return (1.0 - smoothstep(0.25, 1.25, d)) * SCENT_LINE;
 }
 
@@ -546,7 +546,7 @@ float scentSensorLine(vec2 p, Scent s, int k) {
       change = dot(vec2(up.gx.x, up.gy.x) - vec2(down.gx.x, down.gy.x), n) / hold;
     }
   }
-  return scentLine(best, change * n, 1.0);
+  return scentLine(best, change * n);
 }
 
 // The view of the scent s at p over colour c: the glow of the food scent, its line, then the glow of the repellent,

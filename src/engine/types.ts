@@ -84,9 +84,10 @@ export interface Sim {
 
 /**
  * Auto levels: `gain` maps trail units to radiance before the exposure setting (0 until a measurement found
- * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black. `strand`: the trail
- * of a strand for the scent view's mark (scent.ts scentMark()): the 99th percentile of the summed trail, which the
- * levels draw at full strength, read from the same measurement within its bin and smoothed slowly; 0 until measured.
+ * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black. `strand`: the
+ * trail of a strand for the scent view's line (scent.ts scentSensors()): the 99th percentile of the summed trail,
+ * which the levels draw at full strength, read from the same measurement within its bin and smoothed slowly; 0 until
+ * measured.
  */
 export interface Levels {
   gain: number;
