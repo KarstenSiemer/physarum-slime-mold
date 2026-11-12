@@ -19,6 +19,12 @@ layout(location = 1) out vec4 outScent;
 #define COVERED 0
 #endif
 
+// The view of a step that moves first (VIEW in diffuse.wgsl, gl/sim.ts viewTarget(), ADR 0027): the step's diffusion
+// and decay without its sources and its cut, into targets that the simulation does not read. A program of its own.
+#ifndef VIEW
+#define VIEW 0
+#endif
+
 #if COVERED
 // True if the 3 × 3 window around cell q holds an agent; cells outside a closed arena hold none.
 bool covered(ivec2 q) {
@@ -76,11 +82,13 @@ void load(ivec2 c, out vec4 t, out vec2 s, out int kind) {
   }
   t = texelFetch(trailIn, q, 0);
   s = texelFetch(scentIn, q, 0).xy;
+#if !VIEW
   if (first && senseFirst() && kind == OPEN) sources(q, t, s);
   if (first && wound(q)) {
     t = vec4(0.0);
     s = vec2(0.0);
   }
+#endif
 }
 
 void main() {
@@ -127,10 +135,12 @@ void main() {
     t *= P.keep;
     s *= P.scent.z;
   }
+#if !VIEW
   if (last) {
     // Moving first, this step's deposits and sources, after the moves, for the sensors of the next step (diffuse.wgsl).
     if (!senseFirst() && kind == OPEN && !wound(p)) sources(p, t, s);
   }
+#endif
   if (kind == SINK) {
     t = vec4(0.0);
     s = vec2(0.0);

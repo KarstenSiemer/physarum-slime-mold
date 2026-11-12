@@ -55,6 +55,11 @@ export interface Sim {
   readAgents(): Promise<AgentState[]>;
   /** Trail, 4 lanes per cell, rows from y = 0. */
   readTrail(): Promise<Float32Array>;
+  /**
+   * The trail map that the view draws, 4 lanes per cell: the map after the step's diffusion (ADR 0027). Sensing first
+   * it is the trail; moving first the step's diffusion of the trail without its sources.
+   */
+  readView(): Promise<Float32Array>;
   /** Food scent and light repellent, 2 values per cell, rows from y = 0. */
   readScent(): Promise<Float32Array>;
   /** Agents that moved into each cell in the last step, 4 lanes per cell. */

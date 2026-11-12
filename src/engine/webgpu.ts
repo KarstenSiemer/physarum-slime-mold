@@ -92,7 +92,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async settle(sim: Simulation): Promise<Levels> {
-    await this.auto.measure(sim.current.trail);
+    await this.auto.measure(sim.viewTexture);
     return { gain: this.auto.gain, black: this.auto.black };
   }
 
@@ -110,7 +110,8 @@ export class WebGpuBackend implements Backend<Simulation> {
 
   /** Exposure and bloom for the current state; `measure` runs the auto-levels histogram. */
   private frame(sim: Simulation, s: Settings, view: View, measure: boolean): Frame {
-    const trail = sim.current.trail;
+    // The map after the step's diffusion in either order of a step (ADR 0027).
+    const trail = sim.viewTexture;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
     const base = agents ? 0.4 / s.density : measure ? this.auto.update(trail, fallback) : this.auto.gain || fallback;

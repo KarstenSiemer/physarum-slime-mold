@@ -171,7 +171,7 @@ export class Renderer {
     packView(this.data, width, height, f.view, f.exposure, f.black, f.settings, this.frame++, this.overlays, occupancy);
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
-    const trail = sim.current.trail;
+    const trail = sim.viewTexture;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
     let byOcc = this.groups.get(trail);

@@ -105,6 +105,7 @@ strains (one `vec4` lane each).
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
+| view trail         | `rgba32float` texture (WebGL2: target)           | 16 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -249,6 +250,11 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
   dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
   on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
   copies as they are when zoomed out.
+- The view draws the map after the step's diffusion in either order (ADR 0027). Sensing first
+  the trail is that map. Moving first it holds the map as the agents sense it; once per frame
+  after a change, the step's diffusion passes without sources (`VIEW`) write the map after the
+  diffusion into the free trail texture and, from a second pass on, a third one. The render
+  pass, height field, glow, auto levels and PNG read it; the simulation never does.
 - Linear-light compositing: radiance `L = Σ trail_s · gain · color_s`, then tone mapping,
   then sRGB encoding. Overlaps turn white-hot instead of clipping.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed

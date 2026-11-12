@@ -10,6 +10,8 @@ import {
   fitResolution,
   gridSize,
   memoryBudget,
+  VIEW_BYTES_PER_CELL,
+  viewTrailOn,
   type Limits,
 } from './sizing';
 
@@ -93,5 +95,17 @@ describe('capacity (ADR 0025)', () => {
     expect(fitResolution({ ...s, capacity: 2, collisions: false }, 1.6, { ...roomy, budget })).toBeLessThan(2048);
     const growth = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL + 34, bytesPerAgent: BYTES_PER_AGENT + 6 };
     expect(fitResolution(s, 1.6, growth)).toBeLessThan(2048);
+  });
+});
+
+// ADR 0027: the view of a step that moves first needs a third trail texture from two diffusion passes on.
+describe('the view of a step that moves first', () => {
+  it('needs a third trail texture of 16 B per cell only from two passes on', () => {
+    expect(VIEW_BYTES_PER_CELL).toBe(16);
+    for (const diffusion of [0, 1, 2, 3, 4]) {
+      expect(viewTrailOn({ stepOrder: 'move-first', diffusion }), `${diffusion}`).toBe(diffusion >= 2);
+      expect(viewTrailOn({ stepOrder: 'sense-first', diffusion }), `${diffusion}`).toBe(false);
+    }
+    expect(viewTrailOn(defaultSettings())).toBe(false);
   });
 });

@@ -508,6 +508,122 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     );
   });
 
+  // ADR 0027 (owner, 2026-11-12, "Weich"): the view draws the map after the step's diffusion in either order. Moving
+  // first the view runs the step's diffusion passes without its sources into textures that the simulation does not
+  // read; sensing first the trail is that map, and the view draws it without a pass.
+  describe('the view (ADR 0027)', () => {
+    const viewOf = (sim: Sim) => (kind === 'webgpu' ? (sim as Simulation).viewTexture : (sim as GlSim).viewTrail());
+    const trailOf = (sim: Sim) => (kind === 'webgpu' ? (sim as Simulation).current.trail : (sim as GlSim).currentTrail);
+    const bits = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+    const state = async (sim: Sim) => ({
+      agents: await sim.readAgents(),
+      trail: Array.from(await sim.readTrail()),
+      scent: Array.from(await sim.readScent()),
+    });
+    const WALL: Stroke[] = [
+      { kind: 'wall', from: [20, 4], to: [20, 30], radius: 1.5 },
+      { kind: 'wall', from: [2, 38], to: [30, 38], radius: 1 }, // at the bottom edge
+    ];
+
+    // Without agents and sources a step is its diffusion and decay: the view of a state is the trail after the next
+    // step, bit for bit, in both models, with one and two diffusion passes, in a box with walls, and again after it.
+    // With agents and food the next step adds its deposits: the view is that trail wherever no agent moved in.
+    it.each([
+      ['jones', 1, false],
+      ['extended', 1, false],
+      ['extended', 2, false],
+      ['jones', 1, true],
+      ['extended', 2, true],
+    ] as const)(
+      "draws the trail after the step's diffusion, moving first (%s model, %i passes, agents %s)",
+      async (model, diffusion, agents) => {
+        const [w, h] = [48, 40];
+        const settings: Settings = {
+          ...defaultSettings(),
+          seed: 6,
+          layout: agents ? 'mixed' : 'empty',
+          density: 0.2,
+          model,
+          collisions: model === 'jones',
+          boundary: 'box',
+          diffusion,
+          foodStrength: 0.05,
+          stepOrder: 'move-first',
+          strains: [defaultStrain(0)],
+        };
+        const sim = await make(settings, w, h, agents ? Math.round(0.2 * w * h) : 1);
+        sim.paint(agents ? [...WALL, { kind: 'food', from: [8, 8], to: [12, 30], radius: 3 }] : WALL);
+        sim.reset();
+        let r = 3;
+        const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+        // The view of the trail before: a new trail makes it anew.
+        await sim.readView();
+        sim.writeTrail(Float32Array.from({ length: w * h * 4 }, () => Math.fround(100 * rnd())));
+        for (let k = 0; k < 3; k++) {
+          const raw = await sim.readTrail();
+          const view = await sim.readView();
+          expect(viewOf(sim)).not.toBe(trailOf(sim));
+          // The trail the simulation senses is unchanged by the view's passes.
+          expect(bits(await sim.readTrail(), raw), 'the trail stays').toBe(true);
+          sim.run(1);
+          const next = await sim.readTrail();
+          const counts = await sim.readCounts();
+          const moved = counts.reduce((n, c) => n + c, 0);
+          expect(moved > 0, 'agents moved').toBe(agents);
+          for (let i = 0; i < next.length; i++) {
+            const deposit = (counts[i] ?? 0) * 5;
+            if (deposit === 0) expect(Object.is(next[i], view[i]), `step ${k}, value ${i}`).toBe(true);
+            else
+              expect(Math.abs((next[i] ?? 0) - deposit - (view[i] ?? 0)), `step ${k}, value ${i}`).toBeLessThan(1e-3);
+          }
+          expect(bits(view, raw)).toBe(false);
+        }
+      },
+      // Up to 5.3 s on SwiftShader on an M3 Pro, 21.1 s at the four times of CI: 120 s keeps it under a quarter (ADR 0010).
+      120_000,
+    );
+
+    // Sensing first the textures hold the map after the step's diffusion: the view draws them, and runs no pass.
+    it.each([1, 2])('draws the trail itself, sensing first (%i passes)', async (diffusion) => {
+      const [w, h] = [48, 40];
+      const settings: Settings = { ...defaultSettings(), seed: 4, density: 0.5, diffusion, foodStrength: 0.05 };
+      const sim = await make(settings, w, h, Math.round(0.5 * w * h));
+      sim.paint([{ kind: 'food', from: [10, 10], to: [30, 20], radius: 3 }]);
+      sim.run(5);
+      expect(viewOf(sim)).toBe(trailOf(sim));
+      expect(bits(await sim.readView(), await sim.readTrail())).toBe(true);
+    });
+
+    // The view's passes change nothing the simulation reads: agents, trail and scent after 12 steps with the view made
+    // after each step equal those of a run without it, with one and two passes, with agents, food and walls.
+    it.each([1, 2])(
+      'leaves the simulation as it runs without the view, moving first (%i passes)',
+      async (diffusion) => {
+        const [w, h] = [48, 40];
+        const settings: Settings = {
+          ...defaultSettings(),
+          seed: 9,
+          density: 0.3,
+          boundary: 'box',
+          diffusion,
+          foodStrength: 0.05,
+          stepOrder: 'move-first',
+        };
+        const run = async (view: boolean) => {
+          const sim = await make(settings, w, h, Math.round(0.3 * w * h));
+          sim.paint([...WALL, { kind: 'food', from: [8, 8], to: [12, 30], radius: 3 }]);
+          sim.reset();
+          for (let k = 0; k < 12; k++) {
+            sim.run(1);
+            if (view) await sim.readView();
+          }
+          return state(sim);
+        };
+        expect(await run(true)).toEqual(await run(false));
+      },
+    );
+  });
+
   describe('agent rule (Jones 2010, Fig. 3)', () => {
     const RA = 30;
     // Agent at the centre of a 64² grid, heading +x. SO 9, SA 45°: sensor cells F (41,32), FL (38,26), FR (38,38).

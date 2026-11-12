@@ -1388,3 +1388,16 @@ describe('lattices', () => {
     vi.unstubAllGlobals();
   });
 });
+
+// ADR 0027: the view of a step that moves first holds a third trail texture from two diffusion passes on, and the
+// memory fit counts it. 2048 × 1280 cells with 3.2 agents per cell fit 512 MiB at 90 + 102.4 B per cell, not with 16 B
+// more.
+describe('the memory fit of the view', () => {
+  it('counts the third trail texture of a step that moves first with two passes', async () => {
+    const engine = await Engine.create(canvas(), defaultSettings(), undefined, new CpuBackend());
+    const s = { ...defaultSettings(), resolution: 2048, density: 3.2, diffusion: 2 };
+    expect(engine.fit({ ...s, stepOrder: 'sense-first' }).resolution).toBe(2048);
+    expect(engine.fit({ ...s, stepOrder: 'move-first' }).resolution).toBe(1536);
+    expect(engine.fit({ ...s, stepOrder: 'move-first', diffusion: 1 }).resolution).toBe(2048);
+  });
+});

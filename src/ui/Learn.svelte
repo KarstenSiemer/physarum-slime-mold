@@ -145,6 +145,7 @@
         the cell. The agents leave a chemical trail and follow it. Every step has six parts. In Jones 2010 all agents
         move, then all agents sense, then the trail spreads. In his later papers and in Fogleman’s version all agents
         sense first, then move, then the trail spreads. Each scene uses the order of its paper (the setting Step order).
+        The picture always shows the trail after it spread in the step.
       </p>
       <ol>
         <li>

@@ -1,7 +1,8 @@
 # 0027: The model as in Jones' papers: step order, dish, boundaries and the figures' foods
 
 - Status: accepted (owner decisions of 2026-11-11: the scenes of Jones work exactly as in his papers, and the
-  corrections apply to both models; owner decision of 2026-11-12: each scene runs the order of a step of its paper)
+  corrections apply to both models; owner decisions of 2026-11-12: each scene runs the order of a step of its paper,
+  and every scene looks soft)
 - Date: 2026-11-11, amended 2026-11-12
 
 ## Context
@@ -198,8 +199,8 @@ Each decision with its date, who made it, and why.
 
 ### What the view shows
 
-22. **The view shows the map as the agents sense it** (this branch, 2026-11-11; since decision 24 the scenes that
-    sense first show the map after the diffusion, which their agents sense). The textures hold the map after the
+22. **The view shows the map as the agents sense it** (this branch, 2026-11-11; replaced on 2026-11-12 by decisions
+    30 and 31: every scene shows the map after the step's diffusion). The textures hold the map after the
     step's moves and before its diffusion (decision 2), and the renderer, the auto levels and `Sim.readTrail()` read them
     as they are: fresh deposits show undiffused. Options: (a) this; (b) a pass per frame that writes the diffused map
     for the view (a pass more per frame); (c) the mean in the render pass (nine taps per bilinear tap). The images of
@@ -267,8 +268,37 @@ and so did this app before decision 1.
 29. **The emission factor follows the order** (the coordinator, 2026-11-12; decision 5). Moving first d / 0.1, sensing
     first (d / (1 − d)) / (0.1 / 0.9), the factor of before.
 30. **The view of a scene that senses first shows the map after the diffusion**, which its agents sense (decision
-    22): the soft look of before. The sparkle of decision 22 stays with the scenes of Jones 2010 (owner question
-    below).
+    22): the soft look of before.
+
+### The look of the scenes that move first (2026-11-12)
+
+Decisions 32 to 35 are this branch's, made under the owner's delegation of 2026-11-12 (take the recommendations and
+ask only about problems that stay unsolved).
+
+31. **The scenes that move first show the map after the step's diffusion too** (owner, 2026-11-12: "Weich", soft, his
+    answer to whether the scenes of Jones 2010 should look soft or sparkle). Reason: the owner's choice; it is the state
+    after whole steps, which an image at a scheduler step of Jones' figures shows if it is taken after the step's
+    diffusion (Jones 2010 does not say, p. 132 and 134), and every scene now looks alike.
+32. **A view pass per frame, moving first only** (this branch, 2026-11-12, the cheapest exact way of the Cost section,
+    (b)). `viewTexture` (`sim.ts`) and `viewTrail()` (`gl/sim.ts`) run the step's diffusion passes without its sources
+    and its cut (`VIEW` in `diffuse.wgsl` and `diffuse.frag`) on the trail as the agents sense it: the first pass into
+    the free texture of the pair, which the next step writes anew, the second into a third trail texture, and so on, so
+    no pass reads the texture it writes and the simulation reads none of them. The render pass, the gel's height field,
+    the glow, the auto levels and the PNG read the result. It is made once for each state, at the first frame or
+    readback after a step, a reset, a stroke, a written trail or new settings, and not for a frame of a paused
+    simulation that drew it before. Sensing first the view reads the trail and runs no pass. It is exact for any number
+    of passes: without agents and sources the view of a state is the trail after its next step, bit for bit, and with
+    agents it is that trail wherever no agent moved in (tests). The simulation does not change: the digests of every
+    scene at step 500 are those of the commit before on both backends, and a scene that makes its view after every step
+    runs as one that never does (test). Options: (b) this; (c) the mean in the render pass, which is not exact (Cost).
+33. **A third trail texture only from two passes on** (this branch, 2026-11-12; `viewTrailOn()` and
+    `VIEW_BYTES_PER_CELL` in `sizing.ts`, 16 B per cell, counted by the memory fit). Reason: one pass fits in the free
+    texture of the pair, and every scene of Jones 2010 runs one pass, so their lattices need no more memory; a user who
+    gives a scene that moves first two passes or more gets the exact view for 16 B per cell.
+34. **The view's passes are built at their first use** (this branch, 2026-11-12): the WebGPU pipelines like those of
+    covered food, the WebGL2 program like the covered one. Reason: a scene that senses first never needs them, and
+    SwiftShader in CI builds every pipeline built at the start.
+35. **`Sim.readView()`** reads the view's map for tests, as `readTrail()` reads the trail (this branch, 2026-11-12).
 
 ## Measurements
 
@@ -420,6 +450,21 @@ pixel), medians of 12 to 16 rounds while other jobs shared the machine:
   still read the sensed map, and zoomed out its 4 taps average the sensed map.
 - Neither gives main's pixels: the dynamics differ (this ADR). (b) gives the renderer the kind of map it drew before.
 
+The view as built (decisions 31 to 34), alone on the M3 Pro, 2560 × 1600 at fit, 16 alternating rounds of 30 frames:
+a frame whose view is stale (one view pass, as after a step) against a frame of a state whose view is made.
+
+| Scene (grid, order)                             | WebGPU: frame, with the view pass | WebGL2: frame, with the view pass |
+| ----------------------------------------------- | --------------------------------- | --------------------------------- |
+| Transport network (200 × 200, move first)       | 1.42 ms, + 0.03 ms                | 1.57 ms, + 0.11 ms                |
+| Shrinking plasmodium (300 × 300, move first)    | 0.78 ms, + 0.02 ms                | 1.02 ms, + 0.08 ms                |
+| Transport network, 2 passes (extended)          | 1.43 ms, + 0.04 ms                | 1.57 ms, + 0.16 ms                |
+| Default settings (1536 × 960, sense first)      | 1.87 ms, no pass (− 0.01 ms)      | 2.07 ms, no pass (+ 0.01 ms)      |
+| Three strains (1536 × 960, 4.4 M agents, sense) | 1.95 ms, no pass (+ 0.02 ms)      | 2.19 ms, no pass (− 0.02 ms)      |
+
+The pass costs 0.02 to 0.04 ms per frame on WebGPU and 0.08 to 0.16 ms on WebGL2 (medians; rounds within ± 0.1 to
+0.26 ms), once per frame whatever the steps per frame; the scenes that sense first draw as before. The frame times
+here are lower than in the table above, which other jobs shared the machine for.
+
 ### Tests
 
 - `sim.gpu.test.ts`, both backends: the order of a step (moving first the trail holds the step's deposits undiffused, a
@@ -441,6 +486,14 @@ pixel), medians of 12 to 16 rounds while other jobs shared the machine:
   kinds by revision), `state.test.ts` (an old link paints its 8 foods until Reload scene), `presets.test.ts` (Fig. 19's
   foods, the texts), `environment.test.ts` (revision 0 against the fractions of before).
 - e2e: an old link of Shortest path paints its foods of revision 0, and Reload scene those of Fig. 18.
+- The view, both backends: moving first the view of a state is the trail after its next step, bit for bit, without
+  agents (both models, one and two passes, a box with walls, three steps in a row and after a new trail), and with
+  agents and food the same wherever no agent moved in; the trail the simulation reads stays as it was; sensing first
+  the view is the trail itself and no pass runs; a scene that makes its view after every step runs as one that never
+  does (`sim.gpu.test.ts`); a frame moving first draws what a frame sensing first draws for the view's map, and not
+  what it draws for the raw trail (`engine.gpu.test.ts`, one and two passes, with the glow); the third texture and the
+  memory fit (`sizing.test.ts`, `engine-env.test.ts`). On SwiftShader alone the data test took up to 5.3 s and the
+  frame test 9.6 s (the view's pipelines are built at first use): their limits are 120 and 240 s (ADR 0010).
 - On SwiftShader on the M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`) the new and changed GPU
   tests took at most 5.6 s (Jones' one map in a box, WebGL2, which has a limit of 120 s); every other new test at most
   3.1 s of 60 s. At the four times of CI (ADR 0010) none passes a quarter of its limit, so no limit changes. With the
@@ -473,6 +526,12 @@ for the order of each scene's paper (all killed, below):
   mean, each on both backends; the mean and the decay of sensing first folded into one factor (the branch on the count
   gone on WebGPU, the product on each backend); the covered-food pass of the last pass in both orders on each backend;
   the pipeline constant always 0; one emission factor for both orders (unit and GPU).
+- The view (17 killed): the view's pass with the sources, on each backend; no pass moving first, and a pass sensing
+  first, each on both backends; no new view after a step, and after a written trail, each on both backends; the
+  second pass into the free texture instead of a third, on each backend; the render pass, and the glow and the auto
+  levels of WebGPU's frame, on the raw trail; the WebGL2 frame on the raw trail; no third texture in `sizing.ts`, and
+  none in the memory fit. The written trail and the glow survived the first tests; the tests gained a view before a new
+  trail and bright single cells under the glow, and then killed them.
 
 ## Not changed
 
@@ -485,13 +544,10 @@ for the order of each scene's paper (all killed, below):
 
 ## Open for the owner
 
-- **The sparkle of the scenes of Jones 2010 in the view** (decisions 22 and 30): keep the map as the agents sense it,
-  or show the map after the diffusion as before (a pass per frame, or a mean in the render pass; Cost, above). Only
-  these eight scenes move first, on lattices of 200 × 200 and 300 × 300 cells, where a pass per frame costs 0.04 to
-  0.07 ms. Jones 2010 does not say
-  whether an image shows the map before or after a step's diffusion: it takes images "at notable times" of the
-  diffusing trail map (p. 134), its captions count scheduler steps (Fig. 4, p. 134), and the diffusion follows every
-  system step (p. 132).
+- None: the order of a step (decision 24), the look (decision 31) and the emission factor (decision 5) are decided.
+  Jones 2010 does not say whether an image shows the map before or after a step's diffusion: it takes images "at
+  notable times" of the diffusing trail map (p. 134), its captions count scheduler steps (Fig. 4, p. 134), and the
+  diffusion follows every system step (p. 132).
 
 ## Consequences
 
@@ -503,7 +559,8 @@ for the order of each scene's paper (all killed, below):
   23).
 - Each scene runs the order of a step of its paper, and the setting Step order shows and changes it (decisions 24 and
   25).
-- No pass, texture or buffer is added; moving first, the diffusion pass reads `env` and `counts` once per output cell
-  instead of per tile cell (WebGPU) or per tap (WebGL2). WebGPU builds each diffusion pass for both orders at startup
-  (10 pipelines instead of 5).
+- No pass, texture or buffer is added to a step; moving first, the diffusion pass reads `env` and `counts` once per
+  output cell instead of per tile cell (WebGPU) or per tap (WebGL2). WebGPU builds each diffusion pass for both orders
+  at startup (10 pipelines instead of 5). A scene that moves first runs one view pass per frame (0.02 to 0.16 ms), and
+  from two diffusion passes on holds a third trail texture of 16 B per cell.
 - Links have version 2; an app from before this change refuses them and loads their settings alone, with its notice.

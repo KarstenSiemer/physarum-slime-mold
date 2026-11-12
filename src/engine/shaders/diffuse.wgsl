@@ -22,6 +22,10 @@ override COVERED: bool = false;
 // A constant, not P.model.w: inside a branch on a uniform, Metal's compiler folds the mean and the decay of sensing
 // first into one factor, and the code before ADR 0027 rounded them apart.
 override SENSE_FIRST: bool = false;
+// The view of a step that moves first (sim.ts `viewTexture`, ADR 0027): the step's diffusion and decay of the map that
+// the textures hold, without its sources and its cut, into textures that the simulation does not read. The view then
+// draws the map after the step's diffusion, as a scene that senses first draws it.
+override VIEW: bool = false;
 
 @group(0) @binding(1) var trailIn: texture_2d<f32>;
 @group(0) @binding(2) var scentIn: texture_2d<f32>;
@@ -99,9 +103,9 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
       let q = cellCoord(u32(c));
       t = textureLoad(trailIn, q, 0);
       s = textureLoad(scentIn, q, 0).xy;
-      if (FIRST && senseFirst() && kind == OPEN) { sources(c, q, &t, &s); }
+      if (!VIEW && FIRST && senseFirst() && kind == OPEN) { sources(c, q, &t, &s); }
       // The wound is cleared before the step's diffusion, so no chemical of it spreads out.
-      if (FIRST && wound(q)) {
+      if (!VIEW && FIRST && wound(q)) {
         t = vec4f(0.0);
         s = vec2f(0.0);
       }
@@ -162,12 +166,12 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
   if (LAST) {
     // Moving first, this step's deposits and sources (Jones 2010, p. 133 and 144): after the moves, for the sensors of
     // the next step, and none in the wound of a cut that clears it.
-    if (!senseFirst() && kind == OPEN && !wound(p)) { sources(p.y * i32(W()) + p.x, p, &t, &s); }
+    if (!VIEW && !senseFirst() && kind == OPEN && !wound(p)) { sources(p.y * i32(W()) + p.x, p, &t, &s); }
   }
   if (kind == SINK) {
     t = vec4f(0.0);
     s = vec2f(0.0);
   }
   textureStore(trailOut, p, t);
-  textureStore(scentOut, p, vec4f(s, 0.0, 0.0));
+  if (!VIEW) { textureStore(scentOut, p, vec4f(s, 0.0, 0.0)); }
 }

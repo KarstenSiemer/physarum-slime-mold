@@ -11,7 +11,7 @@ import {
   trailSaturation,
   type AgentTool,
 } from '../pack';
-import { diffusePlan } from '../sizing';
+import { diffusePlan, viewTrailOn } from '../sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
   clear,
@@ -166,6 +166,11 @@ export class GlSim implements Sim {
    * (diffuse.frag COVERED). Allocated at its first use.
    */
   private presence: Target | undefined;
+  /** The view's third trail target, for the view of a step that moves first with two diffusion passes or more. */
+  private viewThird: Target | undefined;
+  /** The target that holds the view's map (viewTrail()), and whether a change of the state since made it stale. */
+  private viewOut: Target | undefined;
+  private viewStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
@@ -245,6 +250,56 @@ export class GlSim implements Sim {
     return this.trail[this.p];
   }
 
+  /**
+   * The trail map that the view draws (ADR 0027): the map after the step's diffusion. Sensing first the textures hold
+   * it. Moving first they hold the map as the agents sense it, before its diffusion; the step's diffusion passes
+   * without its sources and its cut (diffuse.frag VIEW) then write the map after the diffusion into the free trail of
+   * the pair and, from a second pass on, into a third target (sim.ts viewTexture). Made once for each state.
+   */
+  viewTrail(): Target {
+    if (this.settings.stepOrder === 'sense-first') return this.currentTrail;
+    if (this.viewStale || !this.viewOut) this.encodeView();
+    return this.viewOut ?? this.currentTrail;
+  }
+
+  /** The passes of viewTrail(): the step's diffusion plan, the input the trail as the agents sense it. */
+  private encodeView() {
+    const gl = this.gl;
+    this.writeParams();
+    const free = flip(this.p);
+    const d = this.prog.view();
+    let input = this.trail[this.p];
+    for (const [i, v] of diffusePlan(this.settings.diffusion).entries()) {
+      // Even passes write the free trail of the pair (its scent too, which the next step writes anew), odd passes the
+      // third target, so no pass reads the target it writes.
+      const odd = i % 2 === 1;
+      const out = odd ? (this.viewThird ??= target(gl, this.width, this.height, gl.RGBA32F)) : this.trail[free];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, odd ? out.fbo : this.mrt[free]);
+      gl.viewport(0, 0, this.width, this.height);
+      gl.useProgram(d.program);
+      const env = this.env.texture;
+      textures(gl, d.program, {
+        trailIn: input.texture,
+        scentIn: this.scent[this.p].texture,
+        counts: this.counts.texture,
+        env,
+        occ: env,
+      });
+      gl.uniform1i(d.loc('first'), Number(v.first));
+      gl.uniform1i(d.loc('last'), Number(v.last));
+      gl.uniform1i(d.loc('blur'), Number(v.blur));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      input = out;
+    }
+    this.viewOut = input;
+    this.viewStale = false;
+  }
+
+  /** For tests: the trail map that the view draws (viewTrail()), 4 lanes per cell. */
+  readView(): Promise<Float32Array> {
+    return Promise.resolve(readTarget(this.gl, this.viewTrail()) as Float32Array);
+  }
+
   get countsTexture(): WebGLTexture {
     return this.counts.texture;
   }
@@ -261,6 +316,13 @@ export class GlSim implements Sim {
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
     this.settings = settings;
+    this.viewStale = true;
+    // The memory fit counts the view's third target only while a step moves first with two passes or more.
+    if (!viewTrailOn(settings) && this.viewThird) {
+      destroyTarget(this.gl, this.viewThird);
+      this.viewThird = undefined;
+      this.viewOut = undefined;
+    }
     if (switchedOn) this.rebuildOccupancy();
     // The memory fit counts `presence` only while covered food is on (sizing.ts), and growth's targets only while it
     // is on.
@@ -276,6 +338,7 @@ export class GlSim implements Sim {
 
   reset() {
     const gl = this.gl;
+    this.viewStale = true;
     this.step = 0;
     this.a = 0;
     this.p = 0;
@@ -329,6 +392,7 @@ export class GlSim implements Sim {
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
+    if (steps > 0) this.viewStale = true;
     for (let k = 0; k < steps; k++) {
       this.writeParams(tool);
       this.encodeStep();
@@ -347,6 +411,7 @@ export class GlSim implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    this.viewStale = true;
     // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
     // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
@@ -430,6 +495,7 @@ export class GlSim implements Sim {
   }
 
   clearEnvironment() {
+    this.viewStale = true;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
     this.walls = false;
@@ -542,6 +608,7 @@ export class GlSim implements Sim {
   }
 
   writeTrail(data: Float32Array) {
+    this.viewStale = true;
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
 
@@ -551,6 +618,7 @@ export class GlSim implements Sim {
    * `env`.
    */
   writeEnv(data: Uint8Array) {
+    this.viewStale = true;
     writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
     clear(this.gl, this.shape);
     const any = (channel: number) => data.some((v, i) => i % 4 === channel && v > 0);
@@ -570,6 +638,7 @@ export class GlSim implements Sim {
     all.push(this.walled, this.clearance);
     if (this.panels) all.push(this.panels);
     if (this.presence) all.push(this.presence);
+    if (this.viewThird) all.push(this.viewThird);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     all.push(...this.growthTargets());
     for (const t of all) destroyTarget(gl, t);

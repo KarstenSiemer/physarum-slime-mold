@@ -77,6 +77,17 @@ export const COVERED_BYTES_PER_CELL_HALF_FLOAT = 1;
  */
 export const GROWTH_BYTES_PER_CELL = 34;
 export const GROWTH_BYTES_PER_AGENT = 6;
+/**
+ * More bytes per cell for the view of a step that moves first with two diffusion passes or more (ADR 0027): a third
+ * trail texture of 16 B (sim.ts viewTexture, gl/sim.ts viewTrail()). With one pass the view uses the free texture of
+ * the pair, and sensing first it uses none.
+ */
+export const VIEW_BYTES_PER_CELL = 16;
+
+/** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
+export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
+  s.stepOrder === 'move-first' && s.diffusion >= 2;
+
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 export const BYTES_PER_AGENT = 32;
 

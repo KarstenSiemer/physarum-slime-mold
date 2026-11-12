@@ -769,3 +769,50 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
     engine.destroy();
   }, 150_000); // 7.6 s on SwiftShader on an M3 Pro, about 30 s in CI: under a quarter of 150 s (ADR 0010)
 });
+
+// ADR 0027 (owner, 2026-11-12, "Weich"): a frame draws the map after the step's diffusion in either order. Moving first
+// the frame draws what the view's passes make of the trail, which is what a scene that senses first draws when its
+// trail holds that map; the trail as the agents sense it draws otherwise.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: the view (ADR 0027)', (kind) => {
+  const maxDiff = (a: ImageData, b: ImageData) =>
+    a.data.reduce((m, v, i) => (i % 4 === 3 ? m : Math.max(m, Math.abs(v - (b.data[i] ?? 0)))), 0);
+  /** A capture with the dither of frame 0: WebGPU's renderer counts its frames, captures too. */
+  const capture = (engine: Engine) => {
+    if (kind === 'webgpu') (engine.backend as unknown as { renderer: { frame: number } }).renderer.frame = 0;
+    return engine.capture();
+  };
+
+  it.each([1, 2])(
+    "draws the map after the step's diffusion, moving first (%i passes)",
+    async (diffusion) => {
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [160, 120];
+      const s: Settings = {
+        ...defaultSettings(),
+        resolution: 256,
+        layout: 'empty',
+        diffusion,
+        stepOrder: 'move-first',
+      };
+      const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+      engine.paused = true;
+      const sim = engine.sim;
+      let r = 11;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      // Bright single cells: the glow of the frame sees them too, and the view spreads them over their neighbours.
+      const raw = Float32Array.from({ length: sim.width * sim.height * 4 }, () => (rnd() < 0.03 ? 300 : 0));
+      sim.writeTrail(raw);
+      const moving = await capture(engine);
+      const view = await sim.readView();
+      sim.update({ ...engine.settings, stepOrder: 'sense-first' });
+      sim.writeTrail(view);
+      expect(maxDiff(moving, await capture(engine))).toBe(0);
+      sim.writeTrail(raw);
+      expect(maxDiff(moving, await capture(engine))).toBeGreaterThan(10);
+      engine.destroy();
+      // Up to 9.6 s on SwiftShader on an M3 Pro (the view's pipelines are built at first use), 38.5 s at the four times
+      // of CI: 240 s keeps it under a quarter (ADR 0010).
+    },
+    240_000,
+  );
+});

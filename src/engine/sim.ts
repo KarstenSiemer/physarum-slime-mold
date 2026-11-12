@@ -20,7 +20,7 @@ import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { diffusePlan, type Diffuse } from './sizing';
+import { diffusePlan, viewTrailOn, type Diffuse } from './sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
@@ -80,6 +80,11 @@ export class Simulation implements Sim {
   readonly scent: Pair<GPUTexture>;
   private readonly trailViews: Pair<GPUTextureView>;
   private readonly scentViews: Pair<GPUTextureView>;
+  /** The view's third trail texture, for the view of a step that moves first with two diffusion passes or more. */
+  private viewTrail?: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  /** The texture that holds the view's map (viewTexture), and whether a change of the state since made it stale. */
+  private viewOut?: GPUTexture | undefined;
+  private viewStale = true;
   readonly counts: GPUBuffer;
   readonly env: GPUBuffer;
   /** Outline distances, light and the walls' shadow, for the renderer only (paint.wgsl `outline`). */
@@ -192,6 +197,82 @@ export class Simulation implements Sim {
     return { trail: this.trail[this.parity], scent: this.scent[this.parity] };
   }
 
+  /**
+   * The trail map that the view draws (ADR 0027): the map after the step's diffusion. Sensing first the textures hold
+   * it, and the view draws them. Moving first they hold the map as the agents sense it, before its diffusion; the
+   * step's diffusion passes without its sources and its cut (diffuse.wgsl VIEW) then write the map after the
+   * diffusion into the free texture of the pair and, from a second pass on, into a third texture. The simulation reads
+   * neither: its next step writes the free texture anew. Made once for each state, at the first frame that draws it.
+   */
+  get viewTexture(): GPUTexture {
+    if (this.settings.stepOrder === 'sense-first') return this.current.trail;
+    if (this.viewStale || !this.viewOut) this.encodeView();
+    return this.viewOut ?? this.current.trail;
+  }
+
+  /** The passes of viewTexture: the step's diffusion plan, the input the trail as the agents sense it. */
+  private encodeView() {
+    this.writeParams();
+    const p = this.parity;
+    const free = flip(p);
+    const occ = this.ensureCollision().occ[this.occParity];
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    let input = this.trailViews[p];
+    let out = this.trail[p];
+    diffusePlan(this.settings.diffusion).forEach((v, i) => {
+      const third = i % 2 === 1 ? this.ensureViewTrail() : undefined;
+      const [target, view] = third ? [third.texture, third.view] : [this.trail[free], this.trailViews[free]];
+      const pipeline = this.kernels.view(v);
+      const key = `view${+v.first}${+v.last}${+v.blur}${i % 2}${p}${this.occParity}`;
+      let group = this.bindCache.get(key);
+      if (!group) {
+        const resources = [
+          this.params,
+          input,
+          this.scentViews[p],
+          view,
+          this.scentViews[free],
+          this.env,
+          this.counts,
+          occ,
+        ];
+        group = this.device.createBindGroup({
+          layout: this.kernels.diffuseLayout,
+          entries: resources.map((r, binding) => entry(binding, r)),
+        });
+        this.bindCache.set(key, group);
+      }
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, group);
+      pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
+      input = view;
+      out = target;
+    });
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.viewOut = out;
+    this.viewStale = false;
+  }
+
+  /** The view's third trail texture, made at its first use (sizing.ts VIEW_BYTES_PER_CELL counts it). */
+  private ensureViewTrail() {
+    if (!this.viewTrail) {
+      const texture = this.device.createTexture({
+        size: [this.width, this.height],
+        format: 'rgba32float',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+      });
+      this.viewTrail = { texture, view: texture.createView() };
+    }
+    return this.viewTrail;
+  }
+
+  /** For tests: the trail map that the view draws (viewTexture), 4 lanes per cell. */
+  readView(): Promise<Float32Array> {
+    return readTexture(this.device, this.viewTexture, 4);
+  }
+
   /** The agent buffer that holds the current state, in sort order (ids in `bits`, ADR 0005). */
   get agentBuffer(): GPUBuffer {
     return this.agentBuffers[this.agentParity];
@@ -234,7 +315,15 @@ export class Simulation implements Sim {
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
     this.settings = settings;
+    this.viewStale = true;
     if (switchedOn) this.rebuildOccupancy();
+    // The memory fit counts the view's third texture only while a step moves first with two passes or more.
+    if (!viewTrailOn(settings) && this.viewTrail) {
+      this.viewTrail.texture.destroy();
+      this.viewTrail = undefined;
+      this.viewOut = undefined;
+      for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
+    }
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -245,6 +334,7 @@ export class Simulation implements Sim {
   }
 
   reset() {
+    this.viewStale = true;
     this.step = 0;
     this.parity = 0;
     this.agentParity = 0;
@@ -345,6 +435,7 @@ export class Simulation implements Sim {
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
+    if (steps > 0) this.viewStale = true;
     for (let k = 0; k < steps; k++) {
       this.writeParams(tool);
       const enc = this.device.createCommandEncoder();
@@ -368,6 +459,7 @@ export class Simulation implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    this.viewStale = true;
     // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
     // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
@@ -473,6 +565,7 @@ export class Simulation implements Sim {
   }
 
   clearEnvironment() {
+    this.viewStale = true;
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
     enc.clearBuffer(this.shapeBuffer);
@@ -556,6 +649,7 @@ export class Simulation implements Sim {
   }
 
   writeTrail(data: Float32Array) {
+    this.viewStale = true;
     this.device.queue.writeTexture({ texture: this.current.trail }, data, { bytesPerRow: this.width * 16 }, [
       this.width,
       this.height,
@@ -567,6 +661,7 @@ export class Simulation implements Sim {
    * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`.
    */
   writeEnv(data: Uint8Array) {
+    this.viewStale = true;
     this.device.queue.writeBuffer(this.env, 0, data);
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.shapeBuffer);
@@ -582,6 +677,7 @@ export class Simulation implements Sim {
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
+    this.viewTrail?.texture.destroy();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -980,6 +1076,8 @@ class Kernels {
   private readonly saturatedPipelines: [Steering?, Steering?] = [];
   /** The last diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
+  /** The view's diffusion passes of a step that moves first (diffuse.wgsl VIEW), by variantKey(). */
+  private readonly viewPipelines = new Map<string, GPUComputePipeline>();
   private capacityPipelines?: Starts;
   private growthPipelines?: GrowthKernels;
 
@@ -1113,6 +1211,25 @@ class Kernels {
       built.set(key, k);
     }
     return k;
+  }
+
+  /** A diffusion pass of the view of a step that moves first (diffuse.wgsl VIEW), built at its first use. */
+  view(v: Diffuse): GPUComputePipeline {
+    const key = variantKey(v, false);
+    let p = this.viewPipelines.get(key);
+    if (!p) {
+      const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.diffuseLayout] });
+      p = this.device.createComputePipeline({
+        layout,
+        compute: {
+          module: this.diffuseModule,
+          entryPoint: 'diffuse',
+          constants: { ...variantConstants(v, false), VIEW: 1 },
+        },
+      });
+      this.viewPipelines.set(key, p);
+    }
+    return p;
   }
 
   diffuse(v: Diffuse, senseFirst: boolean): GPUComputePipeline {
