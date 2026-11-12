@@ -707,7 +707,9 @@ and its consequences; the rest stays.
     pixel), with the line at the mark of the settled levels; outside the arena and on the flake no pixel changes by more
     than the dither; in the Jones model no repellent shows.
   - The Jones model at a decay of 0.0001 with food strength 0.5 reaches more than 10,000 (every power of ten from 1,000
-    to the top is compared), and in a small box more than 100,000, where the glow stays at its top.
+    to the top is compared), and in a small box more than 100,000, where the glow stays at its top. Since the
+    absorbing edges of ADR 0027 (2026-11-12) the second part runs on a periodic grid of 32 × 24 cells: in the box the
+    edges take in the scent, which stops at 15,355.
   - Zoomed in beside a wall the glow and the line follow the reference that leaves the wall's cells out.
   - The view's pipelines and programs are built once.
   - The shadow, the light and the flat top of walls follow their formulas in glow, gel and paper (item 18).
