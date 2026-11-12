@@ -2,7 +2,7 @@
 // paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and simulates nothing else.
 import type { Settings } from '../model/params';
 import { paintReference } from './paint-reference';
-import { BYTES_PER_CELL } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
 import type { Backend, Sim, Stroke } from './types';
 
 export class CpuSim implements Sim {
@@ -117,6 +117,7 @@ export class CpuBackend implements Backend<CpuSim> {
   readonly maxBufferBytes = 2 ** 30;
   readonly maxGridSide = 8192;
   bytesPerCell = BYTES_PER_CELL; // as the WebGPU backend
+  bytesPerAgent = BYTES_PER_AGENT;
   coveredBytesPerCell = 0;
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);

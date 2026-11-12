@@ -2,11 +2,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BOUNDARIES, defaultSettings, defaultStrain, STYLES, type Settings } from '../../model/params';
 import { AgentToolKind } from '../pack';
-import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT } from '../sizing';
+import {
+  BYTES_PER_AGENT_GL,
+  BYTES_PER_CELL,
+  BYTES_PER_CELL_HALF_FLOAT,
+  COVERED_BYTES_PER_CELL_HALF_FLOAT,
+} from '../sizing';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
 import { fence } from './gl';
-import { compile } from './programs';
+import { compile, ORDER_TILE } from './programs';
 import { GlSim } from './sim';
 
 /**
@@ -114,8 +119,8 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
       break;
     }
     failAt(Infinity);
-    // agents ×2, trail ×2, scent ×2, counts, env, outlines, tally; then collisions ×3 or the counting
-    // panels (×2 checks)
+    // agents ×2, the points' order ×2 and its pyramid, trail ×2, scent ×2, counts, env, outlines, tally; then
+    // collisions ×3 or the counting panels (×2 checks)
     expect(failures).toBeGreaterThanOrEqual(floatBlend ? 13 : 12);
   });
 
@@ -159,6 +164,42 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     }
     expect(Math.max(...expected)).toBeGreaterThan(256);
     expect(Array.from(await sim.readCounts())).toEqual(expected);
+    sim.destroy();
+  });
+
+  // The point passes draw in the order of the sort (order.frag, ADR 0028), every 32 steps a new one; the counts must
+  // not notice it. 'center' starts hundreds of agents of each strain in the middle cells, and the grid holds several
+  // tiles of ORDER_TILE cells with sides that no tile divides. On a periodic grid without walls every agent moves, so
+  // the counts of a step are where the agents are after it.
+  it('counts every cell and strain exactly in the order of the sort', async () => {
+    const { gl, prog } = plain();
+    const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
+    const [w, h] = [2 * ORDER_TILE + 7, ORDER_TILE + 9];
+    const sim = new GlSim(
+      gl,
+      prog,
+      settingsWith({ strains, layout: 'center', shrink: 0 }),
+      w,
+      h,
+      12 * w * h,
+      floatBlend,
+    );
+    for (const steps of [1, 33, 64]) {
+      sim.run(steps - sim.step);
+      const order = sim.readOrder();
+      expect(order.filter((i, k) => k % 2 === 1 && i !== (k - 1) / 2).length, `step ${sim.step}`).toBeGreaterThan(
+        w * h,
+      );
+      const expected = new Array<number>(w * h * 4).fill(0);
+      for (const a of await sim.readAgents()) {
+        const [x, y] = [((Math.floor(a.x) % w) + w) % w, ((Math.floor(a.y) % h) + h) % h];
+        const k = (y * w + x) * 4 + (a.bits & 3);
+        if (a.bits & 4) expected[k] = (expected[k] ?? 0) + 1;
+      }
+      // Above 256 the carries count too; later the agents spread out, and dense cells still hold many.
+      expect(Math.max(...expected), `step ${sim.step}`).toBeGreaterThan(sim.step === 1 ? 256 : 32);
+      expect(Array.from(await sim.readCounts()), `step ${sim.step}`).toEqual(expected);
+    }
     sim.destroy();
   });
 
@@ -316,6 +357,8 @@ describe.each(PATHS)('backend, float blending %s', (floatBlend) => {
   it('reports the memory and grid limits of its counting path', () => {
     expect(backend.supportsCollisions).toBe(floatBlend);
     expect(backend.bytesPerCell).toBe(floatBlend ? BYTES_PER_CELL : BYTES_PER_CELL_HALF_FLOAT);
+    // The order of the point passes and its sort (ADR 0028).
+    expect(backend.bytesPerAgent).toBe(BYTES_PER_AGENT_GL);
     // Covered food needs the 8-bit `presence` target only without float blending (ADR 0022).
     expect(backend.coveredBytesPerCell).toBe(floatBlend ? 0 : COVERED_BYTES_PER_CELL_HALF_FLOAT);
   });

@@ -10,7 +10,7 @@ import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
 import { OutOfMemoryError } from './gpu';
-import { BYTES_PER_AGENT, memoryBudget } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_AGENT_GL, memoryBudget } from './sizing';
 import { compact, Placement, sweep } from './sweep';
 import { paintReference } from './paint-reference';
 import type { Backend, Stroke } from './types';
@@ -1331,6 +1331,32 @@ describe('lattices', () => {
     expect(most(cells, BYTES_PER_AGENT, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
     expect(most(45_000, BYTES_PER_AGENT + 6, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
     expect(most(cells, BYTES_PER_AGENT, 0)).toBeGreaterThan(most(2 * cells, BYTES_PER_AGENT, 0));
+  });
+
+  // ADR 0028: WebGL2 holds the order of its point passes, 22 B more per agent (BYTES_PER_AGENT_GL). The fit counts the
+  // bytes per agent of the backend.
+  it('count the bytes per agent of the backend when they decide whether a lattice fits', async () => {
+    const s = jones('shrinking').settings(); // 300 × 300 cells, a dish with 45,000 agents
+    const cells = 300 * 300;
+    const budget = memoryBudget();
+    for (const perAgent of [BYTES_PER_AGENT, BYTES_PER_AGENT_GL]) {
+      const most = Math.floor((budget - 45_000 * perAgent) / cells);
+      for (const [more, holds] of [
+        [0, true],
+        [1, false],
+      ] as const) {
+        const backend = new CpuBackend();
+        backend.bytesPerAgent = perAgent;
+        backend.bytesPerCell = most + more;
+        const engine = await Engine.create(canvas(1280, 720), s, undefined, backend);
+        const at = `${perAgent} B per agent, ${most + more} B per cell`;
+        expect(engine.settings.lattice, at).toEqual(holds ? [300, 300] : null);
+      }
+    }
+    // The second case lies on its own boundary: with the bytes per agent of WebGPU it would hold.
+    expect(Math.floor((budget - 45_000 * BYTES_PER_AGENT) / cells)).toBeGreaterThan(
+      Math.floor((budget - 45_000 * BYTES_PER_AGENT_GL) / cells),
+    );
   });
 
   // ADR 0025, decision 12, and ADR 0026: a new capacity rebuilds the simulation, on the same lattice.

@@ -361,4 +361,11 @@ describe('growth and shrinkage (ADR 0025)', () => {
     // The largest grid has 13 levels with its cells: the arrays of 13 in growth.frag hold them.
     expect(pyramidLevels(4096 * 4096).length + 1).toBe(13);
   });
+
+  // The sort of the WebGL2 point passes (gl/glsl/order.frag, ADR 0028) builds the same pyramid over the agent slots.
+  // Its gather reads up to 11 levels: they hold the most agents of WebGL2, 2^22 in 2048 rows of 2048.
+  it('holds the agent slots of WebGL2 in 11 levels', () => {
+    expect(pyramidLevels(2 ** 22).length).toBe(11);
+    expect(pyramidLevels(2 ** 22 + 1).length).toBe(12);
+  });
 });
