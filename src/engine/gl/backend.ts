@@ -2,8 +2,8 @@ import type { Settings } from '../../model/params';
 import { at } from '../at';
 import { levels, STRAND_BLEND, strandLevel } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
-import { packView, VIEW_BYTES } from '../render';
-import { scentLevel, scentLevelSize } from '../scent';
+import { packView, trailLevel, VIEW_BYTES } from '../render';
+import { levelSize, scentLevel, scentLevelSize } from '../scent';
 import { BYTES_PER_CELL, BYTES_PER_CELL_HALF_FLOAT, COVERED_BYTES_PER_CELL_HALF_FLOAT, equilibrium } from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
@@ -38,6 +38,10 @@ export class WebGl2Backend implements Backend<GlSim> {
   private coarse: Target | undefined;
   /** What the coarse map holds: it is filled again only when the scent or the shape changed, or the level or arena. */
   private coarseHolds: { sim: GlSim; step: number; revision: number; level: number; boundary: string } | undefined;
+  /** The trail's coarse map (trail-down.frag) for a view zoomed out: half the grid's sides, rounded up. */
+  private trailCoarse: Target | undefined;
+  /** What it holds: it is filled again only when the trail changed, or the level (render.ts `trailHolds`). */
+  private trailHolds: { sim: GlSim; trail: WebGLTexture; step: number; revision: number; level: number } | undefined;
   private frame = 0;
   private gain = 0;
   private black = 0;
@@ -170,6 +174,7 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   forget() {
     this.coarseHolds = undefined;
+    this.trailHolds = undefined;
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
@@ -181,6 +186,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     if (this.sampleTarget) destroyTarget(this.gl, this.sampleTarget);
     if (this.heights) destroyTarget(this.gl, this.heights);
     if (this.coarse) destroyTarget(this.gl, this.coarse);
+    if (this.trailCoarse) destroyTarget(this.gl, this.trailCoarse);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
@@ -295,6 +301,29 @@ export class WebGl2Backend implements Backend<GlSim> {
       textures(gl, h.program, cells);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    // Zoomed out, a pixel reads the trail from a coarser map (trail-down.frag), filled when the trail or the level
+    // changed.
+    const trailMap = trailLevel(view.scale);
+    const trailCoarse = trailMap > 0 ? this.trailCoarseFor(sim) : undefined;
+    const kept = this.trailHolds;
+    if (
+      trailCoarse &&
+      !(
+        kept?.sim === sim &&
+        kept.trail === trail &&
+        kept.step === sim.step &&
+        kept.revision === sim.revision &&
+        kept.level === trailMap
+      )
+    ) {
+      this.trailHolds = { sim, trail, step: sim.step, revision: sim.revision, level: trailMap };
+      const fill = this.prog.trailDown();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, trailCoarse.fbo);
+      gl.viewport(0, 0, levelSize(sim.width, trailMap), levelSize(sim.height, trailMap));
+      gl.useProgram(fill.program);
+      textures(gl, fill.program, { trail });
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
     // The scent view once its programs are built; zoomed out it reads a coarser map, filled here.
     const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
     const level = scentLevel(view.scale);
@@ -319,7 +348,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     gl.viewport(0, 0, width, height);
     const p = (this.fixed ?? scent?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
-    const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture };
+    // A sampler that the frame does not read still needs a texture: the trail stands in for its coarse map.
+    const trailLevels = trailCoarse?.texture ?? trail;
+    const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture, trailLevels };
     const scentLevels = coarse?.texture ?? viewScent;
     textures(gl, p.program, scent ? { ...all, scent: viewScent, scentLevels } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -335,6 +366,17 @@ export class WebGl2Backend implements Backend<GlSim> {
       this.coarseHolds = undefined;
     }
     return this.coarse;
+  }
+
+  /** The trail's coarse map for this grid size, made anew when the size changes. */
+  private trailCoarseFor(sim: GlSim): Target {
+    const [w, h] = [levelSize(sim.width, 1), levelSize(sim.height, 1)];
+    if (this.trailCoarse?.width !== w || this.trailCoarse.height !== h) {
+      if (this.trailCoarse) destroyTarget(this.gl, this.trailCoarse);
+      this.trailCoarse = target(this.gl, w, h, this.gl.RGBA32F);
+      this.trailHolds = undefined;
+    }
+    return this.trailCoarse;
   }
 
   /** The gel height field for this grid size, made anew when the size changes. */

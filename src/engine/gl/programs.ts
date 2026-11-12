@@ -19,6 +19,7 @@ import sampleFrag from './glsl/sample.frag?raw';
 import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
+import trailDownFrag from './glsl/trail-down.frag?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import wallsFrag from './glsl/walls.frag?raw';
 import { bindBlock, program, startProgram, type GL } from './gl';
@@ -109,6 +110,8 @@ export interface Programs {
    * Most frames never draw it.
    */
   scent: () => ScentPrograms | undefined;
+  /** The pass that fills the trail's coarse map for a view zoomed out (trail-down.frag), compiled at its first use. */
+  trailDown: () => Program;
   height: [Program, Program];
   bloom: Program;
   sample: Program;
@@ -181,6 +184,7 @@ export function compile(gl: GL): Programs {
   let scent: ScentPrograms | undefined;
   let capacity: Program | undefined;
   let growth: Growth | undefined;
+  let trailDown: Program | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
   return {
     agents: agentsProgram(gl, agentsFrag, false),
@@ -226,6 +230,7 @@ export function compile(gl: GL): Programs {
       if (!off || !on || !down || !sum) return undefined;
       return (scent = { render: [off, on], down, sum });
     },
+    trailDown: () => (trailDown ??= plain('#define ENV 0\n' + viewGlsl + trailDownFrag)),
     height: view(heightFrag),
     bloom: plain(bloomFrag),
     sample: plain(sampleFrag),

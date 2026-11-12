@@ -35,8 +35,12 @@ export function scentLevel(scale: number): number {
   return Math.min(SCENT_LEVELS_MAX, Math.max(0, Math.floor(Math.log2(scale))));
 }
 
-/** Texels per side of the map of level k: the grid side over 2^k, rounded up. */
-export const scentLevelSize = (side: number, k: number) => (side + (1 << k) - 1) >> k;
+/**
+ * Texels per side of a coarse map of level k, of the scent or of the trail (render.ts trailLevel()): the grid side over
+ * 2^k, rounded up.
+ */
+export const levelSize = (side: number, k: number) => (side + (1 << k) - 1) >> k;
+export const scentLevelSize = levelSize;
 
 type Rgb = readonly [number, number, number];
 

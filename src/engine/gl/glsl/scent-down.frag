@@ -4,8 +4,6 @@
 
 uniform sampler2D scent; // food scent (r) and light repellent (g)
 
-ivec2 scentLevelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
-
 // 1 where a cell holds scent (in the arena, not a wall), else 0.
 float scentOpen(ivec2 c) {
   ivec2 s = gridSize();
@@ -16,7 +14,7 @@ float scentOpen(ivec2 c) {
 
 void main() {
   ivec2 s = gridSize();
-  vec2 span = vec2(s) / vec2(scentLevelSize(int(V.scentFx.x)));
+  vec2 span = vec2(s) / vec2(levelSize(int(V.scentFx.x)));
   vec2 lo = floor(gl_FragCoord.xy) * span;
   vec2 hi = lo + span;
   vec3 sum = vec3(0.0);

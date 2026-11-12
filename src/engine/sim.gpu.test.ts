@@ -34,8 +34,17 @@ import { grid, growthStep, occupancy } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
-import { BACKGROUND, LATTICE_COPIES } from './render';
-import { SCENT_LOW, scentGlow, scentLevel, scentLevelSize, scentLine, scentOver, scentSensors } from './scent';
+import { BACKGROUND, LATTICE_COPIES, TRAIL_LEVELS_MAX, trailLevel } from './render';
+import {
+  levelSize,
+  SCENT_LOW,
+  scentGlow,
+  scentLevel,
+  scentLevelSize,
+  scentLine,
+  scentOver,
+  scentSensors,
+} from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -144,10 +153,12 @@ type Vec3 = [number, number, number];
 
 /**
  * The styles on the CPU without food, light and walls, as render.wgsl drew them before PR 3 (ef7f2af): the trail
- * filtered bilinearly (four taps when zoomed out), levels(), then glow (without bloom), paper or gel; the agents
- * style draws the agent counts of the cell under each pixel. The gel lighting runs the full trail filter for every
- * height lookup, as before its height pre-pass. The box edge and the dish rim fade over one pixel into the outside
- * colour, as render.wgsl draws them now. Returns sRGB bytes without the dither.
+ * filtered bilinearly, levels(), then glow (without bloom), paper or gel; the agents style draws the agent counts of
+ * the cell under each pixel. Zoomed out, the trail is the mean over the square of the pixel, from the coarse map of the
+ * level that trailLevel() gives (ADR 0028; before, four bilinear taps). The gel lighting runs a trail filter for every
+ * height lookup, as before its height pre-pass: zoomed out the four taps, which the height field still takes. The box
+ * edge and the dish rim fade over one pixel into the outside colour, as render.wgsl draws them now. Returns sRGB bytes
+ * without the dither.
  */
 function styleReference(
   { trail, counts }: { trail: Float32Array; counts?: Float32Array },
@@ -180,7 +191,46 @@ function styleReference(
       return a * (1 - fy) + b * fy;
     });
   };
-  const filtered = (px: number, py: number) => {
+  // The coarse map of the trail: each texel the mean over the cells it covers, each by the share it covers.
+  const level = trailLevel(view.scale);
+  const [nx, ny] = level > 0 ? [levelSize(w, level), levelSize(h, level)] : [w, h];
+  const coarse = new Float64Array(level > 0 ? nx * ny * 4 : 0);
+  if (level > 0) {
+    const [spanX, spanY] = [w / nx, h / ny];
+    for (let ty = 0; ty < ny; ty++)
+      for (let tx = 0; tx < nx; tx++) {
+        const [x0, x1, y0, y1] = [tx * spanX, (tx + 1) * spanX, ty * spanY, (ty + 1) * spanY];
+        for (let y = Math.floor(y0); y < y1 && y < h; y++)
+          for (let x = Math.floor(x0); x < x1 && x < w; x++) {
+            const share = (Math.min(x1, x + 1) - Math.max(x0, x)) * (Math.min(y1, y + 1) - Math.max(y0, y));
+            for (let s = 0; s < 4; s++)
+              coarse[(ty * nx + tx) * 4 + s] =
+                (coarse[(ty * nx + tx) * 4 + s] ?? 0) + (share * (trail[(y * w + x) * 4 + s] ?? 0)) / (spanX * spanY);
+          }
+      }
+  }
+  const texel = (x: number, y: number, s: number) => {
+    if (wrap) [x, y] = [((x % nx) + nx) % nx, ((y % ny) + ny) % ny];
+    else if (x < 0 || y < 0 || x >= nx || y >= ny) return 0;
+    return (level > 0 ? coarse[(y * nx + x) * 4 + s] : trail[(y * w + x) * 4 + s]) ?? 0;
+  };
+  /** The mean over the square of the pixel at (px, py), view.scale cells wide: at most 3 × 3 texels of the map. */
+  const area = (px: number, py: number) => {
+    const [rx, ry] = [nx / w, ny / h];
+    const [hx, hy] = [0.5 * view.scale * rx, 0.5 * view.scale * ry];
+    const [lx, ly, ux, uy] = [px * rx - hx, py * ry - hy, px * rx + hx, py * ry + hy];
+    const [col, row] = [Math.floor(lx), Math.floor(ly)];
+    const share = (lo: number, hi: number, i: number) => Math.max(Math.min(hi, i + 1) - Math.max(lo, i), 0);
+    const [ax, ay] = [0, 1, 2].reduce(([a, b], j) => [a + share(lx, ux, col + j), b + share(ly, uy, row + j)], [0, 0]);
+    return [0, 1, 2, 3].map((s) => {
+      let sum = 0;
+      for (let j = 0; j < 3; j++)
+        for (let c = 0; c < 3; c++) sum += share(lx, ux, col + c) * share(ly, uy, row + j) * texel(col + c, row + j, s);
+      return sum / (ax * ay);
+    });
+  };
+  const filtered = (px: number, py: number) => (view.scale <= 1 ? bilinear(px, py) : area(px, py));
+  const tapped = (px: number, py: number) => {
     if (view.scale <= 1) return bilinear(px, py);
     const o = 0.25 * view.scale;
     const taps = [
@@ -207,7 +257,7 @@ function styleReference(
       return b * Math.exp(-absorb * exposure);
     });
   const height = (px: number, py: number) =>
-    1 - Math.exp(-levels(filtered(px, py)).reduce((a, b) => a + b, 0) * exposure);
+    1 - Math.exp(-levels(tapped(px, py)).reduce((a, b) => a + b, 0) * exposure);
   const norm = (v: Vec3): Vec3 => {
     const l = Math.hypot(...v);
     return [v[0] / l, v[1] / l, v[2] / l];
@@ -5898,8 +5948,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // A paused simulation keeps its coarse map: the first version filled it in every frame, reading every cell (review
     // of 2026-11-11: 4 ms per frame at 4096 × 2560). A step, a stroke or a new zoom level fill it again, so the view
-    // never shows an old scent.
-    it('fills the coarse map again only when the scent, the shape or the level changed', async () => {
+    // never shows an old scent. The trail has a coarse map too for a view zoomed out (ADR 0028), under the same rule:
+    // each change fills both maps, one pass each.
+    it('fills the coarse maps again only when the scent, the trail, the shape or the level changed', async () => {
       const settings = { ...extended({ style: 'paper', layout: 'empty', strains: [defaultStrain(0)] }), bloom: 0 };
       const sim = await make(settings, W, H, 1);
       sim.paint([{ kind: 'food', from: [20, 24], to: [20, 24], radius: 3 }]);
@@ -5922,12 +5973,28 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const kept = await count();
       expect(await count()).toBe(kept);
       sim.run(1);
-      expect(await count()).toBe(kept + 1);
+      expect(await count()).toBe(kept + 2);
       expect(await count()).toBe(kept);
       sim.paint([{ kind: 'food', from: [44, 24], to: [44, 24], radius: 3 }]);
-      expect(await count()).toBe(kept + 1);
-      expect(await count({ ...view, scale: 6 })).toBe(kept + 1);
+      expect(await count()).toBe(kept + 2);
+      expect(await count({ ...view, scale: 6 })).toBe(kept + 2);
       expect(await count({ ...view, scale: 6 })).toBe(kept);
+      // Without the scent view only the trail's map is left, and up to 2 cells per pixel a frame needs no map.
+      const plain = async (scale: number) => {
+        const before = passes.mock.calls.length;
+        await backend.capture(sim, settings, { ...view, scale }, 32, 24);
+        return passes.mock.calls.length - before;
+      };
+      const frame = await plain(1.5);
+      expect(await plain(1.5)).toBe(frame);
+      expect(await plain(6)).toBe(frame);
+      sim.run(1);
+      expect(await plain(1.5)).toBe(frame);
+      expect(await plain(6)).toBe(frame + 1);
+      expect(await plain(6)).toBe(frame);
+      sim.writeTrail(await sim.readTrail());
+      expect(await plain(6)).toBe(frame + 1);
+      expect(await plain(3)).toBe(frame + 1);
       vi.restoreAllMocks();
       // Steps while the map was kept (the map of 4 cells refreshes only its scent), then a stroke: the view shows the
       // scent of now.
@@ -5991,9 +6058,79 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   // Without food, light or walls the renderer takes the pass without them (`ENV` off), which must draw the pixels
   // of ef7f2af: the reference above computes them on the CPU. The dither moves a channel by at most 1, rounding by
   // 1 more, the gel's hardware filtering of its height field by at most 2. Fit (one bilinear lookup) and zoomed
-  // out (four taps), every style, across the wrap seam, the box edge and the dish rim.
+  // out (the mean under each pixel), every style, across the wrap seam, the box edge and the dish rim.
   describe('styles without food, light or walls', () => {
     const SIZE = 128;
+
+    // Zoomed out, a pixel shows the mean of the trail over its square (ADR 0028): from the trail itself up to 2 cells
+    // per pixel, above from a coarse map of the mean over 2, 4, 8 or 16 cells per side. A trail of noise from cell to
+    // cell: a cell left out or counted twice shows. Sides that no power of two divides, where a texel of a map covers a
+    // share of a cell; the copies of the periodic grid far from it; and the largest zoom, 8 cells per pixel.
+    it.each(
+      BOUNDARIES.flatMap((boundary) =>
+        (
+          [
+            [64, 48],
+            [47, 33],
+          ] as const
+        ).map(([w, h]) => ({ boundary, w, h })),
+      ),
+    )(
+      'draw the mean of the trail under each pixel when zoomed out ($boundary, $w × $h)',
+      async ({ boundary, w, h }) => {
+        const base: Settings = {
+          ...defaultSettings(),
+          boundary,
+          layout: 'empty',
+          strains: [defaultStrain(0), defaultStrain(1)],
+          exposure: 0,
+          bloom: 0,
+        };
+        const sim = await make(base, w, h, 1);
+        const trail = new Float32Array(w * h * 4);
+        let r = 12345;
+        const rand = () => (r = (Math.imul(r, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+        for (let i = 0; i < w * h; i++) {
+          trail[i * 4] = 40 * rand() ** 3;
+          trail[i * 4 + 1] = 40 * rand() ** 3;
+        }
+        sim.writeTrail(trail);
+        const levels = await backend.settle(sim);
+        expect([1.5, 2, 3.9, 4, 8, 15.9, 16, 40].map(trailLevel)).toEqual([0, 1, 1, 2, 3, 3, 4, TRAIL_LEVELS_MAX]);
+        const worst: string[] = [];
+        const views: View[] = [1.01, 1.5, 1.99, 2, 2.5, 3.9, 4, 5.3, 8].map((scale) => ({
+          center: [w / 2 + 0.37, h / 2 - 0.21],
+          scale,
+        }));
+        // The copies of a periodic grid, more than one period away from it.
+        if (boundary === 'wrap')
+          views.push({ center: [-3.3 * w, 2.7 * h], scale: 7.5 }, { center: [5.2 * w, -4 * h], scale: 2.2 });
+        for (const style of ['glow', 'paper'] as const)
+          for (const view of views) {
+            const settings = { ...base, style };
+            const img = await backend.capture(sim, settings, view, 96, 64);
+            const ref = styleReference(
+              { trail },
+              [w, h],
+              settings,
+              view,
+              { exposure: levels.gain, black: levels.black },
+              [96, 64],
+            );
+            let [max, sum] = [0, 0];
+            for (let i = 0; i < ref.length; i++) {
+              if (i % 4 === 3) continue;
+              const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
+              [max, sum] = [Math.max(max, d), sum + d];
+            }
+            const mean = sum / ((ref.length / 4) * 3);
+            // The dither moves a channel by at most 1.
+            if (max > 2 || mean > 0.75) worst.push(`${style} at ${view.scale}: max ${max}, mean ${mean.toFixed(2)}`);
+          }
+        expect(worst).toEqual([]);
+      },
+    );
+
     it.each(BOUNDARIES)(
       'match the colours of the pass before food and walls looked like them (%s)',
       async (boundary) => {
@@ -6023,9 +6160,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(sim.hasEnvironment).toBe(false);
         const worst: string[] = [];
         for (const style of STYLES)
+          // Zoomed out: 1.5 cells per pixel from the trail itself, 2.5 and 5.3 from its coarse maps of 2 and 4 cells.
           for (const view of [
             { center: [14, 12], scale: 1 / 4 },
             { center: [32, 24], scale: 1.5 },
+            { center: [31.3, 22.7], scale: 2.5 },
+            { center: [31.3, 22.7], scale: 5.3 },
           ] as View[]) {
             const settings = { ...base, style };
             const agents = style === 'agents';

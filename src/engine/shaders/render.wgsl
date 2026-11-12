@@ -16,7 +16,7 @@ struct View {
   colors: array<vec4f, 4>, // strain colors, linear RGB
   background: vec4f,  // linear RGB
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
-  fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), unused
+  fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), level of the trail's map (0 to 4)
   scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
@@ -34,6 +34,7 @@ const DISH_FILL = 0.945;
 @group(0) @binding(6) var heights: texture_2d<f32>; // gel style: written by `heightField` each frame
 @group(0) @binding(7) var heightSampler: sampler;   // bilinear, clamped
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
+@group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
@@ -98,12 +99,85 @@ fn bilinear(p: vec2f) -> vec4f {
   return mix(a, b, f.y);
 }
 
-// Four taps spread over the pixel footprint when zoomed out, against aliasing.
+// Texels per side of a coarse map of level k (1 and up), of the trail or of the scent: the grid side over 2^k, rounded
+// up. Its texels tile the grid exactly, each s / n cells wide, so on the periodic grid the map wraps with the grid.
+fn levelSize(k: u32) -> vec2i {
+  return (size() + i32((1u << k) - 1u)) >> vec2u(k);
+}
+
+// The trail on the coarse map of level V.fx.w (1 and up), one texel per fragment: the mean over the cells that the
+// texel covers, each by the share it covers. On a side that 2^k divides, a texel is the mean of 2^k × 2^k cells, the
+// same as k times the mean of 2 × 2. Zoomed out, a pixel reads this map (trailArea): render.ts fills it only for the
+// frames that do, and only when the trail changed.
+@fragment
+fn trailDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  let s = size();
+  let span = vec2f(s) / vec2f(levelSize(u32(V.fx.w))); // cells per texel
+  let lo = floor(frag.xy) * span;
+  let hi = lo + span;
+  var sum = vec4f(0.0);
+  for (var y = i32(floor(lo.y)); f32(y) < hi.y && y < s.y; y++) {
+    let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
+    for (var x = i32(floor(lo.x)); f32(x) < hi.x && x < s.x; x++) {
+      let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
+      sum += w * textureLoad(trail, vec2i(x, y), 0);
+    }
+  }
+  return sum / (span.x * span.y);
+}
+
+// Zoomed out (more than 1 cell per pixel): the mean of the trail over the square of the pixel, V.scale cells wide.
+// The map of level V.fx.w = floor(log2(V.scale)) has texels of 1/2 to 1 pixel (level 0 is the trail itself), so the
+// square covers at most 3 × 3 of them, each by the share that lies under the pixel. Up to 2 cells per pixel that is the
+// exact mean of the cells under the pixel; above, a texel that the pixel covers in part counts with its mean. At 1 cell
+// per pixel it is the bilinear filter. Outside a closed arena the trail is 0, as for trailAt(). Before, a pixel took
+// four bilinear taps of the trail a quarter of the pixel apart: 16 cells far apart from those of the pixels beside it,
+// which missed the cache (49 ms a frame at 8 cells per pixel, ADR 0028), and from 4 cells per pixel on they left cells
+// out, which showed as moiré.
+fn trailArea(p: vec2f) -> vec4f {
+  let k = u32(V.fx.w);
+  var n = size();
+  if (k > 0u) { n = levelSize(k); }
+  let ratio = vec2f(n) / vec2f(size()); // texels per cell
+  let half = 0.5 * V.scale * ratio;
+  let lo = p * ratio - half;
+  let hi = p * ratio + half;
+  let i = vec2i(floor(lo));
+  var xs = vec3i(i.x, i.x + 1, i.x + 2);
+  var ys = vec3i(i.y, i.y + 1, i.y + 2);
+  if (V.boundary == 0u) {
+    // One wrap for the 3 × 3 texels: the column after the last one is the first, and so the row.
+    let w = wrapCell(i, n);
+    let x1 = select(w.x + 1, 0, w.x == n.x - 1);
+    let y1 = select(w.y + 1, 0, w.y == n.y - 1);
+    xs = vec3i(w.x, x1, select(x1 + 1, 0, x1 == n.x - 1));
+    ys = vec3i(w.y, y1, select(y1 + 1, 0, y1 == n.y - 1));
+  }
+  var sum = vec4f(0.0);
+  var area = vec2f(0.0);
+  for (var j = 0; j < 3; j++) {
+    let wy = max(min(hi.y, f32(i.y + j + 1)) - max(lo.y, f32(i.y + j)), 0.0);
+    area.y += wy;
+    var row = vec4f(0.0);
+    for (var c = 0; c < 3; c++) {
+      let wx = max(min(hi.x, f32(i.x + c + 1)) - max(lo.x, f32(i.x + c)), 0.0);
+      if (j == 0) { area.x += wx; }
+      let q = vec2i(xs[c], ys[j]);
+      if (any(q < vec2i(0)) || any(q >= n)) { continue; }
+      if (k == 0u) {
+        row += wx * textureLoad(trail, q, 0);
+      } else {
+        row += wx * textureLoad(trailLevels, q, 0);
+      }
+    }
+    sum += wy * row;
+  }
+  return sum / (area.x * area.y);
+}
+
 fn trailFiltered(p: vec2f) -> vec4f {
   if (V.scale <= 1.0) { return bilinear(p); }
-  let o = 0.25 * V.scale;
-  return 0.25 * (bilinear(p + vec2f(-o, -o)) + bilinear(p + vec2f(o, -o)) +
-                 bilinear(p + vec2f(-o, o)) + bilinear(p + vec2f(o, o)));
+  return trailArea(p);
 }
 
 // Auto levels: subtract the black level from the summed trail, keep the strain ratios.
@@ -215,7 +289,7 @@ fn heightAt(q: vec2f) -> f32 {
   return textureSampleLevel(heights, heightSampler, (p + 1.0) / (s + 2.0), 0.0).r;
 }
 
-// Four taps spread over the pixel footprint when zoomed out, like trailFiltered().
+// Four taps spread over the pixel footprint when zoomed out, against aliasing.
 fn heightFiltered(p: vec2f) -> f32 {
   if (V.scale <= 1.0) { return heightAt(p); }
   let o = 0.25 * V.scale;
@@ -707,12 +781,6 @@ fn scentFrom(s: Scent, d: vec2f) -> Scent {
   return Scent(s.v * k, s.gx * k, s.gy * k, s.w);
 }
 
-// Texels per side of the coarse map of level k (1 to 3): the grid side over 2^k, rounded up. Its texels tile the
-// grid exactly, each s / n cells wide, so on the periodic grid the map wraps with the grid.
-fn scentLevelSize(k: u32) -> vec2i {
-  return (size() + i32((1u << k) - 1u)) >> vec2u(k);
-}
-
 // 1 where a cell holds scent (in the arena, not a wall), else 0.
 fn scentOpen(c: vec2i) -> f32 {
   let s = size();
@@ -734,7 +802,7 @@ override SUM_ONLY: bool = false;
 @fragment
 fn scentDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let s = size();
-  let span = vec2f(s) / vec2f(scentLevelSize(u32(V.scentFx.x))); // cells per texel
+  let span = vec2f(s) / vec2f(levelSize(u32(V.scentFx.x))); // cells per texel
   let lo = floor(frag.xy) * span;
   let hi = lo + span;
   var sum = vec3f(0.0);
@@ -754,7 +822,7 @@ fn scentDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 // it that holds scent, and the gradient per cell.
 fn scentCoarse(p: vec2f, k: u32) -> Scent {
   let s = size();
-  let n = scentLevelSize(k);
+  let n = levelSize(k);
   let ratio = vec2f(n) / vec2f(s); // texels per cell
   let q = p * ratio - 0.5;
   let i = vec2i(floor(q));
