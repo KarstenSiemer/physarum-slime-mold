@@ -292,9 +292,10 @@ ask only about problems that stay unsolved).
     scene at step 500 are those of the commit before on both backends, and a scene that makes its view after every step
     runs as one that never does (test). Options: (b) this; (c) the mean in the render pass, which is not exact (Cost).
 33. **A third trail texture only from two passes on** (this branch, 2026-11-12; `viewTrailOn()` and
-    `VIEW_BYTES_PER_CELL` in `sizing.ts`, 16 B per cell, counted by the memory fit). Reason: one pass fits in the free
+    `VIEW_BYTES_PER_CELL` in `sizing.ts`, 16 B per cell, counted by the memory fit; 24 B with the scent of decision
+    36). Reason: one pass fits in the free
     texture of the pair, and every scene of Jones 2010 runs one pass, so their lattices need no more memory; a user who
-    gives a scene that moves first two passes or more gets the exact view for 16 B per cell.
+    gives a scene that moves first two passes or more gets the exact view for 16 B per cell (24 B with its scent).
 34. **The view's passes are built at their first use** (this branch, 2026-11-12): the WebGPU pipelines like those of
     covered food, the WebGL2 program like the covered one. Reason: a scene that senses first never needs them, and
     SwiftShader in CI builds every pipeline built at the start.
@@ -328,7 +329,8 @@ at `909bb62`); main's tests that the shaders without the view draw the pixels of
 byte of the simulation pass. Moving first, the view's scent is the scent after the next step, bit for bit, wherever no
 food adds its source, and a frame with the scent view (on the grid and on its coarse map of level 2, after new settings)
 draws what a scene that senses first draws for the view's map, and not what it draws for the scent before its
-diffusion (`engine.gpu.test.ts`). Seven mutations (the raw scent in the render pass on each backend, the view pass
+diffusion (`engine.gpu.test.ts`). The merges of `909bb62` and `8e720bb` keep every byte of the simulation of all 17 scenes on both
+backends (digests at step 500 against the commit of decision 31). Seven mutations (the raw scent in the render pass on each backend, the view pass
 without its scent on WebGPU, the scent of the first view pass read again by the second on each backend, new settings
 without a new `revision` on each backend) are killed; the last two survived the first test, which drew at the level of
 the grid, and were killed once it also drew on the coarse map.
@@ -483,20 +485,22 @@ pixel), medians of 12 to 16 rounds while other jobs shared the machine:
   still read the sensed map, and zoomed out its 4 taps average the sensed map.
 - Neither gives main's pixels: the dynamics differ (this ADR). (b) gives the renderer the kind of map it drew before.
 
-The view as built (decisions 31 to 34), alone on the M3 Pro, 2560 × 1600 at fit, 16 alternating rounds of 30 frames:
-a frame whose view is stale (one view pass, as after a step) against a frame of a state whose view is made.
+The view as built (decisions 31 to 34, with the scent of decision 36), alone on the M3 Pro, 2560 × 1600 at fit, 16
+alternating rounds of 30 frames: a frame whose view is stale (one view pass, as after a step) against a frame of a state
+whose view is made.
 
 | Scene (grid, order)                             | WebGPU: frame, with the view pass | WebGL2: frame, with the view pass |
 | ----------------------------------------------- | --------------------------------- | --------------------------------- |
-| Transport network (200 × 200, move first)       | 1.42 ms, + 0.03 ms                | 1.57 ms, + 0.11 ms                |
-| Shrinking plasmodium (300 × 300, move first)    | 0.78 ms, + 0.02 ms                | 1.02 ms, + 0.08 ms                |
-| Transport network, 2 passes (extended)          | 1.43 ms, + 0.04 ms                | 1.57 ms, + 0.16 ms                |
-| Default settings (1536 × 960, sense first)      | 1.87 ms, no pass (− 0.01 ms)      | 2.07 ms, no pass (+ 0.01 ms)      |
-| Three strains (1536 × 960, 4.4 M agents, sense) | 1.95 ms, no pass (+ 0.02 ms)      | 2.19 ms, no pass (− 0.02 ms)      |
+| Transport network (200 × 200, move first)       | 1.21 ms, + 0.03 ms                | 1.38 ms, + 0.09 ms                |
+| Shrinking plasmodium (300 × 300, move first)    | 0.65 ms, + 0.04 ms                | 0.86 ms, + 0.09 ms                |
+| Transport network, 2 passes (extended)          | 1.24 ms, + 0.07 ms                | 1.38 ms, + 0.19 ms                |
+| Default settings (1536 × 960, sense first)      | 1.63 ms, no pass (0.00 ms)        | 1.83 ms, no pass (+ 0.02 ms)      |
+| Three strains (1536 × 960, 4.4 M agents, sense) | 1.71 ms, no pass (− 0.00 ms)      | 1.88 ms, no pass (+ 0.02 ms)      |
 
-The pass costs 0.02 to 0.04 ms per frame on WebGPU and 0.08 to 0.16 ms on WebGL2 (medians; rounds within ± 0.1 to
-0.26 ms), once per frame whatever the steps per frame; the scenes that sense first draw as before. The frame times
-here are lower than in the table above, which other jobs shared the machine for.
+The pass costs 0.03 to 0.07 ms per frame on WebGPU and 0.09 to 0.19 ms on WebGL2 (medians; rounds within ± 0.05 to
+0.25 ms), once per frame whatever the steps per frame; the scenes that sense first draw as before. Before the scent of
+decision 36 it cost 0.02 to 0.04 and 0.08 to 0.16 ms. The frame times here are lower than in the table above, which
+other jobs shared the machine for.
 
 ### Tests
 
@@ -525,8 +529,8 @@ here are lower than in the table above, which other jobs shared the machine for.
   the view is the trail itself and no pass runs; a scene that makes its view after every step runs as one that never
   does (`sim.gpu.test.ts`); a frame moving first draws what a frame sensing first draws for the view's map, and not
   what it draws for the raw trail (`engine.gpu.test.ts`, one and two passes, with the glow); the third texture and the
-  memory fit (`sizing.test.ts`, `engine-env.test.ts`). On SwiftShader alone the data test took up to 5.3 s and the
-  frame test 9.6 s (the view's pipelines are built at first use): their limits are 120 and 240 s (ADR 0010).
+  memory fit (`sizing.test.ts`, `engine-env.test.ts`). On SwiftShader alone the data test took up to 7.2 s and the
+  frame test 12.1 s (the view's pipelines are built at first use): their limits are 120 and 240 s (ADR 0010).
 - On SwiftShader on the M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`) the new and changed GPU
   tests took at most 5.6 s (Jones' one map in a box, WebGL2, which has a limit of 120 s); every other new test at most
   3.1 s of 60 s. At the four times of CI (ADR 0010) none passes a quarter of its limit, so no limit changes. With the
@@ -594,6 +598,6 @@ for the order of each scene's paper (all killed, below):
   25).
 - No pass, texture or buffer is added to a step; moving first, the diffusion pass reads `env` and `counts` once per
   output cell instead of per tile cell (WebGPU) or per tap (WebGL2). WebGPU builds each diffusion pass for both orders
-  at startup (10 pipelines instead of 5). A scene that moves first runs one view pass per frame (0.02 to 0.16 ms), and
-  from two diffusion passes on holds a third trail texture of 16 B per cell.
+  at startup (10 pipelines instead of 5). A scene that moves first runs one view pass per frame (0.03 to 0.19 ms), and
+  from two diffusion passes on holds a third trail and scent of 24 B per cell.
 - Links have version 2; an app from before this change refuses them and loads their settings alone, with its notice.

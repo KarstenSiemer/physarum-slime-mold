@@ -228,8 +228,8 @@ GPU checks use invariants, not long exact trajectories:
   | `engine.gpu.test.ts`, the hook that builds both backends                                                                            | 180 → 360 s      | 106.5 s                                                                                                 | image, review of ADR 0020 beside more load                                         |
   | `lattice.gpu.test.ts`, each test (ADR 0026, new)                                                                                    | 240 s            | at most 26.8 s; 21.1 s in the review, 38.0 s for an earlier, heavier version                            | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
   | `sim.gpu.test.ts`, "release the covered-food factor of the scent where an agent covers it", in each order (ADR 0027)                | 60 → 120 s       | 3.9 s, 15.6 s at four times                                                                             | SwiftShader on an M3 Pro (macOS), alone, 2026-11-12                                |
-  | `sim.gpu.test.ts`, "draws the trail and scent after the step's diffusion, moving first" (ADR 0027)                                  | 60 → 120 s       | 5.3 s, 21.1 s at four times                                                                             | SwiftShader on an M3 Pro (macOS), alone, 2026-11-12                                |
-  | `engine.gpu.test.ts`, "draws the map", and "draws the scent view of the map", "after the step's diffusion, moving first" (ADR 0027) | 60 → 240 s       | 9.6 s, 38.5 s at four times                                                                             | SwiftShader on an M3 Pro (macOS), alone, 2026-11-12                                |
+  | `sim.gpu.test.ts`, "draws the trail and scent after the step's diffusion, moving first" (ADR 0027)                                  | 60 → 120 s       | 7.2 s, 28.8 s at four times                                                                             | SwiftShader on an M3 Pro (macOS), alone, 2026-11-12                                |
+  | `engine.gpu.test.ts`, "draws the map", and "draws the scent view of the map", "after the step's diffusion, moving first" (ADR 0027) | 60 → 240 s       | 12.1 s, 48.2 s at four times                                                                            | SwiftShader on an M3 Pro (macOS), alone, 2026-11-12                                |
   | `lattice.gpu.test.ts`, the hook that builds both backends (ADR 0026, new)                                                           | 360 s            | about 24 s; about 21 s in the review                                                                    | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
   | `tests/e2e/lattice.spec.ts`, each test (ADR 0026, new)                                                                              | 240 s (CI)       | at most 39.8 s (the pointer on 1280 × 720, WebGPU)                                                      | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
   | `sim.gpu.test.ts`, growth and shrinkage, the hook that builds the passes of growth, a capacity and walls (ADR 0025, new)            | 180 s            | 4.7 s (WebGL2), 2.0 s (WebGPU)                                                                          | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
@@ -273,6 +273,12 @@ GPU checks use invariants, not long exact trajectories:
   and then counts more than 150 agents (three times its start). The test gets 360 s. With growth off
   it fails (47 agents).
 
+  With the step order and the walls of ADR 0027 the count stays: built as the app builds the scene on
+  1280 × 720 pixels, seeds 1 to 40 have 173 to 385 agents at step 30 on WebGPU and 182 to 386 on
+  WebGL2 (median 301 and 289), against 173 to 385 and 182 to 388 on main (`8e720bb`; M3 Pro,
+  2026-11-12). The scene senses first, as on main, and in 30 steps the colony meets no wall. The
+  threshold of 150 keeps its margin.
+
 - The verify job keeps its limit of 30 min (`.github/workflows/ci.yml`). A limit adds no time to a
   wait that passes. On GitHub the verify jobs of PR 2, 3, 5 and 6 took 12.8 to 18.0 min. PR 6 on
   PR 3 (`f099dd1`) took 12.9 min: its GPU project (419 tests) 281 s, Fig. 10 on WebGPU 92 s and its
@@ -281,3 +287,9 @@ GPU checks use invariants, not long exact trajectories:
   Fig. 10 takes more than about 15 min, before the test's own limit of 20 min. An e2e test that runs
   into its limit now costs up to 8 min with its retry, against 4 min before: one such test fits in
   that run, two do not.
+- On 2026-11-12 the jobs on GitHub took 10 to 25 min (GPU) and 14 to 30 min (e2e) of their 30 min;
+  the same code on `main` took 11 and 19 min for the GPU tests in two runs. In the report of PR #32
+  the e2e tests took 24.9 min: `scenes.spec.ts` 7.7, `ui.spec.ts` 6.2, `link.spec.ts` 3.7,
+  `lattice.spec.ts` 2.6, `app.spec.ts` and `growth.spec.ts` 2.3 min each. Each test job now runs in
+  two parts (ADR 0014): by those times the e2e shards take about 13 and 12 min, and each GPU part
+  about half of its tests. The limit of each part stays 30 min.

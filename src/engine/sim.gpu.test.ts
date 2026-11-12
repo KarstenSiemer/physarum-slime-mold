@@ -890,7 +890,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           expect(bits(viewScent, rawScent)).toBe(false);
         }
       },
-      // Up to 5.3 s on SwiftShader on an M3 Pro, 21.1 s at the four times of CI: 120 s keeps it under a quarter (ADR 0010).
+      // Up to 7.2 s on SwiftShader on an M3 Pro, 28.8 s at the four times of CI: 120 s keeps it under a quarter (ADR 0010).
       120_000,
     );
 

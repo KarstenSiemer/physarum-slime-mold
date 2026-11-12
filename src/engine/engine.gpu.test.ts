@@ -810,7 +810,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the view (ADR 0027)', (kind)
       sim.writeTrail(raw);
       expect(maxDiff(moving, await capture(engine))).toBeGreaterThan(10);
       engine.destroy();
-      // Up to 9.6 s on SwiftShader on an M3 Pro (the view's pipelines are built at first use), 38.5 s at the four times
+      // Up to 12.1 s on SwiftShader on an M3 Pro (the view's pipelines are built at first use), 48.2 s at the four times
       // of CI: 240 s keeps it under a quarter (ADR 0010).
     },
     240_000,

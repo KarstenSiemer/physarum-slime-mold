@@ -40,12 +40,24 @@ jobs:
         with:
           path: dist
 
-  # The tests run in two jobs at the same time, so each stays well inside its limit on a slow runner
-  # (2026-11-11: GPU project 609 s and e2e suite 1,100 s in one job ran into its 30 min).
+  # The tests run in four jobs at the same time, so each stays well inside its limit on a slow runner
+  # (2026-11-11: GPU project 609 s and e2e suite 1,100 s in one job ran into its 30 min; 2026-11-12:
+  # GPU 10 to 25 min and e2e 14 to 30 min in a job each, owner decision to split both, ADR 0014).
+  # The GPU tests split by the backend in their names: one part runs every test whose full name holds
+  # "webgpu", the other every other test, so each test runs exactly once. The files of the GPU project
+  # already run at the same time, and one file took 21 of the 21 min, so a split by file would not help.
   verify-gpu:
-    name: verify-gpu
+    name: verify-gpu (${{ matrix.part }})
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: webgpu
+            tests: webgpu
+          - part: rest
+            tests: ^(?!.*webgpu)
     # Chromium and its system packages come with the image, so a run needs no Ubuntu mirror (2026-11-11:
     # the runners could not resolve archive.ubuntu.com for 45 min). The image's Playwright version must
     # equal @playwright/test in package.json; Renovate updates both in one pull request (ADR 0014).
@@ -63,22 +75,32 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
       - run: npm ci
-      - run: npm run lint
-      - run: npm run check
-      - run: npm test
-      - run: npm run test:gpu
+      - if: matrix.part == 'rest'
+        run: npm run lint
+      - if: matrix.part == 'rest'
+        run: npm run check
+      - if: matrix.part == 'rest'
+        run: npm test
+      - run: npm run test:gpu -- --testNamePattern "$TESTS"
+        env:
+          TESTS: ${{ matrix.tests }}
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-report-gpu
+          name: test-report-gpu-${{ matrix.part }}
           path: .vitest/attachments/
           retention-days: 7
 
+  # Playwright shares the e2e tests out by test (fullyParallel in playwright.config.ts).
   verify-e2e:
-    name: verify-e2e
+    name: verify-e2e (${{ matrix.shard }}/2)
     needs: build
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # Chromium and its system packages come with the image, so a run needs no Ubuntu mirror (2026-11-11:
     # the runners could not resolve archive.ubuntu.com for 45 min). The image's Playwright version must
     # equal @playwright/test in package.json; Renovate updates both in one pull request (ADR 0014).
@@ -103,16 +125,19 @@ jobs:
           path: ${{ runner.temp }}/site
       - name: Unpack the built site (e2e tests run against the files that deploy publishes)
         run: mkdir dist && tar -xf "$RUNNER_TEMP/site/artifact.tar" -C dist
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --shard="$SHARD/2"
+        env:
+          SHARD: ${{ matrix.shard }}
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-report-e2e
+          name: test-report-e2e-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
 
-  # The ruleset requires a check named verify (ADR 0014). It passes only when both test jobs passed;
-  # a skipped or failed job fails it.
+  # The ruleset requires a check named verify (ADR 0014). It passes only when every part of both test
+  # jobs passed (the result of a matrix job is success only if all its parts succeeded); a skipped or
+  # failed part fails it.
   verify:
     name: verify
     needs: [build, verify-gpu, verify-e2e]
