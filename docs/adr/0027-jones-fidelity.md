@@ -1,0 +1,603 @@
+# 0027: The model as in Jones' papers: step order, dish, boundaries and the figures' foods
+
+- Status: accepted (owner decisions of 2026-11-11: the scenes of Jones work exactly as in his papers, and the
+  corrections apply to both models; owner decisions of 2026-11-12: each scene runs the order of a step of its paper,
+  and every scene looks soft)
+- Date: 2026-11-11, amended 2026-11-12
+
+## Context
+
+A fidelity check of 2026-11-11 compared the eight scenes of Jones 2010 (J. Jones, Characteristics of pattern
+formation and evolution in approximations of Physarum transport networks, Artificial Life 16(2): 127–153) with the
+images of their figures, each on the lattice of its figure (ADR 0026), and with a reference simulator written from the
+paper's text. Page numbers are those of Jones 2010 unless a line names another paper. Three scenes matched: the
+Transport network (Fig. 4: 8 lacunae at step 4,151, the app 6.4 ± 0.9), the Minimizing network (Fig. 5) and the Turing
+stripes (wavelength 16.2 against 15.7 cells, one orientation over 85.5 against 84.6 % of the grid). The others
+deviated, each for a cause in this app's model:
+
+- **The order inside a step.** Jones: every agent moves and deposits (the motor stage), then every agent senses and
+  turns (the sensory stage), then the trail map diffuses (p. 132–133). This app sensed first, then moved, then
+  diffused (`src/engine/sim.ts` at `cf279c4`, lines 611, 631 and 653): its sensors read the map after the diffusion,
+  Jones' read it after the moves and before the diffusion. With Jones' order the Turing spots of Fig. 16 form a regular
+  array (spacing variation 5.6 % at step 10,000 and 4.4 % at 30,000, against 10.5 % with this app's order; 5.7 % in the
+  figure).
+- **The dish.** The images of Fig. 18 and 19 show a dish of 0.947 and 0.944 of the lattice's side. The app's dish was
+  the side less 2 cells (0.993 on 300 × 300). Jones counts his population over the lattice (%p, p. 134; 45,000 agents
+  for %p 50 on 300 × 300, p. 147), so 45,000 agents filled 64.5 % of the app's dish against about 71 % of Jones'. The
+  thinner sheet of Shrinking plasmodium (Fig. 21) tore around its middle food in 18 of 31 runs; with Jones' dish in 0
+  of 31.
+- **Diffusion at the rim.** The app's mean was reflective: at walls and at the rim of a closed arena it averaged over
+  the habitable cells only, so no trail left the arena (ADR 0007). Jones' later papers absorb the chemoattractant at the
+  edges (Jones 2011, Influences on the formation and evolution of Physarum polycephalum inspired emergent transport
+  networks, Natural Computing 10: 1345–1369, p. 1353) and run the mean filter at every lattice site (Jones and
+  Adamatzky 2014, arXiv:1303.4969, p. 23; Jones 2015, arXiv:1503.03265, p. 14; Jones, Mayne and Adamatzky 2017,
+  arXiv:1511.05862, p. 25). Fig. 18 fits an absorbing rim: the trail fades about 4.5 cells inside it, and no trail
+  stays at the rim later. With the reflective rim, Shortest path kept a branch to the rim in 2 of 20 runs; absorbing,
+  in 0 of 20. A growing colony coats the walls for the same cause (the growth analysis of 2026-11-11: within 4 cells of
+  a wall, 7 % of the open cells, 71 % of the agents at step 15,000 on 16:9, 10.5 % when the walls absorb).
+- **The foods.** Fig. 19 shows a square of 60 cells (0.317 of the dish) with foods of about 2.7 cells; the app had
+  0.29 of the dish with foods of 4 cells, and a ring stayed in 10 of 20 runs. Fig. 21 shows 19 foods; the app had 8.
+  Fig. 18 puts its foods 51 cells left and right of the middle; the app 57.6.
+
+Jones' sequential order of the agents (p. 133) against this app's synchronous claims (ADR 0008) is a real difference,
+but with the four corrections above no figure needs it (the fidelity check). It stays the documented difference of
+ADR 0008.
+
+The owner's rule of 2026-11-11: the scenes of Jones work exactly as in his papers ("Jones-Presets … genau so wie aus
+seinen Papers"), and a deviation from Jones means there is an error somewhere. Asked whether the corrections also
+apply to the extended model, the owner decided on 2026-11-11: "Ja, beide Modelle" (yes, both models). The reason
+given: the extended model is Jones plus this app's additions; the step order and the reflective walls are not intended
+additions, and the reflective walls make a growing colony coat the walls.
+
+## Decisions
+
+Each decision with its date, who made it, and why.
+
+### Step order
+
+1. **Jones' order of a step, in both models and on both backends** (owner, 2026-11-11). Every agent moves and
+   deposits, then every agent senses and turns, then the map diffuses and decays (p. 132–133). Since 2026-11-12 only
+   for the scenes of Jones 2010: each scene runs the order of its paper (decision 24).
+2. **The textures hold the map as the agents sense it** (this branch, 2026-11-11). A step of the GPU senses and turns
+   for the moves of the step before, moves, then diffuses and decays the map, and its last diffusion pass adds the
+   deposits and the food and light of this step's moves (`diffuse.wgsl`, `diffuse.frag`: the sources moved from the
+   first pass, before the mean, to the last pass, after the decay). The sensors of the next step read exactly Jones'
+   map after the motor stage: the last diffusion plus the new deposits. Options: (a) the fidelity check's patch for
+   WebGPU: the claim pass reads the trail texture of before the last diffusion plus `counts` and `env` of the last
+   step, and `counts` is cleared between `claim` and `settle`; (b) a third pass that senses after the moves; (c) this
+   one. (a) works only with one diffusion pass (with two, the second pass overwrites the texture it needs) and with the
+   rule of one agent per cell (without it, `advance` senses and deposits in one pass, so it would read the counts it
+   writes), and it repeats covered food and the cut in every sensor. (b) costs a pass over all agents. (c) adds no
+   pass, no texture and no read in a sensor, works for every number of diffusion passes, with and without the rule,
+   and keeps covered food, the cut, light, trail saturation and the sensor walk of ADR 0020 where they were. Reason:
+   the correct order at no cost.
+3. **The first step after a reset moves without sensing** (this branch, 2026-11-11; `sensesFirst()` in
+   `agents.wgsl` and `agents.frag`). Jones' first step moves with the start heading; a step here senses for the moves
+   before it, and the first step has none. Without this an agent would sense the empty map once: a sensor in a wall or
+   outside the arena would turn it, and the random turn pCD would draw. Reason: Jones' first step exactly. Tests that
+   write a trail and agents to see one sensing step now run a first step before (`pastFirstStep()` in
+   `sim.gpu.test.ts`).
+4. **Food and light enter with the deposits, before the sensors** (this branch, 2026-11-11). Jones projects the stimuli
+   into the trail map (p. 144) but does not say where in the step. They enter where the deposits enter, after the step's
+   diffusion, so the sensors read them with the deposits. The fidelity check measured the scenes with this choice.
+   Covered food counts the agents after the step's moves, as before (ADR 0022, decision 20).
+5. **The normalised emission keeps the plateau of a large food at every decay** (this branch, 2026-11-11, from ADR 0022
+   decision 13; the coordinator's decision of 2026-11-12). With Jones' order the scent of a large food settles where s =
+   (1 − d) · s + source, so s = source / d, not source · (1 − d) / d. `emissionScale()` (`src/model/params.ts`) is now d
+   / 0.1, so the plateau is 255 · strength · 10 at every decay. It is exactly 1 at 0.1 as before, so no scene changes by
+   it. Outside a static food the scent of Jones' order equals the scent of the old order: with Q = s − source the new
+   step is Q′ = (1 − d) · M(Q + source), the old one. So the old factor would have kept the scent outside a food as it
+   was and let the plateau vary by 0.9 / (1 − d) (−10 % at decay 0.001); the new factor keeps the plateau and makes the
+   scent outside a food (1 − d) / 0.9 of before (+11 % at decay 0.001). Reason: decision 13 names the plateau, so the
+   plateau it is (the coordinator's decision, not an owner question). If a scene runs the order that senses first (owner
+   question below), the factor follows the order: there the agents sense the map after the diffusion, where the plateau
+   is source · (1 − d) / d, and the factor of the code before, (d / (1 − d)) / (0.1 / 0.9), keeps it at 255 · strength ·
+   9 at every decay, as ADR 0022's decision 13 records. So each order keeps its plateau at every decay, and a scene in
+   the order that senses first releases what it released before this change at every decay (prepared with that option:
+   `emissionScale(d, order)`, a unit test and a GPU test on both backends that fail with one factor for both orders).
+   Both factors are exactly 1 at decay 0.1, where every scene runs. The plateau of the order that senses first is 255 ·
+   strength · 9, not 10, because its agents sense the map after the step's decay.
+
+### Dish
+
+6. **Every dish is 0.945 of the grid's short side, in both models** (owner, 2026-11-11, with the rule above; the fidelity
+   check measured 0.947 in Fig. 18 and 0.944 in Fig. 19, so 0.945 lies between them). `DISH_FILL` in `common.wgsl`,
+   `common.glsl`, `render.wgsl`, `view.glsl` and `src/engine/brush.ts` (`dishRadius()`), which the sweep, the brush,
+   the CPU paint reference and the tests use; `render.frag` takes it from `view.glsl`, and the CPU copy of growth
+   (`growth-reference.ts`, from main's merge of ADR 0025) from `brush.ts`. A unit test (`pack.test.ts`, "the dish")
+   checks that every shader holds the same value and that no rim of the old formula is left; the copy's GPU test
+   fails in the dish on both backends with the old rim. Before, the
+   rim lay at half the short side less 1 cell (ADR 0019). Options the check listed: 0.945 for every dish; 0.92; 0.945
+   only on Jones' lattices; the old dish with density 0.6 for Shrinking plasmodium. The owner's rule decides: a dish is
+   Jones' dish, whatever grid it runs on.
+7. **The agent count stays Jones' %p of the square around the dish** (this branch, 2026-11-11; `agentCount()`,
+   unchanged). Jones counts his population over the lattice (p. 134), and 45,000 agents for %p 50 on 300 × 300 (p. 147)
+   is the count of Fig. 21. In Jones' dish they fill 71 % of the cells (64.5 % of the old dish). The food positions
+   keep their frame, the short side (ADR 0019), so no food moves with the rim, and a link keeps its strokes in that
+   frame. A stroke of an old link that reached past 0.945 of the side now paints only its cells inside the new rim.
+8. **64 claim rounds at the start** (this branch, 2026-11-11; `START_ROUNDS` in `src/engine/pack.ts`, before 32).
+   Jones starts every agent on a free cell (p. 132). In a claim round a waiting agent finds a free cell with about the
+   share of the free cells, so N · f^n of N agents still wait after n rounds at the filled share f. At 71 % and 32
+   rounds, 0 to 2 of Shrinking plasmodium's 45,000 agents started dead in 15 of 61 seeds on WebGPU and 13 of 61 on
+   WebGL2 (seeds 0 to 60); with 64 rounds none in 61 seeds on either backend. A round is one claim and one settle pass
+   over the agents at a reset, only in an arena with the rule that is not a periodic or box grid with the mixed layout
+   and no walls. A GPU test starts Shrinking plasmodium with seed 6, which left 2 agents dead with 32 rounds.
+
+### Diffusion at closed edges and walls
+
+9. **Closed edges absorb, in both models** (owner, 2026-11-11). Jones absorbs the chemoattractant at the edges (Jones
+   2011, p. 1353), and Fig. 18 fits an absorbing rim. The mean is now always the sum of 9 cells divided by 9; a cell
+   outside the arena (the box's edge, the dish's rim, the edge of a closed lattice) counts as 0 and holds 0. Before, the
+   mean divided by the habitable cells of the 3 × 3 (reflective, ADR 0007). The fidelity check measured the effect on
+   Shortest path: a side branch to the rim beyond r = 85 of the 99-cell dish in 2 of 20 runs before, in 0 of 20 with
+   either absorbing rule. Its reference simulator, written from the paper, also tried a third rule (the trail spreads
+   outside the dish up to the lattice's edge): Shrinking plasmodium tore in 10 of 31 runs there, 17 of 31 absorbing and
+   19 of 31 reflective, all with the old dish; the dish was the cause of the tears (decision 6).
+10. **Walls in the Jones model are part of the diffusing lattice** (owner, 2026-11-11, "literal Jones"). Jones' later
+    papers run the mean filter at every lattice site (Jones and Adamatzky 2014, p. 23; Jones 2015, p. 14; Jones, Mayne
+    and Adamatzky 2017, p. 25). A wall cell takes the mean of its 9 cells and decays like any cell, and takes no deposit
+    (no agent enters it) and no food or light. The growth analysis of 2026-11-11 measured this rule as "T". Jones'
+    papers have no wall that reflects.
+11. **Walls in the extended model are sinks** (owner, 2026-11-11). A wall cell holds 0 and counts 0 in the means of its
+    neighbours, as the outside does, so no trail or scent passes a thin wall. This matches the extended model's sensors,
+    which a wall on their way blocks (ADR 0020): neither the sensor nor the trail reaches the other side of a wall. The
+    growth analysis measured this rule as "A": the share of a growing colony's agents within 4 cells of a wall fell from
+    71 % (reflective) to 10.5 % on 16:9.
+12. **Food and light follow the trail's rule in each model** (owner, 2026-11-11). The scent field takes the same means
+    over the same cells, so in the Jones model trail + scent stays Jones' one map (ADR 0022) also at edges and walls.
+13. **A wall is a wall for the sensors in both models, as before** (this branch, 2026-11-11). In the Jones model a wall
+    cell now holds trail, but a sensor in a wall cell still reads `BLOCKED` (ADR 0007): Jones does not say what a sensor
+    in an obstacle reads, and ADR 0020 rejected sensors that read the trail behind a wall. Only the diffusion changes.
+14. **One uniform for the wall rule** (this branch, 2026-11-11). `packParams()` packs 1 in `model.z` for the Jones model
+    and 0 for the extended model (`src/engine/pack.ts`); `diffuse.wgsl` and `diffuse.frag` read it per cell. Reason: the
+    rule is the model's, and an override constant would double the diffusion pipelines for a branch that costs nothing
+    measurable (below). No scene of Jones has walls, so the Jones rule acts only where a user paints a wall into a
+    scene of Jones.
+
+### The figures' foods
+
+15. **The foods of Fig. 18, 19 and 21** (owner, 2026-11-11, with the rule above; the positions measured in the figures
+    by the fidelity check). Shortest path (Fig. 18): 51 cells left and right of the middle of 200 × 200 (±0.255 of the
+    side), radius 4 cells as before; before ±57.6 cells. Steiner tree (Fig. 19, second row): a square of 60 cells
+    (±0.15 of the side, 0.317 of the dish's 189 cells) with foods of 2.7 cells (0.0135 of the side); before 58 cells
+    with foods of 4 cells. Shrinking plasmodium (Fig. 21): the 19 foods of the figure, at the cell positions measured in
+    it on 300 × 300, each `(x − 150) / 300` of the side from the middle; before 8 foods of this app's choice.
+16. **Shrinking plasmodium's food radius of 2.5 cells and weight 0.05 are this app's choice** (this branch, 2026-11-11).
+    Fig. 21 shows the trail, not the food cells, and the text gives neither. The fidelity check measured 0 of 31 runs
+    torn with weight 0.01 and with 0.05; 0.05 stays, the scene's value before. A radius of 2.5 cells around a lattice
+    corner paints 16 cells, the same as its first version's 2.49 cells.
+17. **The scene texts say what the scenes now show** (this branch, 2026-11-11, from the measurements below): Steiner tree
+    ends as a tree through the middle of the square with two junctions and a short bridge, as in Fig. 19, row 2; Turing
+    spots settle as a regular array of about 20 spots; Shrinking plasmodium no longer tears; Shortest path keeps no
+    branch to the rim.
+
+### Links keep the shapes they were made with
+
+18. **Shape revisions** (owner, 2026-11-11, from ADR 0026 decision 2; the design proposed by the lattice branch). A link
+    names a scene's shapes by the scene's id and one bit each (ADR 0021), so moving a scene's foods would make an old
+    link paint other foods than its sender had. Each preset keeps its earlier shape lists, oldest first
+    (`envHistory` in `src/model/presets.ts`); `env` is the newest. Revision 0 is the list of every scene when links
+    began to name shapes on 2026-11-10 (`9c1f56a`); a check of the presets at `9c1f56a`, `12c7078`, `45155a8` and
+    `f81c4a3` found every list unchanged until this change. Shortest path, Steiner tree and Shrinking plasmodium now have
+    revision 1. `shapeRevision()` gives a scene's newest revision and `shapesAt()` the shapes of one.
+19. **Link format version 2** (this branch, 2026-11-11; `src/model/link.ts`). After the scene's id it writes the revision
+    as a varint. A link of version 1 means revision 0. The decoder refuses a revision that the scene does not have and a
+    count of shapes other than the revision's, as it refused a wrong count before; the drawing is then lost and the
+    settings load alone, with the notice of ADR 0021. Without a scene no revision is written. `Drawing.revision` holds
+    it; `drawingOf()`, `kindsOf()`, `sceneOnly()`, `waiting()`, `currentDrawing()` and the engine's match
+    (`Engine.matches()` with the shapes of that revision) read it.
+20. **An old revision is a change of the scene** (this branch, 2026-11-11; `app.sceneRevision` in
+    `src/ui/state.svelte.ts`). The app keeps the revision that the engine's list holds: the newest after a preset load or
+    Reload scene, a link's own after the link. While it is not the newest, the scene card counts the scene as changed:
+    it says "This link changes the scene." while the link is as opened (ADR 0026, decision 14), and Reload scene loads
+    the newest shapes. The address keeps writing the link's revision, so a reload paints the same shapes.
+21. **An old link keeps its settings and its shapes, not the engine's old rules** (owner, 2026-11-11: the model change
+    applies to both models). Old links run with Jones' order, Jones' dish and the new boundaries, so they no longer give
+    the bytes they gave when they were made, also on the sender's grid (ADR 0021 promised those bytes). A stroke of an old
+    dish link that reached past 0.945 of the short side now paints only its cells inside the new rim. No setting brings
+    the old rules back.
+
+### What the view shows
+
+22. **The view shows the map as the agents sense it** (this branch, 2026-11-11; replaced on 2026-11-12 by decisions
+    30 and 31: every scene shows the map after the step's diffusion). The textures hold the map after the
+    step's moves and before its diffusion (decision 2), and the renderer, the auto levels and `Sim.readTrail()` read them
+    as they are: fresh deposits show undiffused. Options: (a) this; (b) a pass per frame that writes the diffused map
+    for the view (a pass more per frame); (c) the mean in the render pass (nine taps per bilinear tap). The images of
+    Jones' figures are grainy at the scale of single agents (Fig. 16 next to the app's map before and after its
+    diffusion, the comparison images of the pull request), so (a) is also the closer picture. The scenes of Jones look
+    grainier than before at their lattices' scale (the contact sheets), and the app's scenes keep their character, apart
+    from the two scenes below. The metrics of this ADR run on Jones' map after his diffusion, computed from the dumps:
+    (1 − decay) times the mean of 9 cells, as the fidelity check measured.
+
+### Both backends alike
+
+23. **The last diffusion pass multiplies the sum of 9 cells by (1 − decay) / 9** (this branch, 2026-11-11). Before this
+    change WebGPU and WebGL2 gave the same trail after 500 steps for the default settings, Two strains, Dunes and Dot
+    grid (digests of the agents by id, the trail and the scent, seed 7, M3 Pro); with Jones' order they still did. The
+    mean of 9 cells over 9 broke it: a CPU replay of two steps of Dunes showed that Metal's compiler turns the WGSL
+    `sum / 9.0` followed by `× (1 − decay)` into `sum × round((1 − decay) × round(1 / 9))`, while the GLSL rounds after
+    the mean and again after the decay. Both now write that product out (`diffuse.wgsl`, `diffuse.frag`). WebGPU kept its
+    bytes, and WebGL2 gives them again for those four scenes; the others differed between the backends before too. The
+    passes before the last one divide by 9 alone, and both backends compute that as × round(1 / 9). Since decision 24
+    those four scenes sense first, and with decision 28 they give the bytes of before ADR 0027 on both backends.
+
+### The order of each scene's paper (2026-11-12)
+
+The papers of Jones differ in the order of a step: Jones 2010 has every agent move, and then the whole population
+sense (p. 133); Jones 2011 has the motor stage follow the sensory stage (Nat. Comput. 10, p. 1350), and so do his later
+papers (arXiv:1503.03265, 2015; arXiv:1511.05862, 2017, with Mayne and Adamatzky). Fogleman's code senses first too,
+and so did this app before decision 1.
+
+24. **Each scene runs the order of a step of its paper** (owner, 2026-11-12: "Ja, je Paper", yes, per paper, his answer
+    to whether each scene should use the order of a step of its own paper). The coordinator put it to him as: move first
+    for the eight scenes of Jones 2010; sense first for the Foraging maze (Jones 2011 and 2017), the scenes of later
+    papers (ADR 0024) and the scenes of Fogleman 2020; the extended model's own scenes and the default settings keep
+    sense first, the order of the code before. Reason: the owner's rule of 2026-11-11 that the scenes of Jones work as
+    in his papers, read per paper; it also gives the scenes of Fogleman their dots back (the app's own scenes, below).
+25. **One setting `stepOrder`, `move-first` or `sense-first`, in both models** (this branch, 2026-11-12; Settings →
+    Step order under Model, "Move first (Jones 2010)" and "Sense first (Jones 2011, Fogleman)"). The scenes of Jones
+    2010 set move first (`jones2010()` in `presets.ts`), and every other scene and the default settings sense first.
+    The Jones model holds either order, and the switch to it keeps the order (`toJones()`, `jonesFits()`). Reason: both
+    orders are rules that Jones published, so the model of only his rules has both. Options: the order as part of the
+    model (the Jones model always moves first), which would run Jones' own later orders only in the extended model; or
+    the order bound to the scene, with no control, which would hide a setting that changes every run.
+26. **A link without the key gets the order of its scene, and one without a scene sense first** (the coordinator,
+    2026-11-12; `stepOrderOf()` in `presets.ts`, `decodeLink()` in `url.ts`). A drawing that this app cannot read
+    names no scene, so its link senses first too. A link that names its order keeps it. Reason: a link from before this
+    change was made in the order that senses first; its scene's paper decides now, as decision 24 decides for the
+    scene. So an old link of a scene of Jones 2010 changes its bytes again (decision 21), and an old link of another
+    scene or of free settings keeps the order it was made in.
+27. **Sense first is the step of the code before decision 1** (this branch, 2026-11-12): every step senses, the first
+    too; the first diffusion pass adds the step's deposits and its food and light before its mean; the textures hold
+    the map after the diffusion. `P.model.w` is 1 for it (`pack.ts`), read by `senses()` in `agents.wgsl` and
+    `agents.frag` and by `senseFirst()` in `diffuse.frag`; on WebGPU each diffusion pass is built for each order
+    (`SENSE_FIRST` in `diffuse.wgsl`, `variantConstants()` in `sim.ts`). With covered food, the pass that adds the
+    sources runs with it: the last one moving first, the first one sensing first. Reason: the order of the papers that
+    sense first, and the same rule as the code that ran it before.
+28. **Sensing first rounds the mean and the decay as the code before did** (this branch, 2026-11-12). The last pass
+    takes the f32 mean, then multiplies by (1 − decay); moving first it keeps decision 23's one factor
+    (1 − decay) / 9. On the M3 Pro the mean is the f32 sum of the 9 cells times the f32 of 1 / 9 on both backends,
+    and the test of the rounding accepts that or a division (SwiftShader). Two compiler effects decide it on WebGPU:
+    with the order as a uniform, an extra block for the decay changed the bytes of moving first (8 scenes of Jones);
+    with the order as a pipeline constant and the decay in a straight line after the mean, Metal folds both into one
+    factor. The mean of sensing first therefore sits in a branch on its count of cells (`n > 0.0`, always true, as the
+    code before branched on the habitable centre). Reason: the scenes that sense first then keep their bytes from
+    before ADR 0027 where its edges and walls change nothing, which proves that they run the same rule; and the
+    scenes of Jones 2010 keep the bytes that the measurements of this ADR were made with.
+29. **The emission factor follows the order** (the coordinator, 2026-11-12; decision 5). Moving first d / 0.1, sensing
+    first (d / (1 − d)) / (0.1 / 0.9), the factor of before.
+30. **The view of a scene that senses first shows the map after the diffusion**, which its agents sense (decision
+    22): the soft look of before.
+
+### The look of the scenes that move first (2026-11-12)
+
+Decisions 32 to 35 are this branch's, made under the owner's delegation of 2026-11-12 (take the recommendations and
+ask only about problems that stay unsolved).
+
+31. **The scenes that move first show the map after the step's diffusion too** (owner, 2026-11-12: "Weich", soft, his
+    answer to whether the scenes of Jones 2010 should look soft or sparkle). Reason: the owner's choice; it is the state
+    after whole steps, which an image at a scheduler step of Jones' figures shows if it is taken after the step's
+    diffusion (Jones 2010 does not say, p. 132 and 134), and every scene now looks alike.
+32. **A view pass per frame, moving first only** (this branch, 2026-11-12, the cheapest exact way of the Cost section,
+    (b)). `viewTexture` (`sim.ts`) and `viewTrail()` (`gl/sim.ts`) run the step's diffusion passes without its sources
+    and its cut (`VIEW` in `diffuse.wgsl` and `diffuse.frag`) on the trail as the agents sense it: the first pass into
+    the free texture of the pair, which the next step writes anew, the second into a third trail texture, and so on, so
+    no pass reads the texture it writes and the simulation reads none of them. The render pass, the gel's height field,
+    the glow, the auto levels and the PNG read the result. It is made once for each state, at the first frame or
+    readback after a step, a reset, a stroke, a written trail or new settings, and not for a frame of a paused
+    simulation that drew it before. Sensing first the view reads the trail and runs no pass. It is exact for any number
+    of passes: without agents and sources the view of a state is the trail after its next step, bit for bit, and with
+    agents it is that trail wherever no agent moved in (tests). The simulation does not change: the digests of every
+    scene at step 500 are those of the commit before on both backends, and a scene that makes its view after every step
+    runs as one that never does (test). Options: (b) this; (c) the mean in the render pass, which is not exact (Cost).
+33. **A third trail texture only from two passes on** (this branch, 2026-11-12; `viewTrailOn()` and
+    `VIEW_BYTES_PER_CELL` in `sizing.ts`, 16 B per cell, counted by the memory fit; 24 B with the scent of decision
+    36). Reason: one pass fits in the free
+    texture of the pair, and every scene of Jones 2010 runs one pass, so their lattices need no more memory; a user who
+    gives a scene that moves first two passes or more gets the exact view for 16 B per cell (24 B with its scent).
+34. **The view's passes are built at their first use** (this branch, 2026-11-12): the WebGPU pipelines like those of
+    covered food, the WebGL2 program like the covered one. Reason: a scene that senses first never needs them, and
+    SwiftShader in CI builds every pipeline built at the start.
+35. **`Sim.readView()`** reads the view's map for tests, as `readTrail()` reads the trail (this branch, 2026-11-12).
+
+### The scent view (merge of PR #31, 2026-11-12)
+
+The scent view (ADR 0009, amendment 2026-11-11) came in with the merge of main at `909bb62`. Decisions 36 to 39 are
+this branch's, under the owner's delegation of 2026-11-12.
+
+36. **The scent view reads the same state as the picture.** The view pass of a scene that moves first diffuses the scent
+    too: trail and scent go into the free pair and, from a second pass on, into a third pair (`viewTextures` in
+    `sim.ts`, `viewTargets()` in `gl/sim.ts`). The scent view's glow, its line with the lookups of its sensors, its
+    coarse map and the strand of the auto levels read the view's trail and scent on both backends; sensing first they
+    read the textures, as main does. The third pair is 24 B per cell (`VIEW_BYTES_PER_CELL`). Reason: the picture and
+    the scent view show one map, the one after the step's diffusion; drawing the scent before its diffusion under a trail
+    after it would mix two states.
+37. **New settings of a scene that moves first count as a change of the scent** (`revision`, `update()` in both sims).
+    The scent view's coarse map is filled again only when the step or `revision` changes (ADR 0009); moving first, new
+    settings without a step make a new view of the same state. Reason: a paused scene would draw the coarse map of the
+    old view.
+38. **The scent view's rim is Jones' dish** (`DISH_FILL` in its texel lookups of `render.wgsl` and `render.frag` and in
+    `scent-down.frag`; `pack.test.ts` reads that file too), and its CPU references use `dishRadius()`. main's test that
+    the glow holds its top from 10,000 up runs on a periodic grid: the box's edges now take in the scent (decision 10),
+    and in the box of 32 × 24 cells the scent stayed at 15,355 instead of passing 100,000.
+39. **`Sim.writeScent()` and `Sim.readViewScent()`** for tests, as `writeTrail()` and `readView()`.
+
+The checks: the scenes that sense first draw main's pixels exactly with the scent view off and on, on both backends
+(the default settings, Three strains, Two strains, Fleeing light, Cyclones, Dunes and Dot grid at step 500, against main
+at `909bb62`); main's tests that the shaders without the view draw the pixels of before and that the view changes no
+byte of the simulation pass. Moving first, the view's scent is the scent after the next step, bit for bit, wherever no
+food adds its source, and a frame with the scent view (on the grid and on its coarse map of level 2, after new settings)
+draws what a scene that senses first draws for the view's map, and not what it draws for the scent before its
+diffusion (`engine.gpu.test.ts`). The merges of `909bb62` and `8e720bb` keep every byte of the simulation of all 17 scenes on both
+backends (digests at step 500 against the commit of decision 31). Seven mutations (the raw scent in the render pass on each backend, the view pass
+without its scent on WebGPU, the scent of the first view pass read again by the second on each backend, new settings
+without a new `revision` on each backend) are killed; the last two survived the first test, which drew at the level of
+the grid, and were killed once it also drew on the coarse map.
+
+## Measurements
+
+### The scenes of Jones against their figures
+
+Built as the app builds a scene (`Engine.create` and `Engine.load` on a canvas of 1280 × 720), on the lattice of the
+figure, Apple M3 Pro, with the seeds of the fidelity check: WebGPU at the commit of the foods (`f1fbb42`), whose bytes
+the head of this branch keeps for every scene of Jones (digests at step 500), WebGL2 again after decision 23 changed
+its bytes (`8e33876`, the bytes of the head). The dumps hold the map
+as the agents sense it; the metrics run on Jones' map after his diffusion (decision 22). The network of a dish scene is
+the trail above the mean of the dish; a lacuna is a part of the rest of at least 20 cells, not open to the rim; a tree
+or a band touches every food, holds no lacuna and stays off the rim; a spot of Fig. 16 is a minimum of the trail blurred
+over 0.12 of the wavelength (the fidelity check's discs, with the nearest-neighbour spacing and its variation, and ψ6
+over the 6 nearest spots). The figure's values are the fidelity check's, measured in the images of Jones 2010. "Before"
+is the code before this change, as ADR 0026 and the fidelity check measured it.
+
+| Scene, property                                               | Figure             | Before                                        | After, WebGPU                  | After, WebGL2                  |
+| ------------------------------------------------------------- | ------------------ | --------------------------------------------- | ------------------------------ | ------------------------------ |
+| Transport network, lacunae at 99 / 512 / 1,740 / 4,151        | 56 / 23 / 12 / 8   | 4,151: 6.4 ± 0.9                              | 50.4 / 24.5 / 12.0 / 6.7 ± 0.6 | 50.9 / 26.1 / 11.1 / 6.6 ± 0.9 |
+| Minimizing network, lacunae at 670 / 4,072 / 31,190           | 18 / 6 / 1         | 31,190: 1.6 ± 0.5                             | 22.2 / 7.4 / 2.0 ± 0.4         | 22.7 / 6.6 / 1.6 ± 0.9         |
+| Turing stripes, wavelength; one orientation at 20,000         | 16.2; 85.5 %       | 15.7; 84.6 %                                  | 15.7; 82.6 ± 1.1 %             | 15.7; 82.0 ± 2.9 %             |
+| Turing spots at 10,000: spots, spacing variation, ψ6          | 20; 5.7 %; 0.87    | 10.5 % (variation)                            | 19.7; 6.6 %; 0.85              | 19.6; 5.9 %; 0.86              |
+| Turing spots at 30,000: exactly 20 spots, variation, ψ6       |                    | 28.7 % (ADR 0026's metric of blurred maxima)  | 28 of 30; 3.6 %; 0.88          | 28 of 30; 4.6 %; 0.85          |
+| Shortest path, one band without a loop, steps 3,000 to 12,000 | one band           | 2 of 20 with network beyond r = 85 (old dish) | 20 of 20, none beyond r = 80   | 20 of 20, none beyond r = 80   |
+| Steiner tree, a tree at 3,000 / 6,000 / 12,000 (20 seeds)     | an X, short bridge | rings in 10 of 20 (old foods)                 | 15 / 20 / 20 of 20             | 15 / 20 / 20 of 20             |
+| Shrinking plasmodium, torn by 2,800 (31 seeds); IoU at 10,000 | not torn           | 18 of 31; 0.41                                | 0 of 31; 0.84                  | 0 of 31; 0.85                  |
+| Wound healing, spacing variation at 2,650 (20 seeds)          | about 3 to 5 %     | 10.8 %                                        | 9.3 ± 3.4 %                    | 8.8 ± 3.5 %                    |
+
+- Every scene keeps its pattern's size in cells (stripes 15.7 to 15.8 cells, spots 43.4 to 43.7 cells apart).
+- The Transport network's lacunae follow Fig. 4 over its whole course. The Minimizing network ends with 1.6 to 2.0
+  lacunae at step 31,190, Fig. 5 with 1.
+- Steiner tree at step 12,000: two junctions with a bridge of 5 to 30 cells in 20 of 20 runs on WebGPU and 19 of 20 on
+  WebGL2 (one run whose skeleton shows no junction); 14 of 20 and 14 of 19 bridges are 10 to 15 cells long, as in
+  Fig. 19, row 2.
+- Shrinking plasmodium: 22,318 ± 96 agents alive at step 2,800 of 45,000 on both backends; the largest enclosed void by
+  step 2,800 has 295 cells (WebGPU) and 309 cells (WebGL2), a tear has at least 1,000.
+- Wound healing stays less regular than the figure. Its variation is 8.8 to 9.3 % against about 3 to 5 % in the JPEG of
+  Fig. 22, and 10.8 % with this app's order. It stays an open item (TODO.md); its cause is not found.
+
+### The app's own scenes
+
+In the order of their papers (decisions 24 to 28), the default settings, Three strains, Two strains, Fleeing light,
+Cyclones, Dunes and Dot grid give the bytes of main at step 500 on both backends (digests of the agents, the trail and
+the scent; main at `dcbc5cd`, M3 Pro, 1280 × 720, seed 7): they sense first on a periodic grid without walls, where the
+edges and walls of this ADR change nothing, so they run main's rule exactly. The Maze and the Foraging maze differ from
+main by their box and walls (decisions 10 and 11). The eight scenes of Jones 2010 keep the bytes of the measurements
+above on both backends.
+
+History, before decision 24, with every scene moving first: contact sheets of main and this branch (WebGPU, 1280 × 720,
+seed 7, steps 500 and 3,000; in the pull request). The default settings, Three strains, Two strains, Fleeing light, the
+Maze and Cyclones kept their character. Two scenes of Fogleman 2020 did not: in Dunes strain B no longer gathered into
+dots (on main the top 1 % of its cells hold 48 to 61 % of its trail, then 4 %, a haze), and its ridges broke into fewer
+pieces; in Dot grid strain B's lattice of dots went and strain A's streaks became round spots (top 1 % share 70 %
+against 31 %). Cyclones kept its honeycomb and its vortices, with more of them (17.4 and 11.4 at steps 3,000 and
+10,000 against 11.0 and 7.8; 5 seeds, 1024 × 576). The two affected strains sense only 1.3 and 1.7 cells ahead. That
+finding, and Jones' own later order, led to decision 24.
+
+### Growth after the merge of ADR 0025
+
+Growth and shrinkage (ADR 0025) came in with the merge of main on 2026-11-12. Its passes run after the moves and their
+deposits and before the diffusion (`sim.ts`, `gl/sim.ts`), so its tests count the occupancy after the moves, and the
+agents sense after them in the next step, as before. The CPU copy of its passes (`growth-reference.ts`) needed Jones'
+dish (decision 6). The merge keeps the bytes of every scene and of the default settings on both backends (digests of
+the agents, the trail, the scent and `env` at step 500, before and after the merge).
+
+Measured with the harness of ADR 0025 (D1, D1b): built as the app builds the scenes, the flood fill of ADR 0019 every
+100 steps, seeds 1 to 10, 15,000 steps, M3 Pro. Both orders of a step, each with the dish and the boundaries of this
+ADR: "sense first" is the order these scenes ship with since decision 24 (measured with decisions 24 to 29), "move
+first" the order of decision 1 before that, kept for comparison. "Near a wall" is the share of the agents within 4 cells
+of a wall or the box's edge at step 15,000, the median of the seeds.
+
+**The Foraging maze** (ADR 0025, decision 30, D1b), the start flow and the owner's flow of a hold of Inoculate at step
+100 or 1,000:
+
+| Backend | Flow               | Screen | Move first: path, steps (median) | Near a wall | Sense first (shipped): path, steps (median)     | Near a wall | Agents at 15,000 (both) |
+| ------- | ------------------ | ------ | -------------------------------- | ----------- | ----------------------------------------------- | ----------- | ----------------------- |
+| WebGPU  | start              | 16:9   | 10 of 10, 2,801 to 4,101 (3,201) | 38 %        | 10 of 10, 2,501 to 3,901 (3,251)                | 38 %        | 15,415 to 16,632        |
+| WebGPU  | start              | 16:10  | 10 of 10, 2,901 to 4,401 (3,451) | 38 %        | 10 of 10, 2,601 to 3,601 (3,401)                | 37 %        | 16,337 to 18,783        |
+| WebGPU  | start              | 1:1    | 10 of 10, 3,501 to 5,201 (4,351) | 33 %        | 10 of 10 (at 15,000: 9), 4,201 to 5,401 (4,551) | 34 %        | 25,043 to 27,467        |
+| WebGPU  | inoculate at 100   | 16:9   | 10 of 10, 3,520 to 4,720 (3,620) | 38 %        | 10 of 10, 2,920 to 4,020 (3,370)                | 37 %        | 15,460 to 17,066        |
+| WebGPU  | inoculate at 100   | 16:10  | 10 of 10, 2,920 to 4,620 (3,620) | 37 %        | 10 of 10, 3,220 to 4,320 (3,620)                | 37 %        | 16,408 to 18,569        |
+| WebGPU  | inoculate at 100   | 1:1    | 10 of 10, 4,320 to 5,320 (4,870) | 34 %        | 10 of 10, 4,020 to 6,020 (4,870)                | 33 %        | 25,316 to 27,786        |
+| WebGPU  | inoculate at 1,000 | 16:9   | 10 of 10, 3,920 to 5,620 (4,470) | 38 %        | 10 of 10, 4,220 to 5,020 (4,520)                | 38 %        | 15,375 to 16,963        |
+| WebGPU  | inoculate at 1,000 | 16:10  | 10 of 10, 3,920 to 5,520 (4,870) | 38 %        | 10 of 10, 3,820 to 5,220 (4,520)                | 36 %        | 16,492 to 18,334        |
+| WebGPU  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,320 (5,470) | 34 %        | 10 of 10, 4,820 to 6,920 (5,870)                | 34 %        | 25,367 to 27,555        |
+| WebGL2  | start              | 16:9   | 10 of 10, 2,401 to 3,801 (3,301) | 39 %        | 10 of 10, 2,601 to 3,401 (3,151)                | 37 %        | 15,311 to 17,225        |
+| WebGL2  | start              | 16:10  | 10 of 10, 3,001 to 4,201 (3,351) | 37 %        | 10 of 10, 2,701 to 3,601 (3,251)                | 36 %        | 16,432 to 18,216        |
+| WebGL2  | start              | 1:1    | 10 of 10, 4,101 to 5,701 (4,301) | 34 %        | 10 of 10, 3,901 to 6,101 (4,601)                | 33 %        | 24,835 to 28,058        |
+| WebGL2  | inoculate at 100   | 16:9   | 10 of 10, 2,620 to 4,020 (3,670) | 38 %        | 10 of 10, 2,720 to 4,220 (3,670)                | 38 %        | 15,267 to 17,298        |
+| WebGL2  | inoculate at 100   | 16:10  | 10 of 10, 3,420 to 4,420 (3,720) | 37 %        | 10 of 10, 3,220 to 4,120 (3,470)                | 37 %        | 16,456 to 18,422        |
+| WebGL2  | inoculate at 100   | 1:1    | 10 of 10, 3,620 to 5,220 (4,470) | 34 %        | 10 of 10, 3,920 to 5,320 (4,920)                | 34 %        | 25,515 to 27,563        |
+| WebGL2  | inoculate at 1,000 | 16:9   | 10 of 10, 4,220 to 4,920 (4,670) | 38 %        | 10 of 10, 4,020 to 4,720 (4,320)                | 37 %        | 15,688 to 16,997        |
+| WebGL2  | inoculate at 1,000 | 16:10  | 10 of 10, 3,920 to 5,320 (4,620) | 38 %        | 10 of 10, 4,020 to 5,020 (4,370)                | 37 %        | 16,729 to 18,071        |
+| WebGL2  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,220 (5,770) | 34 %        | 10 of 10, 5,020 to 6,820 (5,520)                | 33 %        | 25,605 to 27,110        |
+
+Every flow reaches the far food in 10 of 10 seeds on every screen, on both backends and in both orders, as in D1b with
+the code before (10 of 10, median 2,751 to 3,901 steps in the start flow; now 3,151 to 4,601 sensing first and 3,201
+to 4,351 moving first). Sensing first, one seed of the start flow on 1:1 (WebGPU) loses its path again before step
+15,000. The colony settles at the same size (24,835 to 28,058 agents at step 15,000 on 1:1, 15,267 to 18,783 on the
+wide screens; D1b 24,755 to 27,534 and 14,990 to 18,142), and 33 to 39 % of its agents lie near a wall (37 to 41 %
+with SA 22.5° and the reflective walls, ADR 0025's analysis).
+
+**The Maze (SA 45°) with growth from 50 agents** (ADR 0025, D1: start layout Empty, 50 agents on random open cells of
+the default brush on the bottom-right food, growth with the values of 2011):
+
+| Code        | Backend | 16:9: path, steps (median)        | Near a wall | 1:1: path, steps (median) | Near a wall |
+| ----------- | ------- | --------------------------------- | ----------- | ------------------------- | ----------- |
+| Before (D1) | WebGPU  | 10 of 10, 3,200 to 10,000 (5,350) | 71 %        | 0 of 10                   | 80 %        |
+| Before (D1) | WebGL2  | 9 of 10, 3,300 to 10,000 (5,200)  |             | 0 of 10                   |             |
+| Move first  | WebGPU  | 9 of 10, 7,000 to 15,000 (10,900) | 18 %        | 0 of 10                   | 14 %        |
+| Move first  | WebGL2  | 6 of 10, 7,800 to 14,600 (9,800)  | 13 %        | 0 of 10                   | 11 %        |
+| Sense first | WebGPU  | 4 of 10, 6,900 to 10,700 (9,850)  | 10 %        | 0 of 10                   | 10 %        |
+| Sense first | WebGL2  | 4 of 10, 8,300 to 13,600 (9,000)  | 6 %         | 3 of 10, 12,300 to 14,400 | 10 %        |
+
+The colony no longer coats the walls: 6 to 18 % of its agents lie near one, against 71 to 80 % with the walls that
+reflected the trail, so the passes of D1 along the walls are gone. Without the coat it reaches the far food on 16:9 in 4
+to 9 of 10 seeds and on 1:1 in 0 to 3 of 10 (4 of 10 and 0 to 3 of 10 in the order it ships): SA 45° is Jones' angle for
+minimising networks, as ADR 0025's analysis found, and the Foraging maze, with his foraging angle, is the scene for
+growth. The Maze ships without growth, so its text does not change by this.
+
+**The Maze as it ships** (no growth, sensing first), the path check of ADR 0019 and 0020 (WebGPU, seeds 31 to 42): a
+path from food to food at steps 2,000, 5,000, 10,000 and 15,000 in 12 of 12 runs on 16:9, 16:10, 9:19.5 and 1:1, at the
+threshold and at half of it, as ADR 0020 recorded for the code before; moving first the same. Its text ("still holds at
+step 15,000, on wide, tall and square screens alike") stays true. At step 15,000, 1 to 5 % of its agents lie near a
+wall: they keep off the walls that take in the trail.
+
+### Cost
+
+Paired in one page on the M3 Pro (this branch's shaders against main's, 24 rounds of 300 steps, the order alternating):
+the median ratio of a step's time per round is 1.02, 1.03, 0.99, 0.94 and 1.03 on WebGPU and 0.96, 1.02, 1.01, 0.98
+and 0.95 on WebGL2 for the default settings (1536 × 864), Three strains, the Transport network (200 × 200), Shrinking
+plasmodium (300 × 300) and the Maze, with rounds from 0.5 to 1.8 of each other. No change shows above that spread.
+
+The old look of the view (decision 22, owner question), on a canvas of 2560 × 1600 at fit: Three strains on 1536 × 960
+(4.4 M agents on WebGPU, 4.2 M on WebGL2, 0.6 cells per pixel) and the Transport network on 200 × 200 (0.125 cells per
+pixel), medians of 12 to 16 rounds while other jobs shared the machine:
+
+| Way to the old look                                                 | Three strains, WebGPU | WebGL2          | 200 × 200, WebGPU | WebGL2            |
+| ------------------------------------------------------------------- | --------------------- | --------------- | ----------------- | ----------------- |
+| None (decision 22): the draw                                        | 8.7 to 9.0 ms         | 9.2 ms          | 2.8 to 4.1 ms     | 1.5 ms            |
+| (b) a diffusion pass per frame for the view                         | + 1.6 to 2.3 ms       | + 0.1 to 1.3 ms | + 0.04 to 0.07 ms | + 0.03 to 0.05 ms |
+| (c) the 3 × 3 mean in the render pass where a cell is above a pixel | 15.5 to 19.8 ms       | 7.8 ms          | 10.2 to 10.5 ms   | 5.7 ms            |
+
+- (b) is exact for every scene with one diffusion pass (the scenes of Jones, the default settings, Two strains) if the
+  render pass, the gel's height field, the bloom, the auto levels and the PNG all read the pass's output, which fits in
+  the free texture of the ping-pong pair. Three strains and the scenes of Fogleman run two diffusion passes; they need
+  two passes per frame and a third trail texture (16 B per cell) to be exact.
+- (c) reads 16 trail texels per pixel instead of 4. It is not exact: the bloom, the auto levels and the height field
+  still read the sensed map, and zoomed out its 4 taps average the sensed map.
+- Neither gives main's pixels: the dynamics differ (this ADR). (b) gives the renderer the kind of map it drew before.
+
+The view as built (decisions 31 to 34, with the scent of decision 36), alone on the M3 Pro, 2560 × 1600 at fit, 16
+alternating rounds of 30 frames: a frame whose view is stale (one view pass, as after a step) against a frame of a state
+whose view is made.
+
+| Scene (grid, order)                             | WebGPU: frame, with the view pass | WebGL2: frame, with the view pass |
+| ----------------------------------------------- | --------------------------------- | --------------------------------- |
+| Transport network (200 × 200, move first)       | 1.21 ms, + 0.03 ms                | 1.38 ms, + 0.09 ms                |
+| Shrinking plasmodium (300 × 300, move first)    | 0.65 ms, + 0.04 ms                | 0.86 ms, + 0.09 ms                |
+| Transport network, 2 passes (extended)          | 1.24 ms, + 0.07 ms                | 1.38 ms, + 0.19 ms                |
+| Default settings (1536 × 960, sense first)      | 1.63 ms, no pass (0.00 ms)        | 1.83 ms, no pass (+ 0.02 ms)      |
+| Three strains (1536 × 960, 4.4 M agents, sense) | 1.71 ms, no pass (− 0.00 ms)      | 1.88 ms, no pass (+ 0.02 ms)      |
+
+The pass costs 0.03 to 0.07 ms per frame on WebGPU and 0.09 to 0.19 ms on WebGL2 (medians; rounds within ± 0.05 to
+0.25 ms), once per frame whatever the steps per frame; the scenes that sense first draw as before. Before the scent of
+decision 36 it cost 0.02 to 0.04 and 0.08 to 0.16 ms. The frame times here are lower than in the table above, which
+other jobs shared the machine for.
+
+### Tests
+
+- `sim.gpu.test.ts`, both backends: the order of a step (moving first the trail holds the step's deposits undiffused, a
+  sensor reads the deposits of the last moves before they diffuse, and the first step after a reset moves with the start
+  heading; sensing first every step senses, the first too, and the step's deposits diffuse in it); the rounding of each
+  order, bit for bit against an f32 emulation (moving first one factor, sensing first the mean and then the decay); the
+  boundaries (trail, food and light in both models, every arena and both orders against a float64 reference of ADR
+  0027's rules for 20 steps, and far from the other model's walls and from the reflective mean; outside a dish and in
+  the extended model's walls no trail, in the Jones model's walls trail; the wall byte for the sources and the sinks);
+  Jones' one map, the scent references, covered food and the mass balance in both orders, the plateau in each; the dish
+  (71 % filled, every agent of Shrinking plasmodium placed with seed 6, the moves and sensors past a wall byte outside a
+  64 × 64 dish, the rim drawn and the outline of food straight up to the rim at 64 pixels per cell).
+- Unit: `pack.test.ts` (one `DISH_FILL` in every shader, no rim of the old formula, the wall flag, the flag of the order
+  in both models, the emission factor of each order), `params.test.ts` (the order from a link, in both models and
+  through the switch to the Jones model), `presets.test.ts` (the scenes of Jones 2010 move first, every other scene
+  senses first, `stepOrderOf()`), `url.test.ts` (a link without the key: its scene's order, sense first without a scene;
+  a link with the key keeps it), `brush.test.ts`, `sweep.test.ts` and `engine-env.test.ts` (the geometry at the new rim,
+  found again by search), `link.test.ts` (revisions in the bytes, version 1 as revision 0, refused revisions and counts,
+  kinds by revision), `state.test.ts` (an old link paints its 8 foods until Reload scene), `presets.test.ts` (Fig. 19's
+  foods, the texts), `environment.test.ts` (revision 0 against the fractions of before).
+- e2e: an old link of Shortest path paints its foods of revision 0, and Reload scene those of Fig. 18.
+- The view, both backends: moving first the view of a state is the trail after its next step, bit for bit, without
+  agents (both models, one and two passes, a box with walls, three steps in a row and after a new trail), and with
+  agents and food the same wherever no agent moved in; the trail the simulation reads stays as it was; sensing first
+  the view is the trail itself and no pass runs; a scene that makes its view after every step runs as one that never
+  does (`sim.gpu.test.ts`); a frame moving first draws what a frame sensing first draws for the view's map, and not
+  what it draws for the raw trail (`engine.gpu.test.ts`, one and two passes, with the glow); the third texture and the
+  memory fit (`sizing.test.ts`, `engine-env.test.ts`). On SwiftShader alone the data test took up to 7.2 s and the
+  frame test 12.1 s (the view's pipelines are built at first use): their limits are 120 and 240 s (ADR 0010).
+- On SwiftShader on the M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`) the new and changed GPU
+  tests took at most 5.6 s (Jones' one map in a box, WebGL2, which has a limit of 120 s); every other new test at most
+  3.1 s of 60 s. At the four times of CI (ADR 0010) none passes a quarter of its limit, so no limit changes. With the
+  orders (alone on the machine, 2026-11-12) covered food took 3.9 s in each order, 15.6 s at four times, over a
+  quarter of 60 s: its limit is 120 s now (ADR 0010). The rounding test took 2.3 s, the boundaries 1.7 s, Jones' one
+  map 4.3 s of 120 s. "counts deposits exactly far above 2048 agents" without float blending took 15.4 s; its limit
+  of 120 s rests on 27.4 s measured in CI (ADR 0010), and this change only names its order.
+
+### Mutations
+
+Each new rule was broken on purpose, one at a time, and the tests named for it run (`vitest -t`); 37 mutations, and 24
+for the order of each scene's paper (all killed, below):
+
+- killed (35): the deposits added before the decay, and before the mean (the old order), on each backend; the first step
+  that senses, on each backend; the old emission factor (unit and GPU); the dish's radius of before in `common.wgsl`,
+  `common.glsl`, the render rim of `render.wgsl` and `render.frag`, the outline lookups of `render.wgsl` and
+  `view.glsl`, `brush.ts`, and a `DISH_FILL` of 0.95 in one shader; 32 start rounds; the reflective mean, the walls of
+  the other model and the outside that keeps its trail, each on both backends; the wall flag left out of `pack.ts` (GPU
+  and unit); sources in Jones' walls on both backends; a version 1 link read as the newest revision; the revision left
+  out of the bytes; `kindsOf()` with the newest shapes; the card without the old revision; `waiting()` with the newest
+  shapes; `openLink()` without the link's revision; `drawingOf()` without the revision; the old rim in the CPU copy of
+  growth (`growth-reference.ts`).
+- survived (2): the near-rim threshold of `shapeCells` in `render.wgsl` and `render.frag` with the old rim. It only
+  chooses between two ways of reading the same cells; a probe of 4 views across the rim, 3 styles and both backends
+  found no pixel that changed, so the mutation is equivalent there.
+- The order (24 killed): a scene of Jones 2010 that senses first; default settings that move first; a link that
+  ignores its scene; `stepOrderOf()` that falls back to move first; `sanitize()` that ignores the key; `toJones()`
+  that resets the order; the flag of `pack.ts` always 0 (unit and GPU); `senses()` without the flag, and sensing in
+  the first step, each on both backends; the sources of sensing first after the decay, and of moving first before the
+  mean, each on both backends; the mean and the decay of sensing first folded into one factor (the branch on the count
+  gone on WebGPU, the product on each backend); the covered-food pass of the last pass in both orders on each backend;
+  the pipeline constant always 0; one emission factor for both orders (unit and GPU).
+- The view (17 killed): the view's pass with the sources, on each backend; no pass moving first, and a pass sensing
+  first, each on both backends; no new view after a step, and after a written trail, each on both backends; the
+  second pass into the free texture instead of a third, on each backend; the render pass, and the glow and the auto
+  levels of WebGPU's frame, on the raw trail; the WebGL2 frame on the raw trail; no third texture in `sizing.ts`, and
+  none in the memory fit. The written trail and the glow survived the first tests; the tests gained a view before a new
+  trail and bright single cells under the glow, and then killed them.
+
+## Not changed
+
+- **Jones' sequential order of the agents** (p. 133) against the synchronous claims of ADR 0008. The fidelity check
+  found no figure that needs it after the four corrections, and the measurements above agree. ADR 0008 keeps it as the
+  documented difference (amended).
+- **Wound healing's remaining irregularity** (8.8 to 9.3 % against about 3 to 5 % in Fig. 22) stays an open item in
+  TODO.md; its cause is not found.
+- **Sensors in walls** read `BLOCKED` in both models (decision 13).
+
+## Open for the owner
+
+- None: the order of a step (decision 24), the look (decision 31) and the emission factor (decision 5) are decided.
+  Jones 2010 does not say whether an image shows the map before or after a step's diffusion: it takes images "at
+  notable times" of the diffusing trail map (p. 134), its captions count scheduler steps (Fig. 4, p. 134), and the
+  diffusion follows every system step (p. 132).
+
+## Consequences
+
+- The eight scenes of Jones match their figures where the fidelity check found them off (the table above); Wound
+  healing stays less regular than Fig. 22.
+- The scenes of Jones 2010, the Maze, the Foraging maze and every scene or link in a dish or a box change their bytes
+  on both backends, old links too (decision 21). The scenes on a periodic grid without walls that sense first keep the
+  bytes of main (decision 28). WebGPU and WebGL2 give the same trail as each other where they did before (decision
+  23).
+- Each scene runs the order of a step of its paper, and the setting Step order shows and changes it (decisions 24 and
+  25).
+- No pass, texture or buffer is added to a step; moving first, the diffusion pass reads `env` and `counts` once per
+  output cell instead of per tile cell (WebGPU) or per tap (WebGL2). WebGPU builds each diffusion pass for both orders
+  at startup (10 pipelines instead of 5). A scene that moves first runs one view pass per frame (0.03 to 0.19 ms), and
+  from two diffusion passes on holds a third trail and scent of 24 B per cell.
+- Links have version 2; an app from before this change refuses them and loads their settings alone, with its notice.

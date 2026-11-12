@@ -19,13 +19,23 @@ export function segmentDistance(px: number, py: number, a: [number, number], b: 
 export const SLACK = 0.01;
 
 /**
+ * The diameter of the dish as a share of the grid's short side: Jones' dish in the images of Fig. 18 and 19 (Jones
+ * 2010, p. 145–146: 0.947 and 0.944 of the lattice's side; ADR 0027). DISH_FILL in common.wgsl, common.glsl,
+ * render.wgsl and view.glsl is the same (pack.test.ts).
+ */
+export const DISH_FILL = 0.945;
+
+/** The radius of the dish on a `w` × `h` grid, in cells (dishRadius() in common.wgsl). */
+export const dishRadius = (w: number, h: number) => (DISH_FILL * Math.min(w, h)) / 2;
+
+/**
  * Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (common.wgsl `cellAt`). `slack`
  * moves the rim of a dish out by that many cells, or in if it is negative.
  */
 export function cellIndex(x: number, y: number, w: number, h: number, boundary: Boundary, slack = 0) {
   if (boundary === 'wrap') return (((y % h) + h) % h) * w + (((x % w) + w) % w);
   if (x < 0 || y < 0 || x >= w || y >= h) return -1;
-  if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > Math.min(w, h) / 2 - 1 + slack) return -1;
+  if (boundary === 'dish' && Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) > dishRadius(w, h) + slack) return -1;
   return y * w + x;
 }
 
@@ -301,7 +311,7 @@ export class Rows {
       let lo = span[0];
       let hi = span[1];
       if (this.under === 'dish') {
-        const d0 = Math.min(w, h) / 2 - 1 + slack;
+        const d0 = dishRadius(w, h) + slack;
         const d = outer ? d0 + HAIR * (1 + Math.abs(d0)) : d0 - HAIR * (1 + Math.abs(d0));
         const dy = cy - h / 2;
         if (d < Math.abs(dy)) return 0;
@@ -411,7 +421,7 @@ export function ownHeldEverywhere({ from, to, radius }: Stroke, w: number, h: nu
   if (radius < 0.75) return false;
   if (boundary === 'wrap') return true;
   if (boundary === 'box') return [from, to].every(([x, y]) => x >= 0 && y >= 0 && x <= w && y <= h);
-  const rim = 0.5 * Math.min(w, h) - 1 - radius;
+  const rim = dishRadius(w, h) - radius;
   return [from, to].every(([x, y]) => Math.hypot(x - w / 2, y - h / 2) <= rim);
 }
 

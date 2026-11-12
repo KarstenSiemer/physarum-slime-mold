@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dishRadius, DISH_FILL } from './brush';
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, emissionScale, strainSpec, type Settings } from '../model/params';
 import {
@@ -131,10 +132,10 @@ describe('model slot and sources', () => {
   });
 
   it('packs no saturation in the Jones model whatever K says, and a K below 1 as none', () => {
-    const s = { ...defaultSettings(), trailSaturation: 50 };
+    const s = { ...defaultSettings(), trailSaturation: 50, stepOrder: 'move-first' as const };
     expect(s.model).toBe('extended');
     expect(model(s)).toEqual([50, 1, 0, 0]);
-    expect(model({ ...s, model: 'jones' })).toEqual([0, 1, 0, 0]);
+    expect(model({ ...s, model: 'jones' })).toEqual([0, 1, 1, 0]);
     // A link's 1e-300 would pack as 0 in f32 and divide every lane by 0 (sanitize() rounds it too).
     for (const K of [1e-300, 0.5, 0.999]) {
       expect(trailSaturation({ model: 'extended', trailSaturation: K }), `${K}`).toBe(0);
@@ -146,6 +147,21 @@ describe('model slot and sources', () => {
     expect(model({ ...s, coveredFoodFactor: 0.01 })).toEqual([50, 1, 0, 0]);
   });
 
+  // ADR 0027: each scene's paper decides the order of a step, in either model.
+  it('packs whether a step senses first, in both models', () => {
+    expect(model(defaultSettings())[3]).toBe(1);
+    expect(model({ ...defaultSettings(), stepOrder: 'move-first' })[3]).toBe(0);
+    expect(model({ ...jones(), stepOrder: 'sense-first' })[3]).toBe(1);
+    expect(model({ ...jones(), stepOrder: 'move-first' })[3]).toBe(0);
+  });
+
+  // Jones' lattice diffuses at every site, walls too; the extended model's walls are sinks (ADR 0027).
+  it('packs whether walls diffuse: 1 in the Jones model, 0 in the extended model', () => {
+    expect(model(jones())[2]).toBe(1);
+    expect(model({ ...jones(), model: 'extended' })[2]).toBe(0);
+    expect(model(defaultSettings())[2]).toBe(0);
+  });
+
   // Jones 2010, p. 144: food goes into the trail map, which decays with decayT, and the strain weighs it as its trail.
   it('packs Jones’ one trail map in the Jones model: the scent bound to the trail, and no light', () => {
     const strain = { ...defaultStrain(0), decay: 0.05, food: 0.3, light: 2, attraction: [-1, 0, 0, 0] };
@@ -155,7 +171,7 @@ describe('model slot and sources', () => {
     expect(scent(s)).toEqual([Math.fround(255 * 0.02), 0, Math.fround(1 - 0.05), 0]);
     const e = floats({ ...s, model: 'extended' });
     expect([e[9 * 4], e[10 * 4]]).toEqual([Math.fround(0.3), 2]);
-    const g = emissionScale(0.2);
+    const g = emissionScale(0.2, s.stepOrder);
     expect(scent({ ...s, model: 'extended' })).toEqual(
       [255 * 0.02 * g, 255 * 0.4 * g, 1 - 0.2, 0].map((v) => Math.fround(v)),
     );
@@ -172,23 +188,37 @@ describe('model slot and sources', () => {
   });
 
   it('scales the sources by emissionScale() only in the extended model, by exactly 1 at decay 0.1', () => {
-    expect(emissionScale(0.1)).toBe(1);
+    expect(emissionScale(0.1, 'move-first')).toBe(1);
     const s = jones({ foodStrength: 0.05 });
-    const ext = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2 };
+    const ext = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2, stepOrder: 'move-first' as const };
     // At decay 0.1 the extended model releases the food of the Jones model.
     expect(scent(ext)[0]).toBe(scent(s)[0]);
     expect(scent(ext)[1]).toBe(Math.fround(255 * 0.2));
     const [food = 0, light = 0] = scent({ ...ext, scentDecay: 0.001 });
-    expect(food).toBeCloseTo((255 * 0.05 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
-    expect(light).toBeCloseTo((255 * 0.2 * (0.001 / 0.999)) / (0.1 / 0.9), 4);
+    expect(food).toBeCloseTo(255 * 0.05 * (0.001 / 0.1), 4);
+    expect(light).toBeCloseTo(255 * 0.2 * (0.001 / 0.1), 4);
     // The Jones model releases 255 · wProj at every decay of the strain.
     const low = jones({ foodStrength: 0.05, strains: [{ ...defaultStrain(0), decay: 0.001 }], scentDecay: 0.001 });
     expect(scent(low).slice(0, 3)).toEqual([Math.fround(255 * 0.05), 0, Math.fround(0.999)]);
   });
 
-  it('keeps the plateau of a large food at every scent decay: source · (1 − d) / d', () => {
-    const plateau = (d: number) => 255 * 0.05 * emissionScale(d) * ((1 - d) / d);
+  // Moving first, the agents sense the map after the step's sources, before its diffusion (ADR 0027).
+  it('keeps the plateau of a large food at every scent decay, moving first: source / d', () => {
+    const plateau = (d: number) => (255 * 0.05 * emissionScale(d, 'move-first')) / d;
     for (const d of [0.001, 0.003, 0.01, 0.03, 0.3, 0.9]) expect(plateau(d) / plateau(0.1)).toBeCloseTo(1, 12);
+  });
+
+  // Sensing first, the agents sense the map after the diffusion: the factor of the code before ADR 0027.
+  it('keeps the plateau sensing first too: source · (1 − d) / d, with the factor of before', () => {
+    expect(emissionScale(0.1, 'sense-first')).toBe(1);
+    const plateau = (d: number) => (255 * 0.05 * emissionScale(d, 'sense-first') * (1 - d)) / d;
+    for (const d of [0.001, 0.003, 0.01, 0.03, 0.3, 0.9]) expect(plateau(d) / (255 * 0.05 * 9)).toBeCloseTo(1, 12);
+    expect(emissionScale(0.001, 'sense-first')).toBe(0.001 / (1 - 0.001) / (0.1 / (1 - 0.1)));
+    const ext = { ...defaultSettings(), foodStrength: 0.05, scentDecay: 0.001 };
+    expect(scent(ext)[0]).toBe(Math.fround(255 * 0.05 * emissionScale(0.001, 'sense-first')));
+    expect(scent({ ...ext, stepOrder: 'move-first' })[0]).toBe(
+      Math.fround(255 * 0.05 * emissionScale(0.001, 'move-first')),
+    );
   });
 });
 
@@ -207,6 +237,34 @@ describe('strainEnds', () => {
     const s = [defaultStrain(0), { ...defaultStrain(1), share: 3 }];
     expect(strainEnds(s, 1000)).toEqual([250, 1000, 1000, 1000]);
     expect(strainEnds([defaultStrain(0)], 7)).toEqual([7, 7, 7, 7]);
+  });
+});
+
+// Jones' dish, 0.945 of the grid's short side (Jones 2010, Fig. 18 and 19; ADR 0027): one value in every shader.
+describe('the dish', () => {
+  it('has the same share of the short side in every shader and in brush.ts', () => {
+    expect(DISH_FILL).toBe(0.945);
+    expect(dishRadius(300, 300)).toBe(141.75);
+    expect(dishRadius(512, 288)).toBe(0.945 * 144);
+    for (const path of [
+      './shaders/common.wgsl',
+      './shaders/render.wgsl',
+      './gl/glsl/common.glsl',
+      './gl/glsl/view.glsl',
+    ]) {
+      const values = [...read(path).matchAll(/const (?:float )?DISH_FILL = ([\d.]+);/g)].map((m) => Number(m[1]));
+      expect(values, path).toEqual([DISH_FILL]);
+    }
+    // Every rim of the shaders is DISH_FILL times half the short side: no other formula is left.
+    for (const path of [
+      './shaders/common.wgsl',
+      './shaders/render.wgsl',
+      './gl/glsl/common.glsl',
+      './gl/glsl/view.glsl',
+      './gl/glsl/render.frag',
+      './gl/glsl/scent-down.frag',
+    ])
+      expect(read(path), path).not.toMatch(/0\.5 \* (?:f32|float)?\(?min\([^)]*\)\)? - 1\.0/);
   });
 });
 

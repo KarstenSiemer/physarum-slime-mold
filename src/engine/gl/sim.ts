@@ -11,7 +11,7 @@ import {
   trailSaturation,
   type AgentTool,
 } from '../pack';
-import { diffusePlan } from '../sizing';
+import { diffusePlan, viewTrailOn } from '../sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
   clear,
@@ -171,6 +171,11 @@ export class GlSim implements Sim {
    * (diffuse.frag COVERED). Allocated at its first use.
    */
   private presence: Target | undefined;
+  /** The view's third trail and scent, for the view of a step that moves first with two diffusion passes or more. */
+  private viewThird: { trail: Target; scent: Target; fbo: WebGLFramebuffer } | undefined;
+  /** The targets that hold the view's map (viewTargets()), and whether a change of the state since made it stale. */
+  private viewOut: { trail: Target; scent: Target } | undefined;
+  private viewStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
@@ -250,6 +255,95 @@ export class GlSim implements Sim {
     return this.trail[this.p];
   }
 
+  /**
+   * The trail and scent that the view draws (ADR 0027): the map after the step's diffusion. Sensing first the textures
+   * hold it. Moving first they hold the map as the agents sense it, before its diffusion; the step's diffusion passes
+   * without its sources and its cut (diffuse.frag VIEW) then write the map after the diffusion, trail and scent, into
+   * the free pair and, from a second pass on, into a third pair (sim.ts viewTextures). Made once for each state; the
+   * scent view's coarse map keys on the step and on `revision`, which update() counts.
+   */
+  viewTargets(): { trail: Target; scent: Target } {
+    if (this.settings.stepOrder === 'sense-first') return { trail: this.currentTrail, scent: this.currentScent };
+    if (this.viewStale || !this.viewOut) this.encodeView();
+    return this.viewOut ?? { trail: this.currentTrail, scent: this.currentScent };
+  }
+
+  /** The trail of viewTargets(). */
+  viewTrail(): Target {
+    return this.viewTargets().trail;
+  }
+
+  /** The passes of viewTargets(): the step's diffusion plan, the input the map as the agents sense it. */
+  private encodeView() {
+    const gl = this.gl;
+    this.writeParams();
+    const free = flip(this.p);
+    const d = this.prog.view();
+    let input = { trail: this.trail[this.p], scent: this.scent[this.p] };
+    for (const [i, v] of diffusePlan(this.settings.diffusion).entries()) {
+      // Even passes write the free pair, odd passes the third, so no pass reads the target it writes.
+      const third = i % 2 === 1 ? this.ensureViewThird() : undefined;
+      const out = third ?? { trail: this.trail[free], scent: this.scent[free] };
+      gl.bindFramebuffer(gl.FRAMEBUFFER, third ? third.fbo : this.mrt[free]);
+      gl.viewport(0, 0, this.width, this.height);
+      gl.useProgram(d.program);
+      const env = this.env.texture;
+      textures(gl, d.program, {
+        trailIn: input.trail.texture,
+        scentIn: input.scent.texture,
+        counts: this.counts.texture,
+        env,
+        occ: env,
+      });
+      gl.uniform1i(d.loc('first'), Number(v.first));
+      gl.uniform1i(d.loc('last'), Number(v.last));
+      gl.uniform1i(d.loc('blur'), Number(v.blur));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      input = { trail: out.trail, scent: out.scent };
+    }
+    this.viewOut = input;
+    this.viewStale = false;
+  }
+
+  /** The view's third trail and scent with their framebuffer, made at their first use (sizing.ts VIEW_BYTES_PER_CELL). */
+  private ensureViewThird() {
+    if (!this.viewThird) {
+      const gl = this.gl;
+      const trail = target(gl, this.width, this.height, gl.RGBA32F);
+      const scent = target(gl, this.width, this.height, gl.RG32F);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, trail.texture, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, scent.texture, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      this.viewThird = { trail, scent, fbo };
+    }
+    return this.viewThird;
+  }
+
+  /** Frees the view's third pair. */
+  private dropViewThird() {
+    if (!this.viewThird) return;
+    destroyTarget(this.gl, this.viewThird.trail);
+    destroyTarget(this.gl, this.viewThird.scent);
+    this.gl.deleteFramebuffer(this.viewThird.fbo);
+    this.viewThird = undefined;
+  }
+
+  /** For tests: the trail map that the view draws (viewTargets()), 4 lanes per cell. */
+  readView(): Promise<Float32Array> {
+    return Promise.resolve(readTarget(this.gl, this.viewTargets().trail) as Float32Array);
+  }
+
+  /** For tests: the scent that the view draws (viewTargets()), 2 values per cell. */
+  readViewScent(): Promise<Float32Array> {
+    // readTarget() reads 4 channels per cell; the scent targets hold 2 (readScent()).
+    const rgba = readTarget(this.gl, this.viewTargets().scent);
+    return Promise.resolve(
+      Float32Array.from({ length: (rgba.length / 4) * 2 }, (_, i) => rgba[(i >> 1) * 4 + (i & 1)] ?? 0),
+    );
+  }
+
   /** The scent of the same state as currentTrail: both alternate together. */
   get currentScent(): Target {
     return this.scent[this.p];
@@ -270,7 +364,16 @@ export class GlSim implements Sim {
 
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
+    // Moving first new settings make a new view of the same state, and the scent view's coarse map counts it as a change
+    // of the scent (ADR 0027); the step after them changes the step count anyway.
+    if (settings.stepOrder === 'move-first' || this.settings.stepOrder === 'move-first') this.revision++;
     this.settings = settings;
+    this.viewStale = true;
+    // The memory fit counts the view's third target only while a step moves first with two passes or more.
+    if (!viewTrailOn(settings) && this.viewThird) {
+      this.dropViewThird();
+      this.viewOut = undefined;
+    }
     if (switchedOn) this.rebuildOccupancy();
     // The memory fit counts `presence` only while covered food is on (sizing.ts), and growth's targets only while it
     // is on.
@@ -287,6 +390,7 @@ export class GlSim implements Sim {
   reset() {
     this.revision++;
     const gl = this.gl;
+    this.viewStale = true;
     this.step = 0;
     this.a = 0;
     this.p = 0;
@@ -340,6 +444,7 @@ export class GlSim implements Sim {
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
+    if (steps > 0) this.viewStale = true;
     for (let k = 0; k < steps; k++) {
       this.writeParams(tool);
       this.encodeStep();
@@ -358,6 +463,7 @@ export class GlSim implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
+    this.viewStale = true;
     this.revision++;
     // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
     // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
@@ -442,6 +548,7 @@ export class GlSim implements Sim {
   }
 
   clearEnvironment() {
+    this.viewStale = true;
     this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
@@ -555,7 +662,14 @@ export class GlSim implements Sim {
     writeTarget(this.gl, this.agentsTex[this.a], x, y, 1, 1, new Float32Array([a.x, a.y, a.heading, a.bits & 7]));
   }
 
+  writeScent(data: Float32Array) {
+    this.viewStale = true;
+    this.revision++;
+    writeTarget(this.gl, this.currentScent, 0, 0, this.width, this.height, data);
+  }
+
   writeTrail(data: Float32Array) {
+    this.viewStale = true;
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
 
@@ -565,6 +679,7 @@ export class GlSim implements Sim {
    * `env`.
    */
   writeEnv(data: Uint8Array) {
+    this.viewStale = true;
     this.revision++;
     writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
     clear(this.gl, this.shape);
@@ -589,6 +704,7 @@ export class GlSim implements Sim {
     all.push(...this.growthTargets());
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
+    this.dropViewThird();
     gl.deleteBuffer(this.ubo);
   }
 
@@ -748,11 +864,14 @@ export class GlSim implements Sim {
     const covered = this.settings.coveredFood;
     // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
     const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
+    const senseFirst = this.settings.stepOrder === 'sense-first';
     for (const v of diffusePlan(this.settings.diffusion)) {
       const out = flip(this.p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.mrt[out]);
       gl.viewport(0, 0, this.width, this.height);
-      const d = covered && v.first ? this.prog.covered() : this.prog.diffuse;
+      // The pass that adds the step's sources (diffuse.frag): the last moving first, the first sensing first (ADR 0027);
+      // with covered food while it is on.
+      const d = covered && (senseFirst ? v.first : v.last) ? this.prog.covered() : this.prog.diffuse;
       gl.useProgram(d.program);
       textures(gl, d.program, {
         trailIn: this.trail[this.p].texture,

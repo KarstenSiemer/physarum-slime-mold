@@ -1,7 +1,7 @@
 // Growth and shrinkage and Capacity (ADR 0025). Each test starts the app once, from its own link: two starts per test
 // took over a quarter of the time limit on SwiftShader (ADR 0010).
 import { expect, test, type Page } from '@playwright/test';
-import { presetById } from '../../src/model/presets';
+import { presetById, shapeRevision } from '../../src/model/presets';
 import { decodeLink, encodeLink } from '../../src/model/url';
 import { smallScene, watchErrors } from './helpers';
 
@@ -105,6 +105,7 @@ test('the Foraging maze grows from a small colony on its food', async ({ page })
   if (!p) throw new Error('no Foraging maze');
   const { hash } = await encodeLink(p.settings(), {
     scene: p.id,
+    revision: shapeRevision(p),
     origins: [0],
     shapes: p.env?.map(() => true) ?? [],
     strokes: [],

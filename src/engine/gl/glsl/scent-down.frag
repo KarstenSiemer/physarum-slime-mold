@@ -10,7 +10,7 @@ ivec2 scentLevelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
 float scentOpen(ivec2 c) {
   ivec2 s = gridSize();
   if (texelFetch(shape, c, 0).r >= 0.5) return 0.0;
-  if (V.boundary == 2u && distance(vec2(c) + 0.5, 0.5 * vec2(s)) > 0.5 * float(min(s.x, s.y)) - 1.0) return 0.0;
+  if (V.boundary == 2u && distance(vec2(c) + 0.5, 0.5 * vec2(s)) > DISH_FILL * 0.5 * float(min(s.x, s.y))) return 0.0;
   return 1.0;
 }
 

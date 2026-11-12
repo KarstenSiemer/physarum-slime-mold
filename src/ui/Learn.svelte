@@ -5,6 +5,7 @@
     globalSpec,
     growthHelp,
     modelHelp,
+    stepOrderHelp,
     scentViewHelp,
     strainSpec,
   } from '../model/params';
@@ -44,6 +45,7 @@
       .map(([, v]) => v),
     collisionsHelp,
     modelHelp,
+    stepOrderHelp,
     coveredFoodHelp,
     growthHelp,
     ...Object.entries(globalSpec)
@@ -143,9 +145,17 @@
       </p>
       <p>
         Like the paper, the app imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of
-        the cell. The agents leave a chemical trail and follow it. Every step has six parts:
+        the cell. The agents leave a chemical trail and follow it. Every step has six parts. In Jones 2010 all agents
+        move, then all agents sense, then the trail spreads. In his later papers and in Fogleman’s version all agents
+        sense first, then move, then the trail spreads. Each scene uses the order of its paper (the setting Step order).
+        The picture always shows the trail after it spread in the step.
       </p>
       <ol>
+        <li>
+          <strong>Move</strong> one step forward. In Jones’ original, only one agent may sit in each cell (the switch One
+          agent per cell).
+        </li>
+        <li><strong>Deposit</strong> some trail after a successful move.</li>
         <li>
           <strong>Sense.</strong> Three sensors in front of the agent read the trail: front, front-left and front-right.
         </li>
@@ -154,11 +164,9 @@
           toward the stronger side.
         </li>
         <li>
-          <strong>Move</strong> one step forward. In Jones’ original, only one agent may sit in each cell (the switch One
-          agent per cell).
+          <strong>Diffuse:</strong> the trail spreads to the 8 neighbour cells (a 3 × 3 average). Trail that spreads past
+          the edge of a dish or box is lost.
         </li>
-        <li><strong>Deposit</strong> some trail after a successful move.</li>
-        <li><strong>Diffuse:</strong> the trail spreads to the 8 neighbour cells (a 3 × 3 average).</li>
         <li><strong>Decay:</strong> a fixed fraction of the trail disappears.</li>
       </ol>
       <p>
@@ -183,9 +191,9 @@
       <p>
         In the Jones model, one strain follows its own trail, or flees it as in Jones’ Turing patterns. One agent fits
         in a cell, and one 3 × 3 average spreads the trail in each step. Food goes into the trail map, so its scent
-        spreads and fades with the trail. Walls mark where agents cannot go. Agents can die off, as in Shrinking
-        plasmodium. In later papers Jones lets food release almost no scent while agents cover it: the switch Covered
-        food releases less.
+        spreads and fades with the trail. Walls mark where agents cannot go, and the trail spreads through them as
+        through any cell. Agents can die off, as in Shrinking plasmodium. In later papers Jones lets food release almost
+        no scent while agents cover it: the switch Covered food releases less.
       </p>
       <p>
         From 2011 on, Jones also lets the population grow and shrink (Nat. Comput. 10: 1345). Every few steps, an agent
@@ -202,7 +210,7 @@
         A table sets how strongly each strain follows or flees the trails of the others, an idea from Michael Fogleman’s
         version. Light releases a repellent that spreads like the food scent. The food scent has a decay of its own, and
         a strain has its own weight for food and light. Agents can share cells, the trail can spread in more passes, and
-        walls also block what the sensors read.
+        walls also block what the sensors read. Walls take in the trail and the scents, so nothing spreads through them.
       </p>
       <p>
         With Scent decay 0.1 the scent fades within a few cells, so an agent notices food only when a sensor comes

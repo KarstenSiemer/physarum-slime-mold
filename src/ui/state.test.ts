@@ -4,7 +4,7 @@ import { Engine } from '../engine/engine';
 import type { EnvEdit } from '../engine/environment';
 import { decodeLink, encodeLink } from '../model/url';
 import { constrain, defaultSettings, jonesFits, type Boundary, type Settings } from '../model/params';
-import { presetById, PRESETS, type EnvShape } from '../model/presets';
+import { presetById, PRESETS, shapeRevision, shapesAt, type EnvShape } from '../model/presets';
 
 // A fresh module per test: the app state and the once-per-page-load notice live in the module.
 async function fresh() {
@@ -104,7 +104,15 @@ describe('the current scene', () => {
     const { app, latticeLeft, linkUnchanged, loadPreset, openLink, sceneChanged, useSceneLattice } = await fresh();
     const old = { ...(presetById('steiner')?.settings() ?? defaultSettings()), lattice: null, resolution: 256 };
     const link = await decodeLink(
-      (await encodeLink(old, { scene: 'steiner', origins: [0], shapes: [true, true, true, true], strokes: [] })).hash,
+      (
+        await encodeLink(old, {
+          scene: 'steiner',
+          revision: 0,
+          origins: [0],
+          shapes: [true, true, true, true],
+          strokes: [],
+        })
+      ).hash,
     );
     if (!link) throw new Error('no link');
     openLink(link);
@@ -116,11 +124,13 @@ describe('the current scene', () => {
     expect(linkUnchanged()).toBe(false);
     app.settings.density = 0.02;
     expect(linkUnchanged()).toBe(true);
-    // The way back is no change made by the link.
+    // The way back is no change made by the link. The link holds revision 0 of the foods (ADR 0027), so the scene
+    // stays changed until Reload scene loads its foods of Fig. 19.
     useSceneLattice();
-    expect([sceneChanged(), linkUnchanged()]).toEqual([false, false]);
+    expect([sceneChanged(), linkUnchanged(), app.sceneRevision]).toEqual([true, false, 0]);
     loadPreset('steiner');
     expect(app.linkBase).toBeUndefined();
+    expect([sceneChanged(), app.sceneRevision]).toEqual([false, 1]);
   });
 
   // ADR 0026: the scene's own lattice is no pick of a grid size, so the startup check goes on for later scenes.
@@ -439,7 +449,7 @@ describe('a shared link', () => {
     const { app, currentDrawing, openLink, sceneChanged, setEngine, startScene } = await fresh();
     const settings = presetById('maze')?.settings() ?? defaultSettings();
     const shapes = mazeShapes().map((_, i) => i !== 1);
-    const drawing = { scene: 'maze', origins: [0], shapes, strokes: [dab] };
+    const drawing = { scene: 'maze', revision: 0, origins: [0], shapes, strokes: [dab] };
     openLink({ settings, drawing });
     expect(app.scene).toBe('maze');
     expect(app.strainOrigin).toEqual([0]);
@@ -460,19 +470,58 @@ describe('a shared link', () => {
     setEngine(undefined);
   });
 
+  // ADR 0027: a link made before a scene's shapes changed paints the shapes it was made with, and says that it changes
+  // the scene; Reload scene loads the scene's shapes of now.
+  it("of an earlier revision of the scene's shapes paints those shapes, and Reload scene the newest", async () => {
+    const { app, currentDrawing, linkUnchanged, loadPreset, openLink, sceneChanged, setEngine, startScene } =
+      await fresh();
+    const p = presetById('shrinking');
+    if (!p) throw new Error('no Shrinking plasmodium');
+    const old = shapesAt(p, 0) ?? [];
+    const drawing = { scene: 'shrinking', revision: 0, origins: [0], shapes: old.map(() => true), strokes: [] };
+    // After the scene's newest shapes, the link's own revision.
+    loadPreset('shrinking');
+    expect(app.sceneRevision).toBe(1);
+    openLink({ settings: p.settings(), drawing });
+    expect([app.sceneRevision, sceneChanged(), linkUnchanged()]).toEqual([0, true, true]);
+    expect(currentDrawing()).toEqual(drawing);
+    // Before the engine exists, startScene() loads the 8 shapes of revision 0.
+    const { calls, engine } = loads();
+    await startScene(engine);
+    expect(calls).toEqual([[8, 0, 'dish']]);
+    // With an engine: the list holds them, the address keeps revision 0, and the card says that the link changes the
+    // scene.
+    openLink({ settings: p.settings(), drawing });
+    const real = await Engine.create(canvas(), structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(real);
+    await startScene(real);
+    expect(real.envList()).toHaveLength(8);
+    expect(real.matches(old, 'dish')).toBe(true);
+    expect([sceneChanged(), linkUnchanged()]).toEqual([true, true]);
+    expect(currentDrawing()).toEqual(drawing);
+    // Reload scene: the 19 foods of Fig. 21, revision 1, and no change.
+    loadPreset('shrinking');
+    await vi.waitFor(() => {
+      expect(real.envList()).toHaveLength(19);
+    });
+    expect([app.sceneRevision, sceneChanged(), currentDrawing().revision]).toEqual([1, false, 1]);
+    expect(currentDrawing().shapes).toEqual(p.env?.map(() => true));
+    setEngine(undefined);
+  });
+
   it("gives each strain the role it had in the sender's scene", async () => {
     const { app, openLink } = await fresh();
     const s = presetById('dot-grid')?.settings() ?? defaultSettings();
     // The sender removed strain A and added one: B and C moved up a letter.
     const settings = { ...s, strains: [...s.strains.slice(1), s.strains[0] ?? s.strains[1]] } as Settings;
-    openLink({ settings, drawing: { scene: 'dot-grid', origins: [1, 2, -1], shapes: [], strokes: [] } });
+    openLink({ settings, drawing: { scene: 'dot-grid', revision: 0, origins: [1, 2, -1], shapes: [], strokes: [] } });
     expect(app.strainOrigin).toEqual([1, 2, -1]);
   });
 
   it('of the scene as it loads is the scene unchanged, until a model setting differs', async () => {
     const { app, openLink, sceneChanged, setEngine, startScene } = await fresh();
     const settings = presetById('maze')?.settings() ?? defaultSettings();
-    openLink({ settings, drawing: { scene: 'maze', origins: [0], shapes: mazeShapes(), strokes: [] } });
+    openLink({ settings, drawing: { scene: 'maze', revision: 0, origins: [0], shapes: mazeShapes(), strokes: [] } });
     expect(sceneChanged()).toBe(false);
     const engine = await Engine.create(canvas(), structuredClone(app.settings), undefined, new CpuBackend());
     setEngine(engine);
@@ -480,7 +529,10 @@ describe('a shared link', () => {
     expect(sceneChanged()).toBe(false);
     setEngine(undefined);
     const other = { ...settings, diffusion: 3 };
-    openLink({ settings: other, drawing: { scene: 'maze', origins: [0], shapes: mazeShapes(), strokes: [] } });
+    openLink({
+      settings: other,
+      drawing: { scene: 'maze', revision: 0, origins: [0], shapes: mazeShapes(), strokes: [] },
+    });
     expect(sceneChanged()).toBe(true);
   });
 
@@ -491,7 +543,7 @@ describe('a shared link', () => {
     expect(app.scene).toBe('');
     expect(app.notice).toBe('');
     expect(sceneChanged()).toBe(false);
-    expect(currentDrawing()).toEqual({ scene: '', origins: [], shapes: [], strokes: [] });
+    expect(currentDrawing()).toEqual({ scene: '', revision: 0, origins: [], shapes: [], strokes: [] });
     const { calls, engine } = loads();
     await startScene(engine);
     expect(calls).toEqual([[0, 0, undefined]]);
@@ -503,7 +555,7 @@ describe('a shared link', () => {
     openLink({ settings, drawingLost: true });
     expect(app.notice).toBe('This app cannot read the scene and drawing in this link, so only its settings load.');
     expect(app.scene).toBe('');
-    expect(currentDrawing()).toEqual({ scene: '', origins: [], shapes: [], strokes: [] });
+    expect(currentDrawing()).toEqual({ scene: '', revision: 0, origins: [], shapes: [], strokes: [] });
     const { calls, engine } = loads();
     await startScene(engine);
     expect(calls).toEqual([[0, 0, undefined]]);
@@ -512,7 +564,7 @@ describe('a shared link', () => {
   it('loses its drawing to a preset or a Clear chosen before the engine starts', async () => {
     const { clearEnvironment, currentDrawing, loadPreset, openLink, startScene } = await fresh();
     const settings = presetById('maze')?.settings() ?? defaultSettings();
-    const drawing = { scene: 'maze', origins: [0], shapes: mazeShapes(), strokes: [dab] };
+    const drawing = { scene: 'maze', revision: 0, origins: [0], shapes: mazeShapes(), strokes: [dab] };
     openLink({ settings, drawing });
     clearEnvironment();
     expect(currentDrawing()).toEqual({ ...drawing, shapes: mazeShapes().map(() => false), strokes: [] });
@@ -570,7 +622,12 @@ describe('growth and shrinkage (ADR 0025)', () => {
     for (const p of PRESETS) {
       const { app, openLink, sceneChanged } = await fresh();
       const old = Object.fromEntries(Object.entries(p.settings()).filter(([k]) => !gone(k)));
-      const drawing = { scene: p.id, origins: p.settings().strains.map((_s, i) => i), shapes: [] as boolean[] };
+      const drawing = {
+        scene: p.id,
+        revision: shapeRevision(p),
+        origins: p.settings().strains.map((_s, i) => i),
+        shapes: [] as boolean[],
+      };
       const link = await decodeLink((await encodeLink(old as unknown as Settings, { ...drawing, strokes: [] })).hash);
       if (!link) throw new Error(p.id);
       openLink(link);
@@ -849,12 +906,16 @@ describe('a link and the model', () => {
       // Before the switch the scenes of Jones weighed food with +1, also the repelling ones (jones() in presets.ts).
       const jones = p.settings().model === 'jones';
       const old = { ...now, strains: now.strains.map((st) => (jones ? { ...st, food: 1 } : st)) };
-      const drawing = { scene: p.id, origins: now.strains.map((_s, i) => i), shapes: (p.env ?? []).map(() => true) };
+      // A link of that day holds revision 0 of the scene's shapes (ADR 0027).
+      const shapes = (shapesAt(p, 0) ?? []).map(() => true);
+      const drawing = { scene: p.id, revision: 0, origins: now.strains.map((_s, i) => i), shapes };
       const hash = await encodeLink(old as unknown as Settings, { ...drawing, strokes: [] });
       const link = await decodeLink(hash.hash);
       if (!link) throw new Error(p.id);
       openLink(link);
-      expect([app.settings.model, sceneChanged()], p.id).toEqual([p.settings().model, false]);
+      // Its settings are the scene's; only a scene whose shapes changed since is changed, by those shapes.
+      const moved = shapeRevision(p) > 0;
+      expect([app.settings.model, sceneChanged(), app.envChanged], p.id).toEqual([p.settings().model, moved, moved]);
     }
   });
 });

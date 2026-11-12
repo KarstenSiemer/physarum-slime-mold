@@ -221,11 +221,13 @@ export class WebGl2Backend implements Backend<GlSim> {
       this.sampleTarget = target(gl, SAMPLES, h, gl.RGBA32F);
     }
     const t = this.sampleTarget;
+    // Before the target is bound: the view's passes (gl/sim.ts viewTargets()) bind their own.
+    const trail = sim.viewTargets().trail.texture;
     const p = this.prog.sample;
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.viewport(0, 0, t.width, t.height);
     gl.useProgram(p.program);
-    textures(gl, p.program, { trail: sim.currentTrail.texture });
+    textures(gl, p.program, { trail });
     gl.uniform2f(p.loc('outSize'), t.width, t.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     let px: Float32Array;
@@ -250,12 +252,16 @@ export class WebGl2Backend implements Backend<GlSim> {
   private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target, given?: Levels) {
     const gl = this.gl;
     sim.syncShape();
+    // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027), made before any
+    // target is bound: the view's passes (gl/sim.ts viewTargets()) bind their own.
+    const mapped = sim.viewTargets();
+    const [trail, viewScent] = [mapped.trail.texture, mapped.scent.texture];
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
     const l = given ?? this.levels();
     const exposure = (agents ? 0.4 / s.density : l.gain || fallback) * 2 ** s.exposure;
     const black = agents ? 0 : l.black;
-    const bloom = this.runBloom(sim, s, exposure, black);
+    const bloom = this.runBloom(sim, s, exposure, black, trail);
     // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
     const occ = s.collisions ? sim.occupancyTexture : undefined;
     packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined, l.strand);
@@ -266,7 +272,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     // draws the same pixels.
     const variant = sim.hasEnvironment ? 1 : 0;
     // A sampler that the program never reads still needs a texture: the counts stand in for the occupancy.
-    const cells = { trail: sim.currentTrail.texture, shape: sim.shapeTexture, occ: occ ?? sim.countsTexture };
+    const cells = { trail, shape: sim.shapeTexture, occ: occ ?? sim.countsTexture };
     // The gel style samples its height field five times per pixel: once per frame at grid
     // resolution here, instead of five full trail filters per pixel.
     if (s.style === 'gel') {
@@ -292,11 +298,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       gl.bindFramebuffer(gl.FRAMEBUFFER, coarse.fbo);
       gl.viewport(0, 0, scentLevelSize(sim.width, level), scentLevelSize(sim.height, level));
       gl.useProgram(fill.program);
-      textures(gl, fill.program, {
-        trail: sim.currentTrail.texture,
-        shape: sim.shapeTexture,
-        scent: sim.currentScent.texture,
-      });
+      textures(gl, fill.program, { trail, shape: sim.shapeTexture, scent: viewScent });
       if (shaped) gl.colorMask(true, true, false, false); // the share stays
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.colorMask(true, true, true, true);
@@ -306,8 +308,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     const p = (this.fixed ?? scent?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
     const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture };
-    const scentLevels = coarse?.texture ?? sim.currentScent.texture;
-    textures(gl, p.program, scent ? { ...all, scent: sim.currentScent.texture, scentLevels } : all);
+    const scentLevels = coarse?.texture ?? viewScent;
+    textures(gl, p.program, scent ? { ...all, scent: viewScent, scentLevels } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -333,7 +335,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   }
 
   /** Glow chain (bloom.frag); returns level 0, or an empty one when the glow is off. */
-  private runBloom(sim: GlSim, s: Settings, gain: number, black: number): Target {
+  private runBloom(sim: GlSim, s: Settings, gain: number, black: number, trail: WebGLTexture): Target {
     const gl = this.gl;
     const w = Math.ceil(sim.width / 2);
     const h = Math.ceil(sim.height / 2);
@@ -362,7 +364,7 @@ export class WebGl2Backend implements Backend<GlSim> {
         gl.uniform2f(p.loc('texel'), 1 / src.width, 1 / src.height);
       }
       // A sampler may never read the texture being drawn into, even unused: give prefilter level 1.
-      textures(gl, p.program, { src: (src ?? at(chain, 1)).texture, trail: sim.currentTrail.texture });
+      textures(gl, p.program, { src: (src ?? at(chain, 1)).texture, trail });
       gl.uniform2f(p.loc('outSize'), dst.width, dst.height);
       gl.uniform1i(p.loc('mode'), mode);
       if (add) {

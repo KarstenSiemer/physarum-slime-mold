@@ -22,6 +22,9 @@ struct View {
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
 }
 
+// The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
+const DISH_FILL = 0.945;
+
 @group(0) @binding(0) var<uniform> V: View;
 @group(0) @binding(1) var trail: texture_2d<f32>;
 @group(0) @binding(2) var<storage, read> shape: array<u32>; // outline distances and light (paint.wgsl `outline`)
@@ -160,8 +163,9 @@ fn heightField(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   return vec4f(clamp(y, -6e4, 6e4), 0.0, 0.0, 1.0);
 }
 
-// The height of a wall cell: the mean of its neighbours outside walls. Walls hold no trail, so their cells
-// would pull the filtered height down in steps of whole cells along a slanted wall, and the gel would light
+// The height of a wall cell: the mean of its neighbours outside walls. Walls hold no trail in the extended model and
+// less than the cells beside them in the Jones model (diffuse.wgsl, ADR 0027), so their cells would pull the filtered
+// height down in steps of whole cells along a slanted wall, and the gel would light
 // that staircase where the smooth outline of the wall no longer covers it. The wall is drawn over this.
 fn besideWall(c: vec2i, y: f32) -> f32 {
   var sum = 0.0;
@@ -246,7 +250,7 @@ fn shapeIndex(c: vec2i) -> i32 {
   } else if (V.boundary == 2u) {
     let o = 0.5 * vec2f(s);
     let m = vec2f(c) + 0.5 - o;
-    let rim = 0.5 * f32(min(s.x, s.y)) - 1.0; // dishRadius() in common.wgsl
+    let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y)); // dishRadius() in common.wgsl
     if (dot(m, m) > rim * rim) { q = vec2i(floor(o + m * ((rim - 0.75) * inverseSqrt(dot(m, m))))); }
   }
   return q.y * s.x + q.x;
@@ -259,7 +263,7 @@ fn shapeCells(c: vec2i) -> array<u32, 9> {
   var w: array<u32, 9>;
   if (V.boundary == 2u) {
     let m = vec2f(c) + 0.5 - 0.5 * vec2f(s);
-    let rim = 0.5 * f32(min(s.x, s.y)) - 1.0;
+    let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y));
     if (dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
       // Near the rim: some of the 3 × 3 cells may lie outside the dish.
       for (var j = 0; j < 3; j++) {
@@ -493,8 +497,8 @@ fn walls(c: vec3f, e: Env) -> vec3f {
 }
 
 // The trail at p, bilinear over the 4 cells around it but without the cells of walls (`cells`: shapeCells of the
-// cell under p, which holds those 4). Walls hold no trail, so the plain filter fell to nothing towards their
-// cells, in steps along a slanted wall that its smooth outline no longer covers. The weights of the other cells
+// cell under p, which holds those 4). Walls hold no trail in the extended model and less than the cells beside them
+// in the Jones model (ADR 0027), so the plain filter fell towards their cells, in steps along a slanted wall that its smooth outline no longer covers. The weights of the other cells
 // are scaled up to 1, as if the trail went on up to the wall. Only for one bilinear lookup (zoomed in).
 fn trailBesideWalls(p: vec2f, cells: array<u32, 9>) -> vec4f {
   let q = p - 0.5;
@@ -604,7 +608,7 @@ fn scentTexel(c: vec2i) -> vec2i {
   if (V.boundary == 2u) {
     let o = 0.5 * vec2f(s);
     let m = vec2f(c) + 0.5 - o;
-    let rim = 0.5 * f32(min(s.x, s.y)) - 1.0;
+    let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y));
     if (dot(m, m) > rim * rim) { q = vec2i(floor(o + m * ((rim - 0.75) * inverseSqrt(dot(m, m))))); }
   }
   return q;
@@ -628,7 +632,7 @@ fn scentCells(p: vec2f) -> array<vec2i, 4> {
   }
   var t = array<vec2i, 4>(vec2i(x.x, y.x), vec2i(x.y, y.x), vec2i(x.x, y.y), vec2i(x.y, y.y));
   let m = p - 0.5 * vec2f(s);
-  let rim = 0.5 * f32(min(s.x, s.y)) - 1.0;
+  let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y));
   if (V.boundary == 2u && dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
     // Near the rim: some of the 4 cells may lie outside the dish.
     t = array<vec2i, 4>(scentTexel(i), scentTexel(i + vec2i(1, 0)), scentTexel(i + vec2i(0, 1)),
@@ -689,7 +693,7 @@ fn scentLevelSize(k: u32) -> vec2i {
 fn scentOpen(c: vec2i) -> f32 {
   let s = size();
   if ((shape[c.y * s.x + c.x] & 0x80u) != 0u) { return 0.0; }
-  if (V.boundary == 2u && distance(vec2f(c) + 0.5, 0.5 * vec2f(s)) > 0.5 * f32(min(s.x, s.y)) - 1.0) { return 0.0; }
+  if (V.boundary == 2u && distance(vec2f(c) + 0.5, 0.5 * vec2f(s)) > DISH_FILL * 0.5 * f32(min(s.x, s.y))) { return 0.0; }
   return 1.0;
 }
 
@@ -856,7 +860,7 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   if (V.boundary == 1u) {
     inside = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
   } else if (V.boundary == 2u) {
-    inside = cover(0.5 * min(s.x, s.y) - 1.0 - distance(p, 0.5 * s));
+    inside = cover(DISH_FILL * 0.5 * min(s.x, s.y) - distance(p, 0.5 * s));
   }
   let space = V.background.rgb * select(0.55, 0.92, V.style == 2u);
   var c = space;

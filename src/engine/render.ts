@@ -279,7 +279,8 @@ export class Renderer {
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
-    const { trail, scent } = sim.current;
+    // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027).
+    const { trail, scent } = sim.viewTextures;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
     const view = f.settings.showScent && this.fixed === undefined ? this.scentNow() : undefined;
@@ -305,7 +306,7 @@ export class Renderer {
           { binding: 6, resource: heights },
           { binding: 7, resource: this.heightSampler },
           { binding: 8, resource: { buffer: occ } },
-          // The scent of the same state as the trail: both alternate together (Simulation.current).
+          // The scent of the same state as the trail: both come from Simulation.viewTextures (ADR 0027).
           { binding: 9, resource: scentView },
           { binding: 10, resource: this.coarse?.view ?? this.noCoarse.createView() },
         ],

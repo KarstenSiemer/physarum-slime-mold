@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
+import { dishRadius } from './brush';
 import { Engine, type HeldTool } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
@@ -426,7 +427,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     const [env, shape] = [await sim.readEnv(), await sim.readShape()];
     const { width: w, height: h } = sim;
     const { boundary } = settings;
-    const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= Math.min(w, h) / 2 - 1;
+    const inDish = (x: number, y: number) => Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) <= dishRadius(w, h);
     const holds = (x: number, y: number, ch: number) => {
       if (boundary === 'wrap') [x, y] = [((x % w) + w) % w, ((y % h) + h) % h];
       else if (x < 0 || y < 0 || x >= w || y >= h || (boundary === 'dish' && !inDish(x, y))) return false;
@@ -566,7 +567,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
   it('keep the outlines on the side of env across arena switches from the dish to a box and back', async () => {
     const { engine } = await load('shrinking');
     const [w, h] = [engine.sim.width, engine.sim.height];
-    const rim = Math.min(w, h) / 2 - 1;
+    const rim = dishRadius(w, h);
     const strokes: Stroke[] = [
       // Across the rim: the dish clips it, and its shadow falls on cells outside the dish, which a box shows.
       { kind: 'wall', from: [w * 0.5 + rim - 20, h * 0.5 - 4], to: [w * 0.5 + rim + 20, h * 0.5 - 4], radius: 2.2 },
@@ -718,7 +719,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
       }
       const [x, y] = [Math.floor(a.x), Math.floor(a.y)];
       const c = y * width + x;
-      const outside = dish && Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) > Math.min(width, height) / 2 - 1;
+      const outside = dish && Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) > dishRadius(width, height);
       if (outside || (env[c * 4] ?? 0) >= 128) blocked++;
       per.set(c, (per.get(c) ?? 0) + 1);
     }
@@ -767,4 +768,98 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
     expect(await start()).toEqual([]);
     engine.destroy();
   }, 150_000); // 7.6 s on SwiftShader on an M3 Pro, about 30 s in CI: under a quarter of 150 s (ADR 0010)
+});
+
+// ADR 0027 (owner, 2026-11-12, "Weich"): a frame draws the map after the step's diffusion in either order. Moving first
+// the frame draws what the view's passes make of the trail, which is what a scene that senses first draws when its
+// trail holds that map; the trail as the agents sense it draws otherwise.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: the view (ADR 0027)', (kind) => {
+  const maxDiff = (a: ImageData, b: ImageData) =>
+    a.data.reduce((m, v, i) => (i % 4 === 3 ? m : Math.max(m, Math.abs(v - (b.data[i] ?? 0)))), 0);
+  /** A capture with the dither of frame 0: WebGPU's renderer counts its frames, captures too. */
+  const capture = (engine: Engine) => {
+    if (kind === 'webgpu') (engine.backend as unknown as { renderer: { frame: number } }).renderer.frame = 0;
+    return engine.capture();
+  };
+
+  it.each([1, 2])(
+    "draws the map after the step's diffusion, moving first (%i passes)",
+    async (diffusion) => {
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [160, 120];
+      const s: Settings = {
+        ...defaultSettings(),
+        resolution: 256,
+        layout: 'empty',
+        diffusion,
+        stepOrder: 'move-first',
+      };
+      const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+      engine.paused = true;
+      const sim = engine.sim;
+      let r = 11;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      // Bright single cells: the glow of the frame sees them too, and the view spreads them over their neighbours.
+      const raw = Float32Array.from({ length: sim.width * sim.height * 4 }, () => (rnd() < 0.03 ? 300 : 0));
+      sim.writeTrail(raw);
+      const moving = await capture(engine);
+      const view = await sim.readView();
+      sim.update({ ...engine.settings, stepOrder: 'sense-first' });
+      sim.writeTrail(view);
+      expect(maxDiff(moving, await capture(engine))).toBe(0);
+      sim.writeTrail(raw);
+      expect(maxDiff(moving, await capture(engine))).toBeGreaterThan(10);
+      engine.destroy();
+      // Up to 12.1 s on SwiftShader on an M3 Pro (the view's pipelines are built at first use), 48.2 s at the four times
+      // of CI: 240 s keeps it under a quarter (ADR 0010).
+    },
+    240_000,
+  );
+  // The scent view (ADR 0009) reads the same state as the picture: moving first the scent after the step's diffusion
+  // too, zoomed out through its coarse map, with the line of the strand that the trail's levels give.
+  // On 160 × 120 pixels the view reads the grid, on 64 × 48 (4 cells per pixel) its coarse map of level 2.
+  it.each([
+    [1, 160, 120],
+    [2, 160, 120],
+    [1, 64, 48],
+    [2, 64, 48],
+  ])(
+    "draws the scent view of the map after the step's diffusion, moving first (%i passes, %i × %i pixels)",
+    async (diffusion, cw, ch) => {
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [cw, ch];
+      const s: Settings = {
+        ...defaultSettings(),
+        resolution: 256,
+        layout: 'empty',
+        diffusion,
+        stepOrder: 'move-first',
+        showScent: true,
+      };
+      const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+      engine.paused = true;
+      const sim = engine.sim;
+      let r = 5;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      const cells = sim.width * sim.height;
+      const raw = Float32Array.from({ length: cells * 4 }, () => (rnd() < 0.03 ? 300 : 0));
+      const rawScent = Float32Array.from({ length: cells * 2 }, (_, i) => (i % 2 === 0 && rnd() < 0.05 ? 400 : 0));
+      sim.writeTrail(raw);
+      sim.writeScent(rawScent);
+      await capture(engine);
+      // New settings make a new view of the same state: the coarse map follows them without a step.
+      sim.update({ ...engine.settings, scentDecay: 0.3 });
+      const moving = await capture(engine);
+      const [view, viewScent] = [await sim.readView(), await sim.readViewScent()];
+      sim.update({ ...engine.settings, scentDecay: 0.3, stepOrder: 'sense-first' });
+      sim.writeTrail(view);
+      sim.writeScent(viewScent);
+      expect(maxDiff(moving, await capture(engine))).toBe(0);
+      // The scent as the agents sense it draws otherwise, with the trail of the view.
+      sim.writeScent(rawScent);
+      expect(maxDiff(moving, await capture(engine))).toBeGreaterThan(10);
+      engine.destroy();
+    },
+    240_000,
+  );
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Boundary } from '../model/params';
 import {
+  dishRadius,
   lightByte,
   outlineBox,
   outlineRects,
@@ -14,8 +15,8 @@ import {
   segmentDistance,
   SLACK,
   someCell,
-  unionRects,
   type Rect,
+  unionRects,
 } from './brush';
 import { MIN_RADIUS } from './environment';
 import { paintReference } from './paint-reference';
@@ -199,19 +200,23 @@ describe('paintsCell', () => {
     expect(env[10 * 64 * 4 + 1]).toBe(255);
   });
 
-  // On a 237 × 512 dish (a 375 × 810 phone) six rim cells lie exactly at the dish's radius of 117.5 cells: the CPU
-  // counts them inside, and a GPU distance off by a rounding step outside.
+  // On a 237 × 512 dish (a 375 × 810 phone) the centre of cell (31, 185) lies 0.0037 cells inside the dish's radius of
+  // 111.98 cells (ADR 0027): the CPU counts it inside, and a GPU distance off by a few rounding steps could count it
+  // outside.
   it('records a stroke at the rim of a dish only when a cell lies inside the rim by SLACK', () => {
     const [w, h] = [237, 512];
-    expect(Math.hypot(118.5 - w / 2, 138.5 - h / 2)).toBe(Math.min(w, h) / 2 - 1); // cell (118, 138)
-    // Within 1.6 cells of (118.5, 137): cell (118, 138) and cells beyond the rim.
-    const rim = dab('food', [118.5, 137], 1.6);
+    const inside = dishRadius(w, h) - Math.hypot(31.5 - w / 2, 185.5 - h / 2);
+    expect(inside).toBeGreaterThan(0);
+    expect(inside).toBeLessThan(SLACK);
+    // Within 1.6 cells of (30.5, 184.5): cell (31, 185) and cells beyond the rim.
+    const rim = dab('food', [30.5, 184.5], 1.6);
     const env = new Uint8Array(w * h * 4);
     paintReference(env, w, h, rim, 'dish');
     expect(env.filter((v, i) => i % 4 === 1 && v > 0).length).toBe(1);
+    expect(env[(185 * w + 31) * 4 + 1]).toBe(255);
     expect(paintsCell(rim, w, h, 'dish')).toBe(false);
-    // Reaching cell (118, 139) as well, one cell inside the rim.
-    expect(paintsCell(dab('food', [118.5, 137], 2.6), w, h, 'dish')).toBe(true);
+    // Reaching cells (32, 184), (32, 185) and (31, 186) as well, inside the rim by more than SLACK.
+    expect(paintsCell(dab('food', [30.5, 184.5], 2.6), w, h, 'dish')).toBe(true);
   });
 
   // Its soft edge gives light byte 0 in the outer 1.8 % of the radius: such a stroke changes nothing (69 of 10,721
@@ -265,7 +270,7 @@ describe('paintsCell', () => {
       const boundary: Boundary = (['box', 'dish', 'wrap'] as const)[Math.floor(rand() * 3)] ?? 'box';
       const kind = kinds[Math.floor(rand() * kinds.length)] ?? 'food';
       const r = MIN_RADIUS + (rand() < 0.5 ? rand() * 2 : rand() * 10);
-      const R = Math.min(w, h) / 2 - 1;
+      const R = dishRadius(w, h);
       // Near the rim of the dish, or near an edge.
       const phi = rand() * 2 * Math.PI;
       const rho = R + (rand() * 2 - 1) * (r + 2);
@@ -361,7 +366,7 @@ function bruteCells(s: Stroke, w: number, h: number, under: Boundary, slack: num
   const r = s.radius;
   const reach = r + Math.max(0, slack) + 1;
   const [a, b] = [s.from, s.to];
-  const R = Math.min(w, h) / 2 - 1 + slack;
+  const R = dishRadius(w, h) + slack;
   for (let y = Math.floor(Math.min(a[1], b[1]) - reach); y <= Math.ceil(Math.max(a[1], b[1]) + reach); y++)
     for (let x = Math.floor(Math.min(a[0], b[0]) - reach); x <= Math.ceil(Math.max(a[0], b[0]) + reach); x++) {
       let [cx, cy] = [x, y];
@@ -411,7 +416,7 @@ function* edgeStrokes(n: number, seed: number) {
     const [w, h] = pick(grids);
     const under = pick(['box', 'dish', 'wrap'] as const);
     const kind = pick(['food', 'light', 'wall', 'erase'] as const);
-    const R0 = Math.min(w, h) / 2 - 1;
+    const R0 = dishRadius(w, h);
     const q = rand();
     let at: [number, number];
     if (q < 0.3) {
@@ -544,9 +549,9 @@ describe('ownHeldEverywhere', () => {
     expect(ownHeldEverywhere(stroke([10, 10], [20, 10], 0.74), 64, 48, 'wrap')).toBe(false); // thinner than 0.75
     expect(ownHeldEverywhere(stroke([0, 0], [64, 48], 3), 64, 48, 'box')).toBe(true); // the corners still count
     expect(ownHeldEverywhere(stroke([10, 10], [64.1, 10], 3), 64, 48, 'box')).toBe(false);
-    // The dish of 64 × 48 has radius 23 around (32, 24): the brush must stay inside it.
-    expect(ownHeldEverywhere(stroke([32, 24], [32 + 19.9, 24], 3), 64, 48, 'dish')).toBe(true);
-    expect(ownHeldEverywhere(stroke([32, 24], [32 + 20.1, 24], 3), 64, 48, 'dish')).toBe(false);
+    // The dish of 64 × 48 has radius 0.945 × 24 = 22.68 around (32, 24): the brush must stay inside it.
+    expect(ownHeldEverywhere(stroke([32, 24], [32 + 19.67, 24], 3), 64, 48, 'dish')).toBe(true);
+    expect(ownHeldEverywhere(stroke([32, 24], [32 + 19.69, 24], 3), 64, 48, 'dish')).toBe(false);
   });
 });
 

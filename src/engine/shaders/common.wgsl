@@ -18,7 +18,7 @@ struct Params {
   tool2: vec4f,          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
   extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
-  model: vec4f,          // trail saturation K (0 off), covered food factor (1 off), unused, unused (ADR 0022)
+  model: vec4f,          // trail saturation K (0 off), covered food factor (1 off), 1 if walls diffuse (Jones), 1 if a step senses first (ADR 0022, 0027)
   growth: vec4u,         // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   shrinkage: vec4u,      // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   startEnd: vec4u,       // exclusive end index of each strain's agents alive at the start (ADR 0025)
@@ -85,7 +85,11 @@ fn wrapPos(p: vec2f) -> vec2f {
   return min(p - vec2f(c - lo), bitcast<vec2f>(bitcast<vec2u>(vec2f(lo) + 1.0) - 1u));
 }
 
-fn dishRadius() -> f32 { return 0.5 * f32(min(W(), H())) - 1.0; }
+// The dish of Jones' closed arenas (Jones 2010, Fig. 18 and 19, p. 145–146): its diameter is 0.947 and 0.944 of the
+// lattice's side there. DISH_FILL in common.glsl, render.wgsl, view.glsl and src/engine/brush.ts is the same (a test
+// checks them; ADR 0027).
+const DISH_FILL = 0.945;
+fn dishRadius() -> f32 { return DISH_FILL * 0.5 * f32(min(W(), H())); }
 
 // The distance from p to the centre q of an agent tool. On the periodic grid it is the distance to the nearest copy
 // of q (the minimum image): a tool held on a copy of the grid acts on the cells the copy shows, and one across an edge

@@ -25,6 +25,8 @@ import {
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
+  VIEW_BYTES_PER_CELL,
+  viewTrailOn,
 } from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
@@ -239,8 +241,12 @@ export class Engine {
     const collisions = s.collisions && this.backend.supportsCollisions;
     // Covered food needs more memory only on some backends, and only while it is on; growth only while it is on.
     const growth = growthOn({ ...s, collisions });
+    // The view of a step that moves first needs a third trail texture from two diffusion passes on (ADR 0027).
     const bytesPerCell =
-      this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0) + (growth ? GROWTH_BYTES_PER_CELL : 0);
+      this.backend.bytesPerCell +
+      (s.coveredFood ? coveredBytesPerCell : 0) +
+      (growth ? GROWTH_BYTES_PER_CELL : 0) +
+      (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = BYTES_PER_AGENT + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
