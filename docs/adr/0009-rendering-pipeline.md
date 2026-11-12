@@ -997,6 +997,18 @@ scent falls off over less than that (in Jones over about 1.6 cells).
 6. **A model topic, not a decision**: the steering reach of food is about 12 to 14 cells from a food in every model
    (the table above), and the wider scent of the extended model at a low decay does not steer from farther away. It
    stands in `TODO.md` as an open topic of the model (ADR 0022).
+7. **The strand belongs to a run** (2026-11-12, this branch, on a finding of the e2e timing below). Both backends
+   start their levels anew with every restart and every new simulation (`backend.forget()` in `Engine.reset()` and at
+   the end of `Engine.rebuild()`: gain, black and strand 0, and a readback of the old run is dropped), so no frame of a
+   new run draws its line with the old run's strand. But while a new simulation is built no frame draws, and
+   `Engine.levels()` still gave the old run's strand: the legend, which reads it every 500 ms, showed its line's
+   sentence for the new scene over the old picture (on SwiftShader at 1.2 s after the switch, before the Maze's own
+   simulation ran). `Engine.levels()` now gives the strand 0 while a new simulation is built; gain and black stay as
+   the backend holds them, as no frame uses them then and `forget()` restarts them with the new run. Reason: the
+   legend must explain the line on the screen, and a new scene has none until its own strand is measured. After a
+   restart without a new simulation the legend's sentence can stay up to 500 ms after the line went, until its next
+   read. A unit test (`engine.test.ts`, "reports the strand of the running simulation only") fails on the old
+   `levels()`.
 
 ### Consequences
 

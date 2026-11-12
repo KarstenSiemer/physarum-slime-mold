@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
-import { CpuBackend } from './cpu-backend';
+import { CpuBackend, hold } from './cpu-backend';
 import { Engine, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
 import { diffusePlan, equilibrium, gridSize } from './sizing';
@@ -143,6 +143,33 @@ describe('the scent view', () => {
     expect(engine.sim).toBe(sim);
     expect(engine.restarts).toBe(restarts);
     expect(engine.sim.step).toBe(6);
+  });
+
+  // The strand belongs to a run: a restart and a new simulation start the backend's levels anew (forget()), and while a
+  // new simulation is built the old one's strand is none of the new one, so the legend explains no line of the old
+  // run (ADR 0009, amendment 2026-11-12). The backend here reports a strand until it forgets it.
+  it('reports the strand of the running simulation only', async () => {
+    const backend = new CpuBackend();
+    let strand = 7;
+    backend.levels = () => ({ gain: 1, black: 0, strand });
+    backend.forget = () => {
+      strand = 0;
+    };
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const settings = { ...defaultSettings(), resolution: 256 };
+    const engine = await Engine.create(canvas, settings, undefined, backend);
+    strand = 7; // measured on the new run
+    expect(engine.levels().strand).toBe(7);
+    engine.reset();
+    expect(engine.levels().strand).toBe(0);
+    strand = 7;
+    const release = hold(backend);
+    const rebuilt = engine.apply({ ...settings, resolution: 512 });
+    expect(engine.busy).toBe(true);
+    expect(engine.levels()).toEqual({ gain: 1, black: 0, strand: 0 }); // the old run's strand: none of the new one
+    release();
+    await rebuilt;
+    expect(engine.levels().strand).toBe(0); // the new run has measured none yet
   });
 });
 

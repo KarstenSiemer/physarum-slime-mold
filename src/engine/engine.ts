@@ -578,9 +578,14 @@ export class Engine {
     return this.backend.capture(this.sim, this.settings, this.view, this.canvas.width, this.canvas.height, levels);
   }
 
-  /** The auto levels frames use now; the scent view's legend reads its mark from them (Levels.strand). */
+  /**
+   * The auto levels frames use now; the scent view's legend reads the strand from them (Levels.strand). While a new
+   * simulation is built no frame draws, and the backend still holds the strand of the old one until the new one starts
+   * (forget()): the strand is 0 then, so the legend explains no line of the old run for the new scene.
+   */
   levels(): Levels {
-    return this.backend.levels();
+    const l = this.backend.levels();
+    return this.rebuilding ? { ...l, strand: 0 } : l;
   }
 
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */
