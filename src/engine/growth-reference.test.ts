@@ -18,12 +18,15 @@ describe('place(): the order of the births', () => {
   it.each(sizes)('is a bijection of the cells of %i × %i, new for every step', (w, h) => {
     for (const step of [0, 3, 1001]) {
       const seen = new Uint8Array(w * h);
-      for (let c = 0; c < w * h; c++) {
+      let fault = '';
+      for (let c = 0; c < w * h && !fault; c++) {
         const p = place(c, w, h, step, 7);
-        expect(p >= 0 && p < w * h, `${c} → ${p}`).toBe(true);
-        expect(seen[p], `step ${step}: ${c} → ${p}`).toBe(0);
-        seen[p] = 1;
+        if (!(p >= 0 && p < w * h)) fault = `${c} → ${p}: outside the grid`;
+        else if (seen[p]) fault = `${c} → ${p}: taken twice`;
+        else seen[p] = 1;
       }
+      // One expect per step: one per cell took 1.8 s of the 5 s limit on 512 × 288 (ADR 0010).
+      expect(fault, `step ${step}`).toBe('');
     }
     expect(place(5, w, h, 0, 7)).not.toBe(place(5, w, h, 3, 7));
   });

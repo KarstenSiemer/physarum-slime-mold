@@ -1,7 +1,8 @@
 // Growth and shrinkage and Capacity (ADR 0025). Each test starts the app once, from its own link: two starts per test
 // took over a quarter of the time limit on SwiftShader (ADR 0010).
 import { expect, test, type Page } from '@playwright/test';
-import { decodeLink } from '../../src/model/url';
+import { presetById } from '../../src/model/presets';
+import { decodeLink, encodeLink } from '../../src/model/url';
 import { smallScene, watchErrors } from './helpers';
 
 // The start took 32 s on SwiftShader on an M3 Pro (review of 2026-11-11): 150 s keeps it under a quarter (ADR 0010).
@@ -94,13 +95,31 @@ test('a higher capacity gives the inoculate tool agents in a full scene', async 
 });
 
 // The scene Foraging maze starts a small colony on its first food, and the colony grows (its start: engine.gpu.test.ts).
+// It opens from the scene's link: one start of the app. The colony grows with the steps, not with the seconds: with
+// seed 1, its 50 agents are 255 to 282 at step 30 on both backends (SwiftShader, 2026-11-12). A wait for a count in
+// seconds failed on GitHub, where one run made about 0.6 steps per second (PR #31, 272 agents after 60 s).
 test('the Foraging maze grows from a small colony on its food', async ({ page }) => {
+  test.setTimeout(360_000); // ADR 0010: the wait below
   const errors = watchErrors(page);
-  await open(page, await smallScene());
-  const restarts = await page.evaluate(() => globalThis.physarum?.restarts ?? 0);
-  await page.getByRole('combobox', { name: 'Preset' }).selectOption('foraging-maze');
-  await page.waitForFunction((r) => (globalThis.physarum?.restarts ?? 0) > r, restarts);
-  await expect.poll(() => alive(page), { timeout: 60_000 }).toBeGreaterThan(300);
+  const p = presetById('foraging-maze');
+  if (!p) throw new Error('no Foraging maze');
+  const { hash } = await encodeLink(p.settings(), {
+    scene: p.id,
+    origins: [0],
+    shapes: p.env?.map(() => true) ?? [],
+    strokes: [],
+  });
+  await page.goto(`/#${hash}`);
+  // The start and 30 steps: 22.6 s on SwiftShader on an M3 Pro, about 3 times that on GitHub (ADR 0010).
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) >= 30, undefined, { timeout: 300_000 });
+  // The step and the count of one run of the engine, read together.
+  const [step, count] = await page.evaluate(async () => {
+    const sim = globalThis.physarum?.sim;
+    const n = (await sim?.alive())?.reduce((a, b) => a + b, 0) ?? 0;
+    return [sim?.step ?? 0, n];
+  });
+  expect(step).toBeGreaterThanOrEqual(30);
+  expect(count).toBeGreaterThan(150); // three times the start
   const card = page.getByRole('region', { name: 'Scene', exact: true });
   await expect(card.getByText('Growth and shrinkage', { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
