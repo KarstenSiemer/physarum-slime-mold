@@ -33,8 +33,8 @@ import type { Backend, Levels, Sim, Stroke, View } from './types';
 
 /**
  * Most frames in flight at which the loop still starts a frame (ADR 0028): with two frames on the GPU a third would
- * only wait behind them, and its picture would show input that is older by a frame. Before, the browser let up to
- * three frames queue under a second GPU client, 32 to 90 ms from the frame's start to its picture.
+ * only wait behind them, and its picture would show input that is older by a frame. Before, up to five frames queued
+ * under a second GPU client, 67 ms from a frame's start to its picture at the median; with the limit, 19 ms.
  */
 export const MAX_IN_FLIGHT = 2;
 

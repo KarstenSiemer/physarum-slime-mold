@@ -26,7 +26,8 @@ Measured in the gallery loop (`npm run gallery`, contact sheets reviewed by eye)
 ## Decision
 
 1. **Render pass** (canvas resolution): sample the trail (manual bilinear, because
-   `rgba32float` is not filterable everywhere; four taps when zoomed out), apply auto levels,
+   `rgba32float` is not filterable everywhere; four taps when zoomed out, until the amendment of
+   2026-11-12 below: the mean under the pixel from a coarser map), apply auto levels,
    then `L = Σ_s trail_s · gain · color_s` in linear light, per-channel tone curve
    `1 − e^(−x)` (overlaps turn white-hot), sRGB encoding, triangular dither of ±1 LSB.
 2. **Auto levels**: a log₂ histogram of the summed trail (compute shader with workgroup bins on
@@ -1034,3 +1035,52 @@ scent falls off over less than that (in Jones over about 1.6 cells).
 - Cost, the Maze at decay 0.003, 2560 × 1600, draw-only, on − off in ms at fit / 4.4 / 8.8 cells per pixel (load
   average about 7.4): 1024 × 640 WebGPU 0.71 / 0.13 / −0.15, WebGL2 0.66 / 0.05 / −0.19; 4096 × 2560 WebGPU 0.97 /
   −0.42 / 0.55, WebGL2 1.22 / 0.54 / 0.02. At fit the line adds about 0.3 ms to the view (0.29 to 0.38 ms before).
+
+## Amendment 2026-11-12: the trail from a coarser map when zoomed out (ADR 0028)
+
+### Context
+
+Decision 1 of this ADR took four bilinear taps of the trail for a pixel above 1 cell per pixel. Each tap read 4 cells,
+far apart from those of the pixels beside it: at 2560 × 1600 pixels the draw of the start scene took 8.9 ms at 4 cells
+per pixel and 27.7 ms at 8 (WebGPU, M3 Pro), against 1.7 ms fitted. From 4 cells per pixel on the taps left cells
+out, which showed as moiré. The scent view had the same fault and reads a coarser map since the amendment of
+2026-11-11 (decision 10 there).
+
+### Decision
+
+The coordinator of ADR 0028 decided it under the owner's delegation of 2026-11-12 (decision 9 there); the forms marked
+"my choice" are those of the agent that did the work.
+
+1. **A coarse map of the trail**, filled by `trailDown` (`render.wgsl`) and `trail-down.frag`: each texel the mean of
+   the trail over the cells it covers, each by the share it covers, as the scent view's map. The level is
+   floor(log2(cells per pixel)), from 1 to 4 (`trailLevel()`), and a texel of level k covers the grid side over
+   ceil(side / 2^k) cells, so the texels tile the grid and the map wraps with a periodic grid. On a side that 2^k
+   divides, a texel is the mean of 2^k × 2^k cells.
+2. **One texture of half the grid's sides** holds the level in use (`rgba32float`, 4 bytes per cell). It is made at the
+   first frame zoomed out to 2 cells per pixel, and filled only for a frame that reads it, when the trail changed (a
+   step, or a change that the simulation's `revision` counts) or the level. Up to 2 cells per pixel no map is needed.
+3. **A pixel takes the mean over its square** (`trailArea()`; my choice): the 3 × 3 texels that a square of 1 to 2
+   texels can cover, each by the share under the pixel. Level 0 is the trail itself. At 1 cell per pixel this is the
+   bilinear filter of decision 1, so the picture does not jump where the filter changes. Up to 2 cells per pixel it is
+   the exact mean of the cells under the pixel. Above 32 cells per pixel (a grid of 4096 cells fitted to a canvas
+   under 128 pixels) the square is larger than the 3 × 3 texels, and the pixel takes their mean.
+4. **Levels, exposure and tone curve work on the mean** as they worked on the filtered trail. The auto levels still
+   measure the trail of the grid.
+5. **Not changed** (my choice, measured): the gel style's height field keeps its four taps zoomed out (1 to 2 ms at 4
+   to 8 cells per pixel), the agents style shows the cell under the pixel's centre, and the outlines of food and
+   walls read the grid's cells at every zoom.
+
+### Consequences
+
+- The pictures above 1 cell per pixel change in every style that draws the trail: each pixel shows the mean of the
+  trail under it, with less moiré. Up to 1 cell per pixel every frame keeps its bytes (ADR 0028).
+- The draw of a paused view of the start scene: 4.6 → 1.8 ms at 2 cells per pixel, 8.9 → 1.8 ms at 4 and
+  27.7 → 1.9 ms at 8 on WebGPU; 5.1 → 2.7 ms, 10.7 → 2.4 ms and 32.1 → 2.3 ms on WebGL2. A frame of the running scene
+  at 8 cells per pixel, with the map filled anew: 30.5 → 5.6 ms on WebGPU and 45.7 → 16.5 ms on WebGL2.
+- Tests on both backends (`sim.gpu.test.ts`): "draw the mean of the trail under each pixel when zoomed out" holds
+  glow and paper to a CPU model of the map and the mean, for a trail of noise from cell to cell, at 1.01 to 8 cells
+  per pixel, on 64 × 48 and 47 × 33 cells, in every arena, and in the copies of a periodic grid; the style
+  references also run at 2.5 and 5.3 cells per pixel; "fills the coarse maps again only when the scent, the trail,
+  the shape or the level changed" counts the passes. Mutations, each reverted after its run: a lookup of two columns
+  (12 of 12 tests failed), whole cells in the map on a side that 2 does not divide (6 of 12, the odd sides), and a
+  wrap by the grid's size in place of the map's (4 of 12, the periodic ones).

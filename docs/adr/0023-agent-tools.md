@@ -216,3 +216,17 @@ Paused holds (item 9):
     layout Empty places agents, running and paused, and no notice comes.
   - Each test failed with a mutation of the code it checks. SwiftShader cannot show the faults of items 6 and 7, so
     CI cannot catch them again: only a GPU with an inexact division can.
+
+## Amendment 2026-11-12: comparisons inside one period (ADR 0028)
+
+The wrap rule stays: integers for every wrap of a cell coordinate. Its form changed (ADR 0028, decisions 4 and 5).
+
+- `wrapCell()` (`common.wgsl`, `render.wgsl`) and `wrapAxis()` (`common.glsl`, `view.glsl`) add or subtract one period
+  for a coordinate less than one period outside the grid, and take the integer remainder beyond. Both give the cell of
+  the remainder for every coordinate; a test holds all four at the ends of that range, at the grid's edges and far
+  outside, for sides from 1 to 4096 with 33, 47, 246 and 480.
+- "Integer `%` costs no measurable time" above holds for the WebGL2 step, where it was measured. It did not hold for
+  the WebGL2 draw: the remainders in the lookups of the view cost 0.4 ms per frame fitted and 2.0 ms at 1.01 cells
+  per pixel against the float division (2560 × 1600 pixels, Three strains). On ANGLE over Metal a remainder costs
+  also where a branch skips it, so the view now wraps once per lookup and takes the neighbours by comparison.
+- Every preset checked keeps its bits on both backends (8 scenes, 300 steps with both tools, ADR 0028).
