@@ -5,12 +5,22 @@ uniform sampler2D counts;
 uniform sampler2D bloom;
 uniform sampler2D heights; // gel style: written by height.frag each frame
 
+// On the periodic grid one wrap serves the 4 cells (see bilinear in render.wgsl).
 vec4 bilinear(vec2 p) {
   vec2 q = p - 0.5;
   ivec2 i = ivec2(floor(q));
   vec2 f = q - floor(q);
-  vec4 a = mix(trailAt(i), trailAt(i + ivec2(1, 0)), f.x);
-  vec4 b = mix(trailAt(i + ivec2(0, 1)), trailAt(i + ivec2(1, 1)), f.x);
+  if (V.boundary != 0u) {
+    vec4 a = mix(trailAt(i), trailAt(i + ivec2(1, 0)), f.x);
+    vec4 b = mix(trailAt(i + ivec2(0, 1)), trailAt(i + ivec2(1, 1)), f.x);
+    return mix(a, b, f.y);
+  }
+  ivec2 s = gridSize();
+  ivec2 w = wrapCell(i, s);
+  ivec2 x = ivec2(w.x, w.x == s.x - 1 ? 0 : w.x + 1);
+  ivec2 y = ivec2(w.y, w.y == s.y - 1 ? 0 : w.y + 1);
+  vec4 a = mix(texelFetch(trail, ivec2(x.x, y.x), 0), texelFetch(trail, ivec2(x.y, y.x), 0), f.x);
+  vec4 b = mix(texelFetch(trail, ivec2(x.x, y.y), 0), texelFetch(trail, ivec2(x.y, y.y), 0), f.x);
   return mix(a, b, f.y);
 }
 
@@ -116,11 +126,11 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
 
 // Agents in the cell, per strain; in collision mode also those that stayed put (see render.wgsl).
 vec4 agentsAt(vec2 p) {
-  int i = cellAt(ivec2(floor(p)));
-  if (i < 0) return vec4(0.0);
-  vec4 moved = texelFetch(counts, coord(i), 0);
+  ivec2 q = cellXY(ivec2(floor(p)));
+  if (q.x < 0) return vec4(0.0);
+  vec4 moved = texelFetch(counts, q, 0);
   if (V.frame.w == 0u) return moved;
-  float stayed = max(texelFetch(occ, coord(i), 0).r - (moved.x + moved.y + moved.z + moved.w), 0.0);
+  float stayed = max(texelFetch(occ, q, 0).r - (moved.x + moved.y + moved.z + moved.w), 0.0);
   return moved + strainMix(trailAt(ivec2(floor(p)))) * stayed;
 }
 
@@ -147,8 +157,8 @@ struct Env {
 vec3 spline(float u) { return vec3(0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)); }
 vec3 splineSlope(float u) { return vec3(u - 0.5, -2.0 * u, u + 0.5); }
 
-// The columns and rows of the 3 × 3 cells around c: wrapped on the periodic grid with comparisons, else as they
-// are (see shapeCells in render.wgsl).
+// The columns and rows of the 3 × 3 cells around c: wrapped once on the periodic grid, else as they are (see
+// shapeCells in render.wgsl).
 void around(ivec2 c, out ivec3 xs, out ivec3 ys) {
   ivec2 s = gridSize();
   xs = ivec3(c.x - 1, c.x, c.x + 1);
@@ -296,8 +306,8 @@ vec4 presence(Env e, vec4 cells[9], vec4 raw) {
   for (int j = 0; j < 3; j++) {
     for (int i = 0; i < 3; i++) {
       bool inGrid = xs[i] >= 0 && ys[j] >= 0 && xs[i] < s.x && ys[j] < s.y;
-      int index = inGrid ? ys[j] * s.x + xs[i] : -1;
-      share += e.weightX[i] * e.weightY[j] * presenceWeight(index, (cells[j * 3 + i].g - 0.5) * 2.0 * SHAPE_RANGE);
+      ivec2 q = inGrid ? ivec2(xs[i], ys[j]) : ivec2(-1);
+      share += e.weightX[i] * e.weightY[j] * presenceWeight(q, (cells[j * 3 + i].g - 0.5) * 2.0 * SHAPE_RANGE);
     }
   }
   return strainMix(raw) * (a * share * PRESENCE / V.exposure);

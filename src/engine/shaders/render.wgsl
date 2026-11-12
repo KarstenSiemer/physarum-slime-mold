@@ -45,31 +45,56 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 
 fn size() -> vec2i { return vec2i(textureDimensions(trail)); }
 
+// A cell coordinate wrapped into a periodic grid of n cells, in integers (wrapCell in common.wgsl).
+// - Less than one period outside the grid, as every tap of a view that shows the grid about once is: comparisons, then
+//   one addition or subtraction of n. That is the cell the remainders give, and an integer remainder is slow on Apple
+//   GPUs (ADR 0028).
+// - Farther out, in the copies of a view zoomed out or panned away: the remainders. % keeps the sign of c.
+fn wrapCell(c: vec2i, n: vec2i) -> vec2i {
+  if (all(c >= -n) && all(c < 2 * n)) {
+    return c + select(vec2i(0), n, c < vec2i(0)) - select(vec2i(0), n, c >= n);
+  }
+  return ((c % n) + n) % n;
+}
+
+// The cell at c as coordinates inside the grid: wrapped (periodic), or (−1, −1) outside the arena. A lookup takes the
+// coordinates from here: to get them back from the cell's index takes a division, which is slow (ADR 0028).
+fn cellXY(c: vec2i) -> vec2i {
+  let s = size();
+  if (V.boundary == 0u) { return wrapCell(c, s); }
+  if (any(c < vec2i(0)) || any(c >= s)) { return vec2i(-1); }
+  return c;
+}
+
 // Cell index for the grid, wrapped (periodic) or −1 outside the arena.
 fn cellAt(c: vec2i) -> i32 {
-  let s = size();
-  var q = c;
-  if (V.boundary == 0u) {
-    q = ((c % s) + s) % s;
-  } else if (any(c < vec2i(0)) || any(c >= s)) {
-    return -1;
-  }
-  return q.y * s.x + q.x;
+  let q = cellXY(c);
+  return select(q.y * size().x + q.x, -1, q.x < 0);
 }
 
 fn trailAt(c: vec2i) -> vec4f {
-  let i = cellAt(c);
-  if (i < 0) { return vec4f(0.0); }
-  return textureLoad(trail, vec2i(i % size().x, i / size().x), 0);
+  let q = cellXY(c);
+  if (q.x < 0) { return vec4f(0.0); }
+  return textureLoad(trail, q, 0);
 }
 
-// Manual bilinear filter: rgba32float is not filterable without an optional feature.
+// Manual bilinear filter: rgba32float is not filterable without an optional feature. On the periodic grid one wrap
+// serves the 4 cells: the column after the last one is the first, and so the row.
 fn bilinear(p: vec2f) -> vec4f {
   let q = p - 0.5;
   let i = vec2i(floor(q));
   let f = q - floor(q);
-  let a = mix(trailAt(i), trailAt(i + vec2i(1, 0)), f.x);
-  let b = mix(trailAt(i + vec2i(0, 1)), trailAt(i + vec2i(1, 1)), f.x);
+  if (V.boundary != 0u) {
+    let a = mix(trailAt(i), trailAt(i + vec2i(1, 0)), f.x);
+    let b = mix(trailAt(i + vec2i(0, 1)), trailAt(i + vec2i(1, 1)), f.x);
+    return mix(a, b, f.y);
+  }
+  let s = size();
+  let w = wrapCell(i, s);
+  let x = vec2i(w.x, select(w.x + 1, 0, w.x == s.x - 1));
+  let y = vec2i(w.y, select(w.y + 1, 0, w.y == s.y - 1));
+  let a = mix(textureLoad(trail, vec2i(x.x, y.x), 0), textureLoad(trail, vec2i(x.y, y.x), 0), f.x);
+  let b = mix(textureLoad(trail, vec2i(x.x, y.y), 0), textureLoad(trail, vec2i(x.y, y.y), 0), f.x);
   return mix(a, b, f.y);
 }
 
@@ -246,7 +271,7 @@ fn shapeIndex(c: vec2i) -> i32 {
   let s = size();
   var q = clamp(c, vec2i(0), s - 1);
   if (V.boundary == 0u) {
-    q = ((c % s) + s) % s;
+    q = wrapCell(c, s);
   } else if (V.boundary == 2u) {
     let o = 0.5 * vec2f(s);
     let m = vec2f(c) + 0.5 - o;
@@ -257,7 +282,7 @@ fn shapeIndex(c: vec2i) -> i32 {
 }
 
 // The 3 × 3 cells of `shape` around cell c, row by row: the cells the spline reads at a point in c. As
-// shapeIndex(), but the columns and rows are wrapped or clamped once: integer remainders cost.
+// shapeIndex(), but the columns and rows are wrapped or clamped once.
 fn shapeCells(c: vec2i) -> array<u32, 9> {
   let s = size();
   var w: array<u32, 9>;
@@ -275,7 +300,7 @@ fn shapeCells(c: vec2i) -> array<u32, 9> {
   var xs = clamp(vec3i(c.x - 1, c.x, c.x + 1), vec3i(0), vec3i(s.x - 1));
   var ys = clamp(vec3i(c.y - 1, c.y, c.y + 1), vec3i(0), vec3i(s.y - 1));
   if (V.boundary == 0u) {
-    let q = ((c % s) + s) % s;
+    let q = wrapCell(c, s);
     xs = vec3i(select(q.x - 1, s.x - 1, q.x == 0), q.x, select(q.x + 1, 0, q.x == s.x - 1));
     ys = vec3i(select(q.y - 1, s.y - 1, q.y == 0), q.y, select(q.y + 1, 0, q.y == s.y - 1));
   }
@@ -408,8 +433,8 @@ fn valueNoise(q: vec2f, period: vec2i) -> f32 {
   let i = vec2i(floor(q));
   let f = q - floor(q);
   let u = f * f * (3.0 - 2.0 * f);
-  let i0 = ((i % period) + period) % period;
-  let i1 = ((i + 1) % period + period) % period;
+  let i0 = wrapCell(i, period);
+  let i1 = wrapCell(i + 1, period);
   let a = mix(lattice(i0), lattice(vec2i(i1.x, i0.y)), u.x);
   let b = mix(lattice(vec2i(i0.x, i1.y)), lattice(i1), u.x);
   return mix(a, b, u.y);
@@ -462,12 +487,12 @@ fn substrate(f: Flake) -> vec3f {
 fn presence(e: Env, cells: array<u32, 9>, raw: vec4f) -> vec4f {
   let a = cover(e.foodCover);
   if (a <= 0.0) { return vec4f(0.0); }
-  // The cells as cellAt() numbers them, wrapped with comparisons: integer remainders cost.
+  // The cells as cellAt() numbers them, wrapped once.
   let s = size();
   var cx = vec3i(e.cell.x - 1, e.cell.x, e.cell.x + 1);
   var cy = vec3i(e.cell.y - 1, e.cell.y, e.cell.y + 1);
   if (V.boundary == 0u) {
-    let q = ((e.cell % s) + s) % s;
+    let q = wrapCell(e.cell, s);
     cx = vec3i(select(q.x - 1, s.x - 1, q.x == 0), q.x, select(q.x + 1, 0, q.x == s.x - 1));
     cy = vec3i(select(q.y - 1, s.y - 1, q.y == 0), q.y, select(q.y + 1, 0, q.y == s.y - 1));
   }
@@ -615,15 +640,14 @@ fn scentTexel(c: vec2i) -> vec2i {
 }
 
 // The 4 cells around p that a lookup reads: top left, top right, bottom left, bottom right. On the periodic grid the
-// columns and rows are wrapped once, with one remainder each: remainders cost.
+// columns and rows are wrapped once.
 fn scentCells(p: vec2f) -> array<vec2i, 4> {
   let s = size();
   let i = vec2i(floor(p - 0.5));
   var x = vec2i(i.x, i.x + 1);
   var y = vec2i(i.y, i.y + 1);
   if (V.boundary == 0u) {
-    let r = i % s;
-    let w = select(r, r + s, r < vec2i(0));
+    let w = wrapCell(i, s);
     x = vec2i(w.x, select(w.x + 1, 0, w.x == s.x - 1));
     y = vec2i(w.y, select(w.y + 1, 0, w.y == s.y - 1));
   } else {
@@ -738,8 +762,7 @@ fn scentCoarse(p: vec2f, k: u32) -> Scent {
   var x = vec2i(i.x, i.x + 1);
   var y = vec2i(i.y, i.y + 1);
   if (V.boundary == 0u) {
-    let r = i % n;
-    let w = select(r, r + n, r < vec2i(0));
+    let w = wrapCell(i, n);
     x = vec2i(w.x, select(w.x + 1, 0, w.x == n.x - 1));
     y = vec2i(w.y, select(w.y + 1, 0, w.y == n.y - 1));
   } else {

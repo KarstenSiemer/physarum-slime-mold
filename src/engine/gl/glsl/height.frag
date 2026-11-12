@@ -17,7 +17,7 @@ float besideWall(ivec2 c, float y) {
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
       ivec2 k = c + ivec2(i, j);
-      if (cellAt(k) < 0 || shapeAt(k).r >= 0.5) continue;
+      if (cellXY(k).x < 0 || shapeAt(k).r >= 0.5) continue;
       sum += levelAt(k);
       n += 1.0;
     }
@@ -32,7 +32,7 @@ void main() {
 #if ENV
   if (V.frame.z != 0u) {
     vec4 own = shapeAt(c);
-    if (own.r >= 0.5 && cellAt(c) >= 0) y = besideWall(c, y);
+    if (own.r >= 0.5 && cellXY(c).x >= 0) y = besideWall(c, y);
     // A food byte of 0 lies SHAPE_RANGE cells outside the food, so no cell of the 3 × 3 holds food.
     if (V.frame.w != 0u && own.g > 0.0) {
       const vec3 b = vec3(0.125, 0.75, 0.125); // the spline of render.frag at a cell centre
@@ -40,7 +40,7 @@ void main() {
       for (int j = 0; j < 3; j++) {
         for (int i = 0; i < 3; i++) {
           ivec2 n = c + ivec2(i - 1, j - 1);
-          w += b[i] * b[j] * presenceWeight(cellAt(n), (shapeAt(n).g - 0.5) * 2.0 * SHAPE_RANGE);
+          w += b[i] * b[j] * presenceWeight(cellXY(n), (shapeAt(n).g - 0.5) * 2.0 * SHAPE_RANGE);
         }
       }
       y = mix(y, max(y, 0.0), w) + PRESENCE * w;

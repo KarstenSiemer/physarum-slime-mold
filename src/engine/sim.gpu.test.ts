@@ -26,6 +26,7 @@ import diffuseFrag from './gl/glsl/diffuse.frag?raw';
 import fullscreenVert from './gl/glsl/fullscreen.vert?raw';
 import initFrag from './gl/glsl/init.frag?raw';
 import renderFrag from './gl/glsl/render.frag?raw';
+import viewGlsl from './gl/glsl/view.glsl?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
 import { agentsProgram, compile, diffuseProgram, initProgram, type Programs, type Walled } from './gl/programs';
 import { GlSim } from './gl/sim';
@@ -608,9 +609,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     sim.run(1);
   };
 
-  // wrapCell() wraps with comparisons up to one period outside the grid and with remainders beyond (ADR 0028). It
-  // gives the cell of the integer remainder: at both ends of the range of the comparisons, at the edges of the grid,
-  // and far outside. The sides hold 33, 47, 246 and
+  // wrapCell() wraps with comparisons up to one period outside the grid and with remainders beyond (ADR 0028). Each
+  // copy of it, in the simulation shaders and in the view shaders, gives the cell of the integer remainder: at both
+  // ends of the range of the comparisons, at the edges of the grid, and far outside. The sides hold 33, 47, 246 and
   // 480, where a float division was not exact on an Apple M3 Pro (ADR 0023), and the smallest sides.
   describe('cell wraps at the edges of a period (ADR 0028)', () => {
     const SIDES = [1, 2, 3, 16, 33, 47, 246, 480, 512, 1536, 4096];
@@ -646,8 +647,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }`;
     const SOURCES =
       kind === 'webgpu'
-        ? { 'common.wgsl': common + WGSL_ENTRY }
-        : { 'common.glsl': commonGlsl + 'out vec4 result;\n' + GLSL_ENTRY };
+        ? { 'common.wgsl': common + WGSL_ENTRY, 'render.wgsl': renderWgsl + WGSL_ENTRY }
+        : {
+            'common.glsl': commonGlsl + 'out vec4 result;\n' + GLSL_ENTRY,
+            'view.glsl': '#define ENV 0\n' + viewGlsl + GLSL_ENTRY,
+          };
 
     async function wrappedOnWebGpu(code: string): Promise<number[][]> {
       const { device } = (backend as WebGpuBackend).gpu;
@@ -689,8 +693,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       if (!gl) throw new Error('no WebGL2 context');
       const version = '#version 300 es\n';
       const p = program(gl, version + 'precision highp float;\n' + fullscreenVert, version + frag);
-      // The uniform block of the shader (Params, std140) is active also while no code reads it: a draw needs a buffer
-      // behind it.
+      // The uniform block of the shader (Params or View, std140) is active also while no code reads it: a draw needs
+      // a buffer behind it.
       const block = uniformBlock(gl, 1024, 0);
       // The cases as floats: every value is a whole number below 2^24, so a float holds it exactly.
       const [input, output] = [0, 1].map(() => target(gl, CASES.length, 1, gl.RGBA32F));
