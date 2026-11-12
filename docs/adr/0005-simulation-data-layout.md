@@ -78,5 +78,6 @@ floats (10-bit mantissa, relative step ≈ 0.001), so slow decay stops working.
   allocates even with collisions off (`src/engine/sim.ts:137–138`). A 2048² grid needs about
   336 MiB; the budget estimate of 90 B per cell adds the bloom chain and the gel height field
   (ADR 0009, ADR 0013, `BYTES_PER_CELL` in `src/engine/sizing.ts`). WebGL2 without float blending
-  needs 110 B per cell for its exact counts (ADR 0003). The grid size must follow the adapter
+  needs 110 B per cell for its exact counts (ADR 0003). Since ADR 0028 (amendment of 2026-11-12)
+  the estimates are 98 B and 118 B: they count the two coarse maps of the view. The grid size must follow the adapter
   limits and the device class.

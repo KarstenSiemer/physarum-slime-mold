@@ -44,7 +44,8 @@ form-action 'none'; require-trusted-types-for 'script'; trusted-types svelte-tru
    90 B per cell (WebGPU: trail 32, scent 16, counts 16, environment 4, outline distances 4,
    collision buffers 12, bloom chain about 2.7, gel height field about 2; WebGL2 with float
    blending the same or less, without it 110 B: no collision buffers, but 32 B of counting
-   panels, ADR 0003) and 32 B per
+   panels, ADR 0003; since ADR 0028, amendment of 2026-11-12, 98 B and 118 B, with the two coarse
+   maps of the view at 4 B each) and 32 B per
    agent. A rebuild frees the old simulation before it allocates the new one, so memory never
    holds two. Allocations run inside a WebGPU `out-of-memory` error scope (WebGL2:
    `OUT_OF_MEMORY`); a failure frees the partial allocation and steps the grid down instead of

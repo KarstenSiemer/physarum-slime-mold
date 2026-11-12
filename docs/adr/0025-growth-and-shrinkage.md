@@ -248,7 +248,10 @@ The merge (2026-11-11, coordinator's direction) and the checks after it add thre
     2010 always fits the smallest budget of 32 MiB. That still holds: with growth (Capacity at most 1) 300 × 300 cells
     need 14.6 MB (124 B per cell, 90,000 agents at 38 B), and with the largest Capacity, 8 agents per cell without the
     rule, 33.0 MB on WebGL2 without float blending with covered food (111 B per cell, 720,000 agents at 32 B), below
-    the 33.6 MB of 32 MiB. The scenes of Jones now run on their lattices, so D2, D3 and the cost were measured again
+    the 33.6 MB of 32 MiB. Since ADR 0028 (amendment of 2026-11-12) the fit counts the two coarse maps of the view,
+    8 B per cell more: with growth 15.3 MB, which fits; the largest Capacity on WebGL2 without float blending with
+    covered food 33.8 MB (119 B per cell), which no longer fits 32 MiB, so that one case runs on a grid shaped like
+    the screen on a device of 0.25 GB. The scenes of Jones now run on their lattices, so D2, D3 and the cost were measured again
     on them (below).
 33. **The test of the start colony asks for agents in the middle of its food** (`engine.gpu.test.ts`). Reason: a
     mutation that revived every dead agent on the disc (a full disc, not half the density of decision 30) passed the
