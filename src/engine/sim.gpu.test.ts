@@ -834,14 +834,14 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         // A written scent of zeros: the same state, read from the grid's textures.
         full.writeScent(new Float32Array(W * H * 2));
         expect([scentless(one), scentless(full)]).toEqual([true, false]);
-        for (const sim of [one, full]) sim.run(24);
+        for (const sim of [one, full]) sim.run(12);
         const quiet = await all(one);
         expect(quiet).toEqual(await all(full));
         expect(quiet.scent.every((v) => v === 0) && quiet.viewScent.every((v) => v === 0)).toBe(true);
         // With a food both read the grid's textures, from the same zeros on.
         for (const sim of [one, full]) {
           sim.paint([food]);
-          sim.run(12);
+          sim.run(8);
         }
         const fed = await all(one);
         expect(fed).toEqual(await all(full));
@@ -851,9 +851,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         one.clearEnvironment();
         one.reset();
         expect(scentless(one)).toBe(true);
-        for (const sim of [one, fresh]) sim.run(24);
+        for (const sim of [one, fresh]) sim.run(12);
         expect(await all(one)).toEqual(await all(fresh));
       },
+      // Up to 12.0 s on SwiftShader on an M3 Pro with twice the steps: 120 s keeps it under a quarter (ADR 0010).
+      120_000,
     );
   });
 
