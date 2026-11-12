@@ -456,7 +456,8 @@ See `TODO.md` (M2):
 - Decision 13 keeps the plateau of a large food at every decay. In Jones' order that plateau is source / d, not
   source · (1 − d) / d, so `emissionScale()` is now d / 0.1 (ADR 0027, decision 5). It is 1 at decay 0.1, where every
   scene runs. The plateau of a food of strength 0.05 is now 127.5 at every decay (114.75 before, the map after the
-  diffusion). The table of the UI dab above holds the values of the old order.
+  diffusion). The coordinator decided on 2026-11-12 to keep the plateau, and that the factor follows the order of a
+  step if a scene runs the order that senses first: there it is g(d) of decision 12 again (ADR 0027, decision 5). The table of the UI dab above holds the values of the old order.
 - Walls: in the Jones model a wall is a cell of the lattice that diffuses (Jones' later papers run the mean filter at
   every site); in the extended model a wall is a sink. Both change the extended model's list of what is not Jones':
   walls that absorb the trail and scent are the extended model's only (ADR 0027, decisions 10 and 11). The closed edges

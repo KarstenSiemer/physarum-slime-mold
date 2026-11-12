@@ -80,14 +80,21 @@ Each decision with its date, who made it, and why.
    diffusion, so the sensors read them with the deposits. The fidelity check measured the scenes with this choice.
    Covered food counts the agents after the step's moves, as before (ADR 0022, decision 20).
 5. **The normalised emission keeps the plateau of a large food at every decay** (this branch, 2026-11-11, from ADR 0022
-   decision 13). With Jones' order the scent of a large food settles where s = (1 − d) · s + source, so s = source / d,
-   not source · (1 − d) / d. `emissionScale()` (`src/model/params.ts`) is now d / 0.1, so the plateau is 255 · strength
-   · 10 at every decay. It is exactly 1 at 0.1 as before, so no scene changes by it. Outside a static food the scent of
-   Jones' order equals the scent of the old order: with Q = s − source the new step is Q′ = (1 − d) · M(Q + source),
-   the old one. So the old factor would have kept the scent outside a food as it was and let the plateau vary by
-   0.9 / (1 − d) (−10 % at decay 0.001); the new factor keeps the plateau and makes the scent outside a food
-   (1 − d) / 0.9 of before (+11 % at decay 0.001). Decision 13 names the plateau, so the plateau it is. Owner question
-   (below).
+   decision 13; the coordinator's decision of 2026-11-12). With Jones' order the scent of a large food settles where s =
+   (1 − d) · s + source, so s = source / d, not source · (1 − d) / d. `emissionScale()` (`src/model/params.ts`) is now d
+   / 0.1, so the plateau is 255 · strength · 10 at every decay. It is exactly 1 at 0.1 as before, so no scene changes by
+   it. Outside a static food the scent of Jones' order equals the scent of the old order: with Q = s − source the new
+   step is Q′ = (1 − d) · M(Q + source), the old one. So the old factor would have kept the scent outside a food as it
+   was and let the plateau vary by 0.9 / (1 − d) (−10 % at decay 0.001); the new factor keeps the plateau and makes the
+   scent outside a food (1 − d) / 0.9 of before (+11 % at decay 0.001). Reason: decision 13 names the plateau, so the
+   plateau it is (the coordinator's decision, not an owner question). If a scene runs the order that senses first (owner
+   question below), the factor follows the order: there the agents sense the map after the diffusion, where the plateau
+   is source · (1 − d) / d, and the factor of the code before, (d / (1 − d)) / (0.1 / 0.9), keeps it at 255 · strength ·
+   9 at every decay, as ADR 0022's decision 13 records. So each order keeps its plateau at every decay, and a scene in
+   the order that senses first releases what it released before this change at every decay (prepared with that option:
+   `emissionScale(d, order)`, a unit test and a GPU test on both backends that fail with one factor for both orders).
+   Both factors are exactly 1 at decay 0.1, where every scene runs. The plateau of the order that senses first is 255 ·
+   strength · 9, not 10, because its agents sense the map after the step's decay.
 
 ### Dish
 
@@ -420,8 +427,6 @@ Each new rule was broken on purpose, one at a time, and the tests named for it r
   whether an image shows the map before or after a step's diffusion: it takes images "at notable times" of the
   diffusing trail map (p. 134), its captions count scheduler steps (Fig. 4, p. 134), and the diffusion follows every
   system step (p. 132).
-- **The emission factor** (decision 5): d / 0.1 keeps the plateau of a large food at every decay, as ADR 0022's decision
-  13 asks; the old factor would keep the scent outside a food as it was and let the plateau fall by up to 10 %.
 
 ## Consequences
 
