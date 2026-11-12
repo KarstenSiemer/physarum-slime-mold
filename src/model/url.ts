@@ -1,5 +1,6 @@
 import { kindsOf, packDrawing, sceneOnly, unpackDrawing, type Drawing } from './link';
-import { sanitize, type Drawn, type Settings } from './params';
+import { sanitize, type Drawn, type Settings, type StepOrder } from './params';
+import { stepOrderOf } from './presets';
 
 // Shared links carry the full settings as deflated JSON in the URL hash, and the scene with its food, light and walls
 // as deflated bytes (link.ts): #s=<base64url>&e=<base64url> (docs/adr/0021).
@@ -56,11 +57,11 @@ export async function encodeSettings(s: Settings): Promise<string> {
 
 /**
  * Untrusted input: returns sanitized settings, or undefined for anything malformed. `drawn`: what the link's drawing
- * holds, for a link made before the model switch (sanitize()).
+ * holds, for a link made before the model switch; `order`: the step order of a link that names none (sanitize()).
  */
-export async function decodeSettings(encoded: string, drawn?: Drawn): Promise<Settings | undefined> {
+export async function decodeSettings(encoded: string, drawn?: Drawn, order?: StepOrder): Promise<Settings | undefined> {
   try {
-    return sanitize(JSON.parse(new TextDecoder().decode(await inflate(encoded))), drawn);
+    return sanitize(JSON.parse(new TextDecoder().decode(await inflate(encoded))), drawn, order);
   } catch {
     return undefined;
   }
@@ -109,7 +110,8 @@ export async function encodeLink(settings: Settings, drawing?: Drawing): Promise
  * Untrusted input: the hash of a shared link without its '#'. Undefined unless it holds valid settings (`s`). A
  * drawing (`e`) that is malformed, names an unknown scene or exceeds the caps is left out: the settings load alone, as
  * from a link that holds only settings, and `drawingLost` is true. The drawing is read first: what it holds decides
- * the model of a link made before the model switch (ADR 0022).
+ * the model of a link made before the model switch (ADR 0022), and its scene the step order of a link made before the
+ * step orders (ADR 0027).
  */
 export async function decodeLink(hash: string): Promise<Link | undefined> {
   if (hash.length > MAX_HASH) return undefined;
@@ -121,7 +123,7 @@ export async function decodeLink(hash: string): Promise<Link | undefined> {
   const [s, e] = [parts.get('s'), parts.get('e')];
   if (s === undefined) return undefined;
   const drawing = e === undefined ? undefined : await decodeDrawing(e);
-  const settings = await decodeSettings(s, drawing && kindsOf(drawing));
+  const settings = await decodeSettings(s, drawing && kindsOf(drawing), stepOrderOf(drawing?.scene));
   if (!settings) return undefined;
   if (e === undefined) return { settings };
   if (!drawing) return { settings, drawingLost: true };

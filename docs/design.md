@@ -131,18 +131,25 @@ that measure it, and the agent passes that check for walls, are built at the fir
 
 ### One step
 
-Jones' order (p. 132–133, ADR 0027): every agent moves and deposits, then every agent senses and
-turns, then the trail map diffuses. The textures hold the map as the agents sense it: the last
-diffusion plus the deposits, food and light of the last moves. So a step senses and turns for the
-moves of the step before, moves, diffuses, and then adds the deposits and sources of its own
-moves. The first step after a reset moves with the start heading, as Jones' first step does.
+Each scene runs the order of a step of its paper (`stepOrder`, ADR 0027), in both models. The
+textures always hold the map as the agents sense it.
+
+- **Move first** (the eight scenes of Jones 2010, p. 133): every agent moves and deposits, then
+  every agent senses and turns, then the trail map diffuses. The textures hold the last diffusion
+  plus the deposits, food and light of the last moves. So a step senses and turns for the moves of
+  the step before, moves, diffuses, and then adds the deposits and sources of its own moves. The
+  first step after a reset moves with the start heading, as Jones' first step does.
+- **Sense first** (Jones 2011, p. 1350, and his later papers, Fogleman, every other scene and the
+  default settings): every agent senses and turns, moves and deposits, then the map diffuses with
+  the step's deposits and sources. The textures hold the map after the diffusion, and every step
+  senses, the first too.
 
 1. `clearBuffer(counts)` (and `claims` in collision mode).
 2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups):
    - skip dead agents; apply shrinkage (`p_remove`), then the agent tools (ADR 0023): inoculation
      takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
      agent spends its step there: no move, no deposit;
-   - **sense** at F, FL, FR (not in the first step after a reset):
+   - **sense** at F, FL, FR (moving first, not in the first step after a reset):
      `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
      walls and the outside read as −∞; in the extended model also a wall on the way to the
      sensor (ADR 0020). With trail saturation K ≥ 1 (extended model only) each lane of `trail`
@@ -161,14 +168,16 @@ moves. The first step after a reset moves with the start heading, as Jones' firs
    tile saves about 25 % of this pass, see
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
    repeated `passes` times (Jones 1, Fogleman 2): the 3 × 3 mean of 9 cells at every site of the
-   arena (Jones' mean filter), then on the last pass `× (1 − decay)` and `+ counts · deposit`.
+   arena (Jones' mean filter), then on the last pass `× (1 − decay)`. Moving first, the last pass
+   then adds `counts · deposit`; sensing first, the first pass adds it before the mean.
    Outside a closed arena the cells hold 0, so trail and scent that leave it are lost (absorbing
    edges, Jones 2011). Walls diffuse as part of the lattice in the Jones model and are sinks that
    hold 0 in the extended model; they take no deposit or source (ADR 0027). The same for `scent` with
    `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones model g = 1,
    the scent decays with the strain's decay and light has no source, so trail + scent is Jones'
-   one trail map (ADR 0022). In the extended model `g = d / 0.1` with the scent decay d, so a large
-   food reaches the same scent at every decay (ADR 0027). The cut tool
+   one trail map (ADR 0022). In the extended model `g = d / 0.1` moving first and
+   `g = (d / (1 − d)) / (0.1 / 0.9)` sensing first, with the scent decay d, so a large food reaches
+   the same scent at every decay in either order (ADR 0027). The cut tool
    clears trail and scent in the wound only in the extended model. With covered food on, a food
    cell releases the covered-food factor (0.001 by default, Adamatzky and Jones 2010) while the
    3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
@@ -273,7 +282,8 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
 GPU tests compare against a small CPU reference model and check invariants:
 
 - mass balance: `Σ trail' = (1 − decay) · Σ trail + deposit · Σ counts` with periodic
-  boundary (Jones' order, ADR 0027);
+  boundary, moving first, and `Σ trail' = (1 − decay) · (Σ trail + deposit · Σ counts)` sensing
+  first (ADR 0027);
 - agent conservation; at most one agent per cell in collision mode;
 - determinism: two runs with the same seed give identical buffers;
 - behaviour: networks form (coefficient of variation rises), pattern wavelength grows with

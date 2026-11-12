@@ -124,7 +124,7 @@ describe('model slot and sources', () => {
   });
 
   it('packs no saturation in the Jones model whatever K says, and a K below 1 as none', () => {
-    const s = { ...defaultSettings(), trailSaturation: 50 };
+    const s = { ...defaultSettings(), trailSaturation: 50, stepOrder: 'move-first' as const };
     expect(s.model).toBe('extended');
     expect(model(s)).toEqual([50, 1, 0, 0]);
     expect(model({ ...s, model: 'jones' })).toEqual([0, 1, 1, 0]);
@@ -137,6 +137,14 @@ describe('model slot and sources', () => {
     expect(model({ ...s, coveredFood: true })).toEqual([50, Math.fround(0.001), 0, 0]);
     expect(model({ ...s, coveredFood: true, coveredFoodFactor: 0.01 })).toEqual([50, Math.fround(0.01), 0, 0]);
     expect(model({ ...s, coveredFoodFactor: 0.01 })).toEqual([50, 1, 0, 0]);
+  });
+
+  // ADR 0027: each scene's paper decides the order of a step, in either model.
+  it('packs whether a step senses first, in both models', () => {
+    expect(model(defaultSettings())[3]).toBe(1);
+    expect(model({ ...defaultSettings(), stepOrder: 'move-first' })[3]).toBe(0);
+    expect(model({ ...jones(), stepOrder: 'sense-first' })[3]).toBe(1);
+    expect(model({ ...jones(), stepOrder: 'move-first' })[3]).toBe(0);
   });
 
   // Jones' lattice diffuses at every site, walls too; the extended model's walls are sinks (ADR 0027).
@@ -155,7 +163,7 @@ describe('model slot and sources', () => {
     expect(scent(s)).toEqual([Math.fround(255 * 0.02), 0, Math.fround(1 - 0.05), 0]);
     const e = floats({ ...s, model: 'extended' });
     expect([e[9 * 4], e[10 * 4]]).toEqual([Math.fround(0.3), 2]);
-    const g = emissionScale(0.2);
+    const g = emissionScale(0.2, s.stepOrder);
     expect(scent({ ...s, model: 'extended' })).toEqual(
       [255 * 0.02 * g, 255 * 0.4 * g, 1 - 0.2, 0].map((v) => Math.fround(v)),
     );
@@ -172,9 +180,9 @@ describe('model slot and sources', () => {
   });
 
   it('scales the sources by emissionScale() only in the extended model, by exactly 1 at decay 0.1', () => {
-    expect(emissionScale(0.1)).toBe(1);
+    expect(emissionScale(0.1, 'move-first')).toBe(1);
     const s = jones({ foodStrength: 0.05 });
-    const ext = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2 };
+    const ext = { ...defaultSettings(), foodStrength: 0.05, lightStrength: 0.2, stepOrder: 'move-first' as const };
     // At decay 0.1 the extended model releases the food of the Jones model.
     expect(scent(ext)[0]).toBe(scent(s)[0]);
     expect(scent(ext)[1]).toBe(Math.fround(255 * 0.2));
@@ -186,10 +194,23 @@ describe('model slot and sources', () => {
     expect(scent(low).slice(0, 3)).toEqual([Math.fround(255 * 0.05), 0, Math.fround(0.999)]);
   });
 
-  // The agents sense the map after the step's sources, before its diffusion (Jones' order, ADR 0027).
-  it('keeps the plateau of a large food at every scent decay: source / d', () => {
-    const plateau = (d: number) => (255 * 0.05 * emissionScale(d)) / d;
+  // Moving first, the agents sense the map after the step's sources, before its diffusion (ADR 0027).
+  it('keeps the plateau of a large food at every scent decay, moving first: source / d', () => {
+    const plateau = (d: number) => (255 * 0.05 * emissionScale(d, 'move-first')) / d;
     for (const d of [0.001, 0.003, 0.01, 0.03, 0.3, 0.9]) expect(plateau(d) / plateau(0.1)).toBeCloseTo(1, 12);
+  });
+
+  // Sensing first, the agents sense the map after the diffusion: the factor of the code before ADR 0027.
+  it('keeps the plateau sensing first too: source · (1 − d) / d, with the factor of before', () => {
+    expect(emissionScale(0.1, 'sense-first')).toBe(1);
+    const plateau = (d: number) => (255 * 0.05 * emissionScale(d, 'sense-first') * (1 - d)) / d;
+    for (const d of [0.001, 0.003, 0.01, 0.03, 0.3, 0.9]) expect(plateau(d) / (255 * 0.05 * 9)).toBeCloseTo(1, 12);
+    expect(emissionScale(0.001, 'sense-first')).toBe(0.001 / (1 - 0.001) / (0.1 / (1 - 0.1)));
+    const ext = { ...defaultSettings(), foodStrength: 0.05, scentDecay: 0.001 };
+    expect(scent(ext)[0]).toBe(Math.fround(255 * 0.05 * emissionScale(0.001, 'sense-first')));
+    expect(scent({ ...ext, stepOrder: 'move-first' })[0]).toBe(
+      Math.fround(255 * 0.05 * emissionScale(0.001, 'move-first')),
+    );
   });
 });
 

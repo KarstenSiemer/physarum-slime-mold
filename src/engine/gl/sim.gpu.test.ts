@@ -124,14 +124,15 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     const { gl, prog } = plain();
     const strains = [0, 1, 2].map((i) => defaultStrain(i));
     // One cell on a periodic grid: every agent moves into it.
-    const sim = new GlSim(gl, prog, settingsWith({ strains, shrink: 0 }), 1, 1, 100_000, floatBlend);
+    const settings = settingsWith({ strains, shrink: 0, stepOrder: 'move-first' });
+    const sim = new GlSim(gl, prog, settings, 1, 1, 100_000, floatBlend);
     sim.run(1);
     const counts = Array.from(await sim.readCounts());
     const expected = alivePerStrain(await sim.readAgents(), 3);
     expect(expected.every((n) => n > 30_000)).toBe(true); // over 100 carries of 256 each
     expect(counts).toEqual([...expected, 0]);
     // The deposit uses these counts: trail = deposit · count after one step from zero, added after the step's
-    // diffusion (Jones' order, ADR 0027).
+    // diffusion (moving first, ADR 0027).
     const trail = Array.from(await sim.readTrail());
     for (let s = 0; s < 3; s++) expect(trail[s] ?? 0).toBeCloseTo(5 * (expected[s] ?? 0), -1);
     sim.destroy();

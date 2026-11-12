@@ -13,6 +13,8 @@
     MODELS,
     RESOLUTIONS,
     sameLattice,
+    STEP_ORDERS,
+    stepOrderHelp,
     STYLES,
     type Lattice,
     type Strain,
@@ -105,6 +107,11 @@
 
   let ruleHelp = $state(false);
   let modelHelpOpen = $state(false);
+  let orderHelpOpen = $state(false);
+  const ORDER_LABEL: Record<(typeof STEP_ORDERS)[number], string> = {
+    'move-first': 'Move first (Jones 2010)',
+    'sense-first': 'Sense first (Jones 2011, Fogleman)',
+  };
   let coveredHelp = $state(false);
   let growthHelpOpen = $state(false);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
@@ -267,6 +274,28 @@
     </div>
     {#if modelHelpOpen}
       <p class="helptext" id="model-help">{modelHelp.help} <cite>{modelHelp.ref}</cite></p>
+    {/if}
+    <!-- The order of a step, in both models: each scene sets the order of its paper (ADR 0027). -->
+    <div class="check">
+      <label class="field model">
+        <span>{stepOrderHelp.label}</span>
+        <select bind:value={s.stepOrder} aria-describedby={orderHelpOpen ? 'order-help' : undefined}>
+          {#each STEP_ORDERS as o (o)}
+            <option value={o}>{ORDER_LABEL[o]}</option>
+          {/each}
+        </select>
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={orderHelpOpen}
+        aria-controls="order-help"
+        aria-label="About {stepOrderHelp.label}"
+        onclick={() => (orderHelpOpen = !orderHelpOpen)}>?</button
+      >
+    </div>
+    {#if orderHelpOpen}
+      <p class="helptext" id="order-help">{stepOrderHelp.help} <cite>{stepOrderHelp.ref}</cite></p>
     {/if}
     {#if extended}
       <!-- The extended model's own settings, where the choice of the model is. -->

@@ -141,9 +141,10 @@ float steer(vec4 a, int s, inout uint rng, int clear) {
   return h - TAU * floor(h / TAU);
 }
 
-// Jones' order (sensesFirst in agents.wgsl, ADR 0027): a step senses and turns for the moves of the step before, then
-// moves; the first step after a reset moves with the start heading.
-bool sensesFirst() { return P.grid.w > 0u; }
+// Whether a step senses and turns before its move (senses() in agents.wgsl, ADR 0027): moving first, a step senses
+// and turns for the moves of the step before, and the first step after a reset moves with the start heading; sensing
+// first, every step senses.
+bool senses() { return P.grid.w > 0u || P.model.w > 0.0; }
 
 // Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
 // Clears the markers of the last step.
@@ -181,7 +182,7 @@ void main() {
       uint rng = rngSeed(i, STEER);
       int clear = clearanceAt(a.xy);
       float h = a.z;
-      if (sensesFirst()) h = steer(a, s, rng, clear);
+      if (senses()) h = steer(a, s, rng, clear);
       vec2 p = a.xy + P.stepSize[s] * dir(h);
       if (habitable(cellOf(p)) && clearPath(a.xy, p, clear)) {
         a.xy = wrapPos(p);
@@ -200,7 +201,7 @@ void main() {
     } else if (alive) {
       uint rng = rngSeed(i, STEER);
       int clear = clearanceAt(a.xy);
-      if (sensesFirst()) a.z = steer(a, s, rng, clear);
+      if (senses()) a.z = steer(a, s, rng, clear);
       if (canClaim(a, cellOf(destination(a)), clear)) a.w += float(WANTS);
     }
   } else {

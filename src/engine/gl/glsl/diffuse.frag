@@ -1,4 +1,4 @@
-// 3 × 3 mean diffusion + decay, then this step's deposits and sources, in Jones' order (ADR 0027). Mirrors
+// 3 × 3 mean diffusion + decay, and this step's deposits and sources, in either order of a step (ADR 0027). Mirrors
 // ../../shaders/diffuse.wgsl (no tiling: one fragment reads its 3 × 3 neighbourhood).
 
 uniform sampler2D trailIn;
@@ -32,6 +32,22 @@ bool covered(ivec2 q) {
 }
 #endif
 
+// True if a step senses first (senseFirst() in diffuse.wgsl, ADR 0027): the sources enter the first pass before its
+// mean; moving first, the last pass adds them after the decay.
+bool senseFirst() { return P.model.w > 0.0; }
+
+// This step's deposits and food and light at the habitable cell q (sources() in diffuse.wgsl).
+void sources(ivec2 q, inout vec4 t, inout vec2 s) {
+  vec4 e = texelFetch(env, q, 0);
+  t += texelFetch(counts, q, 0) * P.deposit;
+#if COVERED
+  float food = e.g > 0.0 && covered(q) ? P.model.y : 1.0;
+  s += vec2(e.g * P.scent.x * food, e.b * P.scent.y);
+#else
+  s += vec2(e.g * P.scent.x, e.b * P.scent.y);
+#endif
+}
+
 // Cut tool: only in the extended model the wound also loses its chemicals (wound in diffuse.wgsl).
 bool wound(ivec2 q) {
   return P.tool.w == 2.0 && P.tool2.z == 0.0 && toolDistance(vec2(q) + 0.5, P.tool.xy) < P.tool.z;
@@ -60,6 +76,7 @@ void load(ivec2 c, out vec4 t, out vec2 s, out int kind) {
   }
   t = texelFetch(trailIn, q, 0);
   s = texelFetch(scentIn, q, 0).xy;
+  if (first && senseFirst() && kind == OPEN) sources(q, t, s);
   if (first && wound(q)) {
     t = vec4(0.0);
     s = vec2(0.0);
@@ -76,6 +93,7 @@ void main() {
     // Jones' mean filter at every lattice site: a sink counts as 0 (diffuse.wgsl).
     vec4 sum = vec4(0.0);
     vec2 ssum = vec2(0.0);
+    float n = 0.0;
     for (int dy = -1; dy <= 1; dy++) {
       for (int dx = -1; dx <= 1; dx++) {
         vec4 tt;
@@ -84,32 +102,34 @@ void main() {
         load(p + ivec2(dx, dy), tt, ss, k);
         sum += tt;
         ssum += ss;
+        // 1 for every kind: a count of 9 that the compiler cannot fold (sensing first, below).
+        n += k <= WALL ? 1.0 : 0.0;
       }
     }
-    // The mean and the decay as one factor, as WebGPU computes them (diffuse.wgsl, ADR 0027).
-    if (last) {
+    // Moving first, the mean and the decay as one factor, as WebGPU computes them; sensing first, the mean over a count
+    // read at run time, and the decay in a step of its own below, the arithmetic of the code before (diffuse.wgsl,
+    // ADR 0027).
+    if (senseFirst()) {
+      t = sum / n;
+      s = ssum / n;
+    } else if (last) {
       t = sum * (P.keep / 9.0);
       s = ssum * (P.scent.z / 9.0);
     } else {
       t = sum / 9.0;
       s = ssum / 9.0;
     }
-  } else if (last) {
+  } else if (last && !senseFirst()) {
+    t *= P.keep;
+    s *= P.scent.z;
+  }
+  if (last && senseFirst()) {
     t *= P.keep;
     s *= P.scent.z;
   }
   if (last) {
-    // This step's deposits and sources, after the moves, for the sensors of the next step (diffuse.wgsl).
-    if (kind == OPEN && !wound(p)) {
-      vec4 e = texelFetch(env, p, 0);
-      t += texelFetch(counts, p, 0) * P.deposit;
-#if COVERED
-      float food = e.g > 0.0 && covered(p) ? P.model.y : 1.0;
-      s += vec2(e.g * P.scent.x * food, e.b * P.scent.y);
-#else
-      s += vec2(e.g * P.scent.x, e.b * P.scent.y);
-#endif
-    }
+    // Moving first, this step's deposits and sources, after the moves, for the sensors of the next step (diffuse.wgsl).
+    if (!senseFirst() && kind == OPEN && !wound(p)) sources(p, t, s);
   }
   if (kind == SINK) {
     t = vec4(0.0);

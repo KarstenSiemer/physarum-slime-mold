@@ -1,8 +1,8 @@
 # 0027: The model as in Jones' papers: step order, dish, boundaries and the figures' foods
 
 - Status: accepted (owner decisions of 2026-11-11: the scenes of Jones work exactly as in his papers, and the
-  corrections apply to both models)
-- Date: 2026-11-11
+  corrections apply to both models; owner decision of 2026-11-12: each scene runs the order of a step of its paper)
+- Date: 2026-11-11, amended 2026-11-12
 
 ## Context
 
@@ -55,7 +55,8 @@ Each decision with its date, who made it, and why.
 ### Step order
 
 1. **Jones' order of a step, in both models and on both backends** (owner, 2026-11-11). Every agent moves and
-   deposits, then every agent senses and turns, then the map diffuses and decays (p. 132–133).
+   deposits, then every agent senses and turns, then the map diffuses and decays (p. 132–133). Since 2026-11-12 only
+   for the scenes of Jones 2010: each scene runs the order of its paper (decision 24).
 2. **The textures hold the map as the agents sense it** (this branch, 2026-11-11). A step of the GPU senses and turns
    for the moves of the step before, moves, then diffuses and decays the map, and its last diffusion pass adds the
    deposits and the food and light of this step's moves (`diffuse.wgsl`, `diffuse.frag`: the sources moved from the
@@ -197,7 +198,8 @@ Each decision with its date, who made it, and why.
 
 ### What the view shows
 
-22. **The view shows the map as the agents sense it** (this branch, 2026-11-11). The textures hold the map after the
+22. **The view shows the map as the agents sense it** (this branch, 2026-11-11; since decision 24 the scenes that
+    sense first show the map after the diffusion, which their agents sense). The textures hold the map after the
     step's moves and before its diffusion (decision 2), and the renderer, the auto levels and `Sim.readTrail()` read them
     as they are: fresh deposits show undiffused. Options: (a) this; (b) a pass per frame that writes the diffused map
     for the view (a pass more per frame); (c) the mean in the render pass (nine taps per bilinear tap). The images of
@@ -216,7 +218,57 @@ Each decision with its date, who made it, and why.
     `sum / 9.0` followed by `× (1 − decay)` into `sum × round((1 − decay) × round(1 / 9))`, while the GLSL rounds after
     the mean and again after the decay. Both now write that product out (`diffuse.wgsl`, `diffuse.frag`). WebGPU kept its
     bytes, and WebGL2 gives them again for those four scenes; the others differed between the backends before too. The
-    passes before the last one divide by 9 alone, and both backends compute that as × round(1 / 9).
+    passes before the last one divide by 9 alone, and both backends compute that as × round(1 / 9). Since decision 24
+    those four scenes sense first, and with decision 28 they give the bytes of before ADR 0027 on both backends.
+
+### The order of each scene's paper (2026-11-12)
+
+The papers of Jones differ in the order of a step: Jones 2010 has every agent move, and then the whole population
+sense (p. 133); Jones 2011 has the motor stage follow the sensory stage (Nat. Comput. 10, p. 1350), and so do his later
+papers (arXiv:1503.03265, 2015; arXiv:1511.05862, 2017, with Mayne and Adamatzky). Fogleman's code senses first too,
+and so did this app before decision 1.
+
+24. **Each scene runs the order of a step of its paper** (owner, 2026-11-12: "Ja, je Paper", yes, per paper, his answer
+    to whether each scene should use the order of a step of its own paper). The coordinator put it to him as: move first
+    for the eight scenes of Jones 2010; sense first for the Foraging maze (Jones 2011 and 2017), the scenes of later
+    papers (ADR 0024) and the scenes of Fogleman 2020; the extended model's own scenes and the default settings keep
+    sense first, the order of the code before. Reason: the owner's rule of 2026-11-11 that the scenes of Jones work as
+    in his papers, read per paper; it also gives the scenes of Fogleman their dots back (the app's own scenes, below).
+25. **One setting `stepOrder`, `move-first` or `sense-first`, in both models** (this branch, 2026-11-12; Settings →
+    Step order under Model, "Move first (Jones 2010)" and "Sense first (Jones 2011, Fogleman)"). The scenes of Jones
+    2010 set move first (`jones2010()` in `presets.ts`), and every other scene and the default settings sense first.
+    The Jones model holds either order, and the switch to it keeps the order (`toJones()`, `jonesFits()`). Reason: both
+    orders are rules that Jones published, so the model of only his rules has both. Options: the order as part of the
+    model (the Jones model always moves first), which would run Jones' own later orders only in the extended model; or
+    the order bound to the scene, with no control, which would hide a setting that changes every run.
+26. **A link without the key gets the order of its scene, and one without a scene sense first** (the coordinator,
+    2026-11-12; `stepOrderOf()` in `presets.ts`, `decodeLink()` in `url.ts`). A drawing that this app cannot read
+    names no scene, so its link senses first too. A link that names its order keeps it. Reason: a link from before this
+    change was made in the order that senses first; its scene's paper decides now, as decision 24 decides for the
+    scene. So an old link of a scene of Jones 2010 changes its bytes again (decision 21), and an old link of another
+    scene or of free settings keeps the order it was made in.
+27. **Sense first is the step of the code before decision 1** (this branch, 2026-11-12): every step senses, the first
+    too; the first diffusion pass adds the step's deposits and its food and light before its mean; the textures hold
+    the map after the diffusion. `P.model.w` is 1 for it (`pack.ts`), read by `senses()` in `agents.wgsl` and
+    `agents.frag` and by `senseFirst()` in `diffuse.frag`; on WebGPU each diffusion pass is built for each order
+    (`SENSE_FIRST` in `diffuse.wgsl`, `variantConstants()` in `sim.ts`). With covered food, the pass that adds the
+    sources runs with it: the last one moving first, the first one sensing first. Reason: the order of the papers that
+    sense first, and the same rule as the code that ran it before.
+28. **Sensing first rounds the mean and the decay as the code before did** (this branch, 2026-11-12). The last pass
+    takes the f32 mean, then multiplies by (1 − decay); moving first it keeps decision 23's one factor
+    (1 − decay) / 9. On the M3 Pro the mean is the f32 sum of the 9 cells times the f32 of 1 / 9 on both backends,
+    and the test of the rounding accepts that or a division (SwiftShader). Two compiler effects decide it on WebGPU:
+    with the order as a uniform, an extra block for the decay changed the bytes of moving first (8 scenes of Jones);
+    with the order as a pipeline constant and the decay in a straight line after the mean, Metal folds both into one
+    factor. The mean of sensing first therefore sits in a branch on its count of cells (`n > 0.0`, always true, as the
+    code before branched on the habitable centre). Reason: the scenes that sense first then keep their bytes from
+    before ADR 0027 where its edges and walls change nothing, which proves that they run the same rule; and the
+    scenes of Jones 2010 keep the bytes that the measurements of this ADR were made with.
+29. **The emission factor follows the order** (the coordinator, 2026-11-12; decision 5). Moving first d / 0.1, sensing
+    first (d / (1 − d)) / (0.1 / 0.9), the factor of before.
+30. **The view of a scene that senses first shows the map after the diffusion**, which its agents sense (decision
+    22): the soft look of before. The sparkle of decision 22 stays with the scenes of Jones 2010 (owner question
+    below).
 
 ## Measurements
 
@@ -258,17 +310,21 @@ is the code before this change, as ADR 0026 and the fidelity check measured it.
 
 ### The app's own scenes
 
-Contact sheets of main and this branch (WebGPU, 1280 × 720, seed 7, steps 500 and 3,000; in the pull request). The
-default settings, Three strains, Two strains, Fleeing light, the Maze and Cyclones keep their character. Two scenes of
-Fogleman 2020 do not: in Dunes strain B no longer gathers into dots (on main the top 1 % of its cells hold 48 to 61 % of
-its trail, now 4 %, a haze), and its ridges break into fewer pieces; in Dot grid strain B's lattice of dots goes and
-strain A's streaks become round spots (top 1 % share 70 % against 31 %). Cyclones keeps its honeycomb and its
-vortices, with more of them (17.4 and 11.4 at steps 3,000 and 10,000 against 11.0 and 7.8; 5 seeds, 1024 × 576). These
-scenes run on a periodic grid without walls or food, so their only change is the step order: Fogleman's code senses,
-moves and deposits, then blurs (`knowledge-base/variants.md`), the app's order before, and the two affected strains
-sense only 1.3 and 1.7 cells ahead. A step order per scene of the extended model, with Fogleman's order for his scenes,
-gives their statistics back (prepared, not in this branch; owner question below). The scenes of Jones sparkle in the
-glow style: each agent's fresh deposit is a bright point (decision 22; owner question below).
+In the order of their papers (decisions 24 to 28), the default settings, Three strains, Two strains, Fleeing light,
+Cyclones, Dunes and Dot grid give the bytes of main at step 500 on both backends (digests of the agents, the trail and
+the scent; main at `dcbc5cd`, M3 Pro, 1280 × 720, seed 7): they sense first on a periodic grid without walls, where the
+edges and walls of this ADR change nothing, so they run main's rule exactly. The Maze and the Foraging maze differ from
+main by their box and walls (decisions 10 and 11). The eight scenes of Jones 2010 keep the bytes of the measurements
+above on both backends.
+
+History, before decision 24, with every scene moving first: contact sheets of main and this branch (WebGPU, 1280 × 720,
+seed 7, steps 500 and 3,000; in the pull request). The default settings, Three strains, Two strains, Fleeing light, the
+Maze and Cyclones kept their character. Two scenes of Fogleman 2020 did not: in Dunes strain B no longer gathered into
+dots (on main the top 1 % of its cells hold 48 to 61 % of its trail, then 4 %, a haze), and its ridges broke into fewer
+pieces; in Dot grid strain B's lattice of dots went and strain A's streaks became round spots (top 1 % share 70 %
+against 31 %). Cyclones kept its honeycomb and its vortices, with more of them (17.4 and 11.4 at steps 3,000 and
+10,000 against 11.0 and 7.8; 5 seeds, 1024 × 576). The two affected strains sense only 1.3 and 1.7 cells ahead. That
+finding, and Jones' own later order, led to decision 24.
 
 ### Growth after the merge of ADR 0025
 
@@ -279,40 +335,41 @@ dish (decision 6). The merge keeps the bytes of every scene and of the default s
 the agents, the trail, the scent and `env` at step 500, before and after the merge).
 
 Measured with the harness of ADR 0025 (D1, D1b): built as the app builds the scenes, the flood fill of ADR 0019 every
-100 steps, seeds 1 to 10, 15,000 steps, M3 Pro. Both orders of a step: "move first" is this branch (decision 1),
-"sense first" the order of Jones 2011 and later and of Fogleman (prepared, owner question below), each with the dish
-and the boundaries of this ADR. "Near a wall" is the share of the agents within 4 cells of a wall or the box's edge at
-step 15,000, the median of the seeds.
+100 steps, seeds 1 to 10, 15,000 steps, M3 Pro. Both orders of a step, each with the dish and the boundaries of this
+ADR: "sense first" is the order these scenes ship with since decision 24 (measured with decisions 24 to 29), "move
+first" the order of decision 1 before that, kept for comparison. "Near a wall" is the share of the agents within 4 cells
+of a wall or the box's edge at step 15,000, the median of the seeds.
 
 **The Foraging maze** (ADR 0025, decision 30, D1b), the start flow and the owner's flow of a hold of Inoculate at step
 100 or 1,000:
 
-| Backend | Flow               | Screen | Move first: path, steps (median) | Near a wall | Sense first: path, steps (median) | Near a wall | Agents at 15,000 (both) |
-| ------- | ------------------ | ------ | -------------------------------- | ----------- | --------------------------------- | ----------- | ----------------------- |
-| WebGPU  | start              | 16:9   | 10 of 10, 2,801 to 4,101 (3,201) | 38 %        | 10 of 10, 2,501 to 3,601 (3,101)  | 38 %        | 15,415 to 16,655        |
-| WebGPU  | start              | 16:10  | 10 of 10, 2,901 to 4,401 (3,451) | 38 %        | 10 of 10, 2,801 to 4,101 (3,251)  | 37 %        | 17,006 to 18,751        |
-| WebGPU  | start              | 1:1    | 10 of 10, 3,501 to 5,201 (4,351) | 33 %        | 10 of 10, 4,001 to 5,201 (4,801)  | 33 %        | 25,445 to 28,165        |
-| WebGPU  | inoculate at 100   | 16:9   | 10 of 10, 3,520 to 4,720 (3,620) | 38 %        | 10 of 10, 3,020 to 3,920 (3,520)  | 37 %        | 15,460 to 16,913        |
-| WebGPU  | inoculate at 100   | 16:10  | 10 of 10, 2,920 to 4,620 (3,620) | 37 %        | 10 of 10, 3,020 to 4,420 (3,570)  | 36 %        | 16,408 to 18,501        |
-| WebGPU  | inoculate at 100   | 1:1    | 10 of 10, 4,320 to 5,320 (4,870) | 34 %        | 10 of 10, 4,420 to 6,320 (4,670)  | 33 %        | 25,733 to 27,819        |
-| WebGPU  | inoculate at 1,000 | 16:9   | 10 of 10, 3,920 to 5,620 (4,470) | 38 %        | 10 of 10, 4,020 to 5,120 (4,470)  | 38 %        | 15,771 to 16,963        |
-| WebGPU  | inoculate at 1,000 | 16:10  | 10 of 10, 3,920 to 5,520 (4,870) | 38 %        | 10 of 10, 4,220 to 5,420 (4,770)  | 38 %        | 16,648 to 18,089        |
-| WebGPU  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,320 (5,470) | 34 %        | 10 of 10, 5,120 to 6,220 (5,470)  | 34 %        | 24,588 to 27,555        |
-| WebGL2  | start              | 16:9   | 10 of 10, 2,401 to 3,801 (3,301) | 39 %        | 10 of 10, 2,601 to 3,301 (3,051)  | 36 %        | 15,311 to 17,107        |
-| WebGL2  | start              | 16:10  | 10 of 10, 3,001 to 4,201 (3,351) | 37 %        | 10 of 10, 2,601 to 3,701 (3,501)  | 36 %        | 17,098 to 18,513        |
-| WebGL2  | start              | 1:1    | 10 of 10, 4,101 to 5,701 (4,301) | 34 %        | 10 of 10, 3,801 to 5,201 (4,651)  | 33 %        | 25,234 to 28,058        |
-| WebGL2  | inoculate at 100   | 16:9   | 10 of 10, 2,620 to 4,020 (3,670) | 38 %        | 10 of 10, 2,920 to 4,820 (3,670)  | 38 %        | 15,267 to 16,904        |
-| WebGL2  | inoculate at 100   | 16:10  | 10 of 10, 3,420 to 4,420 (3,720) | 37 %        | 10 of 10, 3,120 to 4,320 (3,470)  | 36 %        | 16,456 to 18,996        |
-| WebGL2  | inoculate at 100   | 1:1    | 10 of 10, 3,620 to 5,220 (4,470) | 34 %        | 10 of 10, 4,220 to 5,620 (4,570)  | 33 %        | 25,720 to 27,424        |
-| WebGL2  | inoculate at 1,000 | 16:9   | 10 of 10, 4,220 to 4,920 (4,670) | 38 %        | 10 of 10, 3,820 to 4,920 (4,370)  | 38 %        | 15,746 to 16,997        |
-| WebGL2  | inoculate at 1,000 | 16:10  | 10 of 10, 3,920 to 5,320 (4,620) | 38 %        | 10 of 10, 4,020 to 5,520 (4,670)  | 36 %        | 17,048 to 18,170        |
-| WebGL2  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,220 (5,770) | 34 %        | 10 of 10, 5,020 to 6,620 (5,820)  | 33 %        | 25,786 to 27,871        |
+| Backend | Flow               | Screen | Move first: path, steps (median) | Near a wall | Sense first (shipped): path, steps (median)     | Near a wall | Agents at 15,000 (both) |
+| ------- | ------------------ | ------ | -------------------------------- | ----------- | ----------------------------------------------- | ----------- | ----------------------- |
+| WebGPU  | start              | 16:9   | 10 of 10, 2,801 to 4,101 (3,201) | 38 %        | 10 of 10, 2,501 to 3,901 (3,251)                | 38 %        | 15,415 to 16,632        |
+| WebGPU  | start              | 16:10  | 10 of 10, 2,901 to 4,401 (3,451) | 38 %        | 10 of 10, 2,601 to 3,601 (3,401)                | 37 %        | 16,337 to 18,783        |
+| WebGPU  | start              | 1:1    | 10 of 10, 3,501 to 5,201 (4,351) | 33 %        | 10 of 10 (at 15,000: 9), 4,201 to 5,401 (4,551) | 34 %        | 25,043 to 27,467        |
+| WebGPU  | inoculate at 100   | 16:9   | 10 of 10, 3,520 to 4,720 (3,620) | 38 %        | 10 of 10, 2,920 to 4,020 (3,370)                | 37 %        | 15,460 to 17,066        |
+| WebGPU  | inoculate at 100   | 16:10  | 10 of 10, 2,920 to 4,620 (3,620) | 37 %        | 10 of 10, 3,220 to 4,320 (3,620)                | 37 %        | 16,408 to 18,569        |
+| WebGPU  | inoculate at 100   | 1:1    | 10 of 10, 4,320 to 5,320 (4,870) | 34 %        | 10 of 10, 4,020 to 6,020 (4,870)                | 33 %        | 25,316 to 27,786        |
+| WebGPU  | inoculate at 1,000 | 16:9   | 10 of 10, 3,920 to 5,620 (4,470) | 38 %        | 10 of 10, 4,220 to 5,020 (4,520)                | 38 %        | 15,375 to 16,963        |
+| WebGPU  | inoculate at 1,000 | 16:10  | 10 of 10, 3,920 to 5,520 (4,870) | 38 %        | 10 of 10, 3,820 to 5,220 (4,520)                | 36 %        | 16,492 to 18,334        |
+| WebGPU  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,320 (5,470) | 34 %        | 10 of 10, 4,820 to 6,920 (5,870)                | 34 %        | 25,367 to 27,555        |
+| WebGL2  | start              | 16:9   | 10 of 10, 2,401 to 3,801 (3,301) | 39 %        | 10 of 10, 2,601 to 3,401 (3,151)                | 37 %        | 15,311 to 17,225        |
+| WebGL2  | start              | 16:10  | 10 of 10, 3,001 to 4,201 (3,351) | 37 %        | 10 of 10, 2,701 to 3,601 (3,251)                | 36 %        | 16,432 to 18,216        |
+| WebGL2  | start              | 1:1    | 10 of 10, 4,101 to 5,701 (4,301) | 34 %        | 10 of 10, 3,901 to 6,101 (4,601)                | 33 %        | 24,835 to 28,058        |
+| WebGL2  | inoculate at 100   | 16:9   | 10 of 10, 2,620 to 4,020 (3,670) | 38 %        | 10 of 10, 2,720 to 4,220 (3,670)                | 38 %        | 15,267 to 17,298        |
+| WebGL2  | inoculate at 100   | 16:10  | 10 of 10, 3,420 to 4,420 (3,720) | 37 %        | 10 of 10, 3,220 to 4,120 (3,470)                | 37 %        | 16,456 to 18,422        |
+| WebGL2  | inoculate at 100   | 1:1    | 10 of 10, 3,620 to 5,220 (4,470) | 34 %        | 10 of 10, 3,920 to 5,320 (4,920)                | 34 %        | 25,515 to 27,563        |
+| WebGL2  | inoculate at 1,000 | 16:9   | 10 of 10, 4,220 to 4,920 (4,670) | 38 %        | 10 of 10, 4,020 to 4,720 (4,320)                | 37 %        | 15,688 to 16,997        |
+| WebGL2  | inoculate at 1,000 | 16:10  | 10 of 10, 3,920 to 5,320 (4,620) | 38 %        | 10 of 10, 4,020 to 5,020 (4,370)                | 37 %        | 16,729 to 18,071        |
+| WebGL2  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,220 (5,770) | 34 %        | 10 of 10, 5,020 to 6,820 (5,520)                | 33 %        | 25,605 to 27,110        |
 
 Every flow reaches the far food in 10 of 10 seeds on every screen, on both backends and in both orders, as in D1b with
-the code before (10 of 10, median 2,751 to 3,901 steps in the start flow; now 3,201 to 4,351 move first and 3,051 to
-4,801 sense first). The colony settles at the same size (24,588 to 28,165 agents at step 15,000 on 1:1, 15,267 to
-18,996 on the wide screens; D1b 24,755 to 27,534 and 14,990 to 18,142), and 33 to 39 % of its agents lie near a wall
-(37 to 41 % with SA 22.5° and the reflective walls, ADR 0025's analysis).
+the code before (10 of 10, median 2,751 to 3,901 steps in the start flow; now 3,151 to 4,601 sensing first and 3,201
+to 4,351 moving first). Sensing first, one seed of the start flow on 1:1 (WebGPU) loses its path again before step
+15,000. The colony settles at the same size (24,835 to 28,058 agents at step 15,000 on 1:1, 15,267 to 18,783 on the
+wide screens; D1b 24,755 to 27,534 and 14,990 to 18,142), and 33 to 39 % of its agents lie near a wall (37 to 41 %
+with SA 22.5° and the reflective walls, ADR 0025's analysis).
 
 **The Maze (SA 45°) with growth from 50 agents** (ADR 0025, D1: start layout Empty, 50 agents on random open cells of
 the default brush on the bottom-right food, growth with the values of 2011):
@@ -323,20 +380,20 @@ the default brush on the bottom-right food, growth with the values of 2011):
 | Before (D1) | WebGL2  | 9 of 10, 3,300 to 10,000 (5,200)  |             | 0 of 10                   |             |
 | Move first  | WebGPU  | 9 of 10, 7,000 to 15,000 (10,900) | 18 %        | 0 of 10                   | 14 %        |
 | Move first  | WebGL2  | 6 of 10, 7,800 to 14,600 (9,800)  | 13 %        | 0 of 10                   | 11 %        |
-| Sense first | WebGPU  | 4 of 10, 6,900 to 12,700 (7,950)  | 10 %        | 0 of 10                   | 10 %        |
-| Sense first | WebGL2  | 5 of 10, 8,300 to 14,100 (13,400) | 6 %         | 2 of 10, 11,700 to 12,600 | 10 %        |
+| Sense first | WebGPU  | 4 of 10, 6,900 to 10,700 (9,850)  | 10 %        | 0 of 10                   | 10 %        |
+| Sense first | WebGL2  | 4 of 10, 8,300 to 13,600 (9,000)  | 6 %         | 3 of 10, 12,300 to 14,400 | 10 %        |
 
 The colony no longer coats the walls: 6 to 18 % of its agents lie near one, against 71 to 80 % with the walls that
-reflected the trail, so the passes of D1 along the walls are gone. Without the coat it reaches the far food on 16:9 in
-4 to 9 of 10 seeds and on 1:1 in 0 to 2 of 10: SA 45° is Jones' angle for minimising networks, as ADR 0025's analysis
-found, and the Foraging maze, with his foraging angle, is the scene for growth. The Maze ships without growth, so its
-text does not change by this.
+reflected the trail, so the passes of D1 along the walls are gone. Without the coat it reaches the far food on 16:9 in 4
+to 9 of 10 seeds and on 1:1 in 0 to 3 of 10 (4 of 10 and 0 to 3 of 10 in the order it ships): SA 45° is Jones' angle for
+minimising networks, as ADR 0025's analysis found, and the Foraging maze, with his foraging angle, is the scene for
+growth. The Maze ships without growth, so its text does not change by this.
 
-**The Maze as it ships** (no growth), the path check of ADR 0019 and 0020 (WebGPU, seeds 31 to 42): a path from food to
-food at steps 2,000, 5,000, 10,000 and 15,000 in 12 of 12 runs on 16:9, 16:10, 9:19.5 and 1:1, at the threshold and at
-half of it, in both orders, as ADR 0020 recorded for the code before. Its text ("still holds at step 15,000, on wide,
-tall and square screens alike") stays true. At step 15,000, 1 to 5 % of its agents lie near a wall: they keep off the
-walls that take in the trail.
+**The Maze as it ships** (no growth, sensing first), the path check of ADR 0019 and 0020 (WebGPU, seeds 31 to 42): a
+path from food to food at steps 2,000, 5,000, 10,000 and 15,000 in 12 of 12 runs on 16:9, 16:10, 9:19.5 and 1:1, at the
+threshold and at half of it, as ADR 0020 recorded for the code before; moving first the same. Its text ("still holds at
+step 15,000, on wide, tall and square screens alike") stays true. At step 15,000, 1 to 5 % of its agents lie near a
+wall: they keep off the walls that take in the trail.
 
 ### Cost
 
@@ -365,40 +422,57 @@ pixel), medians of 12 to 16 rounds while other jobs shared the machine:
 
 ### Tests
 
-- `sim.gpu.test.ts`, both backends: Jones' order (the trail holds the step's deposits undiffused; a sensor reads the
-  deposits of the last moves before they diffuse; the first step after a reset moves with the start heading); the
-  boundaries (trail, food and light in both models and every arena against a float64 reference of ADR 0027's rules for
-  20 steps, and far from the other model's walls and from the reflective mean; outside a dish and in the extended
-  model's walls no trail, in the Jones model's walls trail; the wall byte for the sources and the sinks); Jones' one
-  map, the scent references, covered food, the plateau and the mass balance in Jones' order; the dish (71 % filled,
-  every agent of Shrinking plasmodium placed with seed 6, the moves and sensors past a wall byte outside a 64 × 64
-  dish, the rim drawn and the outline of food straight up to the rim at 64 pixels per cell).
-- Unit: `pack.test.ts` (one `DISH_FILL` in every shader, no rim of the old formula, the wall flag, the emission
-  factor), `brush.test.ts`, `sweep.test.ts` and `engine-env.test.ts` (the geometry at the new rim, found again by
-  search), `link.test.ts` (revisions in the bytes, version 1 as revision 0, refused revisions and counts, kinds by
-  revision), `state.test.ts` (an old link paints its 8 foods until Reload scene), `presets.test.ts` (Fig. 19's foods,
-  the texts), `environment.test.ts` (revision 0 against the fractions of before).
+- `sim.gpu.test.ts`, both backends: the order of a step (moving first the trail holds the step's deposits undiffused, a
+  sensor reads the deposits of the last moves before they diffuse, and the first step after a reset moves with the start
+  heading; sensing first every step senses, the first too, and the step's deposits diffuse in it); the rounding of each
+  order, bit for bit against an f32 emulation (moving first one factor, sensing first the mean and then the decay); the
+  boundaries (trail, food and light in both models, every arena and both orders against a float64 reference of ADR
+  0027's rules for 20 steps, and far from the other model's walls and from the reflective mean; outside a dish and in
+  the extended model's walls no trail, in the Jones model's walls trail; the wall byte for the sources and the sinks);
+  Jones' one map, the scent references, covered food and the mass balance in both orders, the plateau in each; the dish
+  (71 % filled, every agent of Shrinking plasmodium placed with seed 6, the moves and sensors past a wall byte outside a
+  64 × 64 dish, the rim drawn and the outline of food straight up to the rim at 64 pixels per cell).
+- Unit: `pack.test.ts` (one `DISH_FILL` in every shader, no rim of the old formula, the wall flag, the flag of the order
+  in both models, the emission factor of each order), `params.test.ts` (the order from a link, in both models and
+  through the switch to the Jones model), `presets.test.ts` (the scenes of Jones 2010 move first, every other scene
+  senses first, `stepOrderOf()`), `url.test.ts` (a link without the key: its scene's order, sense first without a scene;
+  a link with the key keeps it), `brush.test.ts`, `sweep.test.ts` and `engine-env.test.ts` (the geometry at the new rim,
+  found again by search), `link.test.ts` (revisions in the bytes, version 1 as revision 0, refused revisions and counts,
+  kinds by revision), `state.test.ts` (an old link paints its 8 foods until Reload scene), `presets.test.ts` (Fig. 19's
+  foods, the texts), `environment.test.ts` (revision 0 against the fractions of before).
 - e2e: an old link of Shortest path paints its foods of revision 0, and Reload scene those of Fig. 18.
 - On SwiftShader on the M3 Pro (`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader`) the new and changed GPU
   tests took at most 5.6 s (Jones' one map in a box, WebGL2, which has a limit of 120 s); every other new test at most
-  3.1 s of 60 s. At the four times of CI (ADR 0010) none passes a quarter of its limit, so no limit changes.
+  3.1 s of 60 s. At the four times of CI (ADR 0010) none passes a quarter of its limit, so no limit changes. With the
+  orders (alone on the machine, 2026-11-12) covered food took 3.9 s in each order, 15.6 s at four times, over a
+  quarter of 60 s: its limit is 120 s now (ADR 0010). The rounding test took 2.3 s, the boundaries 1.7 s, Jones' one
+  map 4.3 s of 120 s. "counts deposits exactly far above 2048 agents" without float blending took 15.4 s; its limit
+  of 120 s rests on 27.4 s measured in CI (ADR 0010), and this change only names its order.
 
 ### Mutations
 
-Each new rule was broken on purpose, one at a time, and the tests named for it run (`vitest -t`); 37 mutations:
+Each new rule was broken on purpose, one at a time, and the tests named for it run (`vitest -t`); 37 mutations, and 24
+for the order of each scene's paper (all killed, below):
 
-- killed (35): the deposits added before the decay, and before the mean (the old order), on each backend; the first
-  step that senses, on each backend; the old emission factor (unit and GPU); the dish's radius of before in
-  `common.wgsl`, `common.glsl`, the render rim of `render.wgsl` and `render.frag`, the outline lookups of `render.wgsl`
-  and `view.glsl`, `brush.ts`, and a `DISH_FILL` of 0.95 in one shader; 32 start rounds; the reflective mean, the
-  walls of the other model and the outside that keeps its trail, each on both backends; the wall flag left out of
-  `pack.ts` (GPU and unit); sources in Jones' walls on both backends; a version 1 link read as the newest revision; the
-  revision left out of the bytes; `kindsOf()` with the newest shapes; the card without the old revision; `waiting()`
-  with the newest shapes; `openLink()` without the link's revision; `drawingOf()` without the revision; the old rim in the CPU copy of
+- killed (35): the deposits added before the decay, and before the mean (the old order), on each backend; the first step
+  that senses, on each backend; the old emission factor (unit and GPU); the dish's radius of before in `common.wgsl`,
+  `common.glsl`, the render rim of `render.wgsl` and `render.frag`, the outline lookups of `render.wgsl` and
+  `view.glsl`, `brush.ts`, and a `DISH_FILL` of 0.95 in one shader; 32 start rounds; the reflective mean, the walls of
+  the other model and the outside that keeps its trail, each on both backends; the wall flag left out of `pack.ts` (GPU
+  and unit); sources in Jones' walls on both backends; a version 1 link read as the newest revision; the revision left
+  out of the bytes; `kindsOf()` with the newest shapes; the card without the old revision; `waiting()` with the newest
+  shapes; `openLink()` without the link's revision; `drawingOf()` without the revision; the old rim in the CPU copy of
   growth (`growth-reference.ts`).
 - survived (2): the near-rim threshold of `shapeCells` in `render.wgsl` and `render.frag` with the old rim. It only
   chooses between two ways of reading the same cells; a probe of 4 views across the rim, 3 styles and both backends
   found no pixel that changed, so the mutation is equivalent there.
+- The order (24 killed): a scene of Jones 2010 that senses first; default settings that move first; a link that
+  ignores its scene; `stepOrderOf()` that falls back to move first; `sanitize()` that ignores the key; `toJones()`
+  that resets the order; the flag of `pack.ts` always 0 (unit and GPU); `senses()` without the flag, and sensing in
+  the first step, each on both backends; the sources of sensing first after the decay, and of moving first before the
+  mean, each on both backends; the mean and the decay of sensing first folded into one factor (the branch on the count
+  gone on WebGPU, the product on each backend); the covered-food pass of the last pass in both orders on each backend;
+  the pipeline constant always 0; one emission factor for both orders (unit and GPU).
 
 ## Not changed
 
@@ -411,19 +485,10 @@ Each new rule was broken on purpose, one at a time, and the tests named for it r
 
 ## Open for the owner
 
-- **The order of a step for the scenes that do not come from Jones 2010** (found on 2026-11-12). Jones' papers
-  differ. In Jones 2010 every agent moves, and then the whole population senses (p. 133). In Jones 2011 the motor stage
-  follows the sensory stage (Nat. Comput. 10, p. 1350), and so it does in his later papers (arXiv:1503.03265, 2015;
-  arXiv:1511.05862, 2017, with Mayne and Adamatzky). Fogleman's code senses first too. Sense first, then move and
-  deposit, then diffuse, is the order of the code before this change. In Jones' order Dunes and Dot grid lose their
-  dots (above); the Foraging maze passes in both orders (above). Options: move first for every scene (this branch); a
-  step order of the extended model that follows each scene's paper, carried by links: move first for the eight scenes
-  of Jones 2010, sense first for the Foraging maze, the scenes of later papers and the scenes of Fogleman, and the
-  default settings and the app's own scenes in one of the two (prepared: it gives Fogleman's scenes their statistics
-  back and, on WebGL2, main's bytes); or retune or drop the two scenes of Fogleman. Their texts stay as they are until
-  then.
-- **The sparkle of the scenes of Jones in the view** (decision 22): keep the map as the agents sense it, or show the map
-  after the diffusion as before (a pass per frame, or a mean in the render pass; Cost, above). Jones 2010 does not say
+- **The sparkle of the scenes of Jones 2010 in the view** (decisions 22 and 30): keep the map as the agents sense it,
+  or show the map after the diffusion as before (a pass per frame, or a mean in the render pass; Cost, above). Only
+  these eight scenes move first, on lattices of 200 × 200 and 300 × 300 cells, where a pass per frame costs 0.04 to
+  0.07 ms. Jones 2010 does not say
   whether an image shows the map before or after a step's diffusion: it takes images "at notable times" of the
   diffusing trail map (p. 134), its captions count scheduler steps (Fig. 4, p. 134), and the diffusion follows every
   system step (p. 132).
@@ -432,8 +497,13 @@ Each new rule was broken on purpose, one at a time, and the tests named for it r
 
 - The eight scenes of Jones match their figures where the fidelity check found them off (the table above); Wound
   healing stays less regular than Fig. 22.
-- Every scene changes its bytes on both backends, and so does every link, old ones too (decision 21). WebGPU and WebGL2
-  give the same trail as each other where they did before (decision 23).
-- No pass, texture or buffer is added; the diffusion pass reads `env` and `counts` once per output cell instead of per
-  tile cell (WebGPU) or per tap (WebGL2).
+- The scenes of Jones 2010, the Maze, the Foraging maze and every scene or link in a dish or a box change their bytes
+  on both backends, old links too (decision 21). The scenes on a periodic grid without walls that sense first keep the
+  bytes of main (decision 28). WebGPU and WebGL2 give the same trail as each other where they did before (decision
+  23).
+- Each scene runs the order of a step of its paper, and the setting Step order shows and changes it (decisions 24 and
+  25).
+- No pass, texture or buffer is added; moving first, the diffusion pass reads `env` and `counts` once per output cell
+  instead of per tile cell (WebGPU) or per tap (WebGL2). WebGPU builds each diffusion pass for both orders at startup
+  (10 pipelines instead of 5).
 - Links have version 2; an app from before this change refuses them and loads their settings alone, with its notice.

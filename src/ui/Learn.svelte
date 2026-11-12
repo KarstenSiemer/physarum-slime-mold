@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { collisionsHelp, coveredFoodHelp, globalSpec, growthHelp, modelHelp, strainSpec } from '../model/params';
+  import {
+    collisionsHelp,
+    coveredFoodHelp,
+    globalSpec,
+    growthHelp,
+    modelHelp,
+    stepOrderHelp,
+    strainSpec,
+  } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
@@ -36,6 +44,7 @@
       .map(([, v]) => v),
     collisionsHelp,
     modelHelp,
+    stepOrderHelp,
     coveredFoodHelp,
     growthHelp,
     ...Object.entries(globalSpec)
@@ -133,8 +142,9 @@
       </p>
       <p>
         Like the paper, the app imitates the plasmodium with many tiny agents on a grid. Each agent stands for a bit of
-        the cell. The agents leave a chemical trail and follow it. Every step has six parts, in Jones’ order: all agents
-        move, then all agents sense, then the trail spreads.
+        the cell. The agents leave a chemical trail and follow it. Every step has six parts. In Jones 2010 all agents
+        move, then all agents sense, then the trail spreads. In his later papers and in Fogleman’s version all agents
+        sense first, then move, then the trail spreads. Each scene uses the order of its paper (the setting Step order).
       </p>
       <ol>
         <li>

@@ -733,12 +733,14 @@ export class GlSim implements Sim {
     const covered = this.settings.coveredFood;
     // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
     const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
+    const senseFirst = this.settings.stepOrder === 'sense-first';
     for (const v of diffusePlan(this.settings.diffusion)) {
       const out = flip(this.p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.mrt[out]);
       gl.viewport(0, 0, this.width, this.height);
-      // The last pass adds the step's sources (diffuse.frag), with covered food while it is on.
-      const d = covered && v.last ? this.prog.covered() : this.prog.diffuse;
+      // The pass that adds the step's sources (diffuse.frag): the last moving first, the first sensing first (ADR 0027);
+      // with covered food while it is on.
+      const d = covered && (senseFirst ? v.first : v.last) ? this.prog.covered() : this.prog.diffuse;
       gl.useProgram(d.program);
       textures(gl, d.program, {
         trailIn: this.trail[this.p].texture,

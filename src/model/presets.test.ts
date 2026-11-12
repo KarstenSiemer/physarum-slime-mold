@@ -12,6 +12,7 @@ import {
   sourceKind,
   sourceText,
   START,
+  stepOrderOf,
   usesRule,
   type Preset,
 } from './presets';
@@ -179,6 +180,20 @@ describe('presets', () => {
     for (const sentence of text.split(/(?<=\.)\s+/))
       expect(sentence.split(/\s+/).length, sentence).toBeLessThanOrEqual(20);
     expect(text).not.toMatch(/—/);
+  });
+
+  // ADR 0027 (owner, 2026-11-12, "Ja, je Paper"): each scene runs the order of a step of its paper.
+  it('run the scenes of Jones 2010 moving first, and every other scene sensing first', () => {
+    const jones2010 = ['network', 'hexagons', 'spots', 'stripes', 'shortest-path', 'steiner', 'shrinking', 'wound'];
+    expect(PRESETS.filter((p) => p.source.startsWith('Jones 2010')).map((p) => p.id)).toEqual(jones2010);
+    for (const p of PRESETS) {
+      const order = jones2010.includes(p.id) ? 'move-first' : 'sense-first';
+      expect(p.settings().stepOrder, p.id).toBe(order);
+      expect(stepOrderOf(p.id), p.id).toBe(order);
+    }
+    expect(stepOrderOf('')).toBe('sense-first');
+    expect(stepOrderOf('no-such-scene')).toBe('sense-first');
+    expect(stepOrderOf(undefined)).toBe('sense-first');
   });
 
   it('copy the Fogleman presets exactly (cmd/viewer/main.go:31–42, commit 62342a2)', () => {

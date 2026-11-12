@@ -1,18 +1,27 @@
-// 3×3 mean diffusion + decay for trail and scent, then this step's deposits and food/light sources. Prepended with
-// common.wgsl. Jones' order of a step (Jones 2010, p. 132–133; ADR 0027): every agent moves and deposits, then every
-// agent senses, then the map diffuses. The textures hold the map as the agents sense it: the map after the last
-// diffusion with the deposits and sources of the last moves. A step's agent pass senses it and moves; then its
-// `passes` dispatches diffuse and decay it, and LAST adds the deposits and sources of this step's moves, the map that
-// the agents of the next step sense. FIRST clears the wound of a cut in the extended model; BLUR = false is the
-// zero-diffusion variant (Jones 2010, p. 132).
+// 3×3 mean diffusion + decay for trail and scent, and this step's deposits and food/light sources. Prepended with
+// common.wgsl. The textures hold the map as the agents sense it, in either order of a step (ADR 0027):
+// - Move first (Jones 2010, p. 133): every agent moves and deposits, then every agent senses, then the map diffuses.
+//   The textures hold the map after the last diffusion with the deposits and sources of the last moves. A step's
+//   agent pass senses it and moves; then its `passes` dispatches diffuse and decay it, and LAST adds the deposits and
+//   sources of this step's moves, the map that the agents of the next step sense.
+// - Sense first (P.model.w = 1; Jones 2011, p. 1350, his later papers, Fogleman): every agent senses, moves and
+//   deposits, then the map diffuses. The textures hold the map after the diffusion, and FIRST adds the step's deposits
+//   and sources before its mean.
+// FIRST clears the wound of a cut in the extended model; BLUR = false is the zero-diffusion variant (Jones 2010,
+// p. 132).
 
 override FIRST: bool = true;
 override LAST: bool = true;
 override BLUR: bool = true;
 // Covered food (Adamatzky and Jones 2010; ADR 0022): a food cell releases P.model.y of its scent while the
-// 3 × 3 window around it holds an agent. sim.ts builds the LAST pass with it only while the option is on, so the
+// 3 × 3 window around it holds an agent. sim.ts builds the pass that adds the sources with it only while the option is
+// on (LAST moving first, FIRST sensing first), so the
 // passes without it keep the trail and scent of the code before it, bit for bit (sim.gpu.test.ts).
 override COVERED: bool = false;
+// The order of a step (ADR 0027): sim.ts builds every pass for each order, from Settings.stepOrder as P.model.w is.
+// A constant, not P.model.w: inside a branch on a uniform, Metal's compiler folds the mean and the decay of sensing
+// first into one factor, and the code before ADR 0027 rounded them apart.
+override SENSE_FIRST: bool = false;
 
 @group(0) @binding(1) var trailIn: texture_2d<f32>;
 @group(0) @binding(2) var scentIn: texture_2d<f32>;
@@ -47,6 +56,22 @@ fn covered(q: vec2i) -> bool {
   return false;
 }
 
+// True if a step senses first (SENSE_FIRST, ADR 0027): its deposits and sources enter the first pass before its mean,
+// as before ADR 0027; moving first, the last pass adds them after the decay.
+fn senseFirst() -> bool { return SENSE_FIRST; }
+
+// This step's deposits and food and light at the habitable cell c (cell q), with covered food while it is on.
+fn sources(c: i32, q: vec2i, t: ptr<function, vec4f>, s: ptr<function, vec2f>) {
+  *t += vec4f(counts[c]) * P.deposit;
+  let e = envOf(env[c]);
+  if (COVERED) {
+    let food = select(1.0, P.model.y, e.y > 0.0 && covered(q));
+    *s += vec2f(e.y * P.scent.x * food, e.z * P.scent.y);
+  } else {
+    *s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
+  }
+}
+
 // Cut tool: in the extended model the wound also loses its chemicals, this app's choice. Jones 2010 (Sec. 4.3,
 // p. 148) only removes the agents from the wound and places them elsewhere: the Jones model packs P.tool2.z = 1 and
 // keeps them (pack.ts).
@@ -74,6 +99,7 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
       let q = cellCoord(u32(c));
       t = textureLoad(trailIn, q, 0);
       s = textureLoad(scentIn, q, 0).xy;
+      if (FIRST && senseFirst() && kind == OPEN) { sources(c, q, &t, &s); }
       // The wound is cleared before the step's diffusion, so no chemical of it spreads out.
       if (FIRST && wound(q)) {
         t = vec4f(0.0);
@@ -97,40 +123,46 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
     // arena or enter a wall of the extended model are lost.
     var sum = vec4f(0.0);
     var ssum = vec2f(0.0);
+    var n = 0.0;
     for (var dy = 0u; dy < 3u; dy++) {
       for (var dx = 0u; dx < 3u; dx++) {
         let k = (lid.y + dy) * SIDE + lid.x + dx;
         sum += tileTrail[k];
         ssum += tileScent[k];
+        // 1 for every kind: a count of 9 that the compiler cannot fold (sensing first, below).
+        n += select(0.0, 1.0, tileKind[k] <= WALL);
       }
     }
-    // The last pass takes the mean and the decay as one factor, (1 − decay) / 9: Metal's compiler turns the mean, then
-    // × (1 − decay), into this product on WebGPU, so diffuse.frag writes it out and both backends round alike (ADR 0027).
-    if (LAST) {
+    // Moving first, the last pass takes the mean and the decay as one factor, (1 − decay) / 9: Metal's compiler turns
+    // the mean, then × (1 − decay), into this product on WebGPU, so diffuse.frag writes it out and both backends round
+    // alike (ADR 0027). Sensing first, the arithmetic of the code before ADR 0027, which ran that order: the mean over
+    // a count read at run time, and the decay in a block of its own below, so a scene in that order keeps its bytes
+    // where its edges and walls do not change it.
+    if (senseFirst()) {
+      // A branch at run time, as in the code before: else Metal folds the mean and the decay below into one factor.
+      if (n > 0.0) {
+        t = sum / n;
+        s = ssum / n;
+      }
+    } else if (LAST) {
       t = sum * (P.keep / 9.0);
       s = ssum * (P.scent.z / 9.0);
     } else {
       t = sum / 9.0;
       s = ssum / 9.0;
     }
-  } else if (LAST) {
+  } else if (LAST && !senseFirst()) {
+    t *= P.keep;
+    s *= P.scent.z;
+  }
+  if (LAST && senseFirst()) {
     t *= P.keep;
     s *= P.scent.z;
   }
   if (LAST) {
-    // This step's deposits and sources (Jones 2010, p. 133 and 144): after the moves, for the sensors of the next
-    // step, and none in the wound of a cut that clears it.
-    if (kind == OPEN && !wound(p)) {
-      let c = p.y * i32(W()) + p.x;
-      t += vec4f(counts[c]) * P.deposit;
-      let e = envOf(env[c]);
-      if (COVERED) {
-        let food = select(1.0, P.model.y, e.y > 0.0 && covered(p));
-        s += vec2f(e.y * P.scent.x * food, e.z * P.scent.y);
-      } else {
-        s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
-      }
-    }
+    // Moving first, this step's deposits and sources (Jones 2010, p. 133 and 144): after the moves, for the sensors of
+    // the next step, and none in the wound of a cut that clears it.
+    if (!senseFirst() && kind == OPEN && !wound(p)) { sources(p.y * i32(W()) + p.x, p, &t, &s); }
   }
   if (kind == SINK) {
     t = vec4f(0.0);

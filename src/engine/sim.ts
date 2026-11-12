@@ -716,9 +716,13 @@ export class Simulation implements Sim {
       if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow);
     }
     let d = p;
+    // The pass that adds the step's sources (diffuse.wgsl): the last moving first, the first sensing first (ADR 0027);
+    // with covered food while it is on.
+    const senseFirst = this.settings.stepOrder === 'sense-first';
     for (const v of diffusePlan(this.settings.diffusion)) {
-      // The last pass adds the step's sources (diffuse.wgsl), with covered food while it is on.
-      pass.setPipeline(covered && v.last ? k.covered(v) : k.diffuse(v));
+      pass.setPipeline(
+        covered && (senseFirst ? v.first : v.last) ? k.covered(v, senseFirst) : k.diffuse(v, senseFirst),
+      );
       pass.setBindGroup(0, this.diffuseBind(d, this.occParity));
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
@@ -1081,11 +1085,11 @@ class Kernels {
   }
 
   /** A last diffusion pass with covered food (diffuse.wgsl COVERED), built at its first use. */
-  covered(v: Diffuse): GPUComputePipeline {
-    const key = variantKey(v);
+  covered(v: Diffuse, senseFirst: boolean): GPUComputePipeline {
+    const key = variantKey(v, senseFirst);
     let p = this.coveredPipelines.get(key);
     if (!p) {
-      const constants = { FIRST: Number(v.first), LAST: 1, BLUR: Number(v.blur), COVERED: 1 };
+      const constants = { ...variantConstants(v, senseFirst), COVERED: 1 };
       const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.diffuseLayout] });
       p = this.device.createComputePipeline({
         layout,
@@ -1111,9 +1115,9 @@ class Kernels {
     return k;
   }
 
-  diffuse(v: Diffuse): GPUComputePipeline {
-    const p = this.variants.get(variantKey(v));
-    if (!p) throw new Error(`No diffusion pipeline for variant ${variantKey(v)}`);
+  diffuse(v: Diffuse, senseFirst: boolean): GPUComputePipeline {
+    const p = this.variants.get(variantKey(v, senseFirst));
+    if (!p) throw new Error(`No diffusion pipeline for variant ${variantKey(v, senseFirst)}`);
     return p;
   }
 
@@ -1152,19 +1156,22 @@ class Kernels {
     });
     const diffuseModule = module(diffuseSource);
     const layout = device.createPipelineLayout({ bindGroupLayouts: [diffuseLayout] });
-    const plans = [0, 1, 2, 3, 4].flatMap(diffusePlan);
-    const unique = [...new Map(plans.map((v) => [variantKey(v), v])).values()];
+    // Every pass of 0 to 4 passes, in each order of a step (diffuse.wgsl SENSE_FIRST, ADR 0027).
+    const plans = [0, 1, 2, 3, 4]
+      .flatMap(diffusePlan)
+      .flatMap((v) => [false, true].map((senseFirst) => ({ ...v, senseFirst })));
+    const unique = [...new Map(plans.map((v) => [variantKey(v, v.senseFirst), v])).values()];
     const variants = Promise.all(
       unique.map(
         async (v) =>
           [
-            variantKey(v),
+            variantKey(v, v.senseFirst),
             await device.createComputePipelineAsync({
               layout,
               compute: {
                 module: diffuseModule,
                 entryPoint: 'diffuse',
-                constants: { FIRST: Number(v.first), LAST: Number(v.last), BLUR: Number(v.blur) },
+                constants: { ...variantConstants(v, v.senseFirst) },
               },
             }),
           ] as const,
@@ -1266,6 +1273,11 @@ function outlineVariant(segment: Stroke | undefined, own: boolean): OutlineVaria
   return `${base}${own ? 'Own' : 'Held'}`;
 }
 
-function variantKey(v: Diffuse) {
-  return `${+v.first}${+v.last}${+v.blur}`;
+function variantKey(v: Diffuse, senseFirst: boolean) {
+  return `${+v.first}${+v.last}${+v.blur}${+senseFirst}`;
+}
+
+/** The pipeline constants of a diffusion pass (diffuse.wgsl), in the order of a step that `senseFirst` names. */
+function variantConstants(v: Diffuse, senseFirst: boolean) {
+  return { FIRST: Number(v.first), LAST: Number(v.last), BLUR: Number(v.blur), SENSE_FIRST: Number(senseFirst) };
 }

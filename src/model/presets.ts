@@ -1,4 +1,12 @@
-import { defaultSettings, defaultStrain, MAX_STRAINS, type Lattice, type Settings, type Strain } from './params';
+import {
+  defaultSettings,
+  defaultStrain,
+  MAX_STRAINS,
+  type Lattice,
+  type Settings,
+  type StepOrder,
+  type Strain,
+} from './params';
 
 /**
  * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
@@ -115,6 +123,12 @@ const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
     ...extra,
   });
 
+// The scenes of Jones 2010 move first, as his scheduler does there (p. 133); every other scene and the default settings
+// sense first, as Jones 2011 (p. 1350) and his later papers, Fogleman and the code before do (owner, 2026-11-12;
+// ADR 0027).
+const jones2010 = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
+  jones(patch, { stepOrder: 'move-first', ...extra });
+
 /**
  * The lattices of Jones 2010 (ADR 0026): 200 × 200 cells for Fig. 4, 5, 10, 16 and 18 to 20, 300 × 300 for Fig. 11,
  * 12, 15 and 21 to 23 (500 × 500 for Fig. 13 and 14). A new array for each scene's settings.
@@ -200,7 +214,7 @@ export const PRESETS: Preset[] = [
       'Jones’ default setting (p. 134–135). Within a few hundred steps, randomly placed agents form a mesh of trails. Small loops shrink and vanish, bigger holes grow, and now and then a new branch sprouts across a hole, so the network never settles (Fig. 4 shows steps 2 to 4,151). The trails look grainy, as in Jones’ figures: in every step most agents are blocked and turn at random.',
     strainRoles: ['Jones’ standard agent'],
     why: 'Jones’ defaults: Table 1 (p. 134) with one blur pass and wrapping edges, 15 % of cells holding an agent (Fig. 4) and his rule of one agent per cell (p. 133). A rotation angle above the sensor angle keeps the network changing (p. 135). Blocked agents turn at random and start new branches; without the rule the network contracts into a few lines. Jones used 200 × 200 cells. Without glow the holes stay dark.',
-    settings: () => jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network()),
+    settings: () => jones2010({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network()),
   },
   {
     id: 'hexagons',
@@ -212,7 +226,7 @@ export const PRESETS: Preset[] = [
       'Jones’ model with the sensor angle raised to 45°, equal to the rotation angle. New branches do not last: small loops close, the other holes grow, and the network contracts like a soap film. On Jones’ lattice of 200 × 200 cells it ends after about 31,000 steps as a simple network with one or two holes. Its copies, side by side, approximate a hexagonal tiling (Fig. 5).',
     strainRoles: ['Jones’ agent with equal angles'],
     why: 'Only the sensor angle differs from Jones’ defaults. With equal angles an agent turns exactly toward where its side sensor was, so its sensors stay on the trail and new branches do not last (p. 135). The rest is as for Fig. 5: 15 % of cells hold an agent (p. 136), one blur pass (Table 1), one agent per cell (p. 133) and 200 × 200 cells. Without glow the holes stay dark.',
-    settings: () => jones({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network()),
+    settings: () => jones2010({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network()),
   },
   {
     id: 'spots',
@@ -225,7 +239,7 @@ export const PRESETS: Preset[] = [
     strainRoles: ['Jones’ repelled agent'],
     why: 'Jones’ values for Fig. 16, top row (p. 144): 20 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 40, one agent per cell, 200 × 200 cells. The long sensor distance sets the wide spacing between the spots.',
     settings: () =>
-      jones(
+      jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 40, attraction: [-1, 0, 0, 0] },
         { lattice: L200(), density: 0.2 },
       ),
@@ -241,7 +255,7 @@ export const PRESETS: Preset[] = [
     strainRoles: ['Jones’ repelled agent with wide-set sensors'],
     why: 'Jones’ values for Fig. 16, bottom row (p. 144): 20 % of cells hold an agent, one agent per cell, sensor distance 13, 200 × 200 cells. The sensor distance sets the spacing between the stripes.',
     settings: () =>
-      jones(
+      jones2010(
         { sensorAngle: 112.5, rotationAngle: 67.5, sensorOffset: 13, attraction: [-1, 0, 0, 0] },
         { lattice: L200(), density: 0.2 },
       ),
@@ -263,7 +277,7 @@ PRESETS.push(
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 18 (p. 145): as many agents as 2 % of the square around the dish, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. Dish and foods are as in Fig. 18, on 200 × 200 cells.',
     settings: () =>
-      jones(
+      jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
@@ -286,7 +300,7 @@ PRESETS.push(
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. The foods lie as in Fig. 19: a square of 60 cells, each food 2.7 cells in radius.',
     settings: () =>
-      jones(
+      jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L200(), density: 0.02, boundary: 'dish', foodStrength: 0.01 },
       ),
@@ -312,7 +326,7 @@ PRESETS.push(
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 21 (p. 147): as many agents as 50 % of the square around the dish, so they start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Slow removal lets the sheet adapt; faster removal tears holes into it (p. 148). Jones used 300 × 300 cells and the 19 foods of Fig. 21. Food weight 0.05 and the food radius are this app’s choice.',
     settings: () =>
-      jones(
+      jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
         { lattice: L300(), density: 0.5, boundary: 'dish', foodStrength: 0.05, shrink: 0.00025 },
       ),
@@ -368,7 +382,7 @@ PRESETS.push(
     strainRoles: ['Jones’ repelled agent'],
     why: 'Jones’ values for Fig. 22 (p. 148): 10 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 27, one agent per cell, 300 × 300 cells. The Cut tool differs from his method in one point: Jones kept agents out of the wound until all were placed elsewhere, while here they flow back as soon as you release the tool. As in his method, the wound keeps its trail.',
     settings: () =>
-      jones(
+      jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 27, attraction: [-1, 0, 0, 0] },
         { lattice: L300(), density: 0.1 },
       ),
@@ -519,6 +533,13 @@ PRESETS.push(
 );
 
 export const presetById = (id: string) => PRESETS.find((p) => p.id === id);
+
+/**
+ * The step order of a link that names none (ADR 0027): its scene's, or sense first, the order of the code before, for a
+ * link without a scene or with a scene this app does not know.
+ */
+export const stepOrderOf = (scene: string | undefined): StepOrder =>
+  (scene ? presetById(scene)?.settings().stepOrder : undefined) ?? 'sense-first';
 
 /** True for scenes made for Jones' one-agent-per-cell rule. */
 export const usesRule = (p: Preset) => p.settings().collisions;

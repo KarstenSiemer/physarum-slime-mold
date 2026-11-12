@@ -12,6 +12,7 @@ import {
   runsAsJones,
   sanitize,
   snap,
+  STEP_ORDERS,
   strainLike,
   strainSpec,
   toJones,
@@ -372,8 +373,28 @@ describe('the Jones model', () => {
     expect(jonesFits({ ...s, strains: [defaultStrain(0), defaultStrain(1)] })).toBe(false);
     expect(jonesFits({ ...s, collisions: false })).toBe(false);
     for (const diffusion of [0, 2, 4]) expect(jonesFits({ ...s, diffusion }), `${diffusion}`).toBe(false);
+    // Jones published both orders of a step: 2010 moves first, 2011 senses first (ADR 0027).
+    for (const stepOrder of STEP_ORDERS) expect(jonesFits({ ...s, stepOrder }), stepOrder).toBe(true);
     // Covered food, Shrinkage, the start layout and the edges are Jones' too.
     expect(jonesFits({ ...s, coveredFood: true, shrink: 0.001, layout: 'empty', boundary: 'dish' })).toBe(true);
+  });
+
+  // ADR 0027: links carry the order of a step; one without it, or with another value, gets the order it is given (its
+  // scene's, url.ts), sense first by default. Both models keep the order, and so does the switch to the Jones model.
+  it('reads the order of a step from a link, and keeps it in both models', () => {
+    for (const stepOrder of STEP_ORDERS) {
+      expect(sanitize({ ...defaultSettings(), stepOrder }).stepOrder).toBe(stepOrder);
+      expect(sanitize({ ...jonesLink(), stepOrder }).stepOrder).toBe(stepOrder);
+      expect(sanitize({ ...jonesLink(), stepOrder }).model).toBe('jones');
+      expect(toJones({ ...defaultSettings(), stepOrder }).stepOrder).toBe(stepOrder);
+    }
+    const { stepOrder: _, ...old } = defaultSettings();
+    expect(sanitize(old).stepOrder).toBe('sense-first');
+    expect(sanitize(old, new Set(), 'move-first').stepOrder).toBe('move-first');
+    expect(sanitize({ ...defaultSettings(), stepOrder: 'jones' }, new Set(), 'move-first').stepOrder).toBe(
+      'move-first',
+    );
+    expect(defaultSettings().stepOrder).toBe('sense-first');
   });
 
   // decision 27: one strain has no share, and the panel shows none in the Jones model.

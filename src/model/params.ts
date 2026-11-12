@@ -136,6 +136,13 @@ export type Lattice = [width: number, height: number];
 export const LATTICE_SIDE = { min: 16, max: 4096 } as const;
 /** The rule set (ADR 0022): only Jones' published rules, or Jones' rules and this app's additions. */
 export const MODELS = ['jones', 'extended'] as const;
+/**
+ * The order of a step (ADR 0027). Move first: every agent moves and deposits, then every agent senses and turns, then
+ * the map diffuses (Jones 2010, p. 133). Sense first: every agent senses and turns, then moves and deposits, then the
+ * map diffuses (Jones 2011, p. 1350, and his later papers; Fogleman 2020). Each scene uses the order of its paper.
+ */
+export const STEP_ORDERS = ['move-first', 'sense-first'] as const;
+export type StepOrder = (typeof STEP_ORDERS)[number];
 
 export type Layout = (typeof LAYOUTS)[number];
 export type Boundary = (typeof BOUNDARIES)[number];
@@ -322,6 +329,13 @@ export const modelHelp = {
   ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014',
 } as const;
 
+/** Help for the choice "Step order" (ADR 0027); Learn → Controls lists it with the sliders. */
+export const stepOrderHelp = {
+  label: 'Step order',
+  help: 'Move first: all agents move and leave trail, then all sense and turn, then the trail spreads. The agents then sense fresh trail before it spreads, as in Jones 2010. Sense first: all agents sense and turn, then move and leave trail, then the trail spreads, as in Jones’ later papers and in Michael Fogleman’s version. Each scene uses the order of its paper: the scenes of Jones 2010 move first, all other scenes and the default settings sense first.',
+  ref: 'Jones 2010, p. 133; Jones 2011, p. 1350; Fogleman 2020',
+} as const;
+
 /** Help for the switch "Covered food releases less"; Learn → Controls lists it with the sliders. */
 export const coveredFoodHelp = {
   label: 'Covered food releases less',
@@ -333,13 +347,17 @@ export const coveredFoodHelp = {
 export const REFERENCE_SCENT_DECAY = 0.1;
 
 /**
- * Factor on the food and light sources of the extended model (ADR 0022, decision 13; ADR 0027). The scent of a food
- * much larger than its spread settles where the decay removes what the source adds. The agents sense the map after
- * the step's sources and before its diffusion (Jones' order): s = (1 − d) · s + source, so s = source / d. This
- * factor scales the source by d, relative to REFERENCE_SCENT_DECAY, so that level is the same at every decay. It is
- * exactly 1 at the reference: x / x for the same x.
+ * Factor on the food and light sources of the extended model (ADR 0022, decision 13; ADR 0027, decision 5). The scent
+ * of a food much larger than its spread settles where the decay removes what the source adds, in the map that the
+ * agents sense. Moving first, they sense it after the step's sources and before its diffusion:
+ * s = (1 − d) · s + source, so s = source / d, and the factor is d relative to REFERENCE_SCENT_DECAY. Sensing first,
+ * they sense it after the diffusion: s = (1 − d) · (s + source), so s = source · (1 − d) / d, and the factor is
+ * d / (1 − d) relative to the reference, the factor of the code before ADR 0027. Either way that level is the same at
+ * every decay, and the factor is exactly 1 at the reference: x / x for the same x.
  */
-export function emissionScale(scentDecay: number): number {
+export function emissionScale(scentDecay: number, order: StepOrder): number {
+  if (order === 'sense-first')
+    return scentDecay / (1 - scentDecay) / (REFERENCE_SCENT_DECAY / (1 - REFERENCE_SCENT_DECAY));
   return scentDecay / REFERENCE_SCENT_DECAY;
 }
 
@@ -381,6 +399,8 @@ export interface Settings extends Record<GlobalKey, number> {
    * one agent per cell (constrain()).
    */
   growth: boolean;
+  /** The order of a step (STEP_ORDERS, stepOrderHelp), in both models: each scene sets the order of its paper. */
+  stepOrder: StepOrder;
   style: Style;
   strains: Strain[];
 }
@@ -433,6 +453,7 @@ export function defaultSettings(): Settings {
     model: 'extended',
     coveredFood: false,
     growth: false,
+    stepOrder: 'sense-first',
     style: 'glow',
     density: 1,
     diffusion: 1,
@@ -502,9 +523,10 @@ export type Drawn = ReadonlySet<EnvTool>;
 /**
  * Builds valid Settings from untrusted input (the URL). Only known keys are read,
  * numbers are clamped to their spec, everything else falls back to the default. `drawn`: what the link's drawing
- * holds, which decides the model of a link made before the model switch (runsAsJones()).
+ * holds, which decides the model of a link made before the model switch (runsAsJones()). `order`: the step order of a
+ * link that names none, the one of its scene (stepOrderOf()).
  */
-export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
+export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOrder = 'sense-first'): Settings {
   const raw = obj(input);
   const d = defaultSettings();
   const out = { ...d };
@@ -532,6 +554,9 @@ export function sanitize(input: unknown, drawn: Drawn = new Set()): Settings {
   for (const k of ['growthWindow', 'shrinkWindow'] as const) out[k] = snap(out[k], globalSpec[k]);
   // Capacity 0 stands for as many as Agents per cell (capacityOf()): a link keeps it 0, not the range's minimum.
   if (typeof raw.capacity !== 'number' || !(raw.capacity > 0)) out.capacity = 0;
+  // A link from before the step orders holds none: the order of its scene, or sense first without a scene, the order of
+  // the code before (ADR 0027).
+  out.stepOrder = oneOf(raw.stepOrder, STEP_ORDERS, order);
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);

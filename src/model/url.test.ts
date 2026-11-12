@@ -149,6 +149,36 @@ describe('URL links with food, light and walls', () => {
     expect(await decodeLink(plain.hash)).toEqual({ settings: s });
   });
 
+  // ADR 0027 (owner, 2026-11-12): a link from before the step orders gets the order of its scene's paper, and one
+  // without a scene, or with a scene this app does not know, senses first as the code before did. A link that names
+  // its order keeps it.
+  it("give a link without a step order its scene's order, and sense first without a scene", async () => {
+    // A link of `scene` with its newest shapes, from before the step orders: its settings hold no step order.
+    const old = async (scene: string, settings: Settings) => {
+      const { stepOrder: _, ...raw } = settings;
+      const p = presetById(scene);
+      const drawing = p && { scene, revision: shapeRevision(p), origins: [0], shapes: (p.env ?? []).map(() => true) };
+      const bytes = packDrawing({ scene: '', revision: 0, origins: [], shapes: [], ...drawing, strokes: [] });
+      const e = scene && bytes ? `&e=${await hashPart(bytes)}` : '';
+      const link = await decodeLink(`s=${await hashPart(JSON.stringify(raw))}${e}`);
+      return [link?.drawing?.scene ?? '', link?.settings.stepOrder];
+    };
+    const scene = (id: string) => presetById(id)?.settings() ?? defaultSettings();
+    for (const id of ['network', 'shortest-path', 'steiner', 'wound'])
+      expect(await old(id, scene(id)), id).toEqual([id, 'move-first']);
+    for (const id of ['three-strains', 'maze', 'foraging-maze', 'dunes'])
+      expect(await old(id, scene(id)), id).toEqual([id, 'sense-first']);
+    // Without a scene, or with one this app does not know (the drawing is lost), sense first.
+    expect(await old('', scene('network'))).toEqual(['', 'sense-first']);
+    expect(await old('', defaultSettings())).toEqual(['', 'sense-first']);
+    // A link that names its order keeps it, whatever its scene.
+    for (const stepOrder of ['move-first', 'sense-first'] as const) {
+      const d = { scene: 'network', revision: 0, origins: [0], shapes: [], strokes: [] };
+      const { hash } = await encodeLink({ ...scene('maze'), stepOrder }, d);
+      expect((await decodeLink(hash))?.settings.stepOrder).toBe(stepOrder);
+    }
+  });
+
   it('still open links with settings only', async () => {
     const s = { ...defaultSettings(), boundary: 'dish' as const };
     expect(await decodeLink(`s=${await encodeSettings(s)}`)).toEqual({ settings: s });

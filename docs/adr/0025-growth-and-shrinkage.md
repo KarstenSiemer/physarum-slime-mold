@@ -414,7 +414,7 @@ holds for the diffusion of this branch and needs a new measurement after it. A n
 Amendment (2026-11-12, ADR 0027): the fidelity pull request measured the Maze (SA 45°) with growth again (ADR 0027,
 Measurements, "Growth after the merge of ADR 0025"). With walls and edges that take in the trail the colony no longer
 coats the walls: 6 to 18 % of its agents lie within 4 cells of one at step 15,000, against 71 to 80 % here. It reaches
-the far food on 16:9 in 4 to 9 of 10 seeds and on 1:1 in 0 to 2 of 10, in either order of a step and on both backends.
+the far food on 16:9 in 4 to 9 of 10 seeds and on 1:1 in 0 to 3 of 10, in either order of a step and on both backends.
 The square screen still fails on the sensor angle, as above.
 
 History, the first reading (2026-11-11, before the analysis): the colony grows along the walls and the edges of the
@@ -465,13 +465,13 @@ population over time in the start flow (median of 10 seeds, WebGPU; WebGL2 withi
 | 1:1    | 1,820    | 4,706 | 13,438 | 21,880 | 26,268 | 26,462 | 26,294 | 27,534, 42 %                     |
 
 The colony fills the maze with a mesh. At step 15,000 it holds 9.4 to 11.5 % of the cells (all flows), and at no mark
-more than 47 % of its buffer, as without a cap (decision 30): the cap does not shape it. Images of seed 1 on 16:9 and 1:1 at steps 500
-to 15,000 are in the pull request.
+more than 47 % of its buffer, as without a cap (decision 30): the cap does not shape it. Images of seed 1 on 16:9 and
+1:1 at steps 500 to 15,000 are in the pull request.
 
-Amendment (2026-11-12, ADR 0027): measured again with Jones' order of a step, Jones' dish and the walls of ADR 0027,
-and with the order that senses first as well (an owner question there): every flow reaches the far food in 10 of 10
-seeds on every screen, on both backends and in both orders, with 33 to 39 % of the agents near a wall (ADR 0027,
-Measurements).
+Amendment (2026-11-12, ADR 0027): measured again with Jones' order of a step, Jones' dish and the walls of ADR 0027, and
+in the order that senses first, which it ships with since 2026-11-12 (ADR 0027, decision 24): every flow reaches the far
+food in 10 of 10 seeds on every screen, on both backends and in both orders, with 33 to 39 % of the agents near a wall
+(ADR 0027, Measurements).
 
 **D2: a full scene of Jones with growth on.** The Transport network (Jones 2010, Fig. 4) on its lattice of 200 × 200
 cells (ADR 0026), 6,000 agents at the start (15 % of the cells), seeds 1 to 3, 20,000 steps (measured again on the
@@ -544,7 +544,7 @@ See `TODO.md` (M2):
   Modelle", yes, both models). The fidelity pull request brings them to both models and measured both scenes again
   (ADR 0027, 2026-11-12): the Foraging maze reaches the far food in 10 of 10 seeds in every flow, on every screen and
   both backends; the Maze (SA 45°) no longer coats its walls and passes on 16:9 in 4 to 9 of 10 seeds and on 1:1 in 0
-  to 2 of 10.
+  to 3 of 10.
 - Growth counts the agent itself, as shrinkage does, so Growth minimum 0 and 1 act the same (decision 3); a child
   gets a random heading, which Jones does not state (decision 6). Both are this branch's readings.
 - Whether a scene or the default settings should hold a Capacity above Agents per cell, so that Inoculate works there

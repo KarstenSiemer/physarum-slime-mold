@@ -184,9 +184,12 @@ const DEG = Math.PI / 180;
 export const trailSaturation = (s: Pick<Settings, 'model' | 'trailSaturation'>) =>
   s.model === 'extended' && s.trailSaturation >= 1 ? s.trailSaturation : 0;
 
-/** Factor on the food and light sources: 1 in the Jones model, emissionScale() in the extended model (ADR 0022). */
-export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay'>) =>
-  s.model === 'extended' ? emissionScale(s.scentDecay) : 1;
+/**
+ * Factor on the food and light sources: 1 in the Jones model, emissionScale() of the step order in the extended model
+ * (ADR 0022, ADR 0027).
+ */
+export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay' | 'stepOrder'>) =>
+  s.model === 'extended' ? emissionScale(s.scentDecay, s.stepOrder) : 1;
 
 /**
  * Packs the settings for the GPU. In the Jones model the GPU runs Jones' one trail map whatever the settings hold
@@ -230,8 +233,10 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   // The start layout 'food' starts every agent dead, as 'empty' does; the engine then places the colony (ADR 0025).
   const layout = LAYOUTS.indexOf(s.layout === 'food' ? 'empty' : s.layout);
   u.set([layout, rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
-  // model.z: walls diffuse as part of Jones' lattice in the Jones model, and are sinks in the extended model (ADR 0027).
-  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1, jones ? 1 : 0], slot('model'));
+  // model.z: walls diffuse as part of Jones' lattice in the Jones model, and are sinks in the extended model; model.w:
+  // 1 if a step senses first, in either model (ADR 0027).
+  const senseFirst = s.stepOrder === 'sense-first' ? 1 : 0;
+  f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1, jones ? 1 : 0, senseFirst], slot('model'));
   // Growth and shrinkage (ADR 0025): an interval of 0 turns a test off, and both are off without the rule.
   const on = growthOn(s);
   u.set([on ? s.growthEvery : 0, s.growthWindow, s.growthMin, s.growthMax], slot('growth'));

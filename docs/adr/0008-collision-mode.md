@@ -83,5 +83,6 @@ The fidelity check of 2026-11-11 compared every scene of Jones with its figure. 
 agents (p. 133) against these synchronous claims is a real difference, but after Jones' order of a step, his dish, the
 absorbing edges and the figures' foods (ADR 0027) no figure needs it: Turing spots form their regular array, Shrinking
 plasmodium does not tear, and Steiner tree ends as a tree in every run. It stays the documented difference of this
-ADR. The claims now run in Jones' order of a step: a step senses for the moves of the step before, then claims and
-moves.
+ADR. The claims now run in the order of each scene's paper (ADR 0027, 2026-11-12): moving first, a step senses for
+the moves of the step before, then claims and moves; sensing first, it senses on the map after the last diffusion,
+then claims and moves.
