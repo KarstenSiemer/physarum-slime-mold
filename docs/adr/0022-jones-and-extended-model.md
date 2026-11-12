@@ -322,6 +322,17 @@ mutation of its code (the pull request lists them).
     then keeps or clears the chemicals as the new model does. But a key can select another tool during the hold, and
     since the first agent tools (before this branch) the hold then went on inoculating under that tool, for example
     under Move or Food.
+32. **Two models, no third model "Fogleman"** (owner, 2026-11-12, "Ja, zwei Modelle", on the coordinator's
+    recommendation). The owner asked whether the selector could offer three models, Jones, Fogleman and Extended, so that
+    every scene can be tried with another model. Reason: Fogleman's program has no food, light or walls. What it adds to
+    Jones' rules is in the extended model already: several strains with the table of how each weighs the trails of the
+    others, agents that share a cell, and two 3 × 3 means per step. The scenes of Fogleman run on the extended model with
+    his values (`fogleman()` in `src/model/presets.ts`: no food or light, trail saturation 0) and sense first, as his code
+    does (ADR 0027). A model "Fogleman" would therefore copy the extended model, or it would have to switch food off,
+    and a scene of Jones on it would only show agents that ignore the food. Trying a scene with other rules works in
+    every scene already: Model (Jones or Extended) and Step order (move first, Jones 2010; sense first, Jones 2011 and
+    Fogleman) are both in the panel. Not checked: the app's rules against Fogleman's Go code line by line; checked are
+    his values, which the presets copy exactly (ADR 0006), and the scenes' bytes against `main` in either step order.
 
 ## Open for the owner
 
