@@ -19,8 +19,11 @@ import { presetById } from '../model/presets';
 import { at } from './at';
 import { dishRadius, outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
+import { destroyTarget, program, readTarget, target, textures, uniformBlock, writeTarget } from './gl/gl';
 import agentsFrag from './gl/glsl/agents.frag?raw';
+import commonGlsl from './gl/glsl/common.glsl?raw';
 import diffuseFrag from './gl/glsl/diffuse.frag?raw';
+import fullscreenVert from './gl/glsl/fullscreen.vert?raw';
 import initFrag from './gl/glsl/init.frag?raw';
 import renderFrag from './gl/glsl/render.frag?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
@@ -604,6 +607,118 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   const pastFirstStep = (sim: Sim) => {
     sim.run(1);
   };
+
+  // wrapCell() wraps with comparisons up to one period outside the grid and with remainders beyond (ADR 0028). It
+  // gives the cell of the integer remainder: at both ends of the range of the comparisons, at the edges of the grid,
+  // and far outside. The sides hold 33, 47, 246 and
+  // 480, where a float division was not exact on an Apple M3 Pro (ADR 0023), and the smallest sides.
+  describe('cell wraps at the edges of a period (ADR 0028)', () => {
+    const SIDES = [1, 2, 3, 16, 33, 47, 246, 480, 512, 1536, 4096];
+    /** Per axis: around the ends of the range of the comparisons [−n, 2n), around the grid's edges, and far out. */
+    const around = (n: number) => [
+      ...[-n - 1, -n, -n + 1, -1, 0, 1, n - 1, n, n + 1, 2 * n - 1, 2 * n, 2 * n + 1],
+      ...[-2 * n - 1, -7 * n - 3, 9 * n + 5, 1_000_003, -1_000_003, 3 * n, -3 * n],
+    ];
+    // Each case: a cell (x, y) and a grid of (nx, ny) cells. x runs over the values of nx while y takes those of ny in
+    // another order, so both axes meet every value on every side.
+    const CASES = SIDES.flatMap((nx, i) => {
+      const ny = at(SIDES, (i + 3) % SIDES.length);
+      const [xs, ys] = [around(nx), around(ny)];
+      return xs.map((x, j) => [x, at(ys, (j + 5) % ys.length), nx, ny] as const);
+    });
+    const mod = (v: number, n: number) => ((v % n) + n) % n;
+    const expected = CASES.map(([x, y, nx, ny]) => [mod(x, nx), mod(y, ny)]);
+
+    const WGSL_ENTRY = `
+      @group(0) @binding(20) var<storage, read> wrapIn: array<vec4i>;
+      @group(0) @binding(21) var<storage, read_write> wrapOut: array<vec4i>;
+      @compute @workgroup_size(64)
+      fn wrapTest(@builtin(global_invocation_id) g: vec3u) {
+        if (g.x >= arrayLength(&wrapIn)) { return; }
+        let v = wrapIn[g.x];
+        wrapOut[g.x] = vec4i(wrapCell(v.xy, v.zw), 0, 0);
+      }`;
+    const GLSL_ENTRY = `
+      uniform sampler2D wrapIn;
+      void main() {
+        vec4 v = texelFetch(wrapIn, ivec2(gl_FragCoord.xy), 0);
+        result = vec4(vec2(wrapCell(ivec2(v.xy), ivec2(v.zw))), 0.0, 1.0);
+      }`;
+    const SOURCES =
+      kind === 'webgpu'
+        ? { 'common.wgsl': common + WGSL_ENTRY }
+        : { 'common.glsl': commonGlsl + 'out vec4 result;\n' + GLSL_ENTRY };
+
+    async function wrappedOnWebGpu(code: string): Promise<number[][]> {
+      const { device } = (backend as WebGpuBackend).gpu;
+      device.pushErrorScope('validation');
+      const data = new Int32Array(CASES.flat());
+      const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+      const [input, output] = [0, 1].map(() => device.createBuffer({ size: data.byteLength, usage }));
+      if (!input || !output) throw new Error('no buffers');
+      device.queue.writeBuffer(input, 0, data);
+      const pipeline = await device.createComputePipelineAsync({
+        layout: 'auto',
+        compute: { module: device.createShaderModule({ code }), entryPoint: 'wrapTest' },
+      });
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(
+        0,
+        device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 20, resource: { buffer: input } },
+            { binding: 21, resource: { buffer: output } },
+          ],
+        }),
+      );
+      pass.dispatchWorkgroups(Math.ceil(CASES.length / 64));
+      pass.end();
+      device.queue.submit([enc.finish()]);
+      const out = new Int32Array(await readBuffer(device, output));
+      input.destroy();
+      output.destroy();
+      expect((await device.popErrorScope())?.message).toBeUndefined();
+      return CASES.map((_, i) => [out[i * 4] ?? NaN, out[i * 4 + 1] ?? NaN]);
+    }
+
+    function wrappedOnWebGl2(frag: string): number[][] {
+      const gl = canvas.getContext('webgl2');
+      if (!gl) throw new Error('no WebGL2 context');
+      const version = '#version 300 es\n';
+      const p = program(gl, version + 'precision highp float;\n' + fullscreenVert, version + frag);
+      // The uniform block of the shader (Params, std140) is active also while no code reads it: a draw needs a buffer
+      // behind it.
+      const block = uniformBlock(gl, 1024, 0);
+      // The cases as floats: every value is a whole number below 2^24, so a float holds it exactly.
+      const [input, output] = [0, 1].map(() => target(gl, CASES.length, 1, gl.RGBA32F));
+      if (!input || !output) throw new Error('no targets');
+      writeTarget(gl, input, 0, 0, CASES.length, 1, new Float32Array(CASES.flat()));
+      gl.bindFramebuffer(gl.FRAMEBUFFER, output.fbo);
+      gl.viewport(0, 0, CASES.length, 1);
+      gl.useProgram(p);
+      textures(gl, p, { wrapIn: input.texture });
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      const out = readTarget(gl, output);
+      destroyTarget(gl, input);
+      destroyTarget(gl, output);
+      gl.deleteProgram(p);
+      gl.deleteBuffer(block);
+      expect(gl.getError()).toBe(gl.NO_ERROR);
+      return CASES.map((_, i) => [out[i * 4] ?? NaN, out[i * 4 + 1] ?? NaN]);
+    }
+
+    it.each(Object.entries(SOURCES))('wrapCell() of %s gives the cell of the integer remainder', async (_, code) => {
+      const got = kind === 'webgpu' ? await wrappedOnWebGpu(code) : wrappedOnWebGl2(code);
+      const wrong = CASES.flatMap((c, i) => {
+        const [g, e] = [got[i], expected[i]];
+        return g?.[0] === e?.[0] && g?.[1] === e?.[1] ? [] : [`(${c.join(', ')}): ${String(g)}, not ${String(e)}`];
+      });
+      expect(wrong).toEqual([]);
+    });
+  });
 
   describe('diffusion and decay', () => {
     // 47 and 246 are sides where a float floor(c / side) was not exact on an Apple M3 Pro (WebGL2 on Metal): there

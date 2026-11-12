@@ -67,9 +67,16 @@ fn dir(a: f32) -> vec2f {
   return vec2f(cos(w), sin(w));
 }
 
-// A cell coordinate wrapped into a periodic grid of n cells, in integers: % keeps the sign of c (wrapCell in
-// common.glsl).
-fn wrapCell(c: vec2i, n: vec2i) -> vec2i { return ((c % n) + n) % n; }
+// A cell coordinate wrapped into a periodic grid of n cells, in integers (wrapCell in common.glsl).
+// - Less than one period outside the grid, as every move and almost every sensor is: comparisons, then one addition or
+//   subtraction of n. That is the cell the remainders give, and an integer remainder is slow on Apple GPUs (ADR 0028).
+// - Farther out: the remainders. % keeps the sign of c.
+fn wrapCell(c: vec2i, n: vec2i) -> vec2i {
+  if (all(c >= -n) && all(c < 2 * n)) {
+    return c + select(vec2i(0), n, c < vec2i(0)) - select(vec2i(0), n, c >= n);
+  }
+  return ((c % n) + n) % n;
+}
 
 // A position wrapped into the periodic grid, in the cell of its floor. That cell is the one that cellOf(p) gives on
 // the periodic grid, and for every p inside a closed arena: a move or a tool puts an agent in the cell it claimed and
@@ -103,19 +110,22 @@ fn toolDistance(p: vec2f, q: vec2f) -> f32 {
   return length(d);
 }
 
-// Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena.
-// Agents and diffusion share this rule, so a position is habitable exactly when its cell is.
-fn cellAt(c: vec2i) -> i32 {
+// The cell at c as coordinates inside the grid: wrapped for the periodic boundary, or (−1, −1) outside a closed arena.
+// Agents and diffusion share this rule, so a position is habitable exactly when its cell is. A pass that reads a
+// texture at the cell takes the coordinates from here: cellCoord() of the index divides, which is slow (ADR 0028).
+fn cellXY(c: vec2i) -> vec2i {
   let size = vec2i(i32(W()), i32(H()));
-  var q = c;
-  if (P.cfg.z == 0u) {
-    q = wrapCell(c, size);
-  } else {
-    if (any(c < vec2i(0)) || any(c >= size)) { return -1; }
-    if (P.cfg.z == 2u && distance(vec2f(c) + 0.5, 0.5 * vec2f(size)) > dishRadius()) { return -1; }
-  }
-  return q.y * size.x + q.x;
+  if (P.cfg.z == 0u) { return wrapCell(c, size); }
+  if (any(c < vec2i(0)) || any(c >= size)) { return vec2i(-1); }
+  if (P.cfg.z == 2u && distance(vec2f(c) + 0.5, 0.5 * vec2f(size)) > dishRadius()) { return vec2i(-1); }
+  return c;
 }
+
+// The index of a cell from its coordinates as cellXY() gives them: −1 outside a closed arena.
+fn indexOf(q: vec2i) -> i32 { return select(q.y * i32(W()) + q.x, -1, q.x < 0); }
+
+// Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena.
+fn cellAt(c: vec2i) -> i32 { return indexOf(cellXY(c)); }
 
 fn cellOf(p: vec2f) -> i32 { return cellAt(vec2i(floor(p))); }
 

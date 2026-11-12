@@ -46,9 +46,9 @@ const int WALK = 92;
 // agents.wgsl).
 int clearanceAt(vec2 p) {
   if (P.extra.y == 0u) return 0;
-  int c = cellOf(p);
-  if (c < 0) return 0;
-  return int(texelFetch(clearance, cellCoord(c) / CLEAR_TILE, 0).r);
+  ivec2 q = cellXY(ivec2(floor(p)));
+  if (q.x < 0) return 0;
+  return int(texelFetch(clearance, q / CLEAR_TILE, 0).r);
 }
 
 // False if the segment from p to q passes through a wall, for moves and sensors; below the clearance `clear` of the
@@ -102,13 +102,14 @@ bool clearPath(vec2 p, vec2 q, int clear) {
 
 // The sensor at p of an agent at pos; a wall between them reads BLOCKED too (sense in agents.wgsl, ADR 0020).
 float sense(vec2 pos, vec2 p, int s, int clear) {
-  int c = cellOf(p);
+  // The cell as coordinates straight from the wrap (cellXY): cellCoord() of its index would divide.
+  ivec2 c = cellXY(ivec2(floor(p)));
 #if SENSE_WALLS
   if (!habitable(c) || !clearPath(pos, p, clear)) return BLOCKED;
 #else
   if (!habitable(c)) return BLOCKED;
 #endif
-  ivec2 q = cellCoord(c);
+  ivec2 q = c;
   vec2 sc = texelFetch(scent, q, 0).xy;
 #if SATURATE
   vec4 t = texelFetch(trail, q, 0);
@@ -184,7 +185,7 @@ void main() {
       float h = a.z;
       if (senses()) h = steer(a, s, rng, clear);
       vec2 p = a.xy + P.stepSize[s] * dir(h);
-      if (habitable(cellOf(p)) && clearPath(a.xy, p, clear)) {
+      if (habitable(cellXY(ivec2(floor(p)))) && clearPath(a.xy, p, clear)) {
         a.xy = wrapPos(p);
         a.z = h;
         a.w += float(MOVED);

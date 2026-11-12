@@ -66,9 +66,9 @@ const WALK = 92;
 // closed arena. Read once per agent and pass, and only while the environment may hold walls.
 fn clearanceAt(p: vec2f) -> i32 {
   if (P.extra.y == 0u) { return 0; }
-  let c = cellOf(p);
-  if (c < 0) { return 0; }
-  let t = cellCoord(u32(c)) / CLEAR_TILE;
+  let q = cellXY(vec2i(floor(p)));
+  if (q.x < 0) { return 0; }
+  let t = q / CLEAR_TILE;
   return i32(clearance[t.y * ((i32(W()) + CLEAR_TILE - 1) / CLEAR_TILE) + t.x]);
 }
 
@@ -93,7 +93,8 @@ fn clearPath(p: vec2f, q: vec2f, clear: i32) -> bool {
   let dt = select(vec2f(2.0), 1.0 / abs(d), s != vec2i(0));
   // w is c wrapped into the periodic grid, kept step by step, so that the walk does not divide.
   let size = vec2i(i32(W()), i32(H()));
-  var w = select(c, ((c % size) + size) % size, P.cfg.z == 0u);
+  var w = c;
+  if (P.cfg.z == 0u) { w = wrapCell(c, size); }
   // Every iteration enters one cell toward the end, or at a corner checks the two cells beside it and enters the
   // cell past it.
   for (var k = 0; k < WALK; k++) {
@@ -124,9 +125,10 @@ fn clearPath(p: vec2f, q: vec2f, clear: i32) -> bool {
 // What the sensor at p of an agent at pos reads for strain s. A wall, a cell outside a closed arena and a wall
 // between the agent and the sensor read BLOCKED (ADR 0020). `clear` is the agent's clearance (clearPath).
 fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
-  let c = cellOf(p);
+  // The coordinates and the index of the cell from one wrap: cellCoord() of the index would divide.
+  let q = cellXY(vec2i(floor(p)));
+  let c = indexOf(q);
   if (!habitable(c) || (SENSE_WALLS && !clearPath(pos, p, clear))) { return BLOCKED; }
-  let q = cellCoord(u32(c));
   let sc = textureLoad(scent, q, 0).xy;
   var t = textureLoad(trail, q, 0);
   if (SATURATE) { t = t / (1.0 + t / P.model.x); }

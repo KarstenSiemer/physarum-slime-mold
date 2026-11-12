@@ -12,6 +12,9 @@ const uint BLOCK = 3u;
 
 bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 
+// The same for a cell as cellXY() gives it, without the division of cellCoord().
+bool habitable(ivec2 q) { return q.x >= 0 && !isWall(texelFetch(env, q, 0)); }
+
 bool vacant(int c) { return texelFetch(occ, cellCoord(c), 0).r < 0.5; }
 
 // A cell a tool may put an agent in: habitable, and with the rule empty at the start of the step (ADR 0008). Only

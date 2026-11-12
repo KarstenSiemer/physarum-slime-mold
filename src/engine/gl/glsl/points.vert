@@ -19,25 +19,30 @@ void main() {
   uint bits = bitsOf(a);
   int s = int(bits & 3u);
   bool alive = (bits & ALIVE) != 0u && uint(i) < P.grid.z;
-  int c = -1;
+  // The cell of the point as cellXY() gives it, (−1, −1) for none: cellCoord() of an index would divide.
+  ivec2 c = ivec2(-1);
   ivec2 panel = ivec2(0);
   float panels = 1.0;
   value = vec4(0.0);
   gl_PointSize = 1.0;
   if (kind == 5 && (bits & WANTS) != 0u && uint(i) < P.grid.z) {
-    int cell = cellOf(a.xy);
-    ivec2 q = cell >= 0 ? cellCoord(cell) : ivec2(0);
-    if (cell >= 0 && !isWall(texelFetch(env, q, 0)) && texelFetch(occ, q, 0).r < 0.5) {
-      c = cell;
+    ivec2 q = cellXY(ivec2(floor(a.xy)));
+    if (habitable(q) && texelFetch(occ, q, 0).r < 0.5) {
+      c = q;
       value = vec4(startKey(uint(i)));
     }
   } else if (kind == 1 && (bits & WANTS) != 0u && uint(i) < P.grid.z) {
     // A tool's spot (agents.frag mode 1 marks it with PLACE; the agent may be dead), or the target of a move.
-    c = (bits & PLACE) != 0u ? placement(a, uint(i)).cell : cellOf(destination(a));
+    if ((bits & PLACE) != 0u) {
+      int spot = placement(a, uint(i)).cell;
+      if (spot >= 0) c = cellCoord(spot);
+    } else {
+      c = cellXY(ivec2(floor(destination(a))));
+    }
     value = vec4(claimKey(uint(i)));
   } else if (alive) {
     if ((kind == 0 || kind == 4) && (bits & MOVED) != 0u) {
-      c = cellOf(a.xy);
+      c = cellXY(ivec2(floor(a.xy)));
       if (kind == 0) {
         value[s] = 1.0;
       } else {
@@ -46,7 +51,7 @@ void main() {
         panels = 2.0;
       }
     } else if (kind == 2) {
-      c = cellOf(a.xy);
+      c = cellXY(ivec2(floor(a.xy)));
       value = vec4(1.0);
     } else if (kind == 3) {
       // Agent i adds 1 to its strain's lane of pixel i mod n² (n = tallySide). Spread like this, no
@@ -58,10 +63,10 @@ void main() {
       return;
     }
   }
-  if (c < 0) {
+  if (c.x < 0) {
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0); // outside the clip volume: dropped
     return;
   }
-  vec2 q = vec2(cellCoord(c) + panel * ivec2(W(), H())) + 0.5;
+  vec2 q = vec2(c + panel * ivec2(W(), H())) + 0.5;
   gl_Position = vec4(q / (panels * vec2(W(), H())) * 2.0 - 1.0, 0.0, 1.0);
 }
