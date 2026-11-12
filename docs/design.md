@@ -61,7 +61,8 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   when it shows something new (a step, an edit, other settings, another view or canvas size, other
   auto levels) and for 30 frames after; paused, the canvas keeps its picture and the stats line reads
   "paused" (ADR 0028). The loop starts no frame while two frames are still on the GPU: the next one
-  runs the steps of the time since the last. _k_
+  runs the steps of the time since the last. The sort of the agents (WebGPU, every 32 steps) takes
+  the place of one step in its frame, so that frame stays inside a refresh interval. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
   quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises

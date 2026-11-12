@@ -1056,7 +1056,7 @@ The coordinator of ADR 0028 decided it under the owner's delegation of 2026-11-1
    floor(log2(cells per pixel)), from 1 to 4 (`trailLevel()`), and a texel of level k covers the grid side over
    ceil(side / 2^k) cells, so the texels tile the grid and the map wraps with a periodic grid. On a side that 2^k
    divides, a texel is the mean of 2^k × 2^k cells.
-2. **One texture of half the grid's sides** holds the level in use (`rgba32float`, 4 bytes per cell). It is made at the
+2. **One texture of half the grid's sides** holds the level in use (`rgba32float`, 4 bytes per cell, which the memory fit counts: ADR 0028, decision 12). It is made at the
    first frame zoomed out to 2 cells per pixel, and filled only for a frame that reads it, when the trail changed (a
    step, or a change that the simulation's `revision` counts) or the level. Up to 2 cells per pixel no map is needed.
 3. **A pixel takes the mean over its square** (`trailArea()`; my choice): the 3 × 3 texels that a square of 1 to 2

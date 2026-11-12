@@ -136,9 +136,17 @@ food. The two frames zoomed out differ only from decision 9 on.
      beside it twice (`agents.wgsl` on the wall check, `diffuse.wgsl` on `SENSE_FIRST`). With fast-math a compiler may
      also add the six terms of a sensor in another order when two of them are known to be 0, so no argument about
      zeros holds for every compiler. With the same pipeline and the same arithmetic on the same values, zeros, the
-     result is the same on every GPU. A read outside a texture gives zero or a texel of it in WGSL (`textureLoad`),
-     and zero in WebGL 2.0 ("Texel Fetches"); the one texel is zero. The diffusion still writes the scent of every
-     cell: the zeros it wrote before.
+     result is the same on every GPU.
+   - The read outside the one texel, exactly (coordinator, 2026-11-12). The passes read the texel of a cell, which
+     lies outside a texture of one texel for every cell but (0, 0). WGSL (`textureLoad`, an invalid texel address
+     on a texture that is no depth texture) returns the data of some texel inside the texture, or (0, 0, 0, 0), or
+     (0, 0, 0, 1). WebGL 2.0 ("Differences Between WebGL and OpenGL ES 3.0", "Texel Fetches") makes a fetch out of
+     range return zero for a complete texture, and (0, 0, 0, 1) for an incomplete one; the one texel is complete.
+     The scent is `rg32float`, and each reader of the bound scent takes only `.xy`: `agents.wgsl:132`,
+     `diffuse.wgsl:106`, `agents.frag:113`, `diffuse.frag:84`. The one texel holds 0 there, and so does every
+     vector above, so each allowed result is 0. No reader takes `.z` or `.w`; one that took `.w` could get 1. The
+     render and the scent view's map read the grid's scent textures, never the one texel. The diffusion still
+     writes the scent of every cell: the zeros it wrote before.
    - Measured, both forms give the same gain: the step × 0.873 with one texel and × 0.873 with a uniform branch
      (Three strains, WebGPU, 10 rounds), × 0.84 and × 0.85 (Transport network).
    - The step with decisions 5 and 6 against `main` (12 rounds): WebGPU 4.38 → 3.74 ms (× 0.85, 0.84 to 0.86) for
@@ -209,7 +217,7 @@ food. The two frames zoomed out differ only from decision 9 on.
      32.1 → 2.3 ms. A frame of the running start scene at 8 cells per pixel, a step and a draw with the map filled
      anew: 30.5 → 5.6 ms on WebGPU and 45.7 → 16.5 ms on WebGL2.
    - The map takes 4 bytes per cell of GPU memory from the first frame zoomed out to 2 cells per pixel. The memory
-     fit of the grid does not count it, as it does not count the scent view's map.
+     fit of the grid counts it (decision 12).
 10. **The sort stays at every 32 steps** (coordinator, 2026-11-12). The coordinator gave two reasons: another interval
     changes results with one agent per cell, and the report of 2026-11-11 found no gain in the average at 64. The
     first does not hold: the sort changes no result at any interval, with and without the rule (ADR 0005; the test
@@ -233,13 +241,57 @@ food. The two frames zoomed out differ only from decision 9 on.
     - The scent view and growth are off in every scene until the user turns them on; ADR 0009 and ADR 0025 hold
       their costs.
 
+12. **The memory fit counts the two coarse maps of the view: a bug fix** (coordinator, 2026-11-12). `BYTES_PER_CELL`
+    goes from 90 to 98 and `BYTES_PER_CELL_HALF_FLOAT` from 110 to 118 (`src/engine/sizing.ts`).
+    - The trail's map of decision 9 and the scent view's map (ADR 0009, since #31) are each one `rgba32float`
+      texture of half the grid's sides, on WebGPU and on WebGL2 with and without float blending (`render.ts`
+      `coarseFor()` and `trailCoarseFor()`, `gl/backend.ts` the same): 16 B per texel, a quarter of a texel per
+      cell, 4 B per cell each.
+    - The user zooms out or turns the scent view on without a new grid, so the fit must hold both maps from the
+      start. Before, a grid that just fitted its budget went over it by 4 B per cell with the scent view zoomed
+      out, on `main` too; with decision 9 it would have gone over by 8.
+    - Effect: a grid at the edge of its budget is one step smaller. The start scene needs 286 MB of the 512 MiB or
+      more that a desktop gives, so it stays. A lattice of Jones needs 10.3 MB (12.1 MB without float blending),
+      below the smallest budget of 32 MiB. One case no longer fits 32 MiB: 300 × 300 cells with the largest
+      Capacity (8 agents per cell) and covered food on WebGL2 without float blending, 33.8 MB against 33.6 MB; it
+      runs on a grid shaped like the screen there (ADR 0025 said 33.0 MB).
+    - No test depended on the numbers: the unit and e2e tests of the fit take the constants or their own bytes per
+      cell. Their comments and the ADRs that quote 90 and 110 B (0003, 0005, 0013, 0025, 0026) name the new values.
+13. **The sort takes the place of one step in its frame** (coordinator, 2026-11-12, after decision 10).
+    - `Engine.frame()` asks the simulation whether one of the frame's steps would sort (`Sim.sortDue()`). If so it
+      runs the sort first, in a submission of its own (`Sim.sortNow()`), and one step less. A frame of one step is
+      then the sort alone. The step that would have sorted runs without the sort. Steps asked for by hand run as
+      asked, with the sort inside its step, and so do the steps of a tool held while paused, which keep their 60
+      steps per second at any frame rate (ADR 0023), and WebGL2, which has no sort. `Engine.sortOwnTurn` turns it
+      off for measurements.
+    - The sort changes no result (ADR 0005), also up to some steps ahead of its step: with the sort up to 2 steps
+      ahead, in its own submission, 8 scenes keep the bytes of `main` on WebGPU at the same step counts, and a test
+      holds agents and trail against a run that sorts inside its steps, with and without the rule.
+    - Measured in the start scene at 120 Hz, 3 interleaved rounds of 20 s for each case. A frame counts as late
+      when its picture was done more than 8.33 ms after the frame's start.
+
+      | Speed (steps/s) | Sort            | Late frames with the sort | Their median    | All late frames | Frames/s | Steps/s             |
+      | --------------- | --------------- | ------------------------- | --------------- | --------------- | -------- | ------------------- |
+      | 120             | inside its step | 52, 27, 19 %              | 7.5 to 8.5 ms   | 0.7 to 1.8 %    | 120      | 120.0               |
+      | 120             | its own turn    | 0, 0, 1 %                 | 4.6 to 5.0 ms   | 0.0 to 0.4 %    | 120      | 116.3 to 116.4      |
+      | 960             | inside its step | 97, 99, 97 %              | 12.9 to 13.3 ms | 67 to 69 %      | 119      | 182.8, 188.0, 189.9 |
+      | 960             | its own turn    | 63, 72, 64 %              | 8.9 to 9.6 ms   | 72 to 74 %      | 119      | 189.8, 192.3, 187.8 |
+
+      With the sort in its own turn, "frames with the sort" are the turn of the sort and the frame after it.
+
+    - The cost: at one step per frame, 1 turn in 33 runs no step, 3.0 to 3.1 % of the steps per second (120 →
+      116.3). That is the largest cost: at two steps per frame it is 1 step in 64. At 960 steps per second the GPU
+      sets the steps, and they did not fall (+1 %, inside the spread). The coordinator's limit was "more than about
+      3 %": the cost at the scene's own speed lies at that limit by its construction, and the change is in.
+
 ### Consequences
 
 - Against `main`, a frame of the start scene, a step and a draw, takes 5.56 → 4.44 ms on WebGPU (× 0.82, 0.77 to
   0.85) and 24.2 → 22.8 ms on WebGL2 (× 0.92); of Transport network 3.88 → 3.02 ms (× 0.77) and 6.18 → 5.18 ms
   (× 0.84); of Maze × 0.96 and × 0.98.
-- Pixels: only decision 9 changes pictures, and only above 1 cell per pixel. Decisions 4, 5 and 6 change no byte of
-  the simulation and of any frame. Decision 7 changes the text of the stats line while paused. Decision 8 changes
+- Pixels: only decision 9 changes pictures, and only above 1 cell per pixel. Decisions 4, 5, 6 and 13 change no byte
+  of the simulation and of any frame at a given step; decision 13 changes which step a frame shows, at 3 % fewer
+  steps per second where a frame runs one step. Decision 12 changes which grid fits a small budget. Decision 7 changes the text of the stats line while paused. Decision 8 changes
   when frames start under load, not what they show.
 - The wrap rule of ADR 0023 reads now: integers for every wrap, comparisons inside one period, the remainder beyond
   (amended there). A test holds `wrapCell()` of all four shader files to the integer remainder at −n − 1, −n, −1, 0,
@@ -260,10 +312,6 @@ food. The two frames zoomed out differ only from decision 9 on.
     from those of the pixels beside it. A closed arena fills only a part of a view zoomed out (Maze: 1.0 to 1.3 ms
     at 2 to 8 cells per pixel), so this was not measured further.
   - The agents style zoomed out shows the cell under each pixel's centre, not a mean.
-  - A frame with the sort ends after the next refresh at 120 Hz in the start scene, 1 to 2 times per second. A
-    proposal, not done: give the sort a turn of the loop of its own, without a step, so that the sort and a step with
-    its draw never share a refresh interval. The sort changes no result (ADR 0005), so only its place in time would
-    move; one turn in 33 would then run no step.
   - WebGL2 runs a step of the start scene in 21 to 24 ms, WebGPU in 3.7 ms. The wraps are not the cause (a step
     without any remainder took the same time); the cause was not examined.
   - Other GPUs and browsers, a display of device pixel ratio 1, and an idle machine were not measured.
