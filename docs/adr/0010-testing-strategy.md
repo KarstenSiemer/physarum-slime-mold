@@ -232,6 +232,7 @@ GPU checks use invariants, not long exact trajectories:
   | `tests/e2e/growth.spec.ts`, the start of the app in each test (ADR 0025, new)                                             | 150 s            | 32.0 s in the review; each whole test at most 27.0 s of 240 s (the Foraging maze)                       | SwiftShader on an M3 Pro (macOS) beside other work, 2026-11-11                     |
   | `tests/e2e/lattice.spec.ts`, the read of the painted food cell under the pointer (ADR 0026)                               | 5 → 60 s         | one read 3.6 s; failed on WebGPU and WebGL2 at 1280 × 720, as only one read fit in 5 s                  | GitHub, PR #32 (run 43113320425, 2026-11-11)                                       |
   | `tests/e2e/growth.spec.ts`, the buffer after the rebuild for a new Capacity (ADR 0025)                                    | 5 → 120 s        | not timed: a rebuild is a start of the simulation (the starts above: up to 32 s)                        | from the starts above                                                              |
+  | `growth-reference.test.ts`, "is a bijection of the cells" (ADR 0025)                                                      | 5 s (unit)       | 1.8 s with one `expect` per cell (15.4 s once under load 18); 0.1 s with one per step                   | an M3 Pro (macOS) beside other work, 2026-11-12                                    |
 
   Each GPU test in the table gets its limit as the third argument of `it()`, so `testTimeout` in
   `vitest.config.ts` stays 60 s for the other tests. A limit on a line in `describe.each` applies to
@@ -251,6 +252,11 @@ GPU checks use invariants, not long exact trajectories:
   an M3 Pro beside other work (2026-11-11), once the two hooks above have built the passes that the
   first test paid for before (12.8 s in the review). The four growth steps against the CPU copy took
   0.2 s, and their limit of 150 s went back to 60 s.
+
+  The unit test of the order of the births keeps the default 5 s (2026-11-12). It took 1.8 s, more
+  than a quarter, because it called `expect` twice for each cell of each step. It now checks the
+  cells in a plain loop and calls `expect` once per step, with the first faulty cell in the message:
+  0.1 s. A place that is taken twice and a place outside the grid both still fail it.
 
 - The verify job keeps its limit of 30 min (`.github/workflows/ci.yml`). A limit adds no time to a
   wait that passes. On GitHub the verify jobs of PR 2, 3, 5 and 6 took 12.8 to 18.0 min. PR 6 on
