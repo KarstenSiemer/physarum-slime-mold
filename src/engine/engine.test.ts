@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
-import { Engine, SETTLE_FRAMES, type HeldTool } from './engine';
+import { Engine, MAX_IN_FLIGHT, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
 import { diffusePlan, equilibrium, gridSize } from './sizing';
 
@@ -364,5 +364,68 @@ describe('frames that show nothing new', () => {
     rest();
     engine.agentTool({ ...tool, idle: true });
     expect(frames(1)).toBe(0);
+  });
+});
+
+// The loop starts no frame while MAX_IN_FLIGHT frames are on the GPU (ADR 0028).
+describe('frames in flight', () => {
+  async function start() {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const engine = await Engine.create(
+      canvas,
+      { ...defaultSettings(), resolution: 256, speed: 960 },
+      undefined,
+      new CpuBackend(),
+    );
+    // The GPU finishes a frame when the test says so.
+    const finish: (() => void)[] = [];
+    engine.sim.finish = () => new Promise<void>((r) => finish.push(r));
+    /** The GPU finishes its oldest frame. */
+    const done = async () => {
+      finish.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    return { engine, done };
+  }
+
+  it('starts no frame with two in flight, and the next one runs the steps of the time since the last', async () => {
+    const { engine, done } = await start();
+    expect(MAX_IN_FLIGHT).toBe(2);
+    expect(engine.tick(0)).toBe(true);
+    expect(engine.tick(10)).toBe(true);
+    expect(engine.budget.pending).toBe(2);
+    const [frames, step] = [engine.frames, engine.sim.step];
+    engine.budget.steps = 8;
+    expect(engine.tick(20), 'two in flight').toBe(false);
+    expect(engine.tick(30), 'two in flight').toBe(false);
+    expect([engine.frames, engine.sim.step, engine.budget.pending]).toEqual([frames, step, 2]);
+    // Each turn that started no frame told the budget that the GPU is behind.
+    expect(engine.budget.steps).toBe(4.5);
+    await done();
+    expect(engine.budget.pending).toBe(1);
+    expect(engine.tick(40)).toBe(true);
+    // 30 ms at 960 steps per second ask for 28.8 steps; the budget allows 4.5.
+    expect(engine.sim.step - step).toBe(4);
+    expect(engine.frames).toBe(frames + 1);
+  });
+
+  it('runs a frame asked for by hand also with two in flight', async () => {
+    const { engine } = await start();
+    engine.tick(0);
+    engine.tick(10);
+    const step = engine.sim.step;
+    engine.frame(20, 1);
+    expect(engine.sim.step).toBe(step + 1);
+    expect(engine.budget.pending).toBe(3);
+  });
+
+  it('holds no frame back for frames that drew nothing', async () => {
+    const { engine } = await start();
+    engine.paused = true;
+    for (let k = 0; k < SETTLE_FRAMES + 50; k++) engine.frame(k * 10);
+    const pending = engine.budget.pending;
+    for (let k = 0; k < 20; k++) engine.frame(1000 + k * 10);
+    expect(engine.budget.pending).toBe(pending);
   });
 });

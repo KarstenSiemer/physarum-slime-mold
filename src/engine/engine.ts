@@ -32,6 +32,13 @@ import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 
 /**
+ * Most frames in flight at which the loop still starts a frame (ADR 0028): with two frames on the GPU a third would
+ * only wait behind them, and its picture would show input that is older by a frame. Before, the browser let up to
+ * three frames queue under a second GPU client, 32 to 90 ms from the frame's start to its picture.
+ */
+export const MAX_IN_FLIGHT = 2;
+
+/**
  * Frames that still draw after the last change of what a frame shows (Engine.frame). The auto levels measure in drawn
  * frames, every 6th on WebGPU and every 15th on WebGL2, and a measurement comes back some frames later: the frames
  * after a change give them time to move, and each move starts the count again.
@@ -132,7 +139,8 @@ export class Engine {
   paused = false;
   /**
    * Frames since start whose picture was current: drawn, or with nothing new to show (frame()). The UI derives frames
-   * per second from it, and the startup check reads it (ui/tune.ts).
+   * per second from it, and the startup check reads it (ui/tune.ts). A frame that the loop did not start because the
+   * GPU was behind (tick()) does not count.
    */
   frames = 0;
   /** Frames drawn since start. */
@@ -564,10 +572,24 @@ export class Engine {
   /** Called when a frame throws; the loop stops instead of failing silently. */
   onError: ((err: unknown) => void) | undefined;
 
+  /**
+   * One turn of the frame loop at `now` (ms): a frame, unless MAX_IN_FLIGHT frames are in flight. Then the GPU is
+   * behind, and the loop starts no new work for it: the budget hears of it (FrameBudget.held), and the next turn runs
+   * the steps of the time since the last frame. Returns whether the frame ran.
+   */
+  tick(now: number): boolean {
+    if (this.budget.pending >= MAX_IN_FLIGHT && !this.rebuilding) {
+      this.budget.held();
+      return false;
+    }
+    this.frame(now);
+    return true;
+  }
+
   start() {
     const loop = (now: number) => {
       try {
-        this.frame(now);
+        this.tick(now);
       } catch (err) {
         this.onError?.(err);
         return;

@@ -85,6 +85,15 @@ export class FrameBudget {
     return steps;
   }
 
+  /**
+   * The frame loop started no frame, because `pending` frames were in flight (Engine.tick): the GPU is behind, so the
+   * budget drops by a quarter, to at least 1 step, as for a frame that starts with two in flight. The time of the
+   * frame that did not start goes to the next one: its interval is longer.
+   */
+  held() {
+    this.steps = Math.max(1, this.steps * 0.75);
+  }
+
   /** The frame's GPU work is submitted. */
   submitted() {
     this.inFlight++;

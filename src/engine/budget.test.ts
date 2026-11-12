@@ -96,6 +96,22 @@ describe('FrameBudget', () => {
     expect(b.steps).toBe(1);
   });
 
+  it('cuts the budget by a quarter for a frame that the loop did not start, to at least one step', () => {
+    const b = budget(16);
+    b.held();
+    expect(b.steps).toBe(12);
+    b.held();
+    expect(b.steps).toBe(9);
+    for (let f = 0; f < 20; f++) b.held();
+    expect(b.steps).toBe(1);
+    // The frame after it stands for the time since the last frame that ran.
+    const c = new FrameBudget();
+    c.next(0, 60);
+    c.held();
+    c.next(2 * FRAME, 60);
+    expect(c.interval).toBeCloseTo(2 * FRAME, 9);
+  });
+
   it('keeps the budget with one frame in flight', () => {
     const b = budget(3);
     steady(b, 10, 960);
