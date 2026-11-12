@@ -340,3 +340,12 @@ GPU checks use invariants, not long exact trajectories:
   and not that of the files beside it. Rejected: longer limits for each slow test. They follow the
   times of the files beside a test, which change with every new test. Locally the files still run
   at once, as before: the limits come from the times on CI.
+
+  On GitHub (PR #41, run 43277399538, against `main` at `b4c733a`, run 43272194713, 2026-11-12)
+  each file started when the one before it ended. The part `webgpu` took 8.2 min against 9.4 min,
+  the part `rest` 13.3 min against 13.8 min. Tests above 15 s: 11 against 27. Each of the 11 uses at
+  most 17 % of its limit: Fig. 10 101.1 s of 600 s, "places agents on free cells only" and "keep
+  the outlines on the side of env across arena switches" 20.2 s of 120 s each, the tests of the
+  order of the point passes (ADR 0028) at most 25.3 s of 180 s, the lattice tests at most 21.7 s
+  of 240 s, and the inoculate tool at the same steps per second at most 18.6 s of 360 s. The WebGL2
+  test of the paused frames took 6.8 s against 114.0 s on `main` at `b4c733a`.
