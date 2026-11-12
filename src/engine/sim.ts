@@ -132,7 +132,11 @@ export class Simulation implements Sim {
    * and no light. The agent and diffusion passes then read the scent from a texture of one texel, `noScent`
    * (ADR 0028): 3 of an agent's 6 sensor reads and the scent of every cell came from a texture of zeros as large as the
    * grid. The passes and their arithmetic stay as they are, and they still write the scent of every cell: zeros, as
-   * before. A read outside a texture gives a texel of it or zero (WGSL, textureLoad), here zero in both cases.
+   * before. The passes read the texel of a cell, which lies outside a texture of one texel for every cell but (0, 0).
+   * For such a read of a texture that is no depth texture, WGSL (`textureLoad`) gives the data of some texel inside
+   * it, or (0, 0, 0, 0) or (0, 0, 0, 1). The scent is `rg32float`, and both readers take only `.xy`
+   * (agents.wgsl `sense()`, diffuse.wgsl `diffuse`): the one texel holds 0 there, and so does each of the two vectors,
+   * so every result that WGSL allows is 0. A reader of `.w` could get 1.
    */
   scentless = false;
   /** One texel of zeros: the scent while `scentless`. */

@@ -175,8 +175,12 @@ export class GlSim implements Sim {
   private sources = false;
   /**
    * The scent targets hold only zeros, and no step can change that (sim.ts `scentless`, ADR 0028): the agent and
-   * diffusion passes then read the scent from a texture of one texel, `noScent`. A texel fetch outside a texture gives
-   * zero (WebGL 2.0, "Texel Fetches"). The passes stay as they are and still write the scent of every cell: zeros.
+   * diffusion passes then read the scent from a texture of one texel, `noScent`. Their `texelFetch` lies outside that
+   * texture for every cell but (0, 0). WebGL 2.0 ("Differences Between WebGL and OpenGL ES 3.0", "Texel Fetches"): a
+   * texel fetch out of range must return zero for a complete texture, and (0, 0, 0, 1) only for an incomplete one;
+   * `noScent` is complete (one level, nearest filter). Both readers take only `.xy` (agents.frag `sense()`,
+   * diffuse.frag `load()`), which is 0 in either case. The passes stay as they are and still write the scent of every
+   * cell: zeros.
    */
   scentless = false;
   /** One texel of zeros: the scent while `scentless`. */
