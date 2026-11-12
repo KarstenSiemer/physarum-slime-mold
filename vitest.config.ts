@@ -19,6 +19,9 @@ export default mergeConfig(
             name: 'gpu',
             include: ['src/**/*.gpu.test.ts'],
             testTimeout: 60_000,
+            // One file at a time on CI, as the e2e tests: files that run at once share SwiftShader and wait on each
+            // other's GPU work. A test then took up to 2,600 times as long as alone, and the part no less (ADR 0010).
+            fileParallelism: !process.env.CI,
             browser: {
               enabled: true,
               headless: true,
