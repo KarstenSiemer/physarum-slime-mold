@@ -127,8 +127,8 @@ const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDra
 export class GlSim implements Sim {
   step = 0;
   /**
-   * Counts the changes of the scent and the shape outside steps (reset, strokes, clearing, writes, a new hold of the
-   * shape); `step` counts the steps. Together they tell a cache of them when it is old: the scent view's coarse map.
+   * Counts the changes of the trail, the scent and the shape outside steps (reset, strokes, clearing, writes, a new
+   * hold of the shape); `step` counts the steps (sim.ts `revision`).
    */
   revision = 0;
   readonly agentWidth: number;
@@ -687,6 +687,7 @@ export class GlSim implements Sim {
 
   writeTrail(data: Float32Array) {
     this.viewStale = true;
+    this.revision++;
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
 

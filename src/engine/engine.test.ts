@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
-import { Engine, type HeldTool } from './engine';
+import { Engine, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
 import { diffusePlan, equilibrium, gridSize } from './sizing';
 
@@ -218,5 +218,151 @@ describe('agent tools beside a lattice', () => {
     const engine = await paused('wound');
     expect(hold(engine, AgentToolKind.cut, -100, 150)).toBe(30);
     expect(hold(engine, AgentToolKind.cut, 450, -20)).toBe(30);
+  });
+});
+
+// A frame draws only what is new (ADR 0028): paused, the canvas keeps its picture and the GPU stays idle.
+describe('frames that show nothing new', () => {
+  async function start(patch: Partial<Settings> = {}) {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const backend = new CpuBackend();
+    const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, ...patch }, undefined, backend);
+    let t = 0;
+    /** `n` frames of the loop, 1/60 s apart; returns how many of them drew. */
+    const frames = (n = 1) => {
+      const before = backend.draws;
+      for (let k = 0; k < n; k++) engine.frame((t += 1000 / 60));
+      return backend.draws - before;
+    };
+    /** Frames until none draws any more. */
+    const rest = () => {
+      frames(SETTLE_FRAMES);
+      expect(frames(5), 'at rest').toBe(0);
+    };
+    return { engine, backend, canvas, frames, rest };
+  }
+
+  it('draws every frame while steps run, and counts every frame', async () => {
+    const { engine, frames } = await start({ speed: 60 });
+    expect(frames(40)).toBe(40);
+    expect(engine.draws).toBe(40);
+    expect(engine.frames).toBe(40);
+  });
+
+  it('stops after the frames that let the levels settle while paused, and still counts the frames', async () => {
+    const { engine, frames } = await start();
+    engine.paused = true;
+    expect(frames(SETTLE_FRAMES + 20)).toBe(SETTLE_FRAMES);
+    expect(engine.frames).toBe(SETTLE_FRAMES + 20);
+    expect(engine.sim.step).toBe(0);
+  });
+
+  it('draws slow steps only: a frame without a step shows nothing new', async () => {
+    // 6 steps per second at 60 Hz: one frame in 10 runs a step, and SETTLE_FRAMES frames draw after each.
+    const { engine, frames } = await start({ speed: 6 });
+    const drew = frames(600);
+    expect(engine.sim.step).toBeGreaterThanOrEqual(58);
+    expect(drew).toBe(600);
+    // 1 step in 4 s: most frames draw nothing.
+    const slow = await start({ speed: 0.25 });
+    expect(slow.frames(600)).toBeLessThanOrEqual(3 * SETTLE_FRAMES);
+  });
+
+  // Every input of a picture: each one makes the next frame draw, and SETTLE_FRAMES frames in all.
+  const stroke = {
+    kind: 'food' as const,
+    from: [20, 20] as [number, number],
+    to: [30, 20] as [number, number],
+    radius: 4,
+  };
+  const INPUTS: Record<string, (e: Engine, c: HTMLCanvasElement, b: CpuBackend) => void | Promise<void>> = {
+    'a pan': (e) => {
+      e.panBy(3, 0);
+    },
+    'a zoom': (e) => {
+      e.zoomAt(80, 50, 1.25);
+    },
+    'a fitted view after the page set the canvas size again': (e) => {
+      e.fitView();
+    },
+    'another canvas size': (e, c) => {
+      c.width = 200;
+    },
+    'another style': (e) => e.apply({ ...e.settings, style: 'paper' }),
+    'another colour': (e) =>
+      e.apply({ ...e.settings, strains: e.settings.strains.map((s, i) => (i === 0 ? { ...s, color: '#123456' } : s)) }),
+    'another exposure': (e) => e.apply({ ...e.settings, exposure: 0.5 }),
+    'the scent view': (e) => e.apply({ ...e.settings, showScent: true }),
+    'a restart from another seed': (e) => e.apply({ ...e.settings, seed: e.settings.seed + 1 }),
+    'another grid': (e) => e.apply({ ...e.settings, resolution: 512 }),
+    'a stroke': (e) => {
+      e.paint(stroke);
+    },
+    'a reset': (e) => {
+      e.reset();
+    },
+    'a loaded scene': (e) => e.load({ ...e.settings }, []),
+    'a call of invalidate()': (e) => {
+      e.invalidate();
+    },
+    'levels that moved': (e, c, b) => {
+      b.current = { gain: 1, black: 0.1, strand: 2 };
+    },
+    'a step by hand': (e) => {
+      e.frame(0, 1);
+    },
+  };
+  it.each(Object.keys(INPUTS))('draws again after %s while paused', async (name) => {
+    const { engine, backend, canvas, frames, rest } = await start();
+    engine.paused = true;
+    rest();
+    const before = backend.draws;
+    await INPUTS[name]?.(engine, canvas, backend);
+    expect(frames(1), 'the next frame').toBe(1);
+    frames(SETTLE_FRAMES + 10);
+    // A step by hand is the first of these frames.
+    expect(backend.draws - before).toBe(SETTLE_FRAMES);
+  });
+
+  it('draws again after a clear of the food, light and walls', async () => {
+    const { engine, frames, rest } = await start();
+    engine.paused = true;
+    engine.paint(stroke);
+    rest();
+    engine.clearEnvironment();
+    expect(frames(1)).toBe(1);
+  });
+
+  it('keeps the picture while the levels move less than a picture shows', async () => {
+    const { engine, backend, frames, rest } = await start();
+    engine.paused = true;
+    backend.current = { gain: 1, black: 0.5, strand: 3 };
+    rest();
+    backend.current = { gain: 1.0005, black: 0.5002, strand: 3.001 };
+    expect(frames(5)).toBe(0);
+    backend.current = { gain: 1.002, black: 0.5002, strand: 3.001 };
+    expect(frames(1)).toBe(1);
+  });
+
+  it('goes on drawing while a part of the picture is still being built', async () => {
+    const { engine, backend, frames } = await start();
+    engine.paused = true;
+    backend.ready = false;
+    expect(frames(3 * SETTLE_FRAMES)).toBe(3 * SETTLE_FRAMES);
+    backend.ready = true;
+    expect(frames(3 * SETTLE_FRAMES)).toBe(SETTLE_FRAMES);
+  });
+
+  it('draws the steps of a tool held while paused, and none for an idle tool', async () => {
+    const { engine, frames, rest } = await start();
+    engine.paused = true;
+    rest();
+    const tool: HeldTool = { kind: AgentToolKind.inoculate, x: 10, y: 10, radius: 5, strain: 0, rate: 1 };
+    engine.agentTool(tool);
+    expect(frames(1)).toBe(1);
+    expect(engine.sim.step).toBe(1);
+    rest();
+    engine.agentTool({ ...tool, idle: true });
+    expect(frames(1)).toBe(0);
   });
 });

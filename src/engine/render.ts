@@ -231,10 +231,10 @@ export class Renderer {
     this.uniform = device.createBuffer({ size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
-  /** Draws one frame to the canvas. */
-  draw(f: Frame) {
+  /** Draws one frame to the canvas. False while the scent view that the frame asks for is still being built. */
+  draw(f: Frame): boolean {
     const { width, height } = this.context.canvas;
-    this.encode(this.context.getCurrentTexture(), width, height, f);
+    return this.encode(this.context.getCurrentTexture(), width, height, f);
   }
 
   /**
@@ -258,7 +258,8 @@ export class Renderer {
     return new ImageData(pixels, width, height);
   }
 
-  private encode(target: GPUTexture, width: number, height: number, f: Frame) {
+  /** False while the frame draws without the scent view that it asks for: its pipelines are still being built. */
+  private encode(target: GPUTexture, width: number, height: number, f: Frame): boolean {
     const { sim } = f;
     sim.syncShape();
     // Collision mode keeps the occupancy up to date (WebGPU allocates it with every simulation).
@@ -372,6 +373,7 @@ export class Renderer {
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
+    return !(f.settings.showScent && this.fixed === undefined && !view);
   }
 
   /**

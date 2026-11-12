@@ -40,6 +40,12 @@ export interface Sim {
   readonly height: number;
   readonly agents: number;
   readonly step: number;
+  /**
+   * Counts the changes of the trail, the scent, the food, light and walls and their outlines outside steps (a reset,
+   * strokes, a clear, writes, new settings of a step that moves first); `step` counts the steps. With the simulation
+   * itself they tell whether a picture or a map made from its state is still current.
+   */
+  readonly revision: number;
   update(settings: Settings): void;
   reset(): void;
   /** Runs `steps` steps. The agent tool acts on every one of them (ADR 0023). */
@@ -126,8 +132,11 @@ export interface Backend<S extends Sim = Sim> {
    * of each strain (default all). Fewer when the capacity holds more agents than the start population (ADR 0025).
    */
   createSim(settings: Settings, width: number, height: number, agents: number, start?: number): Promise<S>;
-  /** Draws a frame; `measure` lets auto levels sample the trail. */
-  draw(sim: S, settings: Settings, view: View, measure: boolean): void;
+  /**
+   * Draws a frame; `measure` lets auto levels sample the trail. False while a part of the picture is still being
+   * built, as the scent view's pipelines at its first frames: the same call then draws another picture later.
+   */
+  draw(sim: S, settings: Settings, view: View, measure: boolean): boolean;
   /** `levels`: levels for this picture alone (measured()), in place of those of the frames. */
   capture(sim: S, settings: Settings, view: View, width: number, height: number, levels?: Levels): Promise<ImageData>;
   /** Measures auto levels now instead of smoothing over frames; resolves with the levels frames now use. */

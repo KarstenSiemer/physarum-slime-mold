@@ -65,8 +65,9 @@ interface ViewPair {
 export class Simulation implements Sim {
   step = 0;
   /**
-   * Counts the changes of the scent and the shape outside steps (reset, strokes, clearing, writes, a new hold of the
-   * shape); `step` counts the steps. Together they tell a cache of them when it is old: the scent view's coarse map.
+   * Counts the changes of the trail, the scent and the shape outside steps (reset, strokes, clearing, writes, a new
+   * hold of the shape); `step` counts the steps. Together they tell when a picture or a map made from them is old: the
+   * frame on screen (Engine.frame), the scent view's coarse map and the trail's coarse map (render.ts).
    */
   revision = 0;
   private parity: Bit = 0;
@@ -718,6 +719,7 @@ export class Simulation implements Sim {
 
   writeTrail(data: Float32Array) {
     this.viewStale = true;
+    this.revision++;
     this.device.queue.writeTexture({ texture: this.current.trail }, data, { bytesPerRow: this.width * 16 }, [
       this.width,
       this.height,

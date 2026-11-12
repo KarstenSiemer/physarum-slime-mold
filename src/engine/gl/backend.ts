@@ -118,8 +118,9 @@ export class WebGl2Backend implements Backend<GlSim> {
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
     if (measure && this.frame % 15 === 0 && !this.measuring) void this.measure(sim, this.gain === 0 ? 1 : 0.25);
-    this.encode(sim, settings, view, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    const ready = this.encode(sim, settings, view, gl.drawingBufferWidth, gl.drawingBufferHeight);
     this.frame++;
+    return ready;
   }
 
   async capture(
@@ -248,8 +249,19 @@ export class WebGl2Backend implements Backend<GlSim> {
     return l && { ...l, strand: strandLevel(bins, t.width * t.height) };
   }
 
-  /** `given`: levels measured for this frame alone (an export), in place of those of the frames. */
-  private encode(sim: GlSim, s: Settings, view: View, width: number, height: number, dst?: Target, given?: Levels) {
+  /**
+   * `given`: levels measured for this frame alone (an export), in place of those of the frames. False while the frame
+   * draws without the scent view that it asks for: its programs are still being built.
+   */
+  private encode(
+    sim: GlSim,
+    s: Settings,
+    view: View,
+    width: number,
+    height: number,
+    dst?: Target,
+    given?: Levels,
+  ): boolean {
     const gl = this.gl;
     sim.syncShape();
     // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027), made before any
@@ -311,6 +323,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     const scentLevels = coarse?.texture ?? viewScent;
     textures(gl, p.program, scent ? { ...all, scent: viewScent, scentLevels } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return !(s.showScent && !this.fixed && !scent);
   }
 
   /** The scent view's coarse map for this grid size, made anew when the size changes. */
