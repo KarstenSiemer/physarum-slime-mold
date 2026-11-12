@@ -219,10 +219,11 @@
       <p>
         To see the scent, select Scent in the toolbar or press S. A green glow shows the scent of food, and a pink glow
         the repellent of light. The glow fades out as the scent gets weaker, down to 0.01 per cell. The scale is the
-        same in every scene and in both models. A green line shows where the food scent is as strong as the trail of a
-        strand: inside it, food pulls an agent on a strand more than the strand does. Compare a scene in Jones with the
-        same scene in Extended at a low Scent decay: the glow reaches farther, but a small food gets weaker, so the line
-        can come closer to the food. The view changes only the picture, not the simulation.
+        same in every scene and in both models. An agent steers by the difference between its left and right sensors. A
+        thin green line shows where food steers an agent as strongly as a strand of trail holds it. Inside the line,
+        food steers it more. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the glow
+        reaches much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does
+        not steer from farther away. The view changes only the picture, not the simulation.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

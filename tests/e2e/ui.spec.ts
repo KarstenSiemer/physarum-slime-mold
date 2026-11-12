@@ -324,6 +324,10 @@ for (const [width, height] of [
       await page.getByRole('button', { name: 'Hide settings' }).click();
     }
     await expect(legend).toBeVisible();
+    // What the line means, read after the bars (the review of 2026-11-11 heard "a strand" before "Food"); the row
+    // shows once a strand is measured.
+    await expect(legend.getByText('Inside the line, food steers an agent more than a strand holds it.')).toBeVisible();
+    await expect(legend).toHaveText(/^Scent per cell\s*Food/);
     const box = await legend.boundingBox();
     if (!box) throw new Error('no legend');
     const others = [page.locator('.stats'), ...(await page.locator('.toolbar .group').all())];
@@ -334,7 +338,7 @@ for (const [width, height] of [
         box.y + box.height <= o.y || o.y + o.height <= box.y || box.x + box.width <= o.x || o.x + o.width <= box.x;
       expect(apart, `${JSON.stringify(box)} against ${JSON.stringify(o)}`).toBe(true);
     }
-    if (width <= 720 || height <= 500) expect(box.height).toBeLessThan(110); // compact
+    if (width <= 720 || height <= 500) expect(box.height).toBeLessThan(130); // compact
     // The numbers below the bar keep at least 3 px apart (the review of 2026-11-11 read "0.010.1" and "1k10k+").
     const ticks = await legend.locator('.ticks > span').evaluateAll((spans) =>
       spans

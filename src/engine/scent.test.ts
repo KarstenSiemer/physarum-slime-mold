@@ -13,6 +13,7 @@ import {
   scentLine,
   scentMark,
   scentOver,
+  scentSensors,
 } from './scent';
 
 // The scale of the scent view (ADR 0009, amendments of 2026-11-11). The GPU tests hold both render passes to it.
@@ -68,6 +69,35 @@ describe('scentMark', () => {
     expect(scentMark(two, 8)).toBe(4);
     const fleeing = { ...s, strains: [{ ...defaultStrain(0), food: -1 }] };
     expect(scentMark(fleeing, 8)).toBe(0); // no strain follows food: no mark
+  });
+});
+
+describe('scentSensors', () => {
+  const s = { ...defaultSettings(), model: 'extended' as const, trailSaturation: 0 };
+  const half = 9 * Math.sin((22.5 * Math.PI) / 180);
+  it('gives each strain that follows food its half spread of sensors and the hold of a strand', () => {
+    const one = { ...s, strains: [{ ...defaultStrain(0, 1), food: 2 }] };
+    const r = scentSensors(one, 8);
+    expect(r.half[0]).toBeCloseTo(half, 12);
+    expect(r.holds[0]).toBe(4); // 1 · 8 / 2
+    expect([...r.half.slice(1), ...r.holds.slice(1)]).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(scentSensors(one, 0).half).toEqual([0, 0, 0, 0]); // no strand
+    // The Jones model weighs food as the strain's own trail: the hold is the strand.
+    expect(scentSensors({ ...one, model: 'jones' }, 8).holds[0]).toBe(8);
+  });
+
+  it('lets strains of one spread share the lowest hold, and gives other spreads pairs of their own', () => {
+    const same = { ...s, strains: [defaultStrain(0, 2), { ...defaultStrain(1, 2), food: 4 }] };
+    const a = scentSensors(same, 8);
+    expect(a.half.filter((h) => h > 0)).toEqual([a.half[0]]);
+    expect(a.holds[0]).toBe(2);
+    const other = { ...s, strains: [defaultStrain(0, 2), { ...defaultStrain(1, 2), sensorOffset: 4 }] };
+    const b = scentSensors(other, 8);
+    expect(b.half[1]).toBeCloseTo(4 * Math.sin((22.5 * Math.PI) / 180), 12);
+    expect(b.holds.slice(0, 2)).toEqual([8, 8]);
+    // A strain that flees food has no line.
+    const fleeing = { ...s, strains: [{ ...defaultStrain(0, 1), food: -1 }] };
+    expect(scentSensors(fleeing, 8).half).toEqual([0, 0, 0, 0]);
   });
 });
 

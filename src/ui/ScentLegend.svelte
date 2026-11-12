@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { BACKGROUND } from '../engine/render';
-  import { SCENT_LEVELS, SCENT_LINE, SCENT_LOW, SCENT_TOP, scentGlow, scentMark, scentOver } from '../engine/scent';
+  import { SCENT_LEVELS, SCENT_LINE, SCENT_LOW, SCENT_TOP, scentGlow, scentOver, scentSensors } from '../engine/scent';
   import { hexToLinear, linearToHex } from '../model/color';
   import { app, drawn, getEngine } from './state.svelte';
 
@@ -21,9 +21,8 @@
   const food = $derived(drawn('food'));
   // Only the extended model reads the repellent, and the view draws it only there (ADR 0009).
   const light = $derived(app.settings.model === 'extended' && drawn('light'));
-  const mark = $derived(scentMark(app.settings, strand));
-  /** Where the mark lies on the bar, 0 to 1. */
-  const markAt = $derived(mark > 0 ? Math.min(Math.max((Math.log10(mark) - SCENT_LOW) / SCENT_TOP, 0), 1) : undefined);
+  // The view draws its line once a strand is measured and a strain follows food (scentSensors()).
+  const lined = $derived(scentSensors(app.settings, strand).half.some((h) => h > 0));
 
   // The glow as the view draws it over the bare dish of the current style, one stop per half power of ten.
   const colours = $derived.by(() => {
@@ -38,8 +37,8 @@
     return {
       food: `linear-gradient(to right, ${stops('food')})`,
       repellent: `linear-gradient(to right, ${stops('repellent')})`,
-      // The line at the mark as the view draws it over the glow there.
-      line: linearToHex(scentOver(bg, style, scentGlow(mark), SCENT_LINE, 0)),
+      // The line as the view draws it over the bare dish.
+      line: linearToHex(scentOver(bg, style, 0, SCENT_LINE, 0)),
     };
   });
   const label = (v: number) => (v >= 1000 ? `${String(v / 1000)}k` : String(v));
@@ -50,19 +49,10 @@
   {#if !food && !light}
     <p class="empty" id="scent-legend-note">This scene has no food and no light, so it has no scent to show.</p>
   {:else}
-    {#if food && markAt !== undefined}
-      <div class="row">
-        <span class="name"></span>
-        <span class="scale"><span class="mark-label" style:left="{markAt * 100}%">a strand</span></span>
-      </div>
-    {/if}
     {#if food}
       <div class="row">
         <span class="name">Food <span class="sr-only">(green glow)</span></span>
-        <span class="bar" style:background={colours.food}>
-          {#if markAt !== undefined}<span class="mark" style:left="{markAt * 100}%" style:--line={colours.line}
-            ></span>{/if}
-        </span>
+        <span class="bar" style:background={colours.food}></span>
       </div>
     {/if}
     {#if light}
@@ -81,14 +71,18 @@
         {/each}
       </span>
     </div>
+    {#if food && lined}
+      <!-- The line of the map (ADR 0009, decision of 2026-11-12): what it means, in one plain sentence. -->
+      <div class="row">
+        <span class="name"><span class="swatch" style:background={colours.line}></span></span>
+        <span class="key">Inside the line, food steers an agent more than a strand holds it.</span>
+      </div>
+    {/if}
     <p class="note" id="scent-legend-note">
       {food ? 'Green glow: food scent.' : ''}
       {light ? 'Pink glow: the repellent of light.' : ''}
       The glow is stronger where the scent is stronger. Each number is ten times the number before it, and the glow stays
       the same from 10,000 up.
-      {food && markAt !== undefined
-        ? 'The mark shows the trail of a strand. Inside the green line on the map, the food scent is stronger than that trail.'
-        : ''}
     </p>
   {/if}
 </figure>
@@ -128,15 +122,16 @@
     border-radius: 3px;
     margin: 2px 0;
   }
-  /* The mark: the line the view draws where the food scent equals the trail of a strand. */
-  .mark {
-    position: absolute;
-    top: -2px;
-    bottom: -2px;
-    width: 2px;
-    margin-left: -1px;
-    background: var(--line);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  /* The line of the map, as it shows over the bare dish. */
+  .swatch {
+    display: inline-block;
+    width: 22px;
+    height: 2px;
+    vertical-align: middle;
+  }
+  .key {
+    margin: 3px 0 1px;
+    color: var(--fg);
   }
   .scale > span {
     position: absolute;
@@ -151,9 +146,6 @@
   }
   .ticks > span:last-child {
     transform: translateX(-100%);
-  }
-  .mark-label {
-    color: var(--fg) !important;
   }
   .note,
   .empty {

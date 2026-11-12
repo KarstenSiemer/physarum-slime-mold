@@ -28,7 +28,16 @@ import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } fr
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND, LATTICE_COPIES } from './render';
-import { SCENT_LOW, scentGlow, scentLevel, scentLevelSize, scentLine, scentMark, scentOver } from './scent';
+import {
+  SCENT_LOW,
+  scentGlow,
+  scentLevel,
+  scentLevelSize,
+  scentLine,
+  scentMark,
+  scentOver,
+  scentSensors,
+} from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -279,7 +288,8 @@ function cutSpan(source: string, start: string, end: string) {
 
 /**
  * The render shaders without the scent view (ADR 0009, amendment 2026-11-11). These give the files of main (f81c4a3)
- * byte for byte, on both backends; view.glsl differs from main only by the field `scentFx`, which no code of main reads.
+ * byte for byte, on both backends; view.glsl differs from main only by the fields of the scent view, which no code of
+ * main reads.
  */
 const WITHOUT_SCENT = {
   wgsl: cutSpan(
@@ -294,7 +304,9 @@ const WITHOUT_SCENT = {
           '  }\n  // The view lies below the flake of food and the walls.\n  if (SCENT) { c = mix(scentView(p, c, near, cells), c, f.cover); }\n  if (near) {\n',
           '',
         ),
-        '  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), mark (0: none), unused\n',
+        '  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused\n' +
+          '  scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells\n' +
+          '  scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())\n',
         '',
       ),
       '@group(0) @binding(9) var scent',
@@ -331,17 +343,16 @@ const toByte = (c: number) => {
  * repellent if `repellent`. `kink`: p lies within 0.001 of a sample point, where the bilinear gradient jumps, so
  * float32 on the GPU may take the other side.
  */
-function scentAt(
+function scentLookup(
   scent: Float32Array,
   [w, h]: [number, number],
   boundary: Boundary,
   wall: (x: number, y: number) => boolean,
   [px, py]: [number, number],
   scale: number,
-  repellent = true,
-  mark = 0,
 ) {
   let kink: boolean;
+  let weight = 0; // of the cells that hold scent among those read (render.wgsl Scent.w)
   type Layer = [number, number, number]; // value, gradient x, gradient y
   // The bilinear mix of corners [value of each layer, weight] at fraction (fx, fy), with its gradient per step.
   const mix = (corners: [number[], number][], fx: number, fy: number): Layer[] => {
@@ -363,6 +374,7 @@ function scentAt(
         sumY[k] = (sumY[k] ?? 0) + (v[k] ?? 0) * wy;
       }
     });
+    weight = total;
     return [0, 1].map((k): Layer => {
       if (total <= 0) return [0, 0, 0];
       const v = (sum[k] ?? 0) / total;
@@ -445,15 +457,108 @@ function scentAt(
       return [v * k, gx * k, gy * k];
     });
   }
-  const [food = [0, 0, 0], light = [0, 0, 0]] = layers;
+  return { layers, weight, kink };
+}
+
+/** No line: no strand measured, or no strain that follows food (scentSensors()). */
+const NO_SENSORS = { half: [0, 0, 0, 0], holds: [0, 0, 0, 0] };
+
+/** scentSensors() in float32, as the uniform holds it. */
+const sensorsOf = (s: Settings, strand: number) => {
+  const { half, holds } = scentSensors(s, strand);
+  return { half: half.map(Math.fround), holds: holds.map(Math.fround) };
+};
+
+/**
+ * The food's difference across sensors `half` cells up and down the gradient at p (render.wgsl `scentSensorLine`),
+ * with its change along the gradient, per cell; undefined where the gradient is flat or a sensor senses no food (no
+ * cell that holds scent: in a wall). `kink`: a sensor point lies within 0.001 of a sample point.
+ */
+function sensorDifference(
+  scent: Float32Array,
+  size: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  p: [number, number],
+  scale: number,
+  half: number,
+) {
+  const [, gx = 0, gy = 0] = scentLookup(scent, size, boundary, wall, p, scale).layers[0] ?? [];
+  const slope = Math.hypot(gx, gy);
+  if (!(slope > 0)) return undefined;
+  const n = [gx / slope, gy / slope] as const;
+  const at = (k: number) =>
+    scentLookup(scent, size, boundary, wall, [p[0] + k * half * n[0], p[1] + k * half * n[1]], scale);
+  const [up, down] = [at(1), at(-1)];
+  if (up.weight <= 0 || down.weight <= 0) return undefined;
+  const [u = [0, 0, 0], d = [0, 0, 0]] = [up.layers[0], down.layers[0]];
+  return {
+    difference: u[0] - d[0],
+    change: (u[1] - d[1]) * n[0] + (u[2] - d[2]) * n[1],
+    slope,
+    kink: up.kink || down.kink,
+  };
+}
+
+/**
+ * The scent view's opacities at grid position p on the CPU (scentLookup()): the glow of the food scent and of the
+ * repellent if `repellent`, and the line where the food steers across the sensors as hard as a strand holds
+ * (`sensors`, scentSensors()): for each pair the difference across the sensors over the hold, the line where the
+ * largest is 1 (render.wgsl `scentSensorLine`, with its shortcut where the gradient puts the ratio more than 20 times
+ * off). `kink`: p, or a sensor point of the line, lies within 0.001 of a sample point.
+ */
+function scentAt(
+  scent: Float32Array,
+  size: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  p: [number, number],
+  scale: number,
+  repellent = true,
+  sensors: { half: number[]; holds: number[] } = NO_SENSORS,
+) {
+  const here = scentLookup(scent, size, boundary, wall, p, scale);
+  const [food = [0, 0, 0], light = [0, 0, 0]] = here.layers;
+  let [best, change, kink] = [0, 0, here.kink];
+  sensors.half.forEach((half, j) => {
+    const hold = sensors.holds[j] ?? 0;
+    if (!(half > 0) || !(hold > 0)) return;
+    const guess = (Math.hypot(food[1], food[2]) * 2 * half) / hold;
+    if (guess < 0.05 || guess > 20) return;
+    const d = sensorDifference(scent, size, boundary, wall, p, scale, half);
+    if (!d) return;
+    kink ||= d.kink;
+    if (d.difference / hold > best) [best, change] = [d.difference / hold, d.change / hold];
+  });
+  const line = scentLine(best, Math.abs(change), scale, 1);
   return {
     food: scentGlow(food[0]),
-    line: scentLine(food[0], Math.hypot(food[1], food[2]), scale, mark),
+    line,
     repellent: repellent ? scentGlow(light[0]) : 0,
     /** The scent of both layers at p. */
     values: [food[0], light[0]] as const,
-    kink,
+    kink: here.kink || (kink && line > 0.01),
   };
+}
+
+/**
+ * `s` with the food weight of its one strain that puts the view's line at p: the hold of a strand (scentMark()) equals
+ * the food's difference across the strain's sensors there (sensorDifference(), the grid's cells).
+ */
+function aimLine(
+  s: Settings,
+  strand: number,
+  scent: Float32Array,
+  size: [number, number],
+  boundary: Boundary,
+  wall: (x: number, y: number) => boolean,
+  p: [number, number],
+): Settings {
+  const st = s.strains[0] ?? defaultStrain(0);
+  const half = st.sensorOffset * Math.sin((st.sensorAngle * Math.PI) / 180);
+  const d = sensorDifference(scent, size, boundary, wall, p, 1, half);
+  if (!d || !(d.difference > 0)) throw new Error(`no difference across the sensors at ${p.join(', ')}`);
+  return { ...s, strains: [{ ...st, food: (st.food * scentMark(s, strand)) / d.difference }] };
 }
 
 /** The share of the pixel at grid position p inside the arena, as render.wgsl `fs` draws the box edge and the rim. */
@@ -4474,7 +4579,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const wrapped = (d: number, m: number) => (settings.boundary === 'wrap' ? d - m * Math.round(d / m) : d);
       const flake = (p: [number, number]) =>
         Math.min(...foods.map((f) => Math.hypot(wrapped(p[0] - f.at[0], w), wrapped(p[1] - f.at[1], h)) - f.r));
-      const mark = Math.fround(scentMark(settings, backend.levels().strand));
+      const sensors = sensorsOf(settings, backend.levels().strand);
       const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
       const space = hexToLinear(BACKGROUND[settings.style]).map((v) => v * (settings.style === 'paper' ? 0.92 : 0.55));
       let [max, sum, n, still, arena, drawn, lined, copied, copiedFood] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -4499,7 +4604,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           if (edge > 0 && edge < 1) continue;
           arena++;
           const repellent = settings.model === 'extended';
-          const ref = scentAt(scent, [w, h], settings.boundary, wall, p, view.scale, repellent, mark);
+          const ref = scentAt(scent, [w, h], settings.boundary, wall, p, view.scale, repellent, sensors);
           if (ref.kink) continue;
           const bytes = [0, 1, 2].map((k) => off.data[i + k] ?? 0);
           if (bytes.some((b) => b >= 254) || (settings.style === 'paper' && bytes.some((b) => b <= 1))) continue;
@@ -4691,6 +4796,32 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // Around a periodic lattice the copies of the grid show at LATTICE_COPIES of their light (ADR 0026), and the pass
     // dims them after the view: the view on a copy is the view on the grid, dimmed with it. Beside a closed lattice
     // nothing shows, as beside every closed arena (the tests above: outside the arena no pixel changes).
+    // The line stands for every strain that follows its trail and food (scentSensors()): with sensors of another
+    // spread and another food weight a second strain steers by another difference, and the line lies where food first
+    // steers one of them as hard as a strand holds it. Both pairs reach the shader, and its line follows the reference.
+    it('draws the line where food steers the first of several strains', async () => {
+      const strains = [defaultStrain(0, 2), { ...defaultStrain(1, 2), sensorOffset: 4, food: 2.5 }];
+      const settings = extended({ boundary: 'wrap', strains, exposure: -2, bloom: 0 });
+      const sim = await make(settings, W, H, (W * H) / 2);
+      sim.paint(strokes('wrap'));
+      sim.run(150);
+      const { strand } = await backend.settle(sim);
+      const { half, holds } = scentSensors(settings, strand);
+      expect(half.filter((h) => h > 0).length).toBe(2);
+      expect(holds[1]).toBeLessThan(holds[0] ?? 0);
+      const foods = [{ at: [...SCENES.wrap.food] as [number, number], r: 3 }];
+      const worst: string[] = [];
+      let lined = 0;
+      for (const style of ['glow', 'paper'] as const)
+        for (const view of views('wrap')) {
+          const r = await follows(sim, { ...settings, style }, view, foods);
+          worst.push(...r.failed);
+          lined += r.lined;
+        }
+      expect(worst).toEqual([]);
+      expect(lined).toBeGreaterThan(50);
+    });
+
     it('dims the view with the copies around a periodic lattice', async () => {
       const strains = [defaultStrain(0), defaultStrain(1)];
       const settings = extended({ boundary: 'wrap', lattice: [W, H], strains, exposure: -2, bloom: 0 });
@@ -4794,10 +4925,17 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
       const { strand } = await backend.settle(sim);
       const scent = await sim.readScent();
-      const edge = scent[24 * W * 2] ?? 0;
-      const settings = { ...base, strains: [{ ...defaultStrain(0), food: strand / edge }] };
-      const mark = Math.fround(scentMark(settings, strand));
-      expect(mark / edge).toBeCloseTo(1, 5);
+      // The line through the centre of the outer cell of the food's row: one sensor beyond the edge.
+      const settings = aimLine(
+        { ...base, strains: [defaultStrain(0)] },
+        strand,
+        scent,
+        [W, H],
+        'box',
+        () => false,
+        [0.5, 24],
+      );
+      const sensors = sensorsOf(settings, strand);
       const bg = hexToLinear(BACKGROUND.paper);
       const [cw, ch, scale] = [96, 96, 1 / 10];
       const view: View = { center: [3.0137, 24.0291], scale };
@@ -4810,7 +4948,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             (y + 0.5 - ch / 2) * scale + view.center[1],
           ];
           if (insideArena('box', [W, H], p, scale) < 1 || Math.hypot(p[0] - food[0], p[1] - food[1]) < 3 + 2) continue;
-          const ref = scentAt(scent, [W, H], 'box', () => false, p, scale, true, mark);
+          const ref = scentAt(scent, [W, H], 'box', () => false, p, scale, true, sensors);
           if (ref.kink) continue;
           if (p[0] < 0.5 && ref.line > 0.5) lined++;
           const want = scentOver(bg, 'paper', ref.food, ref.line, ref.repellent);
@@ -4827,8 +4965,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // so the line crosses the strip beside the wall. Over the bare paper the picture is the background times the walls'
     // shadow, so the reference is the view over the background times what the picture without the view holds there.
     it('leaves the cells of walls out of the scent, zoomed in', async () => {
-      const settings = extended({ style: 'paper', layout: 'empty', boundary: 'wrap' });
-      const sim = await make(settings, W, H, 1);
+      const plain = extended({ style: 'paper', layout: 'empty', boundary: 'wrap', strains: [defaultStrain(0)] });
+      const sim = await make(plain, W, H, 1);
       const food: [number, number] = [24, 8];
       sim.paint([
         { kind: 'food', from: food, to: food, radius: 3 },
@@ -4836,11 +4974,13 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       ]);
       sim.run(150);
       sim.writeTrail(Float32Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 0 && (i / 4) % W >= 56 ? 1 : 0)));
-      const mark = Math.fround(scentMark(settings, (await backend.settle(sim)).strand));
-      expect(mark).toBeCloseTo(1, 0);
+      const { strand } = await backend.settle(sim);
       const [scent, env] = [await sim.readScent(), await sim.readEnv()];
       const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
       expect(wall(31, 24) && wall(32, 24) && !wall(30, 24) && !wall(33, 24)).toBe(true);
+      // The line through the strip beside the wall.
+      const settings = aimLine(plain, strand, scent, [W, H], 'wrap', wall, [30.7, 10]);
+      const sensors = sensorsOf(settings, strand);
       const bg = hexToLinear(BACKGROUND.paper);
       const [cw, ch] = [96, 288];
       const worst: string[] = [];
@@ -4864,7 +5004,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             // The trail that sets the mark lies on columns 56 to 63, with its filter around it: not the bare paper.
             if (Math.abs(wrapped(p[0] - 60, W)) < 4 + 2 * scale) continue;
             const i = (y * cw + x) * 4;
-            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, mark);
+            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
             if (kink) continue;
             if (p[0] > 30.5 && p[0] < 31) beside++;
             if (p[0] > 30 && p[0] < 31 && line > 0.5) lined++;
@@ -4898,10 +5038,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const [scent, env] = [await sim.readScent(), await sim.readEnv()];
       const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
       expect(wall(30, 24) && wall(33, 24) && !wall(29, 24) && !wall(34, 24)).toBe(true);
-      const target = scent[(24 * W + 29) * 2] ?? 0;
-      const strain = { ...defaultStrain(0), food: (defaultStrain(0).food * scentMark(settings, strand)) / target };
-      const viewed = { ...settings, strains: [strain] };
-      const mark = Math.fround(scentMark(viewed, strand));
+      // The line where the food's sensors beside the wall still sense it: the lower sensor of a pixel at 26 lies at
+      // 29.4, beside the wall's cell 30.
+      const viewed = aimLine(settings, strand, scent, [W, H], 'wrap', wall, [26, 24.5]);
+      const sensors = sensorsOf(viewed, strand);
       const bg = hexToLinear(BACKGROUND.paper);
       const [cw, ch] = [96, 72];
       const worst: string[] = [];
@@ -4924,7 +5064,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
             if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
             const i = (y * cw + x) * 4;
-            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, mark);
+            const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
             if (kink) continue;
             if (wrapped(p[0] - 29.5) > 0 && wrapped(p[0] - 30.5) < 0) read++;
             const want = scentOver(bg, 'paper', f, line, repellent);
@@ -4960,14 +5100,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const wall = (x: number, y: number) => (env[(y * W + x) * 4] ?? 0) >= 128;
       expect(wall(31, 24) && wall(32, 24) && !wall(30, 24) && !wall(33, 24)).toBe(true);
       expect(scent[(24 * W + 31) * 2]).toBe(0); // the wall holds no scent
-      // The food weight that puts the mark at the food scent of cell 30, the last before the wall's face.
-      const target = scent[(24 * W + 30) * 2] ?? 0;
-      expect(target).toBeGreaterThan(0.01);
-      const base = scentMark(settings, strand);
-      const strain = { ...defaultStrain(0), food: (defaultStrain(0).food * base) / target };
-      const viewed = { ...settings, strains: [strain] };
-      const mark = Math.fround(scentMark(viewed, strand));
-      expect(mark / target).toBeCloseTo(1, 5);
+      // The line where the food's sensors beside the wall still sense it (the lower sensor of a pixel at 26 lies
+      // beside cell 30, the last before the wall's face), and the texels of the coarse maps there hold part of the wall.
+      expect(scent[(24 * W + 30) * 2]).toBeGreaterThan(0.01);
+      const viewed = aimLine(settings, strand, scent, [W, H], 'wrap', wall, [26, 24.5]);
+      const sensors = sensorsOf(viewed, strand);
       const bg = hexToLinear(BACKGROUND.paper);
       const [cw, ch] = [96, 72];
       const worst: string[] = [];
@@ -5019,7 +5156,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
               if (Math.abs(wrapped(p[0] - 22)) < 1.5 + 2 + scale) continue;
               if (Math.abs(wrapped(p[0] - 60)) < 4 + 2 * scale) continue;
               const i = (y * cw + x) * 4;
-              const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, mark);
+              const { food: f, line, repellent, kink } = scentAt(scent, [W, H], 'wrap', wall, p, scale, true, sensors);
               if (kink) continue;
               if (line > 0.1 && Math.abs(wrapped(p[0] - 31)) < 3 * scale) near++;
               const want = scentOver(bg, 'paper', f, line, repellent);

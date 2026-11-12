@@ -329,10 +329,10 @@ export const coveredFoodHelp = {
   ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
 } as const;
 
-/** Help for the view switch "Scent" (ADR 0009, amendment 2026-11-11); Learn → Controls lists it with the sliders. */
+/** Help for the view switch "Scent" (ADR 0009, amendments of 2026-11-11 and 2026-11-12); Learn → Controls lists it. */
 export const scentViewHelp = {
   label: 'Scent',
-  help: 'Shows the scent of food as a green glow and the repellent of light as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where the food scent is as strong as the trail of a strand. The simulation does not change.',
+  help: 'Shows the scent of food as a green glow and the repellent of light as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where food steers an agent as strongly as a strand of trail holds it: inside the line, food steers it more. The simulation does not change.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */

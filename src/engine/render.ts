@@ -1,7 +1,7 @@
 import { hexToLinear } from '../model/color';
 import { BOUNDARIES, MAX_STRAINS, STYLES, type Settings } from '../model/params';
 import { readPixels } from './readback';
-import { scentLevel, scentLevelSize, scentMark } from './scent';
+import { scentLevel, scentLevelSize, scentSensors } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Simulation } from './sim';
 import type { View } from './types';
@@ -29,7 +29,7 @@ export interface Frame {
   sampler: GPUSampler;
 }
 
-export const VIEW_BYTES = 160;
+export const VIEW_BYTES = 192;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 /** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
@@ -66,9 +66,12 @@ export function packView(
   const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
   fl.set([settings.bloom, black, copies, 0], 32);
   // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
-  // mark of a strand.
+  // sensors of its line, their half spread and the hold of a strand (scentSensors()).
   const level = settings.showScent ? scentLevel(view.scale) : 0;
-  fl.set([level, settings.model === 'extended' ? 1 : 0, scentMark(settings, strand), 0], 36);
+  fl.set([level, settings.model === 'extended' ? 1 : 0, 0, 0], 36);
+  const sensors = scentSensors(settings, strand);
+  fl.set(sensors.half, 40);
+  fl.set(sensors.holds, 44);
 }
 
 /** How much of the scene the copies around a periodic lattice show (packView). */

@@ -1,6 +1,6 @@
-// The scent view (ADR 0009, amendments of 2026-11-11): the food scent and the light repellent over the picture, as a
-// glow per layer that fades out as the scent gets weaker, on a fixed logarithmic scale, and one line where the food
-// scent weighs as much as the trail of a strand. Display only. render.wgsl and gl/glsl/render.frag hold the same
+// The scent view (ADR 0009, amendments of 2026-11-11 and 2026-11-12): the food scent and the light repellent over the
+// picture, as a glow per layer that fades out as the scent gets weaker, on a fixed logarithmic scale, and one line
+// where the food steers an agent across its sensors as hard as a strand holds it (scentSensors()). Display only. render.wgsl and gl/glsl/render.frag hold the same
 // numbers (`scentView`); the legend (ui/ScentLegend.svelte) and the GPU tests take them from here.
 import { MAX_STRAINS, type Settings, type Style } from '../model/params';
 import { trailSaturation } from './pack';
@@ -11,7 +11,7 @@ export const SCENT_LOW = -2;
 export const SCENT_TOP = 6;
 /** Opacity of the glow at 10,000 and more. */
 export const SCENT_GLOW = 0.45;
-/** Opacity of the line at the mark (scentMark()). */
+/** Opacity of the line (scentSensors()). */
 export const SCENT_LINE = 0.8;
 /**
  * The glow over paper, times this: over a light colour the same opacity shows less. An opacity of 0.1 took the paper's
@@ -79,7 +79,7 @@ function smoothstep(a: number, b: number, x: number) {
 }
 
 /**
- * The mark: the food scent that weighs as much in a sensor as the trail of a strand (agents.wgsl `sense()`: a strain
+ * The hold of a strand: the food scent that weighs as much in a sensor as the trail of a strand (agents.wgsl `sense()`: a strain
  * reads `attraction · trail + food · scent`). `strand` is the trail of a strand: the summed trail that the auto levels
  * draw at full strength, their 99th percentile (Levels.strand). With trail saturation K, a sensor reads it as
  * strand / (1 + strand / K). The Jones model weighs food as the strain's own trail, so there the mark is the strand
@@ -97,6 +97,43 @@ export function scentMark(s: Pick<Settings, 'model' | 'strains' | 'trailSaturati
     if (self > 0 && food > 0) mark = Math.min(mark, (self * trail) / food);
   });
   return Number.isFinite(mark) ? mark : 0;
+}
+
+/** Strains the line can stand for at once: the view's uniform holds 4 pairs (View.scentHalf, View.scentHolds). */
+const SENSOR_PAIRS = 4;
+
+/**
+ * The line of the view (ADR 0009, decision of 2026-11-12): where the food steers an agent as hard as a strand holds
+ * it. An agent steers by the difference between its left and right sensors (agents.wgsl `steer()`), which lie
+ * 2 · SO · sin(SA) apart; on a strand the trail holds it with self · sat(T), the food pulls with w · Δ, Δ the food scent
+ * of the sensor up the gradient less that of the sensor down it. So the line lies where Δ equals the hold of the
+ * strand over the food weight (scentMark() per strain), with the sensors `half` = SO · sin(SA) cells up and down the
+ * gradient. For each strain that follows its own trail and food (weights above 0): its half spread and that hold;
+ * strains of the same spread share one pair with the lowest hold. Up to 4 pairs, the rest 0; all 0 without a strand.
+ * The view draws the line where the largest Δ over hold of the pairs is 1: inside it, food steers at least one strain
+ * more than a strand holds it.
+ */
+export function scentSensors(
+  s: Pick<Settings, 'model' | 'strains' | 'trailSaturation'>,
+  strand: number,
+): { half: number[]; holds: number[] } {
+  const half = new Array<number>(SENSOR_PAIRS).fill(0);
+  const holds = new Array<number>(SENSOR_PAIRS).fill(0);
+  if (!(strand > 0)) return { half, holds };
+  const k = trailSaturation(s);
+  const trail = k > 0 ? strand / (1 + strand / k) : strand;
+  let n = 0;
+  s.strains.slice(0, MAX_STRAINS).forEach((st, i) => {
+    const self = st.attraction[i] ?? 0;
+    const food = s.model === 'jones' ? self : st.food;
+    const h = st.sensorOffset * Math.sin((st.sensorAngle * Math.PI) / 180);
+    if (!(self > 0 && food > 0 && h > 0)) return;
+    const hold = (self * trail) / food;
+    const same = half.slice(0, n).indexOf(h);
+    if (same >= 0) holds[same] = Math.min(holds[same] ?? hold, hold);
+    else if (n < SENSOR_PAIRS) [half[n], holds[n++]] = [h, hold];
+  });
+  return { half, holds };
 }
 
 const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
