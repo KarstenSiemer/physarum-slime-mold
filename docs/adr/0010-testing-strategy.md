@@ -318,3 +318,25 @@ GPU checks use invariants, not long exact trajectories:
   `lattice.spec.ts` 2.6, `app.spec.ts` and `growth.spec.ts` 2.3 min each. Each test job now runs in
   two parts (ADR 0014): by those times the e2e shards take about 13 and 12 min, and each GPU part
   about half of its tests. The limit of each part stays 30 min.
+- GPU test files run one at a time on CI (`fileParallelism: !process.env.CI` in `vitest.config.ts`),
+  as the e2e tests do (`workers: 1` in `playwright.config.ts`). Coordinator's choice under the
+  owner's delegation of 2026-11-12. Before, Vitest ran three GPU test files at once in one browser:
+  in the run of `main` at `1ea91bb` (run 43227583659), `lattice`, `engine` and `sim.gpu.test.ts`
+  started within 1 s of each other. The files share SwiftShader, and a test waits on the GPU work
+  of the files beside it. So the time of a test depended on what ran beside it: the WebGL2 test of
+  the paused frames (ADR 0028) took 101.4 s on GitHub on `main` and failed at 121.5 s in PR #40,
+  against 4.2 s alone in the CI image. Measured in the CI image (Playwright v1.65.0-noble, 4 CPUs,
+  16 GB, Docker on an M3 Pro, `main` at `1ea91bb`, 2026-11-12), each part once each way:
+
+  | Part     | Files at once                                                          | One file at a time                                           |
+  | -------- | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+  | `rest`   | 477 s; the tests 839 s together; 11 tests above 15 s; 1 failed (below) | 448 s; the tests 353 s; 1 test above 15 s (Fig. 10, 33.6 s)  |
+  | `webgpu` | 559 s; the tests 691 s; 10 tests above 15 s                            | 630 s; the tests 438 s; 3 tests above 15 s (Fig. 10, 86.0 s) |
+
+  The failure was the wrap test of `view.glsl` (ADR 0028): 82.9 s at once against its limit of 60 s,
+  32 ms alone; on GitHub it took 18.0 s on `main`. The paused frames took 61.4 s at once and 3.6 s
+  one file at a time. The CI waits for the slower part, so the GPU tests take about 1 min longer in the image
+  (630 s against 559 s); the part `rest` gets faster. A limit now holds the time of its own test,
+  and not that of the files beside it. Rejected: longer limits for each slow test. They follow the
+  times of the files beside a test, which change with every new test. Locally the files still run
+  at once, as before: the limits come from the times on CI.
