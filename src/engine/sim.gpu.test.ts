@@ -724,6 +724,89 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
   });
 
+  // While the scent holds only zeros and `env` holds no food and no light, the passes read the scent from one texel
+  // of zeros (`scentless`, ADR 0028). That changes no byte: the same passes run on the same values.
+  describe('scent of zeros from one texel (ADR 0028)', () => {
+    const [W, H] = [48, 33];
+    const scentless = (sim: Sim) => (sim as Simulation | GlSim).scentless;
+    // Strains that weigh food and light, so a scent that was not zero would steer them.
+    const strains = [0, 1].map((i) => ({ ...defaultStrain(i), food: 3, light: 2, sensorOffset: 5 + 30 * i }));
+    const food: Stroke = { kind: 'food', from: [10, 10], to: [20, 14], radius: 3 };
+    const all = async (sim: Sim) => ({
+      agents: await sim.readAgents(),
+      trail: Array.from(await sim.readTrail()),
+      scent: Array.from(await sim.readScent()),
+      view: Array.from(await sim.readView()),
+      viewScent: Array.from(await sim.readViewScent()),
+    });
+
+    it('reads one texel only while no scent can exist', async () => {
+      const sim = await make({ strains }, W, H, 500);
+      expect(scentless(sim)).toBe(true);
+      sim.paint([{ kind: 'wall', from: [5, 5], to: [9, 5], radius: 1 }]);
+      sim.paint([{ kind: 'erase', from: [5, 5], to: [9, 5], radius: 2 }]);
+      sim.run(2);
+      expect(scentless(sim), 'walls and the eraser add no scent').toBe(true);
+      sim.paint([food]);
+      expect(scentless(sim), 'a food').toBe(false);
+      sim.run(2);
+      sim.clearEnvironment();
+      expect(scentless(sim), 'the scent of the food stays after a clear').toBe(false);
+      sim.reset();
+      expect(scentless(sim), 'a reset without sources').toBe(true);
+      sim.paint([{ kind: 'light', from: [30, 20], to: [30, 20], radius: 4 }]);
+      sim.reset();
+      expect(scentless(sim), 'a reset with a light').toBe(false);
+      sim.clearEnvironment();
+      sim.reset();
+      sim.writeScent(new Float32Array(W * H * 2));
+      expect(scentless(sim), 'a written scent').toBe(false);
+      sim.reset();
+      sim.writeEnv(new Uint8Array(W * H * 4).fill(200, 5, 6)); // one food byte
+      expect(scentless(sim), 'a written food').toBe(false);
+      sim.reset();
+      expect(scentless(sim), 'a reset with a written food').toBe(false);
+      sim.writeEnv(new Uint8Array(W * H * 4).fill(255, 4, 5)); // one wall byte
+      sim.reset();
+      expect(scentless(sim), 'a reset with a written wall only').toBe(true);
+    });
+
+    it.each(
+      STEP_ORDERS.flatMap((stepOrder) =>
+        [false, true].flatMap((collisions) => [1, 3].map((diffusion) => ({ stepOrder, collisions, diffusion }))),
+      ),
+    )(
+      'gives the bytes of the passes that read the scent ($stepOrder, collisions $collisions, $diffusion passes)',
+      async (patch) => {
+        const settings = { seed: 5, strains, density: patch.collisions ? 0.4 : 2, ...patch };
+        const n = Math.round(settings.density * W * H);
+        const [one, full] = [await make(settings, W, H, n), await make(settings, W, H, n)];
+        // A written scent of zeros: the same state, read from the grid's textures.
+        full.writeScent(new Float32Array(W * H * 2));
+        expect([scentless(one), scentless(full)]).toEqual([true, false]);
+        for (const sim of [one, full]) sim.run(24);
+        const quiet = await all(one);
+        expect(quiet).toEqual(await all(full));
+        expect(quiet.scent.every((v) => v === 0) && quiet.viewScent.every((v) => v === 0)).toBe(true);
+        // With a food both read the grid's textures, from the same zeros on.
+        for (const sim of [one, full]) {
+          sim.paint([food]);
+          sim.run(12);
+        }
+        const fed = await all(one);
+        expect(fed).toEqual(await all(full));
+        expect(Math.max(...fed.scent)).toBeGreaterThan(0);
+        // Without the food, after a reset, one texel again: the bytes of a simulation that never had a food.
+        const fresh = await make(settings, W, H, n);
+        one.clearEnvironment();
+        one.reset();
+        expect(scentless(one)).toBe(true);
+        for (const sim of [one, fresh]) sim.run(24);
+        expect(await all(one)).toEqual(await all(fresh));
+      },
+    );
+  });
+
   describe('diffusion and decay', () => {
     // 47 and 246 are sides where a float floor(c / side) was not exact on an Apple M3 Pro (WebGL2 on Metal): there
     // GLSL's cellAt took the cell right of the seam from the next row and the row above the top from outside the

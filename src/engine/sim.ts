@@ -122,6 +122,21 @@ export class Simulation implements Sim {
    * clearPath, ADR 0020).
    */
   private walls = false;
+  /**
+   * A food or a light may lie in `env`: a stroke painted one, or bytes written held one, since the last clear.
+   */
+  private sources = false;
+  /**
+   * The scent textures hold only zeros, and no step can change that: a reset cleared them while `env` held no food
+   * and no light. The agent and diffusion passes then read the scent from a texture of one texel, `noScent`
+   * (ADR 0028): 3 of an agent's 6 sensor reads and the scent of every cell came from a texture of zeros as large as the
+   * grid. The passes and their arithmetic stay as they are, and they still write the scent of every cell: zeros, as
+   * before. A read outside a texture gives a texel of it or zero (WGSL, textureLoad), here zero in both cases.
+   */
+  scentless = false;
+  /** One texel of zeros: the scent while `scentless`. */
+  private readonly noScent: GPUTexture;
+  private readonly noScentView: GPUTextureView;
   /** Per clearance tile: whether it holds a wall cell, and how far the nearest wall lies at least (walls.wgsl). */
   private readonly walled: GPUBuffer;
   private readonly clearance: GPUBuffer;
@@ -177,6 +192,9 @@ export class Simulation implements Sim {
     this.scent = [texture('rg32float'), texture('rg32float')];
     this.trailViews = [this.trail[0].createView(), this.trail[1].createView()];
     this.scentViews = [this.scent[0].createView(), this.scent[1].createView()];
+    // A new texture holds zeros.
+    this.noScent = device.createTexture({ size: [1, 1], format: 'rg32float', usage: GPUTextureUsage.TEXTURE_BINDING });
+    this.noScentView = this.noScent.createView();
     const n = Math.ceil(agents / GROUP);
     const x = Math.min(n, device.limits.maxComputeWorkgroupsPerDimension);
     this.groups = [x, Math.ceil(n / x)];
@@ -248,13 +266,13 @@ export class Simulation implements Sim {
       // Even passes write the free pair, odd passes the third, so no pass reads what it writes.
       const out = i % 2 === 1 ? this.ensureViewThird() : pair(free);
       const pipeline = this.kernels.view(v);
-      const key = `view${+v.first}${+v.last}${+v.blur}${i % 2}${p}${this.occParity}`;
+      const key = `view${+v.first}${+v.last}${+v.blur}${i % 2}${p}${this.occParity}${+this.scentless}`;
       let group = this.bindCache.get(key);
       if (!group) {
         const resources = [
           this.params,
           input.trailView,
-          input.scentView,
+          this.scentless ? this.noScentView : input.scentView,
           out.trailView,
           out.scentView,
           this.env,
@@ -368,6 +386,8 @@ export class Simulation implements Sim {
   reset() {
     this.viewStale = true;
     this.revision++;
+    // The scent textures are cleared below, and without a food or a light no step adds scent.
+    this.scentless = !this.sources;
     this.step = 0;
     this.parity = 0;
     this.agentParity = 0;
@@ -528,6 +548,7 @@ export class Simulation implements Sim {
       const wrap = boundary === 'wrap';
       if (stroke.kind === 'wall') this.walls = true;
       if (stroke.kind !== 'erase') this.hasEnvironment = true;
+      if (stroke.kind === 'food' || stroke.kind === 'light') [this.sources, this.scentless] = [true, false];
       if (boundary !== this.settings.boundary) foreign = true;
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const box = paintBox(segment, this.width, this.height, wrap);
@@ -607,6 +628,8 @@ export class Simulation implements Sim {
     this.device.queue.submit([enc.finish()]);
     this.walls = false;
     this.hasEnvironment = false;
+    // The scent that the textures hold stays until the next reset.
+    this.sources = false;
     this.shapeHeld = this.settings.boundary;
   }
 
@@ -686,6 +709,7 @@ export class Simulation implements Sim {
   writeScent(data: Float32Array) {
     this.viewStale = true;
     this.revision++;
+    this.scentless = false;
     this.device.queue.writeTexture({ texture: this.current.scent }, data, { bytesPerRow: this.width * 8 }, [
       this.width,
       this.height,
@@ -713,12 +737,14 @@ export class Simulation implements Sim {
     this.device.queue.submit([enc.finish()]);
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
     this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
+    this.sources = data.some((v, i) => (i % 4 === 1 || i % 4 === 2) && v > 0);
+    if (this.sources) this.scentless = false;
     this.shapeHeld = undefined;
     if (this.walls) this.updateClearance();
   }
 
   destroy() {
-    for (const t of [...this.trail, ...this.scent]) t.destroy();
+    for (const t of [...this.trail, ...this.scent, this.noScent]) t.destroy();
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
@@ -775,14 +801,15 @@ export class Simulation implements Sim {
     let pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
-    const [trail, scent] = [this.trailViews[p], this.scentViews[p]];
+    // While the scent holds only zeros, the sensors read them from one texel (`scentless`).
+    const [trail, scent] = [this.trailViews[p], this.scentless ? this.noScentView : this.scentViews[p]];
     // With walls in the extended model, the passes whose sensors check the cells on the way for walls (agents.wgsl
     // SENSE_WALLS, ADR 0020): Jones does not say what a sensor reads behind a wall, so his model reads the sensor's
     // cell only (ADR 0022). With a trail saturation K above 0, the passes that saturate the trail (SATURATE).
     const senseWalls = this.walls && this.settings.model === 'extended';
     const saturate = trailSaturation(this.settings) > 0;
     // Bind groups of 'auto' layouts belong to their pipeline: the key names the variant.
-    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}`;
+    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}`;
     const agentPasses = saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k;
     if (!col) {
       const move = agentPasses.move;
@@ -1010,10 +1037,12 @@ export class Simulation implements Sim {
 
   /** `q`: the occupancy buffer that holds the agents per cell after this step's moves (diffuse.wgsl COVERED). */
   private diffuseBind(p: Bit, q: Bit) {
-    const key = `diffuse${p}${q}`;
+    const key = `diffuse${p}${q}${+this.scentless}`;
     let g = this.bindCache.get(key);
     if (!g) {
-      const views = [this.trailViews[p], this.scentViews[p], this.trailViews[flip(p)], this.scentViews[flip(p)]];
+      // While the scent holds only zeros, the pass reads them from one texel and writes zeros (`scentless`).
+      const scentIn = this.scentless ? this.noScentView : this.scentViews[p];
+      const views = [this.trailViews[p], scentIn, this.trailViews[flip(p)], this.scentViews[flip(p)]];
       const occ = this.ensureCollision().occ[q];
       g = this.device.createBindGroup({
         layout: this.kernels.diffuseLayout,

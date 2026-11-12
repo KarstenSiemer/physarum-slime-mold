@@ -171,6 +171,16 @@ export class GlSim implements Sim {
    * (diffuse.frag COVERED). Allocated at its first use.
    */
   private presence: Target | undefined;
+  /** A food or a light may lie in `env` since the last clear (sim.ts `sources`). */
+  private sources = false;
+  /**
+   * The scent targets hold only zeros, and no step can change that (sim.ts `scentless`, ADR 0028): the agent and
+   * diffusion passes then read the scent from a texture of one texel, `noScent`. A texel fetch outside a texture gives
+   * zero (WebGL 2.0, "Texel Fetches"). The passes stay as they are and still write the scent of every cell: zeros.
+   */
+  scentless = false;
+  /** One texel of zeros: the scent while `scentless`. */
+  private readonly noScent: Target;
   /** The view's third trail and scent, for the view of a step that moves first with two diffusion passes or more. */
   private viewThird: { trail: Target; scent: Target; fbo: WebGLFramebuffer } | undefined;
   /** The targets that hold the view's map (viewTargets()), and whether a change of the state since made it stale. */
@@ -215,6 +225,7 @@ export class GlSim implements Sim {
       this.agentsTex = [t(this.agentWidth, agentHeight, gl.RGBA32F), t(this.agentWidth, agentHeight, gl.RGBA32F)];
       this.trail = [t(width, height, gl.RGBA32F), t(width, height, gl.RGBA32F)];
       this.scent = [t(width, height, gl.RG32F), t(width, height, gl.RG32F)];
+      this.noScent = t(1, 1, gl.RG32F); // a new texture holds zeros
       // Float blending sums the counts directly. Without it, deposit() counts in half floats with a
       // stencil and writes the sums here.
       this.counts = t(width, height, gl.RGBA32F);
@@ -290,7 +301,7 @@ export class GlSim implements Sim {
       const env = this.env.texture;
       textures(gl, d.program, {
         trailIn: input.trail.texture,
-        scentIn: input.scent.texture,
+        scentIn: (this.scentless ? this.noScent : input.scent).texture,
         counts: this.counts.texture,
         env,
         occ: env,
@@ -391,6 +402,8 @@ export class GlSim implements Sim {
     this.revision++;
     const gl = this.gl;
     this.viewStale = true;
+    // The scent targets are cleared below, and without a food or a light no step adds scent.
+    this.scentless = !this.sources;
     this.step = 0;
     this.a = 0;
     this.p = 0;
@@ -487,6 +500,7 @@ export class GlSim implements Sim {
       const k = EnvKind[stroke.kind];
       if (b !== this.settings.boundary) foreign = true;
       if (k === EnvKind.wall) this.walls = true;
+      if (k === EnvKind.food || k === EnvKind.light) [this.sources, this.scentless] = [true, false];
       if (k !== EnvKind.erase) {
         this.hasEnvironment = true;
         this.layers[k - 1] = true;
@@ -554,6 +568,8 @@ export class GlSim implements Sim {
     clear(this.gl, this.shape);
     this.walls = false;
     this.hasEnvironment = false;
+    // The scent that the targets hold stays until the next reset.
+    this.sources = false;
     this.shapeHeld = this.settings.boundary;
     this.layers.fill(false);
   }
@@ -665,6 +681,7 @@ export class GlSim implements Sim {
   writeScent(data: Float32Array) {
     this.viewStale = true;
     this.revision++;
+    this.scentless = false;
     writeTarget(this.gl, this.currentScent, 0, 0, this.width, this.height, data);
   }
 
@@ -687,6 +704,8 @@ export class GlSim implements Sim {
     this.walls = any(0);
     [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
     this.hasEnvironment = this.layers.some(Boolean);
+    this.sources = any(1) || any(2);
+    if (this.sources) this.scentless = false;
     this.shapeHeld = undefined;
     if (this.walls) {
       this.writeParams(); // binds this simulation's parameters for the passes
@@ -697,6 +716,7 @@ export class GlSim implements Sim {
   destroy() {
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
+    all.push(this.noScent);
     all.push(this.walled, this.clearance);
     if (this.panels) all.push(this.panels);
     if (this.presence) all.push(this.presence);
@@ -830,7 +850,7 @@ export class GlSim implements Sim {
         {
           agentsIn: src.texture,
           trail: this.trail[this.p].texture,
-          scent: this.scent[this.p].texture,
+          scent: (this.scentless ? this.noScent : this.scent[this.p]).texture,
           env: this.env.texture,
           occ,
           claims,
@@ -875,7 +895,7 @@ export class GlSim implements Sim {
       gl.useProgram(d.program);
       textures(gl, d.program, {
         trailIn: this.trail[this.p].texture,
-        scentIn: this.scent[this.p].texture,
+        scentIn: (this.scentless ? this.noScent : this.scent[this.p]).texture,
         counts: this.counts.texture,
         env: this.env.texture,
         occ,
