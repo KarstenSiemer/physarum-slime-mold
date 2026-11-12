@@ -23,6 +23,14 @@ const EMPTY = 6u;
 // Draws after the first without the rule. The claim rounds with the rule are counted apart (pack.ts START_ROUNDS).
 const ROUNDS = 32u;
 
+// The capacity holds more agents than the start population (ADR 0025): only the first agents of each strain, up to
+// P.startEnd, start alive, and the others wait dead for growth and the Inoculate tool. sim.ts builds the passes with it
+// only then, so the passes without it keep the start of the code before it, bit for bit.
+override CAPACITY: bool = false;
+
+// An agent that the layout places: with the capacity of the start population, every agent.
+fn starter(id: u32, s: u32) -> bool { return !CAPACITY || id < P.startEnd[s]; }
+
 // Bijection on [0, 2^k): odd multiply-add and xorshift are both invertible modulo 2^k.
 fn scramble(x0: u32, k: u32) -> u32 {
   let mask = (1u << k) - 1u;
@@ -120,7 +128,7 @@ fn init(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
   var c = cellOf(st.pos);
   var alive = false;
   // With the rule, the claim rounds place the agent; it waits dead until then.
-  if (P.extra.x != EMPTY && P.cfg.w == 0u) {
+  if (P.extra.x != EMPTY && P.cfg.w == 0u && starter(i, s)) {
     for (var r = 1u; r <= ROUNDS && !habitable(c); r++) {
       st = start(i, s, r);
       c = cellOf(st.pos);
@@ -134,7 +142,9 @@ fn init(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
 }
 
 // Not placed yet: a claim round may still give it a cell.
-fn waiting(a: Agent) -> bool { return (a.bits & ALIVE) == 0u && P.extra.x != EMPTY; }
+fn waiting(a: Agent) -> bool {
+  return (a.bits & ALIVE) == 0u && P.extra.x != EMPTY && starter(agentId(a), a.bits & 3u);
+}
 
 // Unique per round (pcg is a bijection on u32 and ids are unique), so claims never tie. P.extra.z is the round.
 fn startKey(id: u32) -> u32 { return pcg(id ^ pcg(P.extra.z ^ 0x51ed270bu ^ P.cfg.x)); }

@@ -1,11 +1,31 @@
-import { constrain, RESOLUTIONS, sameLattice, type Boundary, type Lattice, type Settings } from '../model/params';
+import {
+  capacityOf,
+  constrain,
+  FOOD_START,
+  RESOLUTIONS,
+  sameLattice,
+  type Boundary,
+  type Lattice,
+  type Settings,
+} from '../model/params';
 import { latticeText, type EnvShape } from '../model/presets';
 import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
-import { stepChance, type AgentTool } from './pack';
-import { agentCount, fitResolution, fits, gridOf, gridSize, memoryBudget } from './sizing';
+import { AgentToolKind, growthOn, stepChance, strainAgents, type AgentTool } from './pack';
+import {
+  agentCount,
+  BYTES_PER_AGENT,
+  capacityCount,
+  fitResolution,
+  fits,
+  gridOf,
+  gridSize,
+  GROWTH_BYTES_PER_AGENT,
+  GROWTH_BYTES_PER_CELL,
+  memoryBudget,
+} from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -26,6 +46,19 @@ const FRAME_MS = 1;
  * agents leave in the brush: 22 % more agents after a second.
  */
 const PAUSED_TOOL_STEPS = 60;
+
+/**
+ * The disc on the first food where the start layout 'food' places its colony (seedAtFood()): twice as many cells as
+ * agents, so the colony starts at half the density of a full sheet. A sheet of one agent per cell has 25 agents in a
+ * 5 × 5 window, above Jones' Shrinkage maximum of 20, and its first shrinkage test would trim it (ADR 0025).
+ */
+const FOOD_CELLS = 2 * FOOD_START;
+const FOOD_RADIUS = Math.sqrt(FOOD_CELLS / Math.PI);
+/**
+ * Dead agents that try a random point of the disc. With the rule only one per cell takes it: K points hit
+ * FOOD_CELLS · (1 − e^(−K / FOOD_CELLS)) cells, FOOD_START for K = FOOD_CELLS · ln 2.
+ */
+const FOOD_TRIES = FOOD_CELLS * Math.LN2;
 
 // Changes that need a new population.
 // Switching one agent per cell restarts it too: agents stacked without the rule would stay stacked for
@@ -100,10 +133,11 @@ export class Engine {
   private raf = 0;
   private rebuilding: Promise<void> | undefined;
   /** What the current simulation was built for: its grid and agent count follow from these. */
-  private built: { resolution: number; lattice: Lattice | null; density: number; dish: boolean } = {
+  private built: { resolution: number; lattice: Lattice | null; density: number; capacity: number; dish: boolean } = {
     resolution: 0,
     lattice: null,
     density: 0,
+    capacity: 0,
     dish: false,
   };
 
@@ -202,12 +236,18 @@ export class Engine {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
     const { maxAgents, maxBufferBytes, maxGridSide, coveredBytesPerCell } = this.backend;
-    // Covered food needs more memory only on some backends, and only while it is on.
-    const bytesPerCell = this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0);
-    const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, budget: memoryBudget(memory) };
     const collisions = s.collisions && this.backend.supportsCollisions;
-    if (s.lattice && fits(s, s.lattice[0], s.lattice[1], limits)) return constrain({ ...s, collisions });
-    return constrain({ ...s, lattice: null, resolution: fitResolution(s, aspect, limits), collisions });
+    // Covered food needs more memory only on some backends, and only while it is on; growth only while it is on.
+    const growth = growthOn({ ...s, collisions });
+    const bytesPerCell =
+      this.backend.bytesPerCell + (s.coveredFood ? coveredBytesPerCell : 0) + (growth ? GROWTH_BYTES_PER_CELL : 0);
+    const bytesPerAgent = BYTES_PER_AGENT + (growth ? GROWTH_BYTES_PER_AGENT : 0);
+    const budget = memoryBudget(memory);
+    const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
+    // With the rule the capacity is at most one agent per cell (capacityOf()): count what this backend runs.
+    const run = { ...s, collisions };
+    if (s.lattice && fits(run, s.lattice[0], s.lattice[1], limits)) return constrain(run);
+    return constrain({ ...run, lattice: null, resolution: fitResolution(run, aspect, limits) });
   }
 
   private supported(s: Settings): Settings {
@@ -224,14 +264,15 @@ export class Engine {
   }
 
   /**
-   * The grid or the agent count changes: a dish counts its agents over the short side's square (agentCount()). On a
-   * lattice the resolution does not set the grid.
+   * The grid, the agent count or the capacity changes: a dish counts its agents over the short side's square
+   * (agentCount()). On a lattice the resolution does not set the grid.
    */
   private needsRebuild() {
     const { resolution, lattice, density, boundary } = this.settings;
     const b = this.built;
     const grid = lattice ? !sameLattice(lattice, b.lattice) : b.lattice !== null || resolution !== b.resolution;
-    return grid || density !== b.density || (boundary === 'dish') !== b.dish;
+    const capacity = capacityOf(this.settings);
+    return grid || density !== b.density || capacity !== b.capacity || (boundary === 'dish') !== b.dish;
   }
 
   /** True while the simulation is being replaced; it cannot be used meanwhile. */
@@ -250,14 +291,17 @@ export class Engine {
       do {
         const { resolution, lattice, density, boundary } = this.settings;
         const [w, h] = gridOf(this.settings, this.canvas.width / Math.max(1, this.canvas.height));
-        const agents = Math.max(1, Math.min(this.backend.maxAgents, agentCount(this.settings, w, h)));
+        // The buffer holds the capacity; the first agents of each strain, the start population, start alive.
+        const agents = Math.max(1, Math.min(this.backend.maxAgents, capacityCount(this.settings, w, h)));
+        const start = Math.min(agents, agentCount(this.settings, w, h));
+        const capacity = capacityOf(this.settings);
         this.live = false;
         old?.destroy();
         old = undefined;
         // Nothing is built until the new one exists.
-        this.built = { resolution: 0, lattice: null, density: 0, dish: false };
+        this.built = { resolution: 0, lattice: null, density: 0, capacity: 0, dish: false };
         try {
-          this.sim = await this.backend.createSim(this.settings, w, h, agents);
+          this.sim = await this.backend.createSim(this.settings, w, h, agents, start);
         } catch (err) {
           // The estimate was too optimistic for this GPU: step the grid down and try again. A lattice keeps its cells
           // or goes: the next grid is the largest one shaped like the screen with fewer cells (ADR 0026). For a grid
@@ -284,13 +328,14 @@ export class Engine {
         old = this.sim;
         this.live = true;
         this.painted = 0; // a new simulation starts without food, light and walls
-        this.built = { resolution, lattice, density, dish: boundary === 'dish' };
+        this.built = { resolution, lattice, density, capacity, dish: boundary === 'dish' };
         this.fitView();
       } while (this.needsRebuild());
       // Settings may have changed during the allocation (seed, layout, shares): start from them.
       this.sim.update(this.settings);
       this.flushEnv();
       this.sim.reset();
+      this.seedAtFood();
       this.backend.forget();
       this.restarts++;
     })().finally(() => (this.rebuilding = undefined));
@@ -300,8 +345,27 @@ export class Engine {
   reset() {
     if (this.rebuilding) return; // the new simulation starts fresh anyway
     this.sim.reset();
+    this.seedAtFood();
     this.backend.forget();
     this.restarts++;
+  }
+
+  /**
+   * The start layout 'food' (ADR 0025): every agent starts dead, and one step of the inoculate tool places about
+   * FOOD_START agents of strain A in a disc of FOOD_CELLS cells on the first food of the edit list, as Jones starts a
+   * foraging run at a food source. About FOOD_TRIES dead agents try a random point of the disc; with the rule one agent
+   * takes each cell they hit (about FOOD_START), and without it about FOOD_START agents try. Nothing happens without a
+   * food. The step is step 0 of the run, the same in every run of a seed.
+   */
+  private seedAtFood() {
+    if (this.settings.layout !== 'food') return;
+    const food = this.edits.find((e) => e.kind === 'food');
+    const at = food && strokeOn(food, this.sim.width, this.sim.height);
+    if (!at) return;
+    const dead = Math.max(1, strainAgents(this.settings.strains, this.sim.agents)[0] ?? 0);
+    const revive = Math.min(1, (this.settings.collisions ? FOOD_TRIES : FOOD_START) / dead);
+    const [x, y] = at.from;
+    this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain: 0, revive });
   }
 
   /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */

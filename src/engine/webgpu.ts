@@ -69,13 +69,13 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   /** Allocation failures surface as OutOfMemoryError instead of a lost device. */
-  async createSim(settings: Settings, width: number, height: number, agents: number) {
+  async createSim(settings: Settings, width: number, height: number, agents: number, start = agents) {
     const device = this.gpu.device;
     device.pushErrorScope('out-of-memory');
     device.pushErrorScope('validation');
     let sim: Simulation | undefined;
     try {
-      sim = await Simulation.create(device, settings, width, height, agents);
+      sim = await Simulation.create(device, settings, width, height, agents, undefined, undefined, start);
     } finally {
       // Always pop both scopes, or they would swallow later errors.
       const invalid = await device.popErrorScope();

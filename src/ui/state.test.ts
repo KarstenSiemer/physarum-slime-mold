@@ -545,6 +545,40 @@ describe('a shared link', () => {
 // The inoculate tool uses only dead agents (ADR 0023). Whether one is left comes from the alive count of the stats,
 // and only from a count of the engine's current run. After the start layout Empty restarted a scene where every agent
 // lived, the count of the run before still said so for up to 500 ms, and the app said that no dead agent was left.
+describe('growth and shrinkage (ADR 0025)', () => {
+  it('count as a change of the scene: the switch, each value and the capacity', async () => {
+    const { app, loadPreset, sceneChanged } = await fresh();
+    loadPreset('network');
+    expect(sceneChanged()).toBe(false);
+    app.settings.growth = true;
+    expect(sceneChanged()).toBe(true);
+    app.settings.growth = false;
+    expect(sceneChanged()).toBe(false);
+    for (const [k, v] of [
+      ['growthMax', 15],
+      ['shrinkWindow', 9],
+      ['capacity', 0.5],
+    ] as const) {
+      loadPreset('network');
+      app.settings[k] = v;
+      expect(sceneChanged(), k).toBe(true);
+    }
+  });
+
+  it('a link from before them opens every scene unchanged', async () => {
+    const gone = (k: string) => /^(growth|shrink[A-Z])/.test(k) || k === 'capacity';
+    for (const p of PRESETS) {
+      const { app, openLink, sceneChanged } = await fresh();
+      const old = Object.fromEntries(Object.entries(p.settings()).filter(([k]) => !gone(k)));
+      const drawing = { scene: p.id, origins: p.settings().strains.map((_s, i) => i), shapes: [] as boolean[] };
+      const link = await decodeLink((await encodeLink(old as unknown as Settings, { ...drawing, strokes: [] })).hash);
+      if (!link) throw new Error(p.id);
+      openLink(link);
+      expect([app.settings.growth, app.settings.capacity, sceneChanged()], p.id).toEqual([false, 0, false]);
+    }
+  });
+});
+
 describe('dead agents for the inoculate tool', () => {
   it('come from the alive count of the current run only', async () => {
     const { app, deadLeft } = await fresh();
@@ -564,6 +598,20 @@ describe('dead agents for the inoculate tool', () => {
     expect(deadLeft(engine)).toBe(true);
     app.strain = 1; // no such strain
     expect(deadLeft(engine)).toBeUndefined();
+  });
+
+  // A capacity above Agents per cell keeps dead agents in a full scene (ADR 0025): the tool has some to place.
+  it('are left in a full scene when the capacity holds more agents than start', async () => {
+    const { app, deadLeft } = await fresh();
+    const s = { ...defaultSettings(), resolution: 256, density: 0.2, capacity: 0.5 };
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, s, undefined, new CpuBackend());
+    const { agents, start } = engine.sim as unknown as { agents: number; start: number };
+    expect(agents).toBe(Math.round(0.5 * 256 * 160));
+    expect(start).toBe(Math.round(0.2 * 256 * 160));
+    app.strain = 0;
+    app.stats = { ...app.stats, alive: [start], run: engine.restarts };
+    expect(deadLeft(engine)).toBe(true);
   });
 });
 

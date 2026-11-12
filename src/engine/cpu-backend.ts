@@ -18,6 +18,8 @@ export class CpuSim implements Sim {
     readonly width: number,
     readonly height: number,
     readonly agents: number,
+    /** Agents alive at the start (Backend.createSim). */
+    readonly start = agents,
   ) {
     this.env = new Uint8Array(width * height * 4);
   }
@@ -63,6 +65,9 @@ export class CpuSim implements Sim {
   readCounts() {
     return Promise.resolve(new Float32Array(0));
   }
+  readWindows() {
+    return Promise.resolve(new Uint32Array(0));
+  }
   readEnv() {
     return Promise.resolve(this.env.slice());
   }
@@ -106,11 +111,11 @@ export class CpuBackend implements Backend<CpuSim> {
   /** Every simulation built, in order. */
   readonly built: CpuSim[] = [];
 
-  async createSim(settings: Settings, width: number, height: number, agents: number) {
+  async createSim(settings: Settings, width: number, height: number, agents: number, start = agents) {
     const hook = this.before;
     this.before = undefined;
     await hook?.();
-    const sim = new CpuSim(settings, width, height, agents);
+    const sim = new CpuSim(settings, width, height, agents, start);
     sim.reset(); // like Simulation.create and the GlSim constructor
     this.built.push(sim);
     return sim;

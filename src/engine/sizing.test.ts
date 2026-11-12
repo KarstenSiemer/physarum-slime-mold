@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings } from '../model/params';
 import {
   agentCount,
+  BYTES_PER_AGENT,
   BYTES_PER_CELL,
   BYTES_PER_CELL_HALF_FLOAT,
+  capacityCount,
   estimateBytes,
   fitResolution,
   gridSize,
@@ -70,5 +72,26 @@ describe('memory budget', () => {
     const [w, h] = [r, Math.round(r / (16 / 9))];
     expect(w * h * 16).toBeLessThanOrEqual(2 ** 27);
     expect(fitResolution(s, 1, { ...roomy, maxGridSide: 2048 })).toBeLessThanOrEqual(2048);
+  });
+});
+
+describe('capacity (ADR 0025)', () => {
+  it('holds the start population, or the capacity when it is higher, counted as agentCount() counts', () => {
+    const s = { ...defaultSettings(), density: 0.12, boundary: 'box' as const };
+    expect(capacityCount(s, 512, 320)).toBe(agentCount(s, 512, 320));
+    expect(capacityCount({ ...s, capacity: 1 }, 512, 320)).toBe(512 * 320);
+    expect(capacityCount({ ...s, capacity: 0.5, boundary: 'dish' }, 512, 320)).toBe(0.5 * 320 * 320);
+  });
+
+  it('is what the memory estimate counts, with the bytes of growth while it is on', () => {
+    const s = { ...defaultSettings(), density: 0.05, capacity: 1, collisions: true, resolution: 2048 };
+    const [w, h] = gridSize(2048, 1.6);
+    const budget = estimateBytes(w, h, w * h);
+    expect(fitResolution(s, 1.6, { ...roomy, budget })).toBe(2048);
+    // With the rule a capacity of 2 holds one agent per cell (capacityOf()); without it, two.
+    expect(fitResolution({ ...s, capacity: 2 }, 1.6, { ...roomy, budget })).toBe(2048);
+    expect(fitResolution({ ...s, capacity: 2, collisions: false }, 1.6, { ...roomy, budget })).toBeLessThan(2048);
+    const growth = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL + 34, bytesPerAgent: BYTES_PER_AGENT + 6 };
+    expect(fitResolution(s, 1.6, growth)).toBeLessThan(2048);
   });
 });

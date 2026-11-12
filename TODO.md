@@ -54,7 +54,12 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [x] A move across the wrap seam lands in the cell it claimed. On a grid 512 cells wide, x = −1.000001 counted in cell 510 and landed in cell 511. `wrapPos()` now takes the whole periods from integers on both backends. Its float division put x = 479.99997 on a side of 480 at −0.00003 (ADR 0008, ADR 0023, 2026-11-11)
 - [x] WebGL2 wraps cells with integers. Its float division was not exact on an Apple M3 Pro for 291 of the sides 16 to 4096, such as 33, 47 and 246. Cell W was in the next row and row H outside the grid, for moves, sensors, diffusion, wall clearance and the view. On 512 × 246 cells no agent crossed the top seam under the rule. SwiftShader (CI) divides exactly and cannot show it (ADR 0023, 2026-11-11)
 - [x] The alive count of the stats belongs to one run. After a restart the app waits for a new count, and WebGPU counts the agents after each reset. Before, the start layout Empty showed the notice that every agent lives (ADR 0023, 2026-11-11)
-- [ ] Inoculate does nothing where every agent of the strain lives, as in most scenes without shrinkage, and shows a notice (ADR 0023). A paused hold then runs no step. With the rule a hold fills the free cells of the brush and then adds agents only as they walk off. With the default brush on the Maze, WebGPU placed 136 to 158 agents after 1 s and 204 to 296 after 10 s. WebGL2 placed 146 to 151 and 193 to 201. These are too few to reach the far food. Keep this, or let the tool get agents in another way, such as growth (owner decision)
+- [x] Inoculate gets agents in a full scene: a Capacity above Agents per cell keeps dead agents, and growth brings dead agents to life (ADR 0025, 2026-11-11). Without a higher Capacity the tool does nothing where every agent of the strain lives, as before, and its notice now names Capacity first (ADR 0023)
+- [ ] Should a scene or the default settings hold a Capacity above Agents per cell, so that Inoculate works there without a change? It gives the strains other ids and so another run, and costs 32 B per agent more (ADR 0025; owner decision)
+- [x] Growth and shrinkage (Jones 2011, Nat. Comput. 10: 1345, Sec. 5.1): a switch in a section Growth with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax (defaults of 2011) and Capacity; in both models with one agent per cell, off in every scene, which keep their bytes on WebGPU, WebGL2 and WebGL2 without float blending. Exact on both backends: a parent claims an empty neighbour with the key of a move, and the dead agent of rank r of a strain takes the birth of rank r (pyramids of sums). Tested against a CPU copy of the passes (ADR 0025, 2026-11-11)
+- [x] Foraging maze (coordinator decision 2026-11-11, ADR 0025): the Maze's walls and foods with Jones' foraging angles (SA 22.5°, RA 45°), growth with the values of 2011 and a start of about 50 agents on the bottom-right food (the new start layout "At the first food"). It reaches the far food within 15,000 steps in 10 of 10 seeds on 16:9, 16:10 and 1:1, on WebGPU and WebGL2, from its own start (median steps 2,751 to 3,901) and when the user inoculates the food at step 100 or 1,000 in the layout Empty (ADR 0025, D1b)
+- [ ] The Maze (SA 45°) with growth from 50 agents reaches the far food on 16:9 and 16:10 only along its walls, and not on a square screen (0 of 10). Cause: the diffusion reflects the trail at walls and closed edges, where Jones absorbs it and runs the mean at every lattice site (Jones 2011, p. 1353; 2014, 2015, 2017), and SA 45° is Jones' angle for minimising networks (ADR 0025, D1). Owner decision 2026-11-11: Jones' corrections hold for both models ("Ja, beide Modelle", yes, both models). The fidelity pull request (in progress) brings them to both models: Jones' order of a step (move and deposit, sense, diffuse), closed edges that absorb the trail, inner walls that diffuse in the Jones model and are sinks in the extended model, and a dish of 0.945 of the short side. It measures the Maze (SA 45°) with growth again. The Foraging maze was measured with this branch's diffusion and needs a new measurement after it too (ADR 0025, D1, D1b)
+- [ ] A growth count includes the agent itself, as the shrinkage count does (ADR 0024, decision 6), so Growth minimum 0 and 1 act the same; and a child gets a random heading, which Jones does not state (ADR 0025; owner decision)
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)
 - [x] Collision mode (claims, ADR 0008)
 - [x] Brush pass (food, light, wall, erase)
@@ -103,6 +108,8 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [ ] On a desktop window a scene of Jones lies partly below the settings panel, as the dish did before (ADR 0026). Fit the lattice into the space beside the panel, or keep it centred in the window (owner decision)
 - [ ] The copies around a periodic lattice show at 0.15 of their light (ADR 0026). Keep, show them brighter or darker, or show none and let tools act only on the lattice (owner decision)
 
+- [ ] On a square window of 800 × 800 the toolbar wraps onto two rows, and its Brush slider lies on the bottom-right food of the Maze: a press there moves the slider and places no agent. The scene label covers the top-left food, and the stats line overlaps Pause, Step and Reset. At 1000 × 1000 both foods are free (app review of the growth branch, 2026-11-11; the layout is older than growth)
+
 ## M5 Quality and reach
 
 - [x] WebGL2 fallback backend (ADR 0003) with shared GPU tests (all model tests on both backends, e2e fallback test)
@@ -128,7 +135,7 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 ## Later (not in scope now)
 
 - Jenson-style contagion between strains; adaptive sensing ("36 Points" idea, own parameters only, license note in knowledge base)
-- Growth and death (Jones 2011), oscillation (Jones 2012), MCPM steering
+- Oscillation (Jones 2012), MCPM steering
 - Tracer agent with path history (shuttle streaming, Jones Fig. 7); video recording
 - Sensor width > 1 and sensitivity threshold `sMin`
 - Custom domain `physarum.karstensiemer.de` (steps in `knowledge-base/github-pages.md`)
