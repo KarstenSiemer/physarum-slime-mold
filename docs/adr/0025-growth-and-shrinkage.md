@@ -552,6 +552,6 @@ See `TODO.md` (M2):
   gets a random heading, which Jones does not state (decision 6). Both are this branch's readings.
 - Whether a scene or the default settings should hold a Capacity above Agents per cell, so that Inoculate works there
   without a change (decision 14). It changes the run of such a scene (other ids, so other random streams) and costs
-  32 B per agent more.
+  32 B per agent more (54 B on WebGL2 since ADR 0028, decision 14).
 - The scenes of the later papers (a later pull request) set their papers' values; this branch adds one scene, the
   Foraging maze (decision 30).

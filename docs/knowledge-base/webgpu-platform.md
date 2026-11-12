@@ -233,6 +233,66 @@ an outline (ADR 0009, item 11).
   WebGPU device with every pipeline and a first simulation took 16.2 to 16.8 s with six outline
   pipelines and 9.4 to 10.4 s with one. On Metal both took 6 to 18 ms, with Chrome's shader cache.
 
+## WebGL2 point passes on a tile-based GPU (measured 2026-11-12)
+
+- Setup: Apple M3 Pro, headed Chromium 158 (Playwright 1.65), WebGL2 on ANGLE over Metal, production builds served
+  locally, canvas 2560 × 1600. The start scene (Three strains) on a grid of 1536 × 960 with 4,194,304 agents (the
+  WebGL2 limit of 2^22). Other sessions used the GPU at the same time, so each comparison ran in one page, the variants
+  in a rotating order, the median of three passes over them. Times are wall time of 8 draws between fences.
+- `EXT_disjoint_timer_query_webgl2` is there, but its times overlap: the queries of the draws of one step summed to
+  60 ms against 27 ms of wall time, also with `gl.flush()` around each query. Per pass, ADR 0028 uses the wall time of a
+  step that runs only that pass.
+- The deposit (`points.vert` kind 0): one 1-pixel point per agent into the `RGBA32F` counts with additive blending,
+  in the order of the agents' indices. 13.3 to 15.3 ms one step after a reset, 15.7 to 22.2 ms after 400 steps.
+- After 400 steps 7.0 to 7.5 % of the cells hold the agents that moved: 38 to 41 per cell on average, a median of 5 to
+  6, a 99th percentile of 504 to 563, and up to 4211 to 9602 in one cell.
+
+| Variant of the deposit, after 400 steps                                   | ms per draw      |
+| ------------------------------------------------------------------------- | ---------------- |
+| as in the app                                                             | 15.7–22.2        |
+| without blending                                                          | 19.4             |
+| into `R32F`, `RGBA16F`, `RGBA8`                                           | 19.8–22.6        |
+| a vertex shader for the deposit only; the strain as `uint`; no varying    | 19.8–21.2        |
+| every point culled in the vertex shader                                   | 1.1–1.3          |
+| point k to pixel k mod cells: neighbours in the order lie side by side    | 3.1–4.2          |
+| each point to a random pixel of its own 32 × 32 tile                      | 21.1             |
+| each point to a random pixel anywhere                                     | 26.7             |
+| every point to one pixel                                                  | 357              |
+| agents reordered on the CPU: by cell; by 32 × 32 tile and cell; at random | 58.5; 52.9; 41.1 |
+
+- The cost follows the order of the points on the screen. Blending, the target format and the vertex work change it by
+  less than the spread of the runs. Points that follow each other in scattered tiles are slow, points that follow each
+  other in a band of neighbouring pixels are fast. Apple GPUs sort the primitives of a render pass into screen tiles
+  before they shade them (tile-based deferred rendering). The binning of scattered points is the likely cause; GPU
+  counters that would show it were not available. A second cost comes from many points on one pixel, which blend one
+  after the other: in an order sorted by cell the agents of a dense cell follow each other, and that is slower than
+  the scattered order.
+- The deposit in k draws, each drawing only the points inside one block of the grid (the vertex shader culls the
+  others): 15.5, 17.3 and 25.2 ms for 4, 8 and 16 bands against 15.7 ms. Less the 1.3 ms of vertex work per draw, the
+  binning part falls from 14.4 to 10.3, 6.9 and 4.3 ms: fewer tiles in a draw cost less.
+- An order through an index texture (`R32F`, read in the vertex shader), sorted on the CPU by a bucket, stable inside
+  the bucket. Through the texture in the agents' own order: 22.5 ms (base 20.2). By bands of 480, 240, 120, 60, 32 and
+  16 rows: 18.7, 15.2, 13.2, 12.7, 11.1 and 12.3 ms. By square tiles of 128, 64, 32, 16 and 8 cells: 10.0, 9.2, 10.3,
+  14.7 and 18.7 ms: small tiles put the many agents of a dense cell close together in the order.
+- The agents of a cell spread over M texels by index, then a pass sums them: without an order no gain (16.4 to 16.5 ms
+  for 2 texels, 21.4 to 22.3 for 4, 28.8 to 35.0 for 8, against 19.4 with the clear). With the order by 64 × 64 tiles
+  (one run, 22.8 ms as in the app): the order alone 9.2, with 2 texels side by side 6.5, with 2 grid copies 7.1, with
+  4 texels 7.4, with 8 texels 10.0 ms. Tiles of 128: 8.1 (2 texels). Tiles of 32: 6.8 (4 texels).
+- The sort of the order in fragment passes (`order.frag`, an LSD radix sort of 2 bits a pass over 361 keys: 5 passes).
+  With a pyramid of a fan-in of 16 the whole sort took 30 to 36 ms, 27 to 28 of them in the gathers, which read up to
+  15 children per level one after the other. All children read first: 41 ms. One sampler per level in place of a
+  choice between six: 30 ms (gathers 24). A fan-in of 4 with one sampler per level: 24 ms (gathers 12, the 55 level
+  passes 7.7, the keys 1.5 to 1.9). The counts were equal bit for bit in every variant.
+- In the app's step the 2 texels gave nothing (8 paired rounds, ADR 0028 decision 14): the deposit 0.57 ms less, the
+  wider clear 0.23 ms and the sum pass 0.64 ms more, the step × 0.995 (0.93 to 1.05). The app deposits into one texel
+  per cell.
+- How the order ages, in the app's build (one texel per cell, 3 rounds): the deposit with its clear, some steps after a
+  sort, 6.4–7.5 ms at once, 8.0–9.4 after 16 steps, 8.3–9.0 after 32, 10.7–11.3 after 64 and 11.6–12.7 after 128,
+  against 14.4–16.2 ms in the agents' own order. In the lab with 2 texels per cell: 7.7–8.8 after 8 steps against
+  18.9–20.6 ms, 8.4–9.5 after 32, 10.0–11.4 after 64, 11.6–14.3 after 128.
+- Not measured: a GPU that renders without tiles (desktop GPUs of other makers). There the scattered order may cost
+  less, and the sort costs its 0.6 ms per step all the same.
+
 ## Feature availability (web3dsurvey share of WebGPU devices)
 
 | Feature                                      | Chrome | Safari 26–27                 | Firefox         |
