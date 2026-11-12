@@ -216,7 +216,9 @@ Each decision with its date, who made it, and why.
 ### The scenes of Jones against their figures
 
 Built as the app builds a scene (`Engine.create` and `Engine.load` on a canvas of 1280 × 720), on the lattice of the
-figure, Apple M3 Pro, the commit of the foods (`f1fbb42`), with the seeds of the fidelity check. The dumps hold the map
+figure, Apple M3 Pro, with the seeds of the fidelity check: WebGPU at the commit of the foods (`f1fbb42`), whose bytes
+the head of this branch keeps for every scene of Jones (digests at step 500), WebGL2 again after decision 23 changed
+its bytes (`8e33876`, the bytes of the head). The dumps hold the map
 as the agents sense it; the metrics run on Jones' map after his diffusion (decision 22). The network of a dish scene is
 the trail above the mean of the dish; a lacuna is a part of the rest of at least 20 cells, not open to the rim; a tree
 or a band touches every food, holds no lacuna and stays off the rim; a spot of Fig. 16 is a minimum of the trail blurred
@@ -226,25 +228,25 @@ is the code before this change, as ADR 0026 and the fidelity check measured it.
 
 | Scene, property                                               | Figure             | Before                                        | After, WebGPU                  | After, WebGL2                  |
 | ------------------------------------------------------------- | ------------------ | --------------------------------------------- | ------------------------------ | ------------------------------ |
-| Transport network, lacunae at 99 / 512 / 1,740 / 4,151        | 56 / 23 / 12 / 8   | 4,151: 6.4 ± 0.9                              | 50.4 / 24.5 / 12.0 / 6.7 ± 0.6 | 49.7 / 25.9 / 11.9 / 7.4 ± 1.1 |
-| Minimizing network, lacunae at 670 / 4,072 / 31,190           | 18 / 6 / 1         | 31,190: 1.6 ± 0.5                             | 22.2 / 7.4 / 2.0 ± 0.4         | 23.2 / 7.4 / 2.2 ± 1.2         |
-| Turing stripes, wavelength; one orientation at 20,000         | 16.2; 85.5 %       | 15.7; 84.6 %                                  | 15.7; 82.6 ± 1.1 %             | 15.8; 83.1 ± 0.8 %             |
-| Turing spots at 10,000: spots, spacing variation, ψ6          | 20; 5.7 %; 0.87    | 10.5 % (variation)                            | 19.7; 6.6 %; 0.85              | 19.6; 5.5 %; 0.83              |
-| Turing spots at 30,000: exactly 20 spots, variation, ψ6       |                    | 28.7 % (ADR 0026's metric of blurred maxima)  | 28 of 30; 3.6 %; 0.88          | 28 of 30; 5.5 %; 0.84          |
+| Transport network, lacunae at 99 / 512 / 1,740 / 4,151        | 56 / 23 / 12 / 8   | 4,151: 6.4 ± 0.9                              | 50.4 / 24.5 / 12.0 / 6.7 ± 0.6 | 50.9 / 26.1 / 11.1 / 6.6 ± 0.9 |
+| Minimizing network, lacunae at 670 / 4,072 / 31,190           | 18 / 6 / 1         | 31,190: 1.6 ± 0.5                             | 22.2 / 7.4 / 2.0 ± 0.4         | 22.7 / 6.6 / 1.6 ± 0.9         |
+| Turing stripes, wavelength; one orientation at 20,000         | 16.2; 85.5 %       | 15.7; 84.6 %                                  | 15.7; 82.6 ± 1.1 %             | 15.7; 82.0 ± 2.9 %             |
+| Turing spots at 10,000: spots, spacing variation, ψ6          | 20; 5.7 %; 0.87    | 10.5 % (variation)                            | 19.7; 6.6 %; 0.85              | 19.6; 5.9 %; 0.86              |
+| Turing spots at 30,000: exactly 20 spots, variation, ψ6       |                    | 28.7 % (ADR 0026's metric of blurred maxima)  | 28 of 30; 3.6 %; 0.88          | 28 of 30; 4.6 %; 0.85          |
 | Shortest path, one band without a loop, steps 3,000 to 12,000 | one band           | 2 of 20 with network beyond r = 85 (old dish) | 20 of 20, none beyond r = 80   | 20 of 20, none beyond r = 80   |
-| Steiner tree, a tree at 3,000 / 6,000 / 12,000 (20 seeds)     | an X, short bridge | rings in 10 of 20 (old foods)                 | 15 / 20 / 20 of 20             | 16 / 20 / 20 of 20             |
-| Shrinking plasmodium, torn by 2,800 (31 seeds); IoU at 10,000 | not torn           | 18 of 31; 0.41                                | 0 of 31; 0.84                  | 0 of 31; 0.84                  |
-| Wound healing, spacing variation at 2,650 (20 seeds)          | about 3 to 5 %     | 10.8 %                                        | 9.3 ± 3.4 %                    | 9.1 ± 3.2 %                    |
+| Steiner tree, a tree at 3,000 / 6,000 / 12,000 (20 seeds)     | an X, short bridge | rings in 10 of 20 (old foods)                 | 15 / 20 / 20 of 20             | 15 / 20 / 20 of 20             |
+| Shrinking plasmodium, torn by 2,800 (31 seeds); IoU at 10,000 | not torn           | 18 of 31; 0.41                                | 0 of 31; 0.84                  | 0 of 31; 0.85                  |
+| Wound healing, spacing variation at 2,650 (20 seeds)          | about 3 to 5 %     | 10.8 %                                        | 9.3 ± 3.4 %                    | 8.8 ± 3.5 %                    |
 
 - Every scene keeps its pattern's size in cells (stripes 15.7 to 15.8 cells, spots 43.4 to 43.7 cells apart).
-- The Transport network's lacunae follow Fig. 4 over its whole course. The Minimizing network ends with about 2
+- The Transport network's lacunae follow Fig. 4 over its whole course. The Minimizing network ends with 1.6 to 2.0
   lacunae at step 31,190, Fig. 5 with 1.
-- Steiner tree at step 12,000: two junctions with a bridge of 5 to 30 cells in 20 of 20 runs on WebGPU and 18 of 20 on
-  WebGL2 (two runs with one junction, an X); 14 of 20 and 16 of 18 bridges are 10 to 15 cells long, as in Fig. 19,
-  row 2.
+- Steiner tree at step 12,000: two junctions with a bridge of 5 to 30 cells in 20 of 20 runs on WebGPU and 19 of 20 on
+  WebGL2 (one run whose skeleton shows no junction); 14 of 20 and 14 of 19 bridges are 10 to 15 cells long, as in
+  Fig. 19, row 2.
 - Shrinking plasmodium: 22,318 ± 96 agents alive at step 2,800 of 45,000 on both backends; the largest enclosed void by
-  step 2,800 has 295 cells (WebGPU) and 316 cells (WebGL2), a tear has at least 1,000.
-- Wound healing stays less regular than the figure. Its variation is 9.1 to 9.3 % against about 3 to 5 % in the JPEG of
+  step 2,800 has 295 cells (WebGPU) and 309 cells (WebGL2), a tear has at least 1,000.
+- Wound healing stays less regular than the figure. Its variation is 8.8 to 9.3 % against about 3 to 5 % in the JPEG of
   Fig. 22, and 10.8 % with this app's order. It stays an open item (TODO.md); its cause is not found.
 
 ### The app's own scenes
@@ -396,7 +398,7 @@ Each new rule was broken on purpose, one at a time, and the tests named for it r
 - **Jones' sequential order of the agents** (p. 133) against the synchronous claims of ADR 0008. The fidelity check
   found no figure that needs it after the four corrections, and the measurements above agree. ADR 0008 keeps it as the
   documented difference (amended).
-- **Wound healing's remaining irregularity** (9.1 to 9.3 % against about 3 to 5 % in Fig. 22) stays an open item in
+- **Wound healing's remaining irregularity** (8.8 to 9.3 % against about 3 to 5 % in Fig. 22) stays an open item in
   TODO.md; its cause is not found.
 - **Sensors in walls** read `BLOCKED` in both models (decision 13).
 
