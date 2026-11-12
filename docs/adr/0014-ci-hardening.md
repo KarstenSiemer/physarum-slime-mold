@@ -15,12 +15,12 @@ Dependabot alerts, CodeQL, rulesets, auto-merge and SHA-pinning enforcement off.
 
 Workflows (`.github/workflows/`):
 
-| File                    | Trigger          | Jobs                                                                                                                                                                                                                                                                                     |
-| ----------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                | PR, push to main | `build`: npm ci, signatures, audit, build, Pages artifact; `verify-gpu`: lint, svelte-check, unit, GPU (SwiftShader); `verify-e2e` (needs `build`): e2e on the `build` artifact; both in the Playwright image; `verify`: passes when `build` and both test jobs passed; `deploy` on main |
-| `security.yml`          | PR, main, weekly | `zizmor` (SARIF), `scorecard` (not on PRs)                                                                                                                                                                                                                                               |
-| `dependency-review.yml` | PR               | blocks moderate+ vulnerabilities and unlisted licenses                                                                                                                                                                                                                                   |
-| `renovate.yml`          | hourly           | self-hosted Renovate (ADR 0015)                                                                                                                                                                                                                                                          |
+| File                    | Trigger          | Jobs                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`                | PR, push to main | `build`: npm ci, signatures, audit, build, Pages artifact; `verify-gpu` in two parts: the GPU tests whose names hold `webgpu`, and the rest with lint, svelte-check and unit; `verify-e2e` (needs `build`) in two shards: e2e on the `build` artifact; all in the Playwright image; `verify`: passes when `build` and every part of both test jobs passed; `deploy` on main |
+| `security.yml`          | PR, main, weekly | `zizmor` (SARIF), `scorecard` (not on PRs)                                                                                                                                                                                                                                                                                                                                  |
+| `dependency-review.yml` | PR               | blocks moderate+ vulnerabilities and unlisted licenses                                                                                                                                                                                                                                                                                                                      |
+| `renovate.yml`          | hourly           | self-hosted Renovate (ADR 0015)                                                                                                                                                                                                                                                                                                                                             |
 
 Rules applied in every workflow (zizmor `--persona=pedantic` checks them in CI and in
 pre-commit; actionlint runs in pre-commit only):
@@ -134,6 +134,22 @@ reporting, CodeQL default setup, and:
   owner decision after one job ran into its 30 min on a slow runner). `verify-gpu` (lint, check,
   unit, GPU) starts at once; `verify-e2e` starts after `build`, so the two test suites run at the
   same time.
+- Each test job runs in two parts at the same time (2026-11-12, owner decision: "Ja, aufteilen").
+  On GitHub the GPU job had taken 10 to 25 min and the e2e job 14 to 30 min of their 30 min, and the
+  same code on `main` varied by about 2 times between runs (GPU 11 and 19 min). Two runs of PR #31
+  and #35 ran into the limit: the e2e job of #35 had passed 55 of 56 tests when it was stopped.
+  - The e2e tests use Playwright's `--shard=1/2` and `2/2`: `fullyParallel` shares them out by test,
+    28 and 28 of 56, and together the two shards list every test once.
+  - The GPU tests do not split by file: the four files already run at the same time, and
+    `sim.gpu.test.ts` alone took 21 of the job's 21 min (PR #34). They split by the backend in
+    their full names: one part runs `--testNamePattern webgpu`, the other `^(?!.*webgpu)`, so every
+    test runs in exactly one part, also a test added later. On 2026-11-12 the parts ran 276 and 308
+    tests; together 584 ran and 1 was skipped, the 585 of one job before.
+  - Lint, svelte-check and the unit tests run in the GPU part `rest` only.
+  - The parts are matrix jobs. Their check names gain the part (`verify-gpu (webgpu)`,
+    `verify-e2e (1/2)`); the ruleset requires `verify`, whose name stays, and `needs.<job>.result`
+    of a matrix job is success only when every part succeeded. Each part keeps the limit of 30 min.
+    The cost is two more runners per run, and `npm ci` and the image start once more each.
 - Residual risk: a Renovate PR with auto-merge and without code-owned files (npm packages,
   `.node-version`) merges without review once the checks pass (ADR 0015).
 - CodeQL does not read `.svelte` files; logic lives in `.ts`, and ESLint checks components.

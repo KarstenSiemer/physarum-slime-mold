@@ -260,3 +260,9 @@ GPU checks use invariants, not long exact trajectories:
   Fig. 10 takes more than about 15 min, before the test's own limit of 20 min. An e2e test that runs
   into its limit now costs up to 8 min with its retry, against 4 min before: one such test fits in
   that run, two do not.
+- On 2026-11-12 the jobs on GitHub took 10 to 25 min (GPU) and 14 to 30 min (e2e) of their 30 min;
+  the same code on `main` took 11 and 19 min for the GPU tests in two runs. In the report of PR #32
+  the e2e tests took 24.9 min: `scenes.spec.ts` 7.7, `ui.spec.ts` 6.2, `link.spec.ts` 3.7,
+  `lattice.spec.ts` 2.6, `app.spec.ts` and `growth.spec.ts` 2.3 min each. Each test job now runs in
+  two parts (ADR 0014): by those times the e2e shards take about 13 and 12 min, and each GPU part
+  about half of its tests. The limit of each part stays 30 min.
