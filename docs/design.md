@@ -105,7 +105,7 @@ strains (one `vec4` lane each).
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
-| view trail         | `rgba32float` texture (WebGL2: target)           | 16 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
+| view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -223,7 +223,7 @@ its short side, as Jones counts %p; a box or a periodic grid over all its cells.
 | Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                     |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                       |
 | Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush |
-| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom                          |
+| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom; scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings  |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                     |
 
@@ -242,7 +242,9 @@ lives (ADR 0023), and no tool runs any beside a closed arena, where it reaches n
 periodic grid the tools act on the cells under the pointer, also on a copy of the grid and across
 its edges (ADR 0026).
 
-Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hide UI.
+Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn.
+A key is a shortcut unless the focused element uses it: a field takes every key, a button Space and Enter, a slider
+the arrows.
 
 ## 5. Look
 
@@ -251,10 +253,11 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
   on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
   copies as they are when zoomed out.
 - The view draws the map after the step's diffusion in either order (ADR 0027). Sensing first
-  the trail is that map. Moving first it holds the map as the agents sense it; once per frame
-  after a change, the step's diffusion passes without sources (`VIEW`) write the map after the
-  diffusion into the free trail texture and, from a second pass on, a third one. The render
-  pass, height field, glow, auto levels and PNG read it; the simulation never does.
+  the trail and scent are that map. Moving first they hold the map as the agents sense it; once
+  per frame after a change, the step's diffusion passes without sources (`VIEW`) write the map
+  after the diffusion, trail and scent, into the free pair and, from a second pass on, a third
+  one. The render pass, height field, glow, auto levels, the scent view (its glow, line, coarse
+  map and strand) and PNG read it; the simulation never does.
 - Linear-light compositing: radiance `L = Σ trail_s · gain · color_s`, then tone mapping,
   then sRGB encoding. Overlaps turn white-hot instead of clipping.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed
@@ -270,6 +273,14 @@ Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, H hid
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
   (they deposit nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
+- Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
+  glow and the light repellent (extended model only) as a pink glow over the picture, below the oat flake and the
+  walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and
+  models compare. One thin line marks where the food steers an agent across its left and right sensors as hard as a
+  strand of trail holds it (the strand: the 99th percentile of the trail that the auto levels measure). A legend shows
+  the scale, what the line means and what the scene holds. Zoomed out the view reads a coarser map of the scent, filled again only when the scent changed. It changes
+  nothing in the simulation, goes into the link like the style, stays on when a scene loads, and without it the
+  render pass draws the pixels of before at the same cost.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.

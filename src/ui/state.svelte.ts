@@ -1,4 +1,5 @@
 import type { Engine } from '../engine/engine';
+import type { EnvTool } from '../engine/types';
 import { strainAgents } from '../engine/pack';
 import { drawingOf, kindsOf, type Drawing } from '../model/link';
 import {
@@ -169,6 +170,8 @@ export const app = $state<AppState>({
 export function setScene(p: Preset) {
   let s = p.settings();
   s.resolution = Math.min(s.resolution, app.maxResolution);
+  // The scent view is the user's, not the scene's: it stays as it is, so two scenes compare (ADR 0009, 2026-11-11).
+  s.showScent = app.settings.showScent;
   // Without the rule a scene of Jones runs on the extended model: the Jones model always has it (constrain()).
   if (!app.canCollide) s = constrain({ ...s, collisions: false });
   const base = structuredClone(s);
@@ -308,12 +311,19 @@ export function currentDrawing(): Drawing {
 }
 
 /**
+ * Whether the food, light and walls hold edits of this kind (kindsOf()). The engine changes its list outside Svelte,
+ * and app.envVersion counts the changes: the read of it lets a derived value follow them.
+ */
+export function drawn(kind: EnvTool): boolean {
+  return app.envVersion >= 0 && kindsOf(currentDrawing()).has(kind);
+}
+
+/**
  * Whether the food, light and walls hold light, which the Jones model draws without effect: the panel says so below
- * the model choice (ADR 0022, decision 29). The engine changes its list outside Svelte, and app.envVersion counts the
- * changes: the read of it lets a derived value follow them.
+ * the model choice (ADR 0022, decision 29).
  */
 export function lightDrawn(): boolean {
-  return app.envVersion >= 0 && kindsOf(currentDrawing()).has('light');
+  return drawn('light');
 }
 
 /** Shown below the model choice while the Jones model draws light (lightDrawn()). */

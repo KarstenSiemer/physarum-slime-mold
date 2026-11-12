@@ -16,6 +16,9 @@ layout(std140) uniform View {
   vec4 background;
   uvec4 frame; // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
   vec4 fx;     // bloom strength, black level, copies (packView), unused
+  vec4 scentFx; // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
+  vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
+  vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
 } V;
 
 // The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).

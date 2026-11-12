@@ -62,6 +62,9 @@ export class CpuSim implements Sim {
   readView() {
     return Promise.resolve(new Float32Array(0));
   }
+  readViewScent() {
+    return Promise.resolve(new Float32Array(0));
+  }
   readScent() {
     return Promise.resolve(new Float32Array(0));
   }
@@ -92,6 +95,9 @@ export class CpuSim implements Sim {
   }
   writeTrail() {
     // trails are not simulated here
+  }
+  writeScent() {
+    // scents are not simulated here
   }
   writeEnv(data: Uint8Array) {
     this.env.set(data);
@@ -130,7 +136,13 @@ export class CpuBackend implements Backend<CpuSim> {
     return Promise.reject(new Error('not available in Node'));
   }
   settle() {
-    return Promise.resolve({ gain: 0, black: 0 });
+    return Promise.resolve(this.levels());
+  }
+  measured() {
+    return Promise.resolve(this.levels());
+  }
+  levels() {
+    return { gain: 0, black: 0, strand: 0 };
   }
   forget() {
     // no caches

@@ -53,9 +53,22 @@ interface GrowthBuffers {
   /** One uniform per pyramid level that a build pass writes (growth.wgsl `level`). */
   levels: GPUBuffer[];
 }
+/** A trail and a scent texture with their views: the view's pairs (viewTextures). */
+interface ViewPair {
+  trail: GPUTexture;
+  trailView: GPUTextureView;
+  scent: GPUTexture;
+  scentView: GPUTextureView;
+}
+
 /** All simulation state on the GPU for one grid size and agent count (WebGPU). */
 export class Simulation implements Sim {
   step = 0;
+  /**
+   * Counts the changes of the scent and the shape outside steps (reset, strokes, clearing, writes, a new hold of the
+   * shape); `step` counts the steps. Together they tell a cache of them when it is old: the scent view's coarse map.
+   */
+  revision = 0;
   private parity: Bit = 0;
   private occParity: Bit = 0;
   private settings: Settings;
@@ -80,10 +93,10 @@ export class Simulation implements Sim {
   readonly scent: Pair<GPUTexture>;
   private readonly trailViews: Pair<GPUTextureView>;
   private readonly scentViews: Pair<GPUTextureView>;
-  /** The view's third trail texture, for the view of a step that moves first with two diffusion passes or more. */
-  private viewTrail?: { texture: GPUTexture; view: GPUTextureView } | undefined;
-  /** The texture that holds the view's map (viewTexture), and whether a change of the state since made it stale. */
-  private viewOut?: GPUTexture | undefined;
+  /** The view's third trail and scent, for the view of a step that moves first with two diffusion passes or more. */
+  private viewThird?: ViewPair | undefined;
+  /** The textures that hold the view's map (viewTextures), and whether a change of the state since made it stale. */
+  private viewOut?: { trail: GPUTexture; scent: GPUTexture } | undefined;
   private viewStale = true;
   readonly counts: GPUBuffer;
   readonly env: GPUBuffer;
@@ -198,19 +211,25 @@ export class Simulation implements Sim {
   }
 
   /**
-   * The trail map that the view draws (ADR 0027): the map after the step's diffusion. Sensing first the textures hold
-   * it, and the view draws them. Moving first they hold the map as the agents sense it, before its diffusion; the
-   * step's diffusion passes without its sources and its cut (diffuse.wgsl VIEW) then write the map after the
-   * diffusion into the free texture of the pair and, from a second pass on, into a third texture. The simulation reads
-   * neither: its next step writes the free texture anew. Made once for each state, at the first frame that draws it.
+   * The trail and scent that the view draws (ADR 0027): the map after the step's diffusion. Sensing first the textures
+   * hold it, and the view draws them. Moving first they hold the map as the agents sense it, before its diffusion; the
+   * step's diffusion passes without its sources and its cut (diffuse.wgsl VIEW) then write the map after the diffusion,
+   * trail and scent, into the free textures of the pair and, from a second pass on, into a third pair. The simulation
+   * reads neither: its next step writes the free textures anew. Made once for each state, at the first frame or
+   * readback that draws it. The scent view's coarse map keys on the step and on `revision`, which update() counts.
    */
-  get viewTexture(): GPUTexture {
-    if (this.settings.stepOrder === 'sense-first') return this.current.trail;
+  get viewTextures(): { trail: GPUTexture; scent: GPUTexture } {
+    if (this.settings.stepOrder === 'sense-first') return this.current;
     if (this.viewStale || !this.viewOut) this.encodeView();
-    return this.viewOut ?? this.current.trail;
+    return this.viewOut ?? this.current;
   }
 
-  /** The passes of viewTexture: the step's diffusion plan, the input the trail as the agents sense it. */
+  /** The trail of viewTextures. */
+  get viewTexture(): GPUTexture {
+    return this.viewTextures.trail;
+  }
+
+  /** The passes of viewTextures: the step's diffusion plan, the input the map as the agents sense it. */
   private encodeView() {
     this.writeParams();
     const p = this.parity;
@@ -218,21 +237,26 @@ export class Simulation implements Sim {
     const occ = this.ensureCollision().occ[this.occParity];
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
-    let input = this.trailViews[p];
-    let out = this.trail[p];
+    const pair = (b: Bit): ViewPair => ({
+      trail: this.trail[b],
+      trailView: this.trailViews[b],
+      scent: this.scent[b],
+      scentView: this.scentViews[b],
+    });
+    let input = pair(p);
     diffusePlan(this.settings.diffusion).forEach((v, i) => {
-      const third = i % 2 === 1 ? this.ensureViewTrail() : undefined;
-      const [target, view] = third ? [third.texture, third.view] : [this.trail[free], this.trailViews[free]];
+      // Even passes write the free pair, odd passes the third, so no pass reads what it writes.
+      const out = i % 2 === 1 ? this.ensureViewThird() : pair(free);
       const pipeline = this.kernels.view(v);
       const key = `view${+v.first}${+v.last}${+v.blur}${i % 2}${p}${this.occParity}`;
       let group = this.bindCache.get(key);
       if (!group) {
         const resources = [
           this.params,
-          input,
-          this.scentViews[p],
-          view,
-          this.scentViews[free],
+          input.trailView,
+          input.scentView,
+          out.trailView,
+          out.scentView,
           this.env,
           this.counts,
           occ,
@@ -246,31 +270,34 @@ export class Simulation implements Sim {
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, group);
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
-      input = view;
-      out = target;
+      input = out;
     });
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    this.viewOut = out;
+    this.viewOut = { trail: input.trail, scent: input.scent };
     this.viewStale = false;
   }
 
-  /** The view's third trail texture, made at its first use (sizing.ts VIEW_BYTES_PER_CELL counts it). */
-  private ensureViewTrail() {
-    if (!this.viewTrail) {
-      const texture = this.device.createTexture({
-        size: [this.width, this.height],
-        format: 'rgba32float',
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
-      });
-      this.viewTrail = { texture, view: texture.createView() };
+  /** The view's third trail and scent, made at their first use (sizing.ts VIEW_BYTES_PER_CELL counts them). */
+  private ensureViewThird(): ViewPair {
+    if (!this.viewThird) {
+      const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
+      const size = [this.width, this.height];
+      const trail = this.device.createTexture({ size, format: 'rgba32float', usage });
+      const scent = this.device.createTexture({ size, format: 'rg32float', usage });
+      this.viewThird = { trail, trailView: trail.createView(), scent, scentView: scent.createView() };
     }
-    return this.viewTrail;
+    return this.viewThird;
   }
 
   /** For tests: the trail map that the view draws (viewTexture), 4 lanes per cell. */
   readView(): Promise<Float32Array> {
-    return readTexture(this.device, this.viewTexture, 4);
+    return readTexture(this.device, this.viewTextures.trail, 4);
+  }
+
+  /** For tests: the scent that the view draws (viewTextures), 2 values per cell. */
+  readViewScent(): Promise<Float32Array> {
+    return readTexture(this.device, this.viewTextures.scent, 2);
   }
 
   /** The agent buffer that holds the current state, in sort order (ids in `bits`, ADR 0005). */
@@ -299,6 +326,7 @@ export class Simulation implements Sim {
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
+    this.revision++;
     this.shapeHeld = this.settings.boundary;
     if (!this.hasEnvironment) return; // nothing painted: `shape` holds only zeros, under every boundary
     this.writeParams();
@@ -314,13 +342,17 @@ export class Simulation implements Sim {
   /** Applies new parameters. Grid size and agent count need a new Simulation instead. */
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
+    // Moving first new settings make a new view of the same state, and the scent view's coarse map counts it as a change
+    // of the scent (ADR 0027); the step after them changes the step count anyway.
+    if (settings.stepOrder === 'move-first' || this.settings.stepOrder === 'move-first') this.revision++;
     this.settings = settings;
     this.viewStale = true;
     if (switchedOn) this.rebuildOccupancy();
     // The memory fit counts the view's third texture only while a step moves first with two passes or more.
-    if (!viewTrailOn(settings) && this.viewTrail) {
-      this.viewTrail.texture.destroy();
-      this.viewTrail = undefined;
+    if (!viewTrailOn(settings) && this.viewThird) {
+      this.viewThird.trail.destroy();
+      this.viewThird.scent.destroy();
+      this.viewThird = undefined;
       this.viewOut = undefined;
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
     }
@@ -335,6 +367,7 @@ export class Simulation implements Sim {
 
   reset() {
     this.viewStale = true;
+    this.revision++;
     this.step = 0;
     this.parity = 0;
     this.agentParity = 0;
@@ -460,6 +493,7 @@ export class Simulation implements Sim {
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
     this.viewStale = true;
+    this.revision++;
     // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
     // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
@@ -566,6 +600,7 @@ export class Simulation implements Sim {
 
   clearEnvironment() {
     this.viewStale = true;
+    this.revision++;
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
     enc.clearBuffer(this.shapeBuffer);
@@ -648,6 +683,15 @@ export class Simulation implements Sim {
     this.device.queue.submit([enc.finish()]);
   }
 
+  writeScent(data: Float32Array) {
+    this.viewStale = true;
+    this.revision++;
+    this.device.queue.writeTexture({ texture: this.current.scent }, data, { bytesPerRow: this.width * 8 }, [
+      this.width,
+      this.height,
+    ]);
+  }
+
   writeTrail(data: Float32Array) {
     this.viewStale = true;
     this.device.queue.writeTexture({ texture: this.current.trail }, data, { bytesPerRow: this.width * 16 }, [
@@ -662,6 +706,7 @@ export class Simulation implements Sim {
    */
   writeEnv(data: Uint8Array) {
     this.viewStale = true;
+    this.revision++;
     this.device.queue.writeBuffer(this.env, 0, data);
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.shapeBuffer);
@@ -677,7 +722,8 @@ export class Simulation implements Sim {
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
-    this.viewTrail?.texture.destroy();
+    this.viewThird?.trail.destroy();
+    this.viewThird?.scent.destroy();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();

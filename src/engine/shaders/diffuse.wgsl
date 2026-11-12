@@ -22,9 +22,9 @@ override COVERED: bool = false;
 // A constant, not P.model.w: inside a branch on a uniform, Metal's compiler folds the mean and the decay of sensing
 // first into one factor, and the code before ADR 0027 rounded them apart.
 override SENSE_FIRST: bool = false;
-// The view of a step that moves first (sim.ts `viewTexture`, ADR 0027): the step's diffusion and decay of the map that
-// the textures hold, without its sources and its cut, into textures that the simulation does not read. The view then
-// draws the map after the step's diffusion, as a scene that senses first draws it.
+// The view of a step that moves first (sim.ts `viewTextures`, ADR 0027): the step's diffusion and decay of the map
+// that the textures hold, trail and scent, without its sources and its cut, into textures that the simulation does not
+// read. The view then draws the map after the step's diffusion, as a scene that senses first draws it.
 override VIEW: bool = false;
 
 @group(0) @binding(1) var trailIn: texture_2d<f32>;
@@ -173,5 +173,5 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
     s = vec2f(0.0);
   }
   textureStore(trailOut, p, t);
-  if (!VIEW) { textureStore(scentOut, p, vec4f(s, 0.0, 0.0)); }
+  textureStore(scentOut, p, vec4f(s, 0.0, 0.0));
 }

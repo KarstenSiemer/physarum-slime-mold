@@ -815,4 +815,51 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the view (ADR 0027)', (kind)
     },
     240_000,
   );
+  // The scent view (ADR 0009) reads the same state as the picture: moving first the scent after the step's diffusion
+  // too, zoomed out through its coarse map, with the line of the strand that the trail's levels give.
+  // On 160 × 120 pixels the view reads the grid, on 64 × 48 (4 cells per pixel) its coarse map of level 2.
+  it.each([
+    [1, 160, 120],
+    [2, 160, 120],
+    [1, 64, 48],
+    [2, 64, 48],
+  ])(
+    "draws the scent view of the map after the step's diffusion, moving first (%i passes, %i × %i pixels)",
+    async (diffusion, cw, ch) => {
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [cw, ch];
+      const s: Settings = {
+        ...defaultSettings(),
+        resolution: 256,
+        layout: 'empty',
+        diffusion,
+        stepOrder: 'move-first',
+        showScent: true,
+      };
+      const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+      engine.paused = true;
+      const sim = engine.sim;
+      let r = 5;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      const cells = sim.width * sim.height;
+      const raw = Float32Array.from({ length: cells * 4 }, () => (rnd() < 0.03 ? 300 : 0));
+      const rawScent = Float32Array.from({ length: cells * 2 }, (_, i) => (i % 2 === 0 && rnd() < 0.05 ? 400 : 0));
+      sim.writeTrail(raw);
+      sim.writeScent(rawScent);
+      await capture(engine);
+      // New settings make a new view of the same state: the coarse map follows them without a step.
+      sim.update({ ...engine.settings, scentDecay: 0.3 });
+      const moving = await capture(engine);
+      const [view, viewScent] = [await sim.readView(), await sim.readViewScent()];
+      sim.update({ ...engine.settings, scentDecay: 0.3, stepOrder: 'sense-first' });
+      sim.writeTrail(view);
+      sim.writeScent(viewScent);
+      expect(maxDiff(moving, await capture(engine))).toBe(0);
+      // The scent as the agents sense it draws otherwise, with the trail of the view.
+      sim.writeScent(rawScent);
+      expect(maxDiff(moving, await capture(engine))).toBeGreaterThan(10);
+      engine.destroy();
+    },
+    240_000,
+  );
 });

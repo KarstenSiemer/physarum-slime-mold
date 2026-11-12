@@ -98,10 +98,10 @@ describe('capacity (ADR 0025)', () => {
   });
 });
 
-// ADR 0027: the view of a step that moves first needs a third trail texture from two diffusion passes on.
+// ADR 0027: the view of a step that moves first needs a third trail and scent from two diffusion passes on.
 describe('the view of a step that moves first', () => {
-  it('needs a third trail texture of 16 B per cell only from two passes on', () => {
-    expect(VIEW_BYTES_PER_CELL).toBe(16);
+  it('needs a third trail and scent of 24 B per cell only from two passes on', () => {
+    expect(VIEW_BYTES_PER_CELL).toBe(24);
     for (const diffusion of [0, 1, 2, 3, 4]) {
       expect(viewTrailOn({ stepOrder: 'move-first', diffusion }), `${diffusion}`).toBe(diffusion >= 2);
       expect(viewTrailOn({ stepOrder: 'sense-first', diffusion }), `${diffusion}`).toBe(false);

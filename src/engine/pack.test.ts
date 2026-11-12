@@ -55,6 +55,14 @@ describe('Params layout', () => {
     expect([...f.slice(12 * 4, 12 * 4 + 4)]).toEqual([-1, 1, 0, 0]);
   });
 
+  it('packs the same bytes with the scent view on and off', () => {
+    const at = { width: 64, height: 32, agents: 1000, step: 7 };
+    for (const model of ['jones', 'extended'] as const) {
+      const s = { ...defaultSettings(), model };
+      expect(new Uint8Array(packParams({ ...s, showScent: true }, at))).toEqual(new Uint8Array(packParams(s, at)));
+    }
+  });
+
   it('packs the layout, the walls flag and the start claim round into extra', () => {
     const s = { ...defaultSettings(), layout: 'ring' as const };
     const extra = (more: { walls?: boolean; round?: number }) => [
@@ -254,6 +262,7 @@ describe('the dish', () => {
       './gl/glsl/common.glsl',
       './gl/glsl/view.glsl',
       './gl/glsl/render.frag',
+      './gl/glsl/scent-down.frag',
     ])
       expect(read(path), path).not.toMatch(/0\.5 \* (?:f32|float)?\(?min\([^)]*\)\)? - 1\.0/);
   });

@@ -300,6 +300,39 @@ ask only about problems that stay unsolved).
     SwiftShader in CI builds every pipeline built at the start.
 35. **`Sim.readView()`** reads the view's map for tests, as `readTrail()` reads the trail (this branch, 2026-11-12).
 
+### The scent view (merge of PR #31, 2026-11-12)
+
+The scent view (ADR 0009, amendment 2026-11-11) came in with the merge of main at `909bb62`. Decisions 36 to 39 are
+this branch's, under the owner's delegation of 2026-11-12.
+
+36. **The scent view reads the same state as the picture.** The view pass of a scene that moves first diffuses the scent
+    too: trail and scent go into the free pair and, from a second pass on, into a third pair (`viewTextures` in
+    `sim.ts`, `viewTargets()` in `gl/sim.ts`). The scent view's glow, its line with the lookups of its sensors, its
+    coarse map and the strand of the auto levels read the view's trail and scent on both backends; sensing first they
+    read the textures, as main does. The third pair is 24 B per cell (`VIEW_BYTES_PER_CELL`). Reason: the picture and
+    the scent view show one map, the one after the step's diffusion; drawing the scent before its diffusion under a trail
+    after it would mix two states.
+37. **New settings of a scene that moves first count as a change of the scent** (`revision`, `update()` in both sims).
+    The scent view's coarse map is filled again only when the step or `revision` changes (ADR 0009); moving first, new
+    settings without a step make a new view of the same state. Reason: a paused scene would draw the coarse map of the
+    old view.
+38. **The scent view's rim is Jones' dish** (`DISH_FILL` in its texel lookups of `render.wgsl` and `render.frag` and in
+    `scent-down.frag`; `pack.test.ts` reads that file too), and its CPU references use `dishRadius()`. main's test that
+    the glow holds its top from 10,000 up runs on a periodic grid: the box's edges now take in the scent (decision 10),
+    and in the box of 32 × 24 cells the scent stayed at 15,355 instead of passing 100,000.
+39. **`Sim.writeScent()` and `Sim.readViewScent()`** for tests, as `writeTrail()` and `readView()`.
+
+The checks: the scenes that sense first draw main's pixels exactly with the scent view off and on, on both backends
+(the default settings, Three strains, Two strains, Fleeing light, Cyclones, Dunes and Dot grid at step 500, against main
+at `909bb62`); main's tests that the shaders without the view draw the pixels of before and that the view changes no
+byte of the simulation pass. Moving first, the view's scent is the scent after the next step, bit for bit, wherever no
+food adds its source, and a frame with the scent view (on the grid and on its coarse map of level 2, after new settings)
+draws what a scene that senses first draws for the view's map, and not what it draws for the scent before its
+diffusion (`engine.gpu.test.ts`). Seven mutations (the raw scent in the render pass on each backend, the view pass
+without its scent on WebGPU, the scent of the first view pass read again by the second on each backend, new settings
+without a new `revision` on each backend) are killed; the last two survived the first test, which drew at the level of
+the grid, and were killed once it also drew on the coarse map.
+
 ## Measurements
 
 ### The scenes of Jones against their figures

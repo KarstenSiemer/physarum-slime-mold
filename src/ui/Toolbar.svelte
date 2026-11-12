@@ -72,6 +72,12 @@
 
   <div class="group">
     <button type="button" onclick={() => getEngine()?.fitView()} title="F">Fit</button>
+    <button
+      type="button"
+      aria-pressed={app.settings.showScent}
+      title="Show the scent of food and light (S)"
+      onclick={() => (app.settings.showScent = !app.settings.showScent)}>Scent</button
+    >
     <button type="button" onclick={savePng}>Save PNG</button>
   </div>
 </div>

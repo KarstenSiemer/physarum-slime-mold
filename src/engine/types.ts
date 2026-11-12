@@ -60,6 +60,8 @@ export interface Sim {
    * it is the trail; moving first the step's diffusion of the trail without its sources.
    */
   readView(): Promise<Float32Array>;
+  /** The scent that the view draws, 2 values per cell: the scent of the same state as readView() (ADR 0027). */
+  readViewScent(): Promise<Float32Array>;
   /** Food scent and light repellent, 2 values per cell, rows from y = 0. */
   readScent(): Promise<Float32Array>;
   /** Agents that moved into each cell in the last step, 4 lanes per cell. */
@@ -80,6 +82,8 @@ export interface Sim {
   readonly hasEnvironment: boolean;
   writeAgent(index: number, a: AgentState): void;
   writeTrail(data: Float32Array): void;
+  /** For tests: replaces the scent, 2 values per cell as readScent() returns them. */
+  writeScent(data: Float32Array): void;
   /**
    * Replaces the environment with `data`, 4 bytes per cell as readEnv() returns them. For tests: the engine
    * changes the environment only with paint() and clearEnvironment().
@@ -89,11 +93,15 @@ export interface Sim {
 
 /**
  * Auto levels: `gain` maps trail units to radiance before the exposure setting (0 until a measurement found
- * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black.
+ * any trail; frames then use 0.4 / equilibrium), `black` is the summed trail level shown as black. `strand`: the
+ * trail of a strand for the scent view's line (scent.ts scentSensors()): the 99th percentile of the summed trail,
+ * which the levels draw at full strength, read from the same measurement within its bin and smoothed slowly; 0 until
+ * measured.
  */
 export interface Levels {
   gain: number;
   black: number;
+  strand: number;
 }
 
 /** A GPU API: creates simulations and draws them. */
@@ -120,9 +128,17 @@ export interface Backend<S extends Sim = Sim> {
   createSim(settings: Settings, width: number, height: number, agents: number, start?: number): Promise<S>;
   /** Draws a frame; `measure` lets auto levels sample the trail. */
   draw(sim: S, settings: Settings, view: View, measure: boolean): void;
-  capture(sim: S, settings: Settings, view: View, width: number, height: number): Promise<ImageData>;
+  /** `levels`: levels for this picture alone (measured()), in place of those of the frames. */
+  capture(sim: S, settings: Settings, view: View, width: number, height: number, levels?: Levels): Promise<ImageData>;
   /** Measures auto levels now instead of smoothing over frames; resolves with the levels frames now use. */
   settle(sim: S): Promise<Levels>;
+  /**
+   * Measures auto levels now for one picture, an export, and resolves with them; the levels frames use stay as they
+   * are, so the scent view's line goes on from its smoothed strand. The levels frames use if nothing could be measured.
+   */
+  measured(sim: S): Promise<Levels>;
+  /** The levels frames use now. */
+  levels(): Levels;
   /** Drops caches tied to a replaced simulation and restarts auto levels. */
   forget(): void;
   destroy(): void;

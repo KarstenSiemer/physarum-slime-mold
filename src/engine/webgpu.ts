@@ -20,9 +20,13 @@ export class WebGpuBackend implements Backend<Simulation> {
 
   readonly description: string;
   readonly lost: Promise<string>;
-  private readonly renderer: Renderer;
+  private renderer: Renderer;
+  private readonly context: GPUCanvasContext;
+  private readonly format: GPUTextureFormat;
   private readonly bloom: Bloom;
   private readonly auto: AutoExposure;
+  /** destroy() was called: the end of the device that follows is no loss. */
+  private ending = false;
 
   private constructor(
     readonly gpu: Gpu,
@@ -30,13 +34,15 @@ export class WebGpuBackend implements Backend<Simulation> {
   ) {
     const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({ device: gpu.device, format, alphaMode: 'opaque' });
+    [this.context, this.format] = [context, format];
     this.renderer = new Renderer(gpu.device, context, format);
     this.bloom = new Bloom(gpu.device);
     this.auto = new AutoExposure(gpu.device);
     const i = gpu.info;
     this.description = `WebGPU · ${[i.vendor, i.architecture, i.description].filter(Boolean).join(' ')}`;
+    // destroy() below ends the device on purpose; any other end of it is a loss, also a destroy() from elsewhere.
     this.lost = gpu.device.lost.then((info) =>
-      info.reason === 'destroyed' ? new Promise<string>(() => undefined) : info.message,
+      this.ending ? new Promise<string>(() => undefined) : info.message || `device ${info.reason}`,
     );
   }
 
@@ -87,13 +93,31 @@ export class WebGpuBackend implements Backend<Simulation> {
     this.renderer.draw(this.frame(sim, settings, view, measure));
   }
 
-  capture(sim: Simulation, settings: Settings, view: View, width: number, height: number) {
-    return this.renderer.capture(this.frame(sim, settings, view, false), width, height);
+  capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
+    return this.renderer.capture(this.frame(sim, settings, view, false, levels), width, height);
   }
 
   async settle(sim: Simulation): Promise<Levels> {
     await this.auto.measure(sim.viewTexture);
-    return { gain: this.auto.gain, black: this.auto.black };
+    return this.levels();
+  }
+
+  levels(): Levels {
+    return { gain: this.auto.gain, black: this.auto.black, strand: this.auto.strand };
+  }
+
+  async measured(sim: Simulation): Promise<Levels> {
+    return (await this.auto.read(sim.viewTexture)) ?? this.levels();
+  }
+
+  /**
+   * For tests: draws every frame with another version of the render shader from now on, as the code before the scent
+   * view did, or as shipped again when `code` is undefined. The new renderer counts its frames from 0, so its dither
+   * matches another one's frame by frame.
+   */
+  renderFrom(code?: string) {
+    this.renderer.destroy();
+    this.renderer = new Renderer(this.gpu.device, this.context, this.format, code);
   }
 
   forget() {
@@ -102,24 +126,32 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   destroy() {
+    this.ending = true;
     this.renderer.destroy();
     this.bloom.destroy();
     this.auto.destroy();
     this.gpu.device.destroy();
   }
 
-  /** Exposure and bloom for the current state; `measure` runs the auto-levels histogram. */
-  private frame(sim: Simulation, s: Settings, view: View, measure: boolean): Frame {
+  /**
+   * Exposure and bloom for the current state; `measure` runs the auto-levels histogram. `given`: levels measured for
+   * this frame alone (an export), in place of those of the frames.
+   */
+  private frame(sim: Simulation, s: Settings, view: View, measure: boolean, given?: Levels): Frame {
     // The map after the step's diffusion in either order of a step (ADR 0027).
     const trail = sim.viewTexture;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
-    const base = agents ? 0.4 / s.density : measure ? this.auto.update(trail, fallback) : this.auto.gain || fallback;
+    // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009).
+    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback);
+    const l = given ?? this.levels();
+    const base = agents ? 0.4 / s.density : l.gain || fallback;
     const exposure = base * 2 ** s.exposure;
-    const black = agents ? 0 : this.auto.black;
+    const black = agents ? 0 : l.black;
     const wrap = s.boundary === 'wrap';
     const bloom =
       s.bloom > 0 && s.style === 'glow' ? this.bloom.run(trail, exposure, black, wrap) : this.bloom.view(trail);
-    return { sim, settings: s, view, exposure, black, bloom, sampler: at(this.bloom.samplers, wrap ? 1 : 0) };
+    const sampler = at(this.bloom.samplers, wrap ? 1 : 0);
+    return { sim, settings: s, view, exposure, black, strand: l.strand, bloom, sampler };
   }
 }
