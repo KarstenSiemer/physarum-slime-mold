@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
-import { Engine, type HeldTool } from './engine';
+import { Engine, MAX_IN_FLIGHT, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
 import { diffusePlan, equilibrium, gridSize } from './sizing';
 
@@ -218,5 +218,315 @@ describe('agent tools beside a lattice', () => {
     const engine = await paused('wound');
     expect(hold(engine, AgentToolKind.cut, -100, 150)).toBe(30);
     expect(hold(engine, AgentToolKind.cut, 450, -20)).toBe(30);
+  });
+});
+
+// A frame draws only what is new (ADR 0028): paused, the canvas keeps its picture and the GPU stays idle.
+describe('frames that show nothing new', () => {
+  async function start(patch: Partial<Settings> = {}) {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const backend = new CpuBackend();
+    const engine = await Engine.create(canvas, { ...defaultSettings(), resolution: 256, ...patch }, undefined, backend);
+    let t = 0;
+    /** `n` frames of the loop, 1/60 s apart; returns how many of them drew. */
+    const frames = (n = 1) => {
+      const before = backend.draws;
+      for (let k = 0; k < n; k++) engine.frame((t += 1000 / 60));
+      return backend.draws - before;
+    };
+    /** Frames until none draws any more. */
+    const rest = () => {
+      frames(SETTLE_FRAMES);
+      expect(frames(5), 'at rest').toBe(0);
+    };
+    return { engine, backend, canvas, frames, rest };
+  }
+
+  it('draws every frame while steps run, and counts every frame', async () => {
+    const { engine, frames } = await start({ speed: 60 });
+    expect(frames(40)).toBe(40);
+    expect(engine.draws).toBe(40);
+    expect(engine.frames).toBe(40);
+  });
+
+  it('stops after the frames that let the levels settle while paused, and still counts the frames', async () => {
+    const { engine, frames } = await start();
+    engine.paused = true;
+    expect(frames(SETTLE_FRAMES + 20)).toBe(SETTLE_FRAMES);
+    expect(engine.frames).toBe(SETTLE_FRAMES + 20);
+    expect(engine.sim.step).toBe(0);
+  });
+
+  it('draws slow steps only: a frame without a step shows nothing new', async () => {
+    // 6 steps per second at 60 Hz: one frame in 10 runs a step, and SETTLE_FRAMES frames draw after each.
+    const { engine, frames } = await start({ speed: 6 });
+    const drew = frames(600);
+    expect(engine.sim.step).toBeGreaterThanOrEqual(58);
+    expect(drew).toBe(600);
+    // 1 step in 4 s: most frames draw nothing.
+    const slow = await start({ speed: 0.25 });
+    expect(slow.frames(600)).toBeLessThanOrEqual(3 * SETTLE_FRAMES);
+  });
+
+  // Every input of a picture: each one makes the next frame draw, and SETTLE_FRAMES frames in all.
+  const stroke = {
+    kind: 'food' as const,
+    from: [20, 20] as [number, number],
+    to: [30, 20] as [number, number],
+    radius: 4,
+  };
+  const INPUTS: Record<string, (e: Engine, c: HTMLCanvasElement, b: CpuBackend) => void | Promise<void>> = {
+    'a pan': (e) => {
+      e.panBy(3, 0);
+    },
+    'a zoom': (e) => {
+      e.zoomAt(80, 50, 1.25);
+    },
+    'a fitted view after the page set the canvas size again': (e) => {
+      e.fitView();
+    },
+    'another canvas size': (e, c) => {
+      c.width = 200;
+    },
+    'another style': (e) => e.apply({ ...e.settings, style: 'paper' }),
+    'another colour': (e) =>
+      e.apply({ ...e.settings, strains: e.settings.strains.map((s, i) => (i === 0 ? { ...s, color: '#123456' } : s)) }),
+    'another exposure': (e) => e.apply({ ...e.settings, exposure: 0.5 }),
+    'the scent view': (e) => e.apply({ ...e.settings, showScent: true }),
+    'a restart from another seed': (e) => e.apply({ ...e.settings, seed: e.settings.seed + 1 }),
+    'another grid': (e) => e.apply({ ...e.settings, resolution: 512 }),
+    'a stroke': (e) => {
+      e.paint(stroke);
+    },
+    'a reset': (e) => {
+      e.reset();
+    },
+    'a loaded scene': (e) => e.load({ ...e.settings }, []),
+    'a call of invalidate()': (e) => {
+      e.invalidate();
+    },
+    'levels that moved': (e, c, b) => {
+      b.current = { gain: 1, black: 0.1, strand: 2 };
+    },
+    'a step by hand': (e) => {
+      e.frame(0, 1);
+    },
+  };
+  it.each(Object.keys(INPUTS))('draws again after %s while paused', async (name) => {
+    const { engine, backend, canvas, frames, rest } = await start();
+    engine.paused = true;
+    rest();
+    const before = backend.draws;
+    await INPUTS[name]?.(engine, canvas, backend);
+    expect(frames(1), 'the next frame').toBe(1);
+    frames(SETTLE_FRAMES + 10);
+    // A step by hand is the first of these frames.
+    expect(backend.draws - before).toBe(SETTLE_FRAMES);
+  });
+
+  it('draws again after a clear of the food, light and walls', async () => {
+    const { engine, frames, rest } = await start();
+    engine.paused = true;
+    engine.paint(stroke);
+    rest();
+    engine.clearEnvironment();
+    expect(frames(1)).toBe(1);
+  });
+
+  it('keeps the picture while the levels move less than a picture shows', async () => {
+    const { engine, backend, frames, rest } = await start();
+    engine.paused = true;
+    backend.current = { gain: 1, black: 0.5, strand: 3 };
+    rest();
+    backend.current = { gain: 1.0005, black: 0.5002, strand: 3.001 };
+    expect(frames(5)).toBe(0);
+    backend.current = { gain: 1.002, black: 0.5002, strand: 3.001 };
+    expect(frames(1)).toBe(1);
+  });
+
+  it('goes on drawing while a part of the picture is still being built', async () => {
+    const { engine, backend, frames } = await start();
+    engine.paused = true;
+    backend.ready = false;
+    expect(frames(3 * SETTLE_FRAMES)).toBe(3 * SETTLE_FRAMES);
+    backend.ready = true;
+    expect(frames(3 * SETTLE_FRAMES)).toBe(SETTLE_FRAMES);
+  });
+
+  it('draws the steps of a tool held while paused, and none for an idle tool', async () => {
+    const { engine, frames, rest } = await start();
+    engine.paused = true;
+    rest();
+    const tool: HeldTool = { kind: AgentToolKind.inoculate, x: 10, y: 10, radius: 5, strain: 0, rate: 1 };
+    engine.agentTool(tool);
+    expect(frames(1)).toBe(1);
+    expect(engine.sim.step).toBe(1);
+    rest();
+    engine.agentTool({ ...tool, idle: true });
+    expect(frames(1)).toBe(0);
+  });
+});
+
+// The loop starts no frame while MAX_IN_FLIGHT frames are on the GPU (ADR 0028).
+describe('frames in flight', () => {
+  async function start() {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const engine = await Engine.create(
+      canvas,
+      { ...defaultSettings(), resolution: 256, speed: 960 },
+      undefined,
+      new CpuBackend(),
+    );
+    // The GPU finishes a frame when the test says so.
+    const finish: (() => void)[] = [];
+    engine.sim.finish = () => new Promise<void>((r) => finish.push(r));
+    /** The GPU finishes its oldest frame. */
+    const done = async () => {
+      finish.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    return { engine, done };
+  }
+
+  it('starts no frame with two in flight, and the next one runs the steps of the time since the last', async () => {
+    const { engine, done } = await start();
+    expect(MAX_IN_FLIGHT).toBe(2);
+    expect(engine.tick(0)).toBe(true);
+    expect(engine.tick(10)).toBe(true);
+    expect(engine.budget.pending).toBe(2);
+    const [frames, step] = [engine.frames, engine.sim.step];
+    engine.budget.steps = 8;
+    expect(engine.tick(20), 'two in flight').toBe(false);
+    expect(engine.tick(30), 'two in flight').toBe(false);
+    expect([engine.frames, engine.sim.step, engine.budget.pending]).toEqual([frames, step, 2]);
+    // Each turn that started no frame told the budget that the GPU is behind.
+    expect(engine.budget.steps).toBe(4.5);
+    await done();
+    expect(engine.budget.pending).toBe(1);
+    expect(engine.tick(40)).toBe(true);
+    // 30 ms at 960 steps per second ask for 28.8 steps; the budget allows 4.5.
+    expect(engine.sim.step - step).toBe(4);
+    expect(engine.frames).toBe(frames + 1);
+  });
+
+  it('runs a frame asked for by hand also with two in flight', async () => {
+    const { engine } = await start();
+    engine.tick(0);
+    engine.tick(10);
+    const step = engine.sim.step;
+    engine.frame(20, 1);
+    expect(engine.sim.step).toBe(step + 1);
+    expect(engine.budget.pending).toBe(3);
+  });
+
+  it('holds no frame back for frames that drew nothing', async () => {
+    const { engine } = await start();
+    engine.paused = true;
+    for (let k = 0; k < SETTLE_FRAMES + 50; k++) engine.frame(k * 10);
+    const pending = engine.budget.pending;
+    for (let k = 0; k < 20; k++) engine.frame(1000 + k * 10);
+    expect(engine.budget.pending).toBe(pending);
+  });
+});
+
+// The sort of the agents takes the place of one step in its frame (ADR 0028). The CPU backend has no sort: here a
+// simulation that sorts before every 4th step stands in for the WebGPU one.
+describe('the sort in a turn of its own', () => {
+  async function start(speed: number) {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const engine = await Engine.create(
+      canvas,
+      { ...defaultSettings(), resolution: 256, speed },
+      undefined,
+      new CpuBackend(),
+    );
+    const sim = engine.sim;
+    const log: string[] = [];
+    let sortedFor = -1;
+    const next = () => Math.ceil(sim.step / 4) * 4;
+    sim.sortDue = (steps) => next() < sim.step + steps && next() !== sortedFor;
+    sim.sortNow = () => {
+      sortedFor = next();
+      log.push(`sort ${sortedFor}`);
+    };
+    const run = sim.run.bind(sim);
+    sim.run = (steps, t) => {
+      log.push(`run ${steps}`);
+      run(steps, t);
+    };
+    return { engine, log };
+  }
+
+  it('runs the sort and one step less in a frame whose steps hold the sort', async () => {
+    // One step per frame at 60 Hz: the frame of the sort runs no step.
+    const one = await start(60);
+    for (let k = 0; k <= 10; k++) one.engine.frame((k * 1000) / 60);
+    expect(one.log).toEqual([
+      'sort 0',
+      'run 1',
+      'run 1',
+      'run 1',
+      'run 1',
+      'sort 4',
+      'run 1',
+      'run 1',
+      'run 1',
+      'run 1',
+    ]);
+    // Three steps per frame (a budget of 3, and the GPU done between the frames): the frame of the sort runs two.
+    const three = await start(180);
+    for (let k = 0; k <= 6; k++) {
+      three.engine.budget.steps = 3;
+      three.engine.frame((k * 1000) / 60);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    // Frame 0 has no time yet. Steps 0 to 2 with the sort of step 0, 2 to 4 with that of step 4, then 5 to 7, ...
+    expect(three.log).toEqual([
+      'sort 0',
+      'run 2',
+      'sort 4',
+      'run 2',
+      'run 3',
+      'sort 8',
+      'run 2',
+      'run 3',
+      'sort 12',
+      'run 2',
+    ]);
+  });
+
+  it('runs steps asked for by hand as asked, with the sort inside its step', async () => {
+    const { engine, log } = await start(60);
+    engine.frame(0, 6);
+    engine.frame(16, 1);
+    expect(log).toEqual(['run 6', 'run 1']);
+  });
+
+  it('leaves the steps of a tool held while paused as they are', async () => {
+    const { engine, log } = await start(60);
+    engine.paused = true;
+    const tool: HeldTool = { kind: AgentToolKind.inoculate, x: 10, y: 10, radius: 5, strain: 0, rate: 1 };
+    for (let k = 0; k <= 6; k++) {
+      engine.agentTool(tool);
+      engine.frame((k * 1000) / 60);
+    }
+    expect(log).toEqual(Array<string>(6).fill('run 1'));
+  });
+
+  it('leaves the sort inside its step when switched off, and where the backend has none', async () => {
+    const { engine, log } = await start(60);
+    engine.sortOwnTurn = false;
+    for (let k = 0; k <= 6; k++) engine.frame((k * 1000) / 60);
+    expect(log).toEqual(Array<string>(6).fill('run 1'));
+    const plain = await Engine.create(
+      { width: 160, height: 100 } as HTMLCanvasElement,
+      defaultSettings(),
+      undefined,
+      new CpuBackend(),
+    );
+    for (let k = 0; k <= 6; k++) plain.frame((k * 1000) / 60);
+    expect(plain.sim.step).toBe(6);
   });
 });

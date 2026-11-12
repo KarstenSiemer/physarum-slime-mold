@@ -57,7 +57,7 @@ test('falls back to WebGL2 and still simulates and draws (ADR 0003)', async ({ p
 
 test('fits a shared link to the device memory before the first allocation', async ({ page }) => {
   const errors = watchErrors(page);
-  // A phone with 0.25 GB: the budget is 32 MiB, far below a 2048 grid (about 270 MB).
+  // A phone with 0.25 GB: the budget is 32 MiB, far below a 2048 grid (about 280 MB).
   await page.addInitScript(() => {
     Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
   });

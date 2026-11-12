@@ -57,7 +57,12 @@ index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainC
   of its shapes and one bit each, so an old link paints the shapes it was made with after a scene's
   shapes change (ADR 0027). A drawing too large for a link stays out of it: the link then holds the
   settings and the scene as it loads, and the app says so.
-- One rAF loop: paint new edits → run _k_ simulation steps → render one frame. _k_
+- One rAF loop: paint new edits → run _k_ simulation steps → render one frame. A frame renders only
+  when it shows something new (a step, an edit, other settings, another view or canvas size, other
+  auto levels) and for 30 frames after; paused, the canvas keeps its picture and the stats line reads
+  "paused" (ADR 0028). The loop starts no frame while two frames are still on the GPU: the next one
+  runs the steps of the time since the last. The sort of the agents (WebGPU, every 32 steps) takes
+  the place of one step in its frame, so that frame stays inside a refresh interval. _k_
   follows the speed, within a budget of steps per frame that the GPU keeps up with
   (`src/engine/budget.ts`): with two frames still on the GPU at the next frame it drops by a
   quarter (to at least 1), with the GPU idle for over a third of the last frame interval it rises
@@ -252,6 +257,9 @@ the arrows.
   dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
   on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
   copies as they are when zoomed out.
+- Zoomed out, above 1 cell per pixel, a pixel shows the mean of the trail over its square: from the
+  trail itself up to 2 cells per pixel, above from a coarser map of the mean over 2, 4, 8 or 16 cells
+  per side, filled only when the trail changed (ADR 0009, amendment of 2026-11-12).
 - The view draws the map after the step's diffusion in either order (ADR 0027). Sensing first
   the trail and scent are that map. Moving first they hold the map as the agents sense it; once
   per frame after a change, the step's diffusion passes without sources (`VIEW`) write the map

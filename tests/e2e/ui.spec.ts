@@ -222,6 +222,21 @@ test('a slow drag records a segment only once the pointer moved half a brush rad
   expect(strokes.length).toBeLessThan(8);
 });
 
+// Paused, a frame draws only what is new (ADR 0028): the stats then give no rate of frames or steps, which would read
+// 0 or the rate of the loop. The stats tick every 500 ms.
+test('the stats say paused in place of the rates while the simulation is paused', async ({ page }) => {
+  const stats = page.locator('.stats');
+  await expect(stats).toContainText('fps', { timeout: 60_000 });
+  await expect(stats).toContainText('steps/s');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await expect(stats).toContainText('paused');
+  await expect(stats).not.toContainText('fps');
+  await expect(stats).toContainText(/step \d+/);
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect(stats).toContainText('fps');
+  await expect(stats).not.toContainText('paused');
+});
+
 test('keyboard shortcuts pause, step and switch tools', async ({ page }) => {
   await page.locator('canvas').click();
   await page.keyboard.press('Space');

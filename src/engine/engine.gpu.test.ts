@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { dishRadius } from './brush';
-import { Engine, type HeldTool } from './engine';
+import { Engine, SETTLE_FRAMES, type HeldTool } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
 import type { GlSim } from './gl/sim';
@@ -862,4 +862,67 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the view (ADR 0027)', (kind)
     },
     240_000,
   );
+});
+
+// A frame draws only what is new (ADR 0028). With a real backend the auto levels come from measurements that the GPU
+// hands back some frames later: paused, they must come to rest, or the frames would draw for ever.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: paused frames (ADR 0028)', (kind) => {
+  it('stop drawing once the levels rest, and draw again for a pan and for the scent view', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [160, 100];
+    const s: Settings = { ...defaultSettings(), resolution: 256, density: 0.5 };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    engine.frame(0, 40);
+    // The levels of this trail at once: from the fallback they would take some hundred frames to come to rest.
+    await engine.settle();
+    engine.paused = true;
+    let t = 0;
+    /** One frame, then the GPU's answers: readbacks of the levels, built pipelines. Returns whether it drew. */
+    const frame = async () => {
+      const before = engine.draws;
+      engine.frame((t += 16));
+      await engine.sim.finish();
+      await new Promise((r) => setTimeout(r, 0));
+      return engine.draws > before;
+    };
+    /** Frames until SETTLE_FRAMES of them in a row drew nothing; returns how many frames drew before. */
+    const rest = async () => {
+      let [drawn, idle] = [0, 0];
+      for (let k = 0; k < 1000 && idle < SETTLE_FRAMES; k++) {
+        if (await frame()) [drawn, idle] = [drawn + 1, 0];
+        else idle++;
+      }
+      expect(idle, 'frames at rest').toBe(SETTLE_FRAMES);
+      return drawn;
+    };
+    // Every 6th drawn frame on WebGPU and every 15th on WebGL2 measures again: the same trail, so the levels stay.
+    const first = await rest();
+    expect(first).toBeGreaterThanOrEqual(SETTLE_FRAMES);
+    expect(first).toBeLessThan(4 * SETTLE_FRAMES);
+    expect(engine.sim.step).toBe(40);
+    engine.panBy(5, 3);
+    expect(await frame(), 'after a pan').toBe(true);
+    expect(await rest()).toBeLessThan(2 * SETTLE_FRAMES);
+    // Measurements that move the levels keep the frames drawing: three times the trail, and the levels go a quarter
+    // of the way with each measurement, for more frames than this.
+    engine.sim.writeTrail((await engine.sim.readTrail()).map((v) => 3 * v));
+    const before = engine.levels().gain;
+    let moving = 0;
+    for (let k = 0; k < 3 * SETTLE_FRAMES; k++) if (await frame()) moving++;
+    expect(moving, 'while the levels move').toBe(3 * SETTLE_FRAMES);
+    expect(engine.levels().gain).toBeLessThan(before);
+    // Back to levels at rest for the next part.
+    await engine.settle();
+    await rest();
+    // The scent view builds its pipelines or programs beside the frames: the frames draw until the view shows, and
+    // the picture then holds it.
+    const drawn = engine.backend.draw.bind(engine.backend);
+    let shownAsAsked = true;
+    engine.backend.draw = (...args) => (shownAsAsked = drawn(...args));
+    await engine.apply({ ...engine.settings, showScent: true });
+    expect(await frame(), 'after the switch').toBe(true);
+    await rest();
+    expect(shownAsAsked, 'the last frame drawn shows the scent view').toBe(true);
+    engine.destroy();
+  }, 120_000); // 3.7 s (WebGPU) and 4.9 s (WebGL2) on SwiftShader on an M3 Pro: under a quarter at four times (ADR 0010)
 });

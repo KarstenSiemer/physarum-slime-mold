@@ -7,6 +7,7 @@ import type { Backend, Sim, Stroke } from './types';
 
 export class CpuSim implements Sim {
   step = 0;
+  revision = 0;
   readonly env: Uint8Array;
   /** As on both GPU backends: false until something other than the eraser is painted after the last clear. */
   hasEnvironment = false;
@@ -27,12 +28,14 @@ export class CpuSim implements Sim {
     this.settings = s;
   }
   reset() {
+    this.revision++;
     this.calls.push('reset');
   }
   run(steps: number) {
     this.step += steps;
   }
   paint(strokes: readonly Stroke[]) {
+    if (strokes.length > 0) this.revision++;
     for (const s of strokes) {
       this.calls.push('paint');
       if (s.kind !== 'erase') this.hasEnvironment = true;
@@ -40,6 +43,7 @@ export class CpuSim implements Sim {
     }
   }
   clearEnvironment() {
+    this.revision++;
     this.calls.push('clear');
     this.env.fill(0);
     this.hasEnvironment = false;
@@ -100,6 +104,7 @@ export class CpuSim implements Sim {
     // scents are not simulated here
   }
   writeEnv(data: Uint8Array) {
+    this.revision++;
     this.env.set(data);
     this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
   }
@@ -129,8 +134,16 @@ export class CpuBackend implements Backend<CpuSim> {
     this.built.push(sim);
     return sim;
   }
+  /** How often draw() ran. */
+  draws = 0;
+  /** What the next calls of draw() return: false stands for a picture that is still being built. */
+  ready = true;
+  /** The levels that levels() gives: a test moves them as a measurement does. */
+  current = { gain: 0, black: 0, strand: 0 };
+
   draw() {
-    // nothing to show
+    this.draws++;
+    return this.ready;
   }
   capture(): Promise<ImageData> {
     return Promise.reject(new Error('not available in Node'));
@@ -142,7 +155,7 @@ export class CpuBackend implements Backend<CpuSim> {
     return Promise.resolve(this.levels());
   }
   levels() {
-    return { gain: 0, black: 0, strand: 0 };
+    return this.current;
   }
   forget() {
     // no caches

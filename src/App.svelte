@@ -92,6 +92,8 @@
     })();
 
     const stats = setInterval(() => void updateStats(), 500);
+    // A frame draws only what is new (Engine.frame): when the tab shows again, the next frame draws in any case.
+    document.addEventListener('visibilitychange', () => getEngine()?.invalidate(), { signal: life.signal });
     return () => {
       life.abort();
       clearInterval(stats);
@@ -379,7 +381,9 @@
   <div class="toolbar-wrap ui" bind:clientHeight={toolbarHeight}><Toolbar /></div>
 
   <p class="stats ui" aria-live="off" bind:clientHeight={statsHeight}>
-    {app.stats.fps.toFixed(0)} fps · {app.stats.stepsPerSecond.toFixed(0)} steps/s · step {app.stats.step}
+    <!-- Paused, a frame draws only what is new (ADR 0028): a rate of frames or steps would say nothing then. -->
+    {#if app.paused}paused{:else}{app.stats.fps.toFixed(0)} fps · {app.stats.stepsPerSecond.toFixed(0)} steps/s{/if}
+    · step {app.stats.step}
     {#if app.stats.alive.length}· {fmt(app.stats.alive.reduce((a, b) => a + b, 0))} agents{/if}
   </p>
 

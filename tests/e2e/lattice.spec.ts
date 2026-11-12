@@ -227,7 +227,7 @@ test('a device that cannot hold the scene’s own lattice runs a grid shaped lik
   page,
 }) => {
   const errors = watchErrors(page);
-  // 1 MB of device memory: a budget of 128 KiB, below the 9.5 MB that Wound healing's 300 × 300 cells need. The app's
+  // 1 MB of device memory: a budget of 128 KiB, below the 10.3 MB that Wound healing's 300 × 300 cells need. The app's
   // smallest grid still runs (the memory fit never goes below it).
   await page.addInitScript(() => {
     Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.001 });

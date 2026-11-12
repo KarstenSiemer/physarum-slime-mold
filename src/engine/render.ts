@@ -1,7 +1,7 @@
 import { hexToLinear } from '../model/color';
 import { BOUNDARIES, MAX_STRAINS, STYLES, type Settings } from '../model/params';
 import { readPixels } from './readback';
-import { scentLevel, scentLevelSize, scentSensors } from './scent';
+import { levelSize, scentLevel, scentLevelSize, scentSensors } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Simulation } from './sim';
 import type { View } from './types';
@@ -34,6 +34,24 @@ export const VIEW_BYTES = 192;
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 /** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
 const COARSE_FORMAT: GPUTextureFormat = 'rgba32float';
+/** The trail's coarse map: the trail of 4 strains, as the trail texture holds it. */
+const TRAIL_FORMAT: GPUTextureFormat = 'rgba32float';
+
+/**
+ * The coarsest map of the trail that a view zoomed out reads (trailLevel()): texels of 16 cells, for up to 32 cells
+ * per pixel. The zoom ends at 8 cells per pixel (Engine.zoomAt); only a large grid fitted to a small canvas shows more.
+ */
+export const TRAIL_LEVELS_MAX = 4;
+
+/**
+ * The map of the trail that a pixel reads at `scale` cells per pixel (ADR 0028): 0 is the trail itself, up to 2 cells
+ * per pixel; k from 1 to TRAIL_LEVELS_MAX a map of the mean over cells of 2^k per side (levelSize()), whose texels are
+ * 1/2 to 1 pixel wide. A pixel then reads the 3 × 3 texels under it, next to those of the pixels beside it, in place
+ * of 16 cells far apart (render.wgsl trailArea).
+ */
+export function trailLevel(scale: number): number {
+  return scale > 1 ? Math.min(TRAIL_LEVELS_MAX, Math.max(0, Math.floor(Math.log2(scale)))) : 0;
+}
 
 /**
  * Fills `struct View` (render.wgsl), which is also the std140 `View` block of the WebGL2 renderer. `occupancy`:
@@ -64,7 +82,7 @@ export function packView(
   u.set([frame, strains.length, overlays ? 1 : 0, occupancy ? 1 : 0], 28);
   // Copies of the grid around a periodic lattice show at this brightness (ADR 0026); 1 shows them as they are.
   const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
-  fl.set([settings.bloom, black, copies, 0], 32);
+  fl.set([settings.bloom, black, copies, trailLevel(view.scale)], 32);
   // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
   // sensors of its line, their half spread and the hold of a strand (scentSensors()).
   const level = settings.showScent ? scentLevel(view.scale) : 0;
@@ -81,7 +99,7 @@ interface Groups {
   group: GPUBindGroup;
   /** The gel height pass (`heightField` in render.wgsl). */
   heights: GPUBindGroup;
-  /** The scent view's pass that fills its coarse map (`scentDown` in render.wgsl). */
+  /** The passes that fill a coarse map (`scentDown` and `trailDown` in render.wgsl). */
   down: GPUBindGroup;
   bloom: GPUTextureView;
   sampler: GPUSampler;
@@ -143,6 +161,15 @@ export class Renderer {
   private coarseHolds: { sim: Simulation; step: number; revision: number; level: number; boundary: number } | undefined;
   /** Bound in its place until then. */
   private readonly noCoarse: GPUTexture;
+  /** The trail's coarse map (trailDown), made at the first frame zoomed out to 2 cells per pixel or more. */
+  private trailCoarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  /**
+   * What the trail's coarse map holds: it is filled again only when the trail changed (a step, or a change that the
+   * simulation's revision counts), or the level. A paused simulation keeps it.
+   */
+  private trailHolds: { sim: Simulation; trail: GPUTexture; step: number; revision: number; level: number } | undefined;
+  /** The pass that fills it, built at its first use: most frames are not zoomed out. */
+  private trailDown: GPURenderPipeline | undefined;
   private readonly module: GPUShaderModule;
   private readonly heightPipelines: Variants;
   private readonly heightSampler: GPUSampler;
@@ -187,6 +214,7 @@ export class Renderer {
         storage(8),
         { binding: 9, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 10, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
       ],
     });
     this.downLayout = device.createBindGroupLayout({
@@ -231,10 +259,10 @@ export class Renderer {
     this.uniform = device.createBuffer({ size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
-  /** Draws one frame to the canvas. */
-  draw(f: Frame) {
+  /** Draws one frame to the canvas. False while the scent view that the frame asks for is still being built. */
+  draw(f: Frame): boolean {
     const { width, height } = this.context.canvas;
-    this.encode(this.context.getCurrentTexture(), width, height, f);
+    return this.encode(this.context.getCurrentTexture(), width, height, f);
   }
 
   /**
@@ -258,7 +286,8 @@ export class Renderer {
     return new ImageData(pixels, width, height);
   }
 
-  private encode(target: GPUTexture, width: number, height: number, f: Frame) {
+  /** False while the frame draws without the scent view that it asks for: its pipelines are still being built. */
+  private encode(target: GPUTexture, width: number, height: number, f: Frame): boolean {
     const { sim } = f;
     sim.syncShape();
     // Collision mode keeps the occupancy up to date (WebGPU allocates it with every simulation).
@@ -285,6 +314,9 @@ export class Renderer {
     const heights = this.heightsFor(trail);
     const view = f.settings.showScent && this.fixed === undefined ? this.scentNow() : undefined;
     const coarse = view ? this.coarseFor(trail) : undefined;
+    // Zoomed out, a pixel reads the trail from a coarser map, filled below (trailDown in render.wgsl).
+    const trailMap = trailLevel(f.view.scale);
+    const trailCoarse = trailMap > 0 ? this.trailCoarseFor(trail) : undefined;
     let byOcc = this.groups.get(trail);
     if (!byOcc) {
       byOcc = new Map();
@@ -309,6 +341,7 @@ export class Renderer {
           // The scent of the same state as the trail: both come from Simulation.viewTextures (ADR 0027).
           { binding: 9, resource: scentView },
           { binding: 10, resource: this.coarse?.view ?? this.noCoarse.createView() },
+          { binding: 11, resource: this.trailCoarse?.view ?? this.noCoarse.createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -345,6 +378,33 @@ export class Renderer {
       pre.draw(3);
       pre.end();
     }
+    const kept = this.trailHolds;
+    if (
+      trailCoarse &&
+      !(
+        kept?.sim === sim &&
+        kept.trail === trail &&
+        kept.step === sim.step &&
+        kept.revision === sim.revision &&
+        kept.level === trailMap
+      )
+    ) {
+      this.trailHolds = { sim, trail, step: sim.step, revision: sim.revision, level: trailMap };
+      // Built without waiting: the queue, not the page, waits for the compiler before the first pass.
+      this.trailDown ??= this.device.createRenderPipeline({
+        layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.downLayout] }),
+        vertex: { module: this.module, entryPoint: 'vs' },
+        fragment: { module: this.module, entryPoint: 'trailDown', targets: [{ format: TRAIL_FORMAT }] },
+      });
+      const down = enc.beginRenderPass({
+        colorAttachments: [{ view: trailCoarse, loadOp: 'clear', storeOp: 'store' }],
+      });
+      down.setViewport(0, 0, levelSize(trail.width, trailMap), levelSize(trail.height, trailMap), 0, 1);
+      down.setPipeline(this.trailDown);
+      down.setBindGroup(0, cached.down);
+      down.draw(3);
+      down.end();
+    }
     // Zoomed out, the scent view reads a coarser map of the scent, filled here (scentDown in render.wgsl).
     const level = scentLevel(f.view.scale);
     const boundary = BOUNDARIES.indexOf(f.settings.boundary);
@@ -372,6 +432,7 @@ export class Renderer {
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
+    return !(f.settings.showScent && this.fixed === undefined && !view);
   }
 
   /**
@@ -428,6 +489,23 @@ export class Renderer {
     return this.coarse.view;
   }
 
+  /** The trail's coarse map for a trail of this size (half its sides, rounded up), made anew with the size. */
+  private trailCoarseFor(trail: GPUTexture): GPUTextureView {
+    const [width, height] = [levelSize(trail.width, 1), levelSize(trail.height, 1)];
+    if (this.trailCoarse?.texture.width !== width || this.trailCoarse.texture.height !== height) {
+      this.trailCoarse?.texture.destroy();
+      const texture = this.device.createTexture({
+        size: [width, height],
+        format: TRAIL_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.trailCoarse = { texture, view: texture.createView() };
+      this.trailHolds = undefined;
+      this.groups.clear();
+    }
+    return this.trailCoarse.view;
+  }
+
   /** The gel height field for a trail of this size, made anew when the size changes. */
   private heightsFor(trail: GPUTexture): GPUTextureView {
     const [width, height] = [trail.width + 2, trail.height + 2];
@@ -448,12 +526,14 @@ export class Renderer {
   forget() {
     this.groups.clear();
     this.coarseHolds = undefined;
+    this.trailHolds = undefined;
   }
 
   destroy() {
     this.uniform.destroy();
     this.heights?.texture.destroy();
     this.coarse?.texture.destroy();
+    this.trailCoarse?.texture.destroy();
     this.noCoarse.destroy();
   }
 }

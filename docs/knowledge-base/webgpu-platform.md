@@ -134,6 +134,17 @@ the sort (ADR 0005); "sorted" is the app's sort every 32 steps, its cost include
   2560 × 1600 in the Transport network (1024 grid). Wrapping the middle cell once and its
   neighbours with comparisons cost 0.1 ms. The outline pass, which looks up to 120 cells of `env`
   around a cell, went from 127 to 71 ms for 4096 batched strokes the same way.
+- A branch does not save the remainder (measured 2026-11-12, ADR 0028). On WebGL2, ANGLE over
+  Metal, a wrap that takes the remainder only outside one period of the grid cost as much as the
+  plain remainder when every lookup of a pixel ran it: 4.1 to 4.3 ms a frame at 1.01 cells per
+  pixel (16 lookups a pixel, 2560 × 1600), against 1.9 ms with no remainder in the shader. On
+  WebGPU the same wrap cost 1.97 against 1.69 ms. So wrap once per pixel or per lookup, and take
+  the neighbours by comparison.
+- Reads far apart miss the cache: 16 cells of the trail per pixel, 8 cells apart from those of
+  the next pixel, cost 27.7 ms a frame; the 3 × 3 texels of a map of the mean, next to those of
+  the next pixel, 1.9 ms (ADR 0028). The same holds for a texture of zeros as large as the grid:
+  the scent read of 3 sensors per agent and of the diffusion cost 13 to 15 % of a step until it
+  came from a texture of one texel.
 - The largest number of agents of one strain that moved into one cell in a step: 29 083 at step
   600 (sampled every 50 steps), about 4100 at step 1000 and 800 to 950 from step 3000 on.
 - The research (2026-11-09, same machine, without the sort) measured the agent pass at 3.1 ms at

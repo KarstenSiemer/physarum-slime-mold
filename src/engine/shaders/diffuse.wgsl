@@ -95,12 +95,13 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
            @builtin(local_invocation_index) li: u32) {
   let origin = vec2i(wg.xy * T) - 1;
   for (var k = li; k < N; k += 256u) {
-    let c = cellAt(origin + vec2i(i32(k % SIDE), i32(k / SIDE)));
+    // The coordinates and the index of the cell from one wrap: cellCoord() of the index would divide.
+    let q = cellXY(origin + vec2i(i32(k % SIDE), i32(k / SIDE)));
+    let c = indexOf(q);
     let kind = kindOf(c);
     var t = vec4f(0.0);
     var s = vec2f(0.0);
     if (kind != SINK) {
-      let q = cellCoord(u32(c));
       t = textureLoad(trailIn, q, 0);
       s = textureLoad(scentIn, q, 0).xy;
       if (!VIEW && FIRST && senseFirst() && kind == OPEN) { sources(c, q, &t, &s); }

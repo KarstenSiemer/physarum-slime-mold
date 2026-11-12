@@ -4,21 +4,69 @@
 uniform sampler2D counts;
 uniform sampler2D bloom;
 uniform sampler2D heights; // gel style: written by height.frag each frame
+uniform sampler2D trailLevels; // the trail on a coarser map (trail-down.frag), zoomed out
 
+// On the periodic grid one wrap serves the 4 cells (see bilinear in render.wgsl).
 vec4 bilinear(vec2 p) {
   vec2 q = p - 0.5;
   ivec2 i = ivec2(floor(q));
   vec2 f = q - floor(q);
-  vec4 a = mix(trailAt(i), trailAt(i + ivec2(1, 0)), f.x);
-  vec4 b = mix(trailAt(i + ivec2(0, 1)), trailAt(i + ivec2(1, 1)), f.x);
+  if (V.boundary != 0u) {
+    vec4 a = mix(trailAt(i), trailAt(i + ivec2(1, 0)), f.x);
+    vec4 b = mix(trailAt(i + ivec2(0, 1)), trailAt(i + ivec2(1, 1)), f.x);
+    return mix(a, b, f.y);
+  }
+  ivec2 s = gridSize();
+  ivec2 w = wrapCell(i, s);
+  ivec2 x = ivec2(w.x, w.x == s.x - 1 ? 0 : w.x + 1);
+  ivec2 y = ivec2(w.y, w.y == s.y - 1 ? 0 : w.y + 1);
+  vec4 a = mix(texelFetch(trail, ivec2(x.x, y.x), 0), texelFetch(trail, ivec2(x.y, y.x), 0), f.x);
+  vec4 b = mix(texelFetch(trail, ivec2(x.x, y.y), 0), texelFetch(trail, ivec2(x.y, y.y), 0), f.x);
   return mix(a, b, f.y);
+}
+
+// Zoomed out: the mean of the trail over the square of the pixel, from the map of level V.fx.w, whose texels are 1/2
+// to 1 pixel wide (level 0 is the trail itself). The square covers at most 3 × 3 texels, each by the share that lies
+// under the pixel (see trailArea in render.wgsl).
+vec4 trailArea(vec2 p) {
+  int k = int(V.fx.w);
+  ivec2 n = k > 0 ? levelSize(k) : gridSize();
+  vec2 ratio = vec2(n) / vec2(gridSize());
+  vec2 half_ = 0.5 * V.scale * ratio;
+  vec2 lo = p * ratio - half_;
+  vec2 hi = p * ratio + half_;
+  ivec2 i = ivec2(floor(lo));
+  ivec3 xs = ivec3(i.x, i.x + 1, i.x + 2);
+  ivec3 ys = ivec3(i.y, i.y + 1, i.y + 2);
+  if (V.boundary == 0u) {
+    // One wrap for the 3 × 3 texels: the column after the last one is the first, and so the row.
+    ivec2 w = wrapCell(i, n);
+    int x1 = w.x == n.x - 1 ? 0 : w.x + 1;
+    int y1 = w.y == n.y - 1 ? 0 : w.y + 1;
+    xs = ivec3(w.x, x1, x1 == n.x - 1 ? 0 : x1 + 1);
+    ys = ivec3(w.y, y1, y1 == n.y - 1 ? 0 : y1 + 1);
+  }
+  vec4 sum = vec4(0.0);
+  vec2 area = vec2(0.0);
+  for (int j = 0; j < 3; j++) {
+    float wy = max(min(hi.y, float(i.y + j + 1)) - max(lo.y, float(i.y + j)), 0.0);
+    area.y += wy;
+    vec4 row = vec4(0.0);
+    for (int c = 0; c < 3; c++) {
+      float wx = max(min(hi.x, float(i.x + c + 1)) - max(lo.x, float(i.x + c)), 0.0);
+      if (j == 0) area.x += wx;
+      ivec2 q = ivec2(xs[c], ys[j]);
+      if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, n))) continue;
+      row += wx * (k == 0 ? texelFetch(trail, q, 0) : texelFetch(trailLevels, q, 0));
+    }
+    sum += wy * row;
+  }
+  return sum / (area.x * area.y);
 }
 
 vec4 trailFiltered(vec2 p) {
   if (V.scale <= 1.0) return bilinear(p);
-  float o = 0.25 * V.scale;
-  return 0.25 * (bilinear(p + vec2(-o, -o)) + bilinear(p + vec2(o, -o)) + bilinear(p + vec2(-o, o)) +
-                 bilinear(p + vec2(o, o)));
+  return trailArea(p);
 }
 
 vec4 levels(vec4 v) {
@@ -75,7 +123,7 @@ float heightAt(vec2 q) {
   return textureLod(heights, (p + 1.0) / (s + 2.0), 0.0).r;
 }
 
-// Four taps spread over the pixel footprint when zoomed out, like trailFiltered().
+// Four taps spread over the pixel footprint when zoomed out, against aliasing.
 float heightFiltered(vec2 p) {
   if (V.scale <= 1.0) return heightAt(p);
   float o = 0.25 * V.scale;
@@ -116,11 +164,11 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
 
 // Agents in the cell, per strain; in collision mode also those that stayed put (see render.wgsl).
 vec4 agentsAt(vec2 p) {
-  int i = cellAt(ivec2(floor(p)));
-  if (i < 0) return vec4(0.0);
-  vec4 moved = texelFetch(counts, coord(i), 0);
+  ivec2 q = cellXY(ivec2(floor(p)));
+  if (q.x < 0) return vec4(0.0);
+  vec4 moved = texelFetch(counts, q, 0);
   if (V.frame.w == 0u) return moved;
-  float stayed = max(texelFetch(occ, coord(i), 0).r - (moved.x + moved.y + moved.z + moved.w), 0.0);
+  float stayed = max(texelFetch(occ, q, 0).r - (moved.x + moved.y + moved.z + moved.w), 0.0);
   return moved + strainMix(trailAt(ivec2(floor(p)))) * stayed;
 }
 
@@ -147,8 +195,8 @@ struct Env {
 vec3 spline(float u) { return vec3(0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)); }
 vec3 splineSlope(float u) { return vec3(u - 0.5, -2.0 * u, u + 0.5); }
 
-// The columns and rows of the 3 × 3 cells around c: wrapped on the periodic grid with comparisons, else as they
-// are (see shapeCells in render.wgsl).
+// The columns and rows of the 3 × 3 cells around c: wrapped once on the periodic grid, else as they are (see
+// shapeCells in render.wgsl).
 void around(ivec2 c, out ivec3 xs, out ivec3 ys) {
   ivec2 s = gridSize();
   xs = ivec3(c.x - 1, c.x, c.x + 1);
@@ -296,8 +344,8 @@ vec4 presence(Env e, vec4 cells[9], vec4 raw) {
   for (int j = 0; j < 3; j++) {
     for (int i = 0; i < 3; i++) {
       bool inGrid = xs[i] >= 0 && ys[j] >= 0 && xs[i] < s.x && ys[j] < s.y;
-      int index = inGrid ? ys[j] * s.x + xs[i] : -1;
-      share += e.weightX[i] * e.weightY[j] * presenceWeight(index, (cells[j * 3 + i].g - 0.5) * 2.0 * SHAPE_RANGE);
+      ivec2 q = inGrid ? ivec2(xs[i], ys[j]) : ivec2(-1);
+      share += e.weightX[i] * e.weightY[j] * presenceWeight(q, (cells[j * 3 + i].g - 0.5) * 2.0 * SHAPE_RANGE);
     }
   }
   return strainMix(raw) * (a * share * PRESENCE / V.exposure);
@@ -454,13 +502,10 @@ Scent scentFrom(Scent s, vec2 d) {
   return Scent(s.v * k, s.gx * k, s.gy * k, s.w);
 }
 
-// Texels per side of the coarse map of level k (see scentLevelSize in render.wgsl).
-ivec2 scentLevelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
-
 // The scent at p on the coarse map of level k, with the gradient per cell (see scentCoarse in render.wgsl).
 Scent scentCoarse(vec2 p, int k) {
   ivec2 s = gridSize();
-  ivec2 n = scentLevelSize(k);
+  ivec2 n = levelSize(k);
   vec2 ratio = vec2(n) / vec2(s);
   vec2 q = p * ratio - 0.5;
   ivec2 i = ivec2(floor(q));

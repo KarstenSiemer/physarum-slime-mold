@@ -19,10 +19,14 @@ import { presetById } from '../model/presets';
 import { at } from './at';
 import { dishRadius, outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
 import { WebGl2Backend } from './gl/backend';
+import { destroyTarget, program, readTarget, target, textures, uniformBlock, writeTarget } from './gl/gl';
 import agentsFrag from './gl/glsl/agents.frag?raw';
+import commonGlsl from './gl/glsl/common.glsl?raw';
 import diffuseFrag from './gl/glsl/diffuse.frag?raw';
+import fullscreenVert from './gl/glsl/fullscreen.vert?raw';
 import initFrag from './gl/glsl/init.frag?raw';
 import renderFrag from './gl/glsl/render.frag?raw';
+import viewGlsl from './gl/glsl/view.glsl?raw';
 import wallsFrag from './gl/glsl/walls.frag?raw';
 import { agentsProgram, compile, diffuseProgram, initProgram, type Programs, type Walled } from './gl/programs';
 import { GlSim } from './gl/sim';
@@ -30,8 +34,17 @@ import { grid, growthStep, occupancy } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
-import { BACKGROUND, LATTICE_COPIES } from './render';
-import { SCENT_LOW, scentGlow, scentLevel, scentLevelSize, scentLine, scentOver, scentSensors } from './scent';
+import { BACKGROUND, LATTICE_COPIES, TRAIL_LEVELS_MAX, trailLevel } from './render';
+import {
+  levelSize,
+  SCENT_LOW,
+  scentGlow,
+  scentLevel,
+  scentLevelSize,
+  scentLine,
+  scentOver,
+  scentSensors,
+} from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
@@ -140,10 +153,12 @@ type Vec3 = [number, number, number];
 
 /**
  * The styles on the CPU without food, light and walls, as render.wgsl drew them before PR 3 (ef7f2af): the trail
- * filtered bilinearly (four taps when zoomed out), levels(), then glow (without bloom), paper or gel; the agents
- * style draws the agent counts of the cell under each pixel. The gel lighting runs the full trail filter for every
- * height lookup, as before its height pre-pass. The box edge and the dish rim fade over one pixel into the outside
- * colour, as render.wgsl draws them now. Returns sRGB bytes without the dither.
+ * filtered bilinearly, levels(), then glow (without bloom), paper or gel; the agents style draws the agent counts of
+ * the cell under each pixel. Zoomed out, the trail is the mean over the square of the pixel, from the coarse map of the
+ * level that trailLevel() gives (ADR 0028; before, four bilinear taps). The gel lighting runs a trail filter for every
+ * height lookup, as before its height pre-pass: zoomed out the four taps, which the height field still takes. The box
+ * edge and the dish rim fade over one pixel into the outside colour, as render.wgsl draws them now. Returns sRGB bytes
+ * without the dither.
  */
 function styleReference(
   { trail, counts }: { trail: Float32Array; counts?: Float32Array },
@@ -176,7 +191,46 @@ function styleReference(
       return a * (1 - fy) + b * fy;
     });
   };
-  const filtered = (px: number, py: number) => {
+  // The coarse map of the trail: each texel the mean over the cells it covers, each by the share it covers.
+  const level = trailLevel(view.scale);
+  const [nx, ny] = level > 0 ? [levelSize(w, level), levelSize(h, level)] : [w, h];
+  const coarse = new Float64Array(level > 0 ? nx * ny * 4 : 0);
+  if (level > 0) {
+    const [spanX, spanY] = [w / nx, h / ny];
+    for (let ty = 0; ty < ny; ty++)
+      for (let tx = 0; tx < nx; tx++) {
+        const [x0, x1, y0, y1] = [tx * spanX, (tx + 1) * spanX, ty * spanY, (ty + 1) * spanY];
+        for (let y = Math.floor(y0); y < y1 && y < h; y++)
+          for (let x = Math.floor(x0); x < x1 && x < w; x++) {
+            const share = (Math.min(x1, x + 1) - Math.max(x0, x)) * (Math.min(y1, y + 1) - Math.max(y0, y));
+            for (let s = 0; s < 4; s++)
+              coarse[(ty * nx + tx) * 4 + s] =
+                (coarse[(ty * nx + tx) * 4 + s] ?? 0) + (share * (trail[(y * w + x) * 4 + s] ?? 0)) / (spanX * spanY);
+          }
+      }
+  }
+  const texel = (x: number, y: number, s: number) => {
+    if (wrap) [x, y] = [((x % nx) + nx) % nx, ((y % ny) + ny) % ny];
+    else if (x < 0 || y < 0 || x >= nx || y >= ny) return 0;
+    return (level > 0 ? coarse[(y * nx + x) * 4 + s] : trail[(y * w + x) * 4 + s]) ?? 0;
+  };
+  /** The mean over the square of the pixel at (px, py), view.scale cells wide: at most 3 × 3 texels of the map. */
+  const area = (px: number, py: number) => {
+    const [rx, ry] = [nx / w, ny / h];
+    const [hx, hy] = [0.5 * view.scale * rx, 0.5 * view.scale * ry];
+    const [lx, ly, ux, uy] = [px * rx - hx, py * ry - hy, px * rx + hx, py * ry + hy];
+    const [col, row] = [Math.floor(lx), Math.floor(ly)];
+    const share = (lo: number, hi: number, i: number) => Math.max(Math.min(hi, i + 1) - Math.max(lo, i), 0);
+    const [ax, ay] = [0, 1, 2].reduce(([a, b], j) => [a + share(lx, ux, col + j), b + share(ly, uy, row + j)], [0, 0]);
+    return [0, 1, 2, 3].map((s) => {
+      let sum = 0;
+      for (let j = 0; j < 3; j++)
+        for (let c = 0; c < 3; c++) sum += share(lx, ux, col + c) * share(ly, uy, row + j) * texel(col + c, row + j, s);
+      return sum / (ax * ay);
+    });
+  };
+  const filtered = (px: number, py: number) => (view.scale <= 1 ? bilinear(px, py) : area(px, py));
+  const tapped = (px: number, py: number) => {
     if (view.scale <= 1) return bilinear(px, py);
     const o = 0.25 * view.scale;
     const taps = [
@@ -203,7 +257,7 @@ function styleReference(
       return b * Math.exp(-absorb * exposure);
     });
   const height = (px: number, py: number) =>
-    1 - Math.exp(-levels(filtered(px, py)).reduce((a, b) => a + b, 0) * exposure);
+    1 - Math.exp(-levels(tapped(px, py)).reduce((a, b) => a + b, 0) * exposure);
   const norm = (v: Vec3): Vec3 => {
     const l = Math.hypot(...v);
     return [v[0] / l, v[1] / l, v[2] / l];
@@ -604,6 +658,206 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   const pastFirstStep = (sim: Sim) => {
     sim.run(1);
   };
+
+  // wrapCell() wraps with comparisons up to one period outside the grid and with remainders beyond (ADR 0028). Each
+  // copy of it, in the simulation shaders and in the view shaders, gives the cell of the integer remainder: at both
+  // ends of the range of the comparisons, at the edges of the grid, and far outside. The sides hold 33, 47, 246 and
+  // 480, where a float division was not exact on an Apple M3 Pro (ADR 0023), and the smallest sides.
+  describe('cell wraps at the edges of a period (ADR 0028)', () => {
+    const SIDES = [1, 2, 3, 16, 33, 47, 246, 480, 512, 1536, 4096];
+    /** Per axis: around the ends of the range of the comparisons [−n, 2n), around the grid's edges, and far out. */
+    const around = (n: number) => [
+      ...[-n - 1, -n, -n + 1, -1, 0, 1, n - 1, n, n + 1, 2 * n - 1, 2 * n, 2 * n + 1],
+      ...[-2 * n - 1, -7 * n - 3, 9 * n + 5, 1_000_003, -1_000_003, 3 * n, -3 * n],
+    ];
+    // Each case: a cell (x, y) and a grid of (nx, ny) cells. x runs over the values of nx while y takes those of ny in
+    // another order, so both axes meet every value on every side.
+    const CASES = SIDES.flatMap((nx, i) => {
+      const ny = at(SIDES, (i + 3) % SIDES.length);
+      const [xs, ys] = [around(nx), around(ny)];
+      return xs.map((x, j) => [x, at(ys, (j + 5) % ys.length), nx, ny] as const);
+    });
+    const mod = (v: number, n: number) => ((v % n) + n) % n;
+    const expected = CASES.map(([x, y, nx, ny]) => [mod(x, nx), mod(y, ny)]);
+
+    const WGSL_ENTRY = `
+      @group(0) @binding(20) var<storage, read> wrapIn: array<vec4i>;
+      @group(0) @binding(21) var<storage, read_write> wrapOut: array<vec4i>;
+      @compute @workgroup_size(64)
+      fn wrapTest(@builtin(global_invocation_id) g: vec3u) {
+        if (g.x >= arrayLength(&wrapIn)) { return; }
+        let v = wrapIn[g.x];
+        wrapOut[g.x] = vec4i(wrapCell(v.xy, v.zw), 0, 0);
+      }`;
+    const GLSL_ENTRY = `
+      uniform sampler2D wrapIn;
+      void main() {
+        vec4 v = texelFetch(wrapIn, ivec2(gl_FragCoord.xy), 0);
+        result = vec4(vec2(wrapCell(ivec2(v.xy), ivec2(v.zw))), 0.0, 1.0);
+      }`;
+    const SOURCES =
+      kind === 'webgpu'
+        ? { 'common.wgsl': common + WGSL_ENTRY, 'render.wgsl': renderWgsl + WGSL_ENTRY }
+        : {
+            'common.glsl': commonGlsl + 'out vec4 result;\n' + GLSL_ENTRY,
+            'view.glsl': '#define ENV 0\n' + viewGlsl + GLSL_ENTRY,
+          };
+
+    async function wrappedOnWebGpu(code: string): Promise<number[][]> {
+      const { device } = (backend as WebGpuBackend).gpu;
+      device.pushErrorScope('validation');
+      const data = new Int32Array(CASES.flat());
+      const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+      const [input, output] = [0, 1].map(() => device.createBuffer({ size: data.byteLength, usage }));
+      if (!input || !output) throw new Error('no buffers');
+      device.queue.writeBuffer(input, 0, data);
+      const pipeline = await device.createComputePipelineAsync({
+        layout: 'auto',
+        compute: { module: device.createShaderModule({ code }), entryPoint: 'wrapTest' },
+      });
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(
+        0,
+        device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 20, resource: { buffer: input } },
+            { binding: 21, resource: { buffer: output } },
+          ],
+        }),
+      );
+      pass.dispatchWorkgroups(Math.ceil(CASES.length / 64));
+      pass.end();
+      device.queue.submit([enc.finish()]);
+      const out = new Int32Array(await readBuffer(device, output));
+      input.destroy();
+      output.destroy();
+      expect((await device.popErrorScope())?.message).toBeUndefined();
+      return CASES.map((_, i) => [out[i * 4] ?? NaN, out[i * 4 + 1] ?? NaN]);
+    }
+
+    function wrappedOnWebGl2(frag: string): number[][] {
+      const gl = canvas.getContext('webgl2');
+      if (!gl) throw new Error('no WebGL2 context');
+      const version = '#version 300 es\n';
+      const p = program(gl, version + 'precision highp float;\n' + fullscreenVert, version + frag);
+      // The uniform block of the shader (Params or View, std140) is active also while no code reads it: a draw needs
+      // a buffer behind it.
+      const block = uniformBlock(gl, 1024, 0);
+      // The cases as floats: every value is a whole number below 2^24, so a float holds it exactly.
+      const [input, output] = [0, 1].map(() => target(gl, CASES.length, 1, gl.RGBA32F));
+      if (!input || !output) throw new Error('no targets');
+      writeTarget(gl, input, 0, 0, CASES.length, 1, new Float32Array(CASES.flat()));
+      gl.bindFramebuffer(gl.FRAMEBUFFER, output.fbo);
+      gl.viewport(0, 0, CASES.length, 1);
+      gl.useProgram(p);
+      textures(gl, p, { wrapIn: input.texture });
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      const out = readTarget(gl, output);
+      destroyTarget(gl, input);
+      destroyTarget(gl, output);
+      gl.deleteProgram(p);
+      gl.deleteBuffer(block);
+      expect(gl.getError()).toBe(gl.NO_ERROR);
+      return CASES.map((_, i) => [out[i * 4] ?? NaN, out[i * 4 + 1] ?? NaN]);
+    }
+
+    it.each(Object.entries(SOURCES))('wrapCell() of %s gives the cell of the integer remainder', async (_, code) => {
+      const got = kind === 'webgpu' ? await wrappedOnWebGpu(code) : wrappedOnWebGl2(code);
+      const wrong = CASES.flatMap((c, i) => {
+        const [g, e] = [got[i], expected[i]];
+        return g?.[0] === e?.[0] && g?.[1] === e?.[1] ? [] : [`(${c.join(', ')}): ${String(g)}, not ${String(e)}`];
+      });
+      expect(wrong).toEqual([]);
+    });
+  });
+
+  // While the scent holds only zeros and `env` holds no food and no light, the passes read the scent from one texel
+  // of zeros (`scentless`, ADR 0028). That changes no byte: the same passes run on the same values.
+  describe('scent of zeros from one texel (ADR 0028)', () => {
+    const [W, H] = [48, 33];
+    const scentless = (sim: Sim) => (sim as Simulation | GlSim).scentless;
+    // Strains that weigh food and light, so a scent that was not zero would steer them.
+    const strains = [0, 1].map((i) => ({ ...defaultStrain(i), food: 3, light: 2, sensorOffset: 5 + 30 * i }));
+    const food: Stroke = { kind: 'food', from: [10, 10], to: [20, 14], radius: 3 };
+    const all = async (sim: Sim) => ({
+      agents: await sim.readAgents(),
+      trail: Array.from(await sim.readTrail()),
+      scent: Array.from(await sim.readScent()),
+      view: Array.from(await sim.readView()),
+      viewScent: Array.from(await sim.readViewScent()),
+    });
+
+    it('reads one texel only while no scent can exist', async () => {
+      const sim = await make({ strains }, W, H, 500);
+      expect(scentless(sim)).toBe(true);
+      sim.paint([{ kind: 'wall', from: [5, 5], to: [9, 5], radius: 1 }]);
+      sim.paint([{ kind: 'erase', from: [5, 5], to: [9, 5], radius: 2 }]);
+      sim.run(2);
+      expect(scentless(sim), 'walls and the eraser add no scent').toBe(true);
+      sim.paint([food]);
+      expect(scentless(sim), 'a food').toBe(false);
+      sim.run(2);
+      sim.clearEnvironment();
+      expect(scentless(sim), 'the scent of the food stays after a clear').toBe(false);
+      sim.reset();
+      expect(scentless(sim), 'a reset without sources').toBe(true);
+      sim.paint([{ kind: 'light', from: [30, 20], to: [30, 20], radius: 4 }]);
+      sim.reset();
+      expect(scentless(sim), 'a reset with a light').toBe(false);
+      sim.clearEnvironment();
+      sim.reset();
+      sim.writeScent(new Float32Array(W * H * 2));
+      expect(scentless(sim), 'a written scent').toBe(false);
+      sim.reset();
+      sim.writeEnv(new Uint8Array(W * H * 4).fill(200, 5, 6)); // one food byte
+      expect(scentless(sim), 'a written food').toBe(false);
+      sim.reset();
+      expect(scentless(sim), 'a reset with a written food').toBe(false);
+      sim.writeEnv(new Uint8Array(W * H * 4).fill(255, 4, 5)); // one wall byte
+      sim.reset();
+      expect(scentless(sim), 'a reset with a written wall only').toBe(true);
+    });
+
+    it.each(
+      STEP_ORDERS.flatMap((stepOrder) =>
+        [false, true].flatMap((collisions) => [1, 3].map((diffusion) => ({ stepOrder, collisions, diffusion }))),
+      ),
+    )(
+      'gives the bytes of the passes that read the scent ($stepOrder, collisions $collisions, $diffusion passes)',
+      async (patch) => {
+        const settings = { seed: 5, strains, density: patch.collisions ? 0.4 : 2, ...patch };
+        const n = Math.round(settings.density * W * H);
+        const [one, full] = [await make(settings, W, H, n), await make(settings, W, H, n)];
+        // A written scent of zeros: the same state, read from the grid's textures.
+        full.writeScent(new Float32Array(W * H * 2));
+        expect([scentless(one), scentless(full)]).toEqual([true, false]);
+        for (const sim of [one, full]) sim.run(12);
+        const quiet = await all(one);
+        expect(quiet).toEqual(await all(full));
+        expect(quiet.scent.every((v) => v === 0) && quiet.viewScent.every((v) => v === 0)).toBe(true);
+        // With a food both read the grid's textures, from the same zeros on.
+        for (const sim of [one, full]) {
+          sim.paint([food]);
+          sim.run(8);
+        }
+        const fed = await all(one);
+        expect(fed).toEqual(await all(full));
+        expect(Math.max(...fed.scent)).toBeGreaterThan(0);
+        // Without the food, after a reset, one texel again: the bytes of a simulation that never had a food.
+        const fresh = await make(settings, W, H, n);
+        one.clearEnvironment();
+        one.reset();
+        expect(scentless(one)).toBe(true);
+        for (const sim of [one, fresh]) sim.run(12);
+        expect(await all(one)).toEqual(await all(fresh));
+      },
+      // Up to 12.0 s on SwiftShader on an M3 Pro with twice the steps: 120 s keeps it under a quarter (ADR 0010).
+      120_000,
+    );
+  });
 
   describe('diffusion and decay', () => {
     // 47 and 246 are sides where a float floor(c / side) was not exact on an Apple M3 Pro (WebGL2 on Metal): there
@@ -5696,8 +5950,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // A paused simulation keeps its coarse map: the first version filled it in every frame, reading every cell (review
     // of 2026-11-11: 4 ms per frame at 4096 × 2560). A step, a stroke or a new zoom level fill it again, so the view
-    // never shows an old scent.
-    it('fills the coarse map again only when the scent, the shape or the level changed', async () => {
+    // never shows an old scent. The trail has a coarse map too for a view zoomed out (ADR 0028), under the same rule:
+    // each change fills both maps, one pass each.
+    it('fills the coarse maps again only when the scent, the trail, the shape or the level changed', async () => {
       const settings = { ...extended({ style: 'paper', layout: 'empty', strains: [defaultStrain(0)] }), bloom: 0 };
       const sim = await make(settings, W, H, 1);
       sim.paint([{ kind: 'food', from: [20, 24], to: [20, 24], radius: 3 }]);
@@ -5720,12 +5975,28 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const kept = await count();
       expect(await count()).toBe(kept);
       sim.run(1);
-      expect(await count()).toBe(kept + 1);
+      expect(await count()).toBe(kept + 2);
       expect(await count()).toBe(kept);
       sim.paint([{ kind: 'food', from: [44, 24], to: [44, 24], radius: 3 }]);
-      expect(await count()).toBe(kept + 1);
-      expect(await count({ ...view, scale: 6 })).toBe(kept + 1);
+      expect(await count()).toBe(kept + 2);
+      expect(await count({ ...view, scale: 6 })).toBe(kept + 2);
       expect(await count({ ...view, scale: 6 })).toBe(kept);
+      // Without the scent view only the trail's map is left, and up to 2 cells per pixel a frame needs no map.
+      const plain = async (scale: number) => {
+        const before = passes.mock.calls.length;
+        await backend.capture(sim, settings, { ...view, scale }, 32, 24);
+        return passes.mock.calls.length - before;
+      };
+      const frame = await plain(1.5);
+      expect(await plain(1.5)).toBe(frame);
+      expect(await plain(6)).toBe(frame);
+      sim.run(1);
+      expect(await plain(1.5)).toBe(frame);
+      expect(await plain(6)).toBe(frame + 1);
+      expect(await plain(6)).toBe(frame);
+      sim.writeTrail(await sim.readTrail());
+      expect(await plain(6)).toBe(frame + 1);
+      expect(await plain(3)).toBe(frame + 1);
       vi.restoreAllMocks();
       // Steps while the map was kept (the map of 4 cells refreshes only its scent), then a stroke: the view shows the
       // scent of now.
@@ -5789,9 +6060,79 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   // Without food, light or walls the renderer takes the pass without them (`ENV` off), which must draw the pixels
   // of ef7f2af: the reference above computes them on the CPU. The dither moves a channel by at most 1, rounding by
   // 1 more, the gel's hardware filtering of its height field by at most 2. Fit (one bilinear lookup) and zoomed
-  // out (four taps), every style, across the wrap seam, the box edge and the dish rim.
+  // out (the mean under each pixel), every style, across the wrap seam, the box edge and the dish rim.
   describe('styles without food, light or walls', () => {
     const SIZE = 128;
+
+    // Zoomed out, a pixel shows the mean of the trail over its square (ADR 0028): from the trail itself up to 2 cells
+    // per pixel, above from a coarse map of the mean over 2, 4, 8 or 16 cells per side. A trail of noise from cell to
+    // cell: a cell left out or counted twice shows. Sides that no power of two divides, where a texel of a map covers a
+    // share of a cell; the copies of the periodic grid far from it; and the largest zoom, 8 cells per pixel.
+    it.each(
+      BOUNDARIES.flatMap((boundary) =>
+        (
+          [
+            [64, 48],
+            [47, 33],
+          ] as const
+        ).map(([w, h]) => ({ boundary, w, h })),
+      ),
+    )(
+      'draw the mean of the trail under each pixel when zoomed out ($boundary, $w × $h)',
+      async ({ boundary, w, h }) => {
+        const base: Settings = {
+          ...defaultSettings(),
+          boundary,
+          layout: 'empty',
+          strains: [defaultStrain(0), defaultStrain(1)],
+          exposure: 0,
+          bloom: 0,
+        };
+        const sim = await make(base, w, h, 1);
+        const trail = new Float32Array(w * h * 4);
+        let r = 12345;
+        const rand = () => (r = (Math.imul(r, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+        for (let i = 0; i < w * h; i++) {
+          trail[i * 4] = 40 * rand() ** 3;
+          trail[i * 4 + 1] = 40 * rand() ** 3;
+        }
+        sim.writeTrail(trail);
+        const levels = await backend.settle(sim);
+        expect([1.5, 2, 3.9, 4, 8, 15.9, 16, 40].map(trailLevel)).toEqual([0, 1, 1, 2, 3, 3, 4, TRAIL_LEVELS_MAX]);
+        const worst: string[] = [];
+        const views: View[] = [1.01, 1.5, 1.99, 2, 2.5, 3.9, 4, 5.3, 8].map((scale) => ({
+          center: [w / 2 + 0.37, h / 2 - 0.21],
+          scale,
+        }));
+        // The copies of a periodic grid, more than one period away from it.
+        if (boundary === 'wrap')
+          views.push({ center: [-3.3 * w, 2.7 * h], scale: 7.5 }, { center: [5.2 * w, -4 * h], scale: 2.2 });
+        for (const style of ['glow', 'paper'] as const)
+          for (const view of views) {
+            const settings = { ...base, style };
+            const img = await backend.capture(sim, settings, view, 96, 64);
+            const ref = styleReference(
+              { trail },
+              [w, h],
+              settings,
+              view,
+              { exposure: levels.gain, black: levels.black },
+              [96, 64],
+            );
+            let [max, sum] = [0, 0];
+            for (let i = 0; i < ref.length; i++) {
+              if (i % 4 === 3) continue;
+              const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
+              [max, sum] = [Math.max(max, d), sum + d];
+            }
+            const mean = sum / ((ref.length / 4) * 3);
+            // The dither moves a channel by at most 1.
+            if (max > 2 || mean > 0.75) worst.push(`${style} at ${view.scale}: max ${max}, mean ${mean.toFixed(2)}`);
+          }
+        expect(worst).toEqual([]);
+      },
+    );
+
     it.each(BOUNDARIES)(
       'match the colours of the pass before food and walls looked like them (%s)',
       async (boundary) => {
@@ -5821,9 +6162,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(sim.hasEnvironment).toBe(false);
         const worst: string[] = [];
         for (const style of STYLES)
+          // Zoomed out: 1.5 cells per pixel from the trail itself, 2.5 and 5.3 from its coarse maps of 2 and 4 cells.
           for (const view of [
             { center: [14, 12], scale: 1 / 4 },
             { center: [32, 24], scale: 1.5 },
+            { center: [31.3, 22.7], scale: 2.5 },
+            { center: [31.3, 22.7], scale: 5.3 },
           ] as View[]) {
             const settings = { ...base, style };
             const agents = style === 'agents';
@@ -5941,6 +6285,48 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             expect(sorted.trail, `sort every ${interval} steps`).toEqual(unsorted.trail);
             expect(sorted.agents, `sort every ${interval} steps`).toEqual(unsorted.agents);
           }
+        },
+      );
+
+      // The engine gives the sort a turn of its own (ADR 0028): sortNow() runs the sort of the next step that sorts,
+      // up to some steps ahead of it, and that step then runs without it. The agents and the trail are those of a
+      // run that sorts inside its steps, and each interval still sorts once.
+      it.each([false, true])(
+        'sorts ahead of its step with the same agents and trail (collisions %s)',
+        async (collisions) => {
+          const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+          const n = collisions ? 2400 : 9600;
+          const [inStep, ahead] = [
+            (await make(patch, 80, 60, n)) as Simulation,
+            (await make(patch, 80, 60, n)) as Simulation,
+          ];
+          inStep.run(70);
+          let sorts = 0;
+          /** Steps as the engine runs them: the sort first, in its own submission, when one of the steps holds it. */
+          const turn = (steps: number) => {
+            const before = ahead.agentBuffer;
+            if (ahead.sortDue(steps)) {
+              ahead.sortNow();
+              sorts++;
+              expect(ahead.agentBuffer, 'the sort writes the other buffer').not.toBe(before);
+              expect(ahead.sortDue(steps), 'sorted for that step').toBe(false);
+            }
+            const sorted = ahead.agentBuffer;
+            ahead.run(steps);
+            expect(ahead.agentBuffer, 'no second sort in the steps').toBe(sorted);
+          };
+          for (let k = 0; k < 29; k++) turn(1); // step 0 sorts
+          turn(4); // steps 29 to 32: the sort of step 32, three steps ahead
+          for (let k = 0; k < 20; k++) turn(1);
+          turn(17); // steps 53 to 69: the sort of step 64
+          expect(ahead.step).toBe(70);
+          expect(sorts).toBe(3);
+          expect(await state(ahead)).toEqual(await state(inStep));
+          // A reset starts over: step 0 sorts again.
+          ahead.reset();
+          expect(ahead.sortDue(1)).toBe(true);
+          ahead.sortInterval = 0;
+          expect(ahead.sortDue(100)).toBe(false);
         },
       );
 

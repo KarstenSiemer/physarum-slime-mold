@@ -1390,7 +1390,7 @@ describe('lattices', () => {
 });
 
 // ADR 0027: the view of a step that moves first holds a third trail and scent from two diffusion passes on, and the
-// memory fit counts them. 2048 × 1280 cells with 3.2 agents per cell fit 512 MiB at 90 + 102.4 B per cell, not with
+// memory fit counts them. 2048 × 1280 cells with 3.2 agents per cell fit 512 MiB at 98 + 102.4 B per cell, not with
 // 24 B more.
 describe('the memory fit of the view', () => {
   it('counts the third trail and scent of a step that moves first with two passes', async () => {

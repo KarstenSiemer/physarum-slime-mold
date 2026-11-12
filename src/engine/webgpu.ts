@@ -90,7 +90,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   draw(sim: Simulation, settings: Settings, view: View, measure: boolean) {
-    this.renderer.draw(this.frame(sim, settings, view, measure));
+    return this.renderer.draw(this.frame(sim, settings, view, measure));
   }
 
   capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {

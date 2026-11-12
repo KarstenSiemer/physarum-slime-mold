@@ -65,7 +65,13 @@ vec2 dir(float a) {
 // as 33, 47 and 246. Then cell W wrapped to the first cell of the next row, and row H to no cell of the grid (ADR
 // 0023). GLSL ES leaves % undefined for a negative operand, so both operands stay non-negative. view.glsl has the same
 // function.
-int wrapAxis(int v, int n) { return v >= 0 ? v % n : n - 1 - (-1 - v) % n; }
+// - Less than one period outside the grid, as every move and almost every sensor is: comparisons, then one addition or
+//   subtraction of n. That is the cell the remainder gives, and an integer remainder is slow on Apple GPUs (ADR 0028).
+// - Farther out: the remainder.
+int wrapAxis(int v, int n) {
+  if (v >= -n && v < 2 * n) return v < 0 ? v + n : (v >= n ? v - n : v);
+  return v >= 0 ? v % n : n - 1 - (-1 - v) % n;
+}
 
 // A cell coordinate wrapped into a periodic grid of n cells (wrapCell in common.wgsl).
 ivec2 wrapCell(ivec2 c, ivec2 n) { return ivec2(wrapAxis(c.x, n.x), wrapAxis(c.y, n.y)); }
@@ -93,18 +99,22 @@ float toolDistance(vec2 p, vec2 q) {
   return length(d);
 }
 
-// Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (cellAt in common.wgsl).
-int cellAt(ivec2 c) {
+// The cell at c as coordinates inside the grid: wrapped for the periodic boundary, or (−1, −1) outside a closed arena
+// (cellXY in common.wgsl). A pass that reads a texture at the cell takes the coordinates from here: cellCoord() of the
+// index divides, which is slow (ADR 0028).
+ivec2 cellXY(ivec2 c) {
   ivec2 size = ivec2(W(), H());
-  ivec2 q = c;
-  if (P.cfg.z == 0u) {
-    q = wrapCell(c, size);
-  } else {
-    if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) return -1;
-    if (P.cfg.z == 2u && distance(vec2(c) + 0.5, 0.5 * vec2(size)) > dishRadius()) return -1;
-  }
-  return q.y * size.x + q.x;
+  if (P.cfg.z == 0u) return wrapCell(c, size);
+  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) return ivec2(-1);
+  if (P.cfg.z == 2u && distance(vec2(c) + 0.5, 0.5 * vec2(size)) > dishRadius()) return ivec2(-1);
+  return c;
 }
+
+// The index of a cell from its coordinates as cellXY() gives them: −1 outside a closed arena.
+int indexOf(ivec2 q) { return q.x < 0 ? -1 : q.y * W() + q.x; }
+
+// Index of a cell, wrapped for the periodic boundary, or −1 outside a closed arena (cellAt in common.wgsl).
+int cellAt(ivec2 c) { return indexOf(cellXY(c)); }
 
 int cellOf(vec2 p) { return cellAt(ivec2(floor(p))); }
 

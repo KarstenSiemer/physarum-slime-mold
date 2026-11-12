@@ -58,12 +58,15 @@ export function diffusePlan(passes: number): Diffuse[] {
 
 /**
  * GPU bytes per grid cell: trail 32, scent 16, counts 16, environment 4, the renderer's outline
- * distances 4, collision buffers 12, the bloom chain about 2.7, the gel height field about 2 and the
- * walls' clearance 0.125 (8 B per tile of 8 × 8 cells, ADR 0020). WebGL2 without float blending has
- * no collision buffers but 32 B of counting panels with a stencil (gl/sim.ts deposit()).
+ * distances 4, collision buffers 12, the bloom chain about 2.7, the gel height field about 2, the
+ * walls' clearance 0.125 (8 B per tile of 8 × 8 cells, ADR 0020), and the two coarse maps of the view, 4 each: the
+ * trail's for a view zoomed out and the scent view's (16 B per texel, a quarter of a texel per cell; render.ts,
+ * gl/backend.ts). The user zooms out or turns the scent view on without a new grid, so the fit holds both maps from
+ * the start (ADR 0028). WebGL2 without float blending has no collision buffers but 32 B of counting panels with a
+ * stencil (gl/sim.ts deposit()); its coarse maps are the same.
  */
-export const BYTES_PER_CELL = 90;
-export const BYTES_PER_CELL_HALF_FLOAT = 110;
+export const BYTES_PER_CELL = 98;
+export const BYTES_PER_CELL_HALF_FLOAT = 118;
 /**
  * More bytes per cell while covered food is on (ADR 0022): WebGL2 without float blending marks the cells with an agent
  * in a target of 1 B (gl/sim.ts `presence`). Elsewhere covered food counts into the collision buffers, which

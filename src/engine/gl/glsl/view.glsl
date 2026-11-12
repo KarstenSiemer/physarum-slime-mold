@@ -15,7 +15,7 @@ layout(std140) uniform View {
   vec4 colors[4];
   vec4 background;
   uvec4 frame; // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
-  vec4 fx;     // bloom strength, black level, copies (packView), unused
+  vec4 fx;     // bloom strength, black level, copies (packView), level of the trail's map (0 to 4)
   vec4 scentFx; // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
   vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
@@ -34,26 +34,32 @@ ivec2 gridSize() { return textureSize(trail, 0); }
 
 // v wrapped into [0, n), in integers, and a cell coordinate wrapped into a periodic grid of n cells: wrapAxis and
 // wrapCell in common.glsl. A float floor(v / n) is not exact on every GPU (ADR 0023).
-int wrapAxis(int v, int n) { return v >= 0 ? v % n : n - 1 - (-1 - v) % n; }
+// - Less than one period outside the grid, as every tap of a view that shows the grid about once is: comparisons, then
+//   one addition or subtraction of n. That is the cell the remainder gives, and an integer remainder is slow on Apple
+//   GPUs (ADR 0028).
+// - Farther out, in the copies of a view zoomed out or panned away: the remainder.
+int wrapAxis(int v, int n) {
+  if (v >= -n && v < 2 * n) return v < 0 ? v + n : (v >= n ? v - n : v);
+  return v >= 0 ? v % n : n - 1 - (-1 - v) % n;
+}
 ivec2 wrapCell(ivec2 c, ivec2 n) { return ivec2(wrapAxis(c.x, n.x), wrapAxis(c.y, n.y)); }
 
-int cellAt(ivec2 c) {
+// The cell at c as texel coordinates: wrapped (periodic), or (−1, −1) outside the arena (cellXY in render.wgsl). The
+// lookups read their texel here, with no index of the cell and no division to get the coordinates back from it.
+ivec2 cellXY(ivec2 c) {
   ivec2 s = gridSize();
-  ivec2 q = c;
-  if (V.boundary == 0u) {
-    q = wrapCell(c, s);
-  } else if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) {
-    return -1;
-  }
-  return q.y * s.x + q.x;
+  if (V.boundary == 0u) return wrapCell(c, s);
+  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) return ivec2(-1);
+  return c;
 }
-
-ivec2 coord(int i) { return ivec2(i % gridSize().x, i / gridSize().x); }
 
 vec4 trailAt(ivec2 c) {
-  int i = cellAt(c);
-  return i < 0 ? vec4(0.0) : texelFetch(trail, coord(i), 0);
+  ivec2 q = cellXY(c);
+  return q.x < 0 ? vec4(0.0) : texelFetch(trail, q, 0);
 }
+
+// Texels per side of a coarse map of level k (1 and up), of the trail or of the scent (see levelSize in render.wgsl).
+ivec2 levelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
 
 const float SHAPE_RANGE = 4.0; // cells; outline distances in `shape` are clamped to ± this (shape.frag)
 const float PRESENCE = 0.9;      // tone-curve input of an occupied food cell (render.frag presence())
@@ -75,9 +81,9 @@ vec4 shapeAt(ivec2 c) {
   return texelFetch(shape, q, 0);
 }
 
-// How much the agent in cell i shows on food: 0 without an agent or outside the food, rising to 1 over
+// How much the agent in cell q (cellXY) shows on food: 0 without an agent or outside the food, rising to 1 over
 // the outer PRESENCE_RAMP cells inside the outline (see presenceWeight in render.wgsl).
-float presenceWeight(int i, float food) {
-  if (i < 0 || texelFetch(occ, coord(i), 0).r < 0.5) return 0.0;
+float presenceWeight(ivec2 q, float food) {
+  if (q.x < 0 || texelFetch(occ, q, 0).r < 0.5) return 0.0;
   return smoothstep(0.0, PRESENCE_RAMP, food);
 }

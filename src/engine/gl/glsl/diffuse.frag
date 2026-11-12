@@ -30,8 +30,8 @@ layout(location = 1) out vec4 outScent;
 bool covered(ivec2 q) {
   for (int dy = -1; dy <= 1; dy++) {
     for (int dx = -1; dx <= 1; dx++) {
-      int c = cellAt(q + ivec2(dx, dy));
-      if (c >= 0 && texelFetch(occ, cellCoord(c), 0).r > 0.5) return true;
+      ivec2 c = cellXY(q + ivec2(dx, dy));
+      if (c.x >= 0 && texelFetch(occ, c, 0).r > 0.5) return true;
     }
   }
   return false;
@@ -71,9 +71,9 @@ void load(ivec2 c, out vec4 t, out vec2 s, out int kind) {
   t = vec4(0.0);
   s = vec2(0.0);
   kind = SINK;
-  int i = cellAt(c);
-  if (i < 0) return;
-  ivec2 q = cellCoord(i);
+  // The coordinates of the cell straight from the wrap: cellCoord() of the index would divide.
+  ivec2 q = cellXY(c);
+  if (q.x < 0) return;
   if (isWall(texelFetch(env, q, 0))) {
     if (P.model.z == 0.0) return;
     kind = WALL;

@@ -30,6 +30,38 @@ import {
 } from './sizing';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
+
+/**
+ * Most frames in flight at which the loop still starts a frame (ADR 0028): with two frames on the GPU a third would
+ * only wait behind them, and its picture would show input that is older by a frame. Before, up to five frames queued
+ * under a second GPU client, 67 ms from a frame's start to its picture at the median; with the limit, 19 ms.
+ */
+export const MAX_IN_FLIGHT = 2;
+
+/**
+ * Frames that still draw after the last change of what a frame shows (Engine.frame). The auto levels measure in drawn
+ * frames, every 6th on WebGPU and every 15th on WebGL2, and a measurement comes back some frames later: the frames
+ * after a change give them time to move, and each move starts the count again.
+ */
+export const SETTLE_FRAMES = 30;
+
+/** Levels this close draw the same picture: a share of 1/1024 is below half a step of 8 bits. */
+const LEVELS_NEAR = 1 / 1024;
+const near = (a: number, b: number) => Math.abs(a - b) <= LEVELS_NEAR * Math.max(Math.abs(a), Math.abs(b));
+
+/** Everything a frame shows apart from the levels (Engine.frame). */
+interface Shown {
+  sim: Sim;
+  step: number;
+  revision: number;
+  settings: Settings;
+  x: number;
+  y: number;
+  scale: number;
+  width: number;
+  height: number;
+  levels: Levels;
+}
 import { WebGpuBackend } from './webgpu';
 
 /**
@@ -105,8 +137,24 @@ export class Engine {
   sim!: Sim;
   view: View = { center: [0, 0], scale: 1 };
   paused = false;
-  /** Frames drawn since start; the UI derives frames per second from it. */
+  /**
+   * Frames since start whose picture was current: drawn, or with nothing new to show (frame()). The UI derives frames
+   * per second from it, and the startup check reads it (ui/tune.ts). A frame that the loop did not start because the
+   * GPU was behind (tick()) does not count.
+   */
   frames = 0;
+  /** Frames drawn since start. */
+  draws = 0;
+  /**
+   * The sort of the agents takes the place of one step in its frame (ADR 0028): a frame whose steps hold the sort runs
+   * the sort and one step less. A step with the sort took 7.5 to 7.9 ms against 4.3 ms in the start scene, and its
+   * frame ended after the next refresh of a 120 Hz display. False: the sort runs inside its step (measurements).
+   */
+  sortOwnTurn = true;
+  /** What the last drawn frame showed, `settling` frames that still draw after it, and a call for a new picture. */
+  private shown: Shown | undefined;
+  private settling = 0;
+  private stale = true;
   /** Steps per frame from the speed and from what the GPU keeps up with (budget.ts). */
   readonly budget = new FrameBudget();
   /** How often the simulation started over (reset or rebuild); the UI restarts its measurements then. */
@@ -384,7 +432,17 @@ export class Engine {
     this.onEdits?.();
   }
 
+  /**
+   * The next frame draws, whatever it shows: the canvas may have lost its picture. The page calls this after it set
+   * the size of the canvas, which clears it, and when the tab shows again.
+   */
+  invalidate() {
+    this.stale = true;
+  }
+
   fitView() {
+    // The page calls this after it set the size of the canvas, which clears the canvas.
+    this.stale = true;
     const { width, height } = this.sim;
     // The sweeps that wait judge the grid on screen until now: they finish before it changes.
     if ((this.viewGrid?.[0] !== width || this.viewGrid[1] !== height) && this.sweepFor()) this.onEdits?.();
@@ -520,10 +578,24 @@ export class Engine {
   /** Called when a frame throws; the loop stops instead of failing silently. */
   onError: ((err: unknown) => void) | undefined;
 
+  /**
+   * One turn of the frame loop at `now` (ms): a frame, unless MAX_IN_FLIGHT frames are in flight. Then the GPU is
+   * behind, and the loop starts no new work for it: the budget hears of it (FrameBudget.held), and the next turn runs
+   * the steps of the time since the last frame. Returns whether the frame ran.
+   */
+  tick(now: number): boolean {
+    if (this.budget.pending >= MAX_IN_FLIGHT && !this.rebuilding) {
+      this.budget.held();
+      return false;
+    }
+    this.frame(now);
+    return true;
+  }
+
   start() {
     const loop = (now: number) => {
       try {
-        this.frame(now);
+        this.tick(now);
       } catch (err) {
         this.onError?.(err);
         return;
@@ -541,6 +613,12 @@ export class Engine {
    * One frame: a slice of a long sweep, new strokes, as many steps as the speed asks for and the GPU keeps up with,
    * then one render. When the GPU falls behind, the steps per frame drop (budget.ts), so a slow GPU lowers the
    * simulation speed instead of the frame rate.
+   *
+   * The render runs only if the frame shows something new (ADR 0028): another state of the simulation (a step, a
+   * reset, a stroke, a clear, a new simulation), other settings, another view or canvas size, other auto levels, a
+   * part of the picture that the last frame could not draw yet, or a call of invalidate(). After the last change
+   * SETTLE_FRAMES frames still draw. Then the canvas keeps its picture and the GPU stays idle, as while paused: before,
+   * a paused scene drew the same picture in every frame.
    *
    * A held agent tool acts on every step of the frame. The frame stands for its interval (budget.ts, at most 100 ms),
    * and each step for its share of that time. So without the rule an inoculation places the same amount per second of
@@ -565,12 +643,45 @@ export class Engine {
       steps = Math.floor(this.pausedSteps + SLACK);
       this.pausedSteps -= steps;
     } else this.pausedSteps = 0;
+    // Only for the steps that the budget gives. Steps asked for by hand run as asked, and a tool held while paused
+    // keeps its 60 steps per second at any frame rate (ADR 0023): those frames are light.
+    if (this.sortOwnTurn && forceSteps === undefined && !this.paused && steps > 0 && this.sim.sortDue?.(steps)) {
+      this.sim.sortNow?.();
+      steps--;
+    }
     if (steps > 0) {
       this.sim.run(steps, held && stepTool(held, this.heldFor / steps));
       this.heldFor = 0;
     }
-    this.backend.draw(this.sim, this.settings, this.view, true);
     this.frames++;
+    const { center, scale } = this.view;
+    const [x, y] = center;
+    const { width, height } = this.canvas;
+    const { sim, settings } = this;
+    const levels = this.backend.levels();
+    const s = this.shown;
+    const same =
+      s !== undefined &&
+      !this.stale &&
+      s.sim === sim &&
+      s.step === sim.step &&
+      s.revision === sim.revision &&
+      s.settings === settings &&
+      s.x === x &&
+      s.y === y &&
+      s.scale === scale &&
+      s.width === width &&
+      s.height === height &&
+      near(s.levels.gain, levels.gain) &&
+      near(s.levels.black, levels.black) &&
+      near(s.levels.strand, levels.strand);
+    if (!same) this.settling = SETTLE_FRAMES;
+    if (this.settling === 0) return; // the canvas shows this frame already
+    this.settling--;
+    this.shown = { sim, step: sim.step, revision: sim.revision, settings, x, y, scale, width, height, levels };
+    // A picture that is still being built is not the one to keep.
+    this.stale = !this.backend.draw(sim, settings, this.view, true);
+    this.draws++;
     this.budget.submitted();
     const done = () => {
       this.budget.done(performance.now());
