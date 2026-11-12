@@ -1,6 +1,16 @@
 import type { Boundary, Settings } from '../../model/params';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { CLEAR_TILE, packParams, PARAMS_BYTES, startRounds, trailSaturation, type AgentTool } from '../pack';
+import {
+  CLEAR_TILE,
+  growthOn,
+  growthTests,
+  packParams,
+  PARAMS_BYTES,
+  pyramidLevels,
+  startRounds,
+  trailSaturation,
+  type AgentTool,
+} from '../pack';
 import { diffusePlan } from '../sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
@@ -35,8 +45,51 @@ const MASKS: Record<number, [boolean, boolean, boolean, boolean]> = {
 /** Side of the tiles syncShape() copies the outline target in: 1 MiB at a time. */
 const REFRESH_TILE = 512;
 
+/**
+ * A pyramid of sums with a fan-in of 4 (growth.frag): level k ≥ 1 lies in texture k mod 2, `width` texels a row, from
+ * row `rows[k]`. `sizes[k]` is its node count, `sizes[0]` the elements, and `top` the level with one node.
+ */
+interface Pyramid {
+  textures: Pair<Target>;
+  width: number;
+  sizes: number[];
+  rows: number[];
+  top: number;
+}
+
+/** The targets of growth and shrinkage (growth.frag, growth.vert), while growth is on (ADR 0025). */
+interface GlGrowth {
+  rows: Target;
+  windows: Target;
+  claims: Target;
+  births: Target;
+  cells: Pyramid;
+  dead: Pyramid;
+}
+
+/** The layout of a pyramid over `n` elements, `width` texels a row (Pyramid). */
+function pyramidLayout(n: number, width: number) {
+  const sizes = [n, ...pyramidLevels(n)];
+  const rows = sizes.map(() => 0);
+  const heights = [0, 0];
+  sizes.forEach((size, k) => {
+    if (k === 0) return;
+    const t = k % 2;
+    rows[k] = heights[t] ?? 0;
+    heights[t] = (heights[t] ?? 0) + Math.ceil(size / width);
+  });
+  return { sizes, rows, heights, top: sizes.length - 1 };
+}
+
 /** Cells of some rectangles. */
 const area = (rects: readonly Rect[]) => rects.reduce((sum, [, , w, h]) => sum + w * h, 0);
+
+/** Uniform values of the levels of a pyramid, for an array of 13 (growth.frag PASS 4): a grid side of up to 4096. */
+function padded(values: readonly number[]): Int32Array {
+  const out = new Int32Array(13);
+  out.set(values.slice(0, 13));
+  return out;
+}
 
 /** About the cells deep in a segment, where its subtraction writes 0 (SHAPE_RANGE cells inside its brush). */
 function core({ from: a, to: b, radius }: Stroke) {
@@ -106,6 +159,8 @@ export class GlSim implements Sim {
   private readonly tally: Target;
   private readonly mrt: Pair<WebGLFramebuffer>;
   private collision?: { occ: Pair<Target>; claims: Target };
+  /** The targets of growth and shrinkage, while growth is on (ADR 0025). */
+  private growth?: GlGrowth | undefined;
   /**
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
    * (diffuse.frag COVERED). Allocated at its first use.
@@ -131,6 +186,8 @@ export class GlSim implements Sim {
     readonly height: number,
     readonly agents: number,
     private readonly floatBlend: boolean,
+    /** Agents alive at the start: fewer than `agents` when the capacity holds more (ADR 0025). */
+    readonly start = agents,
   ) {
     this.settings = settings;
     this.shapeHeld = settings.boundary;
@@ -205,10 +262,15 @@ export class GlSim implements Sim {
     const switchedOn = settings.collisions && !this.settings.collisions;
     this.settings = settings;
     if (switchedOn) this.rebuildOccupancy();
-    // The memory fit counts `presence` only while covered food is on (sizing.ts).
+    // The memory fit counts `presence` only while covered food is on (sizing.ts), and growth's targets only while it
+    // is on.
     if (!settings.coveredFood && this.presence) {
       destroyTarget(this.gl, this.presence);
       this.presence = undefined;
+    }
+    if (!growthOn(settings) && this.growth) {
+      for (const t of this.growthTargets()) destroyTarget(this.gl, t);
+      this.growth = undefined;
     }
   }
 
@@ -222,7 +284,7 @@ export class GlSim implements Sim {
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
-    this.pass(this.prog.init, this.agentsTex[0], init, { agentWidth: this.agentWidth, mode: 0 });
+    this.pass(this.initProgram(), this.agentsTex[0], init, { agentWidth: this.agentWidth, mode: 0 });
     if (this.settings.collisions) {
       this.placeOnFreeCells();
       this.rebuildOccupancy();
@@ -252,9 +314,17 @@ export class GlSim implements Sim {
         claims: col.claims.texture,
       };
       const mode = round === rounds - 1 ? 2 : 1;
-      this.pass(this.prog.init, this.agentsTex[flip(this.a)], textures, { agentWidth: this.agentWidth, mode });
+      this.pass(this.initProgram(), this.agentsTex[flip(this.a)], textures, { agentWidth: this.agentWidth, mode });
       this.a = flip(this.a);
     }
+  }
+
+  /**
+   * The start: with a capacity above the start population the one that starts only the first agents of each strain
+   * (CAPACITY in init.frag), else the one of the code before (ADR 0025).
+   */
+  private initProgram(): Program {
+    return this.start < this.agents ? this.prog.capacity() : this.prog.init;
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -447,6 +517,13 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.counts) as Float32Array);
   }
 
+  readWindows(): Promise<Uint32Array> {
+    if (!this.growth) return Promise.resolve(new Uint32Array(0));
+    const rgba = readTarget(this.gl, this.growth.windows);
+    const cells = this.width * this.height;
+    return Promise.resolve(Uint32Array.from({ length: cells * 2 }, (_, i) => rgba[(i >> 1) * 4 + (i & 1)] ?? 0));
+  }
+
   readEnv(): Promise<Uint8Array> {
     return Promise.resolve(readTarget(this.gl, this.env) as Uint8Array);
   }
@@ -494,6 +571,7 @@ export class GlSim implements Sim {
     if (this.panels) all.push(this.panels);
     if (this.presence) all.push(this.presence);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
+    all.push(...this.growthTargets());
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
     gl.deleteBuffer(this.ubo);
@@ -570,6 +648,7 @@ export class GlSim implements Sim {
       tool,
       walls: this.walls,
       round,
+      start: this.start,
     };
     gl.bindBufferBase(gl.UNIFORM_BUFFER, PARAMS_BINDING, this.ubo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(packParams(s, rt, this.paramData)));
@@ -647,6 +726,10 @@ export class GlSim implements Sim {
       this.q = flip(this.q);
     }
     this.deposit();
+    // Growth and shrinkage after the deposits, so an agent that shrinkage deletes keeps the trail of its move, as on
+    // WebGPU (ADR 0025). Only with the rule, on the steps that test them.
+    const tests = growthTests(this.settings, this.step);
+    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow);
     const covered = this.settings.coveredFood;
     // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
     const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
@@ -670,6 +753,130 @@ export class GlSim implements Sim {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.p = out;
     }
+  }
+
+  /**
+   * Growth and shrinkage after the moves of a test step (growth.frag, growth.vert; growth.wgsl in sim.ts, ADR 0025).
+   * The current occupancy is the one after the moves: it gives the window counts and the empty cells. The agents
+   * pass through the tests, and on a growth step through the claims, the pyramids and the births. Then the occupancy
+   * is counted anew for the next step.
+   */
+  private encodeGrowth(grow: boolean) {
+    const gl = this.gl;
+    const g = this.ensureGrowth();
+    const p = this.prog.growth();
+    const col = this.ensureCollision();
+    const occ = col.occ[this.q].texture;
+    const agentWidth = this.agentWidth;
+    this.pass(p.rows, g.rows, { sums: occ }, {});
+    this.pass(p.windows, g.windows, { sums: g.rows.texture }, {});
+    const tested = this.agentsTex[flip(this.a)];
+    const env = this.env.texture;
+    const windows = g.windows.texture;
+    this.pass(p.test, tested, { agentsIn: this.agentsTex[this.a].texture, windows, occ, env }, { agentWidth });
+    this.a = flip(this.a);
+    if (grow) {
+      const agents = this.agentsTex[this.a];
+      const points = (kind: number, dst: Target, equation: number | null, claims: WebGLTexture) => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+        gl.viewport(0, 0, dst.width, dst.height);
+        gl.useProgram(p.points.program);
+        textures(gl, p.points.program, { agents: agents.texture, claims });
+        gl.uniform1i(p.points.loc('agentWidth'), agentWidth);
+        gl.uniform1i(p.points.loc('kind'), kind);
+        if (equation === null) gl.disable(gl.BLEND);
+        else this.blend(equation);
+        gl.drawArrays(gl.POINTS, 0, this.agents);
+        gl.disable(gl.BLEND);
+      };
+      clear(gl, g.claims);
+      points(0, g.claims, gl.MAX, env);
+      clear(gl, g.births);
+      points(1, g.births, null, g.claims.texture);
+      this.buildPyramid(p.build, g.cells, g.births, 0);
+      this.buildPyramid(p.build, g.dead, agents, 1);
+      const [c, d] = [g.cells, g.dead];
+      this.pass(
+        p.birth,
+        this.agentsTex[flip(this.a)],
+        {
+          agentsIn: agents.texture,
+          births: g.births.texture,
+          cells0: c.textures[0].texture,
+          cells1: c.textures[1].texture,
+          dead0: d.textures[0].texture,
+          dead1: d.textures[1].texture,
+        },
+        { agentWidth, cellTop: c.top, deadTop: d.top },
+        (prog) => {
+          gl.uniform1iv(prog.loc('cellRow'), padded(c.rows));
+          gl.uniform1iv(prog.loc('cellSize'), padded(c.sizes));
+          gl.uniform1iv(prog.loc('deadRow'), padded(d.rows));
+          gl.uniform1iv(prog.loc('deadSize'), padded(d.sizes));
+        },
+      );
+      this.a = flip(this.a);
+    }
+    const next = col.occ[flip(this.q)];
+    clear(gl, next);
+    this.points(2, next, gl.FUNC_ADD);
+    this.q = flip(this.q);
+  }
+
+  /** Builds every level of a pyramid (growth.frag PASS 3) over `base`: the births (kind 0) or the agents (kind 1). */
+  private buildPyramid(program: Program, py: Pyramid, base: Target, kind: number) {
+    const gl = this.gl;
+    for (let k = 1; k <= py.top; k++) {
+      const dst = py.textures[k % 2 === 1 ? 1 : 0];
+      const below = k === 1 ? base : py.textures[(k - 1) % 2 === 1 ? 1 : 0];
+      const rows = Math.ceil((py.sizes[k] ?? 1) / py.width);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+      gl.viewport(0, py.rows[k] ?? 0, py.width, rows);
+      gl.useProgram(program.program);
+      textures(gl, program.program, { below: below.texture });
+      const ints: Record<string, number> = {
+        kind,
+        first: k === 1 ? 1 : 0,
+        row: py.rows[k] ?? 0,
+        width: py.width,
+        size: py.sizes[k] ?? 0,
+        belowRow: k === 1 ? 0 : (py.rows[k - 1] ?? 0),
+        belowWidth: k === 1 ? base.width : py.width,
+        belowSize: py.sizes[k - 1] ?? 0,
+      };
+      for (const [name, v] of Object.entries(ints)) gl.uniform1i(program.loc(name), v);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+
+  /** The targets of growth and shrinkage, at their first use while growth is on (ADR 0025). */
+  private ensureGrowth(): GlGrowth {
+    if (!this.growth) {
+      const gl = this.gl;
+      const pyramid = (n: number, width: number, format: number): Pyramid => {
+        const { sizes, rows, heights, top } = pyramidLayout(n, width);
+        const textures: Pair<Target> = [
+          target(gl, width, Math.max(1, heights[0] ?? 0), format),
+          target(gl, width, Math.max(1, heights[1] ?? 0), format),
+        ];
+        return { textures, width, sizes, rows, top };
+      };
+      const [w, h] = [this.width, this.height];
+      this.growth = {
+        rows: target(gl, w, h, gl.RG32F),
+        windows: target(gl, w, h, gl.RG32F),
+        claims: target(gl, w, h, gl.R32F),
+        births: target(gl, w, h, gl.RG32F),
+        cells: pyramid(w * h, w, gl.RGBA32F),
+        dead: pyramid(this.agents, this.agentWidth, gl.R32F),
+      };
+    }
+    return this.growth;
+  }
+
+  private growthTargets(): Target[] {
+    const g = this.growth;
+    return g ? [g.rows, g.windows, g.claims, g.births, ...g.cells.textures, ...g.dead.textures] : [];
   }
 
   /**

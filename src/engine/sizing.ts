@@ -1,4 +1,4 @@
-import { RESOLUTIONS, type Lattice, type Settings } from '../model/params';
+import { capacityOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 
 /**
  * Agents for a `width` × `height` grid: the density times the cells of the arena's square. A dish counts the square
@@ -9,6 +9,18 @@ import { RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 export function agentCount(s: Pick<Settings, 'density' | 'boundary'>, width: number, height: number): number {
   const cells = s.boundary === 'dish' ? Math.min(width, height) ** 2 : width * height;
   return Math.round(s.density * cells);
+}
+
+/**
+ * The agents that the simulation holds, alive and dead: agentCount() at the capacity (ADR 0025). The first
+ * agentCount() of them start alive.
+ */
+export function capacityCount(
+  s: Pick<Settings, 'density' | 'capacity' | 'boundary' | 'collisions'>,
+  width: number,
+  height: number,
+) {
+  return agentCount({ density: capacityOf(s), boundary: s.boundary }, width, height);
 }
 
 /** Grid size for a resolution (cells on the long side) and an aspect ratio (width / height). */
@@ -58,16 +70,29 @@ export const BYTES_PER_CELL_HALF_FLOAT = 110;
  * BYTES_PER_CELL holds already.
  */
 export const COVERED_BYTES_PER_CELL_HALF_FLOAT = 1;
+/**
+ * More bytes while growth is on (ADR 0025): per cell the row sums and window counts (8 B each), the claims (4 B), the
+ * births (8 B) and the pyramid over them (16 B per node, a third of a node per cell); per agent its dead flag and the
+ * pyramid over them (4 B per node). Both backends hold the same.
+ */
+export const GROWTH_BYTES_PER_CELL = 34;
+export const GROWTH_BYTES_PER_AGENT = 6;
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
-const BYTES_PER_AGENT = 32;
+export const BYTES_PER_AGENT = 32;
 
 /** Memory budget: an eighth of the device memory hint (Chrome only), at most 1 GiB; 512 MiB if unknown. */
 export function memoryBudget(deviceMemoryGb?: number): number {
   return Math.min(2 ** 30, (deviceMemoryGb ?? 4) * 2 ** 27);
 }
 
-export function estimateBytes(width: number, height: number, agents: number, bytesPerCell = BYTES_PER_CELL): number {
-  return width * height * bytesPerCell + agents * BYTES_PER_AGENT;
+export function estimateBytes(
+  width: number,
+  height: number,
+  agents: number,
+  bytesPerCell = BYTES_PER_CELL,
+  bytesPerAgent = BYTES_PER_AGENT,
+): number {
+  return width * height * bytesPerCell + agents * bytesPerAgent;
 }
 
 /**
@@ -84,12 +109,14 @@ export interface Limits {
   budget: number;
   /** GPU bytes per grid cell on this backend (default BYTES_PER_CELL). */
   bytesPerCell?: number;
+  /** GPU bytes per agent (default BYTES_PER_AGENT; more while growth is on). */
+  bytesPerAgent?: number;
 }
 
-/** Whether a `w` × `h` grid with these settings' agents fits the limits. */
+/** Whether a `w` × `h` grid with the agents that these settings hold (capacityCount()) fits the limits. */
 export function fits(s: Settings, w: number, h: number, l: Limits): boolean {
   return (
-    estimateBytes(w, h, Math.min(l.maxAgents, agentCount(s, w, h)), l.bytesPerCell) <= l.budget &&
+    estimateBytes(w, h, Math.min(l.maxAgents, capacityCount(s, w, h)), l.bytesPerCell, l.bytesPerAgent) <= l.budget &&
     w * h * 16 <= l.maxBufferBytes && // the largest per-cell buffer: 16 B (counts, trail texel)
     Math.max(w, h) <= l.maxGridSide
   );

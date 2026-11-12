@@ -6,6 +6,9 @@ import countsFrag from './glsl/counts.frag?raw';
 import diffuseFrag from './glsl/diffuse.frag?raw';
 import fillFrag from './glsl/fill.frag?raw';
 import fullscreen from './glsl/fullscreen.vert?raw';
+import growthFrag from './glsl/growth.frag?raw';
+import growthGlsl from './glsl/growth.glsl?raw';
+import growthVert from './glsl/growth.vert?raw';
 import heightFrag from './glsl/height.frag?raw';
 import initFrag from './glsl/init.frag?raw';
 import paintFrag from './glsl/paint.frag?raw';
@@ -47,6 +50,21 @@ export interface Saturated {
   walled: Program;
 }
 
+/** The programs of growth and shrinkage (growth.frag, growth.vert, ADR 0025). */
+export interface Growth {
+  /** PASS 0 and 1: the row sums of the occupancy, then the window counts. */
+  rows: Program;
+  windows: Program;
+  /** PASS 2: shrinkage and the choice of a parent's neighbour. */
+  test: Program;
+  /** PASS 3: one level of a pyramid of sums. */
+  build: Program;
+  /** PASS 4: the births. */
+  birth: Program;
+  /** The claims of the parents and the births of the winners. */
+  points: Program;
+}
+
 export interface Programs {
   /** The agent pass without the wall check of the sensors, for an environment without walls. */
   agents: Program;
@@ -61,6 +79,10 @@ export interface Programs {
   counts: Program;
   fill: Program;
   init: Program;
+  /** The start for a capacity above the start population (CAPACITY in init.frag), compiled at its first use. */
+  capacity: () => Program;
+  /** The programs of growth and shrinkage, compiled at their first use: every scene has growth off. */
+  growth: () => Growth;
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
   covered: () => Program;
@@ -100,6 +122,11 @@ export function agentsProgram(gl: GL, frag: string, senseWalls: boolean, saturat
   return simProgram(gl, defines + toolsGlsl + frag);
 }
 
+/** The start from `frag` (init.frag or a version of it); `capacity`: for a capacity above the start (ADR 0025). */
+export function initProgram(gl: GL, frag: string, capacity: boolean): Program {
+  return simProgram(gl, (capacity ? '#define CAPACITY 1\n' : '') + frag);
+}
+
 /** The diffusion pass from `frag` (diffuse.frag or a version of it); `covered`: with covered food (COVERED, ADR 0022). */
 export function diffuseProgram(gl: GL, frag: string, covered: boolean): Program {
   return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + frag);
@@ -116,6 +143,9 @@ export function compile(gl: GL): Programs {
   let walled: Walled | undefined;
   let saturated: Saturated | undefined;
   let covered: Program | undefined;
+  let capacity: Program | undefined;
+  let growth: Growth | undefined;
+  const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
   return {
     agents: agentsProgram(gl, agentsFrag, false),
     walled: () => (walled ??= { agents: agentsProgram(gl, agentsFrag, true), walls: sim(wallsFrag) }),
@@ -124,7 +154,17 @@ export function compile(gl: GL): Programs {
         agents: agentsProgram(gl, agentsFrag, false, true),
         walled: agentsProgram(gl, agentsFrag, true, true),
       }),
-    init: sim(initFrag),
+    init: initProgram(gl, initFrag, false),
+    capacity: () => (capacity ??= initProgram(gl, initFrag, true)),
+    growth: () =>
+      (growth ??= {
+        rows: growthPass(0),
+        windows: growthPass(1),
+        test: growthPass(2),
+        build: growthPass(3),
+        birth: growthPass(4),
+        points: wrap(gl, program(gl, V + common + growthGlsl + growthVert, V + common + pointsFrag)),
+      }),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
     paint: sim(brushGlsl + paintFrag),

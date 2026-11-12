@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   attractionSpec,
+  capacityOf,
   constrain,
   defaultSettings,
   defaultStrain,
@@ -25,7 +26,11 @@ const inRange = (v: number, s: Spec) => v >= s.min && v <= s.max;
 describe('defaults', () => {
   it('are inside every spec range', () => {
     const d = defaultSettings();
-    for (const [k, s] of Object.entries(globalSpec)) expect(inRange(d[k as keyof typeof globalSpec], s), k).toBe(true);
+    // Capacity 0 stands for as many as Agents per cell (capacityOf()), which is inside its range.
+    expect(d.capacity).toBe(0);
+    expect(inRange(capacityOf(d), globalSpec.capacity)).toBe(true);
+    for (const [k, s] of Object.entries(globalSpec))
+      if (k !== 'capacity') expect(inRange(d[k as keyof typeof globalSpec], s), k).toBe(true);
     for (const st of d.strains) {
       for (const [k, s] of Object.entries(strainSpec))
         expect(inRange(st[k as keyof typeof strainSpec], s), k).toBe(true);
@@ -161,6 +166,115 @@ describe('sanitize (untrusted input)', () => {
       return Object.fromEntries(keys.map((k) => [k, value(depth + 1)]));
     };
     for (let i = 0; i < 500; i++) expect(() => sanitize(value(0))).not.toThrow();
+  });
+});
+
+describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
+  it('defaults to off with the values of Jones 2011, Sec. 5.1', () => {
+    const d = defaultSettings();
+    expect(d.growth).toBe(false);
+    expect([d.growthEvery, d.growthWindow, d.growthMin, d.growthMax]).toEqual([3, 9, 1, 10]);
+    expect([d.shrinkEvery, d.shrinkWindow, d.shrinkMin, d.shrinkMax]).toEqual([3, 5, 0, 20]);
+  });
+
+  it('keeps growth off in every scene but Foraging maze, and in a link without it', () => {
+    for (const p of PRESETS) {
+      const s = p.settings();
+      expect(s.growth, p.id).toBe(p.id === 'foraging-maze');
+      if (p.id !== 'foraging-maze') expect(s.capacity, p.id).toBe(0);
+      const old = Object.fromEntries(
+        Object.entries(s).filter(([k]) => !k.startsWith('growth') && !k.startsWith('shrink') && k !== 'capacity'),
+      );
+      const link = sanitize(old);
+      expect([link.growth, link.capacity], p.id).toEqual([false, 0]);
+    }
+  });
+
+  it('takes growth from a link, with whole counts and intervals and windows of an odd side', () => {
+    const s = sanitize({
+      ...defaultSettings(),
+      collisions: true,
+      growth: true,
+      growthEvery: 4.6,
+      growthWindow: 8,
+      growthMin: -3,
+      growthMax: 15.4,
+      shrinkEvery: 1e9,
+      shrinkWindow: 10.2,
+      shrinkMin: 0.4,
+      shrinkMax: 79.6,
+    });
+    expect(s.growth).toBe(true);
+    expect([s.growthEvery, s.growthWindow, s.growthMin, s.growthMax]).toEqual([5, 9, 0, 15]);
+    expect([s.shrinkEvery, s.shrinkWindow, s.shrinkMin, s.shrinkMax]).toEqual([100, 11, 0, 80]);
+    for (const w of [-5, 0, 2, 3, 4, 7.9, 14, 15, 99]) {
+      const side = sanitize({ growthWindow: w, shrinkWindow: w });
+      expect(side.growthWindow % 2, `${w}`).toBe(1);
+      expect(side.shrinkWindow % 2, `${w}`).toBe(1);
+      expect(side.growthWindow).toBeGreaterThanOrEqual(3);
+      expect(side.growthWindow).toBeLessThanOrEqual(15);
+    }
+    expect(sanitize({ growth: 'yes', collisions: true }).growth).toBe(false);
+  });
+
+  it('runs only with one agent per cell: without the rule growth goes off (constrain)', () => {
+    const on = { ...defaultSettings(), collisions: true, growth: true };
+    expect(constrain(on)).toBe(on);
+    expect(constrain({ ...on, collisions: false }).growth).toBe(false);
+    expect(sanitize({ ...on, collisions: false }).growth).toBe(false);
+    // In both models: Jones has growth as one of his rules, and Extended has all of Jones' rules.
+    expect(constrain({ ...on, model: 'jones' }).growth).toBe(true);
+    expect(toJones(on).growth).toBe(true);
+  });
+
+  // Review of 2026-11-11: a Capacity that Agents per cell passed, or that the rule capped, came back as 0 or 1, so
+  // its value was lost. Capacity keeps the value set, and capacityOf() gives what the simulation holds.
+  it('keeps the Capacity set; the simulation holds at least Agents per cell and at most 1 with the rule', () => {
+    const d = { ...defaultSettings(), density: 0.2, capacity: 0.5 };
+    expect(constrain(d)).toBe(d);
+    expect(capacityOf(d)).toBe(0.5);
+    const dense = constrain({ ...d, density: 0.8 });
+    expect([dense.capacity, capacityOf(dense)]).toEqual([0.5, 0.8]);
+    const thin = constrain({ ...dense, density: 0.005 });
+    expect([thin.capacity, capacityOf(thin)]).toEqual([0.5, 0.5]);
+    const ruled = constrain({ ...d, capacity: 6, collisions: true });
+    expect([ruled.capacity, capacityOf(ruled)]).toEqual([6, 1]);
+    expect(capacityOf(constrain({ ...ruled, collisions: false }))).toBe(6);
+    expect(capacityOf({ ...d, capacity: 0 })).toBe(0.2);
+    // A link: 0 and anything that is no positive number stay 0, the rest is clamped to the range.
+    expect(sanitize({ ...d, capacity: 0 }).capacity).toBe(0);
+    expect(sanitize({ ...d, capacity: -3 }).capacity).toBe(0);
+    expect(sanitize({ ...d, capacity: 99 }).capacity).toBe(8);
+    expect(sanitize({ ...d, capacity: 0.001 }).capacity).toBe(0.01);
+    expect(sanitize({ ...d, capacity: Number.NaN }).capacity).toBe(0);
+  });
+
+  // Review of 2026-11-11: a minimum above its maximum, or a shrinkage maximum of 0, deleted every agent or stopped
+  // growth without a word. constrain() keeps each maximum from 1 to the cells of its window, and each minimum at most
+  // its maximum.
+  it('keeps each minimum at most its maximum, and each maximum from 1 to the cells of its window', () => {
+    const on = { ...defaultSettings(), collisions: true, growth: true };
+    const fix = (patch: Partial<Settings>) => {
+      const c = constrain({ ...on, ...patch });
+      return [c.growthMin, c.growthMax, c.shrinkMin, c.shrinkMax];
+    };
+    expect(fix({})).toEqual([1, 10, 0, 20]);
+    expect(fix({ shrinkMin: 30, shrinkMax: 20 })).toEqual([1, 10, 20, 20]);
+    expect(fix({ shrinkMax: 0 })).toEqual([1, 10, 0, 1]);
+    expect(fix({ growthMin: 12, growthMax: 10 })).toEqual([10, 10, 0, 20]);
+    expect(fix({ growthMax: 0 })).toEqual([1, 1, 0, 20]);
+    expect(fix({ shrinkWindow: 3, shrinkMax: 20, shrinkMin: 15 })).toEqual([1, 10, 9, 9]);
+    expect(fix({ growthWindow: 3, growthMax: 200 })).toEqual([1, 9, 0, 20]);
+    expect(sanitize({ ...on, shrinkMin: 50, shrinkMax: 0 }).shrinkMax).toBe(1);
+    // Jones' sets keep their values.
+    for (const set of [
+      { growthMin: 0, growthMax: 15, shrinkMin: 0, shrinkMax: 24 },
+      { growthEvery: 5, shrinkEvery: 10, shrinkWindow: 9, shrinkMax: 80 },
+      { growthEvery: 10, shrinkEvery: 2, shrinkWindow: 9, shrinkMax: 79 },
+    ]) {
+      const s = { ...on, ...set };
+      expect(constrain(s)).toBe(s);
+    }
   });
 });
 
@@ -402,6 +516,16 @@ describe('snap and fieldText (sliders and their number fields)', () => {
     // Clamped to the range.
     expect(snap(0.001, density)).toBe(density.min);
     expect(snap(20, density)).toBe(density.max);
+  });
+
+  // The windows of growth and shrinkage run from 3 to 15 cells in steps of 2: a snap counted from 0 would make them
+  // even (ADR 0025).
+  it('snap from the minimum where the minimum is off the steps, so that a window stays odd', () => {
+    for (const v of [3, 3.9, 4, 5, 8.9, 9, 10, 14.99, 15, 40])
+      expect(snap(v, globalSpec.growthWindow) % 2, `${v}`).toBe(1);
+    expect([4, 6, 8.1].map((v) => snap(v, globalSpec.shrinkWindow))).toEqual([5, 7, 9]);
+    expect(snap(0.37, globalSpec.bloom)).toBe(0.35);
+    expect(snap(12.3, globalSpec.growthMax)).toBe(12);
   });
 
   it('snap to the step on a linear range', () => {

@@ -88,12 +88,12 @@ export class WebGl2Backend implements Backend<GlSim> {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await -- async to reject instead of throwing synchronously
-  async createSim(settings: Settings, width: number, height: number, agents: number): Promise<GlSim> {
+  async createSim(settings: Settings, width: number, height: number, agents: number, start = agents): Promise<GlSim> {
     const gl = this.gl;
     while (gl.getError() !== gl.NO_ERROR); // clear stale errors
     let sim: GlSim;
     try {
-      sim = new GlSim(gl, this.prog, settings, width, height, agents, this.floatBlend);
+      sim = new GlSim(gl, this.prog, settings, width, height, agents, this.floatBlend, Math.min(start, agents));
     } catch (err) {
       // GlSim frees what it allocated; only a real out-of-memory may trigger the step-down.
       if (gl.getError() === gl.OUT_OF_MEMORY) throw new OutOfMemoryError(String(err));

@@ -161,7 +161,10 @@ Paused holds (item 9):
   1 s hold now places 136 to 158 agents on WebGPU (seeds 1 to 3). On WebGL2 it places 146 to 151. A 10 s hold places
   204 to 296 on WebGPU and 193 to 201 on WebGL2. The WebGL2 values are seed 1 in the harness and one run in the app.
   Before, 1 s placed 811 to 856 and 10 s placed 6,704 to 7,190, nearly all stacked.
-- The Maze is not solved from an inoculation: too few agents reach the far food. That needs growth.
+- The Maze is not solved from an inoculation: too few agents reach the far food. That needs growth. Since 2026-11-11
+  growth and a capacity exist (ADR 0025): a Capacity above Agents per cell keeps dead agents in a full scene, so the
+  tool places agents there too, and growth from an inoculation reaches the far food of the Maze on wide screens. The
+  numbers and the case of the square screen are in ADR 0025.
 - Without the rule, the amount per second of holding does not depend on the frame rate or the speed. While every
   agent of the strain is dead, it is about 30 times the brush area times the density (at least 0.25). With the rule
   it is at most that, and it goes up with the steps per second, as agents leave cells free. The speed sets the steps

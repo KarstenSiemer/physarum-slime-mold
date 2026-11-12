@@ -23,6 +23,12 @@ const uint EMPTY = 6u;
 // Draws after the first without the rule, as ROUNDS in init.wgsl.
 const uint ROUNDS = 32u;
 
+// The capacity holds more agents than the start population (CAPACITY in init.wgsl, ADR 0025): programs.ts compiles
+// the pass with it, and gl/sim.ts uses that one only then.
+#ifndef CAPACITY
+#define CAPACITY 0
+#endif
+
 // Bijection on [0, 2^k): odd multiply-add and xorshift are both invertible modulo 2^k.
 uint scramble(uint x0, uint k) {
   uint mask = (1u << k) - 1u;
@@ -112,7 +118,13 @@ void main() {
     vec3 st = start(i, s, 0u);
     int c = cellOf(st.xy);
     uint bits = s;
-    if (P.extra.x == EMPTY) {
+#if CAPACITY
+    // Only the first agents of each strain start; the others wait dead for growth and the Inoculate tool.
+    bool waits = P.extra.x == EMPTY || i >= P.startEnd[s];
+#else
+    bool waits = P.extra.x == EMPTY;
+#endif
+    if (waits) {
       // stays dead
     } else if (P.cfg.w != 0u) {
       bits |= WANTS; // waits for the claim rounds

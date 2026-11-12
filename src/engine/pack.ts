@@ -20,6 +20,9 @@ export const PARAM_SLOTS = [
   'strainEnd',
   'extra',
   'model',
+  'growth',
+  'shrinkage',
+  'startEnd',
 ] as const;
 export const PARAMS_BYTES = (PARAM_SLOTS.length + 3) * 16;
 
@@ -104,6 +107,55 @@ export interface Runtime {
   walls?: boolean;
   /** The claim round of the start placement with one agent per cell (init.wgsl). */
   round?: number;
+  /**
+   * Agents alive at the start: the first ones of each strain (startEnds()). Fewer than `agents` when the capacity
+   * holds more than the start population (ADR 0025). Default: `agents`.
+   */
+  start?: number;
+}
+
+/**
+ * Exclusive end index of each strain's agents that the layout places at the start: the first `start` agents of the
+ * population, split by the shares as strainEnds() splits all `agents`, each at the start of its strain's agents. With
+ * `start` equal to `agents` these are strainEnds() (ADR 0025).
+ */
+export function startEnds(strains: readonly Strain[], agents: number, start = agents): number[] {
+  const ends = strainEnds(strains, agents);
+  if (start >= agents) return ends;
+  const counts = strainAgents(strains, start);
+  // Rounding can give a strain one start agent more than it has agents: it then starts them all.
+  return ends.map((end, i) => Math.min(end, (i > 0 ? (ends[i - 1] ?? 0) : 0) + (counts[i] ?? 0)));
+}
+
+/**
+ * Node counts of the levels 1 and up of a pyramid of sums over `n` elements with a fan-in of 4 (growth.wgsl,
+ * gl/glsl/growth.frag): the last level has one node.
+ */
+export function pyramidLevels(n: number): number[] {
+  const sizes: number[] = [];
+  let m = n;
+  do {
+    m = Math.ceil(m / 4);
+    sizes.push(m);
+  } while (m > 1);
+  return sizes;
+}
+
+/** Growth and shrinkage run (ADR 0025): only with one agent per cell, which constrain() also asks for. */
+export const growthOn = (s: Pick<Settings, 'growth' | 'collisions'>) => s.growth && s.collisions;
+
+type GrowthTests = Pick<Settings, 'growth' | 'collisions' | 'growthEvery' | 'shrinkEvery'>;
+
+/**
+ * Which tests of growth and shrinkage run in step `step` (Jones 2011, Sec. 5.1: every Gf and Sf steps): the steps
+ * whose number is a multiple of the interval, from step 0 on. An interval of 0 turns that test off.
+ */
+export function growthTests(s: GrowthTests, step: number): { grow: boolean; shrink: boolean } {
+  const on = growthOn(s);
+  return {
+    grow: on && s.growthEvery > 0 && step % s.growthEvery === 0,
+    shrink: on && s.shrinkEvery > 0 && step % s.shrinkEvery === 0,
+  };
 }
 
 /** Agents of each strain: alive and dead, as strainEnds() splits them. A strain keeps its agents for good. */
@@ -175,9 +227,16 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
     f.set([t.strain, t.revive, jones && t.kind === AgentToolKind.cut ? 1 : 0, 0], slot('tool2'));
   }
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
-  u.set([LAYOUTS.indexOf(s.layout), rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
+  // The start layout 'food' starts every agent dead, as 'empty' does; the engine then places the colony (ADR 0025).
+  const layout = LAYOUTS.indexOf(s.layout === 'food' ? 'empty' : s.layout);
+  u.set([layout, rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
   // model.z: walls diffuse as part of Jones' lattice in the Jones model, and are sinks in the extended model (ADR 0027).
   f.set([trailSaturation(s), s.coveredFood ? s.coveredFoodFactor : 1, jones ? 1 : 0], slot('model'));
+  // Growth and shrinkage (ADR 0025): an interval of 0 turns a test off, and both are off without the rule.
+  const on = growthOn(s);
+  u.set([on ? s.growthEvery : 0, s.growthWindow, s.growthMin, s.growthMax], slot('growth'));
+  u.set([on ? s.shrinkEvery : 0, s.shrinkWindow, s.shrinkMin, s.shrinkMax], slot('shrinkage'));
+  u.set(startEnds(strains, rt.agents, rt.start), slot('startEnd'));
   return buf;
 }
 

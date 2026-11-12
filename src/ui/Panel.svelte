@@ -2,9 +2,11 @@
   import { tick } from 'svelte';
   import {
     BOUNDARIES,
+    capacityOf,
     collisionsHelp,
     coveredFoodHelp,
     globalSpec,
+    growthHelp,
     LAYOUTS,
     MAX_STRAINS,
     modelHelp,
@@ -33,6 +35,7 @@
     addStrain,
     app,
     clearEnvironment,
+    getEngine,
     JONES_LIGHT,
     latticeLeft,
     latticeValue,
@@ -82,6 +85,7 @@
     ring: 'Ring',
     center: 'Center spot',
     empty: 'Empty (inoculate)',
+    food: 'At the first food',
   };
   const BOUNDARY_LABEL: Record<(typeof BOUNDARIES)[number], string> = {
     wrap: 'Wrap around (no edges)',
@@ -102,14 +106,43 @@
   let ruleHelp = $state(false);
   let modelHelpOpen = $state(false);
   let coveredHelp = $state(false);
+  let growthHelpOpen = $state(false);
+  /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
+  const canGrow = $derived(app.canCollide && s.collisions);
+  /** The most Capacity can be: one agent per cell with the rule (capacityOf()). */
+  const capacityMax = $derived(s.collisions ? 1 : globalSpec.capacity.max);
+  /**
+   * Growth is on, but every agent the simulation holds lives, so no agent can divide (ADR 0025): from the alive count
+   * of the current run (app.stats), as deadLeft() reads it.
+   */
+  const noRoom = $derived.by(() => {
+    const e = getEngine();
+    if (!s.growth || !canGrow || app.stats.run !== e?.restarts) return false;
+    return app.stats.alive.reduce((a, b) => a + b, 0) >= e.sim.agents;
+  });
+  /** The Capacity that the hint offers: room for an agent in every cell (growth runs only with the rule). */
+  const roomy = $derived(capacityMax);
+  // The button removes itself at once: the focus goes to the Capacity it changed, not to the page.
+  async function raiseCapacity() {
+    s.capacity = roomy;
+    await tick();
+    document.getElementById('capacity')?.focus();
+  }
 
   // The engine restarts the population on every switch, so agents stacked without the rule do not stay
   // stacked (ADR 0008).
   function setRule(on: boolean) {
+    const growing = s.growth;
     s.collisions = on;
     const scene = presetById(app.scene);
-    if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene), 12_000);
+    const growth = !on && growing ? ` ${GROWTH_OFF}` : '';
+    if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene) + growth, 15_000);
+    else if (growth) showNotice(GROWTH_OFF);
   }
+
+  /** Shown when the rule goes off while growth is on: constrain() turns growth off with it. */
+  const GROWTH_OFF =
+    'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.';
 </script>
 
 <aside class="panel" aria-label="Simulation settings">
@@ -303,6 +336,79 @@
     <button type="button" onclick={clearEnvironment}>Clear food, light and walls</button>
   </Section>
 
+  <Section title="Growth">
+    <div class="check">
+      <label>
+        <input
+          type="checkbox"
+          checked={s.growth && canGrow}
+          disabled={!canGrow}
+          aria-describedby={growthHelpOpen ? 'growth-help' : undefined}
+          onchange={(e) => {
+            s.growth = e.currentTarget.checked;
+          }}
+        />
+        <span
+          >{growthHelp.label} (Jones 2011){app.canCollide
+            ? s.collisions
+              ? ''
+              : ': needs one agent per cell'
+            : ': not available here'}</span
+        >
+      </label>
+      <button
+        class="help"
+        type="button"
+        aria-expanded={growthHelpOpen}
+        aria-controls="growth-help"
+        aria-label="About {growthHelp.label}"
+        onclick={() => (growthHelpOpen = !growthHelpOpen)}>?</button
+      >
+    </div>
+    {#if growthHelpOpen}
+      <p class="helptext" id="growth-help">{growthHelp.help} <cite>{growthHelp.ref}</cite></p>
+    {/if}
+    {#if s.growth && canGrow}
+      {#if s.growthEvery === 0 && s.shrinkEvery === 0}
+        <p class="hint">Both tests are off, so growth and shrinkage do nothing.</p>
+      {/if}
+      {#if noRoom}
+        <p class="hint">
+          Growth has no room: every agent that the simulation holds is alive, and a child needs a dead agent.
+          {#if roomy > capacityOf(s)}
+            Raise Capacity to make room. This restarts the scene.
+            <button type="button" class="action" onclick={raiseCapacity}>Set Capacity to {roomy}</button>
+          {/if}
+        </p>
+      {/if}
+      <Slider spec={globalSpec.growthEvery} bind:value={s.growthEvery} id="growth-every" />
+      <Slider spec={globalSpec.growthWindow} bind:value={s.growthWindow} id="growth-window" />
+      <!-- Each minimum stays at most its maximum, and each maximum within its window (constrain()). -->
+      <Slider spec={{ ...globalSpec.growthMin, max: s.growthMax }} bind:value={s.growthMin} id="growth-min" />
+      <Slider
+        spec={{ ...globalSpec.growthMax, min: Math.max(1, s.growthMin), max: s.growthWindow ** 2 }}
+        bind:value={s.growthMax}
+        id="growth-max"
+      />
+      <Slider spec={globalSpec.shrinkEvery} bind:value={s.shrinkEvery} id="shrink-every" />
+      <Slider spec={globalSpec.shrinkWindow} bind:value={s.shrinkWindow} id="shrink-window" />
+      <Slider spec={{ ...globalSpec.shrinkMin, max: s.shrinkMax }} bind:value={s.shrinkMin} id="shrink-min" />
+      <Slider
+        spec={{ ...globalSpec.shrinkMax, min: Math.max(1, s.shrinkMin), max: s.shrinkWindow ** 2 }}
+        bind:value={s.shrinkMax}
+        id="shrink-max"
+      />
+    {/if}
+    <!-- Capacity is at least Agents per cell and at most 1 with the rule: the slider shows what the simulation holds
+    (capacityOf()). A value at or below Agents per cell stores 0, as many as Agents per cell. -->
+    <Slider
+      spec={{ ...globalSpec.capacity, max: capacityMax }}
+      bind:value={() => capacityOf(s), (v: number) => (s.capacity = v <= s.density ? 0 : v)}
+      id="capacity"
+      live={false}
+    />
+  </Section>
+
   <Section title="Look">
     <label class="field">
       <span>Style</span>
@@ -363,6 +469,15 @@
     margin: -2px 0 8px;
     color: var(--muted);
     font-size: 12px;
+  }
+  .hint {
+    margin: 4px 0 8px;
+    font-size: 12px;
+    color: var(--fg);
+  }
+  .hint button {
+    display: block;
+    margin-top: 4px;
   }
   .lattice {
     margin: -2px 0 10px;

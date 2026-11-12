@@ -76,10 +76,11 @@ of Jones 2010 unless the line names another paper.
 - The wound: the agents in it go to random places outside it (p. 148). The trail stays.
 - Later papers: covered food (Adamatzky and Jones 2010, arXiv:0912.3967, p. 6; Jones and Adamatzky 2014,
   arXiv:1303.4969, Sec. 7.2), built here. Growth and shrinkage windows (Jones 2011; Adamatzky and Jones 2010; Jones and
-  Adamatzky 2014; Jones 2015; Jones, Mayne and Adamatzky 2017), the turn toward the larger side when the front sensor
-  reads least (2014 to 2017), 5 × 5 and 7 × 7 means (2010 road paper, 2017), light that dampens each sensor (2017,
-  ADR 0024, decision 7) and the coverage-gated repellent of obstacles (Jones 2015): Jones' rules, not built yet. They
-  come into the Jones model with Jones' values, and with the 2010 behaviour as their default (ADR 0024).
+  Adamatzky 2014; Jones 2015; Jones, Mayne and Adamatzky 2017), built on 2026-11-11 (ADR 0025): in both models, off in
+  every scene. The turn toward the larger side when the front sensor reads least (2014 to 2017), 5 × 5 and 7 × 7 means
+  (2010 road paper, 2017), light that dampens each sensor (2017, ADR 0024, decision 7) and the coverage-gated
+  repellent of obstacles (Jones 2015): Jones' rules, not built yet. They come into the Jones model with Jones' values,
+  and with the 2010 behaviour as their default (ADR 0024).
 
 **This app's readings where Jones leaves a choice** (in both models):
 

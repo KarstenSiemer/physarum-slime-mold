@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
 import { packDrawing, unpackDrawing, type Drawing } from './link';
-import { defaultSettings, defaultStrain, type Settings } from './params';
+import { constrain, defaultSettings, defaultStrain, type Settings } from './params';
 import { presetById, shapeRevision } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
 
@@ -24,6 +24,16 @@ describe('URL settings', () => {
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);
     expect(await decodeSettings(encoded)).toEqual(s);
+  });
+
+  // ADR 0025: growth, its values and the capacity travel with the link.
+  it('round-trips growth, shrinkage and the capacity', async () => {
+    const s = { ...defaultSettings(), collisions: true, density: 0.05, model: 'jones' as const, growth: true };
+    Object.assign(s, { capacity: 0.8, growthEvery: 5, growthMax: 15, shrinkEvery: 10, shrinkWindow: 9, shrinkMax: 80 });
+    const decoded = await decodeSettings(await encodeSettings(s));
+    expect(decoded).toEqual(constrain(s));
+    expect(decoded?.growth).toBe(true);
+    expect(decoded?.capacity).toBe(0.8);
   });
 
   // ADR 0026: a link holds the lattice, and a link made before lattices opens on the grid shaped like the screen of

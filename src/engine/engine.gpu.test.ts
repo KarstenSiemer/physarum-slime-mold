@@ -731,3 +731,41 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     engine.destroy();
   });
 });
+
+// The start layout 'food' (ADR 0025): the Foraging maze starts about FOOD_START agents of strain A in a disc of twice
+// as many cells on its first food, each on a cell of its own, at half the density of a full sheet, and the same agents
+// after every start of a seed.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the first food', (kind) => {
+  it('starts about 50 agents on the bottom-right food of the Foraging maze, the same after a reset', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [1280, 720];
+    const p = presetById('foraging-maze');
+    if (!p) throw new Error('no Foraging maze');
+    const s = { ...p.settings(), seed: 3 };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    await engine.load(s, p.env ?? []);
+    const { width: w, height: h } = engine.sim;
+    const start = async () => (await engine.sim.readAgents()).filter((a) => a.bits & 4);
+    const first = await start();
+    expect(engine.sim.step).toBe(1);
+    expect(first.length).toBeGreaterThanOrEqual(40);
+    expect(first.length).toBeLessThanOrEqual(60);
+    const cells = new Set(first.map((a) => Math.floor(a.y) * w + Math.floor(a.x)));
+    expect(cells.size).toBe(first.length);
+    // Within the disc of 100 cells (radius 5.64) around the food at (0.9 w, 0.9 h), strain A only.
+    for (const a of first) {
+      expect(Math.hypot(a.x - 0.9 * w, a.y - 0.9 * h)).toBeLessThan(5.7);
+      expect(a.bits & 3).toBe(0);
+    }
+    // At half the density the colony fills its disc up to the middle. A full disc would lose its middle to the
+    // shrinkage test of step 0: every cell within 2.8 cells of the centre counts 25 in its 5 × 5 window, above 20.
+    const middle = first.filter((a) => Math.hypot(a.x - 0.9 * w, a.y - 0.9 * h) < 2.5).length;
+    expect(middle, `${first.length} agents`).toBeGreaterThanOrEqual(4);
+    engine.reset();
+    expect(await start()).toEqual(first);
+    // Another start layout starts no colony.
+    await engine.apply({ ...engine.settings, layout: 'empty' });
+    expect(await start()).toEqual([]);
+    engine.destroy();
+  }, 150_000); // 7.6 s on SwiftShader on an M3 Pro, about 30 s in CI: under a quarter of 150 s (ADR 0010)
+});
