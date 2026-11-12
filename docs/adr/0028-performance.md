@@ -441,7 +441,9 @@ The details of the measurements below are in
   counting paths the counts of a grid of several tiles, in the order of the sort, match a CPU count at steps 1, 33
   and 64. In Node: the fit counts the backend's bytes per agent. Mutations that the tests caught, on the final shader:
   a gather that stops one child early (`below + m < r` in `DESCEND`), caught by all 11 tests of the order; the axes of
-  the tile key swapped, caught only by the test of the order itself, because no order changes a result.
+  the tile key swapped, caught only by the test of the order itself, because no order changes a result. ADR 0010 has
+  the longer limits on GitHub for these tests and for the WebGL2 test of the paused frames, which timed out there with
+  this change at 120 s (101.4 s before).
 - Still open:
   - The rest of the gap: WebGL2 12.0 ms against WebGPU 3.6 ms. The deposit with the order still takes 5.9 to 8.5 ms:
     the floor for 4.2 million points in an order of neighbours without shared pixels was 3.1 to 4.2 ms, and the dense

@@ -924,5 +924,5 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: paused frames (ADR 0028)', (
     await rest();
     expect(shownAsAsked, 'the last frame drawn shows the scent view').toBe(true);
     engine.destroy();
-  }, 120_000); // 3.7 s (WebGPU) and 4.9 s (WebGL2) on SwiftShader on an M3 Pro: under a quarter at four times (ADR 0010)
+  }, 600_000); // GitHub, WebGL2: 98.7 and 101.4 s, then over 120 s in PR #40; WebGPU 12.0 to 15.3 s (ADR 0010)
 });

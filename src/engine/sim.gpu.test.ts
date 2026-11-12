@@ -6390,8 +6390,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
 
   // WebGL2 draws its point passes in an order sorted by the tile of each agent's cell (gl/glsl/order.frag, ADR 0028).
-  // Each point pass sums integers or takes a maximum, so the model must not notice the order. The grids hold several tiles of ORDER_TILE cells, with sides that no tile divides, and agent
-  // counts that fill no row of the agents' layout.
+  // Each point pass sums integers or takes a maximum, so the model must not notice the order. The grids hold several
+  // tiles of ORDER_TILE cells, with sides that no tile divides, and agent counts that fill no row of the agents' layout.
   if (kind === 'webgl2')
     describe('order of the point passes', () => {
       const strains = [0, 1, 2].map((i) => defaultStrain(i));
@@ -6476,6 +6476,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             expect(await state(sim), `sort every ${interval} steps`).toEqual(unsorted);
           }
         },
+        180_000, // GitHub: up to 36.0 s, PR #40 (ADR 0010)
       );
 
       // The keys of the sort are those of the agents at the sort: the tile of the cell of a living agent, and the key

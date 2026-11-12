@@ -122,7 +122,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     // agents ×2, the points' order ×2 and its pyramid, trail ×2, scent ×2, counts, env, outlines, tally; then
     // collisions ×3 or the counting panels (×2 checks)
     expect(failures).toBeGreaterThanOrEqual(floatBlend ? 13 : 12);
-  });
+  }, 120_000); // GitHub: 18.1 s, PR #40 (ADR 0010)
 
   // Half floats count exactly to 2048 only; condensed networks hold thousands of agents per cell.
   it('counts deposits exactly far above 2048 agents per cell and strain', async () => {
@@ -201,7 +201,7 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
       expect(Array.from(await sim.readCounts()), `step ${sim.step}`).toEqual(expected);
     }
     sim.destroy();
-  });
+  }, 180_000); // GitHub: 43.6 s, PR #40 (ADR 0010)
 
   // Without float blending the stencil holds the count mod 256 and the carry its 256s (deposit()).
   it.each([1, 255, 256, 257, 511, 512, 513, 65_535, 65_537])('counts exactly in a cell with n = %i', async (n) => {
