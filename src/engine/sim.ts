@@ -90,6 +90,8 @@ export class Simulation implements Sim {
   private readonly replacement: GPUBuffer;
   /** Sort the agents by position every this many steps; 0 never (measurements and tests). */
   sortInterval = SORT_INTERVAL;
+  /** The step whose sort has run already, ahead of it (sortNow()); −1: none. */
+  private sortedFor = -1;
   readonly trail: Pair<GPUTexture>;
   readonly scent: Pair<GPUTexture>;
   private readonly trailViews: Pair<GPUTextureView>;
@@ -394,6 +396,7 @@ export class Simulation implements Sim {
     // The scent textures are cleared below, and without a food or a light no step adds scent.
     this.scentless = !this.sources;
     this.step = 0;
+    this.sortedFor = -1;
     this.parity = 0;
     this.agentParity = 0;
     this.writeParams();
@@ -501,6 +504,34 @@ export class Simulation implements Sim {
       this.device.queue.submit([enc.finish()]);
       this.step++;
     }
+  }
+
+  /** The next step that sorts: the next multiple of the interval from the current step on. */
+  private get sortStep() {
+    return Math.ceil(this.step / this.sortInterval) * this.sortInterval;
+  }
+
+  sortDue(steps: number): boolean {
+    if (this.sortInterval <= 0) return false;
+    const next = this.sortStep;
+    return next < this.step + steps && next !== this.sortedFor;
+  }
+
+  /**
+   * The sort of the next step that sorts, now and in a submission of its own; that step then runs without it. The
+   * agents may be a few steps away from that step: the sort only orders the buffer, and no result depends on the
+   * order (ADR 0005).
+   */
+  sortNow() {
+    if (this.sortInterval <= 0) return;
+    this.writeParams();
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.tiles);
+    const pass = enc.beginComputePass();
+    this.encodeSort(pass);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.sortedFor = this.sortStep;
   }
 
   /** Bytes per copy of the parameters in paintParams: PARAMS_BYTES rounded up to the offset step. */
@@ -784,7 +815,7 @@ export class Simulation implements Sim {
   private encodeStep(enc: GPUCommandEncoder) {
     const k = this.kernels;
     const p = this.parity;
-    const sort = this.sortInterval > 0 && this.step % this.sortInterval === 0;
+    const sort = this.sortInterval > 0 && this.step % this.sortInterval === 0 && this.sortedFor !== this.step;
     if (sort) enc.clearBuffer(this.tiles);
     enc.clearBuffer(this.counts);
     enc.clearBuffer(this.stats);

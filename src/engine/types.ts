@@ -50,6 +50,16 @@ export interface Sim {
   reset(): void;
   /** Runs `steps` steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool): void;
+  /**
+   * Whether one of the next `steps` steps would sort the agents by position first (WebGPU, sim.ts). A backend without
+   * the sort has no such method.
+   */
+  sortDue?(steps: number): boolean;
+  /**
+   * Sorts now, in a submission of its own, in place of the sort of that step (ADR 0028): the engine then runs one step
+   * less in the frame. The sort changes no result (ADR 0005).
+   */
+  sortNow?(): void;
   /** Paints brush strokes in order: the only way food, light and walls reach a simulation. */
   paint(strokes: readonly Stroke[]): void;
   clearEnvironment(): void;

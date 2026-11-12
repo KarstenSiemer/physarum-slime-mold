@@ -6288,6 +6288,48 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         },
       );
 
+      // The engine gives the sort a turn of its own (ADR 0028): sortNow() runs the sort of the next step that sorts,
+      // up to some steps ahead of it, and that step then runs without it. The agents and the trail are those of a
+      // run that sorts inside its steps, and each interval still sorts once.
+      it.each([false, true])(
+        'sorts ahead of its step with the same agents and trail (collisions %s)',
+        async (collisions) => {
+          const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
+          const n = collisions ? 2400 : 9600;
+          const [inStep, ahead] = [
+            (await make(patch, 80, 60, n)) as Simulation,
+            (await make(patch, 80, 60, n)) as Simulation,
+          ];
+          inStep.run(70);
+          let sorts = 0;
+          /** Steps as the engine runs them: the sort first, in its own submission, when one of the steps holds it. */
+          const turn = (steps: number) => {
+            const before = ahead.agentBuffer;
+            if (ahead.sortDue(steps)) {
+              ahead.sortNow();
+              sorts++;
+              expect(ahead.agentBuffer, 'the sort writes the other buffer').not.toBe(before);
+              expect(ahead.sortDue(steps), 'sorted for that step').toBe(false);
+            }
+            const sorted = ahead.agentBuffer;
+            ahead.run(steps);
+            expect(ahead.agentBuffer, 'no second sort in the steps').toBe(sorted);
+          };
+          for (let k = 0; k < 29; k++) turn(1); // step 0 sorts
+          turn(4); // steps 29 to 32: the sort of step 32, three steps ahead
+          for (let k = 0; k < 20; k++) turn(1);
+          turn(17); // steps 53 to 69: the sort of step 64
+          expect(ahead.step).toBe(70);
+          expect(sorts).toBe(3);
+          expect(await state(ahead)).toEqual(await state(inStep));
+          // A reset starts over: step 0 sorts again.
+          ahead.reset();
+          expect(ahead.sortDue(1)).toBe(true);
+          ahead.sortInterval = 0;
+          expect(ahead.sortDue(100)).toBe(false);
+        },
+      );
+
       it('really reorders the buffer, and keeps every id once', async () => {
         const sim = (await make({ seed: 7, density: 2, strains: [defaultStrain(0)] }, 96, 80, 15360)) as Simulation;
         sim.run(33); // two sorts: steps 0 and 32

@@ -429,3 +429,104 @@ describe('frames in flight', () => {
     expect(engine.budget.pending).toBe(pending);
   });
 });
+
+// The sort of the agents takes the place of one step in its frame (ADR 0028). The CPU backend has no sort: here a
+// simulation that sorts before every 4th step stands in for the WebGPU one.
+describe('the sort in a turn of its own', () => {
+  async function start(speed: number) {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const engine = await Engine.create(
+      canvas,
+      { ...defaultSettings(), resolution: 256, speed },
+      undefined,
+      new CpuBackend(),
+    );
+    const sim = engine.sim;
+    const log: string[] = [];
+    let sortedFor = -1;
+    const next = () => Math.ceil(sim.step / 4) * 4;
+    sim.sortDue = (steps) => next() < sim.step + steps && next() !== sortedFor;
+    sim.sortNow = () => {
+      sortedFor = next();
+      log.push(`sort ${sortedFor}`);
+    };
+    const run = sim.run.bind(sim);
+    sim.run = (steps, t) => {
+      log.push(`run ${steps}`);
+      run(steps, t);
+    };
+    return { engine, log };
+  }
+
+  it('runs the sort and one step less in a frame whose steps hold the sort', async () => {
+    // One step per frame at 60 Hz: the frame of the sort runs no step.
+    const one = await start(60);
+    for (let k = 0; k <= 10; k++) one.engine.frame((k * 1000) / 60);
+    expect(one.log).toEqual([
+      'sort 0',
+      'run 1',
+      'run 1',
+      'run 1',
+      'run 1',
+      'sort 4',
+      'run 1',
+      'run 1',
+      'run 1',
+      'run 1',
+    ]);
+    // Three steps per frame (a budget of 3, and the GPU done between the frames): the frame of the sort runs two.
+    const three = await start(180);
+    for (let k = 0; k <= 6; k++) {
+      three.engine.budget.steps = 3;
+      three.engine.frame((k * 1000) / 60);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    // Frame 0 has no time yet. Steps 0 to 2 with the sort of step 0, 2 to 4 with that of step 4, then 5 to 7, ...
+    expect(three.log).toEqual([
+      'sort 0',
+      'run 2',
+      'sort 4',
+      'run 2',
+      'run 3',
+      'sort 8',
+      'run 2',
+      'run 3',
+      'sort 12',
+      'run 2',
+    ]);
+  });
+
+  it('runs steps asked for by hand as asked, with the sort inside its step', async () => {
+    const { engine, log } = await start(60);
+    engine.frame(0, 6);
+    engine.frame(16, 1);
+    expect(log).toEqual(['run 6', 'run 1']);
+  });
+
+  it('leaves the steps of a tool held while paused as they are', async () => {
+    const { engine, log } = await start(60);
+    engine.paused = true;
+    const tool: HeldTool = { kind: AgentToolKind.inoculate, x: 10, y: 10, radius: 5, strain: 0, rate: 1 };
+    for (let k = 0; k <= 6; k++) {
+      engine.agentTool(tool);
+      engine.frame((k * 1000) / 60);
+    }
+    expect(log).toEqual(Array<string>(6).fill('run 1'));
+  });
+
+  it('leaves the sort inside its step when switched off, and where the backend has none', async () => {
+    const { engine, log } = await start(60);
+    engine.sortOwnTurn = false;
+    for (let k = 0; k <= 6; k++) engine.frame((k * 1000) / 60);
+    expect(log).toEqual(Array<string>(6).fill('run 1'));
+    const plain = await Engine.create(
+      { width: 160, height: 100 } as HTMLCanvasElement,
+      defaultSettings(),
+      undefined,
+      new CpuBackend(),
+    );
+    for (let k = 0; k <= 6; k++) plain.frame((k * 1000) / 60);
+    expect(plain.sim.step).toBe(6);
+  });
+});

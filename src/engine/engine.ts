@@ -145,6 +145,12 @@ export class Engine {
   frames = 0;
   /** Frames drawn since start. */
   draws = 0;
+  /**
+   * The sort of the agents takes the place of one step in its frame (ADR 0028): a frame whose steps hold the sort runs
+   * the sort and one step less. A step with the sort took 7.5 to 7.9 ms against 4.3 ms in the start scene, and its
+   * frame ended after the next refresh of a 120 Hz display. False: the sort runs inside its step (measurements).
+   */
+  sortOwnTurn = true;
   /** What the last drawn frame showed, `settling` frames that still draw after it, and a call for a new picture. */
   private shown: Shown | undefined;
   private settling = 0;
@@ -637,6 +643,12 @@ export class Engine {
       steps = Math.floor(this.pausedSteps + SLACK);
       this.pausedSteps -= steps;
     } else this.pausedSteps = 0;
+    // Only for the steps that the budget gives. Steps asked for by hand run as asked, and a tool held while paused
+    // keeps its 60 steps per second at any frame rate (ADR 0023): those frames are light.
+    if (this.sortOwnTurn && forceSteps === undefined && !this.paused && steps > 0 && this.sim.sortDue?.(steps)) {
+      this.sim.sortNow?.();
+      steps--;
+    }
     if (steps > 0) {
       this.sim.run(steps, held && stepTool(held, this.heldFor / steps));
       this.heldFor = 0;
