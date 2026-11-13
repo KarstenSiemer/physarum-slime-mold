@@ -1,6 +1,6 @@
 // Engine behavior in a real browser (ADR 0010).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { defaultSettings, type Settings } from '../model/params';
+import { defaultSettings, strainLike, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { dishRadius } from './brush';
 import { Engine, SETTLE_FRAMES, type HeldTool } from './engine';
@@ -768,6 +768,39 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
     expect(await start()).toEqual([]);
     engine.destroy();
   }, 150_000); // 7.6 s on SwiftShader on an M3 Pro, about 30 s in CI: under a quarter of 150 s (ADR 0010)
+
+  // ADR 0031: each strain starts on a food of its own, in the order of the foods; a strain without one has no agent.
+  it('starts a colony of each strain on a food of its own, and none for a strain without a food', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [1280, 720];
+    const p = presetById('foraging-maze');
+    if (!p) throw new Error('no Foraging maze');
+    const [a] = p.settings().strains;
+    if (!a) throw new Error('no strain');
+    // Three strains like the scene's, and the two foods of the scene: the bottom-right one, then the top-left one.
+    const s = { ...p.settings(), seed: 3, strains: [a, strainLike(a, 1), strainLike(a, 2)] };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    await engine.load(s, p.env ?? []);
+    const { width: w, height: h } = engine.sim;
+    const first = (await engine.sim.readAgents()).filter((agent) => agent.bits & 4);
+    // One step for each strain with a food.
+    expect(engine.sim.step).toBe(2);
+    const of = (strain: number) => first.filter((agent) => (agent.bits & 3) === strain);
+    // The colony of strain A has moved for one step since its start, so it lies within one more cell of its disc.
+    for (const [strain, x, y, reach] of [
+      [0, 0.9 * w, 0.9 * h, 6.7],
+      [1, 0.1 * w, 0.1 * h, 5.7],
+    ] as const) {
+      const colony = of(strain);
+      expect(colony.length, `strain ${String(strain)}`).toBeGreaterThanOrEqual(40);
+      expect(colony.length, `strain ${String(strain)}`).toBeLessThanOrEqual(60);
+      for (const agent of colony) expect(Math.hypot(agent.x - x, agent.y - y)).toBeLessThan(reach);
+    }
+    expect(of(2)).toEqual([]);
+    engine.reset();
+    expect((await engine.sim.readAgents()).filter((agent) => agent.bits & 4)).toEqual(first);
+    engine.destroy();
+  }, 150_000);
 });
 
 // ADR 0027 (owner, 2026-11-12, "Weich"): a frame draws the map after the step's diffusion in either order. Moving first
