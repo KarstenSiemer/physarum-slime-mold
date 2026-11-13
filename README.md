@@ -56,7 +56,9 @@ step. Strong trails attract more agents, which strengthen the trail: a network f
   and walls keep smooth outlines at any zoom: the brush also stores distances to their outlines,
   which only the renderer reads.
 
-Details: [design](docs/design.md), [decisions (ADRs)](docs/adr/),
+Details: [the rules of the model](docs/model.md) (the step, its formulas and every parameter),
+[fidelity](docs/fidelity.md) (how close each behaviour comes to the real slime mold, with sources),
+[design](docs/design.md), [decisions (ADRs)](docs/adr/),
 [knowledge base](docs/knowledge-base/) (paper notes, variants, GPU and GitHub Pages facts), and
 [research](research/flow/README.md) (the prototype, the measure scripts and the logs behind the
 flow in the tubes, with a command for each step).

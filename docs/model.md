@@ -69,17 +69,18 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 
 **The fields** (per cell):
 
-| Symbol  | Field                                                                                  | Range    |
-| ------- | -------------------------------------------------------------------------------------- | -------- |
-| T_l     | trail of lane l, l = 0 … 3                                                             | ≥ 0      |
-| C_F     | food scent                                                                             | ≥ 0      |
-| C_L     | light repellent                                                                        | ≥ 0      |
-| w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]   |
-| n_l     | agents of strain l whose move ended in the cell in this step                           | integers |
-| occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers |
-| D, B    | flow memory and tube body, one of each per strain (flow only, section 8)               | [0, 1]   |
-| G       | conductivity of the flow, per strain (flow only)                                       | [0, 4]   |
-| P_k     | pressure of the flow in lane k = 0 … 3, per strain (flow only)                         | float    |
+| Symbol  | Field                                                                                  | Range     |
+| ------- | -------------------------------------------------------------------------------------- | --------- |
+| T_l     | trail of lane l, l = 0 … 3                                                             | ≥ 0       |
+| C_F     | food scent                                                                             | ≥ 0       |
+| C_L     | light repellent                                                                        | ≥ 0       |
+| w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]    |
+| n_l     | agents of strain l whose move ended in the cell in this step                           | integers  |
+| occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers  |
+| D       | flow memory, one per strain (flow only, section 8)                                     | [1e-4, 1] |
+| B       | tube body, one per strain (flow only, section 8)                                       | [0, 1]    |
+| G       | conductivity of the flow, per strain (flow only)                                       | [0, 4]    |
+| P_k     | pressure of the flow in lane k = 0 … 3, per strain (flow only)                         | float     |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step.
 
@@ -184,8 +185,10 @@ Jones model the cut leaves the fields as they are (Jones 2010, p. 148).
 
 A brush stroke paints the cells of Ω whose centre lies within its radius r of the stroke (r ≥ 0.75 cells; a stroke of the user on
 steps of 1/16 cell). Wall: the wall byte 255, food and light 0. Food: the food byte 255. Light: max(old, 255 ·
-(1 − smoothstep(0.3 r, r, d))) at the distance d from the stroke. Erase: all bytes 0 (`shaders/paint.wgsl`,
-`gl/glsl/paint.frag`).
+t² (3 − 2t)) rounded to a byte, with t = clamp((d − r) / (0.3 r − r), 0, 1) at the distance d from the stroke: 255
+within 0.3 r, 0 at r. The shaders write this step out, because GLSL ES 3.00 leaves smoothstep undefined with its first
+edge above its second (ADR 0007, amendment of 2026-11-13). Erase: all bytes 0 (`shaders/paint.wgsl`,
+`gl/glsl/paint.frag`, CPU reference `lightByte()` in `brush.ts`).
 
 ### 6.8 Trail saturation K
 
@@ -463,26 +466,26 @@ No test compares the bytes of the two backends; the ADRs quote digests of runs m
 
 All in `src/engine/sim.gpu.test.ts` on both backends unless another file is named.
 
-| Rule                                     | Test                                                                                                                                                                                                                             |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Order of a step, both orders, step 0     | "the order of a step" (four tests)                                                                                                                                                                                               |
-| Turning (7.4)                            | the agent rule: keeps, turns right, turns left, random turn, all sensors equal                                                                                                                                                   |
-| Moving and walls (7.5)                   | blocked by a wall; a step of 3 and of 8 cells; no slip through a corner                                                                                                                                                          |
-| Walls block sensors (7.3)                | "walls block sensors"; sensor wall check in the extended model only                                                                                                                                                              |
-| The 3 × 3 mean and the decay (6.1, 6.2)  | "apply a periodic 3 × 3 mean, then × (1 − decay)"; rounding per order                                                                                                                                                            |
-| Mass balance (6.2)                       | "balance mass with deposits"                                                                                                                                                                                                     |
-| Edges and walls in each model (6.3)      | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                                                                                                                 |
-| Jones' one map (6.4)                     | "keep trail + scent equal to Jones' one trail map"                                                                                                                                                                               |
-| Scent plateau and g (6.4)                | the plateau tests in each order; the scent against a CPU reference                                                                                                                                                               |
-| Covered food (6.5)                       | the covered food tests, also WebGL2 without float blending                                                                                                                                                                       |
-| Cut in the fields (6.6)                  | the cut clears the chemicals in the extended model only                                                                                                                                                                          |
-| K (6.8)                                  | turns with saturation against a CPU reference                                                                                                                                                                                    |
-| One agent per cell (7.6)                 | at most one agent per cell, none lost; determinism                                                                                                                                                                               |
-| Tools (7.2)                              | inoculate onto free cells; dead agents only; cut to free cells                                                                                                                                                                   |
-| Growth (9)                               | growth against the CPU copy in each arena; intervals; one agent per cell                                                                                                                                                         |
-| Flow (8)                                 | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates                                                                                                  |
-| A flow for every strain (8, 7.1, 7.2, 9) | `flow.gpu.test.ts`: no flux between the tubes of two strains; the whole flux of each strain on its own route; starvation, respawn and growth by the memory of the own strain, with four strains; respawn with one agent per cell |
-| Scale grows with SO                      | the network scale test (Jones 2010, Fig. 10)                                                                                                                                                                                     |
+| Rule                                    | Test                                                                                                                                                                                                                             |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Order of a step, both orders, step 0    | "the order of a step" (four tests)                                                                                                                                                                                               |
+| Turning (7.4)                           | the agent rule: keeps, turns right, turns left, random turn, all sensors equal                                                                                                                                                   |
+| Moving and walls (7.5)                  | blocked by a wall; a step of 3 and of 8 cells; no slip through a corner                                                                                                                                                          |
+| Walls block sensors (7.3)               | "walls block sensors"; sensor wall check in the extended model only                                                                                                                                                              |
+| The 3 × 3 mean and the decay (6.1, 6.2) | "apply a periodic 3 × 3 mean, then × (1 − decay)"; rounding per order                                                                                                                                                            |
+| Mass balance (6.2)                      | "balance mass with deposits"                                                                                                                                                                                                     |
+| Edges and walls in each model (6.3)     | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                                                                                                                 |
+| Jones' one map (6.4)                    | "keep trail + scent equal to Jones' one trail map"                                                                                                                                                                               |
+| Scent plateau and g (6.4)               | the plateau tests in each order; the scent against a CPU reference                                                                                                                                                               |
+| Covered food (6.5)                      | the covered food tests, also WebGL2 without float blending                                                                                                                                                                       |
+| Cut in the fields (6.6)                 | the cut clears the chemicals in the extended model only                                                                                                                                                                          |
+| K (6.8)                                 | turns with saturation against a CPU reference                                                                                                                                                                                    |
+| One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                                                                                                                               |
+| Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                                                                                                                   |
+| Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                                                                                                                         |
+| Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates                                                                                                  |
+| A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between the tubes of two strains; the whole flux of each strain on its own route; starvation, respawn and growth by the memory of the own strain, with four strains; respawn with one agent per cell |
+| Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                                                                                                                     |
 
 Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
 (a test checks only that it changes), and agents under a painted wall.

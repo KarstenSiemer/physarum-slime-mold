@@ -108,3 +108,17 @@ negative value in both models, as before. The reflective rule made a growing col
 to the rim of Shortest path in 2 of 20 runs. ADR 0027 records the measurements, and the agents' step order of Jones,
 which changed on the same day: the scent sources now enter after the step's diffusion in the order that moves first,
 and before it in the order that senses first ([model.md](../model.md), section 6.2).
+
+## Amendment 2026-11-13: the soft edge of light without a reversed smoothstep
+
+Both paint shaders gave the soft edge of a light stroke as `smoothstep(r, 0.3 r, d)`, with the first edge above the
+second. GLSL ES 3.00 leaves smoothstep undefined if edge0 ≥ edge1 (Khronos reference page of smoothstep for OpenGL
+ES 3), so a WebGL2 driver may give any value there. Both shaders now write the Hermite step out, with the same float
+operations as `lightByte()` in `src/engine/brush.ts`: t = clamp((d − r) / (0.3 r − r), 0, 1), t² (3 − 2t).
+Coordinator's choice under the owner's delegation of 2026-11-12. `1 − smoothstep(0.3 r, r, d)` gives the same value in
+real numbers, but other float operations.
+
+Checked on an Apple M3 Pro (Chromium, Metal), both backends: 400 light strokes with radii from 0.75 to 31 cells on
+256 × 256 cells give the same SHA-256 of `env` with the old and the new shaders (65,209 lit cells). The paint tests
+compare the light bytes with the CPU reference on both backends; an edge at 0.4 r instead of 0.3 r fails 3 of them on
+each backend.
