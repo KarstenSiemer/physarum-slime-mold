@@ -16,3 +16,5 @@ artl.2010.16.2.pdf
 
 # Logs and pictures of the research scripts (research/flow/README.md).
 research/**/out/
+# The logs of a record are one archive in the repository (logs.tar.gz); this is the unpacked folder.
+research/**/logs/

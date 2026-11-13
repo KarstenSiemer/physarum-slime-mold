@@ -1,8 +1,0 @@
-{"kind":"webgpu","scene":"maze","flow":false,"w":512,"h":320,"agents":19661,"alive":13130,"step":4050,"median":0.18,"min":0.156,"max":0.196}
-{"kind":"webgpu","scene":"maze","flow":true,"w":512,"h":320,"agents":19661,"alive":4881,"step":4050,"median":1.926,"min":1.762,"max":2.018}
-{"kind":"webgpu","scene":"tokyo","flow":false,"w":512,"h":512,"agents":65536,"alive":7491,"step":4051,"median":0.4,"min":0.376,"max":0.416}
-{"kind":"webgpu","scene":"tokyo","flow":true,"w":512,"h":512,"agents":65536,"alive":5145,"step":4051,"median":2.902,"min":2.684,"max":2.968}
-{"kind":"webgl2","scene":"maze","flow":false,"w":512,"h":320,"agents":19661,"alive":13130,"step":4050,"median":0.34,"min":0.31,"max":0.37}
-{"kind":"webgl2","scene":"maze","flow":true,"w":512,"h":320,"agents":19661,"alive":5344,"step":4050,"median":2.304,"min":2.112,"max":2.406}
-{"kind":"webgl2","scene":"tokyo","flow":false,"w":512,"h":512,"agents":65536,"alive":7978,"step":4051,"median":0.63,"min":0.592,"max":0.66}
-{"kind":"webgl2","scene":"tokyo","flow":true,"w":512,"h":512,"agents":65536,"alive":4941,"step":4051,"median":3.312,"min":3.086,"max":3.43}

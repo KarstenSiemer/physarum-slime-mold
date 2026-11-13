@@ -781,11 +781,14 @@ not help it: on the fixed network it had not carried the flux to the sink after 
 
 16. **The research code and its logs are in the repository** (2026-11-13). The owner asked on
     2026-11-13 that a person can retrace how this decision came about, and test it with Node. The
-    form is the coordinator's choice under the owner's delegation of 2026-11-12. `research/flow/`
-    holds the CPU prototype as it ran, the scripts that measure the real engine, three scripts
-    that were written for the section on the solvers (`solvers.ts`, `rules.ts`, `bounded.ts`), and
-    the logs of the runs. Its `README.md` has the commands, and the last section of this record
-    says which command gives which table.
+    form is the coordinator's choice under the owner's delegation of 2026-11-12, but for two
+    points that the owner decided on the same day, when he read the pull request and found it too
+    much to take in: the `README.md` of the folder starts with the story of the decision on one
+    page, in plain words, and the logs are one archive and not 125 files. `research/flow/` holds
+    the CPU prototype as it ran, the scripts that measure the real engine, three scripts that
+    were written for the section on the solvers (`solvers.ts`, `rules.ts`, `bounded.ts`), and the
+    logs of the runs. After the story, its `README.md` has the commands, and the last section of
+    this record says which command gives which table.
 
     - The prototype is kept as it was measured. What changed: the paths, which now point into the
       repository; 12 places that the linter asked for, none in the arithmetic; some names that the
@@ -800,8 +803,15 @@ not help it: on the fixed network it had not carried the flux to the sink after 
       rewrite to that rule. It would change 538 places in code whose numbers this record quotes.
     - Node runs the TypeScript files through `research/flow/register.mjs`, with the TypeScript
       compiler that the repository has. Rejected: a build step or a new package.
-    - The logs are in the repository, 1.9 MB of text. Reason: the tables come from them in a
-      second (`summary.ts`), and the runs behind them take hours.
+    - The logs are in the repository as one archive, `research/flow/logs.tar.gz` (owner,
+      2026-11-13): 125 files and 1.9 MB of text in 0.4 MB. `research/flow/logs.ts` unpacks it to
+      `research/flow/logs/`, which git ignores; a path `research/flow/logs/…` in this record is a
+      path in that folder. Reason for the logs: the tables come from them in a second
+      (`summary.ts`), and the runs behind them take hours. Reason for the archive: the first form
+      of this decision put the 125 files into the repository, and with them the research folder
+      held 157 of the 448 files of the repository. No person reads these files. Rejected: the logs
+      only in the history of the pull request, and no research code in the repository at all;
+      then a number of this record could not be checked from `main`.
     - A unit test runs the first 750 steps of four prototype runs and compares them with the logs
       bit for bit, and it runs the checks of the three new scripts (`research.test.ts`; the
       reruns on CI and with `RESEARCH=full`, ADR 0010). So the code cannot drift from its
@@ -809,7 +819,8 @@ not help it: on the fixed network it had not carried the flux to the sink after 
       test also holds the tools of the record: the runs of each campaign in
       `prototype/campaign.ts` have the names of the logs, and the comparison of a rerun with the
       record (`summary.ts compare`) fails for a log that is short, that differs, or that the
-      record does not have.
+      record does not have. And it holds the archive: a digest of its 125 files, so that a change
+      of the record is a change of the test too.
     - The Maze campaign of table (a) ran again on 2026-11-13 with the code in the repository.
       Reason: on 2026-11-12 it had started two minutes before the last change of `flow.ts`, a change
       that left the rule as it was and changed the order of some float operations. The runs that
@@ -1056,9 +1067,10 @@ and the correction changes no code and no decision.
 Every number of this record comes from a script or a log in `research/flow/` (decision 16), or
 from a test. `research/flow/README.md` has the full command lines, the time that each one takes
 and what it must print. A script starts with
-`node --import ./research/flow/register.mjs research/flow/<script>`. The files
-`engine/*.gpu.test.ts` are runs of the real engine in a headless browser, and they start with
-`npx vitest run --config research/vitest.config.ts research/flow/<file>`.
+`node --import ./research/flow/register.mjs research/flow/<script>`. The script `logs.ts` unpacks
+the logs first: they are one archive, and the folder `logs/` of the table below comes from it.
+The files `engine/*.gpu.test.ts` are runs of the real engine in a headless browser, and they
+start with `npx vitest run --config research/vitest.config.ts research/flow/<file>`.
 
 | Part of this record                            | Script or command                                                                     |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------- |

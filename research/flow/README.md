@@ -83,8 +83,8 @@ code. Most numbers held bit for bit. Five things did not, and the ADR now says s
 | The rest of this page                              | 600 lines   | only to run a step again: it is a list of commands      |
 | `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
 | `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 1,200 lines | no: the scripts that made the other numbers of the ADR  |
-| `logs/`                                            | 1.9 MB      | never: the raw output of the runs, which a script reads |
-| `summary.ts`                                       | 370 lines   | no: it makes the tables of the ADR from `logs/`         |
+| `logs.tar.gz`                                      | 0.4 MB      | never: the raw output of the runs, which a script reads |
+| `summary.ts`                                       | 370 lines   | no: it makes the tables of the ADR from the logs        |
 | `research.test.ts`                                 | 240 lines   | no: it checks that the scripts still give the same rows |
 
 The app does not load this folder, and the build does not hold it.
@@ -103,6 +103,13 @@ and which went away. `research.test.ts` checks that the scripts still give the r
 - For part 6 and for the browser tests of part 7: the browser of the tests,
   `npx playwright install chromium`.
 - Run every command from the root of the repository.
+- Unpack the logs once. The logs of the runs that the ADR quotes are one archive,
+  `research/flow/logs.tar.gz`. This command writes them to `research/flow/logs/`, which git
+  ignores:
+
+  ```bash
+  node --import ./research/flow/register.mjs research/flow/logs.ts
+  ```
 
 Every script starts in the same way. The option `--import ./research/flow/register.mjs` lets Node
 run the TypeScript files of this folder and of `src/`:
@@ -113,8 +120,7 @@ node --import ./research/flow/register.mjs research/flow/prototype/ring.ts
 
 Most scripts print their result to the terminal and write no file. The runs of the agent model
 (`prototype/run-*.ts`, `prototype/campaign.ts`) and the runs of the real engine (`engine/`) write
-their logs and pictures to `research/flow/out/`, which git ignores. The folder
-`research/flow/logs/` holds the logs of the runs that the ADR quotes.
+their logs and pictures to `research/flow/out/`, which git ignores.
 
 The times are those of an M3 Pro with 12 cores.
 
@@ -186,7 +192,8 @@ mathematics". In short:
    RESEARCH=full npm test
    ```
 
-2. The tables of the ADR come from the logs. This prints table (a), the Maze, in a second:
+2. The tables of the ADR come from the logs. Unpack them first ("What you need"). This prints
+   table (a), the Maze, in a second:
 
    ```bash
    node --import ./research/flow/register.mjs research/flow/summary.ts maze-campaign research/flow/logs/maze-pair base exact lag8 lag16 lag32 ma
@@ -633,6 +640,11 @@ backends against each other, or the bytes of a scene without the flow fails in C
 
 ## The logs
 
+The logs are one archive in the repository, `logs.tar.gz`: 125 files, 1.9 MB of text. Unpacked,
+they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
+the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
+asks for the new digest.
+
 | Folder                       | What                                                                   | Made                                                  |
 | ---------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
 | `logs/maze-pair/`            | 60 runs of the prototype: table (a) and the numbers of the Context     | 2026-11-13, `campaign.ts maze-pair`                   |
@@ -676,6 +688,7 @@ Notes on the record:
 | File                      | What it is                                                                                        |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
 | `register.mjs`            | lets Node run the TypeScript files                                                                |
+| `logs.tar.gz`, `logs.ts`  | the logs of the runs as one archive, and the script that unpacks and packs it                     |
 | `prototype/world.ts`      | the grid of a scene as the app paints it, distances along the maze, pictures                      |
 | `prototype/jones.ts`      | a CPU copy of the agent model (not bit-equal to the GPU)                                          |
 | `prototype/flow.ts`       | three solvers for one pair of foods: exact, local with fixed pressures, Ma's walk                 |

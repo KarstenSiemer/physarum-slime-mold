@@ -355,10 +355,12 @@ GPU checks use invariants, not long exact trajectories:
   `research/flow/research.test.ts`, runs scripts of the research folder, each as its own Node
   process, and compares what they give with the logs of the record, bit for bit. Reason: the
   commands of the research guide and the logs must not drift apart, and only a test that CI runs
-  keeps that. Twelve quick checks run always: three of the scripts, and nine of the tools of the
-  record (the runs of each campaign have the names of the logs; the tables print the lines that
-  the guide quotes; the comparison of a rerun with the record fails for a short, a changed and an
-  unknown log). They take 2 to 3 s and add about 1 s to the unit tests: 6.7 to 7.4 s with them
+  keeps that. The logs are one archive (`research/flow/logs.tar.gz`), and the test unpacks it into
+  a folder of its own. Fifteen quick checks run always: three of the scripts, three of the
+  archive (a digest of its 125 files; packing and unpacking give the same files; no path leaves
+  the folder), and nine of the tools of the record (the runs of each campaign have the names of
+  the logs; the tables print the lines that the guide quotes; the comparison of a rerun with the
+  record fails for a short, a changed and an unknown log). They take 2 to 3 s and add about 1 s to the unit tests: 6.7 to 7.4 s with them
   against 5.5 to 6.9 s for the files of `src` alone (three runs each on an M3 Pro in use). Six
   reruns of the prototype run on CI, and locally with `RESEARCH=full npm test`: they take 31 to
   40 s, all at the same time. So they are not in the fast loop: `npm test` is the loop of the

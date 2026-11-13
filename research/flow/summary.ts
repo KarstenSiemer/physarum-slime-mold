@@ -17,20 +17,23 @@ function fail(message: string) {
   console.error(message);
   process.exitCode = 1;
 }
+/** Stops the script: a folder or a file is not there. The logs of the record are an archive until they are unpacked. */
+function missing(what: string, path: string): never {
+  console.error(`no ${what} ${path}`);
+  if (path.includes('logs'))
+    console.error(
+      'The logs of the record are in research/flow/logs.tar.gz. Unpack them first: node --import ./research/flow/register.mjs research/flow/logs.ts',
+    );
+  process.exit(1);
+}
 /** A folder name with a slash at its end. The script stops if the folder does not exist. */
 function folderOf(folder: string): string {
-  if (!existsSync(folder) || !statSync(folder).isDirectory()) {
-    console.error(`no folder ${folder}`);
-    process.exit(1);
-  }
+  if (!existsSync(folder) || !statSync(folder).isDirectory()) missing('folder', folder);
   return folder.endsWith('/') ? folder : `${folder}/`;
 }
 /** The text of a file. The script stops if the file does not exist. */
 function textOf(file: string): string {
-  if (!existsSync(file) || !statSync(file).isFile()) {
-    console.error(`no file ${file}`);
-    process.exit(1);
-  }
+  if (!existsSync(file) || !statSync(file).isFile()) missing('file', file);
   return readFileSync(file, 'utf8');
 }
 
