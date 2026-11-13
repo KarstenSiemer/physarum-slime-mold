@@ -769,7 +769,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
     engine.destroy();
   }, 150_000); // 7.6 s on SwiftShader on an M3 Pro, about 30 s in CI: under a quarter of 150 s (ADR 0010)
 
-  // ADR 0031: each strain starts on a food of its own, in the order of the foods; a strain without one has no agent.
+  // ADR 0032: each strain starts on a food of its own, in the order of the foods; a strain without one has no agent.
   it('starts a colony of each strain on a food of its own, and none for a strain without a food', async () => {
     const canvas = document.createElement('canvas');
     [canvas.width, canvas.height] = [1280, 720];

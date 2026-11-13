@@ -267,7 +267,7 @@ describe('packFlow', () => {
     // A deposit of 0 gives finite thresholds.
     const none = of(0);
     expect(Number.isFinite(none[14] ?? NaN)).toBe(true);
-    // Every strain has a block of its own (ADR 0030): the levels of the trail are in deposits of the block's strain.
+    // Every strain has a block of its own (ADR 0031): the levels of the trail are in deposits of the block's strain.
     const strains = [5, 2, 8].map((deposit, i) => ({ ...defaultStrain(i), deposit }));
     [5, 2, 8].forEach((deposit, strain) => {
       const f = new Float32Array(packFlow({ ...settings, strains }, sites, undefined, strain));
@@ -318,7 +318,7 @@ describe('packFlow', () => {
   });
 });
 
-describe('the levels of the trail of a tube (ADR 0031)', () => {
+describe('the levels of the trail of a tube (ADR 0032)', () => {
   it('holds the trail of a cell that an agent enters at every step, for each order of a step', () => {
     // Sensing first: T ← (T + 1) · (1 − decay). Moving first: T ← T · (1 − decay) + 1 (diffuse.wgsl).
     for (const decay of [0.02, 0.1, 0.3, 0.6, 0.9]) {
@@ -373,7 +373,7 @@ describe('the levels of the trail of a tube (ADR 0031)', () => {
   });
 });
 
-describe('the flow of a strain in the CPU copy of the passes (ADR 0030)', () => {
+describe('the flow of a strain in the CPU copy of the passes (ADR 0031)', () => {
   it('builds the tube body from the trail of the strain of the block alone', () => {
     const n = 16;
     const grid: FlowGrid = { width: n, height: n, boundary: 'box', env: new Uint8Array(n * n * 4) };

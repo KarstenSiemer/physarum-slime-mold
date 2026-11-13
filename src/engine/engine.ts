@@ -413,7 +413,7 @@ export class Engine {
   /**
    * The start layout 'food' (ADR 0025): every agent starts dead, and one step of the inoculate tool places about
    * FOOD_START agents of a strain in a disc of FOOD_CELLS cells on a food of the edit list, as Jones starts a foraging
-   * run at a food source. Each strain has a food of its own (ADR 0031): strain A the first food of the list, strain B
+   * run at a food source. Each strain has a food of its own (ADR 0032): strain A the first food of the list, strain B
    * the second, and so on, one step for each. A strain without such a food starts without agents. About FOOD_TRIES
    * dead agents try a random point of the disc; with the rule one agent takes each cell they hit (about FOOD_START),
    * and without it about FOOD_START agents try. The steps are the first steps of the run, the same in every run of a

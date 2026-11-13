@@ -114,7 +114,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'if (memory * memory < 0.0 * F.e.y) { return -1; }',
     GPU,
   ],
-  // Every strain has a flow of its own (ADR 0030): the wrong rules that give a strain the flow of the first strain.
+  // Every strain has a flow of its own (ADR 0031): the wrong rules that give a strain the flow of the first strain.
   [
     'W10 wgsl: the tube body of every strain from the trail of the first strain',
     WGSL,
@@ -157,7 +157,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'let memory = textureLoad(flowMemory, q, 0u, 0).x;',
     GPU,
   ],
-  // The levels of the trail follow the decay of the strain (ADR 0031): the block of the passes, for each backend.
+  // The levels of the trail follow the decay of the strain (ADR 0032): the block of the passes, for each backend.
   [
     'T1 block: the trail levels of a tube without the decay of the strain (the WebGPU tests)',
     'src/engine/flow.ts',

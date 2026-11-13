@@ -40,7 +40,7 @@ struct Spot {
 #define FLOW 0
 #endif
 #if FLOW
-// Every strain has a flow of its own (ADR 0030): the memory of the flow of strain A, and of strains B, C and D. A scene
+// Every strain has a flow of its own (ADR 0031): the memory of the flow of strain A, and of strains B, C and D. A scene
 // with fewer strains binds the memory of strain A in their place, and no agent reads it there.
 uniform sampler2D flowMemory; // x flow memory, y tube body (flow.frag)
 uniform sampler2D flowMemory1;

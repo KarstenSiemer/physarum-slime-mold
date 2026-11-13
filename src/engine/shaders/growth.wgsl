@@ -34,7 +34,7 @@
 // Flow in the tubes (ADR 0029, flow.wgsl). The lines between `//#if FLOW` and `//#endif` are part of the source only
 // while the flow is on (variant.ts); without them the source is the one of the code before, character for character.
 // An agent on a cell that the flux of its strain passed by does not divide: the flow supplies no plasm for a child
-// there. Every strain has a flow of its own (ADR 0030): a layer of `flowMemory`.
+// there. Every strain has a flow of its own (ADR 0031): a layer of `flowMemory`.
 struct FlowRule {
   a: vec4f,
   b: vec4f,

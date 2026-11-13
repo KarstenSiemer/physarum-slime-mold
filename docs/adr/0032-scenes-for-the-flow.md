@@ -1,10 +1,10 @@
-# 0031: Scenes for the flow, also with several strains
+# 0032: Scenes for the flow, also with several strains
 
 - Status: accepted. The owner asked for the scenes on 2026-11-13. Every decision here is the
   coordinator's choice under the owner's delegation of 2026-11-12, with its date and reason.
 - Date: 2026-11-13
 - In short: three new scenes show the flow in the tubes (ADR 0029), two of them with rival strains
-  that each build a network of their own (ADR 0030). For them, each strain starts on a food of its
+  that each build a network of their own (ADR 0031). For them, each strain starts on a food of its
   own. And the level of the trail from which a cell holds a tube now follows the decay of the
   strain, so the flow also acts in a scene whose trail decays fast.
 
@@ -17,7 +17,7 @@ strains in a dish, with one agent per cell, growth and shrinkage, the flow and t
 Three things stood in the way.
 
 - **The level of a tube.** A cell holds a tube of a strain from 0.2 deposits of trail on, and a
-  full tube from 1 deposit on (ADR 0029, decision 4). ADR 0030 measured the owner's case: the trail
+  full tube from 1 deposit on (ADR 0029, decision 4). ADR 0031 measured the owner's case: the trail
   of a strain is at most 0.26 deposits there, no cell holds a tube, and so the flow does nothing.
   The Maze has up to 2 deposits. The levels fit Jones' decay of 0.1, and that scene has a decay of
   0.6.
@@ -87,7 +87,7 @@ All runs: the real engine, seed 1, WebGPU on an M3 Pro unless a line says WebGL2
 ### The owner's case
 
 Three strains in a dish on a grid of 512 × 320 cells, one agent per cell, growth and shrinkage, the
-flow, two foods. With the levels of ADR 0029 no cell holds a tube in any sample (ADR 0030). With
+flow, two foods. With the levels of ADR 0029 no cell holds a tube in any sample (ADR 0031). With
 the levels of decision 1:
 
 | Step  | Living agents of A, B, C | Cells with a tube of A, B, C | Foods that give or take, per strain |
@@ -132,7 +132,7 @@ tube and 1,033 agents, with 2 it has 19,061 and 3,162, and with 8 it has 18,972 
 
 ### One strain and Jones' decay: the bytes of before
 
-The 18 runs of ADR 0030 (nine on each backend, 2,500 steps, the Maze and the Tokyo scene among
+The 18 runs of ADR 0031 (nine on each backend, 2,500 steps, the Maze and the Tokyo scene among
 them) give the digests of `main` at `7d3a5ee` in 18 of 18 runs, with the levels of decision 1 and
 the start of decision 2.
 
@@ -176,7 +176,7 @@ The time of a step in ms, the median of 21 samples of 50 steps after 3,000 steps
   for each second on an M3 Pro. The frame budget (ADR 0028) then lowers the steps per second.
 - The networks of the rivals take long: they are still thinning at step 12,000, which is 100 s at
   the default speed.
-- Open, as before (ADR 0030): a food site is one cell, and the picture does not show how strong a
+- Open, as before (ADR 0031): a food site is one cell, and the picture does not show how strong a
   tube is (`TODO.md`).
 
 ## How to check this record

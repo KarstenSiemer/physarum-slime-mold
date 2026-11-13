@@ -1,4 +1,4 @@
-# 0030: Every strain has a flow of its own
+# 0031: Every strain has a flow of its own
 
 - Status: accepted. The owner found the fault on 2026-11-13. Every decision here is the
   coordinator's choice under the owner's delegation of 2026-11-12, with its date and reason.
@@ -147,7 +147,7 @@ passes with the trail of its strain alone.
 A test is worth what it catches (ADR 0029, "The tests against wrong rules"). On 2026-11-13, 17
 more wrong rules were put into the code, one at a time. `research/flow/engine/mutate.ts` now has
 39 wrong rules. Every one of them fails at least one test; the log is
-`research/flow/logs/engine/mutations-0030.txt`.
+`research/flow/logs/engine/mutations-0031.txt`.
 
 | Wrong rule                                                                      | In                 | Tests that fail                                                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -275,7 +275,7 @@ After these changes the 18 runs with one strain give the same digests again.
   decay of 0.1. That scene has a decay of 0.6: its trail loses 60 % in every step. Without the
   rule of one agent per cell the same scene has up to 43 deposits, and the flow acts: all three
   strains cover both foods at step 1,000, and of 307,200 agents 4,060 live at step 3,000, 3,930
-  of them of one strain. Closed in ADR 0031: the levels follow the decay of the strain.
+  of them of one strain. Closed in ADR 0032: the levels follow the decay of the strain.
 - Open: a food site is one cell, the centre of a food dot (ADR 0029, decision 5). A strain covers
   a food only when its own tube holds that cell. Where rivals share a food dot, only the strains
   at its centre have it as a site (`TODO.md`).
@@ -298,4 +298,4 @@ After these changes the 18 runs with one strain give the same digests again.
 [`research/flow/README.md`](../../research/flow/README.md), part 8, has one command for each
 result of this record: the test of the fault, the owner's case, the bytes of one strain and the
 time of a step. Part 7 has the command for the wrong rules. The logs of the runs are in
-`research/flow/logs.tar.gz`, in `logs/engine/`: `strains-*.jsonl` and `mutations-0030.txt`.
+`research/flow/logs.tar.gz`, in `logs/engine/`: `strains-*.jsonl` and `mutations-0031.txt`.

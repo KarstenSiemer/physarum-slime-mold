@@ -1,6 +1,6 @@
 // Flow in the tubes (ADR 0029), for the extended model while the setting is on. Prepended with common.wgsl.
 //
-// Every strain is a plasmodium of its own, with a flow of its own (ADR 0030): sim.ts runs these passes once per strain,
+// Every strain is a plasmodium of its own, with a flow of its own (ADR 0031): sim.ts runs these passes once per strain,
 // with the memory and the pressure of that strain. The passes read the trail of that strain alone (U.f.z), so no flux
 // passes from the tubes of one strain into the tubes of another.
 //
@@ -224,7 +224,7 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   } else {
     d = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));
   }
-  // The tube body follows the plasmodium of the strain, which the trail of the strain shows (ADR 0030).
+  // The tube body follows the plasmodium of the strain, which the trail of the strain shows (ADR 0031).
   let t = textureLoad(trail, p, 0)[u32(U.f.z)];
   let presence = clamp((t - U.d.y) * U.d.z, 0.0, 1.0);
   let body = m.y + U.c.y * (presence - m.y);

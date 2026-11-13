@@ -287,7 +287,7 @@ const COAST: readonly (readonly [number, number])[] = [
 /**
  * The scene's food and walls in the frame of a dish (EnvShape): Tokyo's seven food sources first, then the cities.
  * `starts`: cities whose food comes before all others, in this order, one food for each (for Tokyo the one at the
- * station). The start layout on food puts the colony of a strain on each of them (ADR 0031).
+ * station). The start layout on food puts the colony of a strain on each of them (ADR 0032).
  */
 export function tokyoShapes(starts: readonly string[] = []): EnvShape[] {
   const k = TOKYO_SCALE;

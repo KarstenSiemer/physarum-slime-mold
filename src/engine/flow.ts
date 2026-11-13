@@ -1,6 +1,6 @@
 // Flow in the tubes (ADR 0029): the constants of the rule, the uniform block of its passes and the schedule of the
 // foods that give and take. The passes are shaders/flow.wgsl and gl/glsl/flow.frag; flow-reference.ts mirrors them on
-// the CPU for the tests. Every strain has a flow of its own (ADR 0030): the passes run once per strain, on the trail
+// the CPU for the tests. Every strain has a flow of its own (ADR 0031): the passes run once per strain, on the trail
 // of that strain, with a state of their own.
 import { MAX_STRAINS, type Settings, type StepOrder } from '../model/params';
 
@@ -11,7 +11,7 @@ import { MAX_STRAINS, type Settings, type StepOrder } from '../model/params';
 export const flowOn = (s: Pick<Settings, 'flow' | 'model'>) => s.flow && s.model === 'extended';
 
 /**
- * The strains that have a flow of their own (ADR 0030): every strain of the settings, at most the four that a
+ * The strains that have a flow of their own (ADR 0031): every strain of the settings, at most the four that a
  * simulation runs (pack.ts packParams()).
  */
 export const flowStrains = (s: Pick<Settings, 'strains'>) => Math.min(s.strains.length, MAX_STRAINS);
@@ -163,7 +163,7 @@ export function heldTrail(decay: number, order: StepOrder): number {
 }
 
 /**
- * The trail of a strain below which a cell holds no tube of it, and from which it holds a full tube (ADR 0031): 0.2
+ * The trail of a strain below which a cell holds no tube of it, and from which it holds a full tube (ADR 0032): 0.2
  * and 1 deposits at Jones' decay, and in the same ratio to the trail that a cell holds at the decay of the strain. A
  * trail that decays fast stays weak: a strain with a decay of 0.6 holds a thirteenth of the trail, so its levels are
  * a thirteenth too. At a decay of 0.1 the factor is 1, and the levels are those of ADR 0029, bit for bit.
@@ -178,7 +178,7 @@ export function trailLevels(
 }
 
 /**
- * The uniform block of the flow passes of the strain `strain` (ADR 0030): the constants, the cell of the first site
+ * The uniform block of the flow passes of the strain `strain` (ADR 0031): the constants, the cell of the first site
  * (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain and the
  * sites. The passes take the step and the seed from the parameters of the simulation. The levels of the trail are
  * those of the strain (trailLevels()). Every strain has the same sites and the same other constants: the agent passes

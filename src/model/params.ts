@@ -119,7 +119,7 @@ export const attractionSpec = {
 
 /**
  * Start layouts. 'food': every agent starts dead, and the engine places about FOOD_START agents of each strain on a
- * food of its own, strain A on the first food, strain B on the second (ADR 0025, ADR 0031): a small colony to grow
+ * food of its own, strain A on the first food, strain B on the second (ADR 0025, ADR 0032): a small colony to grow
  * from, as Jones starts his foraging runs at a food source.
  */
 export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center', 'empty', 'food'] as const;

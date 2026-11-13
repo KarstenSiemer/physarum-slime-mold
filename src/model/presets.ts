@@ -153,7 +153,7 @@ const wall = (x1: number, y1: number, x2: number, y2: number): EnvShape => ({
 });
 
 /**
- * A colony that forages with the flow in the tubes (ADR 0031): Jones' foraging agent of 2011 with growth and
+ * A colony that forages with the flow in the tubes (ADR 0032): Jones' foraging agent of 2011 with growth and
  * shrinkage, a start on food, the Maze's sensor distance and food weight, and the flow. `rivals`: so many strains like
  * it, each with a colony on a food of its own; each strain flees the trail of the others.
  */
@@ -177,7 +177,7 @@ const forager = (extra: Partial<Settings>, rivals = 1): Settings => {
   return { ...s, strains: Array.from({ length: rivals }, (_, i) => (i === 0 ? first : strainLike(first, i))) };
 };
 
-/** The lattice of the dish scenes with the flow (ADR 0031): the same picture on every screen. */
+/** The lattice of the dish scenes with the flow (ADR 0032): the same picture on every screen. */
 const L384 = (): Lattice => [384, 384];
 
 /** `count` foods on a ring of radius `radius` around the middle, the first one on the right. */

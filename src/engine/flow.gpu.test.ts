@@ -1,5 +1,5 @@
 // The flow in the tubes on both backends (ADR 0029), in Chromium with real GPU APIs (ADR 0010). Every strain has a
-// flow of its own (ADR 0030).
+// flow of its own (ADR 0031).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings, type Strain } from '../model/params';
 import { FLOW, flowSites, packFlow } from './flow';
@@ -488,7 +488,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     // At Jones' decay 0.1 deposits lie below the level of a tube (0.2 deposits): no tube body at all.
     expect(first[on * 4 + 1]).toBe(0);
     // At a decay of 0.6 a cell that an agent enters at every step holds 0.67 deposits, where Jones' holds 9. The
-    // levels follow: 0.1 deposits are a full tube there (ADR 0031), and the body is 1 − 0.98⁶⁰ = 0.70 after 60 steps.
+    // levels follow: 0.1 deposits are a full tube there (ADR 0032), and the body is 1 − 0.98⁶⁰ = 0.70 after 60 steps.
     expect(second[on * 4 + 1] ?? 0).toBeGreaterThan(0.65);
     expect(second[on * 4 + 1] ?? 0).toBeLessThan(0.75);
     expect(second[on * 4 + 2] ?? 0).toBeGreaterThan(0);

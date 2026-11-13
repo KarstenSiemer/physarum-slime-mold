@@ -75,7 +75,7 @@ code. Most numbers held bit for bit. Five things did not, and the ADR now says s
 - The cost per step moves by about a sixth from run to run.
 
 **After the merge: a scene with several strains**
-([ADR 0030](../../docs/adr/0030-a-flow-for-every-strain.md), part 8). The owner tried the flow with
+([ADR 0031](../../docs/adr/0031-a-flow-for-every-strain.md), part 8). The owner tried the flow with
 a second strain. Agents of a strain that had no living agent appeared on the tubes of the first
 strain. The cause: the flow took all strains for one slime mold. The rule that brings dead agents
 to life did not look at the strain, and the flux ran through the tubes of all strains together.
@@ -85,7 +85,7 @@ price: each strain costs the time and the memory of the flow again, about 1.8 ms
 Maze. One case was open: in the start scene with three strains and one agent per cell the trail
 was too weak for a tube, so the flow did nothing there.
 
-**Scenes for the flow** ([ADR 0031](../../docs/adr/0031-scenes-for-the-flow.md), part 9). The trail
+**Scenes for the flow** ([ADR 0032](../../docs/adr/0032-scenes-for-the-flow.md), part 9). The trail
 of that scene is weak because it decays fast: 60 % in a step, where Jones' trail loses 10 %. The
 level from which a cell holds a tube was a fixed number of deposits. Now it follows the decay of
 the strain, and the flow acts in that scene too. Three new scenes use the flow: one colony on a
@@ -662,15 +662,15 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
 
 It changes files below `src/` while it runs and writes each one back as it was. You must see a
 test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
-`logs/engine/mutations-0030.txt` for 39 of them, and `logs/engine/scenes-mutations.txt` for the
-two of ADR 0031; `logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests
-of ADR 0029. ADR 0029 and ADR 0030 have their rules as a table.
+`logs/engine/mutations-0031.txt` for 39 of them, and `logs/engine/scenes-mutations.txt` for the
+two of ADR 0032; `logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests
+of ADR 0029. ADR 0029 and ADR 0031 have their rules as a table.
 
 Result: parts 2 to 6 are measurements that were made once. These tests run on every change. They
 hold the rule that the app got: a change that breaks Kirchhoff's law, the adaptation, the two
 backends against each other, or the bytes of a scene without the flow fails in CI.
 
-### 8. Does every strain have a flow of its own? [ADR 0030]
+### 8. Does every strain have a flow of its own? [ADR 0031]
 
 The fault that the owner saw, as a test (4 s). Two strains, a tube in the trail of one of them,
 and 200 dead agents of each strain:
@@ -679,7 +679,7 @@ and 200 dead agents of each strain:
 npx vitest run --project gpu src/engine/flow.gpu.test.ts -t "own strain"
 ```
 
-You must see 6 tests pass. With the code before ADR 0030, 197 agents of the strain without a tube
+You must see 6 tests pass. With the code before ADR 0031, 197 agents of the strain without a tube
 came to life.
 
 The owner's case in the real engine (1 minute): the Foraging maze with the flow and a second
@@ -721,7 +721,7 @@ for n in scenes patched norule saturated; do node --import ./research/flow/regis
 ```
 
 The last command compares the four files with the digests of `main` at `7d3a5ee`, the code before
-ADR 0030 (made on an M3 Pro). It must print that 4, 8, 2 and 4 runs are equal. On another GPU,
+ADR 0031 (made on an M3 Pro). It must print that 4, 8, 2 and 4 runs are equal. On another GPU,
 make the digests of `7d3a5ee` on your machine too, in a second checkout (part 6 has the way).
 
 The time of a step with one to four strains (1 minute each):
@@ -753,7 +753,7 @@ WebGL2; without the flow 0.2 and 0.4 ms.
 
 Result: every strain has a flow of its own, and a scene with one strain runs as before.
 
-### 9. Do the new scenes keep a network for each strain? [ADR 0031]
+### 9. Do the new scenes keep a network for each strain? [ADR 0032]
 
 The owner's second case (1 minute): the start scene Three strains in a dish with one agent per
 cell, growth, the flow and two foods.
@@ -812,9 +812,9 @@ asks for the new digest.
 | `logs/engine/digest-*.jsonl`                         | the digests of `main` at `377f428`, and of `92a63e7` with the flow off                                                                                                                                                          | the same                                              |
 | `logs/engine/before-review/`                         | the Tokyo runs with the code before the review (commit `6ffed4b`)                                                                                                                                                               | 2026-11-13                                            |
 | `logs/engine/mutations.txt`                          | the tests that fail for each of 22 wrong rules (part 7)                                                                                                                                                                         | 2026-11-13, `engine/mutate.ts`, the code of `main`    |
-| `logs/engine/mutations-0030.txt`                     | the same for 39 wrong rules, with the tests of ADR 0030                                                                                                                                                                         | 2026-11-13, the code of ADR 0030                      |
+| `logs/engine/mutations-0031.txt`                     | the same for 39 wrong rules, with the tests of ADR 0031                                                                                                                                                                         | 2026-11-13, the code of ADR 0031                      |
 | `logs/engine/strains-*.jsonl`                        | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
-| `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0031                                                                                       | 2026-11-13, M3 Pro                                    |
+| `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0032                                                                                       | 2026-11-13, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

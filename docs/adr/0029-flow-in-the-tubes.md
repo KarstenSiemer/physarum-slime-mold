@@ -8,10 +8,10 @@
 - Date: 2026-11-12
 - In short: [`research/flow/README.md`](../../research/flow/README.md) tells on one page, in plain
   words, how this decision came about. This record has the details.
-- Changed by [ADR 0030](0030-a-flow-for-every-strain.md) (2026-11-13): every strain has a flow of
+- Changed by [ADR 0031](0031-a-flow-for-every-strain.md) (2026-11-13): every strain has a flow of
   its own. This record is written for one strain. In a scene with several strains, each line of
   it holds for one strain: its trail, its tubes, its foods, its agents.
-- Changed by [ADR 0031](0031-scenes-for-the-flow.md) (2026-11-13): the levels of the trail of
+- Changed by [ADR 0032](0032-scenes-for-the-flow.md) (2026-11-13): the levels of the trail of
   decision 4, 0.2 and 1 deposits, hold at Jones' decay of 0.1 and follow the decay of the strain.
 
 ## Context
@@ -106,7 +106,7 @@ step, with the adaptation as a semi-implicit step (2007, Sec. 3.3).
 The app has no graph of tubes. Every open cell c is a node (decision 4). It holds the trail T_c of
 the strain, the tube body B_c (0 to 1), the flow memory D_c (Tero's conductivity, 0.0001 to 1),
 the conductivity g_c, and one pressure p_c for each of four fields (decision 5). Every strain has
-these values for itself (ADR 0030; until then T_c was the trail of all strains, in deposits of
+these values for itself (ADR 0031; until then T_c was the trail of all strains, in deposits of
 strain A).
 
 ```text
@@ -574,7 +574,7 @@ not help it: on the fixed network it had not carried the flux to the sink after 
 4. **The network is the grid.** Every open cell is a node, and two cells that share a side are
    joined by an edge. A cell has a conductivity g = B (0.02 + D): B is the tube body, the trail of
    the strain smoothed over time (rate 0.02 per step; presence from 0.2 to 1 deposits of the
-   strain; no tube below B = 0.05; until ADR 0030 the trail of all strains, in deposits of strain
+   strain; no tube below B = 0.05; until ADR 0031 the trail of all strains, in deposits of strain
    A), and D is the flow memory, Tero's conductivity, from 0.0001 to 1. The
    base 0.02 lets a new tube carry a first flux. A food cell with a tube has g = 4 B, so the flux of
    a site spreads over its food before it enters the tubes. The conductance of an edge is the
@@ -719,7 +719,7 @@ not help it: on the fixed network it had not carried the flux to the sink after 
    claims it as a move does (ADR 0008). An agent has one placement per step: an agent that a held
    tool places in a step (inoculate or cut, ADR 0023) does not come to life by the flow in that step
    too. Every other dead agent can come to life by the flow also while a tool is held. The tube
-   and the flow memory are those of the agent's strain (ADR 0030; until then any tube gave life to
+   and the flow memory are those of the agent's strain (ADR 0031; until then any tube gave life to
    the agents of every strain). So a tube
    that carries flux fills up and gets wider, until the flux per cell falls. Rejected, with the
    prototype: (a) a deposit scaled by the flow memory alone: the dead ends stay, because Jones'
@@ -834,7 +834,7 @@ not help it: on the fixed network it had not carried the flux to the sink after 
     - Node runs the TypeScript files through `research/flow/register.mjs`, with the TypeScript
       compiler that the repository has. Rejected: a build step or a new package.
     - The logs are in the repository as one archive, `research/flow/logs.tar.gz` (owner,
-      2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0030, 157 since ADR 0031).
+      2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0031, 157 since ADR 0032).
       `research/flow/logs.ts` unpacks it to
       `research/flow/logs/`, which git ignores; a path `research/flow/logs/…` in this record is a
       path in that folder. Reason for the logs: the tables come from them in a second
@@ -1038,7 +1038,7 @@ changes and runs them again; its log is `research/flow/logs/engine/mutations.txt
 
 Two of these rules fail only the test that compares a backend with the CPU copy of the passes,
 step by step: that test holds a rule only as long as the CPU copy has it. What the tests did not
-hold on that day: no test brought a dead agent to life while a tool is held (decision 8). ADR 0030
+hold on that day: no test brought a dead agent to life while a tool is held (decision 8). ADR 0031
 has that test, and the wrong rules of the flow of each strain.
 
 ## Review before the merge (2026-11-13)
@@ -1078,7 +1078,7 @@ A second reader went through the change before the merge. Each finding was check
   after 4,160 iterations and at 6.7 % after 16,000. A larger radius also lets a pressure swing
   longer. A change needs the tests of decision 6 and every measurement of the results again
   (`TODO.md`).
-- A fault, fixed in ADR 0030 (the owner saw it on 2026-11-13): the flow brought dead agents of
+- A fault, fixed in ADR 0031 (the owner saw it on 2026-11-13): the flow brought dead agents of
   every strain to life. In a scene with several strains, a strain without a living agent appeared
   on the tubes of another strain as soon as a flux ran (the Foraging maze with the flow and a
   second strain switched on). The rule of decision 8 did not look at the strain of the agent.

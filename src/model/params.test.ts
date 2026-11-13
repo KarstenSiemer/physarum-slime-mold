@@ -307,7 +307,7 @@ describe('flow in the tubes (ADR 0029)', () => {
     expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
   });
 
-  it('is on in the Maze, in the Tokyo rail network and in the scenes made for it (ADR 0031)', () => {
+  it('is on in the Maze, in the Tokyo rail network and in the scenes made for it (ADR 0032)', () => {
     const flowing = ['maze', 'tokyo', 'food-ring', 'rival-networks', 'tokyo-rivals'];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
@@ -556,7 +556,7 @@ describe('runsAsJones (links from before the model switch)', () => {
     expect(runsAsJones(strain({ food: 0.4 }), drawn('food'))).toBe(false);
     expect(runsAsJones(strain({ attraction: [-1, 0, 0, 0] }), drawn('food'))).toBe(false); // food +1, trail −1
     expect(runsAsJones({ ...s, trailSaturation: 30 })).toBe(false);
-    // The flow in the tubes is a rule of the extended model alone: the scene Food ring has it and no wall (ADR 0031).
+    // The flow in the tubes is a rule of the extended model alone: the scene Food ring has it and no wall (ADR 0032).
     expect(runsAsJones({ ...s, flow: true })).toBe(false);
     expect(runsAsJones({ ...s, diffusion: 2 })).toBe(false);
     expect(runsAsJones({ ...s, collisions: false })).toBe(false);

@@ -99,7 +99,7 @@ for (const viewport of [
   });
 }
 
-// Rival networks (ADR 0030, 0031): two strains, each with a colony on a food of its own and a flow of its own.
+// Rival networks (ADR 0031, 0031): two strains, each with a colony on a food of its own and a flow of its own.
 test('Rival networks starts a colony of each strain, and each strain has a flow of its own', async ({ page }) => {
   const errors = watchErrors(page);
   await open(page, await smallScene({ resolution: 256 }));
