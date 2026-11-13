@@ -101,6 +101,33 @@ Q. Ma, A. Johansson, A. Tero, T. Nakagaki, D. J. T. Sumpter: J. R. Soc. Interfac
 - [I] On a grid, the mean field of Eq. 2.16 with a time step of 1 is one weighted Jacobi iteration of
   Tero's Poisson equation per step. So the walk is Tero's model with a slow, local pressure solver
   and with sampling noise (measured in ADR 0029).
+- A node has a capacitance C_i (Eq. 2.15), and in the "biologically realistic" model the particles
+  of a node count against it (Sec. 2.4, Eq. 2.16). A solution of Kirchhoff's law needs "a global
+  solution over all nodes" (Sec. 2.2) [H, read on 2026-11-13 in the copy at PubMed Central, where
+  the equations are pictures].
+
+## Solvers for the pressure
+
+R. Bridson, M. Müller-Fischer: Fluid Simulation, SIGGRAPH 2007 Course Notes, chapter 4 ("Making
+Fluids Incompressible"). Read on 2026-11-13 for ADR 0029. The pressure of a fluid on a grid is the
+same kind of system as Tero's network Poisson equation.
+
+- The matrix is symmetric, with one row per cell and an entry for each neighbour. It is positive
+  definite, or positive semi-definite when nothing fixes the level of the pressure; then the
+  right-hand side must add up to zero, and the solution is fixed up to a constant (Sec. 4.3.2) [V].
+- Conjugate gradients: an iteration is one product of the matrix with a vector and a few sums
+  over all cells (Fig. 4.1). Without a preconditioner the number of iterations grows with the
+  width of the grid in cells (Sec. 4.3.2) [V].
+- Incomplete Cholesky, IC(0): a lower triangle L with the sparsity of the matrix, of which only a
+  diagonal is stored (Sec. 4.3.3, Eq. 4.29 to 4.31) [V].
+- Modified incomplete Cholesky, MIC(0): the entries that L · Lᵀ adds are put on the diagonal, so
+  that the row sums stay (Sec. 4.3.4, Eq. 4.33). The iteration count then grows with the square
+  root of the grid width. A weight τ = 0.97 between the two forms works best (Fig. 4.2). To apply
+  it, one sweep goes through the cells in order and one goes back (Fig. 4.3) [V].
+- The notes recommend this preconditioner for "regular PC's", as opposed to massively parallel
+  machines (Sec. 4.3.3) [V].
+- [I] In a sweep each cell needs the result of the cells before it. So the preconditioner is no
+  single pass on a GPU, where a pass computes all cells at once (ADR 0029, "Solver 1").
 
 ## Jones on flux
 

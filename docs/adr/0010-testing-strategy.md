@@ -349,3 +349,26 @@ GPU checks use invariants, not long exact trajectories:
   order of the point passes (ADR 0028) at most 25.3 s of 180 s, the lattice tests at most 21.7 s
   of 240 s, and the inoculate tool at the same steps per second at most 18.6 s of 360 s. The WebGL2
   test of the paused frames took 6.8 s against 114.0 s on `main` at `b4c733a`.
+
+- Research code (ADR 0029, decision 16; coordinator's choice under the owner's delegation of
+  2026-11-12, 2026-11-13). The unit project also runs `research/**/*.test.ts`. The one such file,
+  `research/flow/research.test.ts`, runs scripts of the research folder, each as its own Node
+  process, and compares what they give with the logs of the record, bit for bit. Reason: the
+  commands of the research guide and the logs must not drift apart, and only a test that CI runs
+  keeps that. Twelve quick checks run always: three of the scripts, and nine of the tools of the
+  record (the runs of each campaign have the names of the logs; the tables print the lines that
+  the guide quotes; the comparison of a rerun with the record fails for a short, a changed and an
+  unknown log). They take 2 to 3 s and add about 1 s to the unit tests: 6.7 to 7.4 s with them
+  against 5.5 to 6.9 s for the files of `src` alone (three runs each on an M3 Pro in use). Six
+  reruns of the prototype run on CI, and locally with `RESEARCH=full npm test`: they take 31 to
+  40 s, all at the same time. So they are not in the fast loop: `npm test` is the loop of the
+  work and a hook of every push. The hook of the file has a limit of 600 s, so it may take 150 s
+  on GitHub. Each check of the tools has a limit of 120 s: up to 14 Node processes start at once,
+  and each one loads the TypeScript compiler. In the CI image on an M3 Pro (linux/amd64 under
+  emulation, 4 CPUs) the hook takes about 105 s (the file took 104 to 111 s in three runs) and a
+  check of the tools 1.9 to 3.4 s; with the default limit of 5 s one check failed there. The pull
+  request that added the file has the times on GitHub. The measurements of the real engine
+  (`research/**/*.gpu.test.ts`) have a Vitest configuration of their own,
+  `research/vitest.config.ts`. No script and no CI job uses it: a run takes minutes to hours and
+  writes gigabytes. Rejected: a third project in `vitest.config.ts`. Vitest runs every project
+  when a command names none, and `npx vitest run` must not start a measurement.
