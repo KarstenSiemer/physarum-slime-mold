@@ -52,6 +52,14 @@ fn boxCell(cell: vec2i) -> vec3i {
   return vec3i(cell, cellAt(cell));
 }
 
+// The soft edge of light: 1 within 0.3 of the radius, 0 at the radius, Hermite between. Written out, because
+// smoothstep with its first edge above its second is undefined in GLSL ES 3.00; the same steps as lightByte() in
+// brush.ts and as paint.frag.
+fn lightEdge(d: f32, r: f32) -> f32 {
+  let t = clamp((d - r) / (0.3 * r - r), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
 @compute @workgroup_size(16, 16)
 fn paint(@builtin(global_invocation_id) gid: vec3u) {
   // The box spans at most one period: a cell comes twice only from workgroups past its end, with the same value.
@@ -67,7 +75,7 @@ fn paint(@builtin(global_invocation_id) gid: vec3u) {
     case 1u: { e = vec4f(1.0, 0.0, 0.0, 0.0); }
     case 2u: { e.y = 1.0; }
     // Soft edge, so the repellent has a gradient from the start.
-    default: { e.z = max(e.z, smoothstep(B.radius, 0.3 * B.radius, d)); }
+    default: { e.z = max(e.z, lightEdge(d, B.radius)); }
   }
   env[c] = pack4x8unorm(e);
 }
