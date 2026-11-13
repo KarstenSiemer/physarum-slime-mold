@@ -1,8 +1,8 @@
 // The commands of README.md still give the numbers of the record (ADR 0029, decision 16). Each check runs a script
 // of this folder as a person would, with Node and register.mjs, and compares what it gives with the logs in logs/.
 //
-// The quick checks always run (2 s). The reruns of the prototype and of the solver loop take 25 s on an M3 Pro, all at
-// the same time: they run on CI, and locally with `RESEARCH=full npm test` (ADR 0010).
+// The quick checks always run (2 to 3 s). The reruns of the prototype and of the solver loop take 30 to 40 s on an
+// M3 Pro, all at the same time: they run on CI, and locally with `RESEARCH=full npm test` (ADR 0010).
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -130,7 +130,10 @@ describe('the research code of ADR 0029', () => {
   });
 });
 
-// At the same time: each check starts one or two Node processes, and no check reads what another one wrote.
+// At the same time: each check starts one to three Node processes, and no check reads what another one wrote. So up
+// to 14 processes start at once, and each one loads the TypeScript compiler: a check takes much longer on a machine
+// with few cores than alone. The limit of each check follows ADR 0010 (four times its time on GitHub at least).
+const TOOL_LIMIT = 120_000;
 describe.concurrent('the campaigns, and the comparison of a rerun with the record', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'research-flow-'));
   afterAll(() => {
@@ -162,52 +165,79 @@ describe.concurrent('the campaigns, and the comparison of a rerun with the recor
       const logs = readdirSync(here(`./logs/${campaign}/`)).filter((file) => file.endsWith('.jsonl'));
       expect(names.sort()).toEqual(logs.sort());
     },
+    TOOL_LIMIT,
   );
 
-  it('prints the lines of the tables that the guide quotes', async () => {
-    const pair = await ended('summary.ts', ['maze-campaign', here('./logs/maze-pair/'), 'lag16', 'exact', 'ma']);
-    expect(pair.code).toBe(0);
-    const block = (name: string) => pair.text.split('== ').find((part) => part.startsWith(`${name}:`)) ?? '';
-    expect(block('lag16')).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2500 (2500 to 3250, n 10)');
-    expect(block('exact')).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2250 (2250 to 2500, n 10)');
-    // With Ma's walkers the network dies: the table of the ADR has "(no network)" in this row.
-    expect(block('ma')).toContain('NO NETWORK in 10 of 10 runs');
-    expect(block('lag16')).not.toContain('NO NETWORK');
-    const sites = await ended('summary.ts', ['maze-campaign', here('./logs/maze-sites/'), 'mz-lag16']);
-    expect(sites.text).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2125 (2000 to 2250, n 10)');
-    const tokyo = await ended('summary.ts', ['tokyo-campaign', here('./logs/tokyo/'), 'tk-i8', 'tk-walk']);
-    expect(tokyo.text).toContain('step   2000 alive  3947 | 33: 33 joined, 49 links, TL 1.60 MD 0.83 FT 0.88');
-    expect(tokyo.text.match(/33: 1 joined/g)).toHaveLength(21);
-  });
+  it(
+    'prints the lines of the tables that the guide quotes',
+    async () => {
+      const [pair, sites, tokyo] = await Promise.all([
+        ended('summary.ts', ['maze-campaign', here('./logs/maze-pair/'), 'lag16', 'exact', 'ma']),
+        ended('summary.ts', ['maze-campaign', here('./logs/maze-sites/'), 'mz-lag16']),
+        ended('summary.ts', ['tokyo-campaign', here('./logs/tokyo/'), 'tk-i8', 'tk-walk']),
+      ]);
+      expect(pair.code).toBe(0);
+      const block = (name: string) => pair.text.split('== ').find((part) => part.startsWith(`${name}:`)) ?? '';
+      expect(block('lag16')).toContain(
+        'dead ends below 10% of the route: 10 of 10 runs; step 2500 (2500 to 3250, n 10)',
+      );
+      expect(block('exact')).toContain(
+        'dead ends below 10% of the route: 10 of 10 runs; step 2250 (2250 to 2500, n 10)',
+      );
+      // With Ma's walkers the network dies: the table of the ADR has "(no network)" in this row.
+      expect(block('ma')).toContain('NO NETWORK in 10 of 10 runs');
+      expect(block('lag16')).not.toContain('NO NETWORK');
+      expect(sites.text).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2125 (2000 to 2250, n 10)');
+      expect(tokyo.text).toContain('step   2000 alive  3947 | 33: 33 joined, 49 links, TL 1.60 MD 0.83 FT 0.88');
+      expect(tokyo.text.match(/33: 1 joined/g)).toHaveLength(21);
+    },
+    TOOL_LIMIT,
+  );
 
-  it('passes a rerun that equals the record', async () => {
-    const { code, text } = await ended('summary.ts', ['compare', rerun('equal', log, (lines) => lines), record]);
-    expect(text).toContain(`${log}: all 8 rows equal`);
-    expect(text).toContain('1 of 1 logs of the rerun equal the record');
-    expect(code).toBe(0);
-  });
+  it(
+    'passes a rerun that equals the record',
+    async () => {
+      const { code, text } = await ended('summary.ts', ['compare', rerun('equal', log, (lines) => lines), record]);
+      expect(text).toContain(`${log}: all 8 rows equal`);
+      expect(text).toContain('1 of 1 logs of the rerun equal the record');
+      expect(code).toBe(0);
+    },
+    TOOL_LIMIT,
+  );
 
-  it('fails a rerun that stopped early', async () => {
-    const short = rerun('short', log, (lines) => lines.slice(0, 5));
-    const { code, text } = await ended('summary.ts', ['compare', short, record]);
-    expect(text).toContain(`${log}: 4 rows equal, but the rerun has 4 rows and the record 8`);
-    expect(code).toBe(1);
-  });
+  it(
+    'fails a rerun that stopped early',
+    async () => {
+      const short = rerun('short', log, (lines) => lines.slice(0, 5));
+      const { code, text } = await ended('summary.ts', ['compare', short, record]);
+      expect(text).toContain(`${log}: 4 rows equal, but the rerun has 4 rows and the record 8`);
+      expect(code).toBe(1);
+    },
+    TOOL_LIMIT,
+  );
 
-  it('fails a rerun with another number in a row, and names the step', async () => {
-    const changed = rerun('changed', log, (lines) => lines.map((l) => l.replace('"alive":1044,', '"alive":1045,')));
-    const { code, text } = await ended('summary.ts', ['compare', changed, record]);
-    expect(text).toContain(`${log}: DIFFERENT from the row of step 2000 on`);
-    expect(code).toBe(1);
-  });
+  it(
+    'fails a rerun with another number in a row, and names the step',
+    async () => {
+      const changed = rerun('changed', log, (lines) => lines.map((l) => l.replace('"alive":1044,', '"alive":1045,')));
+      const { code, text } = await ended('summary.ts', ['compare', changed, record]);
+      expect(text).toContain(`${log}: DIFFERENT from the row of step 2000 on`);
+      expect(code).toBe(1);
+    },
+    TOOL_LIMIT,
+  );
 
-  it('fails a rerun whose log the record does not have, and a folder that is not there', async () => {
-    const other = rerun('other', 'other-s1.jsonl', (lines) => lines);
-    const unknown = await ended('summary.ts', ['compare', other, record]);
-    expect(unknown.text).toContain('other-s1.jsonl: NOT IN THE RECORD');
-    expect(unknown.code).toBe(1);
-    const missing = await ended('summary.ts', ['compare', join(scratch, 'nothing'), record]);
-    expect(missing.text).toContain('no folder');
-    expect(missing.code).toBe(1);
-  });
+  it(
+    'fails a rerun whose log the record does not have, and a folder that is not there',
+    async () => {
+      const other = rerun('other', 'other-s1.jsonl', (lines) => lines);
+      const unknown = await ended('summary.ts', ['compare', other, record]);
+      expect(unknown.text).toContain('other-s1.jsonl: NOT IN THE RECORD');
+      expect(unknown.code).toBe(1);
+      const missing = await ended('summary.ts', ['compare', join(scratch, 'nothing'), record]);
+      expect(missing.text).toContain('no folder');
+      expect(missing.code).toBe(1);
+    },
+    TOOL_LIMIT,
+  );
 });
