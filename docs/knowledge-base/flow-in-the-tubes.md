@@ -2,7 +2,8 @@
 
 Notes for ADR 0029, read on 2026-11-12. Each line names the paper and the section, equation or figure
 that holds it. "[V]" marks a fact read in the full text. "[H]" marks a fact that a helper read in the
-copy of the paper at PubMed Central (abstract, results and captions; not its methods). "[I]" marks an
+copy of the paper at PubMed Central (abstract, results and captions; not its methods). "[S]" marks a
+fact that only the summary of a web search gave: nobody of this project read the page. "[I]" marks an
 inference of this project. The papers are copyrighted: this file holds facts and at most a few quoted
 words, no figures.
 
@@ -40,6 +41,25 @@ The owner's plan of 2026-11-11 named three facts. All three hold:
 
 M. Kramar, K. Alim: PNAS 118: e2007815118 (2021). M. Marbach, N. Ziethen, L. Bastin, F. K. Bäuerle,
 K. Alim: eLife 12: e78100 (2023).
+
+### Two plasmodia
+
+Notes for ADR 0030, of 2026-11-13. The question: does protoplasm flow from one plasmodium into
+another? Every line here is "[S]". Three pages with the texts refused an automatic reader on that
+day (a bot check at PubMed Central, an error of the repository of the University of Tsukuba, a
+refusal at Europhysics News), and this project does not pass a bot check. Read the papers before a
+decision rests on more than the first line.
+
+- Two plasmodia of one species do not always fuse when they meet [S] (M. Masui, S. Satoh, K. Seto:
+  J. Phys. D: Appl. Phys. 51: 284001 (2018), on _Physarum rigidum_).
+- In _Physarum polycephalum_ several genes decide it: two plasmodia fuse only when they are alike at
+  all of these loci [S]. The first paper on it: M. J. Carlile, J. Dee: "Plasmodial fusion and lethal
+  interaction between strains in a Myxomycete", Nature 215: 832 (1967).
+- After a fusion of two strains that do not fit, a lethal reaction can follow some hours later, in
+  which the nuclei of one strain are removed [S] (the same line of papers).
+- [I] Two plasmodia that do not fuse stay two bodies. The shuttle flow runs inside one body, so no
+  flux passes from the tubes of one into the tubes of the other. No source of this page states this
+  in these words.
 
 ## The model of Tero, Kobayashi and Nakagaki
 
@@ -151,3 +171,5 @@ ADR 0029 has the decisions and the measurements. In short:
 - Thirty steps stand for one minute. Then the times of the rule lie in the ranges of Marbach et al.
   2023: the tube body follows the trail in 1.7 min, a tube adapts in 11 min, and a tube without flux
   starves after about 33 min.
+- A strain of this app is a plasmodium of its own. So every strain has a flow of its own, and no
+  flux passes between two strains (ADR 0030; "Two plasmodia" above). The app has no fusion.

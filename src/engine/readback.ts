@@ -10,14 +10,19 @@ export async function readBuffer(device: GPUDevice, src: GPUBuffer, size = src.s
   return out;
 }
 
-/** Copies a float texture to the CPU as tightly packed rows (`channels` floats per texel). */
-export async function readTexture(device: GPUDevice, texture: GPUTexture, channels: number): Promise<Float32Array> {
+/** Copies layer `layer` of a float texture to the CPU as tightly packed rows (`channels` floats per texel). */
+export async function readTexture(
+  device: GPUDevice,
+  texture: GPUTexture,
+  channels: number,
+  layer = 0,
+): Promise<Float32Array> {
   const { width, height } = texture;
   const bytes = width * channels * 4;
   const row = Math.ceil(bytes / 256) * 256; // copyTextureToBuffer needs 256-byte rows
   const dst = device.createBuffer({ size: row * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = device.createCommandEncoder();
-  enc.copyTextureToBuffer({ texture }, { buffer: dst, bytesPerRow: row }, [width, height]);
+  enc.copyTextureToBuffer({ texture, origin: [0, 0, layer] }, { buffer: dst, bytesPerRow: row }, [width, height]);
   device.queue.submit([enc.finish()]);
   await dst.mapAsync(GPUMapMode.READ);
   const mapped = dst.getMappedRange();

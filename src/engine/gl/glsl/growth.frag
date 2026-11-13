@@ -54,12 +54,17 @@ uniform sampler2D env;
 uniform int agentWidth;
 
 // Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl): programs.ts compiles this pass with it, and
-// gl/sim.ts uses that program only while the flow is on. An agent on a cell that the flux passed by does not divide.
+// gl/sim.ts uses that program only while the flow is on. An agent on a cell that the flux of its strain passed by
+// does not divide. Every strain has a flow of its own (ADR 0030): the memory of strain A, and of strains B, C and D (the
+// memory of strain A in the place of a strain that the scene does not have).
 #ifndef FLOW
 #define FLOW 0
 #endif
 #if FLOW
 uniform sampler2D flowMemory; // x flow memory (flow.frag), of the step before
+uniform sampler2D flowMemory1;
+uniform sampler2D flowMemory2;
+uniform sampler2D flowMemory3;
 layout(std140) uniform Flow {
   vec4 a;
   vec4 b;
@@ -67,6 +72,14 @@ layout(std140) uniform Flow {
   vec4 d;
   vec4 e; // y: half², the square of the flow memory below which an agent does not divide
 } F;
+
+// The memory of the flow of strain s at cell q (flowMemoryOf in tools.glsl).
+vec4 flowMemoryOf(uint s, ivec2 q) {
+  if (s == 1u) return texelFetch(flowMemory1, q, 0);
+  if (s == 2u) return texelFetch(flowMemory2, q, 0);
+  if (s == 3u) return texelFetch(flowMemory3, q, 0);
+  return texelFetch(flowMemory, q, 0);
+}
 #endif
 
 bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
@@ -80,7 +93,7 @@ int target(uint bits, int c, uint i) {
   if (!growthTest() || !moved || n < float(P.growth.z) || n > float(P.growth.w)) return -1;
   ivec2 q = cellCoord(c);
 #if FLOW
-  float memory = texelFetch(flowMemory, q, 0).x;
+  float memory = flowMemoryOf(bits & 3u, q).x;
   if (memory * memory < F.e.y) return -1;
 #endif
   uint free = 0u;
