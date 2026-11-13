@@ -1,8 +1,9 @@
 // SHA-256 digests of the state of every scene after some steps, to compare two checkouts: with the flow off, a branch
 // gives the bytes of `main` (ADR 0029, "With the flow off"). Runs in the real engine on both backends. Not a test of
-// the app: it runs only when asked, in the project `research` (README.md has the commands). It writes one line per
-// scene and backend to research/flow/out/engine/<name>.jsonl. Environment variables: VITE_KINDS (list), VITE_STEPS,
-// VITE_NAME, VITE_ONLY (scene ids; 'default' is the default settings without a scene), VITE_PATCH (settings as JSON).
+// the app: it runs only when asked, with the configuration research/vitest.config.ts (README.md has the commands). It
+// writes one line per scene and backend to research/flow/out/engine/<name>.jsonl. Environment variables: VITE_KINDS
+// (list), VITE_STEPS, VITE_NAME, VITE_ONLY (scene ids; 'default' is the default settings without a scene), VITE_PATCH
+// (settings as JSON).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';

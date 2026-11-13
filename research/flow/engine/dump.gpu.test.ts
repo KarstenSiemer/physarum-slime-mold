@@ -1,6 +1,7 @@
 // Runs a scene in the real engine and writes its state to research/flow/out/engine/, for the measure scripts of this
-// folder (measure-maze.ts, measure-tokyo.ts, exact-flux.ts). Not a test of the app: it runs only when asked, in the
-// project `research` (README.md has the commands). The settings come from environment variables:
+// folder (measure-maze.ts, measure-tokyo.ts, exact-flux.ts). Not a test of the app: it runs only when asked, with
+// the configuration research/vitest.config.ts (README.md has the commands). The settings come from environment
+// variables:
 //
 // - VITE_SCENE: the id of a scene (maze, tokyo, foraging-maze, ...). VITE_KIND: webgpu or webgl2.
 // - VITE_FLOW: 1 or 0. VITE_I0: the flow strength. VITE_SEED: the seed.

@@ -1,7 +1,8 @@
 // The time of a step with and without the flow in the tubes, in the real engine (ADR 0029, table (c)). Not a test of
-// the app: it runs only when asked, in the project `research` (README.md has the command). It writes one line per
-// scene, backend and flow setting to research/flow/out/engine/<name>.jsonl. Environment variables: VITE_KINDS,
-// VITE_SCENES (lists), VITE_WARM (steps before the measurement), VITE_BATCH (steps per sample), VITE_BATCHES, VITE_NAME.
+// the app: it runs only when asked, with the configuration research/vitest.config.ts (README.md has the command). It
+// writes one line per scene, backend and flow setting to research/flow/out/engine/<name>.jsonl. Environment
+// variables: VITE_KINDS, VITE_SCENES (lists), VITE_WARM (steps before the measurement), VITE_BATCH (steps per
+// sample), VITE_BATCHES, VITE_NAME.
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
