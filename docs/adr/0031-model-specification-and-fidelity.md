@@ -1,7 +1,11 @@
-# 0030: One specification of the model, and one table against the organism
+# 0031: One specification of the model, and one table against the organism
 
 - Status: accepted
 - Date: 2026-11-13
+- Number: this record was merged as 0030 (pull request 49, 19:07 UTC). ADR 0030 about the flow of every strain was
+  merged 17 minutes later with the same number (pull request 50), and 55 lines in 27 files cite it, among them code
+  comments; the names of logs in `research/flow/logs.tar.gz` carry it too. This record had 3 citations, so it took
+  the number 0031 (coordinator's choice under the owner's delegation of 2026-11-12).
 
 ## Context
 

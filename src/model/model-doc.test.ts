@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, strainSpec } from './params';
 
 // docs/model.md states the rules of the model; its table of parameters must name every setting that changes a result
-// (ADR 0030). The settings below change only the view or the playback.
+// (ADR 0031). The settings below change only the view or the playback.
 const VIEW = new Set(['style', 'showScent', 'speed', 'exposure', 'bloom', 'strains']);
 
 const doc = readFileSync(new URL('../../docs/model.md', import.meta.url), 'utf8');
