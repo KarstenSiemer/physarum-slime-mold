@@ -530,8 +530,9 @@ export class Simulation implements Sim {
   }
 
   /**
-   * The centres of the food strokes on this grid, in cells and in the order of the strokes (ADR 0029): the food sites
-   * that give and take the flux of the flow in the tubes (flow.ts flowSites()). The engine sets them after each paint.
+   * The starts of the food strokes on this grid, in cells and in the order of the strokes (ADR 0029): the food sites
+   * that give and take the flux of the flow in the tubes (flow.ts flowSites()). For a food dot the start is its
+   * centre. The engine sets them after each paint.
    */
   foodSites(centres: readonly (readonly [number, number])[]) {
     this.sites = flowSites(centres, this.width, this.height);

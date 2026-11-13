@@ -357,7 +357,7 @@ GPU checks use invariants, not long exact trajectories:
   commands of the research guide and the logs must not drift apart, and only a test that CI runs
   keeps that. The logs are one archive (`research/flow/logs.tar.gz`), and the test unpacks it into
   a folder of its own. Fifteen quick checks run always: three of the scripts, three of the archive
-  (a digest of its 125 files; packing and unpacking give the same files; no path leaves the
+  (a digest of its files; packing and unpacking give the same files; no path leaves the
   folder), and nine of the tools of the record (the runs of each campaign have the names of the
   logs; the tables print the lines that the guide quotes; the comparison of a rerun with the
   record fails for a short, a changed and an unknown log). They take 2 to 3 s and add about 1 s to

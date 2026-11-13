@@ -73,8 +73,11 @@ T. Nakagaki: Science 327: 439–442 (2010), with a supplement of two figures.
 - A second protocol, the plasmodium over all the land first and then all food sources at once, gave
   similar results (p. 439) [V].
 - The measures (p. 440) [V]: the total length TL, the mean shortest distance MD between two food
-  sources, and the fault tolerance FT, from the chance that a cut link separates a part. Each one is
-  divided by the value of the minimum spanning tree (MST).
+  sources, and the fault tolerance FT, from the chance that a cut link separates a part. TL and MD
+  are divided by the value of the minimum spanning tree (MST). The paper says the same of FT and
+  writes FT_MST. [I] That cannot be a division: a tree has FT = 0. FT is one minus the chance that
+  a cut link separates a part, as the numbers of the next point and of Fig. S1 show (FT 0.00 for a
+  tree).
 - The organism (21 runs): TL 1.75 ± 0.30, MD 0.85 ± 0.04. A cut link separates a part in 14 ± 4 % of
   the cases with light on the mountains and in 20 ± 13 % without. The rail network: TL about 1.8, MD
   0.85, 4 %.

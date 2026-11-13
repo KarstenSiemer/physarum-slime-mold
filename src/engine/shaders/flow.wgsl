@@ -2,13 +2,14 @@
 //
 // The network: every open cell (inside the arena, no wall) is a node with a conductivity g, and two cells that share a
 // side are joined by an edge whose conductance is the harmonic mean of their conductivities. A food site that the
-// plasmodium covers gives or takes the flux I0 at its centre cell, and the pressure p follows Kirchhoff's law (Tero,
-// Kobayashi and Nakagaki 2007, Eq. 1 to 3 and 6; several sources and sinks at once). Four pressure fields run side
-// by side, one per lane of the textures: each has its own draw of which sites give and which take.
+// plasmodium covers gives or takes the flux I0 at its cell: the start of the food stroke, which is the centre of a
+// food dot (flowSites() in flow.ts). The pressure p follows Kirchhoff's law (Tero, Kobayashi and Nakagaki 2007, Eq. 1
+// to 3 and 6; several sources and sinks at once). Four pressure fields run side by side, one per lane of the
+// textures: each has its own draw of which sites give and which take.
 //
-// `memory` holds per cell: x the flow memory D (Tero's conductivity of a tube, 0 to 1), y the tube body (the trail
-// smoothed over time, 0 to 1), z the conductivity g, w the roles of a site's centre cell while the site gives or
-// takes, else 0.
+// `memory` holds per cell: x the flow memory D (Tero's conductivity of a tube, 0.0001 to 1), y the tube body (the
+// trail smoothed over time, 0 to 1), z the conductivity g, w the roles of a site's cell while the site gives or
+// takes in at least one lane, else 0.
 //
 // A step runs `update` once and then `pressure` FLOW_ITERATIONS times:
 // - `update`: the flux of every lane through the cell, from the pressure and the conductivities of the step before;
@@ -89,21 +90,21 @@ fn fed() -> bool {
   return false;
 }
 
-// The roles of a site's centre cell as a sign per lane: +1 gives, −1 takes, 0 neither.
+// The roles of a site's cell as a sign per lane: +1 gives, −1 takes, 0 neither.
 fn roleSigns(code: f32) -> vec4f {
   let c = u32(code);
   let d = vec4u(c % 3u, (c / 3u) % 3u, (c / 9u) % 3u, (c / 27u) % 3u);
   return vec4f(d == vec4u(1u)) - vec4f(d == vec4u(2u));
 }
 
-// Whether the plasmodium covers site i: its centre cell held food and a tube in the step before. Every cell reads the
+// Whether the plasmodium covers site i: its cell held food and a tube in the step before. Every cell reads the
 // same memory, so all sites see the same covered sites.
 fn covered(i: i32) -> bool {
   let s = vec2i(U.sites[i].xy);
   return envOf(env[s.y * i32(W()) + s.x]).y > 0.0 && textureLoad(memory, s, 0).y >= U.c.z;
 }
 
-// The roles of the food site whose centre cell is p, as a number whose digit k in base 3 is its role in lane k: 1
+// The roles of the food site whose cell is p, as a number whose digit k in base 3 is its role in lane k: 1
 // gives, 2 takes, 0 neither (flowRoles() in flow.ts has the rule and the reasons). Only covered sites get a role, and
 // only two or more of them. Two sites: the first gives and the other takes. More: a hash orders the covered sites
 // anew every U.g.x steps, each lane at another time; the first half gives, the second half takes, and with an odd
@@ -150,7 +151,8 @@ fn roleCode(p: vec2i) -> f32 {
 }
 
 // The share of its flux that the site at this cell gives or takes, per lane: all of it while its pressure lies within
-// the limit U.g.y of the mean pressure of all sites that give or take, on the side it pushes to, and none beyond. So a
+// the limit U.g.y of the mean pressure of the sites, on the side it pushes to, and none beyond. The mean of a lane
+// runs over every site that gives or takes in at least one lane, also over a site that rests in this lane. So a
 // site that no tube joins to the others stops, and its part of the network does not run away from the rest.
 fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
   let n = i32(U.d.w);
@@ -167,7 +169,7 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4f(0.0), vec4f(1.0));
 }
 
-// The cell whose pressure the first two iterations of a step take off (RECENTRE): the centre of the first site that
+// The cell whose pressure the first two iterations of a step take off (RECENTRE): the cell of the first site that
 // gives or takes, so a cell of the network. A site without a role can lie outside the network or under a wall, and a
 // closed cell holds no pressure: with its pressure nothing would be taken off, and the field would move away from
 // zero. Without a site that gives or takes, no flux runs: then the cell of the uniform block, the first site.
@@ -209,8 +211,9 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   let qg = select(pow(flux, vec4f(U.a.y)), vec4f(0.0), flux <= vec4f(0.0));
   let f = qg / (1.0 + qg);
   let mean = (f.x + f.y + f.z + f.w) * 0.25;
-  // A cell that held a tube adapts while a flux runs between foods (Tero 2007, Eq. 5). Ground without a tube keeps
-  // its memory, so starved ground stays marked; the mark fades slowly, up to the memory of fresh ground.
+  // A cell that held a tube adapts while a flux runs between foods (Tero 2007, Eq. 5). Ground without a tube has at
+  // most the memory of fresh ground: a larger memory falls to it at once. A smaller one stays, so starved ground stays
+  // marked; the mark fades slowly, up to the memory of fresh ground.
   var d = m.x;
   if (m.y >= U.c.z) {
     if (fed()) { d = max(U.d.x, d + U.a.z * (mean - d)); }
@@ -226,7 +229,7 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   let food = envOf(env[p.y * i32(W()) + p.x]).y > 0.0;
   var g = 0.0;
   if (body >= U.c.z) { g = body * select(U.b.x + d, U.b.y, food); }
-  // The roles, if this cell is the centre of a food site that the plasmodium covers (roleCode()).
+  // The roles, if this cell is the cell of a food site that the plasmodium covers (roleCode()).
   var code = 0.0;
   if (food && m.y >= U.c.z) { code = roleCode(p); }
   textureStore(memoryOut, p, vec4f(d, body, g, code));

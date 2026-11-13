@@ -342,7 +342,10 @@ export interface Measures {
   joined: number;
   cities: number;
   links: number;
-  /** Total length, mean shortest distance between two cities and fault tolerance, each over the value of the MST. */
+  /**
+   * Total length and mean shortest distance between two cities, each over the value of the MST, and the fault
+   * tolerance: the share of the links whose loss leaves every joined city joined.
+   */
   tl: number;
   md: number;
   ft: number;

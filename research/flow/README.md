@@ -82,10 +82,10 @@ code. Most numbers held bit for bit. Five things did not, and the ADR now says s
 | The ADR, section "The solvers and the mathematics" | 300 lines   | if you want the formulas                                |
 | The rest of this page                              | 600 lines   | only to run a step again: it is a list of commands      |
 | `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
-| `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 1,200 lines | no: the scripts that made the other numbers of the ADR  |
+| `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 1,400 lines | no: the scripts that made the other numbers of the ADR  |
 | `logs.tar.gz`                                      | 0.4 MB      | never: the raw output of the runs, which a script reads |
-| `summary.ts`                                       | 370 lines   | no: it makes the tables of the ADR from the logs        |
-| `research.test.ts`                                 | 240 lines   | no: it checks that the scripts still give the same rows |
+| `summary.ts`                                       | 400 lines   | no: it makes the tables of the ADR from the logs        |
+| `research.test.ts`                                 | 300 lines   | no: it checks that the scripts still give the same rows |
 
 The app does not load this folder, and the build does not hold it.
 
@@ -143,8 +143,8 @@ mathematics". In short:
   to 2 % per step: it starves. A dead agent comes to life on a cell with a flow memory above 0.5.
   So the agents leave the tubes without a flux and fill the tubes that carry one.
 - **Food source** and **food site**: a food source is one food of a scene, for example a city of
-  the Tokyo scene. A site is the cell where a flux enters or leaves the network: the centre cell
-  of a food stroke. The Tokyo scene has 36 food sources and 42 sites, because Tokyo is seven
+  the Tokyo scene. A site is the cell where a flux enters or leaves the network: the cell at the
+  start of a food stroke, which is the centre of a food dot. The Tokyo scene has 36 food sources and 42 sites, because Tokyo is seven
   sites.
 - **Solver**: the code that computes the pressures from the foods and the conductivities.
 - **Exact solver**, `exact`: the method of conjugate gradients. It takes Kirchhoff's law of all
@@ -634,13 +634,24 @@ You must see 22, 27 and 3 tests pass.
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
+A test is worth what it catches. This script puts 22 wrong rules into the code of the app, one at
+a time, and runs the GPU tests of the flow for each one (90 s):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
+```
+
+It changes files below `src/` while it runs and writes each one back as it was. You must see a
+test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
+`logs/engine/mutations.txt`, and the ADR has it as a table ("The tests against wrong rules").
+
 Result: parts 2 to 6 are measurements that were made once. These tests run on every change. They
 hold the rule that the app got: a change that breaks Kirchhoff's law, the adaptation, the two
 backends against each other, or the bytes of a scene without the flow fails in CI.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 125 files, 1.9 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 126 files, 1.9 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -655,6 +666,7 @@ asks for the new digest.
 | `logs/engine/bench-*.jsonl`  | table (c): runs 1 and 2 are the table, runs 3 to 8 are later runs      | 2026-11-13; runs 3 to 8 with the code of `main`       |
 | `logs/engine/digest-*.jsonl` | the digests of `main` at `377f428`, and of `92a63e7` with the flow off | the same                                              |
 | `logs/engine/before-review/` | the Tokyo runs with the code before the review (commit `6ffed4b`)      | 2026-11-13                                            |
+| `logs/engine/mutations.txt`  | the tests that fail for each of 22 wrong rules (part 7)                | 2026-11-13, `engine/mutate.ts`, the code of `main`    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -704,6 +716,7 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
+| `engine/mutate.ts`        | 22 wrong rules, one at a time, against the GPU tests of the flow                                  |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
 | `research.test.ts`        | the unit test that keeps the scripts and the logs together                                        |
 
