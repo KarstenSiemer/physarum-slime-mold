@@ -2,13 +2,19 @@
 // foods that give and take. The passes are shaders/flow.wgsl and gl/glsl/flow.frag; flow-reference.ts mirrors them on
 // the CPU for the tests. Every strain has a flow of its own (ADR 0030): the passes run once per strain, on the trail
 // of that strain, with a state of their own.
-import type { Settings, StepOrder } from '../model/params';
+import { MAX_STRAINS, type Settings, type StepOrder } from '../model/params';
 
 /**
  * Whether the flow runs: the switch, in the extended model only (constrain() turns it off in the Jones model; this
  * also holds a setting that reached a simulation past it).
  */
 export const flowOn = (s: Pick<Settings, 'flow' | 'model'>) => s.flow && s.model === 'extended';
+
+/**
+ * The strains that have a flow of their own (ADR 0030): every strain of the settings, at most the four that a
+ * simulation runs (pack.ts packParams()).
+ */
+export const flowStrains = (s: Pick<Settings, 'strains'>) => Math.min(s.strains.length, MAX_STRAINS);
 
 /** Thirty steps are one minute of model time (ADR 0029): the scale of every time below. */
 export const STEPS_PER_MINUTE = 30;

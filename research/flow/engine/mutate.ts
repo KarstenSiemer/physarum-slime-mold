@@ -130,6 +130,13 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     GPU,
   ],
   [
+    'S3 webgpu: the passes of the third and the fourth strain on the layer of the second strain',
+    'src/engine/sim.ts',
+    "t.createView({ dimension: '2d', baseArrayLayer: strain, arrayLayerCount: 1 });",
+    "t.createView({ dimension: '2d', baseArrayLayer: Math.min(strain, 1), arrayLayerCount: 1 });",
+    GPU,
+  ],
+  [
     'A3 wgsl: an agent starves by the flow memory of the first strain',
     'src/engine/shaders/agents.wgsl',
     'let d = textureLoad(flowMemory, q, a.bits & 3u, 0).x;',
@@ -232,6 +239,34 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'src/engine/gl/sim.ts',
     'this.flowBlock(flow, strain);',
     'this.flowBlock(flow, 0);',
+    GL,
+  ],
+  [
+    'L2 webgl2: the agents of the fourth strain with the flow memory of the first strain',
+    'src/engine/gl/sim.ts',
+    'flowMemory3: of(3) };',
+    'flowMemory3: of(0) };',
+    GL,
+  ],
+  [
+    'L3 webgl2: the claims of the agents with the flow memory of the first strain alone',
+    'src/engine/gl/sim.ts',
+    '{ occ: occ.texture, ...flowMemory }, claimPoints);',
+    '{ occ: occ.texture, flowMemory: flowMemory.flowMemory ?? occ.texture }, claimPoints);',
+    GL,
+  ],
+  [
+    'F15 glsl: the agents of the third strain with the flow memory of the second strain',
+    'src/engine/gl/glsl/tools.glsl',
+    'if (s == 2u) return texelFetch(flowMemory2, q, 0);',
+    'if (s == 2u) return texelFetch(flowMemory1, q, 0);',
+    GL,
+  ],
+  [
+    'F16 glsl: growth of the third strain by the flow memory of the second strain',
+    'src/engine/gl/glsl/growth.frag',
+    'if (s == 2u) return texelFetch(flowMemory2, q, 0);',
+    'if (s == 2u) return texelFetch(flowMemory1, q, 0);',
     GL,
   ],
   [

@@ -1,7 +1,7 @@
 import type { Boundary, Settings } from '../../model/params';
 import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, packFlow } from '../flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, flowStrains, packFlow } from '../flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -458,7 +458,7 @@ export class GlSim implements Sim {
    * targets of every strain of the settings (ADR 0030). Settings with another number of strains get a new state.
    */
   private ensureFlow() {
-    const strains = this.settings.strains.length;
+    const strains = flowStrains(this.settings);
     if (this.flow && this.flow.memory.length !== strains) this.dropFlow();
     if (!this.flow) {
       const gl = this.gl;
@@ -522,20 +522,21 @@ export class GlSim implements Sim {
     return { flowMemory: of(0), flowMemory1: of(1), flowMemory2: of(2), flowMemory3: of(3) };
   }
 
+  /** Empty for a strain that the settings do not hold, and until the next step for a strain that is new (../sim.ts). */
   readFlow(strain = 0): Promise<Float32Array> {
-    const memory = this.flow?.memory[strain];
+    const memory = strain < flowStrains(this.settings) ? this.flow?.memory[strain] : undefined;
     if (!memory) return Promise.resolve(new Float32Array(0));
     return Promise.resolve(readTarget(this.gl, memory[this.flowM]) as Float32Array);
   }
 
   readPressure(strain = 0): Promise<Float32Array> {
-    const pressure = this.flow?.pressure[strain];
+    const pressure = strain < flowStrains(this.settings) ? this.flow?.pressure[strain] : undefined;
     if (!pressure) return Promise.resolve(new Float32Array(0));
     return Promise.resolve(readTarget(this.gl, at(pressure, this.flowP)) as Float32Array);
   }
 
   writeFlow(data: Float32Array, strain = 0) {
-    if (!flowOn(this.settings) || strain >= this.settings.strains.length) return;
+    if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
     writeTarget(this.gl, at(this.ensureFlow().memory, strain)[this.flowM], 0, 0, this.width, this.height, data);
   }
 

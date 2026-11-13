@@ -1,5 +1,5 @@
 import { capacityOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
-import { flowOn } from './flow';
+import { flowOn, flowStrains } from './flow';
 
 /**
  * Agents for a `width` × `height` grid: the density times the cells of the arena's square. A dish counts the square
@@ -97,7 +97,7 @@ export const FLOW_BYTES_PER_CELL = 80;
 
 /** The bytes per cell of the flow of these settings: every strain has a flow of its own (ADR 0030); 0 while it is off. */
 export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>) =>
-  flowOn(s) ? FLOW_BYTES_PER_CELL * s.strains.length : 0;
+  flowOn(s) ? FLOW_BYTES_PER_CELL * flowStrains(s) : 0;
 
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
@@ -149,7 +149,9 @@ export interface Limits {
 export function fits(s: Settings, w: number, h: number, l: Limits): boolean {
   return (
     estimateBytes(w, h, Math.min(l.maxAgents, capacityCount(s, w, h)), l.bytesPerCell, l.bytesPerAgent) <= l.budget &&
-    w * h * 16 <= l.maxBufferBytes && // the largest per-cell buffer: 16 B (counts, trail texel)
+    // The largest buffer per cell: 16 B (counts). A texture has no limit in bytes, only in its sides: the trail texel
+    // of 16 B, and on WebGPU a texture of the flow with a layer of 16 B per cell for each strain (ADR 0030).
+    w * h * 16 <= l.maxBufferBytes &&
     Math.max(w, h) <= l.maxGridSide
   );
 }

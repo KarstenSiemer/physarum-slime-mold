@@ -635,7 +635,7 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 npm run build && npx playwright test --project e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 24, 41 and 3 tests pass.
+You must see 24, 45 and 3 tests pass.
 
 - `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
   scale, and the growing mesh of part 5 with all rules on.
@@ -646,7 +646,7 @@ You must see 24, 41 and 3 tests pass.
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
-A test is worth what it catches. This script puts 34 wrong rules into the code of the app, one at
+A test is worth what it catches. This script puts 39 wrong rules into the code of the app, one at
 a time, and runs the GPU tests of the flow for each one (5 minutes):
 
 ```bash
@@ -763,7 +763,7 @@ asks for the new digest.
 | `logs/engine/digest-*.jsonl`     | the digests of `main` at `377f428`, and of `92a63e7` with the flow off                                                                                                                                                          | the same                                              |
 | `logs/engine/before-review/`     | the Tokyo runs with the code before the review (commit `6ffed4b`)                                                                                                                                                               | 2026-11-13                                            |
 | `logs/engine/mutations.txt`      | the tests that fail for each of 22 wrong rules (part 7)                                                                                                                                                                         | 2026-11-13, `engine/mutate.ts`, the code of `main`    |
-| `logs/engine/mutations-0030.txt` | the same for 34 wrong rules, with the tests of ADR 0030                                                                                                                                                                         | 2026-11-13, the code of ADR 0030                      |
+| `logs/engine/mutations-0030.txt` | the same for 39 wrong rules, with the tests of ADR 0030                                                                                                                                                                         | 2026-11-13, the code of ADR 0030                      |
 | `logs/engine/strains-*.jsonl`    | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
@@ -814,7 +814,7 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 34 wrong rules, one at a time, against the GPU tests of the flow                                  |
+| `engine/mutate.ts`        | 39 wrong rules, one at a time, against the GPU tests of the flow                                  |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
 | `research.test.ts`        | the unit test that keeps the scripts and the logs together                                        |
 

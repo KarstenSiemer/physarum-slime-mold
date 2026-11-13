@@ -1,7 +1,7 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { at } from './at';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, packFlow } from './flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, flowStrains, packFlow } from './flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -546,7 +546,7 @@ export class Simulation implements Sim {
    * layer and a block per strain of the settings (ADR 0030). Settings with another number of strains get a new state.
    */
   private ensureFlow(): FlowState {
-    const strains = this.settings.strains.length;
+    const strains = flowStrains(this.settings);
     if (this.flow && this.flow.strains !== strains) this.dropFlow();
     if (!this.flow) {
       const usage =
@@ -601,12 +601,18 @@ export class Simulation implements Sim {
     for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);
   }
 
+  /** Whether the state of the flow holds this strain, and the settings hold it too (readFlow(), readPressure()). */
+  private flowHolds(strain: number): boolean {
+    return this.flow !== undefined && strain < Math.min(this.flow.strains, flowStrains(this.settings));
+  }
+
   /**
    * For tests: the memory of the flow of a strain per cell (flow memory, tube body, conductivity, roles), 4 values
-   * per cell; empty while the flow is off, and for a strain that the settings do not hold.
+   * per cell; empty while the flow is off, and for a strain that the settings do not hold. The state follows a new
+   * number of strains at the next step: until then it is empty for a strain that is new.
    */
   async readFlow(strain = 0): Promise<Float32Array> {
-    if (!this.flow || strain >= this.flow.strains) return new Float32Array(0);
+    if (!this.flow || !this.flowHolds(strain)) return new Float32Array(0);
     return readTexture(this.device, at(this.flow.memory, this.flowM), 4, strain);
   }
 
@@ -615,7 +621,7 @@ export class Simulation implements Sim {
    * the flow is on, and for a strain of the settings.
    */
   writeFlow(data: Float32Array, strain = 0) {
-    if (!flowOn(this.settings) || strain >= this.settings.strains.length) return;
+    if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
     const texture = at(this.ensureFlow().memory, this.flowM);
     const size = [this.width, this.height];
     this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
@@ -623,7 +629,7 @@ export class Simulation implements Sim {
 
   /** For tests: the pressure of the four lanes of the flow of a strain, 4 values per cell; empty as readFlow(). */
   async readPressure(strain = 0): Promise<Float32Array> {
-    if (!this.flow || strain >= this.flow.strains) return new Float32Array(0);
+    if (!this.flow || !this.flowHolds(strain)) return new Float32Array(0);
     return readTexture(this.device, at(this.flow.pressure, this.flowP), 4, strain);
   }
 
