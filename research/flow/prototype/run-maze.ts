@@ -1,5 +1,6 @@
-// The Maze with flow: the agent model coupled to a flux field. Prototype code.
-// Usage: node --import ./register.mjs run-maze.ts key=value ...   (see `opt` below)
+// The Maze with flow: the agent model coupled to a flux field between one source and one sink (flow.ts: the exact
+// solver, the local solver with fixed pressures, or Ma's walkers). Prototype code.
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/run-maze.ts key=value ...   (see `opt` below)
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { defaultFlow, Flow, type FlowParams } from './flow.ts';
 import { Jones, mazeParams } from './jones.ts';

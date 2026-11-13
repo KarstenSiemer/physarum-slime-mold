@@ -1,6 +1,7 @@
 // Checks the three solvers against the ring of Tero 2007, Sec. 5.2: two tubes of lengths L1 and L2 between a source
 // and a sink, f(Q) = Q^mu. Closed forms: mu < 1: D_i = Q_i^mu, Q_1 = 1 / (1 + (L1/L2)^(1/(1 − mu))); mu = 1: the
 // shorter tube alone, D = 1.
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/ring.ts
 import { defaultFlow, Flow, type Solver } from './flow.ts';
 import type { World } from './world.ts';
 

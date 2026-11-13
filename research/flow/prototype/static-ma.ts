@@ -1,5 +1,7 @@
 // How many steps Ma's walkers need on a fixed Maze network until their current is the exact flux.
 // The error is measured on the mean walker current of the last 200 steps (the sampled current of one step is noisy).
+// It reads the network that static.ts wrote to research/flow/out/.
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/static-ma.ts [walkers per step = 2000] [steps = 150000]
 import { readFileSync } from 'node:fs';
 import { defaultFlow, Flow } from './flow.ts';
 import { mazeWorld } from './maze.ts';

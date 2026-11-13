@@ -4,10 +4,12 @@
 // The quick checks always run (2 s). The reruns of the prototype and of the solver loop take 25 s on an M3 Pro, all at
 // the same time: they run on CI, and locally with `RESEARCH=full npm test` (ADR 0010).
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const here = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 const exec = promisify(execFile);
@@ -20,6 +22,17 @@ async function script(file: string, args: string[] = []): Promise<string> {
     maxBuffer: 1 << 24,
   });
   return stdout;
+}
+
+/** Runs a script of this folder that may end with an error; gives its exit code and all that it printed. */
+async function ended(file: string, args: string[]): Promise<{ code: number; text: string }> {
+  try {
+    const { stdout, stderr } = await exec(process.execPath, ['--import', here('./register.mjs'), here(file), ...args]);
+    return { code: 0, text: stdout + stderr };
+  } catch (error) {
+    const failed = error as { code?: number; stdout?: string; stderr?: string };
+    return { code: failed.code ?? -1, text: (failed.stdout ?? '') + (failed.stderr ?? '') };
+  }
 }
 
 /** The rows of a log without the run time `s`, which differs from run to run. */
@@ -114,5 +127,70 @@ describe('the research code of ADR 0029', () => {
   it.runIf(FULL)('runs the growing mesh with each rule off', () => {
     expect(grow).toMatch(/^as built +\d+/m);
     expect(grow).toMatch(/^the first version: all four rules off +\d+/m);
+  });
+});
+
+// At the same time: each check starts one or two Node processes, and no check reads what another one wrote.
+describe.concurrent('the campaigns, and the comparison of a rerun with the record', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'research-flow-'));
+  afterAll(() => {
+    rmSync(scratch, { recursive: true, force: true });
+  });
+  const record = here('./logs/alternatives/');
+  const log = 'tokyo-pairs-s1.jsonl';
+  /** A folder with one log: the lines of the record's log after `change`. */
+  function rerun(folder: string, name: string, change: (lines: string[]) => string[]): string {
+    const dir = join(scratch, folder);
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, name),
+      change(
+        readFileSync(record + log, 'utf8')
+          .trim()
+          .split('\n'),
+      ).join('\n') + '\n',
+    );
+    return dir;
+  }
+
+  it.each(['maze-pair', 'maze-sites', 'tokyo', 'alternatives'])(
+    'names the runs of the campaign %s as the logs of the record',
+    async (campaign) => {
+      const { code, text } = await ended('prototype/campaign.ts', [campaign, 'dry=1']);
+      expect(code).toBe(0);
+      const names = [...text.matchAll(/ name=(\S+)/g)].map((m) => `${m[1] ?? ''}.jsonl`);
+      expect(names.sort()).toEqual(readdirSync(here(`./logs/${campaign}/`)).sort());
+    },
+  );
+
+  it('passes a rerun that equals the record', async () => {
+    const { code, text } = await ended('summary.ts', ['compare', rerun('equal', log, (lines) => lines), record]);
+    expect(text).toContain(`${log}: all 8 rows equal`);
+    expect(text).toContain('1 of 1 logs of the rerun equal the record');
+    expect(code).toBe(0);
+  });
+
+  it('fails a rerun that stopped early', async () => {
+    const short = rerun('short', log, (lines) => lines.slice(0, 5));
+    const { code, text } = await ended('summary.ts', ['compare', short, record]);
+    expect(text).toContain(`${log}: 4 rows equal, but the rerun has 4 rows and the record 8`);
+    expect(code).toBe(1);
+  });
+
+  it('fails a rerun with another number in a row, and names the step', async () => {
+    const changed = rerun('changed', log, (lines) => lines.map((l) => l.replace('"alive":1044,', '"alive":1045,')));
+    const { code, text } = await ended('summary.ts', ['compare', changed, record]);
+    expect(text).toContain(`${log}: DIFFERENT from the row of step 2000 on`);
+    expect(code).toBe(1);
+  });
+
+  it('fails a rerun whose log the record does not have, and a folder that is not there', async () => {
+    const other = rerun('other', 'other-s1.jsonl', (lines) => lines);
+    const unknown = await ended('summary.ts', ['compare', other, record]);
+    expect(unknown.text).toContain('other-s1.jsonl: NOT IN THE RECORD');
+    expect(unknown.code).toBe(1);
+    const missing = await ended('summary.ts', ['compare', join(scratch, 'nothing'), record]);
+    expect(missing.text).toContain('no folder');
+    expect(missing.code).toBe(1);
   });
 });

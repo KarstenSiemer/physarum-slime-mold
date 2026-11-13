@@ -1,5 +1,6 @@
-// The Maze with flow: the agent model coupled to a flux field. Prototype code.
-// Usage: node --import ./register.mjs run-maze.ts key=value ...   (see `opt` below)
+// The Maze with flow: the agent model coupled to a flux field in which each food gives or takes a fixed flux, as in
+// the app (flow-multi.ts). Prototype code.
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/run-maze-sites.ts key=value ...   (see `opt` below)
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { defaultMulti, FlowMulti } from './flow-multi.ts';
 import { Jones, mazeParams } from './jones.ts';

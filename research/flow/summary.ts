@@ -8,9 +8,31 @@
 // - engine-tokyo-end <file>...           the same lines: the samples with all food sources joined, mean and deviation
 // - compare <folder> <folder>            the logs of the same name in two folders, row by row: a rerun against the record
 // - digests <file> <file>                the lines of engine/digest.gpu.test.ts of two checkouts, scene by scene
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 
 const [table = '', ...rest] = process.argv.slice(2);
+
+/** Says what is wrong and ends with an error code at the end of the script. */
+function fail(message: string) {
+  console.error(message);
+  process.exitCode = 1;
+}
+/** A folder name with a slash at its end. The script stops if the folder does not exist. */
+function folderOf(folder: string): string {
+  if (!existsSync(folder) || !statSync(folder).isDirectory()) {
+    console.error(`no folder ${folder}`);
+    process.exit(1);
+  }
+  return folder.endsWith('/') ? folder : `${folder}/`;
+}
+/** The text of a file. The script stops if the file does not exist. */
+function textOf(file: string): string {
+  if (!existsSync(file) || !statSync(file).isFile()) {
+    console.error(`no file ${file}`);
+    process.exit(1);
+  }
+  return readFileSync(file, 'utf8');
+}
 
 const median = (v: number[]) => {
   const s = [...v].sort((a, b) => a - b);
@@ -28,18 +50,20 @@ function range(values: (number | undefined)[], digits = 2, count = false): strin
   return `${f(median(v))} (${f(Math.min(...v))} to ${f(Math.max(...v))}${count ? `, n ${v.length}` : ''})`;
 }
 const jsonl = (file: string) =>
-  readFileSync(file, 'utf8')
+  textOf(file)
     .trim()
     .split('\n')
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 /** The logs <prefix>-s<seed>.jsonl of a folder, by seed, without their first line (the options). */
 function runs(folder: string, prefix: string): Record<string, unknown>[][] {
-  const dir = folder.endsWith('/') ? folder : `${folder}/`;
-  return readdirSync(dir)
+  const dir = folderOf(folder);
+  const found = readdirSync(dir)
     .filter((f) => new RegExp(`^${prefix}-s\\d+\\.jsonl$`).test(f))
     .sort((a, b) => Number(/-s(\d+)\./.exec(a)?.[1]) - Number(/-s(\d+)\./.exec(b)?.[1]))
     .map((f) => jsonl(dir + f).filter((r) => 'step' in r))
     .filter((r) => r.length > 0);
+  if (found.length === 0) fail(`no log ${prefix}-s<seed>.jsonl in ${dir}`);
+  return found;
 }
 const num = (r: Record<string, unknown> | undefined, key: string) => r?.[key] as number | undefined;
 
@@ -111,7 +135,7 @@ function engineMaze(files: string[]) {
   const rows = new Map<string, Map<number, Map<number, Row>>>();
   const pattern =
     /^(\S+)-s(\d+) (\d+) alive (\d+) ratio (\S+) tP (\S+) tD (\S+) joined (\w+) tube (\S+) dP (\S+) dD (\S+) ms (\S+)/;
-  for (const line of files.flatMap((f) => readFileSync(f, 'utf8').split('\n'))) {
+  for (const line of files.flatMap((f) => textOf(f).split('\n'))) {
     const m = pattern.exec(line);
     if (!m) continue;
     const seeds = rows.get(m[1]!) ?? new Map<number, Map<number, Row>>();
@@ -172,7 +196,7 @@ function tokyoRows(files: string[]): Map<string, Map<number, Map<number, TokyoRo
   const rows = new Map<string, Map<number, Map<number, TokyoRow>>>();
   const pattern =
     /^(\S+)-s(\d+)\s+(\d+) alive\s+(\d+) \| 33: (\d+) joined (\d+) links TL (\S+) MD (\S+) FT (\S+) \| 36: (\d+) joined TL (\S+) MD (\S+) FT (\S+) \| sea (\d+) \| (\S+) ms/;
-  for (const line of files.flatMap((f) => readFileSync(f, 'utf8').split('\n'))) {
+  for (const line of files.flatMap((f) => textOf(f).split('\n'))) {
     const m = pattern.exec(line);
     if (!m) continue;
     const seeds = rows.get(m[1]!) ?? new Map<number, Map<number, TokyoRow>>();
@@ -266,24 +290,40 @@ const rowsOf = (file: string) =>
     .filter((r) => 'step' in r)
     .map((r) => JSON.stringify({ ...r, s: undefined }));
 
+/**
+ * A rerun in folder `a` against the record in folder `b`: every log of the rerun must have a log of the same name in
+ * the record, with the same number of rows and the same rows. A log of the record that the rerun does not have is
+ * named, and is no fault: a rerun may hold fewer runs.
+ */
 function compare(a: string, b: string) {
-  const [dirA, dirB] = [a, b].map((d) => (d.endsWith('/') ? d : `${d}/`)) as [string, string];
-  const inB = new Set(readdirSync(dirB));
-  const names = readdirSync(dirA).filter((f) => f.endsWith('.jsonl') && inB.has(f));
-  if (names.length === 0) console.log(`no log has the same name in ${dirA} and ${dirB}`);
-  let differ = 0;
-  for (const name of names.sort()) {
+  const [dirA, dirB] = [folderOf(a), folderOf(b)];
+  const logs = (dir: string) => readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+  const inB = new Set(logs(dirB));
+  const names = logs(dirA).sort();
+  if (names.filter((f) => inB.has(f)).length === 0) fail(`no log has the same name in ${dirA} and ${dirB}`);
+  let equal = 0;
+  for (const name of names) {
+    if (!inB.has(name)) {
+      fail(`${name}: NOT IN THE RECORD ${dirB}`);
+      continue;
+    }
     const [rowsA, rowsB] = [rowsOf(dirA + name), rowsOf(dirB + name)];
     const n = Math.min(rowsA.length, rowsB.length);
     const first = Array.from({ length: n }, (_, i) => i).find((i) => rowsA[i] !== rowsB[i]);
-    if (first === undefined) console.log(`${name}: ${n} rows equal (${rowsA.length} and ${rowsB.length} rows)`);
-    else {
-      differ++;
+    if (first !== undefined) {
       const step = (JSON.parse(rowsB[first]!) as { step: number }).step;
-      console.log(`${name}: DIFFERENT from the row of step ${step} on (${n} rows compared)`);
+      fail(`${name}: DIFFERENT from the row of step ${step} on (${n} rows compared)`);
+    } else if (rowsA.length !== rowsB.length) {
+      fail(`${name}: ${n} rows equal, but the rerun has ${rowsA.length} rows and the record ${rowsB.length}`);
+    } else {
+      equal++;
+      console.log(`${name}: all ${n} rows equal`);
     }
   }
-  if (differ > 0) process.exitCode = 1;
+  const missing = [...inB].filter((f) => !names.includes(f)).sort();
+  console.log(
+    `${equal} of ${names.length} logs of the rerun equal the record${missing.length > 0 ? `; the rerun does not have ${missing.length} logs of the record: ${missing.join(', ')}` : ''}`,
+  );
 }
 
 /** The digests of the scenes that both files hold must be equal: the same bytes after the same steps. */
@@ -300,14 +340,29 @@ function digests(a: string, b: string) {
   if (differ.length > 0 || both.length === 0) process.exitCode = 1;
 }
 
+/** The arguments of each table: how many it needs at least, and what they are. */
+const USAGE: Record<string, [least: number, what: string]> = {
+  'maze-campaign': [2, '<folder> <prefix>...'],
+  'tokyo-campaign': [2, '<folder> <prefix>...'],
+  'engine-maze': [1, '<file>...'],
+  'engine-tokyo': [1, '<file>...'],
+  'engine-tokyo-end': [1, '<file>...'],
+  compare: [2, '<folder of the rerun> <folder of the record>'],
+  digests: [2, '<file> <file>'],
+};
+const usage = USAGE[table];
+if (!usage) {
+  console.error(`Tables: ${Object.keys(USAGE).join(', ')}`);
+  process.exit(1);
+}
+if (rest.length < usage[0]) {
+  console.error(`Usage: summary.ts ${table} ${usage[1]}`);
+  process.exit(1);
+}
 if (table === 'maze-campaign') mazeCampaign(rest[0] ?? '', rest.slice(1));
 else if (table === 'tokyo-campaign') tokyoCampaign(rest[0] ?? '', rest.slice(1));
 else if (table === 'engine-maze') engineMaze(rest);
 else if (table === 'engine-tokyo') engineTokyo(rest);
 else if (table === 'engine-tokyo-end') engineTokyoEnd(rest);
 else if (table === 'compare') compare(rest[0] ?? '', rest[1] ?? '');
-else if (table === 'digests') digests(rest[0] ?? '', rest[1] ?? '');
-else {
-  console.error('Tables: maze-campaign, tokyo-campaign, engine-maze, engine-tokyo, engine-tokyo-end, compare, digests');
-  process.exit(1);
-}
+else digests(rest[0] ?? '', rest[1] ?? '');

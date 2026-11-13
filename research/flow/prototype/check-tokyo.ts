@@ -1,5 +1,6 @@
 // Checks the Tokyo world and the measures: the MST drawn as tubes must measure TL 1, MD 1, FT 0; with extra links
 // that close loops, FT must be the share of links on loops.
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/check-tokyo.ts
 import { outDir } from './out.ts';
 import { mapScale, measures, mst, network, tokyoWorld } from './tokyo.ts';
 import { picture, writePng } from './world.ts';

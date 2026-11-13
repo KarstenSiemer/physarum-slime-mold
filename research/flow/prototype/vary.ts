@@ -1,4 +1,5 @@
 // How much the exact flux changes from one step to the next while the agents move (no adaptation).
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/vary.ts
 import { defaultFlow, Flow } from './flow.ts';
 import { Jones, mazeParams } from './jones.ts';
 import { mazeWorld } from './maze.ts';

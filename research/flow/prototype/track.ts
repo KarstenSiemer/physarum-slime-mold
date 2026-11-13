@@ -1,5 +1,5 @@
 // How well the local solver follows the exact flux while the agents move: no adaptation, uniform flow memory.
-// Usage: run-track.ts iterations=16 radius=0.99999 bodyRate=0.02 steps=1500
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/track.ts [iterations=16] [radius=0.99999] [bodyRate=0.02] [steps=1500]
 import { defaultFlow, Flow } from './flow.ts';
 import { Jones, mazeParams } from './jones.ts';
 import { mazeWorld } from './maze.ts';

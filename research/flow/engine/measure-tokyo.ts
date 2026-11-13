@@ -32,9 +32,10 @@ const t = tokyoWorld(n, 'app');
 const { world } = t;
 const read = (file: string) =>
   new Float32Array(new Uint8Array(Buffer.from(readFileSync(DIR + file, 'utf8'), 'base64')).buffer);
+// The steps of the run: its dumps of the trail (and not the pictures that an earlier call of this script wrote).
 const steps = readdirSync(DIR)
-  .filter((f) => f.startsWith(name + '-trail-'))
-  .map((f) => Number(/trail-(\d+)/.exec(f)?.[1]))
+  .filter((f) => f.startsWith(name + '-trail-') && f.endsWith('.f32.b64'))
+  .map((f) => Number(/-trail-(\d+)\.f32\.b64$/.exec(f)?.[1]))
   .sort((a, b) => a - b);
 const set33 = t.cities.map((c, i) => (c.stat ? i : -1)).filter((i) => i >= 0);
 const set36 = t.cities.map((_, i) => i);

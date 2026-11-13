@@ -1,6 +1,6 @@
 // The Tokyo layout with flow: the land is full of plasmodium at the start (Tero's second protocol, and the start of
 // his model), all food sources are there, and the flux runs between changing pairs of food sources. Prototype code.
-// Usage: node --import ./register.mjs run-tokyo.ts key=value ...
+// Usage: node --import ./research/flow/register.mjs research/flow/prototype/run-tokyo.ts key=value ...   (see `opt` below)
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { defaultFlow, Flow, type FlowParams } from './flow.ts';
 import { defaultMulti, FlowMulti, type Terminals } from './flow-multi.ts';
