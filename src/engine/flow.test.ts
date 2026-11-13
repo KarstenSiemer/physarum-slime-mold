@@ -12,8 +12,11 @@ import {
   flowOn,
   flowRoles,
   flowSites,
+  heldTrail,
+  JONES_DECAY,
   packFlow,
   STEPS_PER_MINUTE,
+  trailLevels,
 } from './flow';
 import { flowStart, flowStep, roleSigns, type FlowGrid } from './flow-reference';
 
@@ -312,6 +315,61 @@ describe('packFlow', () => {
     const none = new Float32Array(packFlow(settings, [], buf));
     expect(none[15]).toBe(0);
     expect(none.subarray(28).every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe('the levels of the trail of a tube (ADR 0031)', () => {
+  it('holds the trail of a cell that an agent enters at every step, for each order of a step', () => {
+    // Sensing first: T ← (T + 1) · (1 − decay). Moving first: T ← T · (1 − decay) + 1 (diffuse.wgsl).
+    for (const decay of [0.02, 0.1, 0.3, 0.6, 0.9]) {
+      let [senseFirst, moveFirst] = [0, 0];
+      for (let step = 0; step < 2000; step++) {
+        senseFirst = (senseFirst + 1) * (1 - decay);
+        moveFirst = moveFirst * (1 - decay) + 1;
+      }
+      expect(heldTrail(decay, 'sense-first'), String(decay)).toBeCloseTo(senseFirst, 6);
+      expect(heldTrail(decay, 'move-first'), String(decay)).toBeCloseTo(moveFirst, 6);
+    }
+    // The decay stays inside the range of its slider: no division by 0, and no level of 0.
+    expect(heldTrail(0, 'sense-first')).toBe(heldTrail(1e-4, 'sense-first'));
+    expect(heldTrail(1, 'sense-first')).toBe(heldTrail(0.9, 'sense-first'));
+    expect(heldTrail(1, 'sense-first')).toBeGreaterThan(0);
+  });
+
+  it('gives the levels of ADR 0029 at Jones’ decay, bit for bit, in either order of a step', () => {
+    expect(JONES_DECAY).toBe(0.1);
+    for (const order of ['sense-first', 'move-first'] as const)
+      for (const deposit of [0.5, 2, 5, 50]) {
+        const [low, full] = trailLevels({ deposit, decay: 0.1 }, order);
+        expect(low, `${order} ${String(deposit)}`).toBe(FLOW.trailLow * deposit);
+        expect(full, `${order} ${String(deposit)}`).toBe(FLOW.trailFull * deposit);
+      }
+    // So the block of a scene with that decay holds the numbers of before: the scenes with the flow keep their bytes.
+    const settings = { ...defaultSettings(), flowStrength: 8 };
+    expect(settings.strains[0]?.decay).toBe(0.1);
+    const f = new Float32Array(packFlow(settings, []));
+    expect(f[13]).toBe(Math.fround(FLOW.trailLow * 5));
+    expect(f[14]).toBe(Math.fround(1 / (FLOW.trailFull * 5 - FLOW.trailLow * 5)));
+  });
+
+  it('lowers the levels in the ratio of the trail that a cell holds at the decay of the strain', () => {
+    // A decay of 0.6 leaves (1 − 0.6) / 0.6 = 0.67 deposits where a decay of 0.1 leaves 9: a thirteenth.
+    const [low, full] = trailLevels({ deposit: 5, decay: 0.6 }, 'sense-first');
+    expect(low).toBeCloseTo((FLOW.trailLow * 5 * (0.4 / 0.6)) / 9, 9);
+    expect(full / low).toBeCloseTo(FLOW.trailFull / FLOW.trailLow, 9);
+    // Moving first, a cell holds 1 / decay deposits.
+    expect(trailLevels({ deposit: 5, decay: 0.6 }, 'move-first')[0]).toBeCloseTo(FLOW.trailLow * 5 * (0.1 / 0.6), 9);
+    // A trail that stays longer is stronger, and its levels are higher.
+    expect(trailLevels({ deposit: 5, decay: 0.02 }, 'sense-first')[0]).toBeGreaterThan(FLOW.trailLow * 5);
+    // The block of each strain has the levels of that strain; a deposit of 0 gives finite levels.
+    const strains = [0.1, 0.6].map((decay, i) => ({ ...defaultStrain(i), decay }));
+    const settings = { ...defaultSettings(), strains };
+    const second = new Float32Array(packFlow(settings, [], undefined, 1));
+    expect(second[13]).toBe(Math.fround(low));
+    const none = new Float32Array(
+      packFlow({ ...settings, strains: [{ ...defaultStrain(0), deposit: 0, decay: 0.6 }] }, []),
+    );
+    expect(Number.isFinite(none[14] ?? NaN)).toBe(true);
   });
 });
 

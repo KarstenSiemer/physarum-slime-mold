@@ -2,7 +2,7 @@
 // foods that give and take. The passes are shaders/flow.wgsl and gl/glsl/flow.frag; flow-reference.ts mirrors them on
 // the CPU for the tests. Every strain has a flow of its own (ADR 0030): the passes run once per strain, on the trail
 // of that strain, with a state of their own.
-import type { Settings } from '../model/params';
+import type { Settings, StepOrder } from '../model/params';
 
 /**
  * Whether the flow runs: the switch, in the extended model only (constrain() turns it off in the Jones model; this
@@ -26,8 +26,9 @@ export const STEPS_PER_MINUTE = 30;
  *   a tube would swing by itself, and add to the swing of the network each time the trail gives it a tube.
  * - `bodyRate`: the tube body follows the trail at this rate per step (50 steps, 1.7 min); below `bodyLow` no tube.
  * - `fresh`: flow memory of ground that never held a tube; `floor`: the least flow memory.
- * - `trailLow`, `trailFull`: the trail of a strain, in deposits of that strain, below which a cell holds no plasmodium
- *   of the strain and from which it holds a full tube.
+ * - `trailLow`, `trailFull`: the trail of a strain, in deposits of that strain at Jones' decay of 0.1, below which a
+ *   cell holds no plasmodium of the strain and from which it holds a full tube. For another decay the levels follow
+ *   the trail that a cell then holds (trailLevels()).
  * - `death`: chance per step that an agent on a starved cell dies; `half`: the flow memory at which it is half that.
  * - `birth`: the top chance that a dead agent comes to life on the empty cell it draws; from `birthFrom` on.
  * - `head`: the most pressure that a food site works against, per unit of its flux: a site gives or takes less as its
@@ -141,23 +142,51 @@ export function flowRoles(covered: readonly boolean[], step: number, seed: numbe
   return codes;
 }
 
+/** Jones' decay of the trail (2010, Table 1): the levels of a tube are in deposits at this decay. */
+export const JONES_DECAY = 0.1;
+
+/**
+ * The trail that a cell holds in the end when an agent enters it at every step, in deposits, for a decay per step
+ * (diffuse.wgsl). A step that senses first adds the deposits before the decay: T ← (T + 1) · (1 − decay), which
+ * ends at (1 − decay) / decay. A step that moves first adds them after it: T ← T · (1 − decay) + 1, which ends at
+ * 1 / decay. The decay stays inside the range of its slider.
+ */
+export function heldTrail(decay: number, order: StepOrder): number {
+  const d = Math.min(Math.max(decay, 1e-4), 0.9);
+  return order === 'move-first' ? 1 / d : (1 - d) / d;
+}
+
+/**
+ * The trail of a strain below which a cell holds no tube of it, and from which it holds a full tube (ADR 0031): 0.2
+ * and 1 deposits at Jones' decay, and in the same ratio to the trail that a cell holds at the decay of the strain. A
+ * trail that decays fast stays weak: a strain with a decay of 0.6 holds a thirteenth of the trail, so its levels are
+ * a thirteenth too. At a decay of 0.1 the factor is 1, and the levels are those of ADR 0029, bit for bit.
+ */
+export function trailLevels(
+  strain: Pick<Settings['strains'][number], 'deposit' | 'decay'>,
+  order: StepOrder,
+): [low: number, full: number] {
+  const deposit = Math.max(strain.deposit, 1e-6);
+  const scale = heldTrail(strain.decay, order) / heldTrail(JONES_DECAY, order);
+  return [FLOW.trailLow * deposit * scale, FLOW.trailFull * deposit * scale];
+}
+
 /**
  * The uniform block of the flow passes of the strain `strain` (ADR 0030): the constants, the cell of the first site
  * (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain and the
- * sites. The passes take the step and the seed from the parameters of the simulation. The deposit of the strain is
- * the unit of the trail thresholds. Every strain has the same sites and the same constants: the agent passes read the
- * constants from the block of any strain.
+ * sites. The passes take the step and the seed from the parameters of the simulation. The levels of the trail are
+ * those of the strain (trailLevels()). Every strain has the same sites and the same other constants: the agent passes
+ * read the constants from the block of any strain.
  */
 export function packFlow(
-  s: Pick<Settings, 'flowStrength' | 'strains'>,
+  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder'>,
   sites: readonly (readonly [number, number])[],
   buf = new ArrayBuffer(FLOW_BYTES),
   strain = 0,
 ): ArrayBuffer {
   const f = new Float32Array(buf);
   f.fill(0);
-  const deposit = Math.max(s.strains[strain]?.deposit ?? 5, 1e-6);
-  const [low, full] = [FLOW.trailLow * deposit, FLOW.trailFull * deposit];
+  const [low, full] = trailLevels(s.strains[strain] ?? { deposit: 5, decay: JONES_DECAY }, s.stepOrder);
   const omega = 2 / (1 + Math.sqrt(1 - FLOW.radius * FLOW.radius));
   const n = Math.min(sites.length, FLOW_SITES);
   const limit = FLOW.head * s.flowStrength;
