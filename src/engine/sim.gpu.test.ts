@@ -4259,6 +4259,53 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       },
     ); // At most 0.2 s on SwiftShader on an M3 Pro, after the hook's builds: the default 60 s (ADR 0010).
 
+    // ADR 0025, amendment of 2026-11-13: a child goes to a diagonal neighbour only where a move from the centre of its
+    // parent's cell to the centre of that neighbour could go (clearPath in agents.wgsl, CORNER): not across the
+    // corner where two wall cells touch. Walls of single cells that touch only at their corners: in a box one
+    // diagonal line, and on the periodic grid two, across the seams, which part the torus into two bands. The colony
+    // starts on one side, and a move cannot cross such a wall (the test of the corners above). So an agent on the
+    // other side is a child that a parent placed across a corner.
+    it.each(['box', 'wrap'] as const)('places no child across the corner of a wall (%s)', async (boundary) => {
+      const [w, h] = [32, 32];
+      const d = (x: number, y: number) => (((x - y) % w) + w) % w;
+      const isWall = (x: number, y: number) => (boundary === 'wrap' ? d(x, y) % (w / 2) === 0 : x === y);
+      // The side of the colony: below the diagonal in the box, the band 0 < d < 16 on the torus.
+      const near = (x: number, y: number) => !isWall(x, y) && (boundary === 'wrap' ? d(x, y) < w / 2 : x > y);
+      const s: Settings = {
+        ...defaultSettings(),
+        ...GROWTH,
+        boundary,
+        density: 1,
+        growthEvery: 1,
+        growthWindow: 3,
+        growthMin: 1,
+        growthMax: 9,
+        shrinkEvery: 0,
+      };
+      const sim = await make({ ...s, growth: false, collisions: false }, w, h, w * h);
+      const env = new Uint8Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) if (isWall(c % w, Math.floor(c / w))) env[c * 4] = 255;
+      sim.writeEnv(env);
+      let r = 7;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      let placed = 0;
+      for (let c = 0; c < w * h; c++) {
+        const [x, y] = [c % w, Math.floor(c / w)];
+        if (!near(x, y) || rnd() > 0.35) continue;
+        const [fx, fy] = [Math.fround(0.05 + 0.9 * rnd()), Math.fround(0.05 + 0.9 * rnd())];
+        sim.writeAgent(placed++, { x: x + fx, y: y + fy, heading: Math.fround(rnd() * 6.28), bits: 4 });
+      }
+      // The rule is switched on after the agents are written: the switch builds the occupancy from them.
+      sim.update(s);
+      sim.run(30);
+      const alive = (await sim.readAgents()).filter((a) => a.bits & 4);
+      const cells = alive.map((a) => [Math.floor(a.x), Math.floor(a.y)] as const);
+      // The colony grows on its own side, and no agent lies in a wall or on the other side.
+      expect(placed).toBeGreaterThan(100);
+      expect(cells.filter(([x, y]) => near(x, y)).length).toBeGreaterThan(placed + 50);
+      expect(cells.filter(([x, y]) => !near(x, y))).toEqual([]);
+    });
+
     // Decision 9 of ADR 0025: when dead agents run out, the births that get one spread over the grid. Checked on the
     // children themselves, not with the CPU copy of place(): 40 dead agents for a few hundred births all over a grid.
     it('spreads the births that get a dead agent over the grid', async () => {
