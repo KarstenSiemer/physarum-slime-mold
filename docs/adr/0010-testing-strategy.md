@@ -356,20 +356,23 @@ GPU checks use invariants, not long exact trajectories:
   process, and compares what they give with the logs of the record, bit for bit. Reason: the
   commands of the research guide and the logs must not drift apart, and only a test that CI runs
   keeps that. The logs are one archive (`research/flow/logs.tar.gz`), and the test unpacks it into
-  a folder of its own. Fifteen quick checks run always: three of the scripts, three of the
-  archive (a digest of its 125 files; packing and unpacking give the same files; no path leaves
-  the folder), and nine of the tools of the record (the runs of each campaign have the names of
-  the logs; the tables print the lines that the guide quotes; the comparison of a rerun with the
-  record fails for a short, a changed and an unknown log). They take 2 to 3 s and add about 1 s to the unit tests: 6.7 to 7.4 s with them
-  against 5.5 to 6.9 s for the files of `src` alone (three runs each on an M3 Pro in use). Six
-  reruns of the prototype run on CI, and locally with `RESEARCH=full npm test`: they take 31 to
-  40 s, all at the same time. So they are not in the fast loop: `npm test` is the loop of the
-  work and a hook of every push. The hook of the file has a limit of 600 s, so it may take 150 s
-  on GitHub. Each check of the tools has a limit of 120 s: up to 14 Node processes start at once,
-  and each one loads the TypeScript compiler. In the CI image on an M3 Pro (linux/amd64 under
-  emulation, 4 CPUs) the hook takes about 105 s (the file took 104 to 111 s in three runs) and a
-  check of the tools 1.9 to 3.4 s; with the default limit of 5 s one check failed there. The pull
-  request that added the file has the times on GitHub. The measurements of the real engine
+  a folder of its own. Fifteen quick checks run always: three of the scripts, three of the archive
+  (a digest of its 125 files; packing and unpacking give the same files; no path leaves the
+  folder), and nine of the tools of the record (the runs of each campaign have the names of the
+  logs; the tables print the lines that the guide quotes; the comparison of a rerun with the
+  record fails for a short, a changed and an unknown log). They take 2 to 3 s and add about 1 s to
+  the unit tests: 6.7 to 7.4 s with them against 5.5 to 6.9 s for the files of `src` alone (three
+  runs each on an M3 Pro in use). Six reruns of the prototype run on CI, and locally with
+  `RESEARCH=full npm test`: they take 31 to 40 s, all at the same time. So they are not in the
+  fast loop: `npm test` is the loop of the work and a hook of every push. The hook of the file has
+  a limit of 600 s, so it may take 150 s on GitHub. Each check of the tools has a limit of 120 s:
+  up to 14 Node processes start at once, and each one loads the TypeScript compiler. In the CI
+  image on an M3 Pro (linux/amd64 under emulation, 4 CPUs) the hook takes about 105 s (the file
+  took 104 to 111 s in three runs) and a check of the tools 1.9 to 3.4 s; with the default limit
+  of 5 s one check failed there. On GitHub, in the first CI run of the pull request that added the
+  file (PR #47, head `748f0b0`, Node 26.13.1), the file took 74.7 s: the hook about 73 s of its
+  600 s, and a check of the tools 0.6 to 1.3 s of its 120 s. All unit tests together took 82 s
+  there, in one of the two GPU jobs. The measurements of the real engine
   (`research/**/*.gpu.test.ts`) have a Vitest configuration of their own,
   `research/vitest.config.ts`. No script and no CI job uses it: a run takes minutes to hours and
   writes gigabytes. Rejected: a third project in `vitest.config.ts`. Vitest runs every project
