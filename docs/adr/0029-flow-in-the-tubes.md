@@ -555,10 +555,11 @@ A second reader went through the change before the merge. Each finding was check
   speed of 120 steps per second the steps then take a fifth (Maze on WebGPU) to more than a third
   (Tokyo on WebGL2) of the time. The frame budget (ADR 0028) lowers the steps per second on a slower GPU, and the
   startup check can lower the grid.
-- The time limits of the new GPU tests follow ADR 0010. In the CI image (SwiftShader, 4 CPUs,
-  16 GB, Docker on an M3 Pro, 2026-11-13) the 23 tests of `flow.gpu.test.ts` took 68 s together.
-  The slowest took 13.6 s of its limit of 240 s (WebGL2 without float blending), the next 7.4 s of
-  240 s (Kirchhoff's law on WebGPU) and 7.3 s of 120 s (the CPU copy on WebGL2). The hook that
-  compiles the pipelines took 45 s on WebGPU and 7 s on WebGL2, of a limit of 600 s. GitHub runs
-  SwiftShader's WebGPU compute about twice as slowly as the image (ADR 0010). So each wait stays
-  below a quarter of its limit there; the times on GitHub are in the pull request.
+- The time limits of the new GPU tests follow ADR 0010: each limit is at least four times the time
+  of the test on GitHub. In the CI run of commit `92a63e7` on GitHub the file `flow.gpu.test.ts`
+  took 51 s in the WebGPU job and 67 s in the other job. Its slowest test took 24 s of its limit of
+  240 s (WebGL2 without float blending), the next 11 s of 240 s (Kirchhoff's law on WebGPU), and
+  the hook that compiles the pipelines at most 14 s of 600 s. So each test has a limit of at least
+  10 times its time there. In the CI image on an M3 Pro (SwiftShader, 4 CPUs, 16 GB) the slowest
+  test took 13.6 s and the compile hook 45 s on WebGPU. One test was added after that run; its
+  time on GitHub is in the pull request.
