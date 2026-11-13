@@ -69,17 +69,18 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 
 **The fields** (per cell):
 
-| Symbol  | Field                                                                                  | Range    |
-| ------- | -------------------------------------------------------------------------------------- | -------- |
-| T_l     | trail of lane l, l = 0 … 3                                                             | ≥ 0      |
-| C_F     | food scent                                                                             | ≥ 0      |
-| C_L     | light repellent                                                                        | ≥ 0      |
-| w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]   |
-| n_l     | agents of strain l whose move ended in the cell in this step                           | integers |
-| occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers |
-| D, B    | flow memory and tube body (flow only, section 8)                                       | [0, 1]   |
-| G       | conductivity of the flow (flow only)                                                   | [0, 4]   |
-| P_k     | pressure of the flow in lane k = 0 … 3 (flow only)                                     | float    |
+| Symbol  | Field                                                                                  | Range     |
+| ------- | -------------------------------------------------------------------------------------- | --------- |
+| T_l     | trail of lane l, l = 0 … 3                                                             | ≥ 0       |
+| C_F     | food scent                                                                             | ≥ 0       |
+| C_L     | light repellent                                                                        | ≥ 0       |
+| w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]    |
+| n_l     | agents of strain l whose move ended in the cell in this step                           | integers  |
+| occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers  |
+| D       | flow memory (flow only, section 8)                                                     | [1e-4, 1] |
+| B       | tube body (flow only, section 8)                                                       | [0, 1]    |
+| G       | conductivity of the flow (flow only)                                                   | [0, 4]    |
+| P_k     | pressure of the flow in lane k = 0 … 3 (flow only)                                     | float     |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step.
 
