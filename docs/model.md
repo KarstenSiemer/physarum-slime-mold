@@ -1,6 +1,6 @@
 # The model: the rules in force
 
-Status: 2026-11-13, `main` at `e5e7710`. This file states what the simulation computes, as mathematics, for both
+Status: 2026-11-13, `main` at `10e289a`. This file states what the simulation computes, as mathematics, for both
 models, both orders of a step and both backends. The ADRs hold the reasons and the history; each section names its
 ADR. How close the model comes to the organism: [fidelity.md](fidelity.md). The GPU implementation (buffers, tiles,
 the sort of the agents): [design.md](design.md). Decision: [ADR 0030](adr/0030-model-specification-and-fidelity.md).
@@ -77,10 +77,10 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 | w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]    |
 | n_l     | agents of strain l whose move ended in the cell in this step                           | integers  |
 | occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers  |
-| D       | flow memory (flow only, section 8)                                                     | [1e-4, 1] |
-| B       | tube body (flow only, section 8)                                                       | [0, 1]    |
-| G       | conductivity of the flow (flow only)                                                   | [0, 4]    |
-| P_k     | pressure of the flow in lane k = 0 … 3 (flow only)                                     | float     |
+| D       | flow memory, one per strain (flow only, section 8)                                     | [1e-4, 1] |
+| B       | tube body, one per strain (flow only, section 8)                                       | [0, 1]    |
+| G       | conductivity of the flow, per strain (flow only)                                       | [0, 4]    |
+| P_k     | pressure of the flow in lane k = 0 … 3, per strain (flow only)                         | float     |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step.
 
@@ -207,7 +207,7 @@ The agent pass runs these parts in order for each agent.
 1. **Random shrinkage**: an agent alive at the start of the step dies if u < p_remove (the setting Random shrinkage;
    Jones 2010, Fig. 21 uses 0.00025).
 2. **Starvation** (flow on): a survivor dies if u < 0.02 · h² / (D² + h²), with h = 0.01 and D the flow memory of its
-   cell from the last step (section 8.5).
+   cell for its strain, from the last step (section 8.5).
 
 A dead agent neither moves nor deposits in this step.
 
@@ -224,8 +224,8 @@ move and no deposit in its step.
 - **Cut**: an alive agent whose position lies within the radius of the tool takes the first of 8 uniform random points
   of the grid whose cell is open and that lie outside the radius. It keeps its heading. If none fits, it moves as usual.
 - **Respawn** (flow on, for every agent that no tool places): a dead agent draws one uniform point of the grid. It comes
-  to life there with the chance 0.2 · (D − 0.5) / 0.5 if the cell is open, holds a tube (B ≥ 0.05) and has D > 0.5
-  (section 8.5).
+  to life there with the chance 0.2 · (D − 0.5) / 0.5 if the cell is open, holds a tube of the agent's strain
+  (B ≥ 0.05) and has D > 0.5, with B and D of that strain (section 8.5; ADR 0031).
 
 ### 7.3 Sensing
 
@@ -294,11 +294,17 @@ Extended model only, off by default (ADR 0029). Tero, Kobayashi and Nakagaki 200
 cells in place of a graph. Code: `shaders/flow.wgsl`, `gl/glsl/flow.frag`, constants in `src/engine/flow.ts`, a CPU
 copy of both passes in `src/engine/flow-reference.ts`.
 
+**Every strain has a flow of its own** (ADR 0031). The rules of this section run once for each strain s, with a tube
+body, a flow memory, a conductivity and a pressure of that strain. They read the trail T_s of the strain alone, so no
+flux passes from the tubes of one strain into the tubes of another. The food sites, the flow strength I0 and every
+constant are the same for all strains. Below, B, D, G and P are those of one strain.
+
 ### 8.1 The network on the grid
 
 - Every open cell is a node; its 4 neighbours are its edges.
-- **Tube body**: B ← B + 0.02 · (π − B), with π = clamp((Σ_s T_s − 0.2 · depT_A) / (0.8 · depT_A), 0, 1) from the trail
-  after this step's diffusion. A cell holds a tube while B ≥ 0.05.
+- **Tube body**: B ← B + 0.02 · (π − B), with π = clamp((T_s − 0.2 · depT_s) / (0.8 · depT_s), 0, 1) from the trail of
+  the strain after this step's diffusion, and depT_s the deposit of the strain. A cell holds a tube of the strain
+  while B ≥ 0.05.
 - **Conductivity**: G = B · (0.02 + D) on a tube, 4 B on a tube on food, 0 elsewhere.
 - **Edge conductance**: the harmonic mean H(a, b) = 2ab / (a + b), 0 if a or b is 0. The pressure solve uses
   Ĝ = H(G_a + 1e-5, G_b + 1e-5), so a cell holds a pressure before it joins the network.
@@ -308,8 +314,10 @@ copy of both passes in `src/engine/flow-reference.ts`.
 
 - A site is the cell of the start point of a painted food stroke, in the order of the list. Each cell counts once, cells
   outside the grid are dropped, and with more than 64 the sites spread evenly over the list (`flowSites()`).
-- A site is **covered** while its cell holds food and a tube (B ≥ 0.05 in the last step).
-- The roles in each of the 4 lanes: with fewer than 2 covered sites, none. With exactly 2, the first gives and the
+- A strain **covers** a site while the cell of the site holds food and a tube of the strain (B ≥ 0.05 in the last
+  step). Two strains can cover the same site.
+- The roles in each of the 4 lanes, for each strain among the sites that it covers: with fewer than 2 covered sites,
+  none. With exactly 2, the first gives and the
   other takes. With m ≥ 3, the covered sites are shuffled by a hash, ⌊m/2⌋ give, ⌊m/2⌋ take and an odd one rests;
   lane k draws again at steps where ⌊(t + 75 k) / 300⌋ changes, so every 300 steps, the lanes 75 steps apart.
 - A site that gives adds I0 (the setting Flow strength), one that takes removes I0, scaled by a pressure limit h_c:
@@ -339,11 +347,15 @@ from its result and the second from its momentum term. That shifts the whole his
 
 ### 8.5 The flow and the agents
 
+An agent follows the flow of its own strain: D and B below are those of the agent's strain (ADR 0031).
+
 - **Starvation** (7.1): the chance 0.02 · h² / (D² + h²) per step, h = 0.01: 2 % at D = 0, 1 % at D = 0.01, 0.005 % at
   D = 0.2.
 - **Respawn** (7.2): never for D ≤ 0.5, 20 % per step and dead agent at D = 1 on the cell it draws.
 - **Growth**: an agent does not divide on a cell with D < 0.01 (section 9).
 - The agent and growth passes of step k read D of step k − 1.
+- A strain that covers fewer than 2 sites has no flux, and none of its cells adapts (8.4): its agents follow the memory
+  that its cells hold.
 
 ### 8.6 Time scale
 
@@ -363,7 +375,7 @@ copy in `src/engine/growth-reference.ts`.
   the moves and with the agent's own cell. Wrap wraps; in a box and a dish, cells outside count 0.
 - **Shrinkage**: an agent dies if n_S < Smin or n_S > Smax.
 - **Growth**: a survivor divides if it moved in this step, Gmin ≤ n_G ≤ Gmax, at least one of its 8 neighbours is open
-  and was empty after the moves, and (flow on) D ≥ 0.01. It claims one of the free neighbours at random, with the key
+  and was empty after the moves, and (flow on) D ≥ 0.01 for its strain. It claims one of the free neighbours at random, with the key
   of a move. The child may land diagonally across the corner of a wall: the rule does not check corners.
 - **Births**: the winners' births are matched to dead agents of the same strain by rank, in a new random order of the
   cells each step. A birth without a dead agent is dropped. The capacity limits the population.
@@ -472,6 +484,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                        |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
 | Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                    |
 
 Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
@@ -484,5 +497,10 @@ Found while this file was written; each one is open, not a rule:
 - An agent under a wall that was painted onto it is not moved off the wall, and can step out (7.5).
 - A child of the growth rule can land diagonally across the corner of a wall (9).
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
-- Respawn (7.2) brings a dead agent of any strain to life, so with the flow a strain appears that nobody inoculated
-  (found by the owner on 2026-11-13; ADR 0029 and `TODO.md`).
+- The flow does nothing for a strain whose trail stays below the level of a tube, 0.2 deposits (8.1): the start scene
+  Three strains with one agent per cell has at most 0.26 deposits and holds no tube (ADR 0031 and `TODO.md`).
+- A food site is one cell (8.2). Where two strains share a food dot, only the strains whose tube holds that cell have
+  the site (ADR 0031 and `TODO.md`).
+
+Closed on 2026-11-13: respawn (7.2) brought a dead agent of any strain to life, so with the flow a strain appeared that
+nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031).

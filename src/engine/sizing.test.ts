@@ -123,7 +123,7 @@ describe('the flow in the tubes', () => {
     expect((512 * 512 * FLOW_BYTES_PER_CELL) / 2 ** 20).toBe(20);
   });
 
-  // ADR 0030: every strain has a flow of its own, with textures of its own.
+  // ADR 0031: every strain has a flow of its own, with textures of its own.
   it('counts the textures of every strain, and none while the flow is off or the model is Jones’', () => {
     const strains = (n: number) => Array.from({ length: n }, (_, i) => defaultStrain(i));
     const on = { ...defaultSettings(), model: 'extended' as const, flow: true };

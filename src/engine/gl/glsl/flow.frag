@@ -145,7 +145,7 @@ void main() {
   } else {
     d = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));
   }
-  // The tube body follows the plasmodium of the strain, which the trail of the strain shows (ADR 0030).
+  // The tube body follows the plasmodium of the strain, which the trail of the strain shows (ADR 0031).
   float t = texelFetch(trail, p, 0)[int(U.f.z)];
   float presence = clamp((t - U.d.y) * U.d.z, 0.0, 1.0);
   float body = m.y + U.c.y * (presence - m.y);
