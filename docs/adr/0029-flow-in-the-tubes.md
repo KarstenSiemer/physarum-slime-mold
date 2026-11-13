@@ -133,24 +133,25 @@ from a full sheet; its results are below.
 ### (c) The cost on the GPU
 
 Measured for the rule as built (decision 3), in the real engine on an M3 Pro (Chromium with Metal,
-2026-11-13): the median time of a step over 21 batches of 50 steps, after 3,000 steps.
+2026-11-13, commit `92a63e7`, no other load): the median time of a step over 21 batches of 50
+steps, after 3,000 steps. Two runs agree within 0.02 ms.
 
 | Scene                  | Backend | Without the flow | With the flow | The flow     |
 | ---------------------- | ------- | ---------------- | ------------- | ------------ |
-| Maze, 512 × 320 cells  | WebGPU  | 0.20 ms          | 2.20 ms       | 2.00 ms more |
-| Maze, 512 × 320 cells  | WebGL2  | 0.42 ms          | 2.60 ms       | 2.18 ms more |
-| Tokyo, 512 × 512 cells | WebGPU  | 0.49 ms          | 3.42 ms       | 2.93 ms more |
-| Tokyo, 512 × 512 cells | WebGL2  | 0.75 ms          | 4.32 ms       | 3.57 ms more |
+| Maze, 512 × 320 cells  | WebGPU  | 0.17 ms          | 1.66 ms       | 1.49 ms more |
+| Maze, 512 × 320 cells  | WebGL2  | 0.33 ms          | 2.04 ms       | 1.71 ms more |
+| Tokyo, 512 × 512 cells | WebGPU  | 0.36 ms          | 2.64 ms       | 2.28 ms more |
+| Tokyo, 512 × 512 cells | WebGL2  | 0.64 ms          | 3.11 ms       | 2.47 ms more |
 
-The cost follows the cells: 11 to 12 ns per cell and step on WebGPU and 13 to 14 ns on WebGL2, for
+The cost follows the cells: about 9 ns per cell and step on WebGPU and 9 to 10 ns on WebGL2, for
 the update and the 16 pressure passes.
 
 Ma's walk was not built for the GPU, because it failed in (a) and (b). So its cost is an estimate
 and not a measurement: a step of the walk is one pass over the walkers, one pass that counts them
 per cell and one pass over the grid for the conductivity. The agents of these scenes take the same
-three kinds of pass, and a whole step of them takes 0.2 to 0.5 ms. So with about as many walkers as
-agents, a step of the walk would cost about a tenth of a step of the local solver. That does not
-help it: on the fixed network it had not carried the flux to the sink after 150,000 steps.
+three kinds of pass, and a whole step of them takes 0.2 to 0.6 ms. So with about as many walkers as
+agents, a step of the walk would cost a tenth to a quarter of a step of the local solver. That does
+not help it: on the fixed network it had not carried the flux to the sink after 150,000 steps.
 
 ## Decision
 
@@ -336,10 +337,11 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
     simplified line passed over harbour cities.
 
     The flow strength of the scene is 1.4. Reason: the measurement with 1, 1.4 and 2 over ten seeds
-    each (results below). With 1.4 the total length of the network is that of the organism, every
-    measure lies within one standard deviation of the paper, and the food sources at the edge of
-    the map keep their tubes. The model of the paper uses I0 = 2 (Fig. 4), but the flux of this app
-    has another unit (Consequences), so that value does not carry over.
+    each, run twice (results below). With 1.4 the total length of the network is that of the
+    organism in both sets of runs, and every measure lies within one standard deviation of the
+    paper. A flux of 1 is as near within the spread of the seeds; a flux of 2 gives a longer
+    network. The model of the paper uses I0 = 2 (Fig. 4), but the flux of this app has another unit
+    (Consequences), so that value does not carry over.
 
 13. **The flow is in the source of a pass only while it is on.** WGSL has no preprocessor, and an
     override constant leaves its code and its bindings in the pass. So the lines of the flow in
@@ -363,8 +365,14 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
 
 ## Results in the app
 
-All numbers are from the real engine with the final rules (2026-11-13, M3 Pro, Chromium with
-Metal), measured on dumps of the trail with the scripts of the prototype.
+All numbers are from the real engine (M3 Pro, Chromium with Metal, 2026-11-13), measured on dumps
+of the trail with the scripts of the prototype. The tables are from the code after the review
+(commit `92a63e7`). The same runs with the code before the review gave the same picture; where
+they add something, the text names them. The review changed the random stream of the starvation
+draw and the cell that the pressure is recentred by: single runs differ, the rule does not. Three
+checks were not run again and are from the code before the review: the bounds of the pressure and
+the comparison with the exact solution (decision 6 and the Maze below), and the control without
+the growth gate (decision 9).
 
 Pictures from the app's own renderer (`npm run gallery`, seed 7): `docs/images/maze-flow.jpg` is
 the Maze at step 5,000 without and with the flow, `docs/images/tokyo-flow.jpg` the Tokyo scene at
@@ -378,24 +386,24 @@ trail in the dead ends over the mean trail in the corridor of the shortest route
 
 | Step                               | No flow, 3 seeds    | With the flow, WebGPU, 10 seeds | With the flow, WebGL2, 3 seeds |
 | ---------------------------------- | ------------------- | ------------------------------- | ------------------------------ |
-| Dead ends over route at 1,000      | 0.73 (0.68 to 0.75) | 0.53 (0.49 to 0.60)             | 0.52 (0.51 to 0.55)            |
-| at 1,500                           | 0.76 (0.72 to 0.76) | 0.094 (0.063 to 0.145)          | 0.077 (0.070 to 0.145)         |
-| at 2,000                           | 0.65 (0.65 to 0.68) | 0.029 (0.023 to 0.038)          | 0.018 (0.016 to 0.024)         |
-| at 3,000                           | 0.71 (0.64 to 0.78) | 0.012 (0.001 to 0.030)          | 0.003 (0.002 to 0.019)         |
-| at 5,000                           | 0.76 (0.73 to 0.91) | 0.000 (0.000 to 0.000)          | 0.000 (0.000 to 0.002)         |
-| at 15,000                          | 0.66 (0.60 to 0.77) | 0.000 (0.000 to 0.001)          | 0.000                          |
-| First measured step below 10 %     | never               | 1,500 (1,500 to 2,000)          | 1,500 (1,500 to 2,000)         |
-| First measured step below 2 %      | never               | 3,000 (2,500 to 4,000)          | 2,000 (2,000 to 3,000)         |
-| Foods joined at every step         | 3 of 3              | 10 of 10                        | 3 of 3 (2 of 3 at step 500)    |
-| Tube over shortest route at 15,000 | 1.15 (1.11 to 1.17) | 1.10 (1.08 to 1.13)             | 1.11 (1.10 to 1.14)            |
-| Agents alive at 15,000             | 4,467               | 4,035 (3,966 to 4,537)          | 4,100 (4,099 to 4,213)         |
+| Dead ends over route at 1,000      | 0.73 (0.68 to 0.75) | 0.54 (0.50 to 0.59)             | 0.54 (0.51 to 0.55)            |
+| at 1,500                           | 0.76 (0.72 to 0.76) | 0.089 (0.064 to 0.127)          | 0.104 (0.088 to 0.105)         |
+| at 2,000                           | 0.65 (0.65 to 0.68) | 0.025 (0.003 to 0.070)          | 0.020 (0.008 to 0.032)         |
+| at 3,000                           | 0.71 (0.64 to 0.78) | 0.012 (0.000 to 0.045)          | 0.004 (0.004 to 0.006)         |
+| at 5,000                           | 0.76 (0.73 to 0.91) | 0.000 (0.000 to 0.006)          | 0.000 (0.000 to 0.000)         |
+| at 15,000                          | 0.66 (0.60 to 0.77) | 0.000 (0.000 to 0.000)          | 0.000 (0.000 to 0.003)         |
+| First measured step below 10 %     | never               | 1,500 (1,500 to 2,000)          | 2,000 (1,500 to 2,000)         |
+| First measured step below 2 %      | never               | 2,500 (2,000 to 4,000)          | 2,500 (2,000 to 2,500)         |
+| Foods joined from step 1,000 on    | 3 of 3              | 10 of 10 (9 of 10 at step 500)  | 3 of 3                         |
+| Tube over shortest route at 15,000 | 1.15 (1.11 to 1.17) | 1.10 (1.09 to 1.14)             | 1.11 (1.10 to 1.13)            |
+| Agents alive at 15,000             | 4,467               | 4,186 (3,991 to 4,480)          | 4,137 (4,074 to 4,154)         |
 
 Without the flow a mesh stays in every corridor. With it one tube remains, and it pulls tight:
 1.20 times the shortest route at step 1,000 and 1.10 at step 15,000. Other flow strengths, two
-seeds each: with 2 the tube dies out (about 70 agents left, foods not joined), because the Maze has
+seeds each: with 2 the tube dies out (about 60 agents left, foods not joined), because the Maze has
 no growth and dead agents come to life only where the flow memory is above 0.5; with 4 a thinner
-tube remains (about 2,100 agents, 1.04 times the shortest route); with 16 a thicker one (about
-9,500 agents, 1.05).
+tube remains (about 2,060 agents, 1.04 to 1.06 times the shortest route); with 16 a thicker one
+(about 9,600 agents, 1.03 to 1.04).
 
 The local solver against the exact solution in the Maze (seed 1): the flux on the cells that carry
 more than 5 % of I0 is 40 % off at step 500, while the pressure still builds up along the route,
@@ -410,28 +418,32 @@ tree. Median and range over the seeds.
 
 | Step   | Model time | All 33 joined | All 36 joined | Links           | TL                  | MD                  | FT                  |
 | ------ | ---------- | ------------- | ------------- | --------------- | ------------------- | ------------------- | ------------------- |
-| 2,000  | 1.1 h      | 10 of 10      | 10 of 10      | 88 (78 to 94)   | 2.81 (2.64 to 2.96) | 0.82 (0.81 to 0.84) | 0.98 (0.94 to 0.99) |
-| 4,000  | 2.2 h      | 10 of 10      | 9 of 10       | 73.5 (68 to 85) | 2.43 (2.27 to 2.63) | 0.82 (0.81 to 0.83) | 0.97 (0.93 to 0.99) |
-| 8,000  | 4.4 h      | 10 of 10      | 9 of 10       | 59.5 (55 to 81) | 2.06 (1.82 to 2.29) | 0.82 (0.81 to 0.91) | 0.94 (0.91 to 0.97) |
-| 12,000 | 6.7 h      | 10 of 10      | 10 of 10      | 57 (49 to 63)   | 1.87 (1.76 to 2.01) | 0.82 (0.81 to 0.90) | 0.92 (0.84 to 0.95) |
-| 16,000 | 8.9 h      | 10 of 10      | 10 of 10      | 60.5 (51 to 71) | 1.91 (1.58 to 2.28) | 0.82 (0.81 to 0.84) | 0.93 (0.84 to 0.96) |
-| 24,000 | 13.3 h     | 10 of 10      | 8 of 10       | 50.5 (46 to 61) | 1.71 (1.59 to 2.00) | 0.82 (0.82 to 0.90) | 0.90 (0.80 to 0.95) |
-| 32,000 | 17.8 h     | 10 of 10      | 10 of 10      | 53.5 (50 to 58) | 1.81 (1.61 to 1.95) | 0.83 (0.81 to 0.93) | 0.91 (0.84 to 0.95) |
-| 40,000 | 22.2 h     | 10 of 10      | 10 of 10      | 52 (49 to 56)   | 1.72 (1.66 to 1.93) | 0.83 (0.82 to 0.91) | 0.90 (0.82 to 0.92) |
-| 48,000 | 26.7 h     | 10 of 10      | 10 of 10      | 51.5 (46 to 55) | 1.79 (1.56 to 1.96) | 0.82 (0.81 to 0.90) | 0.90 (0.82 to 0.95) |
+| 1,000  | 33 min     | 5 of 10       | 0 of 10       | 64.5 (49 to 71) | 2.12 (1.72 to 2.32) | 0.87 (0.84 to 0.90) | 0.91 (0.86 to 0.92) |
+| 2,000  | 1.1 h      | 10 of 10      | 10 of 10      | 80.5 (72 to 92) | 2.73 (2.56 to 2.85) | 0.83 (0.82 to 0.90) | 0.97 (0.94 to 0.99) |
+| 4,000  | 2.2 h      | 10 of 10      | 10 of 10      | 70 (60 to 85)   | 2.46 (2.15 to 2.59) | 0.81 (0.80 to 0.85) | 0.97 (0.93 to 0.99) |
+| 8,000  | 4.4 h      | 10 of 10      | 10 of 10      | 61.5 (55 to 71) | 2.05 (1.87 to 2.28) | 0.82 (0.81 to 0.84) | 0.95 (0.90 to 0.96) |
+| 12,000 | 6.7 h      | 10 of 10      | 9 of 10       | 53.5 (49 to 63) | 1.90 (1.58 to 2.05) | 0.83 (0.82 to 0.91) | 0.91 (0.80 to 0.93) |
+| 16,000 | 8.9 h      | 10 of 10      | 9 of 10       | 55 (46 to 64)   | 1.88 (1.67 to 2.02) | 0.82 (0.81 to 0.91) | 0.92 (0.89 to 0.95) |
+| 24,000 | 13.3 h     | 10 of 10      | 9 of 10       | 53 (47 to 60)   | 1.77 (1.63 to 1.99) | 0.82 (0.81 to 0.84) | 0.92 (0.85 to 0.95) |
+| 32,000 | 17.8 h     | 10 of 10      | 10 of 10      | 53 (45 to 57)   | 1.81 (1.45 to 2.00) | 0.82 (0.80 to 0.89) | 0.92 (0.82 to 0.96) |
+| 40,000 | 22.2 h     | 9 of 10       | 8 of 10       | 54 (42 to 57)   | 1.84 (1.53 to 1.91) | 0.82 (0.81 to 0.84) | 0.93 (0.85 to 0.93) |
+| 48,000 | 26.7 h     | 10 of 10      | 8 of 10       | 53 (45 to 65)   | 1.77 (1.51 to 1.98) | 0.83 (0.81 to 0.91) | 0.91 (0.78 to 0.96) |
 
-At step 48,000, the end of the experiment in model time: TL 1.77 ± 0.14, MD 0.83 ± 0.03 and FT
-0.90 ± 0.04 (mean and standard deviation), and FT over TL is 0.51. The organism (p. 440): TL
+At step 48,000, the end of the experiment in model time: TL 1.77 ± 0.15, MD 0.84 ± 0.03 and FT
+0.90 ± 0.05 (mean and standard deviation), and FT over TL is 0.51. The organism (p. 440): TL
 1.75 ± 0.30, MD 0.85 ± 0.04, FT 0.80 ± 0.13 without light and 0.86 ± 0.04 with light on the
 mountains, and FT over TL about 0.5. The check of the specification of 2026-11-11 (TL from 1.45 to
 2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds in 10 of 10 seeds at step
 24,000 and at step 48,000, and FT in 10 of 10. So the network of the scene is as long as the
-organism's, and it is a little more direct and more fault tolerant: MD is 0.5 and FT 0.7 standard
-deviations of the paper from the paper's mean without light (FT 0.9 above the mean with light).
+organism's, and it is a little more direct and more fault tolerant: MD is 0.3 and FT 0.8 standard
+deviations of the paper from the paper's mean without light (FT 1.0 above the mean with light).
+The runs with the code before the review gave TL 1.77 ± 0.14, MD 0.83 ± 0.03 and FT 0.90 ± 0.04.
 
-All 33 food sources of Fig. 2 are joined in every sample. Where a row has fewer than 10 of 10 for
-all 36, one of the three food sources at the edge of the map (those that only Fig. 1 has) had no
-tube above the level of the measure in that sample, and it had one again in the next sample.
+From step 2,000 on, all 33 food sources of Fig. 2 are joined in every sample but one (32 of 33 in
+one seed at step 40,000). All 36 are joined in 73 of the 80 samples from step 4,000 on. In the
+other seven, one of the three food sources at the edge of the map (those that only Fig. 1 has) has
+no tube above the level of the measure. No such gap lasts two samples in a row. Two of the seven
+are at step 48,000.
 
 The time course: the colony grows out from Tokyo as a mesh of tubes, reaches all 36 food sources
 by step 2,000 and has its most links there. Then the tubes without a flux between food sources
@@ -446,47 +458,67 @@ seed, 80 in all.
 
 | Flux         | TL          | MD          | FT                         | All 36 joined at 48,000 | All 36 joined, samples | Check of the specification at 48,000 |
 | ------------ | ----------- | ----------- | -------------------------- | ----------------------- | ---------------------- | ------------------------------------ |
-| 1            | 1.64 ± 0.10 | 0.84 ± 0.01 | 0.86 ± 0.04                | 8 of 10                 | 70 of 80               | 10 of 10                             |
-| 1.4          | 1.77 ± 0.14 | 0.83 ± 0.03 | 0.90 ± 0.04                | 10 of 10                | 76 of 80               | 10 of 10                             |
-| 2            | 1.94 ± 0.10 | 0.81 ± 0.01 | 0.93 ± 0.02                | 10 of 10                | 75 of 80               | 9 of 10                              |
+| 1            | 1.71 ± 0.15 | 0.83 ± 0.01 | 0.88 ± 0.03                | 10 of 10                | 73 of 80               | 10 of 10                             |
+| 1.4          | 1.77 ± 0.15 | 0.84 ± 0.03 | 0.90 ± 0.05                | 8 of 10                 | 73 of 80               | 10 of 10                             |
+| 2            | 1.88 ± 0.13 | 0.81 ± 0.01 | 0.93 ± 0.02                | 9 of 10                 | 72 of 80               | 9 of 10                              |
 | The organism | 1.75 ± 0.30 | 0.85 ± 0.04 | 0.80 ± 0.13 or 0.86 ± 0.04 | all                     |                        |                                      |
 
-More flux keeps more links, as in the model of the paper (supplement, Fig. S1): with a flux of 4
-and of 8 (three seeds each, step 24,000) TL is 2.07 (1.91 to 2.27) and 2.14 (2.11 to 2.42), and FT
-is 0.95 and 0.97. With 1 and with 1.4 every measure lies within one standard deviation of the
-organism's. With 2 the network is longer (TL 0.6 standard deviations above), MD is one standard
-deviation off, and FT one (without light) to two (with light).
+The same thirty runs with the code before the review gave TL 1.64 ± 0.10, 1.77 ± 0.14 and
+1.94 ± 0.10, and all 36 joined in 70, 76 and 75 of 80 samples. So two sets of ten seeds differ by
+up to 0.07 in the mean TL and by up to 3 samples.
 
-One food source is without a tube above the level of the measure in 10 of 80 samples with 1, in 4
-with 1.4 and in 5 with 2. With 1 and with 1.4 it is always one of the three at the edge of the map;
-with 2 it is once one of the 33 of Fig. 2. No such gap is longer than two samples in a row (flux 1)
-or one sample (1.4 and 2). The reason for the difference: a tube that ends at a food source carries
-the flux I0 of that source. In a tube of one cell, f(I0) is 0.50 for a flux of 1, 0.65 for 1.4 and
-0.78 for 2, and dead agents come to life only where the flow memory is above 0.5 (decision 8). So
-with a flux of 1 the tubes to the edge live from the growth rule alone.
+More flux gives a longer network with more loops, as in the model of the paper (supplement,
+Fig. S1): with a flux of 4 and of 8 (three seeds each, step 24,000) TL is 1.97 (1.89 to 2.25) and
+2.34 (2.32 to 2.36), and FT is 0.95 and 0.97. With 1 and with 1.4 every measure lies within one
+standard deviation of the organism's. With 2, TL is 0.4 standard deviations above, MD is one
+standard deviation off, and FT one (without light) to two (with light). The strengths do not
+differ in how often one food source is without a tube above the level of the measure: 7, 7 and 8
+of 80 samples.
 
-The scene uses 1.4: its total length is the organism's, and its food sources stay joined as with a
-flux of 2. A flux of 1 is a little nearer to the organism in MD and FT and 0.4 standard deviations
-shorter in TL; its tubes to the edge of the map are thinner.
+The scene uses 1.4: in both sets of runs its total length is the organism's (1.77 against 1.75). A
+flux of 1 is as near to the organism in MD and FT, within the spread of the seeds, and a little
+shorter in TL (1.71, and 1.64 before the review).
 
 Without the flow (one seed) the mesh of Jones' growth rule stays: TL 2.70 to 2.88 and FT 0.96 to
-0.99 from step 2,000 to step 24,000, with 76 to 88 links. On WebGL2 (two seeds) the scene
-gives TL 1.85 and 1.95, MD 0.81 and 0.82 and FT 0.92 and 0.87 at step 24,000, within the range of
-the ten seeds on WebGPU.
+0.99 from step 2,000 to step 24,000, with 76 to 88 links. On WebGL2 (two seeds) the scene gives TL
+1.72 and 1.91, MD 0.82 and 0.83 and FT 0.90 and 0.92 at step 24,000, within the range of the ten
+seeds on WebGPU.
 
 ### With the flow off
 
 With `flow` off the branch gives the bytes of `main` (`377f428`): the 16 scenes of `main` and the
 default settings, 500 steps from seed 12345, on WebGPU and on WebGL2; the Maze with its flow
 switched off. The SHA-256 digests of the agents, the trail, the scent and the environment are equal
-in 34 of 34 runs (M3 Pro, 2026-11-13). The sources of `agents.wgsl` and `growth.wgsl` without the
-lines of the flow equal the files of `main` character for character (decision 13).
+in 34 of 34 runs (M3 Pro, 2026-11-13, checked again with commit `92a63e7` after the review). The
+sources of `agents.wgsl` and `growth.wgsl` without the lines of the flow equal the files of `main`
+character for character (decision 13).
 
 The Foraging maze with the flow switched on (flux 8, three seeds; the scene itself keeps it off):
 the colony grows from the first food and reaches the far food between step 4,000 and step 6,000.
-From then on both foods are covered, the flux runs, and the mesh thins to one tube: 1.03 to 1.06
-times the shortest route at step 12,000, with the dead ends at 9 to 14 % of the route's trail and
-falling.
+From then on both foods are covered, the flux runs, and the mesh thins to one tube: 1.04 to 1.07
+times the shortest route at step 12,000. The dead ends hold 37 to 63 % of the route's trail at
+step 8,000 and 20 to 28 % at step 12,000.
+
+## Review before the merge (2026-11-13)
+
+A second reader went through the change before the merge. Each finding was checked in the code.
+
+- **WebGPU, a serious fault.** With the flow, the pass `settle` has one pipeline for each variant
+  of the agent passes (walls, trail saturation), but its bind group was cached without the
+  variant, and on WebGPU a bind group belongs to its pipeline. In a scene with the flow and the
+  rule of one agent per cell, a change of the trail saturation or of the walls made every later
+  step invalid: no pass of it ran, and no message showed. A new GPU test changes both during a
+  run; before the fix no agent moved after the change. The key of the bind group now names the
+  variant (`sim.ts`).
+- The reference cell of the pressure: decision 3.
+- The random stream of the starvation draw: decision 15.
+- The text "nothing starves" without a flux: decision 5. The rule did not change.
+- The engine mapped the food sites after every paint, also with the flow off (8 ms for a list of
+  100,000 edits, measured by the reader). It now maps them only while the flow is on, when the
+  flow turns on and after every load. A load without shapes left the sites of the scene before in
+  the simulation; they had no effect, because a site without food gives and takes nothing.
+- Open: the textures of the flow are made at the first step that needs them, outside the error
+  scopes of the start (`TODO.md`).
 
 ## Consequences
 
@@ -508,10 +540,10 @@ falling.
   16 h): Jones' growth rule has no speed of its own to set.
 - North stays up on the Tokyo scene only on its lattice. A grid shaped like a tall screen, chosen
   by the user, turns the map by 90°, as every scene (ADR 0019).
-- Cost: the flow takes about 2 ms more per step on 512 × 320 cells and 3 to 3.6 ms on 512 × 512
-  (M3 Pro; table (c)), 6 to 11 times the step of these scenes without it. At the default speed of
-  120 steps per second the steps then take a quarter (Maze on WebGPU) to a half (Tokyo on WebGL2)
-  of the time. The frame budget (ADR 0028) lowers the steps per second on a slower GPU, and the
+- Cost: the flow takes about 1.5 ms more per step on 512 × 320 cells and 2.3 to 2.5 ms on
+  512 × 512 (M3 Pro; table (c)), 5 to 10 times the step of these scenes without it. At the default
+  speed of 120 steps per second the steps then take a fifth (Maze on WebGPU) to more than a third
+  (Tokyo on WebGL2) of the time. The frame budget (ADR 0028) lowers the steps per second on a slower GPU, and the
   startup check can lower the grid.
 - The time limits of the new GPU tests follow ADR 0010. In the CI image (SwiftShader, 4 CPUs,
   16 GB, Docker on an M3 Pro, 2026-11-13) the 23 tests of `flow.gpu.test.ts` took 68 s together.

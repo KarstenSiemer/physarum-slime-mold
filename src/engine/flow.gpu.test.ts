@@ -55,6 +55,17 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     return sim;
   }
 
+  /** How many living agents are in another place after `steps` steps: none if the steps did not run. */
+  async function moved(sim: Sim, steps: number) {
+    const before = await sim.readAgents();
+    sim.run(steps);
+    const after = await sim.readAgents();
+    return before.filter((a, i) => {
+      const b = after[i];
+      return b !== undefined && (a.bits & ALIVE) !== 0 && (a.x !== b.x || a.y !== b.y);
+    }).length;
+  }
+
   it('follows the CPU reference: the memory and the pressure of every step', async () => {
     const [w, h] = [48, 40];
     const settings = flowing();
@@ -401,28 +412,96 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const settings = flowing({ seed: 3 });
     const sim = await make(settings, w, h, 2000, 600);
     const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
-    const moved = async (steps: number) => {
-      const before = await sim.readAgents();
-      sim.run(steps);
-      const after = await sim.readAgents();
-      return before.filter((a, i) => {
-        const b = after[i];
-        return b !== undefined && (a.bits & ALIVE) !== 0 && (a.x !== b.x || a.y !== b.y);
-      }).length;
-    };
     device?.pushErrorScope('validation');
     // Four steps bind the passes at both parities of the buffers.
-    expect(await moved(4)).toBeGreaterThan(300);
+    expect(await moved(sim, 4)).toBeGreaterThan(300);
     // A trail saturation above 0: the agent passes that saturate the trail.
     sim.update({ ...settings, trailSaturation: 20 });
-    expect(await moved(4), 'with a trail saturation').toBeGreaterThan(300);
+    expect(await moved(sim, 4), 'with a trail saturation').toBeGreaterThan(300);
     // The first wall: the agent passes whose sensors check for walls.
     sim.paint([{ kind: 'wall', from: [10, 10], to: [30, 10], radius: 1 }]);
-    expect(await moved(4), 'with a wall').toBeGreaterThan(300);
+    expect(await moved(sim, 4), 'with a wall').toBeGreaterThan(300);
     sim.update(settings);
-    expect(await moved(4), 'without the trail saturation again').toBeGreaterThan(300);
+    expect(await moved(sim, 4), 'without the trail saturation again').toBeGreaterThan(300);
     expect((await device?.popErrorScope())?.message).toBeUndefined();
   }, 120_000);
+
+  it('keeps stepping when the rule, growth, the food or the flow itself change during a run', async () => {
+    // Each change selects other passes or other buffers for the passes of the flow. The engine resets the simulation
+    // after a change of the rule of one agent per cell (engine.ts RESET_KEYS).
+    const [w, h] = [48, 48];
+    const base = flowing({ seed: 4, density: 0.065, capacity: 0.65 });
+    const sim = await make(base, w, h, 2000, 600);
+    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const food = (x: number): Stroke => ({ kind: 'food', from: [x, 30.5], to: [x, 30.5], radius: 3 });
+    const changes: [string, () => void][] = [
+      ['at the start', () => undefined],
+      [
+        'with two foods: the scent is no longer empty',
+        () => {
+          sim.paint([food(12.5), food(36.5)]);
+        },
+      ],
+      [
+        'without the rule of one agent per cell',
+        () => {
+          sim.update({ ...base, collisions: false });
+          sim.reset();
+        },
+      ],
+      [
+        'with the rule again',
+        () => {
+          sim.update(base);
+          sim.reset();
+        },
+      ],
+      [
+        'with growth and shrinkage',
+        () => {
+          sim.update({ ...base, growth: true, growthEvery: 1, shrinkEvery: 1 });
+        },
+      ],
+      [
+        'without growth again',
+        () => {
+          sim.update(base);
+        },
+      ],
+      [
+        'with the flow off',
+        () => {
+          sim.update({ ...base, flow: false });
+        },
+      ],
+      [
+        'with the flow on again',
+        () => {
+          sim.update(base);
+        },
+      ],
+      [
+        'after a clear of the environment',
+        () => {
+          sim.clearEnvironment();
+        },
+      ],
+      [
+        'after a reset',
+        () => {
+          sim.reset();
+        },
+      ],
+    ];
+    device?.pushErrorScope('validation');
+    for (const [what, change] of changes) {
+      change();
+      expect(await moved(sim, 4), what).toBeGreaterThan(100);
+    }
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
+    // The flow runs at the end: the simulation holds its memory.
+    expect((await sim.readFlow()).length).toBe(w * h * 4);
+  }, 240_000);
 
   it('lets no agent divide on a cell that the flux passed by (growth of Jones 2011)', async () => {
     const [w, h] = [96, 48];

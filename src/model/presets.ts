@@ -495,9 +495,9 @@ PRESETS.push(
           foodStrength: 0.03,
           growth: true,
           flow: true,
-          // Measured with 1, 1.4 and 2 over ten seeds each (ADR 0029): with 1.4 the total length of the network is
-          // that of the organism (1.77 against 1.75 times the minimum spanning tree), and the food sources at the
-          // edge of the map keep their tubes. The I0 = 2 of the model of Tero et al. 2010 (Fig. 4) has another unit.
+          // Measured with 1, 1.4 and 2 over ten seeds each, twice (ADR 0029): with 1.4 the total length of the
+          // network is that of the organism (1.77 against 1.75 times the minimum spanning tree). The I0 = 2 of the
+          // model of Tero et al. 2010 (Fig. 4) has another unit.
           flowStrength: 1.4,
         },
       ),
