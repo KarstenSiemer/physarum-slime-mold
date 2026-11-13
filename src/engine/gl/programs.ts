@@ -22,8 +22,11 @@ import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import trailDownFrag from './glsl/trail-down.frag?raw';
+import tubesFrag from './glsl/tubes.frag?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import wallsFrag from './glsl/walls.frag?raw';
+import { FLOW } from '../flow';
+import { TUBES } from '../tubes';
 import { bindBlock, program, startProgram, type GL } from './gl';
 
 /** Uniform block binding points. */
@@ -38,6 +41,13 @@ export const FLOW_BINDING = 2;
 export const ORDER_TILE = 64;
 
 const V = '#version 300 es\n';
+
+/** A number as a float literal of GLSL: a whole number needs its point. */
+const literal = (v: number) => (Number.isInteger(v) ? `${String(v)}.0` : String(v));
+/** The numbers of the picture of the tubes (tubes.ts) for tubes.frag, as sim.ts sets them for tubes.wgsl. */
+const TUBE_DEFINES =
+  `#define RADIUS ${literal(TUBES.radius)}\n#define EDGE ${literal(TUBES.edge)}\n#define SHEET ${literal(TUBES.sheet)}\n` +
+  `#define SPAN ${literal(TUBES.span)}\n#define BODY_LOW ${literal(FLOW.bodyLow)}\n`;
 
 export interface Program {
   program: WebGLProgram;
@@ -91,6 +101,14 @@ export interface FlowPrograms {
   points: Program;
 }
 
+/** The passes of the picture of the tubes (tubes.frag, ADR 0034). */
+export interface TubePrograms {
+  /** PASS 0: per cell and strain the factor of the radius of its tube. */
+  roots: Program;
+  /** PASS 1: the trail that the view draws. */
+  picture: Program;
+}
+
 /** The programs of growth and shrinkage (growth.frag, growth.vert, ADR 0025). */
 export interface Growth {
   /** PASS 0 and 1: the row sums of the occupancy, then the window counts. */
@@ -128,6 +146,8 @@ export interface Programs {
   growth: () => Growth;
   /** The passes of the flow in the tubes, compiled at their first use: only scenes with the flow need them. */
   flow: () => FlowPrograms;
+  /** The passes of the picture of the tubes, compiled at their first use, with the numbers of tubes.ts. */
+  tubes: () => TubePrograms;
   /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide (FLOW in growth.frag, ADR 0029),
    * compiled at its first use: only a scene with growth and the flow needs it.
@@ -233,6 +253,7 @@ export function compile(gl: GL): Programs {
   let capacity: Program | undefined;
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
+  let tubes: TubePrograms | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
@@ -267,6 +288,11 @@ export function compile(gl: GL): Programs {
           gl,
           program(gl, V + common + '#define FLOW 1\n' + toolsGlsl + pointsVert, V + common + pointsFrag),
         ),
+      }),
+    tubes: () =>
+      (tubes ??= {
+        roots: sim(`#define PASS 0\n${TUBE_DEFINES}${tubesFrag}`),
+        picture: sim(`#define PASS 1\n${TUBE_DEFINES}${tubesFrag}`),
       }),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;

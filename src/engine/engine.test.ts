@@ -4,7 +4,7 @@ import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
 import { Engine, MAX_IN_FLIGHT, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
-import { diffusePlan, equilibrium, gridSize } from './sizing';
+import { diffusePlan, equilibrium, FLOW_BYTES_PER_CELL, gridSize, memoryBudget, TUBES_BYTES_PER_CELL } from './sizing';
 
 describe('gridSize', () => {
   it('puts the resolution on the long side', () => {
@@ -173,6 +173,41 @@ describe('the scent view', () => {
   });
 });
 
+// The picture of the tubes (ADR 0034) changes the view only, as the scent view: no restart and no new simulation, and
+// its switch does not change the grid that fits the memory.
+describe('the picture of the tubes', () => {
+  it('neither restarts nor rebuilds the simulation', async () => {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const settings: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true };
+    const engine = await Engine.create(canvas, settings, undefined, new CpuBackend());
+    const [sim, restarts] = [engine.sim, engine.restarts];
+    engine.frame(0, 3);
+    await engine.apply({ ...settings, showTubes: false });
+    engine.frame(16, 3);
+    await engine.apply({ ...settings, showTubes: true });
+    expect(engine.sim).toBe(sim);
+    expect(engine.restarts).toBe(restarts);
+    expect(engine.sim.step).toBe(6);
+  });
+
+  it('counts the memory of the picture with the flow, whatever the switch says', async () => {
+    const backend = new CpuBackend();
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const base: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true, density: 0.001 };
+    const engine = await Engine.create(canvas, base, undefined, backend);
+    const perCell = backend.bytesPerCell + FLOW_BYTES_PER_CELL + TUBES_BYTES_PER_CELL;
+    // The largest square lattice that would fit with 16 B less per cell, and the largest that fits with 16 B more.
+    const [tooLarge, small] = [-16, 16].map((more) => Math.floor(Math.sqrt(memoryBudget() / (perCell + more))));
+    for (const showTubes of [true, false]) {
+      const fit = (side = 0) => engine.fit({ ...base, showTubes, lattice: [side, side] }).lattice;
+      expect(fit(tooLarge), `the picture ${showTubes ? 'on' : 'off'}`).toBeNull();
+      expect(fit(small), `the picture ${showTubes ? 'on' : 'off'}`).toEqual([small, small]);
+    }
+    // Without the flow the same lattice fits: the picture has no textures then.
+    expect(engine.fit({ ...base, flow: false, lattice: [tooLarge ?? 0, tooLarge ?? 0] }).lattice).not.toBeNull();
+  });
+});
+
 // ADR 0026: beside a closed lattice nothing may happen. A tool there reaches no cell of the arena, so it is idle, and a
 // paused hold runs no step. On a periodic lattice every place shows a cell of the grid.
 describe('agent tools beside a lattice', () => {
@@ -293,6 +328,7 @@ describe('frames that show nothing new', () => {
       e.apply({ ...e.settings, strains: e.settings.strains.map((s, i) => (i === 0 ? { ...s, color: '#123456' } : s)) }),
     'another exposure': (e) => e.apply({ ...e.settings, exposure: 0.5 }),
     'the scent view': (e) => e.apply({ ...e.settings, showScent: true }),
+    'the picture of the tubes': (e) => e.apply({ ...e.settings, showTubes: false }),
     'a restart from another seed': (e) => e.apply({ ...e.settings, seed: e.settings.seed + 1 }),
     'another grid': (e) => e.apply({ ...e.settings, resolution: 512 }),
     'a stroke': (e) => {

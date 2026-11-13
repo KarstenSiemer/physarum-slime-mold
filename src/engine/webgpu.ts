@@ -99,7 +99,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async settle(sim: Simulation): Promise<Levels> {
-    await this.auto.measure(sim.viewTexture);
+    await this.auto.measure(sim.pictureTexture, 1, sim.viewTexture);
     return this.levels();
   }
 
@@ -108,7 +108,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async measured(sim: Simulation): Promise<Levels> {
-    return (await this.auto.read(sim.viewTexture)) ?? this.levels();
+    return (await this.auto.read(sim.pictureTexture, sim.viewTexture)) ?? this.levels();
   }
 
   /**
@@ -139,12 +139,14 @@ export class WebGpuBackend implements Backend<Simulation> {
    * this frame alone (an export), in place of those of the frames.
    */
   private frame(sim: Simulation, s: Settings, view: View, measure: boolean, given?: Levels): Frame {
-    // The map after the step's diffusion in either order of a step (ADR 0027).
-    const trail = sim.viewTexture;
+    // The map after the step's diffusion in either order of a step (ADR 0027), or the picture of the tubes made from it
+    // (ADR 0034): the levels and the bloom are those of the trail that the frame draws.
+    const trail = sim.pictureTexture;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
-    // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009).
-    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback);
+    // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009). The
+    // strand is a level of the trail of the model, with or without the picture of the tubes.
+    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback, sim.viewTexture);
     const l = given ?? this.levels();
     const base = agents ? 0.4 / s.density : l.gain || fallback;
     const exposure = base * 2 ** s.exposure;

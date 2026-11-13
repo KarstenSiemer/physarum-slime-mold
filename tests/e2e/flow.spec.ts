@@ -139,3 +139,52 @@ test('Rival networks starts a colony of each strain, and each strain has a flow 
   expect(memories).toEqual([384 * 384 * 4, 384 * 384 * 4, 0]);
   expect(errors).toEqual([]);
 });
+
+// The picture of the tubes (ADR 0034): its switch below the flow strength changes the view only. With it the picture
+// holds another trail than the view of the model, and without it the same.
+test('the switch below the flow strength draws the tubes by their flow, and changes the view only', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await open(page, await smallScene({ resolution: 256 }));
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('maze');
+  await page.waitForFunction(() => globalThis.physarum?.settings.flow === true, undefined, { timeout: 150_000 });
+  await page.locator('summary', { hasText: 'Flow' }).click();
+  const tubes = page.getByRole('checkbox', { name: 'Draw the tubes by their flow', exact: true });
+  await expect(tubes).toBeChecked();
+  expect(await page.evaluate(() => globalThis.physarum?.settings.showTubes)).toBe(true);
+  // How many cells the picture draws with another trail than the view of the model, and the step.
+  const differs = () =>
+    page.evaluate(async () => {
+      const sim = globalThis.physarum?.sim;
+      if (!sim) return { cells: -1, step: -1 };
+      const [picture, view] = [await sim.readPicture(), await sim.readView()];
+      let cells = 0;
+      for (let i = 0; i < view.length; i += 4) if (picture[i] !== view[i]) cells++;
+      return { cells, step: sim.step };
+    });
+  // The colony holds tubes after some steps: the picture then differs from the trail on many cells.
+  await expect.poll(async () => (await differs()).cells, { timeout: 120_000 }).toBeGreaterThan(100);
+  const before = (await differs()).step;
+  await tubes.uncheck();
+  await page.waitForFunction(() => globalThis.physarum?.settings.showTubes === false);
+  // The same simulation goes on, and the picture is the trail of the view again.
+  const off = await differs();
+  expect(off.cells).toBe(0);
+  expect(off.step).toBeGreaterThanOrEqual(before);
+  await expect.poll(async () => (await linked(page))?.showTubes).toBe(false);
+  // The card of the scene does not count the switch as a change of the scene.
+  const card = page.getByRole('region', { name: 'Scene', exact: true });
+  await expect(card.getByText('changed', { exact: true })).toHaveCount(0);
+  // The help states the rule and its numbers.
+  await page.getByRole('button', { name: 'About Draw the tubes by their flow', exact: true }).click();
+  await expect(page.getByText(/grows with the fourth root of the conductivity/)).toBeVisible();
+  await tubes.check();
+  await expect.poll(async () => (await differs()).cells, { timeout: 60_000 }).toBeGreaterThan(100);
+  // Without the flow there is no switch: the picture is the trail.
+  await page.getByRole('checkbox', { name: 'Flow in the tubes', exact: true }).uncheck();
+  await expect(tubes).toHaveCount(0);
+  await page.waitForFunction(() => globalThis.physarum?.settings.flow === false);
+  expect((await differs()).cells).toBe(0);
+  expect(errors).toEqual([]);
+});

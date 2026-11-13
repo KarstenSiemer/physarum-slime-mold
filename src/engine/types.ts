@@ -83,6 +83,16 @@ export interface Sim {
   readView(): Promise<Float32Array>;
   /** The scent that the view draws, 2 values per cell: the scent of the same state as readView() (ADR 0027). */
   readViewScent(): Promise<Float32Array>;
+  /**
+   * The trail that the picture draws, 4 lanes per cell: readView(), or the picture of the tubes while the settings
+   * show it and the flow holds a state (tubes.ts, ADR 0034).
+   */
+  readPicture(): Promise<Float32Array>;
+  /**
+   * For tests: the factor of the radius of the tube of every cell and strain in the picture of the tubes, 4 values per
+   * cell; empty without that picture.
+   */
+  readTubeRoots(): Promise<Float32Array>;
   /** Food scent and light repellent, 2 values per cell, rows from y = 0. */
   readScent(): Promise<Float32Array>;
   /** Agents that moved into each cell in the last step, 4 lanes per cell. */

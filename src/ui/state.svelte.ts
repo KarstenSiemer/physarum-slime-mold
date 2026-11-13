@@ -172,6 +172,8 @@ export function setScene(p: Preset) {
   s.resolution = Math.min(s.resolution, app.maxResolution);
   // The scent view is the user's, not the scene's: it stays as it is, so two scenes compare (ADR 0009, 2026-11-11).
   s.showScent = app.settings.showScent;
+  // So is the picture of the tubes (ADR 0034).
+  s.showTubes = app.settings.showTubes;
   // Without the rule a scene of Jones runs on the extended model: the Jones model always has it (constrain()).
   if (!app.canCollide) s = constrain({ ...s, collisions: false });
   const base = structuredClone(s);

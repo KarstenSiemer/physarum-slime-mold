@@ -1,6 +1,7 @@
-// Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"). The script puts one
-// wrong rule at a time into a source file of the app, runs the GPU tests of the flow on the backend of that file, and
-// puts the file back. Every wrong rule must fail at least one test.
+// Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules") and of the picture of
+// the tubes (ADR 0034). The script puts one wrong rule at a time into a source file of the app, runs the GPU tests of
+// the flow or of the picture on the backend of that file, and puts the file back. Every wrong rule must fail at least
+// one test.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/mutate.ts [W1 F3 ...]
 // It changes files below src/ while it runs, and it writes each one back as it was. It stops if a file has changed
 // since the mutations were written: then the text of a mutation no longer fits.
@@ -11,11 +12,19 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WGSL = 'src/engine/shaders/flow.wgsl';
 const FRAG = 'src/engine/gl/glsl/flow.frag';
+/** The passes of the picture of the tubes, and the file of their tests. */
+const TUBES_WGSL = 'src/engine/shaders/tubes.wgsl';
+const TUBES_FRAG = 'src/engine/gl/glsl/tubes.frag';
+const TUBES_SPEC = 'src/engine/tubes.gpu.test.ts';
+const FLOW_SPEC = 'src/engine/flow.gpu.test.ts';
 /** The tests of one backend: a part of the test names. */
 const [GPU, GL] = ['webgpu', 'webgl2|WebGL2'];
 
-/** A wrong rule: its name, the file, the text of the right rule in it, the wrong text, and the tests to run. */
-const MUTATIONS: [name: string, file: string, right: string, wrong: string, tests: string][] = [
+/**
+ * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run, and their
+ * file (without one: the tests of the flow).
+ */
+const MUTATIONS: [name: string, file: string, right: string, wrong: string, tests: string, spec?: string][] = [
   [
     'W1 wgsl: the momentum on every cell',
     WGSL,
@@ -305,6 +314,287 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'float memory = flowMemoryOf(0u, q).x;',
     GL,
   ],
+  // The picture of the tubes (ADR 0034).
+  [
+    'V1 wgsl: the square root of the strength, not the fourth root',
+    TUBES_WGSL,
+    'textureStore(rootsOut, p, sqrt(sqrt(across)));',
+    'textureStore(rootsOut, p, sqrt(across));',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V2 wgsl: a tube on a cell without a body',
+    TUBES_WGSL,
+    'if (m.y >= BODY_LOW) { sum[s] += m.x * m.y; }',
+    'if (m.y >= 0.0) { sum[s] += m.x * m.y; }',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V3 wgsl: the flow memory without the body',
+    TUBES_WGSL,
+    'if (m.y >= BODY_LOW) { sum[s] += m.x * m.y; }',
+    'if (m.y >= BODY_LOW) { sum[s] += m.x; }',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V4 wgsl: the sum of the 3 × 3 cells over one cell of length',
+    TUBES_WGSL,
+    'let across = min(vec4f(sum[0], sum[1], sum[2], sum[3]) / SPAN, vec4f(1.0));',
+    'let across = min(vec4f(sum[0], sum[1], sum[2], sum[3]), vec4f(1.0));',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V5 wgsl: a strength above 1',
+    TUBES_WGSL,
+    'let across = min(vec4f(sum[0], sum[1], sum[2], sum[3]) / SPAN, vec4f(1.0));',
+    'let across = vec4f(sum[0], sum[1], sum[2], sum[3]) / SPAN;',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V6 wgsl: the tubes of every strain from the memory of the first strain',
+    TUBES_WGSL,
+    'let m = textureLoad(memory, q, s, 0);',
+    'let m = textureLoad(memory, q, 0u, 0);',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V7 wgsl: a disc passes a wall',
+    TUBES_WGSL,
+    'if (here + clearOf(q) <= d) { continue; }',
+    'if (here + clearOf(q) <= -1.0) { continue; }',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V8 wgsl: no plasmodium without a tube',
+    TUBES_WGSL,
+    'textureStore(pictureOut, p, max(SHEET * textureLoad(trail, p, 0), tube));',
+    'textureStore(pictureOut, p, tube);',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V9 wgsl: the mean trail without the largest weight',
+    TUBES_WGSL,
+    'let tube = top * lit / max(sum, vec4f(1e-20));',
+    'let tube = lit / max(sum, vec4f(1e-20));',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V10 wgsl: the trail of the strongest disc, not the mean by weight',
+    TUBES_WGSL,
+    'lit += textureLoad(trail, q, 0) * weight;',
+    'lit = max(lit, textureLoad(trail, q, 0) * weight); sum = top;',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V11 wgsl: a weight without the factor of the radius',
+    TUBES_WGSL,
+    'let weight = root * clamp(',
+    'let weight = clamp(',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V12 wgsl: the edge of a disc twice as wide',
+    TUBES_WGSL,
+    '- d) / EDGE, vec4f(0.0), vec4f(1.0));',
+    '- d) / (2.0 * EDGE), vec4f(0.0), vec4f(1.0));',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V13 wgsl: a picture outside the arena',
+    TUBES_WGSL,
+    'if (cellXY(p).x < 0) {\n    textureStore(pictureOut, p, vec4f(0.0));',
+    'if (false) {\n    textureStore(pictureOut, p, vec4f(0.0));',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V14 glsl: the square root of the strength, not the fourth root',
+    TUBES_FRAG,
+    'result = sqrt(sqrt(min(sum / SPAN, vec4(1.0))));',
+    'result = sqrt(min(sum / SPAN, vec4(1.0)));',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V15 glsl: a tube on a cell without a body',
+    TUBES_FRAG,
+    'float strength(vec4 m) { return m.y >= BODY_LOW ? m.x * m.y : 0.0; }',
+    'float strength(vec4 m) { return m.y >= 0.0 ? m.x * m.y : 0.0; }',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V16 glsl: the flow memory without the body',
+    TUBES_FRAG,
+    'float strength(vec4 m) { return m.y >= BODY_LOW ? m.x * m.y : 0.0; }',
+    'float strength(vec4 m) { return m.y >= BODY_LOW ? m.x : 0.0; }',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V17 glsl: a strength above 1, over one cell of length',
+    TUBES_FRAG,
+    'result = sqrt(sqrt(min(sum / SPAN, vec4(1.0))));',
+    'result = sqrt(sqrt(sum));',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V18 glsl: the tubes of the second strain from the memory of the first strain',
+    TUBES_FRAG,
+    'if (strains > 1) sum.y += strength(texelFetch(flowMemory1, q, 0));',
+    'if (strains > 1) sum.y += strength(texelFetch(flowMemory, q, 0));',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V19 glsl: a tube of a strain that the scene does not hold',
+    TUBES_FRAG,
+    'if (strains > 2) sum.z += strength(texelFetch(flowMemory2, q, 0));',
+    'sum.z += strength(texelFetch(flowMemory2, q, 0));',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V20 glsl: a disc passes a wall',
+    TUBES_FRAG,
+    'if (here + clearOf(q) <= d) continue;',
+    'if (here + clearOf(q) <= -1.0) continue;',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V21 glsl: no plasmodium without a tube',
+    TUBES_FRAG,
+    'result = max(SHEET * texelFetch(trail, p, 0), tube);',
+    'result = tube;',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V22 glsl: the mean trail without the largest weight',
+    TUBES_FRAG,
+    'vec4 tube = top * lit / max(sum, vec4(1e-20));',
+    'vec4 tube = lit / max(sum, vec4(1e-20));',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V23 glsl: a weight without the factor of the radius',
+    TUBES_FRAG,
+    'vec4 weight = root * clamp(',
+    'vec4 weight = clamp(',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V24 glsl: the edge of a disc twice as wide',
+    TUBES_FRAG,
+    '- d) / EDGE, 0.0, 1.0);',
+    '- d) / (2.0 * EDGE), 0.0, 1.0);',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V25 webgpu: the picture does not follow a new memory of the flow',
+    'src/engine/sim.ts',
+    'this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);\n    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();',
+    'this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);\n    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V26 webgpu: the picture from the trail before the diffusion of a step that moves first',
+    'src/engine/sim.ts',
+    '    const trail = this.viewTexture;\n    this.writeParams();\n    const tubes = this.ensureTubes();',
+    '    const trail = this.trail[this.parity];\n    this.writeParams();\n    const tubes = this.ensureTubes();',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V27 webgpu: the picture with its switch off',
+    'src/engine/sim.ts',
+    'if (!tubesShown(this.settings) || !this.flow) return this.viewTexture;\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
+    'if (!this.flow) return this.viewTexture;\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V28 webgpu: the strand of the scent view from the picture',
+    'src/engine/webgpu.ts',
+    'await this.auto.measure(sim.pictureTexture, 1, sim.viewTexture);',
+    'await this.auto.measure(sim.pictureTexture, 1);',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V29 webgpu: the levels from the trail without the tubes',
+    'src/engine/webgpu.ts',
+    'await this.auto.measure(sim.pictureTexture, 1, sim.viewTexture);',
+    'await this.auto.measure(sim.viewTexture, 1, sim.viewTexture);',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V30 webgl2: the picture does not follow a new memory of the flow',
+    'src/engine/gl/sim.ts',
+    'writeTarget(this.gl, at(this.ensureFlow().memory, strain)[this.flowM], 0, 0, this.width, this.height, data);\n    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();',
+    'writeTarget(this.gl, at(this.ensureFlow().memory, strain)[this.flowM], 0, 0, this.width, this.height, data);\n    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V31 webgl2: the picture from the trail before the diffusion of a step that moves first',
+    'src/engine/gl/sim.ts',
+    '    const trail = this.viewTrail().texture;\n    this.writeParams();\n    this.tubes ??= {',
+    '    const trail = this.currentTrail.texture;\n    this.writeParams();\n    this.tubes ??= {',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V32 webgl2: the picture with its switch off',
+    'src/engine/gl/sim.ts',
+    'if (!tubesShown(this.settings) || !this.flow) return this.viewTrail();\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
+    'if (!this.flow) return this.viewTrail();\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V33 webgl2: the strand of the scent view from the picture',
+    'src/engine/gl/backend.ts',
+    'const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];',
+    'const [drawn, model] = [sim.pictureTarget().texture, sim.pictureTarget().texture];',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V34 webgl2: the levels from the trail without the tubes',
+    'src/engine/gl/backend.ts',
+    'const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];',
+    'const [drawn, model] = [sim.viewTargets().trail.texture, sim.viewTargets().trail.texture];',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V35 both: the picture in the style that draws the agents',
+    'src/engine/tubes.ts',
+    "s.showTubes && flowOn(s) && s.style !== 'agents';",
+    's.showTubes && flowOn(s);',
+    `${GPU}|${GL}`,
+    TUBES_SPEC,
+  ],
 ];
 
 const only = process.argv.slice(2);
@@ -320,7 +610,7 @@ process.on('SIGINT', () => {
 });
 
 let survived = 0;
-for (const [name, file, right, wrong, tests] of MUTATIONS) {
+for (const [name, file, right, wrong, tests, spec = FLOW_SPEC] of MUTATIONS) {
   if (only.length > 0 && !only.includes(name.split(' ')[0] ?? '')) continue;
   const path = ROOT + file;
   const text = readFileSync(path, 'utf8');
@@ -333,7 +623,7 @@ for (const [name, file, right, wrong, tests] of MUTATIONS) {
     try {
       open = { path, text };
       writeFileSync(path, text.replace(right, wrong));
-      const run = spawnSync('npx', ['vitest', 'run', '--project', 'gpu', 'src/engine/flow.gpu.test.ts', '-t', tests], {
+      const run = spawnSync('npx', ['vitest', 'run', '--project', 'gpu', spec, '-t', tests], {
         cwd: ROOT,
         encoding: 'utf8',
         timeout: 900_000,

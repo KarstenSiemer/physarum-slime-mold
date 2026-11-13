@@ -99,6 +99,18 @@ export const FLOW_BYTES_PER_CELL = 80;
 export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>) =>
   flowOn(s) ? FLOW_BYTES_PER_CELL * flowStrains(s) : 0;
 
+/**
+ * More bytes per cell for the picture of the tubes (tubes.ts, ADR 0034): per cell and strain the factor of the radius
+ * of its tube, and the picture, 16 B per cell each (sim.ts TubeState, gl/sim.ts `tubes`). Both backends hold the same.
+ */
+export const TUBES_BYTES_PER_CELL = 32;
+
+/**
+ * The bytes per cell of the picture of the tubes: counted while the flow is on, with the picture or without it. The
+ * switch of the picture changes only the view, so it must not change the grid that fits the memory.
+ */
+export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>) => (flowOn(s) ? TUBES_BYTES_PER_CELL : 0);
+
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
   s.stepOrder === 'move-first' && s.diffusion >= 2;

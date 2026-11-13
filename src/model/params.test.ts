@@ -128,6 +128,15 @@ describe('sanitize (untrusted input)', () => {
     for (const v of [1, 'true', {}, null, undefined]) expect(sanitize({ showScent: v }).showScent).toBe(false);
   });
 
+  // The picture of the tubes is a setting of the look (ADR 0034). It is on for a new scene and for a link from before
+  // it: only `false` turns it off.
+  it('keeps the picture of the tubes on unless a link says false', () => {
+    expect(defaultSettings().showTubes).toBe(true);
+    expect(sanitize({}).showTubes).toBe(true);
+    expect(sanitize({ showTubes: false }).showTubes).toBe(false);
+    for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showTubes: v }).showTubes).toBe(true);
+  });
+
   it('takes the model, covered food and trail saturation', () => {
     const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
     expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);

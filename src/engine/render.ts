@@ -308,8 +308,10 @@ export class Renderer {
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
-    // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027).
-    const { trail, scent } = sim.viewTextures;
+    // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027). The trail is the
+    // picture of the tubes while the settings show it (ADR 0034): every map below is made from the trail that is drawn.
+    const { scent } = sim.viewTextures;
+    const trail = sim.pictureTexture;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
     const view = f.settings.showScent && this.fixed === undefined ? this.scentNow() : undefined;

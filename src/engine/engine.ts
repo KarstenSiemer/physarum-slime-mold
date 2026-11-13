@@ -26,6 +26,7 @@ import {
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
+  tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
 } from './sizing';
@@ -300,6 +301,7 @@ export class Engine {
       (s.coveredFood ? coveredBytesPerCell : 0) +
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
       flowBytesPerCell(s) +
+      tubesBytesPerCell(s) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);

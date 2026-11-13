@@ -834,8 +834,8 @@ not help it: on the fixed network it had not carried the flux to the sink after 
     - Node runs the TypeScript files through `research/flow/register.mjs`, with the TypeScript
       compiler that the repository has. Rejected: a build step or a new package.
     - The logs are in the repository as one archive, `research/flow/logs.tar.gz` (owner,
-      2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0031, 157 since ADR 0032).
-      `research/flow/logs.ts` unpacks it to
+      2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0031, 157 since
+      ADR 0032, 160 since ADR 0034). `research/flow/logs.ts` unpacks it to
       `research/flow/logs/`, which git ignores; a path `research/flow/logs/…` in this record is a
       path in that folder. Reason for the logs: the tables come from them in a second
       (`summary.ts`), and the runs behind them take hours. Reason for the archive: the first form

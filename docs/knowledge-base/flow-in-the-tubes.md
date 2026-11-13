@@ -68,6 +68,11 @@ A. Tero, R. Kobayashi, T. Nakagaki: Physica A 363: 115–119 (2006) and J. Theor
 
 - The network is a graph. A tube between the nodes i and j has the length L and the conductivity D.
   The flux follows Poiseuille's law: Q = D (p_i − p_j) / L (2006, Eq. 1; 2007, Eq. 1) [V].
+- [I] For Poiseuille's flow in a round tube the conductivity grows with the fourth power of the
+  radius (the law of Hagen and Poiseuille: flux = π r⁴ Δp / (8 η L), with the viscosity η). So the
+  radius of a tube grows with the fourth root of its conductivity D. That is textbook physics;
+  nobody of this project read it in the papers above for this note. The picture of the tubes
+  draws that radius (ADR 0034).
 - Kirchhoff's law holds at every node. One food source gives the flux I0 and the other takes it
   (2006, Eq. 2 and 3; 2007, Eq. 2 and 3) [V]. The total flux is fixed.
 - The pressures are the solution of a linear system, a Poisson equation on the graph (2006, Eq. 5;

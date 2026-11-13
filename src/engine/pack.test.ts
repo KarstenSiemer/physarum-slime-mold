@@ -60,6 +60,8 @@ describe('Params layout', () => {
     for (const model of ['jones', 'extended'] as const) {
       const s = { ...defaultSettings(), model };
       expect(new Uint8Array(packParams({ ...s, showScent: true }, at))).toEqual(new Uint8Array(packParams(s, at)));
+      // So with the picture of the tubes (ADR 0034).
+      expect(new Uint8Array(packParams({ ...s, showTubes: false }, at))).toEqual(new Uint8Array(packParams(s, at)));
     }
   });
 
