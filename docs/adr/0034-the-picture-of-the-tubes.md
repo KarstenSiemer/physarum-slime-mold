@@ -181,6 +181,9 @@ The view draws at most one state per frame, so the cost does not grow with the s
 
 - A scene with the flow looks different from before: the picture of the tubes is on. A link from
   before this record opens with it too. No result of a simulation changes.
+- The pictures of the Maze and of the Tokyo scene in `README.md` and for ADR 0029 show the new
+  look. `tests/gallery/readme.spec.ts` makes them from the app's own renderer (seed 7), so they can
+  be made again after the next change of the look.
 - The picture needs 32 B per cell more while the flow is on, and its two passes for each drawn
   state (the table above).
 - Open: the gel style shows the tubes less clearly than the other styles. The owner asked for a

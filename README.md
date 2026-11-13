@@ -19,7 +19,8 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 - Run **experiments**: shortest path, Steiner tree, shrinking plasmodium and wound healing from
   the paper, plus light avoidance, a maze and the Tokyo rail network of Tero et al. (2010).
 - Turn on **flow in the tubes**: tubes that carry flow between foods stay, the others starve.
-  The Maze then keeps one tube along a short route.
+  The Maze then keeps one tube along a short route. The picture draws every tube as wide as its
+  flow says: thick with much flow, thin and faint without.
 - Read what each scene shows: where its settings come from, what to watch, and why it uses them.
 - Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the settings,
   the scene and its food, light and walls as a link.
@@ -30,7 +31,8 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 | ---------------------------------------- | ---------------------------------------- |
 | ![Steiner tree](docs/images/steiner.jpg) | ![Cyclones](docs/images/cyclones.jpg)    |
 
-The Maze at step 5,000, without and with the flow in the tubes:
+The Maze at step 5,000, without and with the flow in the tubes. With the flow, the route between
+the two foods is one thick tube, and the stubs of the dead ends are thin:
 
 ![The Maze without and with the flow in the tubes](docs/images/maze-flow.jpg)
 
