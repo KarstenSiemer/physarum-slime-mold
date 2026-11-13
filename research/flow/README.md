@@ -664,7 +664,7 @@ backends against each other, or the bytes of a scene without the flow fails in C
 
 ### 8. Does every strain have a flow of its own? [ADR 0030]
 
-The fault that the owner saw, as a test (3 s). Two strains, a tube in the trail of one of them,
+The fault that the owner saw, as a test (4 s). Two strains, a tube in the trail of one of them,
 and 200 dead agents of each strain:
 
 ```bash
