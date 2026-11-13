@@ -284,9 +284,9 @@ describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', ()
   // The case in which the first version of the app let the pressure run away. A mesh of tubes grows out from a food
   // as a disc and reaches three more foods, and its cells flicker: in each step a cell of the disc changes between
   // tube and no tube with a chance of 5 %, so cells cross the level of the tube body again and again, the centre
-  // cells of the foods too. With the momentum of the iteration on every cell this run reaches a pressure of 8 · 10⁸
+  // cells of the foods too. With the momentum of the iteration on every cell this run reaches a pressure of 1.3 · 10⁹
   // (measured 2026-11-13). With the rule that only a cell that conducts takes the momentum, the largest pressure is
-  // 433: a food that gives into a piece of tube without a way out, below the pressure limit of a site.
+  // 433, below the pressure limit of a site (4,096 for a flux of 1).
   // flow.gpu.test.ts holds both backends to this copy, on cells with a tube and on cells without one.
   it('stays bounded while a mesh of tubes grows over the foods and flickers', () => {
     const n = 40;

@@ -34,12 +34,14 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
 
   beforeAll(async () => {
     backend = await create(document.createElement('canvas'));
-    // The first simulation with the flow compiles its pipelines: here, under a long timeout.
+    // The first simulation with the flow compiles its pipelines: here, under a long timeout. In the CI image on an
+    // M3 Pro this hook took 45 s on WebGPU and 7 s on WebGL2 (2026-11-13), and GitHub runs SwiftShader's WebGPU
+    // compute about twice as slowly: 600 s keeps it under a quarter of the limit (ADR 0010).
     const sim = await backend.createSim(flowing(), 16, 16, 8);
     sim.run(1);
     await sim.finish();
     sim.destroy();
-  }, 360_000);
+  }, 600_000);
   afterEach(() => {
     for (const s of live.splice(0)) s.destroy();
   });

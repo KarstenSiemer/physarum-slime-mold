@@ -268,10 +268,10 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
    0.2 · (D − 0.5) / 0.5. With the rule of one agent per cell the cell must be empty, and the agent
    claims it as a move does (ADR 0008). In a step in which a tool places agents (inoculate or cut,
    ADR 0023), the flow brings none to life: an agent has one placement per step. So a tube that
-   carries flux fills up and gets wider, until the flux per cell falls. Rejected, with the prototype: (a) a deposit scaled by the flow memory
-   alone: the dead ends stay, because Jones' agents steer by the difference between their sensors
-   and not by the amount of trail; (b) starvation without births: the tube of the route dies out
-   too, more slowly.
+   carries flux fills up and gets wider, until the flux per cell falls. Rejected, with the
+   prototype: (a) a deposit scaled by the flow memory alone: the dead ends stay, because Jones'
+   agents steer by the difference between their sensors and not by the amount of trail; (b)
+   starvation without births: the tube of the route dies out too, more slowly.
 
 9. **With growth and shrinkage (ADR 0025), an agent does not divide on a starved cell.** An agent
    divides only where D ≥ h (0.01), the level at which the chance of starvation is half its top
@@ -407,9 +407,9 @@ At step 48,000, the end of the experiment in model time: TL 1.77 ± 0.14, MD 0.8
 1.75 ± 0.30, MD 0.85 ± 0.04, FT 0.80 ± 0.13 without light and 0.86 ± 0.04 with light on the
 mountains, and FT over TL about 0.5. The check of the specification of 2026-11-11 (TL from 1.45 to
 2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds in 10 of 10 seeds at step
-24,000 and at step 48,000, and FT in 10 of 10. So the network of the scene is as long as the organism's, and it is a
-little more direct and more fault tolerant: MD is 0.5 and FT 0.7 standard deviations of the paper
-from the paper's mean without light (FT 0.9 above the mean with light).
+24,000 and at step 48,000, and FT in 10 of 10. So the network of the scene is as long as the
+organism's, and it is a little more direct and more fault tolerant: MD is 0.5 and FT 0.7 standard
+deviations of the paper from the paper's mean without light (FT 0.9 above the mean with light).
 
 All 33 food sources of Fig. 2 are joined in every sample. Where a row has fewer than 10 of 10 for
 all 36, one of the three food sources at the edge of the map (those that only Fig. 1 has) had no
@@ -442,12 +442,13 @@ deviation off, and FT one (without light) to two (with light).
 One food source is without a tube above the level of the measure in 10 of 80 samples with 1, in 4
 with 1.4 and in 5 with 2. With 1 and with 1.4 it is always one of the three at the edge of the map;
 with 2 it is once one of the 33 of Fig. 2. No such gap is longer than two samples in a row (flux 1)
-or one sample (1.4 and 2). The reason for the difference: a tube that ends at a
-food source carries the flux I0 of that source. In a tube of one cell, f(I0) is 0.50 for a flux of
-1, 0.65 for 1.4 and 0.78 for 2, and dead agents come to life only where the flow memory is above
-0.5 (decision 8). So with a flux of 1 the tubes to the edge live from the growth rule alone.
+or one sample (1.4 and 2). The reason for the difference: a tube that ends at a food source carries
+the flux I0 of that source. In a tube of one cell, f(I0) is 0.50 for a flux of 1, 0.65 for 1.4 and
+0.78 for 2, and dead agents come to life only where the flow memory is above 0.5 (decision 8). So
+with a flux of 1 the tubes to the edge live from the growth rule alone.
 
-The scene uses 1.4: its total length is the organism's, and its food sources stay joined as with 2. A flux of 1 is a little nearer to the organism in MD and FT and 0.4 standard deviations
+The scene uses 1.4: its total length is the organism's, and its food sources stay joined as with a
+flux of 2. A flux of 1 is a little nearer to the organism in MD and FT and 0.4 standard deviations
 shorter in TL; its tubes to the edge of the map are thinner.
 
 Without the flow (one seed) the mesh of Jones' growth rule stays: TL 2.70 to 2.88 and FT 0.96 to
@@ -490,12 +491,14 @@ falling.
 - North stays up on the Tokyo scene only on its lattice. A grid shaped like a tall screen, chosen
   by the user, turns the map by 90°, as every scene (ADR 0019).
 - Cost: the flow takes about 2 ms more per step on 512 × 320 cells and 3 to 3.6 ms on 512 × 512
-  (M3 Pro; table (c)), ten times the step of these scenes without it. At the default speed of 120
-  steps per second that is a quarter to two fifths of the time. The frame budget (ADR 0028) lowers
-  the steps per second on a slower GPU, and the startup check can lower the grid.
+  (M3 Pro; table (c)), 6 to 11 times the step of these scenes without it. At the default speed of
+  120 steps per second the steps then take a quarter (Maze on WebGPU) to a half (Tokyo on WebGL2)
+  of the time. The frame budget (ADR 0028) lowers the steps per second on a slower GPU, and the
+  startup check can lower the grid.
 - The time limits of the new GPU tests follow ADR 0010. In the CI image (SwiftShader, 4 CPUs,
-  16 GB, Docker on an M3 Pro, 2026-11-13) the file `flow.gpu.test.ts` took 159 s for its 21 tests.
-  The slowest test took 15.5 s of its limit of 240 s (WebGL2 without float blending), the next
-  10.1 s of 240 s (Kirchhoff's law on WebGPU), and the two hooks that compile the pipelines about
-  35 s each of 360 s. Each is below a quarter of its limit; the times on GitHub are in the pull
-  request.
+  16 GB, Docker on an M3 Pro, 2026-11-13) the 23 tests of `flow.gpu.test.ts` took 68 s together.
+  The slowest took 13.6 s of its limit of 240 s (WebGL2 without float blending), the next 7.4 s of
+  240 s (Kirchhoff's law on WebGPU) and 7.3 s of 120 s (the CPU copy on WebGL2). The hook that
+  compiles the pipelines took 45 s on WebGPU and 7 s on WebGL2, of a limit of 600 s. GitHub runs
+  SwiftShader's WebGPU compute about twice as slowly as the image (ADR 0010). So each wait stays
+  below a quarter of its limit there; the times on GitHub are in the pull request.
