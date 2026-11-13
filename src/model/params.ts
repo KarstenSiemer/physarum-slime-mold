@@ -118,12 +118,13 @@ export const attractionSpec = {
 } as const satisfies Spec;
 
 /**
- * Start layouts. 'food': every agent starts dead, and the engine places about FOOD_START agents of strain A on the
- * first food (ADR 0025): a small colony to grow from, as Jones starts his foraging runs at a food source.
+ * Start layouts. 'food': every agent starts dead, and the engine places about FOOD_START agents of each strain on a
+ * food of its own, strain A on the first food, strain B on the second (ADR 0025, ADR 0032): a small colony to grow
+ * from, as Jones starts his foraging runs at a food source.
  */
 export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center', 'empty', 'food'] as const;
 
-/** Agents that the start layout 'food' places on the first food (ADR 0025). */
+/** Agents of a strain that the start layout 'food' places on the food of the strain (ADR 0025). */
 export const FOOD_START = 50;
 export const BOUNDARIES = ['wrap', 'box', 'dish'] as const;
 export const STYLES = ['glow', 'gel', 'paper', 'agents'] as const;
@@ -626,11 +627,12 @@ export const sameLattice = (a: Lattice | null, b: Lattice | null) => a?.[0] === 
  * of 2026-11-11, ADR 0022, decision 24). That code ran every link with this app's additions, as the extended model at
  * a source factor of 1 does. The link must fit Jones' model (jonesFits()), and what Jones' model binds or leaves out
  * must have had no effect: food weighed as the strain's own trail with the strain's decay, no light with an effect,
- * no trail saturation, and no walls, because only the extended model's sensors check walls on their way.
+ * no trail saturation, no flow in the tubes, which only the extended model has (ADR 0029), and no walls, because only
+ * the extended model's sensors check walls on their way.
  */
 export function runsAsJones(s: Settings, drawn: Drawn = new Set()): boolean {
   const st = s.strains[0];
-  if (!st || !jonesFits(s) || s.trailSaturation !== 0 || drawn.has('wall')) return false;
+  if (!st || !jonesFits(s) || s.trailSaturation !== 0 || s.flow || drawn.has('wall')) return false;
   const food =
     !drawn.has('food') || s.foodStrength === 0 || (st.food === st.attraction[0] && s.scentDecay === st.decay);
   const light = !drawn.has('light') || s.lightStrength === 0 || st.light === 0;

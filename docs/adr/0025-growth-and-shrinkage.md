@@ -2,6 +2,8 @@
 
 - Status: accepted (owner rule, 2026-11-11: every decision goes into an ADR)
 - Date: 2026-11-11
+- Changed by ADR 0032 (2026-11-13): the start layout "At the first food" starts a colony of each strain on a food of
+  its own, strain A on the first food as here, and the panel names it "On food, one colony each".
 
 ## Context
 
@@ -647,7 +649,10 @@ scent and the environment; the default settings and 17 scenes on both backends, 
 `main` in 36 of 36 runs after 500 steps, and in the Foraging maze and the Tokyo rail network after 15,000 steps on
 both backends. This follows from the walls too: the rule differs from the code before only between two
 wall cells that touch at a corner, and no scene has such a pair. So the numbers of D1b, of ADR 0027 and of ADR 0029
-hold with the chosen rule, and `docs/fidelity.md` keeps its numbers.
+hold with the chosen rule, and `docs/fidelity.md` keeps its numbers. Pull request #53 added three scenes, among them
+Tokyo rivals with growth and the coast of the Tokyo map. After its merge all 20 scenes hold 0 such pairs, and after
+3,000 steps the digests of the three new scenes, the Foraging maze and the Tokyo rail network equal those of `main`
+(`a37c2b5`) on both backends.
 
 **Bytes, with the rejected option.** After 500 steps 33 of 36 digests equal those of `main`. The other three are the
 two scenes with growth: the Foraging maze on WebGPU, and the Tokyo rail network on both backends. Then both scenes

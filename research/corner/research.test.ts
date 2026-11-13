@@ -95,6 +95,6 @@ describe('the record of the corner rule', () => {
     const digest = createHash('sha256');
     for (const { name, data } of readArchive(ARCHIVE)) digest.update(`${name}\0${String(data.length)}\0`).update(data);
     // A new campaign changes the record: pack the archive again (README.md) and put the new number here.
-    expect(digest.digest('hex')).toBe('251edc6c788fb5266d8bc00afff973aed5cb3af0a4e6be541f8cd959d525d224');
+    expect(digest.digest('hex')).toBe('32c69472ad2c914f51e477b542f34efcf3f58897a13d679c13bd37fddbb9179f');
   });
 });

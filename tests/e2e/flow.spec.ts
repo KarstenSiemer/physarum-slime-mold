@@ -98,3 +98,44 @@ for (const viewport of [
     expect(errors).toEqual([]);
   });
 }
+
+// Rival networks (ADR 0031, 0031): two strains, each with a colony on a food of its own and a flow of its own.
+test('Rival networks starts a colony of each strain, and each strain has a flow of its own', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, await smallScene({ resolution: 256 }));
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('rival-networks');
+  await page.waitForFunction(
+    () => globalThis.physarum?.settings.flow === true && globalThis.physarum.sim.width === 384,
+    undefined,
+    { timeout: 150_000 },
+  );
+  const state = await page.evaluate(() => {
+    const e = globalThis.physarum;
+    return e && { size: [e.sim.width, e.sim.height], strains: e.settings.strains.length, layout: e.settings.layout };
+  });
+  expect(state).toEqual({ size: [384, 384], strains: 2, layout: 'food' });
+  const card = page.getByRole('region', { name: 'Scene', exact: true });
+  await expect(card.getByRole('heading', { name: 'Rival networks' })).toBeVisible();
+  for (const chip of ['One agent per cell', 'Growth and shrinkage', 'Flow in the tubes'])
+    await expect(card.getByText(chip, { exact: true })).toBeVisible();
+  await expect(card.getByText('changed', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Start layout')).toHaveValue('food');
+  // Each strain starts as a colony of about 50 agents on its own food, and both colonies grow.
+  const alive = () => page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.slice(0, 2) ?? []);
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) >= 4, undefined, { timeout: 120_000 });
+  const first = await alive();
+  for (const n of first) {
+    expect(n).toBeGreaterThan(20);
+    expect(n).toBeLessThan(2000);
+  }
+  await expect
+    .poll(async () => (await alive()).map((n, i) => n > (first[i] ?? 0) + 20), { timeout: 120_000 })
+    .toEqual([true, true]);
+  // The simulation holds the memory of a flow for each of the two strains, and for no third one.
+  const memories = await page.evaluate(async () => {
+    const sim = globalThis.physarum?.sim;
+    return sim ? [(await sim.readFlow(0)).length, (await sim.readFlow(1)).length, (await sim.readFlow(2)).length] : [];
+  });
+  expect(memories).toEqual([384 * 384 * 4, 384 * 384 * 4, 0]);
+  expect(errors).toEqual([]);
+});

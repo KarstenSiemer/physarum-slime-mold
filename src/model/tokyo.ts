@@ -284,14 +284,24 @@ const COAST: readonly (readonly [number, number])[] = [
   [0.239, -0.362],
 ];
 
-/** The scene's food and walls in the frame of a dish (EnvShape): Tokyo's seven food sources first, then the cities. */
-export function tokyoShapes(): EnvShape[] {
+/**
+ * The scene's food and walls in the frame of a dish (EnvShape): Tokyo's seven food sources first, then the cities.
+ * `starts`: cities whose food comes before all others, in this order, one food for each (for Tokyo the one at the
+ * station). The start layout on food puts the colony of a strain on each of them (ADR 0032).
+ */
+export function tokyoShapes(starts: readonly string[] = []): EnvShape[] {
   const k = TOKYO_SCALE;
   const at = (x: number, y: number): [number, number] => [x * k, y * k];
-  const shapes: EnvShape[] = [];
+  const first: (EnvShape | undefined)[] = starts.map(() => undefined);
+  const rest: EnvShape[] = [];
   for (const [name, x, y] of TOKYO_CITIES)
-    for (const [dx, dy] of name === 'Tokyo' ? TOKYO_DABS : [[0, 0] as const])
-      shapes.push({ kind: 'food', at: at(x + dx, y + dy), r: TOKYO_FOOD_RADIUS * k });
+    (name === 'Tokyo' ? TOKYO_DABS : [[0, 0] as const]).forEach(([dx, dy], dab) => {
+      const food: EnvShape = { kind: 'food', at: at(x + dx, y + dy), r: TOKYO_FOOD_RADIUS * k };
+      const start = dab === 0 ? starts.indexOf(name) : -1;
+      if (start < 0) rest.push(food);
+      else first[start] = food;
+    });
+  const shapes: EnvShape[] = [...first.filter((f) => f !== undefined), ...rest];
   const wall = (a: readonly [number, number], b: readonly [number, number]) =>
     shapes.push({ kind: 'wall', at: at(a[0], a[1]), to: at(b[0], b[1]), r: TOKYO_WALL_RADIUS * k });
   COAST.forEach((p, i) => {

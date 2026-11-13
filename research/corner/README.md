@@ -94,7 +94,9 @@ VITE_ONLY=foraging-maze,tokyo VITE_STEPS=15000 VITE_NAME=digest-both-15000 npx v
 Each writes `research/flow/out/engine/<name>.jsonl`: per backend and scene the SHA-256 of the agents, the trail, the
 scent and the environment after 500 (or 15,000) steps from seed 12345. The record: `logs/digest-main-7d3a5ee*.jsonl`,
 `logs/digest-both-ac234db*.jsonl` (the chosen rule; equal to `main` in every run) and `logs/digest-either-*.jsonl`
-(the rejected rule, at `91907bc` and after the merge of `main`, `633d898`).
+(the rejected rule, at `91907bc` and after the merge of `main`, `633d898`). After the merge of pull request #53 (three
+new scenes): `logs/digest-main-a37c2b5-3000.jsonl` and `logs/digest-both-after-53-3000.jsonl`, the new scenes, the
+Foraging maze and the Tokyo rail network after 3,000 steps (`VITE_ONLY` with the ids of the scenes, `VITE_STEPS=3000`).
 
 ### 3. The corners in the walls
 

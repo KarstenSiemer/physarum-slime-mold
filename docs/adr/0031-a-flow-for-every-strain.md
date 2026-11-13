@@ -278,7 +278,7 @@ After these changes the 18 runs with one strain give the same digests again.
   decay of 0.1. That scene has a decay of 0.6: its trail loses 60 % in every step. Without the
   rule of one agent per cell the same scene has up to 43 deposits, and the flow acts: all three
   strains cover both foods at step 1,000, and of 307,200 agents 4,060 live at step 3,000, 3,930
-  of them of one strain. A level that follows the decay of the strain is not built (`TODO.md`).
+  of them of one strain. Closed in ADR 0032: the levels follow the decay of the strain.
 - Open: a food site is one cell, the centre of a food dot (ADR 0029, decision 5). A strain covers
   a food only when its own tube holds that cell. Where rivals share a food dot, only the strains
   at its centre have it as a site (`TODO.md`).
@@ -293,7 +293,8 @@ After these changes the 18 runs with one strain give the same digests again.
   float blending took 16.2 s of 240 s. The tests that the review added or changed are not in that
   run. On an M3 Pro each of them takes 0.02 to 0.14 s. The tests of their kind in that run (the
   CPU copy for two strains, starvation and growth by strain) took 0.3 to 1.6 s on GitHub, of
-  limits of 120 and 240 s.
+  limits of 120 and 240 s. In the second run (commit `544d456`, 45 tests) the tests of the review
+  took 0.4 to 3.0 s on GitHub, the file 136.2 s and 109.5 s, and its slowest test 23.7 s of 240 s.
 - Not built: a fusion of strains (decision 4).
 
 ## How to check this record
