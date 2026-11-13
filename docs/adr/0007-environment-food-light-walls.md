@@ -36,7 +36,7 @@ Option 3, plus:
   would pass through a wall cell on its way (ADR 0019); sensors read walls and the outside as a
   large negative value, and in the extended model also a sensor whose way from the agent passes
   through a wall cell, so no agent senses the trail behind a wall (ADR 0020, ADR 0022); diffusion averages only over non-wall cells (no
-  flux into walls). A cell is a wall when its wall byte is at least 128 (0.5), in WGSL and GLSL
+  flux into walls; superseded by the amendment below and ADR 0027: [model.md](../model.md), section 6.3). A cell is a wall when its wall byte is at least 128 (0.5), in WGSL and GLSL
   alike (ADR 0019).
 - Boundary modes: periodic (Jones default), closed box, dish (circle, Jones Fig. 9 and 17–21).
 
@@ -83,6 +83,8 @@ choice made with it.
   and light weight per strain. There the extended model releases `255 · wProj · g(d)` and
   `255 · wLight · g(d)` with `g(d) = (d / (1 − d)) / (0.1 / 0.9)`, d the scent decay: the scent of
   a large food is then the same at every decay, 114.75 for wProj 0.05, and only its reach grows.
+  (Since ADR 0027 this g holds for the order that senses first; moving first g = d / 0.1 and the plateau is 127.5:
+  [model.md](../model.md), section 6.4.)
   g(0.1) = 1 exactly, so at decay 0.1 it releases the scent of the Jones model.
 - Covered food, a rule of Jones' later papers (Adamatzky and Jones 2010, Jones and Adamatzky 2014),
   works in both models: a food cell releases a small share of its scent (0.001 by default, a
@@ -104,4 +106,5 @@ p. 14). In the extended model a wall cell is a sink that holds 0, so nothing pas
 past one (ADR 0020). Food and light follow the trail's rule in each model. A sensor in a wall cell reads the large
 negative value in both models, as before. The reflective rule made a growing colony coat the walls and kept a branch
 to the rim of Shortest path in 2 of 20 runs. ADR 0027 records the measurements, and the agents' step order of Jones,
-which changed on the same day: the scent sources now enter after the step's diffusion.
+which changed on the same day: the scent sources now enter after the step's diffusion in the order that moves first,
+and before it in the order that senses first ([model.md](../model.md), section 6.2).
