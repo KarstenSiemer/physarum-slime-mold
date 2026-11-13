@@ -140,7 +140,8 @@ export function flowRoles(covered: readonly boolean[], step: number, seed: numbe
 }
 
 /**
- * The uniform block of the flow passes: the constants, the reference cell (the first site) and the sites. The passes
+ * The uniform block of the flow passes: the constants, the cell of the first site (the passes recentre the pressure
+ * by it while no site gives or takes, flow.wgsl referenceCell()) and the sites. The passes
  * take the step and the seed from the parameters of the simulation. The deposit of strain A is the unit of the trail
  * thresholds.
  */

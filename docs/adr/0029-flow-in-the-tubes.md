@@ -175,6 +175,15 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
    Only a cell that conducts takes the momentum (ω); a cell without a tube takes the plain damped
    iteration (decision 6).
 
+   Kirchhoff's law fixes the pressure only up to a constant. So the first two iterations of a step
+   take the pressure of one cell off the whole field: the centre of the first site that gives or
+   takes, a cell of the network. The first version took the first site of the list. A review of
+   2026-11-13 found its fault: that site can lie under a wall, and a closed cell holds no pressure,
+   so nothing was taken off. In the CPU copy with four covered sites, one of them not joined to the
+   others, the mean pressure of the network then went to −2.9 · 10⁴ in 3,000 steps, and the flux of
+   a cell was up to 2.8 % of the largest flux off. With the cell of the first site that gives or
+   takes, the mean pressure is 18 after 6,000 steps, whatever the first site of the list is.
+
 4. **The network is the grid.** Every open cell is a node, and two cells that share a side are
    joined by an edge. A cell has a conductivity g = B (0.02 + D): B is the tube body, the trail of
    all strains smoothed over time (rate 0.02 per step; presence from 0.2 to 1 deposits of strain A;
@@ -195,7 +204,13 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
    takes, and with an odd count the last one rests. The order is new every 300 steps, the fields
    75 steps apart. The `update` pass draws the roles on the GPU, because only the GPU knows which
    sites are covered; `flowRoles()` in `flow.ts` is the same rule for the tests. While fewer than
-   two sites are covered, no cell adapts: the flow memory keeps its values and nothing starves.
+   two sites are covered, no cell adapts: the flow memory keeps its values, so no cell becomes a
+   starved cell. The agents still follow the memory that they find (decision 8). On fresh ground
+   (D = 0.2) the chance to starve is 0.005 % per step: without growth, half of a colony that has no
+   flux is gone after 13,900 steps, 7.7 h of model time. Rejected on 2026-11-13, after a review
+   found that an earlier text said "nothing starves": no starvation at all until a flux runs. The
+   agent passes would need to know whether a flux runs, and the agents would stop following the
+   memory when a flux ends, for example when the user removes a food.
    Rejected, with the prototype on the Tokyo layout: (a) one random pair per step, as in Tero et
    al. 2010: the local solver cannot follow a new pair at every step, and with a pair held for 300
    steps each tube carries flux only part of the time, so the network starves; (b) a fixed
@@ -339,9 +354,12 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
     and the pressure of the four fields in three, each `rgba32float`. The memory fit counts them
     only while the flow runs (`FLOW_BYTES_PER_CELL`).
 
-15. **The draws of the flow have their own random streams** (7 for starvation, 8 for the cell that
+15. **The draws of the flow have their own random streams** (9 for starvation, 8 for the cell that
     a dead agent draws), so they shift no other draw. A unit test checks that every stream number
-    is used once, in WGSL and in GLSL.
+    is used once, in WGSL and in GLSL, and that every draw of a shader names its stream. The start
+    of a simulation draws from the streams 7 + k · 65536. The first version used 7 for starvation,
+    so in step 0 the draw of starvation was the first draw of the agent's start (review of
+    2026-11-13).
 
 ## Results in the app
 

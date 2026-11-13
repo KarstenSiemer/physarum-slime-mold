@@ -729,6 +729,37 @@ describe('the food sites of the flow in the tubes', () => {
   });
 });
 
+describe('the food sites while the flow is off, and after a load without shapes', () => {
+  it('are not kept while the flow is off, and are those of the list when it turns on', async () => {
+    const { engine, sim } = await engineWith({ ...maze.settings(), flow: false });
+    // Only the flow reads the sites: a paint does not map the list of edits again (review of 2026-11-13).
+    expect(sim().sites).toEqual([]);
+    engine.paint({ kind: 'food', from: [100, 200], to: [120, 200], radius: 3 });
+    engine.frame(0, 0);
+    expect(sim().sites).toEqual([]);
+    await engine.apply({ ...engine.settings, flow: true });
+    expect(sim().sites.length).toBe(3);
+    expect(sim().sites[2]).toEqual([100, 200]);
+    // Off again: the list stays, and nobody reads it. On again: the list of that moment.
+    await engine.apply({ ...engine.settings, flow: false });
+    engine.paint({ kind: 'food', from: [300, 40], to: [300, 40], radius: 3 });
+    engine.frame(0, 0);
+    expect(sim().sites.length).toBe(3);
+    await engine.apply({ ...engine.settings, flow: true });
+    expect(sim().sites.length).toBe(4);
+  });
+
+  it('are none after a load without shapes on the same grid', async () => {
+    const { engine, sim } = await engineWith(maze.settings());
+    const first = sim();
+    expect(first.sites.length).toBe(2);
+    // The same settings without the scene's shapes: the engine keeps the simulation, which held the two foods.
+    await engine.load(maze.settings(), []);
+    expect(sim()).toBe(first);
+    expect(sim().sites).toEqual([]);
+  });
+});
+
 describe('a long sweep', () => {
   /**
    * 3,000 food dabs on 512 × 320, each painted, and an erase over most of them; while its sweep waits, an erase over a

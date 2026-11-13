@@ -47,6 +47,16 @@ describe('the time scale (ADR 0029)', () => {
     expect(minutes(fresh) / 60).toBeLessThan(19);
   });
 
+  it('lets few agents starve on fresh ground: half of a colony without a flux in about 8 hours', () => {
+    // While no flux runs, the memory keeps its values (flow.wgsl fed()), and the agents follow it: the chance of
+    // agents.wgsl starved() at the memory of fresh ground. The help of the setting and ADR 0029 name these numbers.
+    const chance = (FLOW.death * FLOW.half ** 2) / (FLOW.fresh ** 2 + FLOW.half ** 2);
+    expect(chance * 20_000).toBeCloseTo(1, 2);
+    const half = Math.log(2) / chance;
+    expect(Math.round(half / 100) * 100).toBe(13_900);
+    expect(half / STEPS_PER_MINUTE / 60).toBeCloseTo(7.7, 1);
+  });
+
   it('keeps the levels of the memory in order', () => {
     expect(FLOW.floor).toBeLessThan(FLOW.half);
     expect(FLOW.half).toBeLessThan(FLOW.fresh);

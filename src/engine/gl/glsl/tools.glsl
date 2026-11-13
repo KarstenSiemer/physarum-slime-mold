@@ -48,7 +48,7 @@ layout(std140) uniform Flow {
   vec4 d;
   vec4 e; // death, half², birth, birth from
 } F;
-const uint STARVE = 7u; // streams 4 to 6: growth.glsl
+const uint STARVE = 9u; // streams 4 to 6: growth.glsl; 7 and every 7 + k * 65536: the start (init.frag)
 const uint RESPAWN = 8u;
 
 // Where the flow brings a dead agent to life, or cell −1 (respawn in agents.wgsl): the agent draws one random point of

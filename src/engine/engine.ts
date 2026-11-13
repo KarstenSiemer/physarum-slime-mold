@@ -224,6 +224,8 @@ export class Engine {
     this.sim.update(this.settings);
     // Compare what runs, not what was asked: a backend without the rule keeps it off, which is no switch.
     const now = this.settings;
+    // The flow was off, so nobody kept the food sites (syncSites()).
+    if (flowOn(now) && !flowOn(prev)) this.syncSites();
     if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
   }
 
@@ -251,6 +253,8 @@ export class Engine {
     this.sim.update(this.settings);
     this.sim.clearEnvironment();
     this.flushEnv();
+    // Also without an edit to paint: the simulation still has the sites of the scene before.
+    this.syncSites();
     this.reset();
   }
 
@@ -572,9 +576,11 @@ export class Engine {
 
   /**
    * The food sites of the flow in the tubes (ADR 0029): the start point of each food edit that the simulation holds,
-   * on its grid and in the order of the list. After each paint and after the sweep deleted edits.
+   * on its grid and in the order of the list. After each paint, after the sweep deleted edits, after a load and when
+   * the flow turns on. Only the flow reads the sites: while it is off, a paint does not map the list again.
    */
   private syncSites() {
+    if (!flowOn(this.settings)) return;
     const { width, height } = this.sim;
     const centres: [number, number][] = [];
     for (const e of this.edits.slice(0, this.painted)) {

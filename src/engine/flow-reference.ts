@@ -154,9 +154,11 @@ export function flowPressure(
   const { width: w, height: h } = grid;
   const [i0, ghost, omega, weight] = [u[0] ?? 0, u[6] ?? 0, u[7] ?? 0, u[8] ?? 0];
   const [limit, limitScale] = [u[25] ?? 0, u[26] ?? 0];
-  const ref = (Math.trunc(u[21] ?? 0) * w + Math.trunc(u[20] ?? 0)) * 4;
-  // The mean pressure of the sites that give or take, per lane (headroom in flow.wgsl).
   const acting = siteCells(u, w).filter((c) => (memory[c * 4 + 3] ?? 0) !== 0);
+  // The cell that the first two iterations recentre by: the centre of the first site that gives or takes, else the
+  // cell of the uniform block (referenceCell in flow.wgsl).
+  const ref = (acting[0] ?? Math.trunc(u[21] ?? 0) * w + Math.trunc(u[20] ?? 0)) * 4;
+  // The mean pressure of the sites that give or take, per lane (headroom in flow.wgsl).
   const level = [0, 1, 2, 3].map((k) =>
     acting.length > 0 ? acting.reduce((a, c) => a + (pressure[c * 4 + k] ?? 0), 0) / acting.length : 0,
   );

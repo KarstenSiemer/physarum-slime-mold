@@ -27,7 +27,7 @@ struct Flow {
   c: vec4f, // weight, body rate, body low, fresh memory
   d: vec4f, // memory floor, trail low, 1 / (trail full − trail low), site count
   e: vec4f, // death, half², birth, birth from (agents.wgsl)
-  f: vec4f, // reference cell x, y, unused, unused
+  f: vec4f, // the first site's cell x, y (referenceCell()), unused, unused
   g: vec4f, // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
   sites: array<vec4f, 64>, // cell x, cell y, unused, unused
 }
@@ -75,7 +75,8 @@ fn ghostEdge(a: f32, q: vec2i) -> f32 {
 }
 
 // Whether a flux runs between foods: at least two food sites give or take (their roles are in the memory). Without it
-// no cell adapts: the flow memory keeps its values, and no tube starves.
+// no cell adapts: the flow memory keeps its values, so no cell becomes a starved cell. The agents still follow the
+// memory that they find (agents.wgsl starved()): on fresh ground one of 20,000 starves per step.
 fn fed() -> bool {
   let n = i32(U.d.w);
   var found = 0;
@@ -166,6 +167,19 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4f(0.0), vec4f(1.0));
 }
 
+// The cell whose pressure the first two iterations of a step take off (RECENTRE): the centre of the first site that
+// gives or takes, so a cell of the network. A site without a role can lie outside the network or under a wall, and a
+// closed cell holds no pressure: with its pressure nothing would be taken off, and the field would move away from
+// zero. Without a site that gives or takes, no flux runs: then the cell of the uniform block, the first site.
+fn referenceCell() -> vec2i {
+  let n = i32(U.d.w);
+  for (var i = 0; i < n; i++) {
+    let s = vec2i(U.sites[i].xy);
+    if (textureLoad(memory, s, 0).w != 0.0) { return s; }
+  }
+  return vec2i(U.f.xy);
+}
+
 @compute @workgroup_size(8, 8)
 fn update(@builtin(global_invocation_id) gid: vec3u) {
   let p = vec2i(gid.xy);
@@ -253,13 +267,13 @@ fn pressure(@builtin(global_invocation_id) gid: vec3u) {
     }
     let balanced = (acc + given) / sum;
     let jacobi = pc + U.c.x * (balanced - pc);
-    if (RECENTRE == 2u) { before -= textureLoad(pressureBefore, vec2i(U.f.xy), 0); }
+    if (RECENTRE == 2u) { before -= textureLoad(pressureBefore, referenceCell(), 0); }
     // Only a cell that conducts takes the momentum of the iteration. With the momentum a pressure swings for hundreds
     // of iterations. A cell without a tube would swing by itself beside the network; when the trail gives it a tube, its
     // swing would pass into the network and come back larger at the next such cell (ADR 0029, decision 6).
     let omega = select(1.0, U.b.w, m.z > 0.0);
     next = omega * jacobi + (1.0 - omega) * before;
   }
-  if (RECENTRE == 1u) { next -= textureLoad(pressureIn, vec2i(U.f.xy), 0); }
+  if (RECENTRE == 1u) { next -= textureLoad(pressureIn, referenceCell(), 0); }
   textureStore(pressureOut, p, next);
 }

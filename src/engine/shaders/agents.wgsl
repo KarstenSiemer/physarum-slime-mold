@@ -40,7 +40,7 @@ struct FlowRule {
 }
 @group(0) @binding(12) var flowMemory: texture_2d<f32>; // x flow memory, y tube body (flow.wgsl)
 @group(0) @binding(13) var<uniform> F: FlowRule;
-const STARVE = 7u; // streams 4 to 6: growth.wgsl
+const STARVE = 9u; // streams 4 to 6: growth.wgsl; 7 and every 7 + k · 65536: the start (init.wgsl)
 const RESPAWN = 8u;
 //#endif
 

@@ -1020,11 +1020,14 @@ export class Simulation implements Sim {
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
+      // Without the flow one `settle` serves every variant of the agent passes. With the flow each variant has its
+      // own (Kernels.flowing()), so the key names the variant, as the keys of `move` and `claim` do.
       const settle = flowing?.settle ?? k.settle;
+      const settleKey = flow ? `flow${fm}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';
       pass.setPipeline(settle);
       pass.setBindGroup(
         0,
-        this.bind(`settle${q}${a}${flow ? `flow${fm}` : ''}`, settle, [
+        this.bind(`settle${q}${a}${settleKey}`, settle, [
           this.params,
           this.agentBuffer,
           null,

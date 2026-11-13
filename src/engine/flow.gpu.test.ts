@@ -28,7 +28,7 @@ const flowing = (patch: Partial<Settings> = {}): Settings => ({
   ...patch,
 });
 
-describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, create) => {
+describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, create) => {
   let backend: Backend;
   const live: Sim[] = [];
 
@@ -59,21 +59,25 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
     const [w, h] = [48, 40];
     const settings = flowing();
     const sim = await make(settings, w, h, 500);
-    // A wall with a gap, and two foods on either side of it.
+    // A wall with a gap, and two foods on either side of it. The first food of the list lies under the wall: its
+    // centre is a closed cell, so it never gives or takes, and the passes recentre the pressure by the next food.
     const strokes: Stroke[] = [
+      { kind: 'food', from: [24.5, 10.5], to: [24.5, 10.5], radius: 2.5 },
       { kind: 'wall', from: [24, 0], to: [24, 24], radius: 1 },
       { kind: 'food', from: [8.5, 8.5], to: [8.5, 8.5], radius: 2.5 },
       { kind: 'food', from: [40.5, 30.5], to: [40.5, 30.5], radius: 2.5 },
     ];
     sim.paint(strokes);
     const centres: [number, number][] = [
+      [24.5, 10.5],
       [8.5, 8.5],
       [40.5, 30.5],
     ];
     sim.foodSites(centres);
     sim.reset();
     const sites = flowSites(centres, w, h);
-    const grid: FlowGrid = { width: w, height: h, boundary: 'box', env: await sim.readEnv() };
+    const env = await sim.readEnv();
+    const grid: FlowGrid = { width: w, height: h, boundary: 'box', env };
     let fields = flowStart(grid, FLOW.fresh);
     // Every cell but those of a block holds a tube from the start, so both foods give or take from the first step
     // on. The memory adapts from the second step on: a step reads which sites gave or took in the step before. The
@@ -102,9 +106,12 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
         off = Math.max(off, Math.abs((pressure[i] ?? 0) - (fields.pressure[i] ?? 0)));
       expect(top, 'a pressure builds up').toBeGreaterThan(0);
       expect(off / top, `pressure at step ${String(step)}`).toBeLessThan(1e-3);
-      // The roles lie on the two centre cells, and nowhere else.
+      // The roles lie on the centre cells of the two foods beside the wall, and nowhere else.
       const roles = [...memory].flatMap((v, i) => (i % 4 === 3 && v !== 0 ? [(i - 3) / 4] : []));
       expect(roles).toEqual([8 * w + 8, 30 * w + 40]);
+      // The centre of the first food of the list is a closed cell: it holds no pressure.
+      expect(env[(10 * w + 24) * 4] ?? 0).toBeGreaterThanOrEqual(128);
+      expect([0, 1, 2, 3].map((k) => pressure[(10 * w + 24) * 4 + k])).toEqual([0, 0, 0, 0]);
       // At the end cells of the block still conduct nothing, and they hold a pressure: that of the tubes beside
       // them.
       if (step < 5) continue;
@@ -383,6 +390,38 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
       alive = agents.length;
     }
     expect(alive).toBeGreaterThan(900);
+  }, 120_000);
+
+  it('keeps stepping when the trail saturation or the walls change during a run with the flow', async () => {
+    // With the rule of one agent per cell the pass `settle` places agents by the flow too. With the flow its pipeline
+    // depends on the walls and on the trail saturation. On WebGPU a bind group belongs to its pipeline, so the group
+    // of one variant must not serve another: the step would be invalid, and no pass of it would run (review of
+    // 2026-11-13).
+    const [w, h] = [48, 48];
+    const settings = flowing({ seed: 3 });
+    const sim = await make(settings, w, h, 2000, 600);
+    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const moved = async (steps: number) => {
+      const before = await sim.readAgents();
+      sim.run(steps);
+      const after = await sim.readAgents();
+      return before.filter((a, i) => {
+        const b = after[i];
+        return b !== undefined && (a.bits & ALIVE) !== 0 && (a.x !== b.x || a.y !== b.y);
+      }).length;
+    };
+    device?.pushErrorScope('validation');
+    // Four steps bind the passes at both parities of the buffers.
+    expect(await moved(4)).toBeGreaterThan(300);
+    // A trail saturation above 0: the agent passes that saturate the trail.
+    sim.update({ ...settings, trailSaturation: 20 });
+    expect(await moved(4), 'with a trail saturation').toBeGreaterThan(300);
+    // The first wall: the agent passes whose sensors check for walls.
+    sim.paint([{ kind: 'wall', from: [10, 10], to: [30, 10], radius: 1 }]);
+    expect(await moved(4), 'with a wall').toBeGreaterThan(300);
+    sim.update(settings);
+    expect(await moved(4), 'without the trail saturation again').toBeGreaterThan(300);
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
   }, 120_000);
 
   it('lets no agent divide on a cell that the flux passed by (growth of Jones 2011)', async () => {

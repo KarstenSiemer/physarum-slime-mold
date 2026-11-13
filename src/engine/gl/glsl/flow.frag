@@ -190,6 +190,18 @@ vec4 headroom(vec4 pc, vec4 signs) {
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4(0.0), vec4(1.0));
 }
 
+// The cell whose pressure the first two iterations of a step take off: the centre of the first site that gives or
+// takes, else the cell of the uniform block (referenceCell in flow.wgsl).
+ivec2 referenceCell() {
+  int n = int(U.d.w);
+  for (int i = 0; i < 64; i++) {
+    if (i >= n) break;
+    ivec2 s = ivec2(U.sites[i].xy);
+    if (texelFetch(memory, s, 0).w != 0.0) return s;
+  }
+  return ivec2(U.f.xy);
+}
+
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   if (openXY(p).x < 0) {
@@ -223,12 +235,12 @@ void main() {
     }
     vec4 balanced = (acc + given) / sum;
     vec4 jacobi = pc + U.c.x * (balanced - pc);
-    if (recentre == 2) before -= texelFetch(pressureBefore, ivec2(U.f.xy), 0);
+    if (recentre == 2) before -= texelFetch(pressureBefore, referenceCell(), 0);
     // Only a cell that conducts takes the momentum of the iteration (pressure in flow.wgsl).
     float omega = m.z > 0.0 ? U.b.w : 1.0;
     next = omega * jacobi + (1.0 - omega) * before;
   }
-  if (recentre == 1) next -= texelFetch(pressureIn, ivec2(U.f.xy), 0);
+  if (recentre == 1) next -= texelFetch(pressureIn, referenceCell(), 0);
   result = next;
 }
 #endif

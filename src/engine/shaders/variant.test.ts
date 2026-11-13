@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { variant } from './variant';
 
@@ -83,5 +83,27 @@ describe('the random streams of the agent passes', () => {
       ...streams('../gl/glsl/growth.glsl', /^const uint (GROW|BIRTH|PLACE_ORDER) = (\d+)u;/gm),
     ];
     expect(Object.fromEntries(glsl)).toEqual(Object.fromEntries(wgsl));
+    // The start draws from the streams 7 + round · 65536 (init.wgsl, init.frag): no draw of a step uses one of them.
+    // With stream 7, the draw of starvation in step 0 was the first draw of the agent's start (review of 2026-11-13).
+    for (const [name, n] of wgsl) expect(n % 0x10000, name).not.toBe(7);
+  });
+
+  it('seeds every draw of a shader with a named stream, and the start with its own streams', () => {
+    const names = ['BIRTH', 'BLOCK', 'GROW', 'PLACE_ORDER', 'RESPAWN', 'SHRINK', 'STARVE', 'STEER', 'TOOL'];
+    const calls = (dir: string) =>
+      readdirSync(new URL(dir, import.meta.url))
+        .filter((f) => /\.(wgsl|glsl|frag|vert)$/.test(f))
+        .flatMap((f) =>
+          [...read(dir + f).matchAll(/^(?!\s*(?:fn|uint) rngSeed).*\brngSeed\([^,]+,\s*([^)]+)\)/gm)].map(
+            (m) => [f, (m[1] ?? '').trim()] as const,
+          ),
+        );
+    const all = [...calls('./'), ...calls('../gl/glsl/')];
+    // Both backends draw in the same places: 11 calls each (agents, growth, the start).
+    expect(all.length).toBe(22);
+    for (const [file, stream] of all) {
+      if (file.startsWith('init.')) expect(stream, file).toBe('7u + round * 0x10000u');
+      else expect(names, `${file}: ${stream}`).toContain(stream);
+    }
   });
 });
