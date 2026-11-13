@@ -125,33 +125,43 @@ wrong for strains that share cells.
   whose two halves are in the trail of two strains carries no flux, and no site gives or takes.
 - Two strains with a route each between the same two foods: each strain sends its whole flux I0
   along its own route, and none along the other.
-- An agent starves and comes to life by the flow memory of its own strain: of two strains on the
-  same cells, the one whose ground starved loses 2 % of its agents in a step and has no birth, and
-  the other loses none and has the births of ADR 0029.
-- An agent divides by the flow memory of its own strain.
-- The passes follow the CPU copy for the second of two strains, which has another deposit.
+- An agent starves and comes to life by the flow memory of its own strain: four strains on the
+  same cells, each with another flow memory. The strain whose ground starved loses 2 % of its
+  agents in a step and has no birth. The other three lose none, and 16, 4 and 10 % of their dead
+  agents come to life, as their memory gives it.
+- Dead agents of every strain come to life with the rule of one agent per cell, each on a cell of
+  its own: of four strains, the two that are fed.
+- An agent divides by the flow memory of its own strain: four strains, in two runs with other
+  pairs of starved strains.
+- The passes follow the CPU copy for the second of two strains, which has another deposit, and for
+  the third and the fourth of four strains.
 - A change of the number of strains during a run: the simulation keeps stepping, and the flow holds
   a state for each strain of the settings and for no other.
 - Dead agents come to life by the flow also in a step in which a tool is held (ADR 0029,
   decision 8). A reader of 2026-11-13 found that no test held this.
 
-The file has 41 tests now, 20 on each backend and one on WebGL2 without float blending.
+The file has 45 tests now, 22 on each backend and one on WebGL2 without float blending.
 `src/engine/flow.test.ts` (24 tests) has the uniform block of each strain, and the CPU copy of the
 passes with the trail of its strain alone.
 
-A test is worth what it catches (ADR 0029, "The tests against wrong rules"). On 2026-11-13, 12
-more wrong rules were put into the code, one at a time, 6 for each backend.
-`research/flow/engine/mutate.ts` now has 34 wrong rules. Every one of them fails at least one
-test; the log is `research/flow/logs/engine/mutations-0030.txt`.
+A test is worth what it catches (ADR 0029, "The tests against wrong rules"). On 2026-11-13, 17
+more wrong rules were put into the code, one at a time. `research/flow/engine/mutate.ts` now has
+39 wrong rules. Every one of them fails at least one test; the log is
+`research/flow/logs/engine/mutations-0030.txt`.
 
-| Wrong rule                                                            | In               | Tests that fail                                                                                                                                                                                                                    |
-| --------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The tube body of every strain from the trail of the first strain      | WGSL, GLSL       | follows the CPU reference for the second of two strains; brings a dead agent to life only on a tube of its own strain; lets no flux pass from the tubes of one strain into the tubes of another; gives every strain its whole flux |
-| The passes of every strain with the uniform block of the first strain | the two backends | the same four tests                                                                                                                                                                                                                |
-| An agent starves by the flow memory of the first strain               | WGSL, GLSL       | lets an agent starve and come to life by the flow memory of its own strain                                                                                                                                                         |
-| An agent comes to life by the flow memory of the first strain         | WGSL, GLSL       | brings a dead agent to life only on a tube of its own strain; lets an agent starve and come to life by the flow memory of its own strain                                                                                           |
-| An agent divides by the flow memory of the first strain               | WGSL, GLSL       | lets an agent divide by the flow memory of its own strain                                                                                                                                                                          |
-| No birth by the flow in a step in which a tool is held                | WGSL, GLSL       | brings dead agents to life by the flow also in a step in which a tool is held                                                                                                                                                      |
+| Wrong rule                                                                      | In                 | Tests that fail                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The tube body of every strain from the trail of the first strain                | WGSL, GLSL         | follows the CPU reference for the second of two strains; brings a dead agent to life only on a tube of its own strain; lets no flux pass from the tubes of one strain into the tubes of another; gives every strain its whole flux |
+| The passes of every strain with the uniform block of the first strain           | the two backends   | the same four tests                                                                                                                                                                                                                |
+| An agent starves by the flow memory of the first strain                         | WGSL, GLSL         | lets an agent starve and come to life by the flow memory of its own strain                                                                                                                                                         |
+| An agent comes to life by the flow memory of the first strain                   | WGSL, GLSL         | brings a dead agent to life only on a tube of its own strain; lets an agent starve and come to life by the flow memory of its own strain                                                                                           |
+| An agent divides by the flow memory of the first strain                         | WGSL, GLSL         | lets an agent divide by the flow memory of its own strain                                                                                                                                                                          |
+| No birth by the flow in a step in which a tool is held                          | WGSL, GLSL         | brings dead agents to life by the flow also in a step in which a tool is held                                                                                                                                                      |
+| The passes of the third and the fourth strain on the layer of the second strain | the WebGPU backend | follows the CPU reference for the third and the fourth of four strains                                                                                                                                                             |
+| The agents of the fourth strain with the flow memory of the first strain        | the WebGL2 backend | the test of starvation and births by strain; brings dead agents of every strain to life with the rule; lets an agent divide by the flow memory of its own strain                                                                   |
+| The claims of the agents with the flow memory of the first strain alone         | the WebGL2 backend | brings dead agents of every strain to life with the rule                                                                                                                                                                           |
+| The agents of the third strain with the flow memory of the second strain        | GLSL               | the test of starvation and births by strain; brings dead agents of every strain to life with the rule                                                                                                                              |
+| Growth of the third strain by the flow memory of the second strain              | GLSL               | lets an agent divide by the flow memory of its own strain                                                                                                                                                                          |
 
 ### One strain: the bytes of before
 
@@ -214,6 +224,32 @@ Metal; `research/flow/engine/bench.gpu.test.ts`).
   each strain, 12 ns per cell. With the code before the change, which had one flow for all
   strains, the step with the flow took 24 ms (35 ms on WebGL2).
 
+## Review before the merge (2026-11-13)
+
+A second reader went through the commit of the code. The reader found no fault in the code of the
+engine. Each of the six points of the report was checked and closed:
+
+- **Gaps in the tests.** No test had a third or a fourth strain, and no test brought an agent of a
+  strain other than the first to life with the rule of one agent per cell. On WebGL2 the agents of
+  each strain read their flow memory through code that is written out for each strain, in three
+  places. Three wrong lines there passed every test, and so did a wrong layer for the passes of
+  the third and the fourth strain on WebGPU. The tests above now have four strains, and the five
+  wrong rules of the last five lines of the table fail them.
+- `research/flow/rules.ts`, a copy of the CPU copy of the passes, still read the trail of all
+  strains. It reads the trail of its strain now.
+- `readFlow()` and `readPressure()` gave the state of a strain that the settings had lost, until
+  the next step. They give nothing now, and a test holds it.
+- A comment in `sizing.ts` named 16 B as the largest buffer or texture per cell. A texture of the
+  flow has 16 B per cell for each strain on WebGPU. A texture has no limit in bytes, so nothing
+  changes; the comment says so now.
+- `research/flow/engine/dump.gpu.test.ts` writes the state of the first strain. Its head says so
+  now.
+- The state of the flow took the number of strains from the settings as it was. It takes at most
+  four now, as the rest of a simulation does (`flowStrains()` in `flow.ts`). The app never has
+  more.
+
+After these changes the 18 runs with one strain give the same digests again.
+
 ## Consequences
 
 - The fault is gone: a strain without a living agent stays without one until the user inoculates
@@ -246,6 +282,15 @@ Metal; `research/flow/engine/bench.gpu.test.ts`).
 - A link to a scene with the flow and several strains, made before this change, now runs with a
   flow for each strain. No scene of the app had both.
 - The texts: the help of the switch says that each strain has its own flow.
+- The time limits of the GPU tests follow ADR 0010: a test uses at most a quarter of its limit on
+  GitHub. In the first CI run of the pull request (commit `01aa2ac`, 41 tests) the file
+  `flow.gpu.test.ts` took 123.8 s in the WebGPU job and 68.4 s in the other job; with the 27 tests
+  of ADR 0029 it took 51.0 to 66.5 s. Its slowest tests are the two that run two strains for 1,500
+  steps: 21.3 s and 21.1 s of their limit of 240 s on WebGPU, 8.9 %. The test on WebGL2 without
+  float blending took 16.2 s of 240 s. The tests that the review added or changed are not in that
+  run. On an M3 Pro each of them takes 0.02 to 0.14 s. The tests of their kind in that run (the
+  CPU copy for two strains, starvation and growth by strain) took 0.3 to 1.6 s on GitHub, of
+  limits of 120 and 240 s.
 - Not built: a fusion of strains (decision 4).
 
 ## How to check this record

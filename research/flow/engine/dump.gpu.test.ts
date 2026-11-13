@@ -9,6 +9,9 @@
 // - VITE_NAME: the name of the files; without it `<scene>-<kind>-<flow or base>-s<seed>`.
 // - VITE_PATCH and VITE_STRAIN: settings and strain settings as JSON, on top of the scene's.
 // - VITE_DUMP_P: 1 also writes the environment, the whole flow memory and the pressure (exact-flux.ts reads them).
+//
+// The trail, the flow memory and the pressure are those of the first strain: the measure scripts read a scene with
+// one strain. strains.gpu.test.ts counts the strains of a scene with several (ADR 0030).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';

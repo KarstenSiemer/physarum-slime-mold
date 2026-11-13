@@ -58,6 +58,8 @@ export function update(
   const [base, foodG] = [u[4]!, u[5]!];
   const [bodyRate, bodyLow, fresh] = [u[9]!, u[10]!, u[11]!];
   const [floor, trailLow, trailScale] = [u[12]!, u[13]!, u[14]!];
+  // The strain of the block: the pass reads the trail of that strain alone (ADR 0030).
+  const strain = Math.trunc(u[22]!);
   const flux = flowFlux(grid, fields.memory, fields.pressure);
   const sites = siteCells(u, w);
   const fed = sites.filter((c) => fields.memory[c * 4 + 3] !== 0).length >= 2;
@@ -84,8 +86,8 @@ export function update(
       const bodyOld = fields.memory[i + 1]!;
       if (bodyOld >= bodyLow) d = fed ? Math.max(floor, d + rate * (mean - d)) : d;
       else d = Math.min(fresh, Math.max(d, floor) * (1 + recover));
-      const total = trail[i]! + trail[i + 1]! + trail[i + 2]! + trail[i + 3]!;
-      const presence = Math.min(1, Math.max(0, (total - trailLow) * trailScale));
+      const own = trail[i + strain]!;
+      const presence = Math.min(1, Math.max(0, (own - trailLow) * trailScale));
       const body = bodyOld + bodyRate * (presence - bodyOld);
       const isFood = food(y * w + x);
       let g = body >= bodyLow ? body * (isFood ? foodG : base + d) : 0;

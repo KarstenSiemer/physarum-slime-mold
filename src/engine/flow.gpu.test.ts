@@ -145,6 +145,14 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     await followsReference([{ ...defaultStrain(0), sensorOffset: 5 }], 0);
   }, 120_000);
 
+  it('follows the CPU reference for the third and the fourth of four strains', async () => {
+    // Each strain has a layer or targets of its own for its passes: the passes of a strain must not run on the state
+    // of another one.
+    const four = [5, 2, 3, 8].map((deposit, i) => ({ ...defaultStrain(i), sensorOffset: 5, deposit }));
+    await followsReference(four, 2);
+    await followsReference(four, 3);
+  }, 120_000);
+
   it('follows the CPU reference for the second of two strains, with the trail and the deposit of that strain', async () => {
     // The second strain deposits 2 where the first deposits 5: the levels of its trail are 0.4 and 2, not 1 and 5.
     const second = { ...defaultStrain(1), sensorOffset: 5, deposit: 2 };
@@ -458,19 +466,19 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
 
   it('lets an agent starve and come to life by the flow memory of its own strain', async () => {
     const [w, h] = [64, 64];
-    // No food: no flux runs, and the memory that the test writes stays. Without the rule every draw can place. Two
+    // No food: no flux runs, and the memory that the test writes stays. Without the rule every draw can place. Four
     // strains with 10,000 living and 10,000 dead agents each.
-    const strains = [0, 1].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
+    const strains = [0, 1, 2, 3].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
     const settings = flowing({ boundary: 'wrap', collisions: false, seed: 11, strains });
-    const sim = await make(settings, w, h, 40_000, 20_000);
-    // The whole grid starved for the first strain and fed for the second; a tube of both everywhere.
-    const fill = (cell: number[]) => {
+    const sim = await make(settings, w, h, 80_000, 40_000);
+    // A tube of every strain everywhere, with another flow memory for each strain: starved for the first one, and fed
+    // to three levels for the others. So each strain has a chance to starve and a chance of a birth of its own.
+    const memories = [FLOW.floor, 0.9, 0.6, 0.75];
+    memories.forEach((d, strain) => {
       const memory = new Float32Array(w * h * 4);
-      for (let c = 0; c < w * h; c++) memory.set(cell, c * 4);
-      return memory;
-    };
-    sim.writeFlow(fill([FLOW.floor, 1, 0.02, 0]), 0);
-    sim.writeFlow(fill([0.9, 1, 0.9, 0]), 1);
+      for (let c = 0; c < w * h; c++) memory.set([d, 1, 0.5, 0], c * 4);
+      sim.writeFlow(memory, strain);
+    });
     const before = await sim.readAgents();
     sim.run(1);
     const after = await sim.readAgents();
@@ -480,7 +488,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const around = (d: number, n: number) => Math.min(Math.abs(d), n - Math.abs(d));
     const gone = (a: AgentState, b: AgentState) =>
       !alive(b) || Math.hypot(around(a.x - b.x, w), around(a.y - b.y, h)) > 2;
-    const count = [0, 1].map(() => ({ alive: 0, gone: 0, dead: 0, born: 0 }));
+    const count = memories.map(() => ({ alive: 0, gone: 0, dead: 0, born: 0 }));
     before.forEach((a, i) => {
       const [b, of] = [after[i], count[a.bits & 3]];
       if (!b || !of) throw new Error('agent missing');
@@ -492,18 +500,21 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
         if (alive(b)) of.born++;
       }
     });
-    const [first, second] = count;
-    if (!first || !second) throw new Error('two strains');
-    expect([first.alive, first.dead, second.alive, second.dead]).toEqual([10_000, 10_000, 10_000, 10_000]);
-    // The first strain starves with the chance of the floor of the memory, and none of its dead agents comes to life.
-    const p = (FLOW.death * FLOW.half ** 2) / (FLOW.floor ** 2 + FLOW.half ** 2);
-    expect(Math.abs(first.gone - first.alive * p)).toBeLessThan(6 * Math.sqrt(first.alive * p * (1 - p)));
-    expect(first.born).toBe(0);
-    // The second strain does not starve, and its dead agents come to life with birth · (D − from) / (1 − from).
-    const q = (FLOW.birth * (0.9 - FLOW.birthFrom)) / (1 - FLOW.birthFrom);
-    // At D = 0.9 the chance to starve is 2.5 in a million: 0.025 agents of 10,000.
-    expect(second.gone).toBeLessThanOrEqual(1);
-    expect(Math.abs(second.born - second.dead * q)).toBeLessThan(6 * Math.sqrt(second.dead * q * (1 - q)));
+    count.forEach((of, strain) => {
+      const d = memories[strain] ?? 0;
+      expect([of.alive, of.dead], `strain ${String(strain)}`).toEqual([10_000, 10_000]);
+      // Starvation: death · half² / (D² + half²). About 2 % on the floor of the memory, and 2.5 to 5.6 in a million on
+      // the fed levels: less than 0.06 agents of 10,000.
+      const p = (FLOW.death * FLOW.half ** 2) / (d ** 2 + FLOW.half ** 2);
+      const starving = Math.max(1.5, 6 * Math.sqrt(of.alive * p * (1 - p)));
+      expect(Math.abs(of.gone - of.alive * p), `starved of strain ${String(strain)}`).toBeLessThan(starving);
+      // Births: birth · (D − from) / (1 − from), and none below `from`: 0, 16, 4 and 10 % of the dead agents.
+      const q = Math.max(0, (FLOW.birth * (d - FLOW.birthFrom)) / (1 - FLOW.birthFrom));
+      const births = Math.max(0.5, 6 * Math.sqrt(of.dead * q * (1 - q)));
+      expect(Math.abs(of.born - of.dead * q), `births of strain ${String(strain)}`).toBeLessThan(births);
+    });
+    // The chances lie far apart: a strain with the memory of another strain would miss its number.
+    expect(count.map((of) => Math.round(of.born / 100))).toEqual([0, 16, 4, 10]);
   }, 120_000);
 
   it('lets agents starve on cells that the flux passed by, and brings dead agents to life on fed cells', async () => {
@@ -610,6 +621,39 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(alive).toBeGreaterThan(900);
   }, 120_000);
 
+  it('brings dead agents of every strain to life with the rule, each on a cell of its own', async () => {
+    const [w, h] = [48, 48];
+    // Four strains with the rule of one agent per cell: 150 living and 350 dead agents each. The second and the
+    // fourth strain are fed everywhere; the ground of the other two is fresh, where no agent comes to life.
+    const strains = [0, 1, 2, 3].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
+    const settings = flowing({ boundary: 'box', collisions: true, seed: 3, strains });
+    const sim = await make(settings, w, h, 2000, 600);
+    const start = await sim.alive();
+    expect(start).toEqual([150, 150, 150, 150]);
+    let alive = start;
+    for (let k = 0; k < 8; k++) {
+      // The memory again before every step: without food the update keeps the flow memory, but the body follows the
+      // trail.
+      strains.forEach((_, strain) => {
+        const memory = new Float32Array(w * h * 4);
+        for (let c = 0; c < w * h; c++) memory.set([strain % 2 === 1 ? 0.95 : FLOW.fresh, 1, 0.9, 0], c * 4);
+        sim.writeFlow(memory, strain);
+      });
+      sim.run(1);
+      const agents = (await sim.readAgents()).filter((a) => (a.bits & ALIVE) !== 0);
+      const cells = new Set(agents.map((a) => Math.floor(a.y) * w + Math.floor(a.x)));
+      expect(cells.size, `step ${String(k)}`).toBe(agents.length);
+      alive = await sim.alive();
+    }
+    // A dead agent of a fed strain claims the cell that it draws, as a move does, and the settle pass places it there.
+    // The two passes and the claim itself must read the memory of the same strain: else a claim is for another cell,
+    // and no agent of that strain comes to life.
+    expect(alive[1]).toBeGreaterThan(300);
+    expect(alive[3]).toBeGreaterThan(300);
+    expect(alive[0]).toBeLessThanOrEqual(150);
+    expect(alive[2]).toBeLessThanOrEqual(150);
+  }, 120_000);
+
   it('keeps stepping when the trail saturation or the walls change during a run with the flow', async () => {
     // With the rule of one agent per cell the pass `settle` places agents by the flow too. With the flow its pipeline
     // depends on the walls and on the trail saturation. On WebGPU a bind group belongs to its pipeline, so the group
@@ -641,6 +685,8 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const sim = await make(base, w, h, 2000, 600);
     const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
     const food = (x: number): Stroke => ({ kind: 'food', from: [x, 30.5], to: [x, 30.5], radius: 3 });
+    /** The state of the second strain as read right after the settings lost that strain. */
+    let second: Promise<Float32Array> | undefined;
     const changes: [string, () => void][] = [
       ['at the start', () => undefined],
       [
@@ -698,6 +744,8 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
         'with one strain again',
         () => {
           sim.update(base);
+          // The settings no longer hold the second strain: its state is not read, also before the next step.
+          second = sim.readFlow(1);
           sim.reset();
         },
       ],
@@ -717,10 +765,15 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     device?.pushErrorScope('validation');
     for (const [what, change] of changes) {
       change();
+      // A new strain has no state until the next step makes it.
+      if (what.startsWith('with a second strain')) expect((await sim.readFlow(1)).length, what).toBe(0);
       expect(await moved(sim, 4), what).toBeGreaterThan(100);
       // The flow holds a state for each strain of the settings, and for no other.
       if (what.startsWith('with a second strain')) expect((await sim.readFlow(1)).length, what).toBe(w * h * 4);
-      if (what.startsWith('with one strain again')) expect((await sim.readFlow(1)).length, what).toBe(0);
+      if (what.startsWith('with one strain again')) {
+        expect((await second)?.length, what).toBe(0);
+        expect((await sim.readFlow(1)).length, what).toBe(0);
+      }
     }
     expect((await device?.popErrorScope())?.message).toBeUndefined();
     // The flow runs at the end: the simulation holds its memory.
@@ -762,39 +815,46 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
 
   it('lets an agent divide by the flow memory of its own strain', async () => {
     const [w, h] = [96, 48];
-    const strains = [0, 1].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
+    const strains = [0, 1, 2, 3].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
     const settings = flowing({
       seed: 8,
       growth: true,
       growthEvery: 1,
       shrinkEvery: 0,
-      density: 0.065,
-      capacity: 0.65,
+      density: 0.13,
+      capacity: 1,
       strains,
     });
-    // The agents of each strain that live after 12 steps and were dead at the start: children. `starved` is the strain
-    // whose whole ground starved; the ground of the other strain is fresh. No food: the memory keeps these values.
-    const children = async (starved: number) => {
-      const sim = await make(settings, w, h, 3000, 300);
-      for (const strain of [0, 1]) {
+    // The agents of each strain that live after 12 steps and were dead at the start: children. The whole ground of
+    // the strains in `starved` starved; the ground of the others is fresh. No food: the memory keeps these values.
+    const children = async (starved: readonly number[]) => {
+      const sim = await make(settings, w, h, 4608, 600);
+      strains.forEach((_, strain) => {
         const memory = new Float32Array(w * h * 4);
-        for (let c = 0; c < w * h; c++) memory.set([strain === starved ? FLOW.floor : FLOW.fresh, 1, 0.1, 0], c * 4);
+        const d = starved.includes(strain) ? FLOW.floor : FLOW.fresh;
+        for (let c = 0; c < w * h; c++) memory.set([d, 1, 0.1, 0], c * 4);
         sim.writeFlow(memory, strain);
-      }
+      });
       const before = await sim.readAgents();
       sim.run(12);
       const after = await sim.readAgents();
       const alive = (a: AgentState | undefined) => a !== undefined && (a.bits & ALIVE) !== 0;
       const born = after.filter((a, i) => alive(a) && !alive(before[i]));
-      return [0, 1].map((strain) => born.filter((a) => (a.bits & 3) === strain).length);
+      return strains.map((_, strain) => born.filter((a) => (a.bits & 3) === strain).length);
     };
-    // Both strains walk the same cells. Only the strain whose ground is fresh has children.
-    const [none, some] = await children(0);
-    expect(none).toBe(0);
-    expect(some).toBeGreaterThan(60);
-    const [others, zero] = await children(1);
-    expect(zero).toBe(0);
-    expect(others).toBeGreaterThan(60);
+    // All strains walk the same cells. Only a strain whose own ground is fresh has children. The two runs give each
+    // strain another pair of grounds, so a strain with the memory of another strain would show.
+    const grounds: readonly (readonly number[])[] = [
+      [0, 2],
+      [0, 1],
+    ];
+    for (const starved of grounds) {
+      const born = await children(starved);
+      born.forEach((n, strain) => {
+        if (starved.includes(strain)) expect(n, `strain ${String(strain)} starved`).toBe(0);
+        else expect(n, `strain ${String(strain)} on fresh ground`).toBeGreaterThan(40);
+      });
+    }
   }, 240_000);
 
   it('gives the same bytes for the same seed, and others for another seed', async () => {
