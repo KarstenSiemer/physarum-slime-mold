@@ -3,7 +3,7 @@
 // archive to research/flow/logs/, which git ignores, and packs that folder again after a new campaign.
 // Usage: node --import ./research/flow/register.mjs research/flow/logs.ts [unpack | pack | list]
 // The archive is a plain tar.gz: `tar -xzf research/flow/logs.tar.gz -C research/flow` unpacks it too.
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -68,11 +68,12 @@ export function unpackLogs(into = HERE, file = ARCHIVE): number {
 export function packLogs(from = HERE, file = ARCHIVE): number {
   const names: string[] = [];
   const walk = (folder: string) => {
-    for (const entry of readdirSync(join(from, folder)).sort()) {
-      const path = `${folder}/${entry}`;
-      if (statSync(join(from, path)).isDirectory()) walk(path);
+    const entries = readdirSync(join(from, folder), { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const path = `${folder}/${entry.name}`;
+      if (entry.isDirectory()) walk(path);
       // No hidden files: a file manager puts its own files into a folder.
-      else if (!entry.startsWith('.')) names.push(path);
+      else if (!entry.name.startsWith('.')) names.push(path);
     }
   };
   walk('logs');

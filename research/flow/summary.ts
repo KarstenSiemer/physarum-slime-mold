@@ -8,7 +8,7 @@
 // - engine-tokyo-end <file>...           the same lines: the samples with all food sources joined, mean and deviation
 // - compare <folder> <folder>            the logs of the same name in two folders, row by row: a rerun against the record
 // - digests <file> <file>                the lines of engine/digest.gpu.test.ts of two checkouts, scene by scene
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const [table = '', ...rest] = process.argv.slice(2);
 
@@ -26,15 +26,23 @@ function missing(what: string, path: string): never {
     );
   process.exit(1);
 }
-/** A folder name with a slash at its end. The script stops if the folder does not exist. */
+/** A folder name with a slash at its end. The script stops if the folder cannot be read. */
 function folderOf(folder: string): string {
-  if (!existsSync(folder) || !statSync(folder).isDirectory()) missing('folder', folder);
+  // The read itself is the check: a check before a read could be true for another state of the disk.
+  try {
+    readdirSync(folder);
+  } catch {
+    missing('folder', folder);
+  }
   return folder.endsWith('/') ? folder : `${folder}/`;
 }
-/** The text of a file. The script stops if the file does not exist. */
+/** The text of a file. The script stops if the file cannot be read. */
 function textOf(file: string): string {
-  if (!existsSync(file) || !statSync(file).isFile()) missing('file', file);
-  return readFileSync(file, 'utf8');
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    missing('file', file);
+  }
 }
 
 const median = (v: number[]) => {
@@ -57,13 +65,24 @@ const jsonl = (file: string) =>
     .trim()
     .split('\n')
     .map((l) => JSON.parse(l) as Record<string, unknown>);
+/**
+ * The seed of the log `<prefix>-s<seed>.jsonl`, and nothing for a file with another name. The prefix comes from the
+ * command line: it is compared as plain text and is not part of a pattern.
+ */
+function seedOf(file: string, prefix: string): number | undefined {
+  const [head, tail] = [`${prefix}-s`, '.jsonl'];
+  if (!file.startsWith(head) || !file.endsWith(tail)) return undefined;
+  const seed = file.slice(head.length, file.length - tail.length);
+  return /^\d+$/.test(seed) ? Number(seed) : undefined;
+}
 /** The logs <prefix>-s<seed>.jsonl of a folder, by seed, without their first line (the options). */
 function runs(folder: string, prefix: string): Record<string, unknown>[][] {
   const dir = folderOf(folder);
   const found = readdirSync(dir)
-    .filter((f) => new RegExp(`^${prefix}-s\\d+\\.jsonl$`).test(f))
-    .sort((a, b) => Number(/-s(\d+)\./.exec(a)?.[1]) - Number(/-s(\d+)\./.exec(b)?.[1]))
-    .map((f) => jsonl(dir + f).filter((r) => 'step' in r))
+    .map((file) => ({ file, seed: seedOf(file, prefix) }))
+    .filter((log): log is { file: string; seed: number } => log.seed !== undefined)
+    .sort((a, b) => a.seed - b.seed)
+    .map(({ file }) => jsonl(dir + file).filter((r) => 'step' in r))
     .filter((r) => r.length > 0);
   if (found.length === 0) fail(`no log ${prefix}-s<seed>.jsonl in ${dir}`);
   return found;

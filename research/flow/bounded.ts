@@ -153,7 +153,8 @@ if (scene === 'grow') {
     first = ruleStep(grid, u, first, trail, s, SEED, old);
     reference = flowStep(grid, u, reference, trail, s, SEED);
     same(built, reference, `step ${s}`);
-    if ((s + 1) % (steps / 6) !== 0) continue;
+    // Six lines per run, and always the last step (a step count that 6 does not divide printed nothing before).
+    if ((s + 1) % Math.max(1, Math.round(steps / 6)) !== 0 && s + 1 !== steps) continue;
     const flux = [flowFlux(grid, built.memory, built.pressure), flowFlux(grid, first.memory, first.pressure)];
     const line2 = [built, first].map((f, i) => {
       let [offset, cells, worst, top] = [0, 0, 0, 0];

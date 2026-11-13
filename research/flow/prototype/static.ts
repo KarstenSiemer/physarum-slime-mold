@@ -2,7 +2,7 @@
 // iterations each solver needs, and how the flux differs between the route and the dead ends (ADR 0029, "The pressure
 // on a fixed network"). The network is the trail of the Maze at step 1,000 of seed 1.
 // Usage: node --import ./research/flow/register.mjs research/flow/prototype/static.ts [plain=400000]
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { defaultFlow, Flow } from './flow.ts';
 import { Jones, mazeParams } from './jones.ts';
 import { mazeWorld, zones } from './maze.ts';
@@ -16,8 +16,12 @@ const z = zones(world);
 const n = world.w * world.h;
 const cache = `${OUT}trail-s1-1000.f32`;
 let trail: Float32Array;
-if (existsSync(cache)) trail = new Float32Array(readFileSync(cache).buffer.slice(0));
-else {
+// The read itself says if the network is there: a check before the read could be true for another state of the disk.
+try {
+  trail = new Float32Array(readFileSync(cache).buffer.slice(0));
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  // No network yet: make it, and keep it for the next call and for static-ma.ts.
   const sim = new Jones(world, mazeParams(1), 0.12);
   for (let s = 0; s < 1000; s++) sim.advance();
   trail = sim.trail;
