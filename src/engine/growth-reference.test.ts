@@ -1,7 +1,9 @@
 // The order of the births (place() in growth.wgsl and growth.glsl; the CPU copy equals both, bit for bit, by the
-// CPU-copy test in sim.gpu.test.ts). ADR 0025, decision 9.
+// CPU-copy test in sim.gpu.test.ts). ADR 0025, decision 9. And the cell of a child at the corner of a wall (ADR 0025,
+// decision 35).
 import { describe, expect, it } from 'vitest';
-import { place } from './growth-reference';
+import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { growthStep, place } from './growth-reference';
 
 describe('place(): the order of the births', () => {
   const sizes: [number, number][] = [
@@ -48,5 +50,69 @@ describe('place(): the order of the births', () => {
         for (const q of quarters) expect(q / first.length).toBeGreaterThan(0.2);
       }
     }
+  });
+});
+
+// Decision 35 of ADR 0025: a child may go to a diagonal cell past the corner of one wall cell, as a move from its
+// parent's cell can, but not between two wall cells that touch at that corner. One parent in cell (5, 5) that moved
+// in this step, agents on six of its neighbours and a wall on a seventh, so that (6, 6) is its only free cell, unless
+// (5, 6) is a wall too. The sim.gpu.test.ts test of the CPU copy holds both backends to this copy.
+describe('growthStep(): the child at the corner of a wall', () => {
+  const [w, h] = [16, 16];
+  const s: Settings = {
+    ...defaultSettings(),
+    layout: 'empty',
+    boundary: 'box',
+    model: 'extended',
+    strains: [defaultStrain(0)],
+    collisions: true,
+    growth: true,
+    growthEvery: 1,
+    growthWindow: 3,
+    growthMin: 1,
+    growthMax: 9,
+    shrinkEvery: 0,
+  };
+  const at = (x: number, y: number) => ({ x: x + 0.5, y: y + 0.5, heading: 0, bits: 4 });
+  const neighbours: [number, number][] = [
+    [4, 4],
+    [5, 4],
+    [6, 4],
+    [4, 5],
+    [4, 6],
+  ];
+
+  function child(walls: [number, number][], filled: [number, number][]) {
+    const env = new Uint8Array(w * h * 4);
+    for (const [x, y] of walls) env[(y * w + x) * 4] = 255;
+    const agents = [at(5, 5), ...filled.map(([x, y]) => at(x, y)), ...Array.from({ length: 3 }, () => at(0, 0))];
+    // The last three are dead.
+    for (let k = agents.length - 3; k < agents.length; k++) agents[k] = { ...at(0, 0), bits: 0 };
+    const counts = new Float32Array(w * h * 4);
+    counts[(5 * w + 5) * 4] = 1; // the parent moved into its cell in this step
+    const out = growthStep({ kind: 'webgpu', settings: s, w, h, env, step: 0, agents, counts }).agents;
+    const born = out.filter((a, id) => a.bits & 4 && !((agents[id]?.bits ?? 0) & 4));
+    return born.map((a) => [Math.floor(a.x), Math.floor(a.y)]);
+  }
+
+  it('goes past the corner of one wall cell', () => {
+    expect(child([[6, 5]], [...neighbours, [5, 6]])).toEqual([[6, 6]]);
+    expect(child([[5, 6]], [...neighbours, [6, 5]])).toEqual([[6, 6]]);
+  });
+
+  it('does not go between two wall cells that touch at the corner', () => {
+    expect(
+      child(
+        [
+          [6, 5],
+          [5, 6],
+        ],
+        neighbours,
+      ),
+    ).toEqual([]);
+  });
+
+  it('goes to its only free cell without walls', () => {
+    expect(child([], [...neighbours, [6, 5], [5, 6]])).toEqual([[6, 6]]);
   });
 });

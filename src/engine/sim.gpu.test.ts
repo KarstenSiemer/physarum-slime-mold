@@ -4101,7 +4101,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // One step that tests growth and shrinkage, against the CPU copy of the passes (growth-reference.ts) stepped
     // from the state after the moves: a twin without growth runs the same moves. On the periodic grid with a wall
     // across its seams, in a box with a wall at its edge, and in a dish, so that windows meet the grid's edges, the
-    // seam, walls and the rim.
+    // seam, walls and the rim. With walls, also single wall cells that touch only at their corners, where the colony
+    // grows: a diagonal line across the seam of the periodic grid and from the edge of the box, and a lattice of
+    // diamonds. 10 to 11 dividing agents then have an empty diagonal neighbour between two walls, and 16 to 18 one past
+    // the corner of one wall cell (ADR 0025, decision 35): the CPU copy without the corner rule, and with the rule that
+    // either wall blocks, fails each case with walls.
     it.each([
       ['wrap', true],
       ['box', true],
@@ -4134,6 +4138,14 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         : [];
       for (const sim of [a, b]) {
         sim.paint(wall);
+        if (walls) {
+          const bytes = await sim.readEnv();
+          for (let k = 0; k < 24; k++) bytes[(((36 + k) % h) * w + 4 + k) * 4] = 255;
+          // A lattice of diamonds left of x = 24 and above y = 28, where the colony is thin and grows.
+          for (let y = 0; y < 28; y++)
+            for (let x = 0; x < 24; x++) if ((x + y) % 8 === 0 || (x - y + 64) % 8 === 0) bytes[(y * w + x) * 4] = 255;
+          sim.writeEnv(bytes);
+        }
         r = 5;
         seedAgents(sim, s, rnd, await sim.readEnv());
         sim.writeTrail(trail);
@@ -4164,20 +4176,51 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(died).toBeGreaterThan(20);
       expect(got).toEqual(expected.agents);
       // Each child lies in a cell that was empty and habitable after the moves, next to a parent of its strain that
-      // moved in this step.
+      // moved in this step, and not between two wall cells that touch at the corner between them.
       const occ = occupancy(moved, w, h, boundary);
       const counts = await b.readCounts();
-      const wrap = (v: number, m: number) => (boundary === 'wrap' ? ((v % m) + m) % m : v);
+      const cellIndex = (x: number, y: number) => {
+        const [u, v] = boundary === 'wrap' ? [((x % w) + w) % w, ((y % h) + h) % h] : [x, y];
+        return u < 0 || v < 0 || u >= w || v >= h ? -1 : v * w + u;
+      };
+      const isWall = (x: number, y: number) => {
+        const c = cellIndex(x, y);
+        return c >= 0 && (env[c * 4] ?? 0) >= 128;
+      };
+      const around = [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => [dx, dy] as const));
+      /** From cell (x, y), the neighbour at (dx, dy) is diagonal, and `n` of the two cells beside the corner are walls. */
+      const beside = (x: number, y: number, [dx, dy]: readonly [number, number], n: number) =>
+        dx !== 0 && dy !== 0 && Number(isWall(x + dx, y)) + Number(isWall(x, y + dy)) === n;
       for (const [id, g] of got.entries()) {
         if (!child(g, id)) continue;
         const [x, y] = [Math.floor(g.x), Math.floor(g.y)];
         expect(occ[y * w + x], `child ${id}`).toBe(0);
         expect(env[(y * w + x) * 4] ?? 0, `child ${id}`).toBeLessThan(128);
-        const parents = [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => wrap(y + dy, h) * w + wrap(x + dx, w)));
-        expect(
-          parents.some((c) => c >= 0 && (occ[c] ?? 0) > 0 && (counts[c * 4 + (g.bits & 3)] ?? 0) > 0),
-          `child ${id}`,
-        ).toBe(true);
+        const parents = around.filter(([dx, dy]) => {
+          const c = cellIndex(x + dx, y + dy);
+          return c >= 0 && (occ[c] ?? 0) > 0 && (counts[c * 4 + (g.bits & 3)] ?? 0) > 0 && !beside(x, y, [dx, dy], 2);
+        });
+        expect(parents.length, `child ${id}`).toBeGreaterThan(0);
+      }
+      // The corner rule acts: survivors that divide and have an empty diagonal neighbour between two wall cells, which
+      // the rule leaves out, and ones with an empty diagonal neighbour past the corner of one wall cell, which it keeps.
+      const dividers = moved.filter((m) => {
+        const c = cellIndex(Math.floor(m.x), Math.floor(m.y));
+        if (!(m.bits & 4) || c < 0 || (counts[c * 4 + (m.bits & 3)] ?? 0) === 0) return false;
+        const [grow, keep] = [expected.windows[c * 2] ?? 0, expected.windows[c * 2 + 1] ?? 0];
+        return grow >= s.growthMin && grow <= s.growthMax && keep >= s.shrinkMin && keep <= s.shrinkMax;
+      });
+      const corners = (n: number) =>
+        dividers.filter((m) => {
+          const [x, y] = [Math.floor(m.x), Math.floor(m.y)];
+          return around.some((o) => {
+            const t = cellIndex(x + o[0], y + o[1]);
+            return t >= 0 && occ[t] === 0 && !isWall(x + o[0], y + o[1]) && beside(x, y, o, n);
+          });
+        }).length;
+      if (walls) {
+        expect(corners(2)).toBeGreaterThan(0);
+        expect(corners(1)).toBeGreaterThan(0);
       }
       expect((await census(a, boundary)).most).toBe(1);
     });
@@ -4258,6 +4301,53 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(born).toBeGreaterThan(20);
       },
     ); // At most 0.2 s on SwiftShader on an M3 Pro, after the hook's builds: the default 60 s (ADR 0010).
+
+    // ADR 0025, decision 35: a child goes to a diagonal neighbour only where a move from its parent's cell could go
+    // (clearPath in agents.wgsl, CORNER): not between two wall cells that touch at the corner between them (the unit
+    // test of growth-reference.ts has the corner of one wall cell). Walls of single cells that touch only at their
+    // corners: in a box one diagonal line, and on the periodic grid two, across the seams, which part the torus into
+    // two bands. The colony starts on one side, and a move cannot cross such a wall (the test of the corners above).
+    // So an agent on the other side is a child that a parent placed across a corner.
+    it.each(['box', 'wrap'] as const)('places no child across the corner of a wall (%s)', async (boundary) => {
+      const [w, h] = [32, 32];
+      const d = (x: number, y: number) => (((x - y) % w) + w) % w;
+      const isWall = (x: number, y: number) => (boundary === 'wrap' ? d(x, y) % (w / 2) === 0 : x === y);
+      // The side of the colony: below the diagonal in the box, the band 0 < d < 16 on the torus.
+      const near = (x: number, y: number) => !isWall(x, y) && (boundary === 'wrap' ? d(x, y) < w / 2 : x > y);
+      const s: Settings = {
+        ...defaultSettings(),
+        ...GROWTH,
+        boundary,
+        density: 1,
+        growthEvery: 1,
+        growthWindow: 3,
+        growthMin: 1,
+        growthMax: 9,
+        shrinkEvery: 0,
+      };
+      const sim = await make({ ...s, growth: false, collisions: false }, w, h, w * h);
+      const env = new Uint8Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) if (isWall(c % w, Math.floor(c / w))) env[c * 4] = 255;
+      sim.writeEnv(env);
+      let r = 7;
+      const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+      let placed = 0;
+      for (let c = 0; c < w * h; c++) {
+        const [x, y] = [c % w, Math.floor(c / w)];
+        if (!near(x, y) || rnd() > 0.35) continue;
+        const [fx, fy] = [Math.fround(0.05 + 0.9 * rnd()), Math.fround(0.05 + 0.9 * rnd())];
+        sim.writeAgent(placed++, { x: x + fx, y: y + fy, heading: Math.fround(rnd() * 6.28), bits: 4 });
+      }
+      // The rule is switched on after the agents are written: the switch builds the occupancy from them.
+      sim.update(s);
+      sim.run(30);
+      const alive = (await sim.readAgents()).filter((a) => a.bits & 4);
+      const cells = alive.map((a) => [Math.floor(a.x), Math.floor(a.y)] as const);
+      // The colony grows on its own side, and no agent lies in a wall or on the other side.
+      expect(placed).toBeGreaterThan(100);
+      expect(cells.filter(([x, y]) => near(x, y)).length).toBeGreaterThan(placed + 50);
+      expect(cells.filter(([x, y]) => !near(x, y))).toEqual([]);
+    });
 
     // Decision 9 of ADR 0025: when dead agents run out, the births that get one spread over the grid. Checked on the
     // children themselves, not with the CPU copy of place(): 40 dead agents for a few hundred births all over a grid.
