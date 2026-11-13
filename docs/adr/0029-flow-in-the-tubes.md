@@ -887,7 +887,7 @@ Pictures from the app's own renderer (`npm run gallery`, seed 7): `docs/images/m
 the Maze at step 5,000 without and with the flow, `docs/images/tokyo-flow.jpg` the Tokyo scene at
 step 12,000 without and with the flow, and `docs/images/tokyo-time.jpg` the Tokyo scene at step
 1,000 and at step 48,000. They were made again on 2026-11-13 with the picture of the tubes
-(ADR 0034), which draws every tube as wide as its flow memory says: `tests/gallery/readme.spec.ts`
+(ADR 0034), which draws every tube as wide as its flow memory says: `tests/pictures/readme.spec.ts`
 makes the three files.
 
 ### The Maze (flux 8)

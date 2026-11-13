@@ -259,15 +259,17 @@ the arrows.
   as its flow memory says, with a switch below the flow strength that is on at the start. Two passes run once for each
   drawn state (`shaders/tubes.wgsl`, `gl/glsl/tubes.frag`; the rule and its numbers in `src/engine/tubes.ts`, a CPU
   copy in `tubes-reference.ts`). The first writes, per cell and strain, the fourth root of the strength across the
-  tube: the sum of body times flow memory over the 3 × 3 cells around the cell, over 3, at most 1. The second draws
-  every cell with a tube as a disc of 3.5 cells times that factor, with an edge 1 cell wide. A cell of the picture
-  takes the largest weight (factor times cover) of the discs that reach it, times the mean of the trails of their
-  cells by weight, and at least a quarter of its own trail. A disc reaches a cell only if the wall distances of both
-  cells in `shape` are together more than the distance between them, so no tube is drawn across a wall. The render
-  pass, the height field, the glow, the auto levels, the coarse map of the trail and PNG read the picture in place of
-  the trail; the strand of the scent view stays a level of the trail of the model; the agents style has no picture of
-  the tubes. The memory counts the two textures while the flow is on, with the switch on or off, so the switch never
-  changes the grid. The simulation never reads the picture.
+  tube: on a cell with a tube the sum of tube body times flow memory over the 3 × 3 cells around the cell, over 3, at
+  most 1, and 0 on a cell without a tube. The second draws every cell with a tube as a disc of 3.5 cells times that
+  factor, with an edge 1 cell wide, so a tube is at most 3 cells wider on each side than its band of cells. A cell of
+  the picture takes the largest weight (factor times cover) of the discs that reach it, times the mean of the trails
+  of their cells by weight, and at least a quarter of its own trail. A disc reaches another cell only if neither is a
+  cell of a wall and no cell of a wall lies on the line between the two cells (`shape` says which cells are walls),
+  so no tube is drawn across a wall. The render pass, the height field, the
+  glow, the auto levels, the coarse map of the trail and PNG read the picture in place of the trail; the strand of
+  the scent view stays a level of the trail of the model; the agents style has no picture of the tubes. The fit of the
+  grid to the memory of the GPU counts the two textures while the flow is on, with the switch on or off, so the
+  switch never changes the grid. The simulation never reads the picture.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.

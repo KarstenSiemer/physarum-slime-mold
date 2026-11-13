@@ -99,8 +99,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   [V]. Near a new food the tubes dilate up to twofold (Kramar and Alim 2021) [H].
 - **Model**: the thickness of a tube is the number of agents across it, not a radius. Dead agents come to life on a tube
   of their own strain where the flow memory of their strain is above 0.5 (ADR 0029, decision 8; ADR 0031, decision 2).
-  The view can draw a radius: the picture of the tubes draws each tube with the fourth root of its flow memory, the
-  radius that Poiseuille's law gives for a conductivity (ADR 0034). That changes the picture only.
+  The view can draw a radius: the picture of the tubes draws a disc on every cell of a tube, with a radius that grows
+  with the fourth root of its conductivity, as Poiseuille's law gives it (ADR 0034). That changes the picture only.
 - **Measured**: a stronger flow gives a wider tube in the Maze: about 2,060 agents at a strength of 4 and about 9,600
   at 16 (2 seeds each, ADR 0029). The width of a tube against its own flux is not measured. The competition of two
   routes is not measured in the app; the prototype tested it only on Tero's ring (ADR 0029, prototype).
