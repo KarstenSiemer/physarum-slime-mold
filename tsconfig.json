@@ -18,5 +18,5 @@
     "allowImportingTsExtensions": true,
     "allowJs": true
   },
-  "include": ["src", "tests", "*.ts", "*.js"]
+  "include": ["src", "tests", "research", "*.ts", "*.js"]
 }

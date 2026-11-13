@@ -13,3 +13,6 @@ CLAUDE-SECURITY-*/
 artl.2010.16.2.pdf
 
 .vitest/
+
+# Logs and pictures of the research scripts (research/flow/README.md).
+research/**/out/
