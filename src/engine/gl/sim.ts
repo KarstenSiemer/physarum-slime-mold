@@ -417,20 +417,31 @@ export class GlSim implements Sim {
 
   /** The passes of pictureTarget(): the factor of the radius of every tube, then the picture. */
   private encodeTubes(flow: NonNullable<GlSim['flow']>) {
-    const gl = this.gl;
     this.syncShape();
     // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
     const trail = this.viewTrail().texture;
     this.writeParams();
-    this.tubes ??= {
-      roots: target(gl, this.width, this.height, gl.RGBA32F),
-      picture: target(gl, this.width, this.height, gl.RGBA32F),
-    };
-    const { roots, picture } = this.tubes;
+    const tubes = this.ensureTubes();
     const k = this.prog.tubes();
-    this.pass(k.roots, roots, this.flowMemories(flow), { strains: flow.memory.length });
-    this.pass(k.picture, picture, { trail, shape: this.shape.texture, roots: roots.texture }, {});
+    this.pass(k.roots, tubes.roots, this.flowMemories(flow), { strains: flow.memory.length });
+    this.pass(k.picture, tubes.picture, { trail, shape: this.shape.texture, roots: tubes.roots.texture }, {});
     this.tubesStale = false;
+    return tubes;
+  }
+
+  /** The targets of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
+  private ensureTubes() {
+    if (!this.tubes) {
+      const gl = this.gl;
+      const roots = target(gl, this.width, this.height, gl.RGBA32F);
+      try {
+        this.tubes = { roots, picture: target(gl, this.width, this.height, gl.RGBA32F) };
+      } catch (error) {
+        // The second target did not fit: the first must not stay behind.
+        destroyTarget(gl, roots);
+        throw error;
+      }
+    }
     return this.tubes;
   }
 
@@ -512,7 +523,8 @@ export class GlSim implements Sim {
     }
     // The memory fit counts the targets of the flow only while it is on.
     if (!flowOn(settings) && this.flow) this.dropFlow();
-    // And the targets of the picture of the tubes only while the settings show it (tubes.ts).
+    // The picture of the tubes holds its targets only while the settings show it (tubes.ts). The memory fit counts them
+    // with the flow, shown or not (sizing.ts tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
   }
 

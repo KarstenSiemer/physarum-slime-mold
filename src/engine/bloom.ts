@@ -12,8 +12,11 @@ interface Chain {
   out: GPUTextureView;
   /** Index 0: prefilter; 1–4: downsample (source level i − 1); 5–8: upsample (source level 4 … 1). */
   uniforms: GPUBuffer[];
-  /** Bind groups per trail texture (ping-pong) and sampler mode (0 clamp, 1 repeat). */
-  groups: Map<GPUTexture, GPUBindGroup[][]>;
+  /**
+   * Bind groups per trail texture (ping-pong, or the picture of the tubes) and sampler mode (0 clamp, 1 repeat). The
+   * textures are weak keys: a texture that its simulation freed leaves no group behind.
+   */
+  groups: WeakMap<GPUTexture, GPUBindGroup[][]>;
 }
 
 /** Soft glow: a blurred mip chain of the exposed trail, one lane per strain (see bloom.wgsl). */
@@ -95,7 +98,7 @@ export class Bloom {
       return b;
     });
     const out = at(levels, 0).createView();
-    this.chain = { width: trail.width, height: trail.height, levels, out, uniforms, groups: new Map() };
+    this.chain = { width: trail.width, height: trail.height, levels, out, uniforms, groups: new WeakMap() };
     return this.chain;
   }
 

@@ -99,7 +99,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async settle(sim: Simulation): Promise<Levels> {
-    await this.auto.measure(sim.pictureTexture, 1, sim.viewTexture);
+    await this.auto.measure(() => [sim.pictureTexture, sim.viewTexture]);
     return this.levels();
   }
 
@@ -108,7 +108,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async measured(sim: Simulation): Promise<Levels> {
-    return (await this.auto.read(sim.pictureTexture, sim.viewTexture)) ?? this.levels();
+    return (await this.auto.read(() => [sim.pictureTexture, sim.viewTexture])) ?? this.levels();
   }
 
   /**

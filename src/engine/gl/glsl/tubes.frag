@@ -13,27 +13,31 @@ uniform sampler2D flowMemory3;
 // The strains that the state of the flow holds: a sampler beyond them holds the memory of the first strain.
 uniform int strains;
 
-// The strength of the tube of a cell from its memory: its body times its flow memory, 0 without a tube.
-float strength(vec4 m) { return m.y >= BODY_LOW ? m.x * m.y : 0.0; }
-
-void main() {
-  ivec2 p = ivec2(gl_FragCoord.xy);
-  if (cellXY(p).x < 0) {
-    result = vec4(0.0);
-    return;
-  }
-  vec4 sum = vec4(0.0);
+// The strength across the tube that the cell at p (cellXY) holds in one memory; 0 on a cell without a tube.
+float across(sampler2D memory, ivec2 p) {
+  if (texelFetch(memory, p, 0).y < BODY_LOW) return 0.0;
+  float sum = 0.0;
   for (int dy = -1; dy <= 1; dy++) {
     for (int dx = -1; dx <= 1; dx++) {
       ivec2 q = cellXY(p + ivec2(dx, dy));
       if (q.x < 0) continue;
-      sum.x += strength(texelFetch(flowMemory, q, 0));
-      if (strains > 1) sum.y += strength(texelFetch(flowMemory1, q, 0));
-      if (strains > 2) sum.z += strength(texelFetch(flowMemory2, q, 0));
-      if (strains > 3) sum.w += strength(texelFetch(flowMemory3, q, 0));
+      vec4 m = texelFetch(memory, q, 0);
+      if (m.y >= BODY_LOW) sum += m.x * m.y;
     }
   }
-  result = sqrt(sqrt(min(sum / SPAN, vec4(1.0))));
+  return min(sum / SPAN, 1.0);
+}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 a = vec4(0.0);
+  if (cellXY(p).x >= 0) {
+    a.x = across(flowMemory, p);
+    if (strains > 1) a.y = across(flowMemory1, p);
+    if (strains > 2) a.z = across(flowMemory2, p);
+    if (strains > 3) a.w = across(flowMemory3, p);
+  }
+  result = sqrt(sqrt(a));
 }
 
 #else
@@ -43,8 +47,9 @@ uniform sampler2D roots; // PASS 0
 
 const float SHAPE_RANGE = 4.0; // cells; SHAPE_RANGE in shape.frag
 
-// The distance of the cell at q (cellXY) to the outline of the walls, cells: 0 in a wall, at most SHAPE_RANGE.
-float clearOf(ivec2 q) { return max(0.0, (1.0 - 2.0 * texelFetch(shape, q, 0).r) * SHAPE_RANGE); }
+// The distance to the outline of the walls that the wall byte of a texel of `shape` stands for, cells, less half a
+// step of the byte (clearOf in tubes.wgsl).
+float clearOf(vec4 s) { return max(0.0, (1.0 - 2.0 * s.r - 1.0 / 255.0) * SHAPE_RANGE); }
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -54,24 +59,30 @@ void main() {
   }
   float reach = RADIUS + 0.5 * EDGE;
   int window = int(ceil(reach)) - 1;
-  float here = clearOf(p);
+  vec4 here = texelFetch(shape, p, 0);
   // Of the discs that reach the cell: the largest weight, the sum of the weights, and the sum of the trails by weight.
   vec4 top = vec4(0.0);
   vec4 sum = vec4(0.0);
   vec4 lit = vec4(0.0);
-  for (int dy = -window; dy <= window; dy++) {
-    for (int dx = -window; dx <= window; dx++) {
-      float d = length(vec2(float(dx), float(dy)));
-      if (d >= reach) continue;
-      ivec2 q = cellXY(p + ivec2(dx, dy));
-      if (q.x < 0) continue;
-      // A wall lies on the line between the cells, or one of them is a wall.
-      if (here + clearOf(q) <= d) continue;
-      vec4 root = texelFetch(roots, q, 0);
-      vec4 weight = root * clamp((RADIUS * root + 0.5 * EDGE - d) / EDGE, 0.0, 1.0);
-      top = max(top, weight);
-      sum += weight;
-      lit += texelFetch(trail, q, 0) * weight;
+  // No disc reaches a cell of a wall.
+  if (!isWall(here)) {
+    for (int dy = -window; dy <= window; dy++) {
+      for (int dx = -window; dx <= window; dx++) {
+        float d = length(vec2(float(dx), float(dy)));
+        if (d >= reach) continue;
+        ivec2 q = cellXY(p + ivec2(dx, dy));
+        if (q.x < 0) continue;
+        // The disc of the cell itself reaches it. Another cell: not a wall cell, and no wall on the line between.
+        if (dx != 0 || dy != 0) {
+          vec4 there = texelFetch(shape, q, 0);
+          if (isWall(there) || clearOf(here) + clearOf(there) <= d) continue;
+        }
+        vec4 root = texelFetch(roots, q, 0);
+        vec4 weight = root * clamp((RADIUS * root + 0.5 * EDGE - d) / EDGE, 0.0, 1.0);
+        top = max(top, weight);
+        sum += weight;
+        lit += texelFetch(trail, q, 0) * weight;
+      }
     }
   }
   // The tube: the strongest disc, with the mean trail of the cells whose discs reach the cell. Without a disc all

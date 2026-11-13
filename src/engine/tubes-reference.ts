@@ -14,6 +14,9 @@ export interface TubeGrid {
   shape: Uint8Array;
 }
 
+/** A wall byte from this on is a cell of a wall (WALL_BYTE in common.wgsl). */
+const WALL_BYTE = 128;
+
 /** The index of the cell at (x, y) if it lies in the arena, wrapped on the periodic grid; else −1 (cellXY()). */
 export function arenaCell(grid: TubeGrid, x: number, y: number): number {
   const { width: w, height: h, boundary } = grid;
@@ -23,13 +26,20 @@ export function arenaCell(grid: TubeGrid, x: number, y: number): number {
   return y * w + x;
 }
 
-/** The distance of a cell to the outline of the walls, cells: 0 in a wall, at most SHAPE_RANGE (clearOf()). */
-export const clearOf = (grid: TubeGrid, c: number) =>
-  Math.max(0, (1 - (2 * (grid.shape[c * 4] ?? 0)) / 255) * SHAPE_RANGE);
+/** The wall byte of a cell: its signed distance to the outline of the walls, WALL_BYTE and up in a wall. */
+export const wallByte = (grid: TubeGrid, c: number) => grid.shape[c * 4] ?? 0;
 
 /**
- * The pass `roots`: per cell and strain (4 values per cell) the fourth root of the strength across the tube.
- * `memories`: the memory of the flow of each strain, 4 values per cell as Sim.readFlow() returns them.
+ * The distance to the outline of the walls that a wall byte stands for, cells, at most SHAPE_RANGE, less half a step
+ * of the byte: the byte is rounded, and this distance must never be above the distance to the centre of the nearest
+ * wall cell (clearOf() in tubes.wgsl).
+ */
+export const clearOf = (byte: number) => Math.max(0, (1 - (2 * byte + 1) / 255) * SHAPE_RANGE);
+
+/**
+ * The pass `roots`: per cell and strain (4 values per cell) the fourth root of the strength across the tube, and 0 on
+ * a cell without a tube of the strain. `memories`: the memory of the flow of each strain, 4 values per cell as
+ * Sim.readFlow() returns them.
  */
 export function tubeRoots(grid: TubeGrid, memories: readonly Float32Array[]): Float32Array {
   const { width: w, height: h } = grid;
@@ -39,6 +49,8 @@ export function tubeRoots(grid: TubeGrid, memories: readonly Float32Array[]): Fl
       const p = arenaCell(grid, x, y);
       if (p < 0) continue;
       memories.slice(0, 4).forEach((memory, s) => {
+        // A cell without a tube of the strain is no disc.
+        if ((memory[p * 4 + 1] ?? 0) < FLOW.bodyLow) return;
         let sum = 0;
         for (let dy = -1; dy <= 1; dy++)
           for (let dx = -1; dx <= 1; dx++) {
@@ -64,7 +76,7 @@ export function tubePicture(grid: TubeGrid, trail: Float32Array, roots: Float32A
     for (let x = 0; x < w; x++) {
       const p = arenaCell(grid, x, y);
       if (p < 0) continue;
-      const here = clearOf(grid, p);
+      const here = wallByte(grid, p);
       // Per strain, of the discs that reach the cell: the largest weight, the sum of the weights, and the sum of the
       // trails by weight.
       const [top, sum, lit] = [
@@ -72,14 +84,18 @@ export function tubePicture(grid: TubeGrid, trail: Float32Array, roots: Float32A
         [0, 0, 0, 0],
         [0, 0, 0, 0],
       ];
-      for (let dy = -TUBE_WINDOW; dy <= TUBE_WINDOW; dy++)
+      // No disc reaches a cell of a wall.
+      for (let dy = -TUBE_WINDOW; here < WALL_BYTE && dy <= TUBE_WINDOW; dy++)
         for (let dx = -TUBE_WINDOW; dx <= TUBE_WINDOW; dx++) {
           const d = Math.hypot(dx, dy);
           if (d >= TUBE_REACH) continue;
           const q = arenaCell(grid, x + dx, y + dy);
           if (q < 0) continue;
-          // A wall lies on the line between the cells, or one of them is a wall.
-          if (here + clearOf(grid, q) <= d) continue;
+          // The disc of the cell itself reaches it. Another cell: not a wall cell, and no wall on the line between.
+          if (dx !== 0 || dy !== 0) {
+            const there = wallByte(grid, q);
+            if (there >= WALL_BYTE || clearOf(here) + clearOf(there) <= d) continue;
+          }
           for (let s = 0; s < 4; s++) {
             const root = roots[q * 4 + s] ?? 0;
             const cover = Math.min(1, Math.max(0, (TUBES.radius * root + TUBES.edge / 2 - d) / TUBES.edge));

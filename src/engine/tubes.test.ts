@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, tubeViewHelp, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { clearOf, tubePicture, tubeRoots, type TubeGrid } from './tubes-reference';
+import { clearOf, tubePicture, tubeRoots, wallByte, type TubeGrid } from './tubes-reference';
 import { SHAPE_RANGE } from './types';
 
 /** A grid without walls: every byte of `shape` is 0, the byte of a cell 4 cells or more from a wall. */
@@ -16,7 +16,7 @@ const open = (width: number, height: number, boundary: TubeGrid['boundary'] = 'b
 });
 
 /** The wall byte of a signed distance to the outline of a wall, cells, positive inside (paint.wgsl distanceByte()). */
-const wallByte = (sd: number) => Math.round((Math.min(1, Math.max(-1, sd / SHAPE_RANGE)) * 0.5 + 0.5) * 255);
+const byteOf = (sd: number) => Math.round((Math.min(1, Math.max(-1, sd / SHAPE_RANGE)) * 0.5 + 0.5) * 255);
 
 /** The memory of a flow, 4 values per cell: fresh ground without a tube, and what `of` gives for a cell. */
 function memoryOf(g: TubeGrid, of: (x: number, y: number) => [memory: number, body: number] | undefined) {
@@ -57,20 +57,21 @@ describe('the picture of the tubes', () => {
   });
 
   it('states its numbers in the help of the switch', () => {
-    expect(tubeViewHelp.help).toContain(`radius of ${String(TUBES.radius)} cells`);
+    // A disc of the largest radius covers the whole cells nearer than its reach: a tube is so much wider on each side.
+    expect(tubeViewHelp.help).toContain(`is ${String(TUBE_WINDOW)} cells wider on each side`);
     expect(TUBES.sheet).toBe(0.25);
     expect(tubeViewHelp.help).toContain('a quarter of its brightness');
     expect(tubeViewHelp.help).toContain('fourth root');
   });
 
-  it('takes the strength across a tube from the 3 × 3 cells around a cell, and its fourth root', () => {
+  it('takes the strength across a tube from the 3 × 3 cells around a cell with a tube, and its fourth root', () => {
     const g = open(24, 16);
     const at = (roots: Float32Array, x: number, y: number) => roots[(y * g.width + x) * 4] ?? 0;
     // A tube of one cell along row 8 with a flow memory of 0.01: three of its cells lie in the 3 × 3 cells around a
-    // cell of it and of the rows beside it, over a length of 3 cells.
+    // cell of it, over a length of 3 cells. The rows beside it hold no tube, so they hold no factor.
     const line = tubeRoots(g, [memoryOf(g, (_, y) => (y === 8 ? [0.01, 1] : undefined))]);
-    for (const y of [7, 8, 9]) expect(at(line, 12, y)).toBeCloseTo(0.01 ** 0.25, 6);
-    expect(at(line, 12, 6)).toBe(0);
+    expect(at(line, 12, 8)).toBeCloseTo(0.01 ** 0.25, 6);
+    expect([7, 9, 6].map((y) => at(line, 12, y))).toEqual([0, 0, 0]);
     // A band of 3 rows holds 3 times the strength across it, and the strength is at most 1.
     const band = (memory: number) =>
       tubeRoots(g, [memoryOf(g, (_, y) => (y >= 7 && y <= 9 ? [memory, 1] : undefined))]);
@@ -81,7 +82,8 @@ describe('the picture of the tubes', () => {
     const dot = (body: number) =>
       tubeRoots(g, [memoryOf(g, (x, y) => (x === 12 && y === 8 ? [0.6, body] : undefined))]);
     expect(at(dot(1), 12, 8)).toBeCloseTo((0.6 / 3) ** 0.25, 6);
-    expect(at(dot(0.5), 13, 9)).toBeCloseTo((0.3 / 3) ** 0.25, 6);
+    expect(at(dot(0.5), 12, 8)).toBeCloseTo((0.3 / 3) ** 0.25, 6);
+    expect(at(dot(1), 13, 9)).toBe(0);
     expect(at(dot(0.99 * FLOW.bodyLow), 12, 8)).toBe(0);
     // Fresh ground holds a flow memory and no body: it is no tube.
     expect(Math.max(...tubeRoots(g, [memoryOf(g, () => undefined)]))).toBe(0);
@@ -92,56 +94,64 @@ describe('the picture of the tubes', () => {
 
   it('draws a tube as a disc around every cell of it, and the trail without a tube at a quarter', () => {
     const g = open(32, 24);
-    // A full tube along row 12: the cells of rows 11 to 13 hold its strength, and here its trail too.
+    // A full tube of one cell along row 12, and a trail without a tube on a part of row 3.
     const tube = memoryOf(g, (_, y) => (y === 12 ? [1, 1] : undefined));
-    const trail = trailOf(g, (x, y) => (y >= 11 && y <= 13 ? 8 : y === 3 && x < 16 ? 6 : 0));
+    const trail = trailOf(g, (x, y) => (y === 12 ? 8 : y === 3 && x < 16 ? 6 : 0));
     const picture = tubePicture(g, trail, tubeRoots(g, [tube]));
     const at = (x: number, y: number) => picture[(y * g.width + x) * 4] ?? 0;
-    // A disc of the full radius covers a cell up to 3 cells away, and nothing of a cell 4 cells away.
-    expect([13, 14, 15, 16, 17].map((y) => at(20, y))).toEqual([8, 8, 8, 8, 0]);
-    expect([11, 10, 9, 8, 7].map((y) => at(20, y))).toEqual([8, 8, 8, 8, 0]);
+    // A disc of the full radius, 3.5 cells, covers a cell up to 3 cells away, and nothing of a cell 4 cells away: the
+    // tube is 7 cells wide.
+    expect([12, 13, 14, 15, 16].map((y) => at(20, y))).toEqual([8, 8, 8, 8, 0]);
+    expect([11, 10, 9, 8].map((y) => at(20, y))).toEqual([8, 8, 8, 0]);
     // The trail without a tube stays, at a quarter, and it is no wider than it was.
     expect(at(8, 3)).toBe(TUBES.sheet * 6);
     expect([at(8, 2), at(8, 4), at(20, 3)]).toEqual([0, 0, 0]);
-    // One tube cell alone: the 3 × 3 cells around it hold a third of its strength each. The edge of a disc is one
-    // cell wide, so a cell 2.83 cells from the nearest of them holds a part.
+    // One tube cell alone holds a third of its strength across. The edge of its disc is one cell wide, so a cell
+    // 2.83 cells away holds a part.
     const dot = memoryOf(g, (x, y) => (x === 12 && y === 12 ? [1, 1] : undefined));
-    const block = trailOf(g, (x, y) => (Math.abs(x - 12) <= 1 && Math.abs(y - 12) <= 1 ? 8 : 0));
     const root = (1 / 3) ** 0.25;
-    const one = tubePicture(g, block, tubeRoots(g, [dot]));
+    const one = tubePicture(
+      g,
+      trailOf(g, (x, y) => (x === 12 && y === 12 ? 8 : 0)),
+      tubeRoots(g, [dot]),
+    );
     expect(one[(12 * g.width + 12) * 4]).toBeCloseTo(8 * root, 6);
-    expect(one[(15 * g.width + 15) * 4]).toBeCloseTo(8 * root * (TUBES.radius * root + 0.5 - Math.hypot(2, 2)), 5);
-    expect(one[(16 * g.width + 16) * 4]).toBe(0);
+    expect(one[(14 * g.width + 14) * 4]).toBeCloseTo(8 * root * (TUBES.radius * root + 0.5 - Math.hypot(2, 2)), 5);
+    expect(one[(15 * g.width + 15) * 4]).toBe(0);
+    // A weak tube: a hundredth of the flow memory gives a third of the radius and of the brightness.
+    const weak = memoryOf(g, (_, y) => (y === 12 ? [0.01, 1] : undefined));
+    const thin = tubePicture(
+      g,
+      trailOf(g, (_, y) => (y === 12 ? 8 : 0)),
+      tubeRoots(g, [weak]),
+    );
+    const factor = 0.01 ** 0.25;
+    expect(thin[(12 * g.width + 20) * 4]).toBeCloseTo(8 * factor, 6);
+    expect(thin[(13 * g.width + 20) * 4]).toBeCloseTo(8 * factor * (TUBES.radius * factor + 0.5 - 1), 6);
+    expect(thin[(14 * g.width + 20) * 4]).toBe(0);
   });
 
   it('gives a tube the mean trail of the cells whose discs reach a cell, each by its weight', () => {
     const g = open(32, 24);
-    const tube = memoryOf(g, (_, y) => (y === 12 ? [1, 1] : undefined));
-    // The trail lies on row 12 alone, and the rows beside it hold a part of the tube without trail. At a cell of row
-    // 12 the discs of 7 cells of its row reach it whole, and in each row beside it 5 whole and 2 at their edge.
-    const thin = tubePicture(
+    // A full tube of two rows, with a trail of 8 on row 12 and of 2 on row 13. At a cell of row 12 the discs of 7
+    // cells of its row reach it whole, and of row 13 the discs of 5 cells whole and of 2 at their edge.
+    const tube = memoryOf(g, (_, y) => (y === 12 || y === 13 ? [1, 1] : undefined));
+    const picture = tubePicture(
       g,
-      trailOf(g, (_, y) => (y === 12 ? 8 : 0)),
+      trailOf(g, (_, y) => (y === 12 ? 8 : y === 13 ? 2 : 0)),
       tubeRoots(g, [tube]),
     );
     const beside = 5 + 2 * (TUBE_REACH - Math.hypot(3, 1));
-    expect(thin[(12 * g.width + 16) * 4]).toBeCloseTo((8 * 7) / (7 + 2 * beside), 6);
-    // A weak disc beside a strong one adds little: the mean goes by the weights. Rows 4 to 6 hold a tube of the full
-    // strength with a trail of 8, and rows 7 to 9 a tube of a hundredth of it with a trail of 80.
-    const two = memoryOf(g, (_, y) => (y === 5 ? [1, 1] : y === 8 ? [0.01, 1] : undefined));
-    const mixed = tubePicture(
+    expect(picture[(12 * g.width + 16) * 4]).toBeCloseTo((7 * 8 + beside * 2) / (7 + beside), 5);
+    expect(picture[(13 * g.width + 16) * 4]).toBeCloseTo((beside * 8 + 7 * 2) / (7 + beside), 5);
+    // Equal trails give that trail: a thick tube is smooth.
+    const even = tubePicture(
       g,
-      trailOf(g, (_, y) => (y >= 4 && y <= 6 ? 8 : y >= 7 && y <= 9 ? 80 : 0)),
-      tubeRoots(g, [two]),
+      trailOf(g, (_, y) => (y === 12 || y === 13 ? 8 : 0)),
+      tubeRoots(g, [tube]),
     );
-    const at = (y: number) => mixed[(y * g.width + 16) * 4] ?? 0;
-    // Row 3, on the far side of the strong tube, holds its trail alone. Row 6 holds a little of the trail of 80.
-    expect(at(3)).toBe(8);
-    expect(at(6)).toBeGreaterThan(8);
-    expect(at(6)).toBeLessThan(16);
-    // The weak tube shows its own trail at its own factor, where the strong one does not reach.
-    expect(at(10)).toBeLessThan(80 * 0.01 ** 0.25);
-    expect(at(10)).toBeGreaterThan(0);
+    expect(even[(12 * g.width + 16) * 4]).toBeCloseTo(8, 5);
+    expect(even[(10 * g.width + 16) * 4]).toBeCloseTo(8, 5);
   });
 
   it('wraps on the periodic grid, and ends at the edge of a box and at the rim of a dish', () => {
@@ -149,15 +159,13 @@ describe('the picture of the tubes', () => {
     const row = (g: TubeGrid, y: number) =>
       tubePicture(
         g,
-        trailOf(g, (_, yy) => (yy <= 2 ? 8 : 0)),
+        trailOf(g, (_, yy) => (yy === 1 ? 8 : 0)),
         tubeRoots(g, [tube(g)]),
       )[(y * g.width + 12) * 4];
     const [wrap, box] = [open(24, 16, 'wrap'), open(24, 16, 'box')];
-    // The tube holds rows 0 to 2. Row 13 lies 3 cells above row 0 on the periodic grid, and 11 cells below row 2 in
-    // a box.
-    expect([15, 14, 13, 12].map((y) => row(wrap, y))).toEqual([8, 8, 8, 0]);
-    expect([15, 14, 13].map((y) => row(box, y))).toEqual([0, 0, 0]);
-    expect(row(box, 0)).toBe(8);
+    // Row 14 lies 3 cells above row 1 on the periodic grid, and 13 cells below it in a box.
+    expect([0, 15, 14, 13].map((y) => row(wrap, y))).toEqual([8, 8, 8, 0]);
+    expect([0, 15, 14, 13].map((y) => row(box, y))).toEqual([8, 0, 0, 0]);
     // A dish: no cell outside the rim holds a part of the picture.
     const dish = open(24, 24, 'dish');
     const all = memoryOf(dish, () => [1, 1]);
@@ -167,7 +175,7 @@ describe('the picture of the tubes', () => {
       tubeRoots(dish, [all]),
     );
     expect(picture[0]).toBe(0);
-    expect(picture[(12 * 24 + 12) * 4]).toBeCloseTo(8, 6);
+    expect(picture[(12 * 24 + 12) * 4]).toBeCloseTo(8, 5);
   });
 
   it('draws no tube across a wall', () => {
@@ -176,33 +184,71 @@ describe('the picture of the tubes', () => {
     for (let y = 0; y < g.height; y++)
       for (let x = 0; x < g.width; x++) {
         const sd = y < 16 ? y - 15.5 : y > 17 ? 17.5 - y : Math.min(y - 15.5, 17.5 - y);
-        g.shape[(y * g.width + x) * 4] = wallByte(sd);
+        g.shape[(y * g.width + x) * 4] = byteOf(sd);
       }
-    expect([14, 15, 16, 17, 18].map((y) => clearOf(g, y * g.width + 5) > 0)).toEqual([true, true, false, false, true]);
-    expect(clearOf(g, 15 * g.width + 5)).toBeCloseTo(0.5, 1);
-    // A full tube along row 12 holds rows 11 to 13, with its trail.
-    const tube = memoryOf(g, (_, y) => (y === 12 ? [1, 1] : undefined));
-    const trail = trailOf(g, (_, y) => (y >= 11 && y <= 13 ? 8 : 0));
+    expect([14, 15, 16, 17, 18].map((y) => wallByte(g, y * g.width + 5) >= 128)).toEqual([
+      false,
+      false,
+      true,
+      true,
+      false,
+    ]);
+    // A full tube along row 14, two rows above the wall.
+    const tube = memoryOf(g, (_, y) => (y === 14 ? [1, 1] : undefined));
+    const trail = trailOf(g, (_, y) => (y === 14 ? 8 : 0));
     const picture = tubePicture(g, trail, tubeRoots(g, [tube]));
     const at = (y: number) => picture[(y * g.width + 16) * 4] ?? 0;
-    // The tube fills the open cells before the wall. The wall holds nothing.
-    expect([10, 9, 8].map(at)).toEqual([8, 8, 8]);
-    expect([14, 15].map(at)).toEqual([8, 8]);
+    // The tube fills the open cell before the wall. The wall holds nothing.
+    expect([13, 12, 11].map(at)).toEqual([8, 8, 8]);
+    expect(at(15)).toBe(8);
     expect([16, 17].map(at)).toEqual([0, 0]);
-    // Without the wall the same tube reaches row 16, 3 cells below row 13.
+    // Without the wall the same tube reaches row 17, 3 cells below it.
     const free = open(32, 24);
-    expect(tubePicture(free, trail, tubeRoots(free, [tube]))[(16 * 32 + 16) * 4]).toBe(8);
-    // A wall of one row, 15, stops the discs of a tube on rows 12 to 14 too. Without it they reach row 16.
+    expect(tubePicture(free, trail, tubeRoots(free, [tube]))[(17 * 32 + 16) * 4]).toBe(8);
+    // A wall of one row, 15, stops the discs of a tube on row 13 too. Without it they reach row 16.
     const [nearTube, nearTrail] = [
       (g2: TubeGrid) => memoryOf(g2, (_, y) => (y === 13 ? [1, 1] : undefined)),
-      (g2: TubeGrid) => trailOf(g2, (_, y) => (y >= 12 && y <= 14 ? 8 : 0)),
+      (g2: TubeGrid) => trailOf(g2, (_, y) => (y === 13 ? 8 : 0)),
     ];
     expect(tubePicture(free, nearTrail(free), tubeRoots(free, [nearTube(free)]))[(16 * 32 + 16) * 4]).toBe(8);
     const thin = open(32, 24);
     for (let y = 0; y < thin.height; y++)
-      for (let x = 0; x < thin.width; x++) thin.shape[(y * thin.width + x) * 4] = wallByte(0.5 - Math.abs(y - 15));
+      for (let x = 0; x < thin.width; x++) thin.shape[(y * thin.width + x) * 4] = byteOf(0.5 - Math.abs(y - 15));
     const behind = tubePicture(thin, nearTrail(thin), tubeRoots(thin, [nearTube(thin)]));
     expect([15, 16, 17].map((y) => behind[(y * 32 + 16) * 4])).toEqual([0, 0, 0]);
-    expect([14, 11].map((y) => behind[(y * 32 + 16) * 4])).toEqual([8, 8]);
+    expect([14, 12].map((y) => behind[(y * 32 + 16) * 4])).toEqual([8, 8]);
+  });
+
+  it('never takes a wall byte for more than the distance that it was made from', () => {
+    // A byte holds a distance in steps of 8 / 255 cells, rounded. The distance that the wall test takes from it is
+    // at most the true one, and at most one step below it.
+    for (let d = 0; d <= SHAPE_RANGE; d += 0.001) {
+      const clear = clearOf(byteOf(-d));
+      expect(clear).toBeLessThanOrEqual(d);
+      expect(clear).toBeGreaterThan(d - (2 * SHAPE_RANGE) / 255 - 1e-9);
+    }
+    expect(clearOf(0)).toBeCloseTo(SHAPE_RANGE * (1 - 1 / 255), 9);
+    // One wall cell alone, with the bytes that the engine holds around it after a change of boundary: the distance
+    // to the centre of the wall cell, rounded (paint.wgsl floorByte()). The cell diagonally beside it gets byte 82,
+    // which stands for 1.4275 cells: more than the 1.4142 cells to the wall cell.
+    const g = open(32, 24);
+    const [wx, wy] = [16, 12];
+    for (let y = 0; y < g.height; y++)
+      for (let x = 0; x < g.width; x++) {
+        const n = (x - wx) ** 2 + (y - wy) ** 2;
+        g.shape[(y * g.width + x) * 4] = n === 0 ? 128 : n <= 18 ? byteOf(-Math.sqrt(n)) : 0;
+      }
+    expect(wallByte(g, 11 * g.width + 15)).toBe(82);
+    // A tube cell diagonally beside the wall cell: its disc reaches neither the wall cell nor the cell behind it,
+    // 2.83 cells away on the line through the wall cell. Without the wall it reaches both.
+    const dot = memoryOf(g, (x, y) => (x === 15 && y === 11 ? [1, 1] : undefined));
+    const trail = trailOf(g, (x, y) => (x === 15 && y === 11 ? 8 : 0));
+    const walled = tubePicture(g, trail, tubeRoots(g, [dot]));
+    expect([walled[(12 * g.width + 16) * 4], walled[(13 * g.width + 17) * 4]]).toEqual([0, 0]);
+    expect(walled[(10 * g.width + 14) * 4]).toBeGreaterThan(4);
+    const free = open(32, 24);
+    const unwalled = tubePicture(free, trail, tubeRoots(free, [dot]));
+    expect(unwalled[(12 * g.width + 16) * 4]).toBeGreaterThan(4);
+    expect(unwalled[(13 * g.width + 17) * 4]).toBeGreaterThan(1);
   });
 });

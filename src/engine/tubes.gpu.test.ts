@@ -1,12 +1,12 @@
 // The picture of the tubes on both backends (ADR 0034), in Chromium with real GPU APIs (ADR 0010): the passes against
-// the CPU reference, and the rule in plain cases.
+// the CPU reference, the rule in plain cases, and the frames that the view draws from the picture.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
 import { TUBES } from './tubes';
 import { tubePicture, tubeRoots, type TubeGrid } from './tubes-reference';
-import type { Backend, Sim, Stroke } from './types';
+import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const BACKENDS = {
@@ -34,14 +34,37 @@ function noise(c: number, salt: number): number {
   return ((x ^ (x >>> 16)) >>> 8) / 16777216;
 }
 
+/** The red value of a pixel of a drawn frame, 0 to 255. Strain A is yellow: its trail is red and green. */
+const red = (img: ImageData, x: number, y: number) => img.data[(y * img.width + x) * 4] ?? 0;
+
+/** The largest difference of one pixel of two frames in red, green or blue. */
+const pixelDiff = (a: ImageData, b: ImageData, x: number, y: number) =>
+  Math.max(
+    ...[0, 1, 2].map((k) =>
+      Math.abs((a.data[(y * a.width + x) * 4 + k] ?? 0) - (b.data[(y * b.width + x) * 4 + k] ?? 0)),
+    ),
+  );
+
+/** The largest difference of two frames in one value of a pixel. */
+function frameDiff(a: ImageData, b: ImageData): number {
+  let worstValue = 0;
+  for (let i = 0; i < a.data.length; i++)
+    worstValue = Math.max(worstValue, Math.abs((a.data[i] ?? 0) - (b.data[i] ?? 0)));
+  return worstValue;
+}
+
 /** A value of the picture to 4 places: the mean of equal trails is the trail but for the rounding of its sums. */
 const near = (v: number | undefined) => Math.round((v ?? 0) * 1e4) / 1e4;
 
-/** The largest difference of two fields, against the size of the value. */
-function worst(got: Float32Array, want: Float32Array): number {
+/**
+ * The largest difference of two fields, against the size of the value and at least against `least`. The picture has
+ * `least` 1: at the edge of a disc its cover is a small difference of numbers near 4, so a GPU with 32-bit floats
+ * gives the cover to about 1 part in a million of 1, not of its own size. The trails here are up to 20.
+ */
+function worst(got: Float32Array, want: Float32Array, least = 1e-6): number {
   let w = 0;
   for (let i = 0; i < want.length; i++)
-    w = Math.max(w, Math.abs((got[i] ?? 0) - (want[i] ?? 0)) / (1e-6 + Math.abs(want[i] ?? 0)));
+    w = Math.max(w, Math.abs((got[i] ?? 0) - (want[i] ?? 0)) / (least + Math.abs(want[i] ?? 0)));
   return w;
 }
 
@@ -120,7 +143,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       expect(roots.length).toBe(w * h * 4);
       expect(picture.length).toBe(w * h * 4);
       expect(worst(roots, want.roots), 'the factors of the radius').toBeLessThan(1e-5);
-      expect(worst(picture, want.picture), 'the picture').toBeLessThan(1e-5);
+      expect(worst(picture, want.picture, 1), 'the picture').toBeLessThan(1e-5);
       // The case is not empty: tubes of every strain widen the trail, and walls stop some of them.
       const view = await sim.readView();
       const wider = [0, 1, 2, 3].map((s) => {
@@ -136,50 +159,49 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
   it('draws a tube as wide and as bright as the fourth root of its strength says', async () => {
     const [w, h] = [48, 40];
     const sim = await make(flowing(), w, h);
-    // Two tubes of one cell along rows 10 and 28: the first with the full flow memory, the second with a hundredth
-    // of it. Three cells of a tube lie in the 3 × 3 cells around a cell of it and of the rows beside it, so those
-    // three rows hold the strength of the tube, and here they hold its trail too.
+    // Two tubes of one cell along rows 10 and 28, with the same trail: the first with the full flow memory, the
+    // second with a hundredth of it. Three cells of a tube lie in the 3 × 3 cells around a cell of it, so the strength
+    // across the tube is its flow memory.
     const rows = new Map([
       [10, 1],
       [28, 0.01],
     ]);
     const trail = new Float32Array(w * h * 4);
-    for (const y of rows.keys())
-      for (const dy of [-1, 0, 1]) for (let x = 0; x < w; x++) trail[((y + dy) * w + x) * 4] = 8;
+    for (const y of rows.keys()) for (let x = 0; x < w; x++) trail[(y * w + x) * 4] = 8;
     sim.writeTrail(trail);
     sim.writeFlow(memoryOf(w, h, (_, y) => (rows.has(y) ? [rows.get(y) ?? 0, 1] : undefined)));
     const picture = await sim.readPicture();
     const at = (x: number, y: number) => picture[(y * w + x) * 4] ?? 0;
     for (const [y, memory] of rows) {
       const root = memory ** 0.25;
-      // k cells from the nearest of the three rows.
       for (let k = 0; k <= 5; k++) {
         const cover = Math.min(1, Math.max(0, (TUBES.radius * root + TUBES.edge / 2 - k) / TUBES.edge));
-        expect(at(24, y + 1 + k), `row ${String(y)}, ${String(k)} cells below`).toBeCloseTo(8 * root * cover, 4);
-        expect(at(24, y - 1 - k), `row ${String(y)}, ${String(k)} cells above`).toBeCloseTo(8 * root * cover, 4);
+        expect(at(24, y + k), `row ${String(y)}, ${String(k)} cells below`).toBeCloseTo(8 * root * cover, 4);
+        expect(at(24, y - k), `row ${String(y)}, ${String(k)} cells above`).toBeCloseTo(8 * root * cover, 4);
       }
     }
-    // In numbers: the full tube adds 3 cells at its full brightness on each side, the weak one a part of 1 cell at a
-    // third of it.
-    expect([11, 12, 13, 14, 15].map((y) => at(24, y) > 7.99)).toEqual([true, true, true, true, false]);
-    expect(at(24, 15)).toBe(0);
+    // In numbers: the full tube is 7 cells wide at its full brightness. The weak one has a third of the brightness,
+    // and a part of one cell on each side.
+    expect([10, 11, 12, 13, 14].map((y) => at(24, y) > 7.99)).toEqual([true, true, true, true, false]);
+    expect(at(24, 14)).toBe(0);
     expect(at(24, 28)).toBeCloseTo(8 * 0.01 ** 0.25, 4);
-    expect(at(24, 30)).toBeGreaterThan(0.5);
-    expect(at(24, 30)).toBeLessThan(at(24, 28));
-    expect(at(24, 31)).toBe(0);
-    // The scene holds one strain: the lanes of the other three hold no factor of a radius, on a cell of a tube too.
+    expect(at(24, 29)).toBeGreaterThan(0.5);
+    expect(at(24, 29)).toBeLessThan(at(24, 28));
+    expect(at(24, 30)).toBe(0);
+    // Only a cell with a tube holds a factor of a radius, and only in the lane of its strain: the scene holds one.
     const roots = await sim.readTubeRoots();
     expect([0, 1, 2, 3].map((lane) => near(roots[(10 * w + 24) * 4 + lane]))).toEqual([1, 0, 0, 0]);
+    expect([9, 11].map((y) => roots[(y * w + 24) * 4])).toEqual([0, 0]);
   });
 
   it('keeps the plasmodium without a tube at a quarter of its trail, and a strain to its own lane', async () => {
     const [w, h] = [32, 24];
     const sim = await make(flowing({ strains: [defaultStrain(0), defaultStrain(1)] }), w, h);
     const trail = new Float32Array(w * h * 4);
-    // Strain A has trail on row 6 and no tube. Strain B has a full tube along row 16, with trail on rows 15 to 17.
+    // Strain A has trail on row 6 and no tube. Strain B has trail and a full tube on row 16.
     for (let x = 0; x < w; x++) {
       trail[(6 * w + x) * 4] = 12;
-      for (const y of [15, 16, 17]) trail[(y * w + x) * 4 + 1] = 4;
+      trail[(16 * w + x) * 4 + 1] = 4;
     }
     sim.writeTrail(trail);
     sim.writeFlow(
@@ -197,9 +219,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(at(16, 7, 0)).toBe(0);
     // The tube of strain B is wide in the lane of strain B, and it adds nothing to the lane of strain A.
     expect(at(16, 16, 1)).toBeCloseTo(4, 5);
-    expect(at(16, 20, 1)).toBeCloseTo(4, 5);
-    expect(at(16, 21, 1)).toBe(0);
-    for (let y = 12; y <= 21; y++) expect(at(16, y, 0)).toBe(0);
+    expect(at(16, 19, 1)).toBeCloseTo(4, 5);
+    expect(at(16, 20, 1)).toBe(0);
+    for (let y = 12; y <= 20; y++) expect(at(16, y, 0)).toBe(0);
     // The lanes of the strains that the scene does not hold are empty, in the factors of the radius too.
     const roots = await sim.readTubeRoots();
     expect([0, 1, 2, 3].map((lane) => roots[(16 * w + 16) * 4 + lane])).toEqual([0, 1, 0, 0]);
@@ -216,50 +238,58 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
   it('gives a tube the mean trail of the cells whose discs reach a cell, each by its weight', async () => {
     const [w, h] = [32, 24];
     const sim = await make(flowing(), w, h);
-    // The trail lies on row 12 alone, and the rows beside it hold a part of the tube without trail. At a cell of row
-    // 12 the discs of 7 cells of its row reach it whole, and in each row beside it 5 whole and 2 at their edge.
+    // A full tube of two rows, with a trail of 8 on row 12 and of 2 on row 13. At a cell of row 12 the discs of 7
+    // cells of its row reach it whole, and of row 13 the discs of 5 cells whole and of 2 at their edge.
     const trail = new Float32Array(w * h * 4);
-    for (let x = 0; x < w; x++) trail[(12 * w + x) * 4] = 8;
+    for (let x = 0; x < w; x++) {
+      trail[(12 * w + x) * 4] = 8;
+      trail[(13 * w + x) * 4] = 2;
+    }
     sim.writeTrail(trail);
-    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 || y === 13 ? [1, 1] : undefined)));
     const beside = 5 + 2 * (TUBES.radius + TUBES.edge / 2 - Math.hypot(3, 1));
-    expect((await sim.readPicture())[(12 * w + 16) * 4]).toBeCloseTo((8 * 7) / (7 + 2 * beside), 4);
+    const picture = await sim.readPicture();
+    expect(picture[(12 * w + 16) * 4]).toBeCloseTo((7 * 8 + beside * 2) / (7 + beside), 4);
+    expect(picture[(13 * w + 16) * 4]).toBeCloseTo((beside * 8 + 7 * 2) / (7 + beside), 4);
   });
 
   it('draws no tube across a wall', async () => {
     const [w, h] = [48, 32];
     const sim = await make(flowing(), w, h);
-    // A wall along row 16, about 2 cells thick, and a full tube along row 12 above it, with trail on rows 11 to 13.
+    // A wall along row 16, about 2 cells thick.
     sim.paint([{ kind: 'wall', from: [0, 16], to: [48, 16], radius: 1 }]);
     const env = await sim.readEnv();
     const wall = (y: number) => (env[(y * w + 24) * 4] ?? 0) >= 128;
     expect([13, 14, 15, 16, 17, 18].map(wall)).toEqual([false, false, true, true, false, false]);
-    const band = (from: number) => {
+    /** A full tube of one cell along a row, and the picture of the cells of column 24. */
+    const tube = async (row: number) => {
       const trail = new Float32Array(w * h * 4);
-      for (const y of [from, from + 1, from + 2]) for (let x = 0; x < w; x++) trail[(y * w + x) * 4] = 8;
+      for (let x = 0; x < w; x++) trail[(row * w + x) * 4] = 8;
       sim.writeTrail(trail);
-      sim.writeFlow(memoryOf(w, h, (_, y) => (y === from + 1 ? [1, 1] : undefined)));
+      sim.writeFlow(memoryOf(w, h, (_, y) => (y === row ? [1, 1] : undefined)));
+      const picture = await sim.readPicture();
+      return (y: number) => near(picture[(y * w + 24) * 4]);
     };
-    band(11);
-    const picture = await sim.readPicture();
-    const at = (y: number) => picture[(y * w + 24) * 4] ?? 0;
-    // Away from the wall the tube adds 3 cells at its full brightness. Toward the wall it fills the open cell, and
-    // it reaches no cell of the wall and no cell behind the wall.
-    expect([10, 9, 8, 7].map(at).map(near)).toEqual([8, 8, 8, 0]);
-    expect(near(at(14))).toBe(8);
-    expect([15, 16, 17, 18].map(at)).toEqual([0, 0, 0, 0]);
-    // Without the wall the same tube reaches row 16, 3 cells below row 13.
+    // A tube on row 13: away from the wall it adds 3 cells at its full brightness. Toward the wall it fills the open
+    // cell, and it reaches no cell of the wall.
+    const far = await tube(13);
+    expect([12, 11, 10, 9].map(far)).toEqual([8, 8, 8, 0]);
+    expect(far(14)).toBe(8);
+    expect([15, 16].map(far)).toEqual([0, 0]);
+    // A tube on row 14, beside the wall: row 17 lies 3 cells from it, behind the wall, and holds nothing.
+    const beside = await tube(14);
+    expect([13, 12, 11].map(beside)).toEqual([8, 8, 8]);
+    expect([15, 16, 17, 18].map(beside)).toEqual([0, 0, 0, 0]);
+    // Without the wall the same tube reaches row 17.
     sim.clearEnvironment();
-    band(11);
-    const open = await sim.readPicture();
-    expect([14, 15, 16, 17].map((y) => near(open[(y * w + 24) * 4]))).toEqual([8, 8, 8, 0]);
+    const open = await tube(14);
+    expect([15, 16, 17, 18].map(open)).toEqual([8, 8, 8, 0]);
   });
 
   it('draws the trail of the view while the setting is off, the flow is off, or the style draws the agents', async () => {
     const [w, h] = [24, 16];
-    // A full tube along row 8, with trail on rows 7 to 9.
     const trail = new Float32Array(w * h * 4);
-    for (const y of [7, 8, 9]) for (let x = 0; x < w; x++) trail[(y * w + x) * 4] = 8;
+    for (let x = 0; x < w; x++) trail[(8 * w + x) * 4] = 8;
     const tube = memoryOf(w, h, (_, y) => (y === 8 ? [1, 1] : undefined));
     const off: Partial<Settings>[] = [{ showTubes: false }, { flow: false }, { style: 'agents' }];
     for (const patch of off) {
@@ -287,7 +317,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     live.push(sim);
     const check = async (what: string) => {
       const want = await reference(sim, 'box', 1);
-      expect(worst(await sim.readPicture(), want.picture), what).toBeLessThan(1e-5);
+      expect(worst(await sim.readPicture(), want.picture, 1), what).toBeLessThan(1e-5);
     };
     sim.paint([{ kind: 'food', from: [8.5, 12.5], to: [8.5, 12.5], radius: 2.5 }]);
     sim.foodSites([[8.5, 12.5]]);
@@ -326,10 +356,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       const [view, trail] = [await sim.readView(), await sim.readTrail()];
       expect([...view]).not.toEqual([...trail]);
       const want = await reference(sim, 'box', 1);
-      expect(worst(await sim.readPicture(), want.picture), `${String(diffusion)} passes`).toBeLessThan(1e-5);
+      expect(worst(await sim.readPicture(), want.picture, 1), `${String(diffusion)} passes`).toBeLessThan(1e-5);
       sim.run(1);
       const next = await reference(sim, 'box', 1);
-      expect(worst(await sim.readPicture(), next.picture), `${String(diffusion)} passes, a step later`).toBeLessThan(
+      expect(worst(await sim.readPicture(), next.picture, 1), `${String(diffusion)} passes, a step later`).toBeLessThan(
         1e-5,
       );
     }
@@ -352,5 +382,241 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(tubes.gain).not.toBeCloseTo(plain.gain, 2);
     expect(tubes.strand).toBeGreaterThan(0);
     expect(tubes.strand).toBe(plain.strand);
+  });
+  // The frames. The tests above read the picture; these read what the view draws from it. Fixed levels and no bloom,
+  // so that a pixel shows its own cells alone.
+  const LEVELS: Levels = { gain: 0.2, black: 0, strand: 1 };
+
+  it('draws a frame from the picture: zoomed in, zoomed out, and in every style that draws the trail', async () => {
+    const [w, h] = [64, 48];
+    // A full tube of one cell along row 24: the picture holds rows 21 to 27, the trail of the view row 24 alone.
+    const trail = new Float32Array(w * h * 4);
+    for (let x = 0; x < w; x++) trail[(24 * w + x) * 4] = 8;
+    const tube = memoryOf(w, h, (_, y) => (y === 24 ? [1, 1] : undefined));
+    const sim = await make(flowing({ bloom: 0 }), w, h);
+    sim.writeTrail(trail);
+    sim.writeFlow(tube);
+    // 8 pixels per cell: the pixel (260, 196) is the centre of cell (32, 24), and (260, 220) of cell (32, 27).
+    const near8: View = { center: [32, 24], scale: 1 / 8 };
+    // 4 cells per pixel, where the view reads the coarse map of the trail: the pixel (8, 5) holds rows 20 to 23, and
+    // the pixel (8, 6) rows 24 to 27.
+    const far4: View = { center: [32, 24], scale: 4 };
+    const frame = async (patch: Partial<Settings>, view: View) => {
+      const settings = flowing({ bloom: 0, ...patch });
+      sim.update(settings);
+      const [cw, ch] = view === near8 ? [512, 384] : [16, 12];
+      return backend.capture(sim, settings, view, cw, ch, LEVELS);
+    };
+    for (const style of ['glow', 'gel', 'paper'] as const) {
+      const [on, off] = [await frame({ style }, near8), await frame({ style, showTubes: false }, near8)];
+      // Three cells beside the trail: the tube with the switch, the ground without it.
+      expect(pixelDiff(on, off, 260, 220), `${style}, beside the trail`).toBeGreaterThan(40);
+      // On the trail both frames hold plasmodium. The gel style lights a ridge and a plateau in other ways, so only
+      // the flat styles are compared there.
+      if (style !== 'gel') expect(pixelDiff(on, off, 260, 196), `${style}, on the trail`).toBeLessThan(40);
+    }
+    const [on, off] = [await frame({}, near8), await frame({ showTubes: false }, near8)];
+    expect([red(on, 260, 220), red(off, 260, 220)].map((v) => v > 120)).toEqual([true, false]);
+    expect(red(off, 260, 220)).toBeLessThan(60);
+    expect(red(on, 260, 228)).toBeLessThan(60); // 4 cells beside the trail: no tube
+    // Zoomed out the pixel beside the trail holds three rows of the tube, or nothing.
+    const [farOn, farOff] = [await frame({}, far4), await frame({ showTubes: false }, far4)];
+    expect([red(farOn, 8, 5), red(farOff, 8, 5)].map((v) => v > 120)).toEqual([true, false]);
+    expect(red(farOff, 8, 6)).toBeGreaterThan(60);
+    // A new memory at the same step: the next frame shows it, zoomed in and from the coarse map.
+    await frame({}, far4);
+    sim.writeFlow(memoryOf(w, h, () => undefined));
+    expect(red(await frame({}, far4), 8, 5)).toBeLessThan(60);
+    expect(red(await frame({}, near8), 260, 220)).toBeLessThan(60);
+    sim.writeFlow(tube);
+    expect(red(await frame({}, far4), 8, 5)).toBeGreaterThan(120);
+    expect(red(await frame({}, near8), 260, 220)).toBeGreaterThan(120);
+  });
+
+  it('takes the glow of a frame from the picture', async () => {
+    const [w, h] = [64, 48];
+    const trail = new Float32Array(w * h * 4);
+    for (let x = 0; x < w; x++) trail[(24 * w + x) * 4] = 8;
+    const sim = await make(flowing({ bloom: 1 }), w, h);
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 24 ? [1, 1] : undefined)));
+    const view: View = { center: [32, 24], scale: 1 / 8 };
+    const frame = async (patch: Partial<Settings>) => {
+      const settings = flowing({ bloom: 1, ...patch });
+      sim.update(settings);
+      return backend.capture(sim, settings, view, 512, 384, LEVELS);
+    };
+    // Five cells beside the trail no cell holds a part of the picture. The glow of the tube, whose edge lies 2 cells
+    // away, reaches it more than the glow of the trail alone, 5 cells away. Without the glow both pixels are ground.
+    const y = 196 + 5 * 8;
+    const [on, off] = [await frame({}), await frame({ showTubes: false })];
+    expect(red(on, 260, y)).toBeGreaterThan(red(off, 260, y) + 10);
+    const [dark, darkOff] = [await frame({ bloom: 0 }), await frame({ bloom: 0, showTubes: false })];
+    expect(Math.abs(red(dark, 260, y) - red(darkOff, 260, y))).toBeLessThanOrEqual(2);
+    expect(red(on, 260, y)).toBeGreaterThan(red(dark, 260, y) + 10);
+  });
+
+  it('draws the scent of the state of each frame under the picture', async () => {
+    const [w, h] = [48, 32];
+    // No agent lives, so no cell holds trail, and the picture of the tubes is empty with the switch on and off. A
+    // food gives scent, which grows from step to step. Two simulations run the same steps: one draws with the
+    // picture, the other without it. Their frames must show the same scent.
+    const scene = (showTubes: boolean) =>
+      flowing({ showTubes, showScent: true, bloom: 0, collisions: false, strains: [defaultStrain(0)] });
+    const sims = await Promise.all(
+      [true, false].map(async (showTubes) => {
+        const sim = await backend.createSim(scene(showTubes), w, h, 8, 0);
+        live.push(sim);
+        sim.paint([{ kind: 'food', from: [24.5, 16.5], to: [24.5, 16.5], radius: 3 }]);
+        sim.foodSites([[24.5, 16.5]]);
+        sim.reset();
+        return sim;
+      }),
+    );
+    const view: View = { center: [24, 16], scale: 1 / 8 };
+    const frames = (step: number) =>
+      Promise.all(
+        sims.map((sim, i) => {
+          if (sim.step < step) sim.run(step - sim.step);
+          return backend.capture(sim, scene(i === 0), view, 384, 256, LEVELS);
+        }),
+      );
+    let before: ImageData | undefined;
+    for (const step of [1, 2, 3, 4, 5]) {
+      const [withTubes, plain] = await frames(step);
+      if (!withTubes || !plain) throw new Error('no frame');
+      // The dither of a frame differs by its count: 2 of 255 at most.
+      expect(frameDiff(withTubes, plain), `step ${String(step)}`).toBeLessThanOrEqual(2);
+      // The scent of this step is not that of the step before: a frame with the scent of another state would show.
+      if (before) expect(frameDiff(plain, before), `step ${String(step)} against the step before`).toBeGreaterThan(8);
+      before = plain;
+    }
+  });
+
+  it('keeps drawing when settings free and make the textures that the picture reads', async () => {
+    const [w, h] = [40, 32];
+    const strain = { ...defaultStrain(0), sensorOffset: 5 };
+    const moving = (patch: Partial<Settings>) =>
+      flowing({ stepOrder: 'move-first', diffusion: 2, strains: [strain], ...patch });
+    const sim = await backend.createSim(moving({}), w, h, 300);
+    live.push(sim);
+    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const view: View = { center: [20, 16], scale: 1 / 4 };
+    /**
+     * New settings, then twice: a step, a memory with a tube on every cell, the picture against the rule and a frame.
+     * Twice, because the memory of the flow is in one of two textures, in turns, and the picture reads the one of
+     * the step.
+     */
+    const check = async (settings: Settings, what: string) => {
+      sim.update(settings);
+      for (const step of ['first', 'second']) {
+        sim.run(1);
+        for (let s = 0; s < settings.strains.length; s++)
+          sim.writeFlow(
+            memoryOf(w, h, () => [0.3, 1]),
+            s,
+          );
+        // Without the switch the picture is the trail of the view.
+        const want = settings.showTubes
+          ? (await reference(sim, 'box', settings.strains.length)).picture
+          : await sim.readView();
+        expect(worst(await sim.readPicture(), want, 1), `${what}, ${step} step`).toBeLessThan(1e-5);
+        const img = await backend.capture(sim, settings, view, 160, 128, LEVELS);
+        let lit = 0;
+        for (let i = 0; i < img.data.length; i += 4) if ((img.data[i] ?? 0) > 80) lit++;
+        expect(lit, `${what}, ${step} step: pixels of the frame that show plasmodium`).toBeGreaterThan(50);
+      }
+    };
+    device?.pushErrorScope('validation');
+    // Two diffusion passes: the view of a step that moves first is in a third pair of textures. One pass: that pair
+    // is freed, and the view is in the free pair. Then back, then a step that senses first, then a second strain,
+    // whose flow needs textures with one more layer.
+    await check(moving({}), 'two passes');
+    await check(moving({ diffusion: 1 }), 'one pass');
+    await check(moving({}), 'two passes again');
+    await check(moving({ stepOrder: 'sense-first' }), 'sensing first');
+    await check(moving({ strains: [strain, { ...defaultStrain(1), sensorOffset: 5 }] }), 'two strains');
+    await check(moving({ showTubes: false }), 'without the picture');
+    await check(moving({}), 'with the picture again');
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
+  }, 120_000);
+
+  it('holds the wall distances to the boundary of the settings before it draws the picture', async () => {
+    const [w, h] = [40, 24];
+    const sim = await make(flowing(), w, h);
+    // A wall of one column at the left edge of a box, and a full tube along the column 3 cells before the right edge.
+    sim.paint([{ kind: 'wall', from: [0.5, 0], to: [0.5, h], radius: 0.75 }]);
+    const env = await sim.readEnv();
+    expect([0, 1].map((x) => (env[(12 * w + x) * 4] ?? 0) >= 128)).toEqual([true, false]);
+    const trail = new Float32Array(w * h * 4);
+    for (let y = 0; y < h; y++) trail[(y * w + w - 2) * 4] = 8;
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (x) => (x === w - 2 ? [1, 1] : undefined)));
+    const at = (picture: Float32Array, x: number) => near(picture[(12 * w + x) * 4]);
+    // In the box column 1 is far from the tube. On the periodic grid it lies 3 cells from it, behind the wall: the
+    // tube must not reach it. The picture is read before anything else asks for the wall distances.
+    expect(at(await sim.readPicture(), 1)).toBe(0);
+    sim.update(flowing({ boundary: 'wrap' }));
+    const wrapped = await sim.readPicture();
+    expect([w - 1, 0, 1].map((x) => at(wrapped, x))).toEqual([8, 0, 0]);
+    const want = await reference(sim, 'wrap', 1);
+    expect(worst(wrapped, want.picture, 1)).toBeLessThan(1e-5);
+    // Without the wall the tube reaches column 1 across the edge.
+    sim.clearEnvironment();
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (x) => (x === w - 2 ? [1, 1] : undefined)));
+    const open = await sim.readPicture();
+    expect([w - 1, 0, 1, 2].map((x) => at(open, x))).toEqual([8, 8, 8, 0]);
+  });
+  it('stops a disc at a wall cell whose distances are rounded', async () => {
+    const [w, h] = [32, 24];
+    const sim = await make(flowing(), w, h);
+    // One wall cell alone, written as bytes: the engine then holds, around it, the distance to its centre, rounded
+    // to a byte (paint.wgsl floorByte()). The cell diagonally beside it gets byte 82, which stands for 1.4275 cells,
+    // more than the 1.4142 cells to the wall cell. The wall test takes half a step of a byte off.
+    const env = new Uint8Array(w * h * 4);
+    env[(12 * w + 16) * 4] = 255;
+    sim.writeEnv(env);
+    const trail = new Float32Array(w * h * 4);
+    trail[(11 * w + 15) * 4] = 8;
+    const dot = memoryOf(w, h, (x, y) => (x === 15 && y === 11 ? [1, 1] : undefined));
+    sim.writeTrail(trail);
+    sim.writeFlow(dot);
+    const walled = await sim.readPicture();
+    expect((await sim.readShape())[(11 * w + 15) * 4]).toBe(82);
+    // A tube cell diagonally beside the wall cell: its disc reaches neither the wall cell nor the cell behind it,
+    // 2.83 cells away on the line through the wall cell. Away from the wall cell it reaches as far.
+    expect([walled[(12 * w + 16) * 4], walled[(13 * w + 17) * 4]]).toEqual([0, 0]);
+    expect(walled[(9 * w + 13) * 4]).toBeGreaterThan(1);
+    const want = await reference(sim, 'box', 1);
+    expect(worst(walled, want.picture, 1)).toBeLessThan(1e-5);
+    // Without the wall cell the disc reaches both cells.
+    sim.clearEnvironment();
+    sim.writeTrail(trail);
+    sim.writeFlow(dot);
+    const open = await sim.readPicture();
+    expect(open[(12 * w + 16) * 4]).toBeGreaterThan(4);
+    expect(open[(13 * w + 17) * 4]).toBeGreaterThan(1);
+  });
+
+  it('measures the levels with the textures of the moment, also when settings free the picture meanwhile', async () => {
+    const [w, h] = [32, 24];
+    const sim = await make(flowing(), w, h);
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    device?.pushErrorScope('validation');
+    // The second measurement waits for the first. Meanwhile the switch goes off, and the simulation frees the
+    // picture: the second must measure the trail that is drawn then, not a texture that is gone.
+    const first = backend.settle(sim);
+    const second = backend.settle(sim);
+    sim.update(flowing({ showTubes: false }));
+    const [withTubes, plain] = [await first, await second];
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
+    expect(withTubes.gain).toBeGreaterThan(0);
+    // The levels of the trail alone: those that a new measurement gives.
+    expect(plain.gain).toBeCloseTo((await backend.settle(sim)).gain, 6);
   });
 });

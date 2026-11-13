@@ -63,6 +63,9 @@ export function levels(bins: ArrayLike<number>, cells: number): { black: number;
   return { black, gain: TARGET / (white - black) };
 }
 
+/** The trail that a frame draws, and the trail of the model (the same texture without the picture of the tubes). */
+export type Trails = [drawn: GPUTexture, model: GPUTexture];
+
 /** Auto exposure: a GPU histogram every few frames, read back without stalling, smoothed over time. */
 export class AutoExposure {
   private readonly pipeline: GPUComputePipeline;
@@ -101,27 +104,33 @@ export class AutoExposure {
   update(trail: GPUTexture, fallback: number, model = trail): number {
     if (this.gain === 0) this.gain = fallback;
     if (this.pending || this.frame++ % 6 !== 0) return this.gain;
-    void this.measure(trail, 0.25, model);
+    // No measurement is running, so this one encodes at once, with the textures of this frame.
+    void this.measure(() => [trail, model], 0.25);
     return this.gain;
   }
 
   /**
    * Measures now; `blend` 1 jumps to the result (tests), smaller values smooth. Waits for a measurement that is still
-   * running, so `blend` 1 always gets its own.
+   * running, so `blend` 1 always gets its own. `trails`: see read().
    */
-  async measure(trail: GPUTexture, blend = 1, model = trail): Promise<void> {
-    const l = await this.read(trail, model);
+  async measure(trails: () => Trails, blend = 1): Promise<void> {
+    const l = await this.read(trails);
     if (l) this.apply(l, blend);
   }
 
   /**
    * The levels measured now, without changing the levels that frames use: an export draws with them, and the line of
    * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field or a replaced
-   * simulation.
+   * simulation. `trails` gives the trail that the frame draws and the trail of the model. It is asked after the wait
+   * for a measurement that is still running: new settings can free a texture meanwhile (the picture of the tubes, the
+   * view of a step that moves first).
    */
-  async read(trail: GPUTexture, model = trail): Promise<Levels | undefined> {
+  async read(trails: () => Trails): Promise<Levels | undefined> {
+    const generation = this.generation;
     while (this.pending) await this.pending;
-    const run = this.histogram(trail, model);
+    // The simulation was replaced during the wait: its textures are gone.
+    if (generation !== this.generation) return undefined;
+    const run = this.histogram(...trails());
     this.pending = run
       .then(
         () => undefined,

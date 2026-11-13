@@ -535,7 +535,8 @@ export class Simulation implements Sim {
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
       this.forgetTubes();
     }
-    // The memory fit counts the textures of the picture of the tubes only while the settings show it (tubes.ts).
+    // The picture of the tubes holds its textures only while the settings show it (tubes.ts). The memory fit counts
+    // them with the flow, shown or not (sizing.ts tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
     if (!flowOn(settings)) this.dropFlow();
