@@ -4393,7 +4393,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         usage: GPUTextureUsage.TEXTURE_BINDING,
       });
       // With the flow in the tubes, the passes that decide who divides also read the flow memory, a texture with a
-      // layer per strain (ADR 0030), and the uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029).
+      // layer per strain (ADR 0031), and the uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029).
       for (const flow of [false, true]) {
         const passes = kernels.growth(flow);
         expect(Object.keys(passes).sort()).toEqual(Object.keys(lists).sort());

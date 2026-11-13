@@ -55,7 +55,7 @@ uniform int agentWidth;
 
 // Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl): programs.ts compiles this pass with it, and
 // gl/sim.ts uses that program only while the flow is on. An agent on a cell that the flux of its strain passed by
-// does not divide. Every strain has a flow of its own (ADR 0030): the memory of strain A, and of strains B, C and D (the
+// does not divide. Every strain has a flow of its own (ADR 0031): the memory of strain A, and of strains B, C and D (the
 // memory of strain A in the place of a strain that the scene does not have).
 #ifndef FLOW
 #define FLOW 0

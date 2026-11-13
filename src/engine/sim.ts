@@ -63,7 +63,7 @@ interface GrowthBuffers {
  * The state of the flow in the tubes (flow.wgsl, ADR 0029), allocated while the flow is on: the memory of each cell
  * (flow memory, tube body, conductivity, roles) in two textures that the update pass writes in turn, the pressure of
  * the four lanes in three textures (the one in work, the one before as momentum, the one that an iteration writes), and
- * the uniform block of the passes. Every strain has a flow of its own (ADR 0030): each texture has a layer per strain,
+ * the uniform block of the passes. Every strain has a flow of its own (ADR 0031): each texture has a layer per strain,
  * and each strain has its uniform block.
  */
 interface FlowState {
@@ -543,7 +543,7 @@ export class Simulation implements Sim {
 
   /**
    * The textures and the uniform blocks of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL), with a
-   * layer and a block per strain of the settings (ADR 0030). Settings with another number of strains get a new state.
+   * layer and a block per strain of the settings (ADR 0031). Settings with another number of strains get a new state.
    */
   private ensureFlow(): FlowState {
     const strains = flowStrains(this.settings);
@@ -987,7 +987,7 @@ export class Simulation implements Sim {
     const saturate = trailSaturation(this.settings) > 0;
     // Bind groups of 'auto' layouts belong to their pipeline: the key names the variant.
     // With the flow in the tubes, the passes in which agents starve and come to life by the flow memory (agents.wgsl
-    // `//#if FLOW`, ADR 0029): they read the memory of the step before, each agent the layer of its strain (ADR 0030).
+    // `//#if FLOW`, ADR 0029): they read the memory of the step before, each agent the layer of its strain (ADR 0031).
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
     flow?.uniforms.forEach((block, strain) => {
       this.device.queue.writeBuffer(block, 0, packFlow(this.settings, this.sites, this.flowData, strain));
@@ -1101,7 +1101,7 @@ export class Simulation implements Sim {
   /**
    * The flow in the tubes after the diffusion of a step (flow.wgsl, ADR 0029): the update of the memory from the
    * pressure and the trail of this step, then the pressure iterations on the new conductivity. `trail`: the texture
-   * that holds the trail after the step. Once per strain, each with its own layers and its own block (ADR 0030): the
+   * that holds the trail after the step. Once per strain, each with its own layers and its own block (ADR 0031): the
    * passes of a strain read no state of another strain.
    */
   private encodeFlow(pass: GPUComputePassEncoder, flow: FlowState, trail: Bit) {
