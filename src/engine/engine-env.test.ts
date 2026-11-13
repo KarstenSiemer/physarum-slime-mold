@@ -165,7 +165,7 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 
-  // ADR 0030: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
+  // ADR 0031: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
   it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
     // 1320 B per cell and 80 for the flow of one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
     const backend = new CpuBackend();

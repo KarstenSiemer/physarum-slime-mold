@@ -1,6 +1,6 @@
 // CPU mirror of the flow passes (shaders/flow.wgsl, gl/glsl/flow.frag), for tests only: flow.gpu.test.ts checks both
 // backends against it. It reads the uniform block as the shaders do (flow.ts packFlow()): the block names the strain
-// whose flow this is (ADR 0030), and the fields are those of that strain.
+// whose flow this is (ADR 0031), and the fields are those of that strain.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
 import { FLOW_CONSTANT_SLOTS, FLOW_ITERATIONS, flowRoles } from './flow';

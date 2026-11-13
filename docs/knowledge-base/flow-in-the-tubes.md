@@ -44,7 +44,7 @@ K. Alim: eLife 12: e78100 (2023).
 
 ### Two plasmodia
 
-Notes for ADR 0030, of 2026-11-13. The question: does protoplasm flow from one plasmodium into
+Notes for ADR 0031, of 2026-11-13. The question: does protoplasm flow from one plasmodium into
 another? Every line here is "[S]". Three pages with the texts refused an automatic reader on that
 day (a bot check at PubMed Central, an error of the repository of the University of Tsukuba, a
 refusal at Europhysics News), and this project does not pass a bot check. Read the papers before a
@@ -172,4 +172,4 @@ ADR 0029 has the decisions and the measurements. In short:
   2023: the tube body follows the trail in 1.7 min, a tube adapts in 11 min, and a tube without flux
   starves after about 33 min.
 - A strain of this app is a plasmodium of its own. So every strain has a flow of its own, and no
-  flux passes between two strains (ADR 0030; "Two plasmodia" above). The app has no fusion.
+  flux passes between two strains (ADR 0031; "Two plasmodia" above). The app has no fusion.
