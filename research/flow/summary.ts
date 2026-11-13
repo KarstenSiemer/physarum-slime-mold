@@ -104,6 +104,12 @@ function mazeCampaign(folder: string, prefixes: string[]) {
         `  dead ends below ${key} of the route: ${got.length} of ${fade.length} runs; step ${range(got, 0, true)}`,
       );
     }
+    // A run whose network died has no route: its whole trail fades, the trail of the dead ends first.
+    const dead = all.filter((rows) => rows[rows.length - 1]?.joined !== true).length;
+    if (dead > 0)
+      console.log(
+        `  NO NETWORK in ${dead} of ${all.length} runs: no tube joins the two foods at the last step. In such a run the whole trail fades, and "below" does not show a route.`,
+      );
   }
 }
 

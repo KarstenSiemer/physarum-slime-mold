@@ -159,9 +159,26 @@ describe.concurrent('the campaigns, and the comparison of a rerun with the recor
       const { code, text } = await ended('prototype/campaign.ts', [campaign, 'dry=1']);
       expect(code).toBe(0);
       const names = [...text.matchAll(/ name=(\S+)/g)].map((m) => `${m[1] ?? ''}.jsonl`);
-      expect(names.sort()).toEqual(readdirSync(here(`./logs/${campaign}/`)).sort());
+      const logs = readdirSync(here(`./logs/${campaign}/`)).filter((file) => file.endsWith('.jsonl'));
+      expect(names.sort()).toEqual(logs.sort());
     },
   );
+
+  it('prints the lines of the tables that the guide quotes', async () => {
+    const pair = await ended('summary.ts', ['maze-campaign', here('./logs/maze-pair/'), 'lag16', 'exact', 'ma']);
+    expect(pair.code).toBe(0);
+    const block = (name: string) => pair.text.split('== ').find((part) => part.startsWith(`${name}:`)) ?? '';
+    expect(block('lag16')).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2500 (2500 to 3250, n 10)');
+    expect(block('exact')).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2250 (2250 to 2500, n 10)');
+    // With Ma's walkers the network dies: the table of the ADR has "(no network)" in this row.
+    expect(block('ma')).toContain('NO NETWORK in 10 of 10 runs');
+    expect(block('lag16')).not.toContain('NO NETWORK');
+    const sites = await ended('summary.ts', ['maze-campaign', here('./logs/maze-sites/'), 'mz-lag16']);
+    expect(sites.text).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2125 (2000 to 2250, n 10)');
+    const tokyo = await ended('summary.ts', ['tokyo-campaign', here('./logs/tokyo/'), 'tk-i8', 'tk-walk']);
+    expect(tokyo.text).toContain('step   2000 alive  3947 | 33: 33 joined, 49 links, TL 1.60 MD 0.83 FT 0.88');
+    expect(tokyo.text.match(/33: 1 joined/g)).toHaveLength(21);
+  });
 
   it('passes a rerun that equals the record', async () => {
     const { code, text } = await ended('summary.ts', ['compare', rerun('equal', log, (lines) => lines), record]);
