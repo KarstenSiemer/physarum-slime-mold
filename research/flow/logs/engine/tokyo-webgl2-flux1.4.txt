@@ -1,0 +1,12 @@
+g-tkgl-i1.4-s1   2000 alive   6452 | 33: 33 joined 87 links TL 2.80 MD 0.91 FT 0.97 | 36: 36 joined TL 2.50 MD 0.89 FT 0.96 | sea 0 | 17420 ms
+g-tkgl-i1.4-s1   4000 alive   4898 | 33: 33 joined 75 links TL 2.38 MD 0.82 FT 0.97 | 36: 36 joined TL 2.14 MD 0.81 FT 0.96 | sea 0 | 36733 ms
+g-tkgl-i1.4-s1   8000 alive   4328 | 33: 33 joined 63 links TL 2.06 MD 0.82 FT 0.95 | 36: 36 joined TL 1.89 MD 0.81 FT 0.92 | sea 0 | 75184 ms
+g-tkgl-i1.4-s1  12000 alive   4108 | 33: 33 joined 68 links TL 2.06 MD 0.81 FT 0.94 | 36: 36 joined TL 1.89 MD 0.80 FT 0.92 | sea 0 | 115649 ms
+g-tkgl-i1.4-s1  16000 alive   4139 | 33: 33 joined 61 links TL 1.94 MD 0.82 FT 0.93 | 36: 36 joined TL 1.76 MD 0.81 FT 0.91 | sea 0 | 153664 ms
+g-tkgl-i1.4-s1  24000 alive   4040 | 33: 33 joined 61 links TL 1.91 MD 0.82 FT 0.92 | 36: 36 joined TL 1.79 MD 0.82 FT 0.88 | sea 0 | 234386 ms
+g-tkgl-i1.4-s2   2000 alive   6307 | 33: 33 joined 83 links TL 2.72 MD 0.82 FT 0.98 | 36: 36 joined TL 2.43 MD 0.81 FT 0.95 | sea 0 | 19438 ms
+g-tkgl-i1.4-s2   4000 alive   4929 | 33: 33 joined 72 links TL 2.44 MD 0.82 FT 0.97 | 36: 36 joined TL 2.19 MD 0.81 FT 0.96 | sea 0 | 40292 ms
+g-tkgl-i1.4-s2   8000 alive   4266 | 33: 33 joined 60 links TL 2.03 MD 0.82 FT 0.95 | 36: 36 joined TL 1.86 MD 0.81 FT 0.92 | sea 0 | 84232 ms
+g-tkgl-i1.4-s2  12000 alive   4302 | 33: 33 joined 62 links TL 2.17 MD 0.81 FT 0.97 | 36: 36 joined TL 1.98 MD 0.80 FT 0.94 | sea 0 | 143735 ms
+g-tkgl-i1.4-s2  16000 alive   3747 | 33: 33 joined 48 links TL 1.69 MD 0.83 FT 0.90 | 36: 36 joined TL 1.59 MD 0.82 FT 0.85 | sea 0 | 203982 ms
+g-tkgl-i1.4-s2  24000 alive   4082 | 33: 33 joined 48 links TL 1.72 MD 0.83 FT 0.90 | 36: 36 joined TL 1.61 MD 0.82 FT 0.85 | sea 0 | 322773 ms

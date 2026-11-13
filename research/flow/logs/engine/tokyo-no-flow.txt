@@ -1,0 +1,6 @@
+g-tk-base-s1   2000 alive   7535 | 33: 33 joined 85 links TL 2.75 MD 0.82 FT 0.99 | 36: 36 joined TL 2.47 MD 0.82 FT 0.98 | sea 0 | 1010 ms
+g-tk-base-s1   4000 alive   7491 | 33: 33 joined 76 links TL 2.77 MD 0.82 FT 0.99 | 36: 36 joined TL 2.46 MD 0.82 FT 0.97 | sea 0 | 1951 ms
+g-tk-base-s1   8000 alive   7965 | 33: 33 joined 88 links TL 2.88 MD 0.83 FT 0.98 | 36: 36 joined TL 2.56 MD 0.82 FT 0.97 | sea 0 | 3850 ms
+g-tk-base-s1  12000 alive   7639 | 33: 33 joined 83 links TL 2.70 MD 0.89 FT 0.99 | 36: 36 joined TL 2.41 MD 0.88 FT 0.98 | sea 0 | 5746 ms
+g-tk-base-s1  16000 alive   7512 | 33: 33 joined 84 links TL 2.79 MD 0.84 FT 0.99 | 36: 36 joined TL 2.48 MD 0.83 FT 0.98 | sea 0 | 7620 ms
+g-tk-base-s1  24000 alive   7568 | 33: 33 joined 84 links TL 2.74 MD 0.83 FT 0.96 | 36: 36 joined TL 2.45 MD 0.82 FT 0.95 | sea 0 | 11346 ms
