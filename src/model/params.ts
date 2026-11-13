@@ -294,6 +294,17 @@ export const globalSpec = {
     step: 1,
     ref: 'Jones 2011, Sec. 5.1',
   },
+  // Flow in the tubes (ADR 0029): the extended model only. Tero et al. 2010 call the total flux between a source
+  // and a sink I0, in units of the flux at which a tube grows at half its top rate.
+  flowStrength: {
+    label: 'Flow strength',
+    help: 'The flux that each food gives or takes while Flow in the tubes is on (I0 of Tero et al.). A low value keeps only the tubes that the network needs, so it gets close to a tree. A high value also keeps side routes, so the network has more loops and survives a cut tube. The unit is the flux through one cell at which the flow memory of the cell goes to one half. Dead agents come back to life only where that memory is above one half. So without Growth and shrinkage a tube needs enough flux for each of its cells: in the Maze a strength of 2 is too low, and 4 is enough.',
+    min: 0.1,
+    max: 32,
+    step: 0.1,
+    log: true,
+    ref: 'Tero et al. 2010, Science 327: 439, Fig. 3 and S1',
+  },
   speed: {
     label: 'Speed',
     unit: 'steps/s',
@@ -341,6 +352,13 @@ export const coveredFoodHelp = {
   label: 'Covered food releases less',
   help: 'A food cell releases less scent while an agent is on it or on one of its 8 neighbour cells. It then releases only the Covered food factor of its scent. With one agent per cell, covered food then pulls in almost no more agents, and food without agents pulls with full strength. Jones uses this rule in later papers with Adamatzky. The Jones model always has one agent per cell. In the extended model without that rule, agents stack on a food and hold each other there with their own trail. Then more agents can gather on covered food than without this option. Without the rule the option also costs time: up to 38 % of the steps per second on WebGL2, and up to 24 % on WebGPU.',
   ref: 'Adamatzky and Jones 2010; Jones and Adamatzky 2014, Sec. 7.2',
+} as const;
+
+/** Help for the switch "Flow in the tubes" (ADR 0029); Learn → Controls lists it with the sliders. */
+export const flowHelp = {
+  label: 'Flow in the tubes',
+  help: 'Only the extended model has this rule. It follows the slime mold: a tube that carries much flow gets thicker, and a tube with little flow decays. Each food that the colony covers gives or takes a fixed flux, and as many foods give as take. The flux runs through the tubes from the foods that give to the foods that take (Kirchhoff’s law, as in the model of Tero, Kobayashi and Nakagaki). With two foods, the first one gives and the other takes. With more, the app draws again every ten minutes of model time which foods give and which take. Each cell remembers the flux that passed it. Where that memory is low, the tube starves: its agents die, and with Growth and shrinkage they do not divide there. A tube without any flux starves after about half an hour of model time. Where the memory is high, dead agents come back to life, so the tube gets wider. Thirty steps are one minute of model time. With two foods, one thick tube along a short route remains. With many foods, a network with loops remains. While the colony covers fewer than two foods, no flux runs between foods, and the memory stays as it is. On fresh ground few agents starve: without Growth and shrinkage, half of a colony is gone after about 8 hours of model time. The rule costs time: the app solves the pressure in the tubes with 16 passes over the grid at each step.',
+  ref: 'Tero, Kobayashi and Nakagaki 2007, J. Theor. Biol. 244: 553; Tero et al. 2010, Science 327: 439; Marbach et al. 2023, eLife 12: e78100',
 } as const;
 
 /** Help for the view switch "Scent" (ADR 0009, amendments of 2026-11-11 and 2026-11-12); Learn → Controls lists it. */
@@ -407,6 +425,8 @@ export interface Settings extends Record<GlobalKey, number> {
   growth: boolean;
   /** The order of a step (STEP_ORDERS, stepOrderHelp), in both models: each scene sets the order of its paper. */
   stepOrder: StepOrder;
+  /** Flow in the tubes (flowHelp, ADR 0029), with `flowStrength`. Only in the extended model (constrain()). */
+  flow: boolean;
   style: Style;
   /** The view draws the food scent and the light repellent over the picture (scentViewHelp). Display only. */
   showScent: boolean;
@@ -462,6 +482,7 @@ export function defaultSettings(): Settings {
     coveredFood: false,
     growth: false,
     stepOrder: 'sense-first',
+    flow: false,
     style: 'glow',
     showScent: false,
     density: 1,
@@ -486,6 +507,8 @@ export function defaultSettings(): Settings {
     shrinkWindow: 5,
     shrinkMin: 0,
     shrinkMax: 20,
+    // Tero et al. 2010 use I0 = 2 per tube (Fig. 4); a tube of this app is about 4 cells wide (ADR 0029).
+    flowStrength: 8,
     speed: 120,
     exposure: 0,
     bloom: 1,
@@ -567,6 +590,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // A link from before the step orders holds none: the order of its scene, or sense first without a scene, the order of
   // the code before (ADR 0027).
   out.stepOrder = oneOf(raw.stepOrder, STEP_ORDERS, order);
+  // A link from before the flow holds none: it stays off (ADR 0029).
+  out.flow = raw.flow === true;
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);
@@ -663,8 +688,8 @@ export function jonesFits(s: Settings): boolean {
 /**
  * The Jones model's values of the settings that are not Jones' own (ADR 0022). Food goes into his one trail map
  * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. Jones'
- * papers have neither light that releases a repellent nor trail saturation, so their values return to the defaults,
- * and a link holds none of them. Returns `s` itself when it holds these values already.
+ * papers have neither light that releases a repellent nor trail saturation nor a flow in the tubes, so their values
+ * return to the defaults, and a link holds none of them. Returns `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
   const d = defaultSettings();
@@ -674,13 +699,17 @@ function asJones(s: Settings): Settings {
   const light = defaultStrain(0).light;
   // One population: a share means nothing for one strain, and the panel offers none in the Jones model.
   const strainOk = st.food === self && st.light === light && st.share === 1;
-  const ok = strainOk && s.scentDecay === st.decay && s.lightStrength === d.lightStrength && s.trailSaturation === 0;
+  const bound = s.scentDecay === st.decay && s.lightStrength === d.lightStrength && s.trailSaturation === 0;
+  // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
+  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength;
   if (ok) return s;
   return {
     ...s,
     scentDecay: st.decay,
     lightStrength: d.lightStrength,
     trailSaturation: 0,
+    flow: false,
+    flowStrength: d.flowStrength,
     strains: strainOk ? s.strains : [{ ...st, food: self, light, share: 1 }],
   };
 }

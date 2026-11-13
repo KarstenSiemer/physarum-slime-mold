@@ -2,6 +2,7 @@
   import {
     collisionsHelp,
     coveredFoodHelp,
+    flowHelp,
     globalSpec,
     growthHelp,
     modelHelp,
@@ -41,7 +42,7 @@
   const specs: { label: string; help: string; ref?: string }[] = [
     ...Object.values(strainSpec),
     ...Object.entries(globalSpec)
-      .filter(([k]) => !GROWTH_KEYS.has(k))
+      .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength')
       .map(([, v]) => v),
     collisionsHelp,
     modelHelp,
@@ -51,6 +52,9 @@
     ...Object.entries(globalSpec)
       .filter(([k]) => GROWTH_KEYS.has(k))
       .map(([, v]) => v),
+    // The switch Flow in the tubes comes before its value, as in the panel.
+    flowHelp,
+    globalSpec.flowStrength,
     // The view switch last: it changes only the picture.
     scentViewHelp,
   ];
@@ -110,8 +114,9 @@
         Still, it finds food and connects food sources with an efficient network of tubes. Inside, the cell squeezes its
         liquid back and forth about every two minutes (shuttle streaming). Tubes that carry much flow grow thicker;
         tubes with little flow fade. In experiments it found the shortest way through a maze (Nakagaki 2000) and built a
-        network like the Tokyo rail system (Tero 2010). The model in this app has no flow, so its tubes do not grow
-        thicker with use.
+        network like the Tokyo rail system (Tero 2010). Jones’ model has no flow. The extended model of this app can add
+        one: with Flow in the tubes, a tube that carries flow between foods stays, and the others starve. The scenes
+        Maze and Tokyo rail network use it.
       </p>
       <p>
         It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food
@@ -256,7 +261,8 @@
       <p>
         Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
         figure in his paper, on the grid of that figure. Fogleman 2020 scenes are his saved settings, and the others
-        were made for this app. These scenes use a grid shaped like your screen.
+        were made for this app. These scenes use a grid shaped like your screen. Tokyo rail network has a square grid on
+        every screen, so north stays up on its map.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>
@@ -314,6 +320,14 @@
         <a href="https://cargocollective.com/sagejenson/physarum" rel="noreferrer">physarum</a> (2019). Multiple species
         and presets “Cyclones”, “Dunes”, “Dot grid”: Michael Fogleman,
         <a href="https://github.com/fogleman/physarum" rel="noreferrer">physarum</a> (MIT license).
+      </p>
+      <p>
+        Flow in the tubes: after A. Tero, R. Kobayashi and T. Nakagaki, “A mathematical model for adaptive transport
+        network in path finding by true slime mold”, <em>Journal of Theoretical Biology</em> 244: 553–564, 2007, and A.
+        Tero and colleagues, “Rules for biologically inspired adaptive network design”, <em>Science</em> 327: 439–442,
+        2010. The map of the scene Tokyo rail network: coastline ©
+        <a href="https://www.openstreetmap.org/copyright" rel="noreferrer">OpenStreetMap</a> contributors (Open Database License),
+        station positions from Wikidata (CC0).
       </p>
       <p>
         This page runs fully in your browser on your graphics card with WebGPU. It sends no data anywhere and uses no

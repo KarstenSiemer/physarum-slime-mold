@@ -13,6 +13,7 @@ import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
+import { flowOn } from './flow';
 import { AgentToolKind, growthOn, stepChance, strainAgents, type AgentTool } from './pack';
 import {
   agentCount,
@@ -21,6 +22,7 @@ import {
   fits,
   gridOf,
   gridSize,
+  FLOW_BYTES_PER_CELL,
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
@@ -222,6 +224,8 @@ export class Engine {
     this.sim.update(this.settings);
     // Compare what runs, not what was asked: a backend without the rule keeps it off, which is no switch.
     const now = this.settings;
+    // The flow was off, so nobody kept the food sites (syncSites()).
+    if (flowOn(now) && !flowOn(prev)) this.syncSites();
     if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
   }
 
@@ -249,6 +253,8 @@ export class Engine {
     this.sim.update(this.settings);
     this.sim.clearEnvironment();
     this.flushEnv();
+    // Also without an edit to paint: the simulation still has the sites of the scene before.
+    this.syncSites();
     this.reset();
   }
 
@@ -293,6 +299,7 @@ export class Engine {
       this.backend.bytesPerCell +
       (s.coveredFood ? coveredBytesPerCell : 0) +
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
+      (flowOn(s) ? FLOW_BYTES_PER_CELL : 0) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
@@ -427,7 +434,10 @@ export class Engine {
     this.painted = 0;
     this.placement = undefined;
     [this.running, this.queue] = [undefined, []];
-    if (this.live) this.sim.clearEnvironment();
+    if (this.live) {
+      this.sim.clearEnvironment();
+      this.sim.foodSites([]);
+    }
     this.onEdits?.();
   }
 
@@ -539,6 +549,7 @@ export class Engine {
     this.painted -= [...gone].filter((i) => i < this.painted).length;
     compact(this.edits, gone);
     this.placement?.remove(gone);
+    if (this.live) this.syncSites();
     return true;
   }
 
@@ -560,6 +571,23 @@ export class Engine {
     }
     this.painted = this.edits.length;
     this.sim.paint(strokes.filter((s) => s !== undefined));
+    this.syncSites();
+  }
+
+  /**
+   * The food sites of the flow in the tubes (ADR 0029): the start point of each food edit that the simulation holds,
+   * on its grid and in the order of the list. After each paint, after the sweep deleted edits, after a load and when
+   * the flow turns on. Only the flow reads the sites: while it is off, a paint does not map the list again.
+   */
+  private syncSites() {
+    if (!flowOn(this.settings)) return;
+    const { width, height } = this.sim;
+    const centres: [number, number][] = [];
+    for (const e of this.edits.slice(0, this.painted)) {
+      const at = e.kind === 'food' ? strokeOn(e, width, height) : undefined;
+      if (at) centres.push(at.from);
+    }
+    this.sim.foodSites(centres);
   }
 
   /**

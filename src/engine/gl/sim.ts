@@ -1,5 +1,7 @@
 import type { Boundary, Settings } from '../../model/params';
+import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, packFlow } from '../flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -27,7 +29,7 @@ import {
   type GL,
   type Target,
 } from './gl';
-import { ORDER_TILE, PARAMS_BINDING, type Program, type Programs } from './programs';
+import { FLOW_BINDING, ORDER_TILE, PARAMS_BINDING, type Program, type Programs } from './programs';
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -190,6 +192,17 @@ export class GlSim implements Sim {
   private collision?: { occ: Pair<Target>; claims: Target };
   /** The targets of growth and shrinkage, while growth is on (ADR 0025). */
   private growth?: GlGrowth | undefined;
+  /**
+   * The state of the flow in the tubes, while it is on (flow.frag, ADR 0029; `FlowState` in ../sim.ts): the memory of
+   * each cell in two targets, the pressure of the four lanes in three, and the uniform block of the passes.
+   */
+  private flow?: { memory: Pair<Target>; pressure: Target[]; ubo: WebGLBuffer } | undefined;
+  /** Which memory target is current, and which pressure target holds the pressure in work. */
+  private flowM: Bit = 0;
+  private flowP = 0;
+  /** The food sites that give and take the flux (foodSites()). */
+  private sites: [number, number][] = [];
+  private readonly flowData = new ArrayBuffer(FLOW_BYTES);
   /**
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
    * (diffuse.frag COVERED). Allocated at its first use.
@@ -431,6 +444,71 @@ export class GlSim implements Sim {
       for (const t of this.growthTargets()) destroyTarget(this.gl, t);
       this.growth = undefined;
     }
+    // The memory fit counts the targets of the flow only while it is on.
+    if (!flowOn(settings) && this.flow) this.dropFlow();
+  }
+
+  foodSites(centres: readonly (readonly [number, number])[]) {
+    this.sites = flowSites(centres, this.width, this.height);
+  }
+
+  /** The targets and the uniform block of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL). */
+  private ensureFlow() {
+    if (!this.flow) {
+      const gl = this.gl;
+      const made: Target[] = [];
+      const make = () => {
+        const t = target(gl, this.width, this.height, gl.RGBA32F);
+        made.push(t);
+        return t;
+      };
+      try {
+        const memory: Pair<Target> = [make(), make()];
+        this.flow = { memory, pressure: [make(), make(), make()], ubo: uniformBlock(gl, FLOW_BYTES, FLOW_BINDING) };
+      } catch (err) {
+        for (const t of made) destroyTarget(gl, t);
+        throw err;
+      }
+      this.clearFlow();
+    }
+    return this.flow;
+  }
+
+  /** The start of the flow: every cell with the memory of fresh ground, no tube, no pressure. */
+  private clearFlow() {
+    const gl = this.gl;
+    if (!this.flow) return;
+    for (const t of this.flow.memory) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.viewport(0, 0, t.width, t.height);
+      gl.clearColor(FLOW.fresh, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    for (const t of this.flow.pressure) clear(gl, t);
+    this.flowM = 0;
+    this.flowP = 0;
+  }
+
+  private dropFlow() {
+    if (!this.flow) return;
+    for (const t of [...this.flow.memory, ...this.flow.pressure]) destroyTarget(this.gl, t);
+    this.gl.deleteBuffer(this.flow.ubo);
+    this.flow = undefined;
+  }
+
+  readFlow(): Promise<Float32Array> {
+    if (!this.flow) return Promise.resolve(new Float32Array(0));
+    return Promise.resolve(readTarget(this.gl, this.flow.memory[this.flowM]) as Float32Array);
+  }
+
+  readPressure(): Promise<Float32Array> {
+    if (!this.flow) return Promise.resolve(new Float32Array(0));
+    return Promise.resolve(readTarget(this.gl, at(this.flow.pressure, this.flowP)) as Float32Array);
+  }
+
+  writeFlow(data: Float32Array) {
+    if (!flowOn(this.settings)) return;
+    writeTarget(this.gl, this.ensureFlow().memory[this.flowM], 0, 0, this.width, this.height, data);
   }
 
   reset() {
@@ -445,6 +523,7 @@ export class GlSim implements Sim {
     this.p = 0;
     this.writeParams();
     for (const t of [...this.trail, ...this.scent, this.counts]) clear(gl, t);
+    this.clearFlow();
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
@@ -844,6 +923,7 @@ export class GlSim implements Sim {
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
     this.dropViewThird();
+    this.dropFlow();
     gl.deleteBuffer(this.ubo);
   }
 
@@ -930,6 +1010,8 @@ export class GlSim implements Sim {
    */
   private agentProgram(): Program {
     const senseWalls = this.walls && this.settings.model === 'extended';
+    // With the flow in the tubes, the pass in which agents starve and come to life by the flow memory (ADR 0029).
+    if (flowOn(this.settings)) return this.prog.flowing(senseWalls, trailSaturation(this.settings) > 0);
     if (trailSaturation(this.settings) > 0) {
       const p = this.prog.saturated();
       return senseWalls ? p.walled : p.agents;
@@ -962,6 +1044,15 @@ export class GlSim implements Sim {
     const gl = this.gl;
     const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
     const agentProgram = this.agentProgram();
+    // The flow in the tubes (ADR 0029): the agent passes read the memory of the step before, with the roles of this
+    // step in the uniform block.
+    const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
+    if (flow) {
+      gl.bindBufferBase(gl.UNIFORM_BUFFER, FLOW_BINDING, flow.ubo);
+      const block = packFlow(this.settings, this.sites, this.flowData);
+      gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(block));
+    }
+    const flowMemory: Record<string, WebGLTexture> = flow ? { flowMemory: flow.memory[this.flowM].texture } : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -974,6 +1065,7 @@ export class GlSim implements Sim {
           occ,
           claims,
           clearance: this.clearance.texture,
+          ...flowMemory,
         },
         { agentWidth: this.agentWidth, mode },
       );
@@ -987,8 +1079,9 @@ export class GlSim implements Sim {
       const occ = col.occ[this.q];
       agentPass(1, A, B, occ.texture, dummy);
       clear(gl, col.claims);
-      // A tool's spot needs the occupancy (tools.glsl placement).
-      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture });
+      // A tool's spot needs the occupancy (tools.glsl placement), and a spot of the flow its memory.
+      const claimPoints = flow ? this.prog.flow().points : this.prog.points;
+      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture, ...flowMemory }, claimPoints);
       agentPass(2, B, A, occ.texture, col.claims.texture);
       const next = col.occ[flip(this.q)];
       clear(gl, next);
@@ -1025,6 +1118,43 @@ export class GlSim implements Sim {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.p = out;
     }
+    if (flow) this.encodeFlow(flow);
+  }
+
+  /**
+   * The flow in the tubes after the diffusion of a step (flow.frag; encodeFlow in ../sim.ts, ADR 0029): the update of
+   * the memory from the pressure and the trail of this step, then the pressure iterations on the new conductivity.
+   */
+  private encodeFlow(flow: NonNullable<GlSim['flow']>) {
+    const programs = this.prog.flow();
+    const env = this.env.texture;
+    const [m, next] = [this.flowM, flip(this.flowM)];
+    let p = this.flowP;
+    this.pass(
+      programs.update,
+      flow.memory[next],
+      {
+        env,
+        memory: flow.memory[m].texture,
+        pressureIn: at(flow.pressure, p).texture,
+        trail: this.trail[this.p].texture,
+      },
+      {},
+    );
+    const memory = flow.memory[next].texture;
+    for (let i = 0; i < FLOW_ITERATIONS; i++) {
+      const [before, out] = [(p + 2) % 3, (p + 1) % 3];
+      this.pass(
+        programs.pressure,
+        at(flow.pressure, out),
+        { env, memory, pressureIn: at(flow.pressure, p).texture, pressureBefore: at(flow.pressure, before).texture },
+        // The first two iterations take the pressure of the reference cell off (RECENTRE in flow.wgsl).
+        { recentre: i < 2 ? i + 1 : 0 },
+      );
+      p = out;
+    }
+    this.flowM = next;
+    this.flowP = p;
   }
 
   /**
@@ -1045,7 +1175,16 @@ export class GlSim implements Sim {
     const tested = this.agentsTex[flip(this.a)];
     const env = this.env.texture;
     const windows = g.windows.texture;
-    this.pass(p.test, tested, { agentsIn: this.agentsTex[this.a].texture, windows, occ, env }, { agentWidth });
+    // With the flow in the tubes, the test in which an agent on a starved cell does not divide (FLOW in growth.frag,
+    // ADR 0029): it reads the flow memory that the agent pass of the step read.
+    const flow = flowOn(this.settings) ? this.flow : undefined;
+    const flowMemory: Record<string, WebGLTexture> = flow ? { flowMemory: flow.memory[this.flowM].texture } : {};
+    this.pass(
+      flow ? this.prog.growthFlowing() : p.test,
+      tested,
+      { agentsIn: this.agentsTex[this.a].texture, windows, occ, env, ...flowMemory },
+      { agentWidth },
+    );
     this.a = flip(this.a);
     if (grow) {
       const agents = this.agentsTex[this.a];
@@ -1201,9 +1340,9 @@ export class GlSim implements Sim {
     agents = this.agentsTex[this.a],
     unit: [number, number, number, number] = [0, 0, 0, 0],
     more: Record<string, WebGLTexture> = {},
+    p = this.prog.points,
   ) {
     const gl = this.gl;
-    const p = this.prog.points;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
     gl.viewport(0, 0, dst.width, dst.height);
     gl.useProgram(p.program);

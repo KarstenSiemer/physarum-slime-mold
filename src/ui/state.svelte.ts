@@ -385,9 +385,12 @@ function jonesChanges(s: Settings, next: Settings): string {
   const removed = [
     n > 1 && (n === 2 ? 'strain B' : `strains B to ${letter(n - 1)}`),
     !s.collisions && 'agents that share a cell',
+    // The Jones model never has the flow (ADR 0029); its strength then means nothing, so the list of changes skips it.
+    s.flow && 'the flow in the tubes',
   ].filter((v): v is string => typeof v === 'string');
   const changed: string[] = [];
   for (const k of Object.keys(globalSpec) as (keyof typeof globalSpec)[]) {
+    if (k === 'flowStrength') continue;
     const why = k === 'scentDecay' ? ' (the Decay of strain A)' : '';
     if (s[k] !== next[k]) changed.push(`${globalSpec[k].label} from ${fmt(s[k])} to ${fmt(next[k])}${why}`);
   }

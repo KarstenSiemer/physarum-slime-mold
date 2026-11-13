@@ -8,6 +8,7 @@ import {
   capacityCount,
   estimateBytes,
   fitResolution,
+  FLOW_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
   VIEW_BYTES_PER_CELL,
@@ -107,5 +108,17 @@ describe('the view of a step that moves first', () => {
       expect(viewTrailOn({ stepOrder: 'sense-first', diffusion }), `${diffusion}`).toBe(false);
     }
     expect(viewTrailOn(defaultSettings())).toBe(false);
+  });
+});
+
+// ADR 0029: the flow in the tubes holds the memory of each cell twice and the pressure of its four fields three times.
+describe('the flow in the tubes', () => {
+  it('holds five textures of 16 B per cell, which the memory estimate counts per cell', () => {
+    expect(FLOW_BYTES_PER_CELL).toBe(5 * 16);
+    const [w, h] = gridSize(512, 1.6);
+    const without = estimateBytes(w, h, 1000);
+    expect(estimateBytes(w, h, 1000, BYTES_PER_CELL + FLOW_BYTES_PER_CELL) - without).toBe(w * h * FLOW_BYTES_PER_CELL);
+    // The Tokyo scene on its lattice: 20 MiB more.
+    expect((512 * 512 * FLOW_BYTES_PER_CELL) / 2 ** 20).toBe(20);
   });
 });

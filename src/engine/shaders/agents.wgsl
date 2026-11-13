@@ -25,6 +25,24 @@ override SENSE_WALLS: bool = false;
 // t / (1 + t / K), K = P.model.x. sim.ts builds `advance` and `claim` with it only while K > 0, so the passes without
 // it keep the agents and trail of the code before it, bit for bit (sim.gpu.test.ts).
 override SATURATE: bool = false;
+//#if FLOW
+
+// Flow in the tubes (ADR 0029, flow.wgsl). The lines between `//#if FLOW` and `//#endif` are part of the source only
+// while the flow is on (variant.ts); without them the source is the one of the code before, character for character,
+// so a simulation without the flow keeps its bytes. An agent on a cell whose flow memory is low starves, and a dead
+// agent comes to life on an empty cell whose flow memory is high: the tube that carries flux gets wider.
+struct FlowRule {
+  a: vec4f,
+  b: vec4f,
+  c: vec4f, // z: the tube body below which a cell holds no tube
+  d: vec4f,
+  e: vec4f, // death, half², birth, birth from
+}
+@group(0) @binding(12) var flowMemory: texture_2d<f32>; // x flow memory, y tube body (flow.wgsl)
+@group(0) @binding(13) var<uniform> F: FlowRule;
+const STARVE = 9u; // streams 4 to 6: growth.wgsl; 7 and every 7 + k · 65536: the start (init.wgsl)
+const RESPAWN = 8u;
+//#endif
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
 const STEER = 0u;
@@ -171,6 +189,19 @@ fn randomIn(center: vec2f, radius: f32, rng: ptr<function, u32>) -> vec2f {
   return center + radius * sqrt(rand(rng)) * dir(rand(rng) * TAU);
 }
 
+//#if FLOW
+// Starvation (ADR 0029): an agent dies with the chance death · half² / (D² + half²), D the flow memory of its cell.
+// On a tube that carries flux D is far above `half`, and the chance is almost 0; on a cell that the flux passed by
+// for long it is `death`.
+fn starved(a: Agent, id: u32) -> bool {
+  let q = cellXY(vec2i(floor(a.pos)));
+  if (q.x < 0) { return false; }
+  let d = textureLoad(flowMemory, q, 0).x;
+  var r = rngSeed(id, STARVE);
+  return rand(&r) < F.e.x * F.e.y / (d * d + F.e.y);
+}
+
+//#endif
 // Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
 fn shrinkage(a: ptr<function, Agent>, id: u32) -> bool {
   var alive = ((*a).bits & ALIVE) != 0u;
@@ -178,6 +209,9 @@ fn shrinkage(a: ptr<function, Agent>, id: u32) -> bool {
     var r = rngSeed(id, SHRINK);
     alive = rand(&r) >= P.scent.w;
   }
+//#if FLOW
+  if (alive) { alive = !starved(*a, id); }
+//#endif
   (*a).bits = ((*a).bits & ~ALIVE) | select(0u, ALIVE, alive);
   return alive;
 }
@@ -193,13 +227,36 @@ struct Spot {
 // the rule reads `occ`, which `advance` binds but never reads.
 fn openCell(c: i32) -> bool { return habitable(c) && (P.cfg.w == 0u || occ[c] == 0u); }
 
+//#if FLOW
+// Where the flow brings a dead agent to life (ADR 0029), or cell −1: the agent draws one random point of the grid. If
+// its cell is open (openCell) and holds a tube, the agent comes to life there with the chance
+// birth · (D − from) / (1 − from), D the flow memory of the cell. A pure function of the agent, the parameters, `env`,
+// `occ` and the flow memory, as placement() must be; with the rule the agent claims the cell like a move.
+fn respawn(a: Agent, id: u32) -> Spot {
+  let none = Spot(a.pos, a.heading, -1);
+  if ((a.bits & ALIVE) != 0u) { return none; }
+  var rng = rngSeed(id, RESPAWN);
+  let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
+  let q = cellXY(vec2i(floor(p)));
+  let c = indexOf(q);
+  if (!openCell(c)) { return none; }
+  let m = textureLoad(flowMemory, q, 0);
+  if (m.y < F.c.z || rand(&rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) { return none; }
+  return Spot(wrapPos(p), rand(&rng) * TAU, c);
+}
+
+//#endif
 // Inoculate takes a dead agent of the tool's strain, with the chance P.tool2.y, to a random point of the brush, and
 // never a living one. Cut takes a living agent in the wound to the first of 8 random points outside it whose cell
 // is open (Jones 2010, Sec. 4.3). After shrinkage, so a pure function of the agent as `claim` leaves it, the
 // parameters, `env` and `occ`: `claim` and `settle` find the same spot. With the rule the agent claims the cell like
 // a move (`claim`), and only the winner goes there (`settle`).
 fn placement(a: Agent, id: u32) -> Spot {
+//#if FLOW
+  if (P.tool.w == 0.0) { return respawn(a, id); }
+//#else
   if (P.tool.w == 0.0) { return Spot(a.pos, a.heading, -1); } // no tool held: the usual step
+//#endif
   var rng = rngSeed(id, TOOL);
   let alive = (a.bits & ALIVE) != 0u;
   if (P.tool.w == 1.0 && !alive && f32(a.bits & 3u) == P.tool2.x && rand(&rng) < P.tool2.y) {
@@ -213,7 +270,11 @@ fn placement(a: Agent, id: u32) -> Spot {
       if (openCell(c) && toolDistance(p, P.tool.xy) >= P.tool.z) { return Spot(wrapPos(p), a.heading, c); }
     }
   }
+//#if FLOW
+  return respawn(a, id);
+//#else
   return Spot(a.pos, a.heading, -1);
+//#endif
 }
 
 fn count(alive: bool, s: u32) {

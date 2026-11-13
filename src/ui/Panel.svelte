@@ -5,6 +5,7 @@
     capacityOf,
     collisionsHelp,
     coveredFoodHelp,
+    flowHelp,
     globalSpec,
     growthHelp,
     LAYOUTS,
@@ -114,6 +115,7 @@
   };
   let coveredHelp = $state(false);
   let growthHelpOpen = $state(false);
+  let flowHelpOpen = $state(false);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
   const canGrow = $derived(app.canCollide && s.collisions);
   /** The most Capacity can be: one agent per cell with the rule (capacityOf()). */
@@ -437,6 +439,32 @@
       live={false}
     />
   </Section>
+
+  {#if extended}
+    <!-- The flow in the tubes is a rule of the extended model only (ADR 0029). -->
+    <Section title="Flow">
+      <div class="check">
+        <label>
+          <input type="checkbox" bind:checked={s.flow} aria-describedby={flowHelpOpen ? 'flow-help' : undefined} />
+          <span>{flowHelp.label}</span>
+        </label>
+        <button
+          class="help"
+          type="button"
+          aria-expanded={flowHelpOpen}
+          aria-controls="flow-help"
+          aria-label="About {flowHelp.label}"
+          onclick={() => (flowHelpOpen = !flowHelpOpen)}>?</button
+        >
+      </div>
+      {#if flowHelpOpen}
+        <p class="helptext" id="flow-help">{flowHelp.help} <cite>{flowHelp.ref}</cite></p>
+      {/if}
+      {#if s.flow}
+        <Slider spec={globalSpec.flowStrength} bind:value={s.flowStrength} id="flow-strength" />
+      {/if}
+    </Section>
+  {/if}
 
   <Section title="Look">
     <label class="field">

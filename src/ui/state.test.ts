@@ -698,6 +698,21 @@ describe('the model switch', () => {
     );
   });
 
+  // The Jones model never has the flow in the tubes (ADR 0029): the switch to Jones takes it off and says so.
+  it('to Jones takes the flow in the tubes off and names it, not its strength', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('maze');
+    expect(app.settings.flow).toBe(true);
+    app.settings.flowStrength = 12;
+    setModel('jones');
+    expect([app.settings.model, app.settings.flow, app.settings.flowStrength]).toEqual(['jones', false, 8]);
+    expect(app.notice).toContain('It removed the flow in the tubes.');
+    expect(app.notice).not.toContain('Flow strength');
+    // Back in the extended model the flow stays off until the user turns it on.
+    setModel('extended');
+    expect([app.settings.model, app.settings.flow]).toEqual(['extended', false]);
+  });
+
   // Every value that toJones() changes is in the notice, also those that the panel of the extended model shows
   // elsewhere: the light strength, the weights of strain A and no diffusion.
   it('to Jones names every value it changed', async () => {
@@ -746,7 +761,10 @@ describe('the model switch', () => {
     const { app, loadPreset, setModel } = await fresh();
     loadPreset('maze');
     setModel('jones');
-    expect(app.notice).toBe(`${BASE} The walls stop agents, but they do not block sensors.`);
+    // The Maze also has the flow in the tubes, which the Jones model never has (ADR 0029).
+    expect(app.notice).toBe(
+      `${BASE} The walls stop agents, but they do not block sensors. It removed the flow in the tubes.`,
+    );
   });
 
   it('to Jones is not possible without the rule, and changes nothing then', async () => {
@@ -803,12 +821,19 @@ describe('the model switch', () => {
 
   it('to Jones and back changes an extended scene that fits Jones only for the switch itself', async () => {
     const { app, loadPreset, sceneChanged, setModel } = await fresh();
-    loadPreset('maze');
+    // Foraging maze is extended for its walls alone. The Maze also has the flow in the tubes, which stays off after
+    // the way back (ADR 0029).
+    loadPreset('foraging-maze');
     setModel('jones');
     expect(sceneChanged()).toBe(true);
     setModel('extended');
     expect(sceneChanged()).toBe(false);
-    expect(app.settings).toEqual({ ...sceneOf('maze'), seed: app.settings.seed });
+    expect(app.settings).toEqual({ ...sceneOf('foraging-maze'), seed: app.settings.seed });
+    loadPreset('maze');
+    setModel('jones');
+    setModel('extended');
+    expect(sceneChanged()).toBe(true);
+    expect(app.settings).toEqual({ ...sceneOf('maze'), seed: app.settings.seed, flow: false });
   });
 
   it('is undone by Reload scene, which restores the model of the scene', async () => {

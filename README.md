@@ -17,7 +17,9 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 - Paint **food** (attracts), **light** (repels), **walls**, inoculate agents, or **cut** a
   wound and watch it heal.
 - Run **experiments**: shortest path, Steiner tree, shrinking plasmodium and wound healing from
-  the paper, plus light avoidance and a maze.
+  the paper, plus light avoidance, a maze and the Tokyo rail network of Tero et al. (2010).
+- Turn on **flow in the tubes**: tubes that carry flow between foods stay, the others starve.
+  The Maze then keeps one tube along a short route.
 - Read what each scene shows: where its settings come from, what to watch, and why it uses them.
 - Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the settings,
   the scene and its food, light and walls as a link.
@@ -28,6 +30,15 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 | ---------------------------------------- | ---------------------------------------- |
 | ![Steiner tree](docs/images/steiner.jpg) | ![Cyclones](docs/images/cyclones.jpg)    |
 
+The Maze at step 5,000, without and with the flow in the tubes:
+
+![The Maze without and with the flow in the tubes](docs/images/maze-flow.jpg)
+
+The Tokyo rail network at step 1,000 and at step 48,000, which stands for the 26 hours of the
+experiment of Tero et al. (2010):
+
+![The Tokyo rail network at step 1,000 and at step 48,000](docs/images/tokyo-time.jpg)
+
 ## How it works
 
 Each agent has three forward sensors. In every step all agents sense the trail and turn toward
@@ -37,6 +48,9 @@ step. Strong trails attract more agents, which strengthen the trail: a network f
 
 - Simulation: WebGPU compute shaders (WGSL) with integer atomics; deterministic for a seed.
   Optional one-agent-per-cell rule as in the paper, with a deterministic GPU claim method.
+- Flow in the tubes (optional, extended model): a pressure field on the grid after Tero,
+  Kobayashi and Nakagaki (2007), solved by 16 local passes per step
+  ([ADR 0029](docs/adr/0029-flow-in-the-tubes.md)).
 - Fallback: a WebGL2 backend with the same model for browsers without WebGPU.
 - Rendering: auto levels from a GPU histogram, glow (bloom), dithering against banding. Food
   and walls keep smooth outlines at any zoom: the brush also stores distances to their outlines,
@@ -94,6 +108,13 @@ GitHub Actions builds, tests and deploys to GitHub Pages from `main`
 - GPU approach and inspiration: [Sage Jenson](https://cargocollective.com/sagejenson/physarum).
 - Multiple species and the presets Cyclones, Dunes and Dot grid:
   [Michael Fogleman](https://github.com/fogleman/physarum) (MIT).
+- Flow in the tubes: A. Tero, R. Kobayashi, T. Nakagaki, _A mathematical model for adaptive
+  transport network in path finding by true slime mold_, J. Theor. Biol. 244: 553–564, 2007;
+  A. Tero et al., _Rules for biologically inspired adaptive network design_, Science 327:
+  439–442, 2010.
+- Map of the scene Tokyo rail network (`src/model/tokyo.ts`): coastline ©
+  [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, Open Database License;
+  station positions from Wikidata (CC0).
 
 ## License
 

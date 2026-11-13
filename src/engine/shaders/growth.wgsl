@@ -29,6 +29,21 @@
 @group(0) @binding(12) var<storage, read_write> occNext: array<atomic<u32>>; // agents per cell after this step
 @group(0) @binding(13) var<storage, read_write> stats: array<atomic<u32>>;
 @group(0) @binding(14) var<uniform> level: vec4u; // x: the pyramid level that a build pass writes
+//#if FLOW
+
+// Flow in the tubes (ADR 0029, flow.wgsl). The lines between `//#if FLOW` and `//#endif` are part of the source only
+// while the flow is on (variant.ts); without them the source is the one of the code before, character for character.
+// An agent on a cell that the flux passed by does not divide: the flow supplies no plasm for a child there.
+struct FlowRule {
+  a: vec4f,
+  b: vec4f,
+  c: vec4f,
+  d: vec4f,
+  e: vec4f, // y: half², the square of the flow memory below which an agent does not divide
+}
+@group(0) @binding(15) var flowMemory: texture_2d<f32>; // x flow memory (flow.wgsl), of the step before
+@group(0) @binding(16) var<uniform> F: FlowRule;
+//#endif
 
 // Random streams of their own (STEER 0 to BLOCK 3 in agents.wgsl), so growth never shifts the other draws.
 const GROW = 4u; // the cell that a parent divides into
@@ -112,6 +127,10 @@ fn divideInto(a: Agent, c: i32) -> i32 {
   let n = windows[c].x;
   if (!growthTest() || counts[c][s] == 0u || n < P.growth.z || n > P.growth.w) { return -1; }
   let q = cellCoord(u32(c));
+//#if FLOW
+  let memory = textureLoad(flowMemory, q, 0).x;
+  if (memory * memory < F.e.y) { return -1; }
+//#endif
   var free = 0u;
   for (var k = 0u; k < 8u; k++) {
     let m = cellAt(q + around(k));
