@@ -95,11 +95,13 @@ the same foods. For them, each strain starts on a food of its own.
 **The picture of the tubes** ([ADR 0034](../../docs/adr/0034-the-picture-of-the-tubes.md), part
 10). The owner saw tubes vanish, but no tube looked thicker than another: the picture showed the
 trail, and a tube of Jones' agents has about the same width everywhere. The flow keeps a number
-for every cell that says how well its tube conducts, the flow memory. Now the picture draws every
-tube as wide as that number says. The width follows the law for a liquid in a round tube: a tube
-that conducts 16 times as well is twice as wide. A tube with much flow is thick, and a tube
-without flow is thin and faint. This changes the picture only, and a switch turns it off. The
-rule was chosen with pictures of saved states, made on the CPU. Four other rules were tried and
+for every cell that says how well its tube conducts, the flow memory. It grows where much flow
+runs, and it falls where little flow runs. Now the picture draws every tube as wide and as bright
+as that number says. The radius follows the law for a liquid in a round tube: where a tube
+conducts 16 times as well, the picture draws a disc with twice the radius. A tube that keeps much
+flow stays thick, and a tube with little flow gets thin and faint. A new tube starts thick: the
+model gives it a middle value. This changes the picture only, and a switch turns it off. The rule
+was chosen with pictures of saved states, made on the CPU. Four other rules were drawn and
 rejected, and the script can still draw them.
 
 ## What is in this folder, and what you need to read
@@ -128,8 +130,9 @@ and which went away. `research.test.ts` checks that the scripts still give the r
 ## What you need
 
 - Node 26 and the packages of the repository: `npm ci`. Checked with Node 26.10, 26.13 and 26.13.1.
-- For part 6 and for the browser tests of part 7: the browser of the tests,
-  `npx playwright install chromium`.
+- The browser of the tests, `npx playwright install chromium`, for every run in a browser: the
+  runs of the real engine (the commands with `research/vitest.config.ts`, parts 6 and 8 to 10),
+  the GPU tests (`--project gpu`) and the commands with `playwright`.
 - Run every command from the root of the repository.
 - Unpack the logs once. The logs of the runs that the ADR quotes are one archive,
   `research/flow/logs.tar.gz`. This command writes them to `research/flow/logs/`, which git
@@ -166,7 +169,14 @@ mathematics". In short:
 - **Flow memory**, `D`: how well a cell with a tube conducts. It is the conductivity of Tero et
   al. The **adaptation** is the rule that changes it: D moves toward f(Q), a number between 0 and
   1 that rises with the flux Q of the cell. So the flow memory grows where the flux is large and
-  falls where the flux is small.
+  falls where the flux is small. **Fresh ground** is ground that never held a tube: its flow
+  memory is 0.2.
+- **Tube body**: how much of a tube a cell holds, from 0 to 1. It follows the trail of the strain,
+  and a cell holds a tube from 0.05 on.
+- **Strength**, **factor** and **disc** (part 10): the picture of the tubes takes the strength
+  across a tube from the tube body times the flow memory of the 3 × 3 cells around a cell. The
+  factor is the fourth root of that strength, from 0 to 1. The picture draws every cell with a
+  tube as a disc with a radius of 3.5 cells times its factor.
 - **Starvation and births**: an agent on a cell with a small flow memory dies with a chance of up
   to 2 % per step: it starves. A dead agent comes to life on a cell with a flow memory above 0.5.
   So the agents leave the tubes without a flux and fill the tubes that carry one.
@@ -649,10 +659,10 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 ```
 
 ```bash
-npm run build && npx playwright test --project e2e tests/e2e/flow.spec.ts
+npm run build && npx playwright test --project=e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 27, 47 and 4 tests pass.
+You must see 27, 47 and 5 tests pass.
 
 - `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
   scale, and the growing mesh of part 5 with all rules on.
@@ -665,7 +675,7 @@ You must see 27, 47 and 4 tests pass.
 
 A test is worth what it catches. This script puts 41 wrong rules of the flow into the code of the
 app, one at a time, and runs the GPU tests of the flow for each one (5 minutes). Without a name it
-also runs the 35 wrong rules of the picture of the tubes (part 10):
+also runs the 62 wrong rules of the picture of the tubes (part 10):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -808,7 +818,9 @@ scenes with one strain and Jones' decay run as before.
 ### 10. Does the picture show how thick a tube is? [ADR 0034]
 
 The states for the pictures (1 minute): the trail and the memory of the flow of a scene at some
-steps, written to `out/engine/` (these files are large and not in the record).
+steps, written to `out/engine/` (these files are large and not in the record). They are the Maze,
+the Food ring, and three strains in a dish without food. In the last one no flux runs, so every
+cell keeps the flow memory of fresh ground: it shows how the picture draws a new tube.
 
 ```bash
 VITE_SCENE=maze VITE_STEPS=4000 VITE_DUMP_P=1 VITE_NAME=v-maze-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts
@@ -824,52 +836,103 @@ VITE_SCENE=three-strains VITE_PATCH='{"boundary":"dish","collisions":true,"growt
 
 The Tokyo states are those of part 6 (`g-tk-i1.4-s1`). A picture of a state, with the rule of the
 app: the trail alone, the strength of the tubes, and the picture of the tubes, side by side in
-`out/view/`. `W` is the width of the grid.
+`out/view/`. The script takes the size of the grid and its boundary from the file `<name>.jsonl`
+that the dump wrote.
 
 ```bash
-W=384 node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-ring-s1 12000
+node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-ring-s1 12000
 ```
 
-You must see a line with the flow memory on the cells with a tube, and a picture in which the
-network between the foods is thick and the strands outside it are thin. The lines of eight states
-are the record `logs/view/states.jsonl`. This makes them again:
+You must see a line of numbers, and the path of a picture in which the network between the foods
+is thick and the strands outside it are thin. The numbers are for the cells with a tube:
+`memoryOnTubes` is the flow memory, `belowFresh` the share of the cells below the 0.2 of fresh
+ground, `factorOnTubes` the factor of the radius, and `bandWidth` the width of a band of cells
+with a tube. The lines of eight states are the record `logs/view/states.jsonl`. This makes them
+again:
 
 ```bash
-printf '%s\n' "512 v-maze-s1 4000" "512 g-tk-i1.4-s1 2000" "512 g-tk-i1.4-s1 8000" "512 g-tk-i1.4-s1 24000" "384 v-ring-s1 2000" "384 v-ring-s1 6000" "384 v-ring-s1 12000" "512 v-three-s1 2000" | while read w name step; do W=$w node --import ./research/flow/register.mjs research/flow/view/tubes.ts $name $step | head -1; done
+printf '%s\n' "v-maze-s1 4000" "g-tk-i1.4-s1 2000" "g-tk-i1.4-s1 8000" "g-tk-i1.4-s1 24000" "v-ring-s1 2000" "v-ring-s1 6000" "v-ring-s1 12000" "v-three-s1 2000" | while read name step; do node --import ./research/flow/register.mjs research/flow/view/tubes.ts $name $step | head -1; done
 ```
 
-The rules that were rejected, on the same state (`RULE`): the largest value of the discs, which
-shows scales on a thick tube; the same with a window of 9 × 9 cells for the strength across a
-tube; fresh ground as the zero point; the brightness alone.
+How wide the picture draws a straight tube, by the width of its band of cells and by its flow
+memory (the table of decision 2). The record is `logs/view/widths.jsonl`, and a unit test compares
+it with the script on every change (`research.test.ts`):
 
 ```bash
-for rule in largest fresh bright; do W=512 RULE=$rule PANELS=view CROP=150,40,160,160 SCALE=4 node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-maze-s1 4000; done
+node --import ./research/flow/register.mjs research/flow/view/widths.ts
 ```
+
+The rules that were rejected, on the same state. `RULE` names one: `largest` is the largest value
+of the discs, which shows scales on a thick tube; `fresh` is fresh ground as the zero point;
+`bright` is the brightness alone. `PANELS=view` draws the picture alone, `CROP` is the part of the
+grid as x,y,width,height in cells, and `SCALE` is the count of pixels for a cell.
 
 ```bash
-W=384 RULE=largest WINDOW=4 REF=3 PANELS=view node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-ring-s1 12000
+for rule in largest fresh bright; do RULE=$rule PANELS=view CROP=150,40,160,160 SCALE=4 node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-maze-s1 4000; done
 ```
 
-The time of a frame with and without the picture (4 minutes); the record is
+The largest value of the discs with a window of 9 × 9 cells for the strength across a tube
+(`WINDOW=4`), where a strength of 3 gets the largest radius (`REF=3`):
+
+```bash
+RULE=largest WINDOW=4 REF=3 PANELS=view node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-ring-s1 12000
+```
+
+The pictures of the app with the switch off and on (3 minutes), written to
+`test-results/pictures/`. A file has the name of its scene, its step, its style, and `off` or
+`on`. You must see what "The pictures" of the ADR says for each scene. The command starts the
+built app on port 4173:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/tubes.spec.ts
+```
+
+The time of a frame with and without the picture (4 minutes). The run prints only that its one
+test passed: it writes its lines to `research/flow/out/engine/picture.jsonl`. The record is
 `logs/view/picture.jsonl`:
 
 ```bash
 VITE_NAME=picture npx vitest run --config research/vitest.config.ts research/flow/engine/picture.gpu.test.ts
 ```
 
-The 35 wrong rules of the picture (4 minutes): every line must name at least one test that fails.
-The record is `logs/view/mutations.txt`.
+The tests of the picture: you must see 11 tests pass, and 39 with 1 skipped. The test of the switch
+in the built app is one of the tests of `tests/e2e/flow.spec.ts` (part 7).
 
 ```bash
-node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 35)
+npx vitest run --project unit src/engine/tubes.test.ts
 ```
 
-Result: the picture draws a tube with much flow thick and a tube without flow thin, on both
-backends as the rule on the CPU says, and no result of a simulation changes.
+```bash
+npx vitest run --project gpu src/engine/tubes.gpu.test.ts
+```
+
+The tests of a measurement of the levels, and of a PNG, while a rebuild replaces the simulation:
+you must see 1 test pass, and then 2.
+
+```bash
+npx vitest run --project unit src/engine/engine.test.ts -t "measures the levels again"
+```
+
+```bash
+npx vitest run --project gpu src/engine/engine.gpu.test.ts -t "a PNG while"
+```
+
+The 62 wrong rules of the picture (2 minutes): every block must name at least one test that fails,
+marked `×`, and no block may say `NO TEST FAILS`. The script changes files below `src/` while it
+runs, and it writes each one back as it was: do not change those files while it runs. The record
+is `logs/view/mutations.txt`.
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 62)
+```
+
+Result: the picture draws a tube with a large flow memory thick, and a tube with a small one thin
+and faint, on both backends as the rule on the CPU says. A new tube is thick until its flow memory
+follows its flux. No result of a simulation changes.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 160 files, 1.8 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 161 files, 1.9 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -888,7 +951,7 @@ asks for the new digest.
 | `logs/engine/mutations-0031.txt`                     | the same for 39 wrong rules, with the tests of ADR 0031                                                                                                                                                                         | 2026-11-13, the code of ADR 0031                      |
 | `logs/engine/strains-*.jsonl`                        | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
 | `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0032                                                                                       | 2026-11-13, M3 Pro                                    |
-| `logs/view/`                                         | the runs of part 10: the flow memory of eight saved states, the time of a frame with and without the picture of the tubes, and its 35 wrong rules                                                                               | 2026-11-13, M3 Pro                                    |
+| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, and its 62 wrong rules                                                    | 2026-11-13, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -938,8 +1001,9 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 76 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes  |
+| `engine/mutate.ts`        | 103 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
+| `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
 | `research.test.ts`        | the unit test that keeps the scripts and the logs together                                        |
 

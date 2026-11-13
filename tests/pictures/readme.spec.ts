@@ -1,7 +1,8 @@
 // The pictures of README.md and of ADR 0029 in docs/images/: two panels of a scene side by side, each with a line of
-// text below it. Not part of CI. Run it by hand after a change of the look of these scenes:
+// text below it. Not part of CI. It writes files of the repository, so it is not in the project of `npm run gallery`.
+// Run it by hand after a change of the look of these scenes:
 //
-//   npx playwright test --project gallery tests/gallery/readme.spec.ts
+//   npm run build && npx playwright test --project=pictures tests/pictures/readme.spec.ts
 //
 // A panel is a snapshot of the app's own renderer on 1,280 × 800 pixels with seed 7, as `npm run gallery` takes it,
 // cut to the arena and shown 640 pixels wide. `README=maze-flow` makes one picture only.

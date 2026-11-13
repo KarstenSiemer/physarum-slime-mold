@@ -101,6 +101,7 @@ it('dumps a run of a scene', async () => {
         step: target,
         w: sim.width,
         h: sim.height,
+        boundary: settings.boundary,
         agents: sim.agents,
         alive,
         ms: Math.round(performance.now() - t0),

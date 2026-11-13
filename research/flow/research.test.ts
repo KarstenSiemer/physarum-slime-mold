@@ -142,6 +142,13 @@ describe('the research code of ADR 0029', () => {
   });
 });
 
+describe('the research code of ADR 0034', () => {
+  // view/widths.ts runs the rule of the app on the CPU: its lines are the table of decision 2 of the ADR.
+  it('gives the widths of a straight tube in the picture of the tubes, as the record has them', async () => {
+    expect(await script('view/widths.ts')).toBe(readFileSync(logs('view/widths.jsonl'), 'utf8'));
+  });
+});
+
 describe('the archive of the logs', () => {
   /** One number for all files of an archive: their names, their sizes and their bytes. */
   const digestOf = (files: Entry[]) => {
@@ -150,16 +157,16 @@ describe('the archive of the logs', () => {
     return digest.digest('hex');
   };
 
-  it('holds the 160 logs of the record, unchanged', () => {
+  it('holds the 161 logs of the record, unchanged', () => {
     const files = readArchive();
-    expect(files).toHaveLength(160);
+    expect(files).toHaveLength(161);
     // A new campaign changes the record: pack the archive again (`logs.ts pack`) and put the new number here.
-    expect(digestOf(files)).toBe('d0beae7977407c503610d69953d4c6b0588d1cf80e6608239340f806b42731a8');
+    expect(digestOf(files)).toBe('591b2e863a4bfaac7ea3f2d37d7386daee2027f559a593c0c8a1bcf0ccbc62fe');
   });
 
   it('packs a folder so that unpacking gives the same files', () => {
     const again = join(record, 'again.tar.gz');
-    expect(packLogs(record, again)).toBe(160);
+    expect(packLogs(record, again)).toBe(161);
     expect(digestOf(readArchive(again))).toBe(digestOf(readArchive()));
   });
 

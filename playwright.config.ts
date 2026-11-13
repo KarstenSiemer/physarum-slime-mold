@@ -5,9 +5,12 @@ const ci = !!process.env.CI;
 
 export default defineConfig({
   testDir: 'tests',
+  // `e2e` runs in CI. `gallery` is the visual review loop (`npm run gallery`). `pictures` holds the tools that make
+  // the pictures of the repository and of a record again; a person runs one of them by its file.
   projects: [
     { name: 'e2e', testDir: 'tests/e2e' },
     { name: 'gallery', testDir: 'tests/gallery' },
+    { name: 'pictures', testDir: 'tests/pictures' },
   ],
   fullyParallel: true,
   // One browser at a time on CI: parallel WebGPU browsers are flaky on SwiftShader.

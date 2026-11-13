@@ -11,17 +11,18 @@
 //   zero point. `bright`: the factor on the brightness alone, no radius.
 // - WINDOW (1): with RULE=largest, the strength across a tube is the sum over a square of 2 WINDOW + 1 cells, over
 //   2 WINDOW + 1 cells of length; REF (1): the strength that gets the largest radius.
-// - PANELS: which pictures, side by side: trail, strength, view. CROP: x,y,w,h in cells. SCALE: pixels per cell.
-// - W: the width of the grid (512).
+// - PANELS: which pictures, side by side: trail, strength, view (default: all three). CROP: the part of the grid
+//   that a picture shows, as x,y,width,height in cells (default: the whole grid). SCALE: pixels per cell (2).
+// - BOUNDARY: wrap, box or dish, for a state whose dump does not name the boundary of its grid.
 //
-// The strain is the first one. The walls come from the environment bytes of the dump: the distance of a cell to a
-// wall is here the distance to the centre of the nearest wall cell less half a cell. The app holds the distance to
-// the smooth outline (paint.wgsl), so a picture of this script can differ from the app in the cells beside a wall.
+// The size of the grid and its boundary come from the file <name>.jsonl that the dump writes, so a state needs no
+// other setting. The strain is the first one. The walls are the cells of a wall in the environment bytes of the dump:
+// the rule of the app asks only which cells are walls (tubes-reference.ts).
 import { existsSync, readFileSync } from 'node:fs';
 import { FLOW } from '../../../src/engine/flow.ts';
 import { TUBES, TUBE_REACH, TUBE_WINDOW } from '../../../src/engine/tubes.ts';
 import { tubePicture, tubeRoots, type TubeGrid } from '../../../src/engine/tubes-reference.ts';
-import { SHAPE_RANGE } from '../../../src/engine/types.ts';
+import type { Boundary } from '../../../src/model/params.ts';
 import { outDir } from '../prototype/out.ts';
 import { writePng } from '../prototype/world.ts';
 
@@ -29,7 +30,6 @@ const DIR = process.env.DIR ?? outDir('engine/');
 const OUT = outDir('view/');
 const name = process.argv[2] ?? 'g-tk-i1.4-s1';
 const step = Number(process.argv[3] ?? 8000);
-const W = Number(process.env.W ?? 512);
 const RULE = process.env.RULE ?? 'app';
 const WINDOW = Number(process.env.WINDOW ?? 1);
 const REF = Number(process.env.REF ?? 1);
@@ -37,30 +37,39 @@ const SCALE = Number(process.env.SCALE ?? 2);
 
 const floats = (file: string) =>
   new Float32Array(new Uint8Array(Buffer.from(readFileSync(DIR + file, 'utf8'), 'base64')).buffer);
+/** The grid of the state: the dump writes a line for each step, with the size of the grid and its boundary. */
+function gridOf(): { w: number; h: number; boundary: Boundary } {
+  const file = `${DIR}${name}.jsonl`;
+  if (!existsSync(file)) throw new Error(`no file ${file}: the dump of a state writes it`);
+  const line = readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((text) => text.trim() !== '')
+    .map((text) => JSON.parse(text) as { step?: number; w?: number; h?: number; boundary?: string })
+    .find((row) => row.step === step);
+  if (!line?.w || !line.h) throw new Error(`${file} has no line for step ${String(step)}`);
+  const boundary = process.env.BOUNDARY ?? line.boundary;
+  if (boundary !== 'wrap' && boundary !== 'box' && boundary !== 'dish')
+    throw new Error(`${file} does not name the boundary of the grid: make the state again, or set BOUNDARY`);
+  return { w: line.w, h: line.h, boundary };
+}
+const { w: W, h: H, boundary: BOUNDARY } = gridOf();
 const trail = floats(`${name}-trail-${String(step)}.f32.b64`);
 const memory = floats(`${name}-memory-${String(step)}.f32.b64`);
-const n = trail.length;
-const H = n / W;
+const n = W * H;
+if (trail.length !== n || memory.length !== n * 4)
+  throw new Error(`the state ${name} at step ${String(step)} does not have ${String(W)} × ${String(H)} cells`);
 const D = Float32Array.from({ length: n }, (_, i) => memory[i * 4] ?? 0);
 const B = Float32Array.from({ length: n }, (_, i) => memory[i * 4 + 1] ?? 0);
 /** The strength of the tube of a cell: its body times its flow memory, and 0 on a cell without a tube. */
 const S = Float32Array.from({ length: n }, (_, i) => ((B[i] ?? 0) >= FLOW.bodyLow ? (B[i] ?? 0) * (D[i] ?? 0) : 0));
 
-/** The wall bytes of `shape` from the environment of the dump, if it has one (the header has the limits). */
+/** The wall bytes of `shape` from the environment of the dump, if it has one: 128 on every cell of a wall. */
 function shapeOf(): Uint8Array {
   const shape = new Uint8Array(n * 4);
   const file = `${DIR}${name}-env.u8.b64`;
   if (!existsSync(file)) return shape;
   const env = new Uint8Array(Buffer.from(readFileSync(file, 'utf8'), 'base64'));
-  const wall = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && (env[(y * W + x) * 4] ?? 0) >= 128;
-  for (let y = 0; y < H; y++)
-    for (let x = 0; x < W; x++) {
-      let near = Infinity;
-      for (let dy = -4; dy <= 4; dy++)
-        for (let dx = -4; dx <= 4; dx++) if (wall(x + dx, y + dy)) near = Math.min(near, Math.hypot(dx, dy));
-      const sd = near === 0 ? 0.5 : -(near - 0.5);
-      shape[(y * W + x) * 4] = Math.round((Math.min(1, Math.max(-1, sd / SHAPE_RANGE)) * 0.5 + 0.5) * 255);
-    }
+  for (let c = 0; c < n; c++) if ((env[c * 4] ?? 0) >= 128) shape[c * 4] = 128;
   return shape;
 }
 
@@ -72,10 +81,13 @@ const lanes = (lane0: Float32Array) => {
   return f;
 };
 
+const GRID: TubeGrid = { width: W, height: H, boundary: BOUNDARY, shape: shapeOf() };
+/** The factor of the radius of every cell by the rule of the app: the first lane of the pass `roots`. */
+const FACTOR = first(tubeRoots(GRID, [memory]));
+
 /** The rule of the app (ADR 0034, decisions 2 and 3). */
 function app(): Float32Array {
-  const grid: TubeGrid = { width: W, height: H, boundary: 'box', shape: shapeOf() };
-  return first(tubePicture(grid, lanes(trail), tubeRoots(grid, [memory])));
+  return first(tubePicture(GRID, lanes(trail), tubeRoots(GRID, [memory])));
 }
 
 /** The mean of a field over a square of 2 k + 1 cells. */
@@ -264,6 +276,43 @@ const bright = (f: Float32Array) => {
   const half = 0.5 * levelAbove(f, 0.01);
   return f.reduce((count, v) => count + (v >= half ? 1 : 0), 0);
 };
+const tube = (c: number) => (B[c] ?? 0) >= FLOW.bodyLow;
+/** The share of the cells with a tube whose flow memory is below that of fresh ground. */
+const belowFresh = () => {
+  const cells = [...D.keys()].filter(tube);
+  return +(cells.filter((c) => (D[c] ?? 0) < FLOW.fresh).length / Math.max(cells.length, 1)).toFixed(3);
+};
+/**
+ * How many cells wide a band of cells with a tube is. For every cell with a tube: the distance to the nearest cell
+ * without one. Where that distance is a local maximum the cell lies on the middle line of a band, and the band is
+ * about twice the distance less one cell wide.
+ */
+function bandWidth() {
+  const RANGE = 14;
+  const has = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && tube(y * W + x);
+  const far = new Float32Array(n);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      if (!has(x, y)) continue;
+      let best = RANGE + 1;
+      for (let dy = -RANGE; dy <= RANGE; dy++)
+        for (let dx = -RANGE; dx <= RANGE; dx++) if (!has(x + dx, y + dy)) best = Math.min(best, Math.hypot(dx, dy));
+      far[y * W + x] = best;
+    }
+  const widths: number[] = [];
+  for (let y = 1; y < H - 1; y++)
+    for (let x = 1; x < W - 1; x++) {
+      const d = far[y * W + x] ?? 0;
+      if (d === 0) continue;
+      let ridge = true;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) if ((far[(y + dy) * W + x + dx] ?? 0) > d) ridge = false;
+      if (ridge) widths.push(2 * d - 1);
+    }
+  widths.sort((a, b) => a - b);
+  const at = (p: number) => +(widths[Math.min(widths.length - 1, Math.floor(p * widths.length))] ?? 0).toFixed(1);
+  return { p10: at(0.1), p50: at(0.5), p90: at(0.9) };
+}
 console.log(
   JSON.stringify({
     name,
@@ -271,8 +320,12 @@ console.log(
     rule: RULE,
     w: W,
     h: H,
-    memoryOnTubes: levels(D, (c) => (B[c] ?? 0) >= FLOW.bodyLow),
-    strengthOnTubes: levels(S, (c) => (B[c] ?? 0) >= FLOW.bodyLow),
+    boundary: BOUNDARY,
+    memoryOnTubes: levels(D, tube),
+    belowFresh: belowFresh(),
+    strengthOnTubes: levels(S, tube),
+    factorOnTubes: levels(FACTOR, tube),
+    bandWidth: bandWidth(),
     cellsAboveHalf: { trail: bright(trail), view: bright(view) },
   }),
 );
