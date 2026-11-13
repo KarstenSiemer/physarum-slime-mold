@@ -4101,9 +4101,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // One step that tests growth and shrinkage, against the CPU copy of the passes (growth-reference.ts) stepped
     // from the state after the moves: a twin without growth runs the same moves. On the periodic grid with a wall
     // across its seams, in a box with a wall at its edge, and in a dish, so that windows meet the grid's edges, the
-    // seam, walls and the rim. With walls, also two lines of single wall cells that touch only at their corners, one
-    // in each diagonal direction, where the colony grows: one runs across the seam of the periodic grid and from the
-    // edge of the box (ADR 0025, amendment of 2026-11-13).
+    // seam, walls and the rim. With walls, also single wall cells that touch only at their corners, where the colony
+    // grows: a diagonal line across the seam of the periodic grid and from the edge of the box, and a lattice of
+    // diamonds. 10 to 11 dividing agents then have an empty diagonal neighbour between two walls, and 16 to 18 one past
+    // the corner of one wall cell (ADR 0025, decision 35): the CPU copy without the corner rule, and with the rule that
+    // either wall blocks, fails each case with walls.
     it.each([
       ['wrap', true],
       ['box', true],
@@ -4138,10 +4140,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         sim.paint(wall);
         if (walls) {
           const bytes = await sim.readEnv();
-          for (let k = 0; k < 24; k++) {
-            bytes[(((36 + k) % h) * w + 4 + k) * 4] = 255;
-            if (k < 16) bytes[((12 + k) * w + 20 - k) * 4] = 255;
-          }
+          for (let k = 0; k < 24; k++) bytes[(((36 + k) % h) * w + 4 + k) * 4] = 255;
+          // A lattice of diamonds left of x = 24 and above y = 28, where the colony is thin and grows.
+          for (let y = 0; y < 28; y++)
+            for (let x = 0; x < 24; x++) if ((x + y) % 8 === 0 || (x - y + 64) % 8 === 0) bytes[(y * w + x) * 4] = 255;
           sim.writeEnv(bytes);
         }
         r = 5;
