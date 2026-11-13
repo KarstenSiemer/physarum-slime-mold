@@ -31,7 +31,7 @@ override SATURATE: bool = false;
 // while the flow is on (variant.ts); without them the source is the one of the code before, character for character,
 // so a simulation without the flow keeps its bytes. An agent on a cell whose flow memory is low starves, and a dead
 // agent comes to life on an empty cell whose flow memory is high: the tube that carries flux gets wider. Every strain
-// has a flow of its own (ADR 0030): an agent reads the memory of its own strain, a layer of `flowMemory`.
+// has a flow of its own (ADR 0031): an agent reads the memory of its own strain, a layer of `flowMemory`.
 struct FlowRule {
   a: vec4f,
   b: vec4f,
@@ -231,7 +231,7 @@ fn openCell(c: i32) -> bool { return habitable(c) && (P.cfg.w == 0u || occ[c] ==
 //#if FLOW
 // Where the flow brings a dead agent to life (ADR 0029), or cell −1: the agent draws one random point of the grid. If
 // its cell is open (openCell) and holds a tube of the agent's strain, the agent comes to life there with the chance
-// birth · (D − from) / (1 − from), D the flow memory of the cell for that strain (ADR 0030: before, any tube gave
+// birth · (D − from) / (1 − from), D the flow memory of the cell for that strain (ADR 0031: before, any tube gave
 // life to the agents of every strain). A pure function of the agent, the parameters, `env`, `occ` and the flow memory,
 // as placement() must be; with the rule the agent claims the cell like a move.
 fn respawn(a: Agent, id: u32) -> Spot {

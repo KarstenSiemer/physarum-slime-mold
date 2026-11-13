@@ -1,9 +1,9 @@
 # The model: the rules in force
 
-Status: 2026-11-13, `main` at `0d4e5ad`. This file states what the simulation computes, as mathematics, for both
+Status: 2026-11-13, `main` at `e3bbefc`. This file states what the simulation computes, as mathematics, for both
 models, both orders of a step and both backends. The ADRs hold the reasons and the history; each section names its
 ADR. How close the model comes to the organism: [fidelity.md](fidelity.md). The GPU implementation (buffers, tiles,
-the sort of the agents): [design.md](design.md). Decision: [ADR 0031](adr/0031-model-specification-and-fidelity.md).
+the sort of the agents): [design.md](design.md). Decision: [ADR 0030](adr/0030-model-specification-and-fidelity.md).
 
 The code is the truth. If this file and the code differ, one of them has a bug: fix it, and change this file in the
 same pull request.
@@ -229,9 +229,9 @@ move and no deposit in its step.
   of the grid whose cell is open and that lie outside the radius. It keeps its heading. If none fits, it moves as usual.
 - **Respawn** (flow on, for every agent that no tool places): a dead agent of strain s draws one uniform point of the
   grid. It comes to life there with the chance 0.2 · (D_s − 0.5) / 0.5 if the cell is open, holds a tube of its own
-  strain (B_s ≥ 0.05) and has D_s > 0.5 (section 8.5). A tube of another strain gives it no life. With one agent per
-  cell the cell must also be empty at the start of the step, whatever the strain of the agent in it, and the agent
-  claims it like a move (7.6).
+  strain (B_s ≥ 0.05) and has D_s > 0.5 (section 8.5; ADR 0031). A tube of another strain gives it no life. With one
+  agent per cell the cell must also be empty at the start of the step, whatever the strain of the agent in it, and the
+  agent claims it like a move (7.6).
 
 ### 7.3 Sensing
 
@@ -300,12 +300,12 @@ Extended model only, off by default (ADR 0029). Tero, Kobayashi and Nakagaki 200
 cells in place of a graph. Code: `shaders/flow.wgsl`, `gl/glsl/flow.frag`, constants in `src/engine/flow.ts`, a CPU
 copy of both passes in `src/engine/flow-reference.ts`.
 
-**Every strain has a flow of its own** ([ADR 0030](adr/0030-a-flow-for-every-strain.md)). The rules below run once per
+**Every strain has a flow of its own** ([ADR 0031](adr/0031-a-flow-for-every-strain.md)). The rules below run once per
 strain s, on the trail T_s of that strain alone, with the fields B_s, D_s, G_s and P_s,k of that strain; below, B, D, G
 and P are those of the strain of the pass. The strains share the food sites, the flow strength I0 and every constant of
 `FLOW`; only the trail levels of the tube body are in deposits of each strain (8.1). No flux passes from the tubes of
 one strain into the tubes of another: the app has no fusion of strains. With one strain a run keeps the bytes that it
-had with the flow of ADR 0029 (18 runs checked, ADR 0030).
+had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 
 ### 8.1 The network on the grid
 
@@ -323,6 +323,7 @@ had with the flow of ADR 0029 (18 runs checked, ADR 0030).
 - A site is the cell of the start point of a painted food stroke, in the order of the list. Each cell counts once, cells
   outside the grid are dropped, and with more than 64 the sites spread evenly over the list (`flowSites()`).
 - A site is **covered** by the strain while its cell holds food and a tube of the strain (B ≥ 0.05 in the last step).
+  Two strains can cover the same site.
 - The roles of the strain in each of the 4 lanes: with fewer than 2 sites that the strain covers, none. With exactly 2,
   the first gives and the other takes. With m ≥ 3, the covered sites are shuffled by a hash, ⌊m/2⌋ give, ⌊m/2⌋ take and
   an odd one rests; lane k draws again at steps where ⌊(t + 75 k) / 300⌋ changes, so every 300 steps, the lanes 75 steps
@@ -351,16 +352,21 @@ difference.
 - Flux of a cell: Q = ½ · Σ_{n ∈ N4} H(G_c, G_n) · |P_c − P_n|, per lane, with G and P of the last step.
 - f(Q) = Q^1.8 / (1 + Q^1.8) (Tero et al. 2010, γ = 1.8), averaged over the 4 lanes.
 - On a tube, while at least 2 sites had a role in the flow of the strain in the last step:
-  D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles D stays. On ground without a
-  tube: D ← min(0.2, max(D, 1e-4) · 1.00023), so starved ground comes back to 0.2 in about 33,000 steps.
+  D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles
+  D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · 1.00023), so starved ground comes back to 0.2 in
+  about 33,000 steps.
 
 ### 8.5 The flow and the agents
+
+An agent follows the flow of its own strain: D and B below are those of the agent's strain (ADR 0031).
 
 - **Starvation** (7.1): the chance 0.02 · h² / (D² + h²) per step, h = 0.01: 2 % at D = 0, 1 % at D = 0.01, 0.005 % at
   D = 0.2.
 - **Respawn** (7.2): never for D ≤ 0.5, 20 % per step and dead agent at D = 1 on the cell it draws.
 - **Growth**: an agent does not divide on a cell with D < 0.01 (section 9).
-- An agent reads D and B of its own strain. The agent and growth passes of step k read D of step k − 1.
+- The agent and growth passes of step k read D of step k − 1.
+- A strain that covers fewer than 2 sites has no flux, and none of its cells adapts (8.4): its agents follow the memory
+  that its cells hold.
 
 ### 8.6 Time scale
 
@@ -491,25 +497,28 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                        |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
 | Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                    |
 
-The flow of each strain (8, ADR 0030), in `flow.gpu.test.ts` on both backends: births, starvation and growth by the
-memory of the agent's own strain; no flux between the tubes of two strains; each strain its whole I0 on its own route
-between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of four); a
-change of the number of strains during a run.
+`flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
+route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of
+four); a change of the number of strains during a run.
 
 Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
 (a test checks only that it changes), and agents under a painted wall.
 
 ## 14. Open points in the code
 
-Each one is open, not a rule. The first three were found while this file was written, the last two in ADR 0030:
+Each one is open, not a rule. The first three were found while this file was written, the last two in ADR 0031:
 
 - An agent under a wall that was painted onto it is not moved off the wall, and can step out (7.5).
 - A child of the growth rule can land diagonally across the corner of a wall (9).
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
 - The trail levels of a tube (8.1) are fixed in deposits, whatever the decay. In the scene Three strains (decay 0.6)
   with one agent per cell, growth, the flow and two foods, the trail of a strain stays at 0.26 deposits at most, so no
-  tube forms and the flow does nothing (`TODO.md`).
+  tube forms and the flow does nothing (ADR 0031 and `TODO.md`).
 - A site is one cell (8.2). Where strains share a food dot, only the strains whose tube holds its cell cover it
-  (`TODO.md`).
+  (ADR 0031 and `TODO.md`).
+
+Closed on 2026-11-13: respawn (7.2) brought a dead agent of any strain to life, so with the flow a strain appeared that
+nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031).

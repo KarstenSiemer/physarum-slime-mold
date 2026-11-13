@@ -1,7 +1,7 @@
 # How close the model comes to the slime mold
 
-Status: 2026-11-13, `main` at `0d4e5ad`. The rules of the model are in [model.md](model.md). The measurements are in
-the ADRs that each row names. Decision: [ADR 0031](adr/0031-model-specification-and-fidelity.md).
+Status: 2026-11-13, `main` at `e3bbefc`. The rules of the model are in [model.md](model.md). The measurements are in
+the ADRs that each row names. Decision: [ADR 0030](adr/0030-model-specification-and-fidelity.md).
 
 ## Two questions
 
@@ -95,7 +95,7 @@ of attraction (Fogleman 2020) are an extension for the look, not biology.
 - **Organism**: of two tubes between the same two foods, the longer one tends to disappear (Tero et al. 2007, Sec. 2)
   [V]. Near a new food the tubes dilate up to twofold (Kramar and Alim 2021) [H].
 - **Model**: the thickness of a tube is the number of agents across it, not a radius. Dead agents come to life on a tube
-  of their own strain where the flow memory of their strain is above 0.5 (ADR 0029, decision 8; ADR 0030, decision 2).
+  of their own strain where the flow memory of their strain is above 0.5 (ADR 0029, decision 8; ADR 0031, decision 2).
 - **Measured**: a stronger flow gives a wider tube in the Maze: about 2,060 agents at a strength of 4 and about 9,600
   at 16 (2 seeds each, ADR 0029). The width of a tube against its own flux is not measured. The competition of two
   routes is not measured in the app; the prototype tested it only on Tero's ring (ADR 0029, prototype).
@@ -256,7 +256,7 @@ of attraction (Fogleman 2020) are an extension for the look, not biology.
 - The front of the growth is not a fan of fine veins (row 6).
 - Light is this app's repellent, not the light of Jones' papers (row 13). Dryness is not modelled.
 - Two strains never fuse. With the flow every strain is a plasmodium of its own, and no flux passes between strains
-  ([ADR 0030](adr/0030-a-flow-for-every-strain.md), decision 4). Two plasmodia of _Physarum polycephalum_ fuse only when
+  ([ADR 0031](adr/0031-a-flow-for-every-strain.md), decision 4). Two plasmodia of _Physarum polycephalum_ fuse only when
   they are alike at all of several loci; that line comes from the summaries of a web search, the papers were not read
   ([flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia"). Every scene with the flow has one
   strain.

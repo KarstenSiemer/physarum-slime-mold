@@ -58,7 +58,7 @@ export function update(
   const [base, foodG] = [u[4]!, u[5]!];
   const [bodyRate, bodyLow, fresh] = [u[9]!, u[10]!, u[11]!];
   const [floor, trailLow, trailScale] = [u[12]!, u[13]!, u[14]!];
-  // The strain of the block: the pass reads the trail of that strain alone (ADR 0030).
+  // The strain of the block: the pass reads the trail of that strain alone (ADR 0031).
   const strain = Math.trunc(u[22]!);
   const flux = flowFlux(grid, fields.memory, fields.pressure);
   const sites = siteCells(u, w);

@@ -95,7 +95,7 @@ export interface Sim {
   /**
    * For tests: the memory of the flow in the tubes of a strain, 4 values per cell (flow memory, tube body,
    * conductivity, roles of a food site), and the pressure of its four lanes, 4 values per cell (ADR 0029). Every
-   * strain has a flow of its own (ADR 0030); `strain` is the first one by default. Empty while the flow is off, and
+   * strain has a flow of its own (ADR 0031); `strain` is the first one by default. Empty while the flow is off, and
    * for a strain that the settings do not hold. The state follows a new number of strains at the next step: until
    * then it is empty for a strain that is new.
    */

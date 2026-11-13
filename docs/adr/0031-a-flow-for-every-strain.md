@@ -1,7 +1,10 @@
-# 0030: Every strain has a flow of its own
+# 0031: Every strain has a flow of its own
 
 - Status: accepted. The owner found the fault on 2026-11-13. Every decision here is the
   coordinator's choice under the owner's delegation of 2026-11-12, with its date and reason.
+- Number: this record went into `main` as 0030 (pull request #50). The record of the model
+  specification had taken that number an hour before (pull request #49), so this one is 0031
+  since the same day. The rules of the model in force are in `docs/model.md`, section 8.
 - Date: 2026-11-13
 - In short: with the flow in the tubes (ADR 0029), every strain is a slime mold of its own. Its
   flux runs only through its own tubes, between the foods that it covers, and it gives life only to
@@ -147,7 +150,7 @@ passes with the trail of its strain alone.
 A test is worth what it catches (ADR 0029, "The tests against wrong rules"). On 2026-11-13, 17
 more wrong rules were put into the code, one at a time. `research/flow/engine/mutate.ts` now has
 39 wrong rules. Every one of them fails at least one test; the log is
-`research/flow/logs/engine/mutations-0030.txt`.
+`research/flow/logs/engine/mutations-0031.txt`.
 
 | Wrong rule                                                                      | In                 | Tests that fail                                                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -298,4 +301,4 @@ After these changes the 18 runs with one strain give the same digests again.
 [`research/flow/README.md`](../../research/flow/README.md), part 8, has one command for each
 result of this record: the test of the fault, the owner's case, the bytes of one strain and the
 time of a step. Part 7 has the command for the wrong rules. The logs of the runs are in
-`research/flow/logs.tar.gz`, in `logs/engine/`: `strains-*.jsonl` and `mutations-0030.txt`.
+`research/flow/logs.tar.gz`, in `logs/engine/`: `strains-*.jsonl` and `mutations-0031.txt`.

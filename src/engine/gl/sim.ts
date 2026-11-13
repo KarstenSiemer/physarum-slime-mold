@@ -194,7 +194,7 @@ export class GlSim implements Sim {
   private growth?: GlGrowth | undefined;
   /**
    * The state of the flow in the tubes, while it is on (flow.frag, ADR 0029; `FlowState` in ../sim.ts): per strain the
-   * memory of each cell in two targets and the pressure of the four lanes in three (ADR 0030), and the uniform block
+   * memory of each cell in two targets and the pressure of the four lanes in three (ADR 0031), and the uniform block
    * of the passes, which holds the block of one strain at a time.
    */
   private flow?: { memory: Pair<Target>[]; pressure: Target[][]; ubo: WebGLBuffer } | undefined;
@@ -455,7 +455,7 @@ export class GlSim implements Sim {
 
   /**
    * The targets and the uniform block of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL), with the
-   * targets of every strain of the settings (ADR 0030). Settings with another number of strains get a new state.
+   * targets of every strain of the settings (ADR 0031). Settings with another number of strains get a new state.
    */
   private ensureFlow() {
     const strains = flowStrains(this.settings);
@@ -1074,7 +1074,7 @@ export class GlSim implements Sim {
     const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
     const agentProgram = this.agentProgram();
     // The flow in the tubes (ADR 0029): the agent passes read the memory of the step before, each agent that of its
-    // strain (ADR 0030). They read only the constants of the uniform block, which every strain has: the block of the
+    // strain (ADR 0031). They read only the constants of the uniform block, which every strain has: the block of the
     // first strain. Growth, later in the step, reads the same block.
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
     if (flow) this.flowBlock(flow, 0);
@@ -1150,7 +1150,7 @@ export class GlSim implements Sim {
   /**
    * The flow in the tubes after the diffusion of a step (flow.frag; encodeFlow in ../sim.ts, ADR 0029): the update of
    * the memory from the pressure and the trail of this step, then the pressure iterations on the new conductivity.
-   * Once per strain, each with its own targets and its own block (ADR 0030).
+   * Once per strain, each with its own targets and its own block (ADR 0031).
    */
   private encodeFlow(flow: NonNullable<GlSim['flow']>) {
     const programs = this.prog.flow();

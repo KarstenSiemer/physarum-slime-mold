@@ -114,7 +114,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'if (memory * memory < 0.0 * F.e.y) { return -1; }',
     GPU,
   ],
-  // Every strain has a flow of its own (ADR 0030): the wrong rules that give a strain the flow of the first strain.
+  // Every strain has a flow of its own (ADR 0031): the wrong rules that give a strain the flow of the first strain.
   [
     'W10 wgsl: the tube body of every strain from the trail of the first strain',
     WGSL,

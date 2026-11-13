@@ -113,7 +113,7 @@ strains (one `vec4` lane each).
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
 | view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
-| flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0030), extended model only |
+| flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -161,7 +161,7 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
    last pass, the mean and the order (`P.model.w`), and separate programs for covered food and the view. The cut is a
    uniform on both.
 6. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
-   iterations, once per strain (ADR 0030). On WebGPU each texture of the flow has a layer per strain, and the agent and
+   iterations, once per strain (ADR 0031). On WebGPU each texture of the flow has a layer per strain, and the agent and
    growth passes read the layer of the agent's strain from a `texture_2d_array`; on WebGL2 each strain has its own
    targets. On WebGPU each strain has its own uniform buffer; on WebGL2 one uniform buffer holds the block of one strain
    at a time, written before that strain's passes. The block names the strain (`f.z`, `packFlow()`). The agent and

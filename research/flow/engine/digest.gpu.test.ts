@@ -19,7 +19,7 @@ const STEPS = Number(env.VITE_STEPS ?? 500);
 const NAME = env.VITE_NAME ?? 'digest';
 const ONLY = (env.VITE_ONLY ?? '').split(',').filter(Boolean);
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Partial<Settings>;
-/** VITE_FLOW=1: also the digests of the memory and the pressure of the flow of every strain (ADR 0030). */
+/** VITE_FLOW=1: also the digests of the memory and the pressure of the flow of every strain (ADR 0031). */
 const FLOW_STATE = env.VITE_FLOW === '1';
 
 /** The memory or the pressure of the flow of each of the `strains` strains of a simulation, strain by strain. */

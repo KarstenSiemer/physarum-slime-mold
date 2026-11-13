@@ -1,4 +1,4 @@
-// The strains of a scene with the flow in the tubes, sample by sample (ADR 0030): how many agents of each strain
+// The strains of a scene with the flow in the tubes, sample by sample (ADR 0031): how many agents of each strain
 // live, how many cells hold a tube of the strain, how many of these cells the flow feeds or lets starve, how many
 // food sites give or take in the flow of the strain, and the largest trail of the strain in deposits of the strain (a
 // tube needs 0.2). Not a test of the app: it runs only when asked, with the

@@ -1,6 +1,6 @@
 // Flow in the tubes (ADR 0029): the constants of the rule, the uniform block of its passes and the schedule of the
 // foods that give and take. The passes are shaders/flow.wgsl and gl/glsl/flow.frag; flow-reference.ts mirrors them on
-// the CPU for the tests. Every strain has a flow of its own (ADR 0030): the passes run once per strain, on the trail
+// the CPU for the tests. Every strain has a flow of its own (ADR 0031): the passes run once per strain, on the trail
 // of that strain, with a state of their own.
 import { MAX_STRAINS, type Settings } from '../model/params';
 
@@ -11,7 +11,7 @@ import { MAX_STRAINS, type Settings } from '../model/params';
 export const flowOn = (s: Pick<Settings, 'flow' | 'model'>) => s.flow && s.model === 'extended';
 
 /**
- * The strains that have a flow of their own (ADR 0030): every strain of the settings, at most the four that a
+ * The strains that have a flow of their own (ADR 0031): every strain of the settings, at most the four that a
  * simulation runs (pack.ts packParams()).
  */
 export const flowStrains = (s: Pick<Settings, 'strains'>) => Math.min(s.strains.length, MAX_STRAINS);
@@ -148,7 +148,7 @@ export function flowRoles(covered: readonly boolean[], step: number, seed: numbe
 }
 
 /**
- * The uniform block of the flow passes of the strain `strain` (ADR 0030): the constants, the cell of the first site
+ * The uniform block of the flow passes of the strain `strain` (ADR 0031): the constants, the cell of the first site
  * (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain and the
  * sites. The passes take the step and the seed from the parameters of the simulation. The deposit of the strain is
  * the unit of the trail thresholds. Every strain has the same sites and the same constants: the agent passes read the
