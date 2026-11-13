@@ -97,7 +97,8 @@ All decisions of 2026-11-11, by this branch unless marked.
    which none of the published sets can reach (a 5 × 5 count above 20 means a 9 × 9 count above 10).
 6. **The child**: a random cell of the 8 around the parent that is habitable and empty after the moves (uniform among
    these), a random position in it, a random heading, the parent's strain, and no deposit in its step. Reason: the
-   papers' words; Jones does not state the heading, and the specifications took random as the likely choice.
+   papers' words; Jones does not state the heading, and the specifications took random as the likely choice. Since
+   the amendment of 2026-11-13 (decision 35), a diagonal cell past the corner of a wall is not among them.
 7. **Two parents that pick one cell claim it** with the unique key of the step, as moves do (ADR 0008); only the
    winner gets a child there, and the loser does not divide in this step. Reason: no race and no duplicate. In
    Jones' sequential order the loser would pick another empty cell; this is the same synchronous difference as for
@@ -563,3 +564,59 @@ Decision 1 and the list of unit tests name the Foraging maze as the only scene w
 request #44) the Tokyo rail network has growth on as well: its colony grows out from Tokyo (`src/model/presets.ts`;
 `params.test.ts`, "keeps growth off in every scene but Foraging maze and Tokyo"). The rules of growth are in
 [model.md](../model.md), section 9.
+
+## Amendment 2026-11-13: no child past the corner of a wall
+
+**The gap.** The code reading for [model.md](../model.md) (the specification of the model, pull request #49) found that decision 6 lets a
+child land in a diagonal neighbour past the corner of a wall. A move cannot go there: it counts both cells beside a
+grid corner that it passes within 0.001 cells (`clearPath` and `CORNER` in `agents.wgsl` and `agents.frag`; ADR 0019,
+"Wall jumps"). So a line of wall cells that touch only at their corners stops the agents but not their children.
+Jones' papers do not say how a child treats the corner of a wall.
+
+**Reproduced first.** The GPU test "places no child across the corner of a wall" (`sim.gpu.test.ts`, both backends):
+wall cells that touch only at their corners, one diagonal line in a box of 32 × 32 cells and two on the periodic grid,
+which part the torus into two bands. A colony starts on one side, with growth in every step, for 30 steps. On `main`
+(`7d3a5ee`) 459 (WebGPU, box), 480 (WebGPU, periodic grid), 496 (WebGL2, box) and 480 (WebGL2, periodic grid) agents
+lie on the other side. A move cannot get there, so each one is a child that a parent placed across a corner, or a
+descendant of one. With the fix the other side holds no agent, and the colony still grows on its own side.
+
+35. **A diagonal neighbour is free only if neither of the two cells beside the corner between it and the parent's cell
+    is a wall.** Reason: the rule picks a cell, not a position. The way from the centre of the parent's cell to the
+    centre of a diagonal neighbour passes exactly through the corner between them, and the move rule counts both cells
+    beside such a corner: either one blocks a move on that way (the GPU test "cannot slip through two wall cells that
+    touch at a corner, nor touch a wall at a corner"). A cell outside a box or the dish is no wall here, as for a move
+    (`wallIn` in `agents.wgsl`). The other rules of decision 6 stay. My choice under the owner's delegation of
+    2026-11-12. The options:
+    - Neither cell beside the corner is a wall (chosen).
+    - Only both cells together block: the gap between two wall cells that touch at a corner closes, and a child still
+      passes the corner of a single wall cell. A move from the parent's own position can pass such a corner through
+      the free cell beside it. Rejected: at the time of the choice the child has no position yet. The dead agent that
+      takes the birth draws it later (decision 8, the stream `BIRTH`), so no way from the parent's position to the
+      child's exists then. The only way that the two cells define is the way between their centres, and the move rule
+      blocks it.
+    - The way from the parent's position to the child's position, with the walk of a move: the child's position would
+      have to be drawn in the pass `test`, before the births are matched to dead agents. That changes the random
+      streams of every scene with growth, also where no wall is near. Rejected.
+36. **One loop with two masks of bits.** `divideInto()` in `growth.wgsl`, `target()` in `growth.frag` and `growthStep()`
+    in `growth-reference.ts` read the 8 neighbours once into a mask of the free cells and a mask of the walls, then
+    take out the diagonal cells past a wall's corner, then pick. The code before read every neighbour twice (once to
+    count, once to pick). Where no wall lies beside a corner, the free cells and their order are those of the code
+    before, so the pick is the same: a scene without walls keeps its bytes. `aroundIndex()` (`growth.wgsl`,
+    `growth.glsl`) is the inverse of `around()`.
+
+The tests:
+
+- The new test above fails on `main` and passes with the fix, on both backends.
+- "divide and die as the CPU copy of the passes does" holds, with walls, two more lines of single wall cells, one in
+  each diagonal direction, where the colony grows: one runs across the seam of the periodic grid and from the edge of
+  the box. The test also checks that each child has a parent that moved and is not past a corner from it, and that
+  some dividing agents have an empty diagonal neighbour past a corner (2 on the periodic grid, 4 in the box). The GPU
+  equals the CPU copy on both backends. A check by hand: the CPU copy without the corner rule fails all 4 cases with
+  walls.
+- The whole GPU suite passes (826 tests, M3 Pro).
+
+The time of the growth passes was not measured: the machine ran other work at the time, and from the first corner
+that a colony meets, the colonies of `main` and of the fix differ, so the time of a step would compare other states.
+The passes now read each neighbour once instead of twice.
+
+MEASUREMENTS
