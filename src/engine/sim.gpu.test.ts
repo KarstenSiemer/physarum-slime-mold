@@ -57,13 +57,16 @@ import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
+import flowWgsl from './shaders/flow.wgsl?raw';
+import growthWgsl from './shaders/growth.wgsl?raw';
 import histogramWgsl from './shaders/histogram.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { GROWTH_BINDINGS, Simulation } from './sim';
+import { GROWTH_BINDINGS, GROWTH_FLOW_BINDINGS, Simulation } from './sim';
 import { equilibrium } from './sizing';
 import { SHAPE_RANGE, type AgentState, type Backend, type Sim, type Stroke, type View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -138,8 +141,14 @@ describe('WGSL', () => {
   it('compiles without errors or warnings', async () => {
     const backend = await WebGpuBackend.create(document.createElement('canvas'));
     const { device } = backend.gpu;
+    // agents.wgsl and growth.wgsl hold the lines of the flow in the tubes between markers (variant.ts, ADR 0029): the
+    // passes compile from the source without them, and with the flow from the source with them.
     const sources = {
-      agents: common + agentsWgsl,
+      agents: common + variant(agentsWgsl),
+      agentsFlow: common + variant(agentsWgsl, ['FLOW']),
+      growth: common + variant(growthWgsl),
+      growthFlow: common + variant(growthWgsl, ['FLOW']),
+      flow: common + flowWgsl,
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
       paint: common + paintWgsl,
@@ -4283,18 +4292,37 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       if (kind !== 'webgpu') return; // WebGL2 binds its textures by name
       const { device } = (backend as WebGpuBackend).gpu;
       const sim = await make({ ...GROWTH }, 16, 16, 4);
-      const kernels = (sim as unknown as { kernels: { growth(): Record<string, GPUComputePipeline> } }).kernels;
-      const passes = kernels.growth();
+      type Passes = Record<string, GPUComputePipeline>;
+      const kernels = (sim as unknown as { kernels: { growth(flow: boolean): Passes } }).kernels;
       const lists = GROWTH_BINDINGS as Record<string, readonly number[]>;
-      expect(Object.keys(passes).sort()).toEqual(Object.keys(lists).sort());
+      const more = GROWTH_FLOW_BINDINGS as Record<string, readonly number[]>;
       const buffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.UNIFORM });
-      for (const [name, pipeline] of Object.entries(passes)) {
-        device.pushErrorScope('validation');
-        const entries = (lists[name] ?? []).map((binding) => ({ binding, resource: { buffer } }));
-        device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
-        expect((await device.popErrorScope())?.message, name).toBeUndefined();
+      const texture = device.createTexture({
+        size: [16, 16],
+        format: 'rgba32float',
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+      });
+      // With the flow in the tubes, the passes that decide who divides also read the flow memory, a texture, and the
+      // uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029).
+      for (const flow of [false, true]) {
+        const passes = kernels.growth(flow);
+        expect(Object.keys(passes).sort()).toEqual(Object.keys(lists).sort());
+        for (const [name, pipeline] of Object.entries(passes)) {
+          device.pushErrorScope('validation');
+          const entries: GPUBindGroupEntry[] = (lists[name] ?? []).map((binding) => ({
+            binding,
+            resource: { buffer },
+          }));
+          if (flow)
+            for (const binding of more[name] ?? [])
+              entries.push({ binding, resource: binding === 15 ? texture.createView() : { buffer } });
+          device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
+          expect((await device.popErrorScope())?.message, `${name}${flow ? ' with the flow' : ''}`).toBeUndefined();
+        }
       }
+      expect(Object.keys(more).sort()).toEqual(Object.keys(lists).sort());
       buffer.destroy();
+      texture.destroy();
     });
 
     // A colony of 40 agents grows to fill the box with a wall in it: one agent per cell, none lost or doubled, none

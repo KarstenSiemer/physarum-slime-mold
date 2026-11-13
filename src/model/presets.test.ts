@@ -87,12 +87,13 @@ describe('presets', () => {
       expect(s.collisions, p.id).toBe(true);
       expect(s.density, p.id).toBeLessThanOrEqual(1);
     }
-    // Fleeing light and Maze use Jones' model too; usesRule() marks every scene made for the rule.
+    // Fleeing light, the mazes and Tokyo use Jones' agents too; usesRule() marks every scene made for the rule.
     expect(PRESETS.filter(usesRule).map((p) => p.id)).toEqual([
       ...jones.map((p) => p.id),
       'light',
       'maze',
       'foraging-maze',
+      'tokyo',
     ]);
   });
 
@@ -128,9 +129,12 @@ describe('presets', () => {
   });
 
   // Owner decision 2026-11-11 (ADR 0024 decision 3, ADR 0026): a scene of Jones' papers runs on the lattice of its
-  // figure, the app's scenes on a grid shaped like the screen. The lattices are in the captions of Jones 2010.
+  // figure, the app's scenes on a grid shaped like the screen. The lattices are in the captions of Jones 2010. The map
+  // of Tokyo runs on a square lattice: a grid shaped like a tall screen would turn it, and north stays up (ADR 0024
+  // decision 4, ADR 0029).
   it('run each scene of Jones on the lattice of its figure, and the app’s scenes on a grid shaped like the screen', () => {
     const lattices: Record<string, [number, number]> = {
+      tokyo: [512, 512], // this app's choice (ADR 0029)
       network: [200, 200], // Fig. 4, p. 135
       hexagons: [200, 200], // Fig. 5, p. 136
       spots: [200, 200], // Fig. 16 top, p. 144

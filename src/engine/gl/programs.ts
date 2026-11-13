@@ -5,6 +5,7 @@ import common from './glsl/common.glsl?raw';
 import countsFrag from './glsl/counts.frag?raw';
 import diffuseFrag from './glsl/diffuse.frag?raw';
 import fillFrag from './glsl/fill.frag?raw';
+import flowFrag from './glsl/flow.frag?raw';
 import fullscreen from './glsl/fullscreen.vert?raw';
 import growthFrag from './glsl/growth.frag?raw';
 import growthGlsl from './glsl/growth.glsl?raw';
@@ -28,6 +29,8 @@ import { bindBlock, program, startProgram, type GL } from './gl';
 /** Uniform block binding points. */
 export const PARAMS_BINDING = 0;
 export const VIEW_BINDING = 1;
+/** The uniform block of the flow in the tubes (flow.frag, tools.glsl; flow.ts packFlow()). */
+export const FLOW_BINDING = 2;
 /**
  * Side in cells of the tiles that order the point passes (order.frag, ADR 0028): 64 measured best among 8 to 128 in the
  * start scene.
@@ -78,6 +81,16 @@ export interface Order {
   gather: Program;
 }
 
+/** The passes of the flow in the tubes (flow.frag, ADR 0029). */
+export interface FlowPrograms {
+  /** PASS 0: the memory of each cell. */
+  update: Program;
+  /** PASS 1: one iteration of the pressure. */
+  pressure: Program;
+  /** The claim points whose agents the flow brings to life (FLOW in tools.glsl). */
+  points: Program;
+}
+
 /** The programs of growth and shrinkage (growth.frag, growth.vert, ADR 0025). */
 export interface Growth {
   /** PASS 0 and 1: the row sums of the occupancy, then the window counts. */
@@ -113,6 +126,18 @@ export interface Programs {
   capacity: () => Program;
   /** The programs of growth and shrinkage, compiled at their first use: every scene has growth off. */
   growth: () => Growth;
+  /** The passes of the flow in the tubes, compiled at their first use: only scenes with the flow need them. */
+  flow: () => FlowPrograms;
+  /**
+   * PASS 2 of growth.frag in which an agent on a starved cell does not divide (FLOW in growth.frag, ADR 0029),
+   * compiled at its first use: only a scene with growth and the flow needs it.
+   */
+  growthFlowing: () => Program;
+  /**
+   * The agent pass in which agents starve and come to life by the flow memory (FLOW in tools.glsl and agents.frag,
+   * ADR 0029), by the wall check of the sensors and the trail saturation, compiled at its first use.
+   */
+  flowing: (senseWalls: boolean, saturate: boolean) => Program;
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
   covered: () => Program;
@@ -138,6 +163,7 @@ export interface Programs {
 function wrap(gl: GL, p: WebGLProgram): Program {
   bindBlock(gl, p, 'Params', PARAMS_BINDING);
   bindBlock(gl, p, 'View', VIEW_BINDING);
+  bindBlock(gl, p, 'Flow', FLOW_BINDING);
   const cache = new Map<string, WebGLUniformLocation | null>();
   return {
     program: p,
@@ -155,10 +181,14 @@ function simProgram(gl: GL, frag: string): Program {
 
 /**
  * The agent pass from `frag` (agents.frag or a version of it), with the agent tools (tools.glsl). `senseWalls`: the
- * sensors check for walls (SENSE_WALLS); `saturate`: the sensors saturate the trail (SATURATE, ADR 0022).
+ * sensors check for walls (SENSE_WALLS); `saturate`: the sensors saturate the trail (SATURATE, ADR 0022); `flow`:
+ * agents starve and come to life by the flow memory (FLOW, ADR 0029).
  */
-export function agentsProgram(gl: GL, frag: string, senseWalls: boolean, saturate = false): Program {
-  const defines = (senseWalls ? '#define SENSE_WALLS 1\n' : '') + (saturate ? '#define SATURATE 1\n' : '');
+export function agentsProgram(gl: GL, frag: string, senseWalls: boolean, saturate = false, flow = false): Program {
+  const defines =
+    (senseWalls ? '#define SENSE_WALLS 1\n' : '') +
+    (saturate ? '#define SATURATE 1\n' : '') +
+    (flow ? '#define FLOW 1\n' : '');
   return simProgram(gl, defines + toolsGlsl + frag);
 }
 
@@ -202,6 +232,9 @@ export function compile(gl: GL): Programs {
   let scent: ScentPrograms | undefined;
   let capacity: Program | undefined;
   let growth: Growth | undefined;
+  let flow: FlowPrograms | undefined;
+  let growthFlowing: Program | undefined;
+  const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
   const orderPass = (pass: number) =>
@@ -225,6 +258,25 @@ export function compile(gl: GL): Programs {
         birth: growthPass(4),
         points: wrap(gl, program(gl, V + common + growthGlsl + growthVert, V + common + pointsFrag)),
       }),
+    growthFlowing: () => (growthFlowing ??= sim(`#define PASS 2\n#define FLOW 1\n${growthGlsl}${growthFrag}`)),
+    flow: () =>
+      (flow ??= {
+        update: sim('#define PASS 0\n' + flowFrag),
+        pressure: sim('#define PASS 1\n' + flowFrag),
+        points: wrap(
+          gl,
+          program(gl, V + common + '#define FLOW 1\n' + toolsGlsl + pointsVert, V + common + pointsFrag),
+        ),
+      }),
+    flowing: (senseWalls, saturate) => {
+      const key = `${String(senseWalls)}${String(saturate)}`;
+      let p = flowing.get(key);
+      if (!p) {
+        p = agentsProgram(gl, agentsFrag, senseWalls, saturate, true);
+        flowing.set(key, p);
+      }
+      return p;
+    },
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
     view: () => (viewDiffuse ??= diffuseProgram(gl, diffuseFrag, false, true)),

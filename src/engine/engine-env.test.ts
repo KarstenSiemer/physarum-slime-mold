@@ -147,6 +147,24 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 
+  // ADR 0029: the flow in the tubes holds 80 B more per cell (sizing.ts FLOW_BYTES_PER_CELL), only while it runs.
+  it('count the bytes of the flow in the tubes only while it runs, and rebuild when they lower the grid', async () => {
+    // 1400 B per cell fit 768 × 480 into the 512 MiB budget; with 80 more, only 512 × 320 fits.
+    const backend = new CpuBackend();
+    backend.bytesPerCell = 1400;
+    const off = { ...maze.settings(), flow: false, resolution: 768 };
+    const { engine, sim } = await engineWith(off, mazeEnv, canvas(), backend);
+    expect([sim().width, sim().height]).toEqual([768, 480]);
+    const before = sim();
+    await engine.apply({ ...engine.settings, flowStrength: 4 });
+    expect(sim()).toBe(before);
+    await engine.apply({ ...engine.settings, flow: true });
+    expect([sim().width, sim().height]).toEqual([512, 320]);
+    expect(engine.settings.resolution).toBe(512);
+    const fresh = await engineWith({ ...maze.settings(), resolution: 512 });
+    expect(differing(sim().env, fresh.sim().env)).toBe(0);
+  });
+
   it('survive a switch between the dish and another arena, which changes the agent count', async () => {
     const { engine, sim } = await engineWith(shrinking.settings(), shrinking.env);
     const before = sim().env.slice();
@@ -661,6 +679,56 @@ describe('food, light and walls after an arena switch', () => {
 
 // A long sweep pauses after a few hundred rows of work and goes on in the next frames: a deletion changes no byte on
 // screen (Engine.sweepFor()).
+// ADR 0029: the foods give and take the flux of the flow in the tubes at the start point of their strokes. The engine
+// tells the simulation these points after every change of the list of edits that the simulation holds.
+describe('the food sites of the flow in the tubes', () => {
+  const frame = (x: number, y: number, w: number, h: number) => fromFrame([x, y], [w, h], 'box');
+
+  it('are the start of each food of the list on the grid, in its order', async () => {
+    const { engine, sim } = await engineWith(maze.settings());
+    // The Maze's foods lie at (−0.64, −0.4) and (0.64, 0.4) of the frame of a box.
+    const two = [frame(-0.64, -0.4, 512, 320), frame(0.64, 0.4, 512, 320)];
+    expect(sim().sites).toEqual(two);
+    // A food stroke gives one site, at its start; a wall gives none.
+    engine.paint({ kind: 'food', from: [100, 200], to: [120, 200], radius: 3 });
+    engine.paint({ kind: 'wall', from: [10, 10], to: [20, 10], radius: 2 });
+    engine.frame(0, 0);
+    expect(sim().sites).toEqual([...two, [100, 200]]);
+    // Before the frame paints a stroke, the simulation does not hold it: no site yet.
+    engine.paint({ kind: 'food', from: [300, 40], to: [300, 40], radius: 3 });
+    expect(sim().sites).toEqual([...two, [100, 200]]);
+    engine.frame(0, 0);
+    expect(sim().sites).toEqual([...two, [100, 200], [300, 40]]);
+  });
+
+  it('lose a food that an erase removes from the list, and follow the foods to a new grid', async () => {
+    const { engine, sim } = await engineWith(maze.settings());
+    engine.paint({ kind: 'food', from: [100, 200], to: [100, 200], radius: 3 });
+    engine.frame(0, 0);
+    expect(sim().sites.length).toBe(3);
+    engine.paint({ kind: 'erase', from: [100, 200], to: [100, 200], radius: 8 });
+    engine.frame(0, 0);
+    expect(sim().sites).toEqual([frame(-0.64, -0.4, 512, 320), frame(0.64, 0.4, 512, 320)]);
+    await engine.apply({ ...engine.settings, resolution: 768 });
+    expect([sim().width, sim().height]).toEqual([768, 480]);
+    expect(sim().sites).toEqual([frame(-0.64, -0.4, 768, 480), frame(0.64, 0.4, 768, 480)]);
+  });
+
+  it('are none after Clear, and those of the scene after a load', async () => {
+    const { engine, sim } = await engineWith(maze.settings());
+    engine.clearEnvironment();
+    expect(sim().sites).toEqual([]);
+    const tokyo = presetById('tokyo');
+    if (!tokyo?.env) throw new Error('no Tokyo');
+    await engine.load(tokyo.settings(), tokyo.env);
+    // Tokyo's seven food sources and the 35 other cities, on the scene's lattice; the first is Tokyo station.
+    expect([sim().width, sim().height]).toEqual([512, 512]);
+    expect(sim().sites.length).toBe(42);
+    const station = tokyo.env[0];
+    expect(sim().sites[0]).toEqual(fromFrame(station?.at ?? [0, 0], [512, 512], 'dish'));
+  });
+});
+
 describe('a long sweep', () => {
   /**
    * 3,000 food dabs on 512 × 320, each painted, and an erase over most of them; while its sweep waits, an erase over a

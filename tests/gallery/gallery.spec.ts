@@ -1,6 +1,8 @@
 // Visual review loop (not part of CI): renders every preset at fixed steps and saves PNG files to
 // test-results/gallery/. Run with `npm run gallery`, optionally `GALLERY=id1,id2 STEPS=300,1200` and
-// `GALLERY_RESOLUTION=1024` (a smaller grid for machines short of GPU memory).
+// `GALLERY_RESOLUTION=1024` (a smaller grid for machines short of GPU memory). `GALLERY_PATCH='{"flow":false}'` sets
+// other settings for every scene, and `GALLERY_TAG=noflow` adds a word to the file names, for a picture before and
+// after a change.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from '@playwright/test';
 import { PRESETS } from '../../src/model/presets';
@@ -9,6 +11,8 @@ const only = process.env.GALLERY?.split(',');
 const style = process.env.GALLERY_STYLE as 'glow' | 'gel' | 'paper' | 'agents' | undefined;
 const steps = (process.env.STEPS ?? '400,1500').split(',').map(Number);
 const resolution = Number(process.env.GALLERY_RESOLUTION) || undefined;
+const patch = JSON.parse(process.env.GALLERY_PATCH ?? '{}') as Record<string, unknown>;
+const tag = process.env.GALLERY_TAG;
 const out = 'test-results/gallery';
 mkdirSync(out, { recursive: true });
 
@@ -27,6 +31,7 @@ for (const preset of PRESETS.filter((p) => !only || only.includes(p.id))) {
       seed: 7,
       ...(style ? { style } : {}),
       ...(resolution ? { resolution } : {}),
+      ...patch,
     };
     await page.evaluate(
       async ([s, env]) => {
@@ -57,7 +62,7 @@ for (const preset of PRESETS.filter((p) => !only || only.includes(p.id))) {
         for (const b of bytes) s += String.fromCharCode(b);
         return btoa(s);
       });
-      const name = `${preset.id}${style ? `-${style}` : ''}-${String(target).padStart(5, '0')}`;
+      const name = `${preset.id}${style ? `-${style}` : ''}${tag ? `-${tag}` : ''}-${String(target).padStart(5, '0')}`;
       writeFileSync(`${out}/${name}.png`, Buffer.from(png, 'base64'));
     }
   });

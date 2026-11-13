@@ -185,11 +185,13 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
     expect([d.shrinkEvery, d.shrinkWindow, d.shrinkMin, d.shrinkMax]).toEqual([3, 5, 0, 20]);
   });
 
-  it('keeps growth off in every scene but Foraging maze, and in a link without it', () => {
+  it('keeps growth off in every scene but Foraging maze and Tokyo, and in a link without it', () => {
+    // Both scenes start as a small colony on a food and grow from it (ADR 0025, 0029).
+    const grows = ['foraging-maze', 'tokyo'];
     for (const p of PRESETS) {
       const s = p.settings();
-      expect(s.growth, p.id).toBe(p.id === 'foraging-maze');
-      if (p.id !== 'foraging-maze') expect(s.capacity, p.id).toBe(0);
+      expect(s.growth, p.id).toBe(grows.includes(p.id));
+      if (!grows.includes(p.id)) expect(s.capacity, p.id).toBe(0);
       const old = Object.fromEntries(
         Object.entries(s).filter(([k]) => !k.startsWith('growth') && !k.startsWith('shrink') && k !== 'capacity'),
       );
@@ -292,6 +294,64 @@ describe('covered food (Adamatzky and Jones 2010, ADR 0022)', () => {
     expect(sanitize({ coveredFoodFactor: 0.01 }).coveredFoodFactor).toBe(0.01); // Jones and Adamatzky 2014
     expect(sanitize({ coveredFoodFactor: 0 }).coveredFoodFactor).toBe(globalSpec.coveredFoodFactor.min);
     expect(sanitize({ coveredFoodFactor: 'x' }).coveredFoodFactor).toBe(0.001);
+  });
+});
+
+// Owner decision 2026-11-12 (ADR 0029): the flow is an option of the extended model, off by default.
+describe('flow in the tubes (ADR 0029)', () => {
+  it('is off by default, with a flux of 8 per food', () => {
+    const d = defaultSettings();
+    expect(d.flow).toBe(false);
+    expect(d.flowStrength).toBe(8);
+    // Tero et al. 2010 vary the flux from 0.2 to 7.19 (Fig. 3): a range over orders of magnitude.
+    expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
+  });
+
+  it('is on in the Maze and in the Tokyo rail network only', () => {
+    expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(['maze', 'tokyo']);
+    for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
+  });
+
+  it('takes the switch from a link only as true, and keeps the flux inside its range', () => {
+    expect(sanitize({ model: 'extended', flow: true }).flow).toBe(true);
+    for (const v of [1, 'true', 'on', null, undefined, {}])
+      expect(sanitize({ model: 'extended', flow: v }).flow).toBe(false);
+    expect(sanitize({ model: 'extended', flowStrength: 100 }).flowStrength).toBe(32);
+    expect(sanitize({ model: 'extended', flowStrength: 0 }).flowStrength).toBe(0.1);
+    expect(sanitize({ model: 'extended', flowStrength: 'x' }).flowStrength).toBe(8);
+    expect(sanitize({ model: 'extended', flowStrength: 4.5 }).flowStrength).toBe(4.5);
+  });
+
+  it('stays off for a link from before the flow, in both models', () => {
+    for (const p of PRESETS) {
+      const { flow: _, flowStrength: __, ...before } = p.settings();
+      const s = sanitize(before);
+      expect(s.flow, p.id).toBe(false);
+      expect(s.flowStrength, p.id).toBe(8);
+    }
+  });
+
+  it('never runs in the Jones model: the model binds the switch to off and the flux to its default', () => {
+    const jones = { ...presetById('network')?.settings(), flow: true, flowStrength: 20 };
+    const s = sanitize(jones);
+    expect(s.model).toBe('jones');
+    expect([s.flow, s.flowStrength]).toEqual([false, 8]);
+    expect(constrain(s)).toBe(s);
+    // The switch to Jones takes the flow off a scene that has it.
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    expect(maze.flow).toBe(true);
+    const t = toJones({ ...maze, flowStrength: 12 });
+    expect([t.model, t.flow, t.flowStrength]).toEqual(['jones', false, 8]);
+  });
+
+  it('keeps the switch and the flux in the extended model through constrain()', () => {
+    const s = sanitize({ model: 'extended', flow: true, flowStrength: 12 });
+    expect([s.model, s.flow, s.flowStrength]).toEqual(['extended', true, 12]);
+    expect(constrain(s)).toBe(s);
+    // Without the rule and with several strains too: the flow needs neither.
+    const free = sanitize({ ...presetById('three-strains')?.settings(), flow: true });
+    expect([free.flow, free.collisions, free.strains.length]).toEqual([true, false, 3]);
   });
 });
 

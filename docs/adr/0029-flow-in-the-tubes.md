@@ -1,0 +1,474 @@
+# 0029: Flow in the tubes
+
+- Status: accepted. The owner decided on 2026-11-12 that the flow is an option of the extended model
+  that is off by default (decision 1). Every other decision here is the coordinator's choice under
+  the owner's delegation of 2026-11-12, with its date and reason.
+- Date: 2026-11-12
+
+## Context
+
+Step 4 of the owner's plan of 2026-11-11: tubes that carry much flow get thicker, and tubes with
+little flow decay. In the real slime mould this gives the shortest tube in a maze (Nakagaki, Yamada
+and Tóth 2000) and the network of the Tokyo experiment (Tero et al. 2010). Jones' agent model has no
+flow (Jones 2015, Sec. 3: the population stands for the structure and the flux; no flux is computed).
+
+Measured before this change, on a CPU copy of the Maze scene (512 × 320 cells, 10 seeds; the trail
+in the corridor of the shortest route over the trail in the dead ends): 1.35 at step 1,000, 1.19 at
+step 5,000 and 1.35 (1.26 to 1.57) at step 15,000. The dead ends never fall below 10 % of the
+route. The Maze's own text said so: "it has no flow that thickens the shortest one".
+
+What the papers give is in `docs/knowledge-base/flow-in-the-tubes.md`, with the section of each
+fact. The parts that this decision uses:
+
+- **The flux model** (Tero, Kobayashi and Nakagaki 2006, Eq. 1 to 5; 2007, Eq. 1 to 6): a tube has a
+  conductivity D and a length L, and the flux is Q = D (p_i − p_j) / L. Kirchhoff's law holds at
+  every node; one food source gives the flux I0 and another takes it. D adapts: dD/dt = f(|Q|) − D.
+  A dead end has Q = 0, so its D falls as exp(−t) (2007, Sec. 5.1).
+- **The network model** (Tero et al. 2010, p. 441): at each time step a random pair of food sources
+  gives and takes I0, and f(Q) = Q^γ / (1 + Q^γ), with I0 = 2 and γ = 1.8 as typical values. The
+  paper measures a network by its total length TL, its mean shortest distance MD and its fault
+  tolerance FT, each over the value of the minimum spanning tree (p. 440).
+- **A local alternative** (Ma et al. 2013, Eq. 2.4 to 2.16): particles walk on the network, their
+  number on a node is the potential, and the flow of a step reinforces the conductivity. Its mean
+  field is Tero's model.
+- **Time scales of the organism**: the three facts of the owner's plan hold. The contractions have
+  a period of about two minutes (Tero et al. 2007, Sec. 2; Marbach et al. 2023: 1 to 2 min). Veins
+  "typically vanish over 15 min to 40 min", they answer with a delay of 1 to 3 min and adapt within
+  10 to 100 min (Marbach et al. 2023). After food, the tube diameters reorganise "within about
+  15 min" (Kramar and Alim 2021, Results; read by a helper in the copy at PubMed Central, not in
+  the PDF).
+
+Constraints: the Jones model holds only Jones' rules (ADR 0022). With the flow off, every scene
+keeps its bytes. Both backends run the same rule, and a run is the same for the same seed.
+
+## Options
+
+1. **Tero's model with an exact pressure solve.** The pressure of every step is the solution of a
+   linear system over all cells of the network. Tero et al. use a conjugate gradient method with an
+   incomplete Cholesky preconditioner (2007, Sec. 3.3). That preconditioner is a chain of dependent
+   steps and does not run in parallel on a GPU.
+2. **Tero's model with a local pressure solver.** A few Jacobi iterations per step, started from the
+   pressure of the step before. Each iteration is one pass over the grid: a stencil of five cells,
+   as the diffusion pass.
+3. **Current-reinforced random walks** (Ma et al. 2013). Walkers carry the flux; no pressure solve.
+4. **No flux field: scale the deposit or the survival by a local measure**, such as the agent count
+   or the age of the trail. No paper gives such a rule, and it cannot tell a dead end from a route:
+   both look the same from inside.
+
+## The prototype
+
+A CPU prototype on the grid of the app (TypeScript, a copy of the agent model with the Maze's rules;
+not bit-equal to the GPU) ran options 1 to 3 against each other. It is not in the repository; its
+numbers are below. Tero's ring (2007, Sec. 5.2: two tubes of length 10 and 16 between two nodes)
+checked the three solvers first: all give D1 = 0.9297 and D2 = 0.1419 for μ = 0.8, the equilibrium
+of the paper, and (1, 0) for μ = 1.
+
+### The pressure on a fixed network
+
+The Maze's network at step 1,000 of seed 1, with I0 = 2 between its two foods:
+
+| Solver                                                        | Result                                             |
+| ------------------------------------------------------------- | -------------------------------------------------- |
+| Exact (conjugate gradients, modified incomplete Cholesky)     | 443 to 490 iterations per solve (Jacobi: 3,102)    |
+| Local: damped Jacobi, second-order Richardson, radius 0.99999 | 5 % error after 4,150 iterations from a cold start |
+| The same with radius 0.9999 and 0.999999                      | 5 % error after 14,140 and 5,110 iterations        |
+| Local: plain Jacobi                                           | 40 % error after 400,000 iterations                |
+| Ma's walkers (Eq. 2.16; 2,000 new walkers per step, dt 0.8)   | 88.8 % error after 150,000 steps; none at the sink |
+
+The exact flux through the tube cells of the route's corridor is 0.083 per cell, and 0.0049 in the
+dead ends: a ratio of 17. On the moving network the exact flux changes by 0.35 % per step. The
+local solver with 16 iterations per step follows it within about 2 % (7 % at 300 steps after a cold
+start), when the conductivity changes slowly and every open cell conducts a little (decisions 4
+and 6).
+
+Ma's walk on a grid is Tero's model with a slow pressure solver: the mean field of Eq. 2.16 with a
+time step of 1 is one weighted Jacobi iteration of Tero's Poisson equation per step. The walkers add
+sampling noise to it. The Maze's route is about 700 cells long, and a diffusion over 700 cells needs
+in the order of 700² steps.
+
+### (a) The Maze: the route against the dead ends
+
+The Maze scene on the CPU copy, 10 seeds each, the flow from step 500 on. "Ratio": trail in the
+route's corridor over trail in the dead ends. "Below 10 %" and "below 2 %": the first step at which
+the trail of the dead ends is below that share of the route's; median and range over the seeds.
+"Tube": the length of the tube over the shortest route at step 10,000.
+
+| Rule                              | Ratio at 2,500 | Ratio at 5,000 | Below 10 % at step     | Below 2 % at step      | Joined   | Tube |
+| --------------------------------- | -------------- | -------------- | ---------------------- | ---------------------- | -------- | ---- |
+| No flow (Jones)                   | 1.45           | 1.19           | never                  | never                  | 10 of 10 | 1.21 |
+| Tero, exact solve every 8 steps   | 14.9           | 62             | 2,250 (2,250 to 2,500) | 4,875 (4,750 to 6,250) | 10 of 10 | 1.13 |
+| Tero, local solver, 8 iterations  | 3.2            | 37             | 3,250 (2,750 to 4,500) | 5,625 (4,750 to 8,000) | 10 of 10 | 1.16 |
+| Tero, local solver, 16 iterations | 12.2           | 85             | 2,500 (2,500 to 3,250) | 4,375 (2,750 to 6,750) | 10 of 10 | 1.13 |
+| Tero, local solver, 32 iterations | 21.6           | 1,960          | 2,250 (2,250 to 2,500) | 3,625 (3,000 to 8,250) | 10 of 10 | 1.13 |
+| Ma's walkers                      | 5.8            | (no network)   | (no network)           | (no network)           | 0 of 10  | none |
+
+With Ma's walkers the flux never reaches the far food, every tube starves, and 78 agents (63 to 97)
+of 19,661 live at step 2,500: the foods are not joined in any seed. The local solver with 16
+iterations ends where the exact solve ends, within the spread of the seeds; 8 iterations are slower,
+and 32 gain little. These runs held the two foods at fixed pressures and scaled the flux to I0.
+With a fixed flux at each food, as in the app (decision 5), the prototype gave, for 16, 8 and 32
+iterations: below 10 % at step 2,125, 2,250 and 2,250 (each 2,000 to 2,250), below 2 % at step
+3,625, 3,125 and 3,000, and a ratio of 28, 23 and 30 at step 2,500, in 10 of 10 seeds each.
+
+### (b) A layout like Tokyo: 36 food sources
+
+The Tokyo map (decision 12) on 400 × 400 cells, the land full of agents at the start (the second
+protocol of Tero et al. 2010, p. 439), the flow from step 500 on. The measures are those of the
+paper (p. 440) on the 33 food sources of its Fig. 2: the trail above 1.5 as the network, thinned to
+lines; a link is a line between two junctions or food sources.
+
+| Rule (flux 8 per food site)             | Seeds | Agents alive at step 2,000 | Joined of 33, steps 2,000 to 7,000 | TL           | MD           | FT           |
+| --------------------------------------- | ----- | -------------------------- | ---------------------------------- | ------------ | ------------ | ------------ |
+| Tero, local solver, all sites at once   | 2     | 3,947 and 4,013 of 5,293   | 33, but 28 at one of 6 steps each  | 1.41 to 1.67 | 0.83 to 0.90 | 0.75 to 0.93 |
+| Ma's walkers                            | 3     | 147 to 160                 | 1 (no network), in 3 of 3 seeds    | none         | none         | none         |
+| The organism (Tero et al. 2010, p. 440) | 21    |                            | all                                | 1.75 ± 0.30  | 0.85 ± 0.04  | 0.80 to 0.86 |
+
+With Ma's walkers the network dies here too: 57 to 94 agents live from step 3,000 on. With Tero's
+rule a flux of 4 gives a tree within 5,000 steps (TL 1.05 to 1.13, FT 0 to 0.43, one seed), and a
+flux of 8 a network with loops: more flux keeps more links, as in the supplement of the paper
+(Fig. S1). In this protocol some food sources lose their last tube for a time (28 of 33 joined at
+single steps), and a run with a flux of 4 loses up to 8. The app's Tokyo scene does not start
+from a full sheet; its results are below.
+
+### (c) The cost on the GPU
+
+Measured for the rule as built (decision 3), in the real engine on an M3 Pro (Chromium with Metal,
+2026-11-13): the median time of a step over 21 batches of 50 steps, after 3,000 steps.
+
+| Scene                  | Backend | Without the flow | With the flow | The flow     |
+| ---------------------- | ------- | ---------------- | ------------- | ------------ |
+| Maze, 512 × 320 cells  | WebGPU  | 0.20 ms          | 2.20 ms       | 2.00 ms more |
+| Maze, 512 × 320 cells  | WebGL2  | 0.42 ms          | 2.60 ms       | 2.18 ms more |
+| Tokyo, 512 × 512 cells | WebGPU  | 0.49 ms          | 3.42 ms       | 2.93 ms more |
+| Tokyo, 512 × 512 cells | WebGL2  | 0.75 ms          | 4.32 ms       | 3.57 ms more |
+
+The cost follows the cells: 11 to 12 ns per cell and step on WebGPU and 13 to 14 ns on WebGL2, for
+the update and the 16 pressure passes.
+
+Ma's walk was not built for the GPU, because it failed in (a) and (b). So its cost is an estimate
+and not a measurement: a step of the walk is one pass over the walkers, one pass that counts them
+per cell and one pass over the grid for the conductivity. The agents of these scenes take the same
+three kinds of pass, and a whole step of them takes 0.2 to 0.5 ms. So with about as many walkers as
+agents, a step of the walk would cost about a tenth of a step of the local solver. That does not
+help it: on the fixed network it had not carried the flux to the sink after 150,000 steps.
+
+## Decision
+
+1. **The flow is an option of the extended model, off by default** (owner, 2026-11-12). The switch
+   "Flow in the tubes" and the setting "Flow strength" are in a section Flow of the panel, in the
+   extended model only. The Jones model never runs it: `constrain()` binds the switch to off there,
+   and `flowOn()` checks the model again in the simulation. With the switch off, every scene keeps
+   its bytes (decision 13 and the checks below).
+
+2. **Tero's flux model, not Ma's walk.** Reason: the measurements above. On this grid the walk does
+   not carry a flux over the length of a route within the life of a tube, and its mean field is
+   Tero's model with a slower solver.
+
+3. **A local pressure solver with 16 iterations per step.** Reason: it is one stencil pass over the
+   grid, as the diffusion, so it runs on both backends; the exact solve has no parallel
+   preconditioner. In the Maze it ends where the exact solve ends (table (a)). The iteration is a
+   damped Jacobi iteration (weight 0.9) with the acceleration of a second-order Richardson
+   iteration: p ← ω (p + 0.9 (p\* − p)) + (1 − ω) p_before, where p\* solves Kirchhoff's law of the
+   cell for the pressures of its neighbours, and ω = 2 / (1 + √(1 − r²)) for the spectral radius
+   r = 0.99999. That radius reached 5 % error first (table above). The pressure of a step starts
+   from the pressure of the step before, and keeps the pressure of the iteration before as momentum.
+   Only a cell that conducts takes the momentum (ω); a cell without a tube takes the plain damped
+   iteration (decision 6).
+
+4. **The network is the grid.** Every open cell is a node, and two cells that share a side are
+   joined by an edge. A cell has a conductivity g = B (0.02 + D): B is the tube body, the trail of
+   all strains smoothed over time (rate 0.02 per step; presence from 0.2 to 1 deposits of strain A;
+   no tube below B = 0.05), and D is the flow memory, Tero's conductivity, from 0 to 1. The base
+   0.02 lets a new tube carry a first flux. A food cell with a tube has g = 4 B, so the flux of a
+   site spreads over its food before it enters the tubes. The conductance of an edge is the
+   harmonic mean of its two cells, two half cells in series. Reason: the app has no graph of tubes;
+   the trail is the plasmodium. The slow body keeps the conductivity from changing faster than the
+   solver follows.
+
+5. **Every covered food site gives or takes the flux at once, and as many give as take.** A site
+   is the centre cell of a food stroke (at most 64 sites; with more foods, sites spread evenly over
+   the list). The plasmodium covers a site while its centre cell holds a tube (B ≥ 0.05). Four
+   pressure fields run side by side, each with its own roles. Two covered sites: the first gives I0
+   and the other takes it, always; a new draw could only swap them, which gives the same flux in
+   every tube and a pressure that has to settle again. Three or more: a hash of the site, the
+   field, the seed and the time orders the covered sites; the first half gives, the second half
+   takes, and with an odd count the last one rests. The order is new every 300 steps, the fields
+   75 steps apart. The `update` pass draws the roles on the GPU, because only the GPU knows which
+   sites are covered; `flowRoles()` in `flow.ts` is the same rule for the tests. While fewer than
+   two sites are covered, no cell adapts: the flow memory keeps its values and nothing starves.
+   Rejected, with the prototype on the Tokyo layout: (a) one random pair per step, as in Tero et
+   al. 2010: the local solver cannot follow a new pair at every step, and with a pair held for 300
+   steps each tube carries flux only part of the time, so the network starves; (b) a fixed
+   pressure at each site in place of a fixed flux: two sites close together then exchange almost
+   all of the flux, and far sites get none; (c) roles drawn among all food sites on the CPU, as
+   the first version of the app did: see decision 6.
+
+6. **Four rules keep the pressure bounded.** The first version of the app let the pressure of the
+   Tokyo scene run away while the colony grew: about ±4 · 10⁶ on the tubes at step 250, up to
+   10¹⁸ at step 1,000, and back to ±450 only at step 4,000, when the growth had ended (flux 1,
+   seed 1, WebGPU). The flux was above 3 on every tube cell from step 500 to 2,000, so f was 1,
+   the flow memory went to 1 on the whole colony, and dead agents came to life everywhere: the land
+   filled with a sheet of agents that the model does not give. The Maze, with two covered foods and
+   no growth, did not show it. The CPU mirror of the passes reproduced it (a growing mesh with four
+   foods: 7 · 10⁷ at step 300 and 3 · 10²³ at step 500). The causes and the rules against them:
+
+   - **A food without a tube does not conduct.** Before, every food cell had g = 4. A food that
+     the colony had not reached yet then held a pressure of its own behind the tiny conductivity
+     of open ground, thousands of units from the pressure of the colony, and let it go into the
+     tubes when the colony arrived.
+   - **As many covered sites give as take** (decision 5). Before, the roles were drawn among all
+     food sites, and the covered ones were out of balance (3 to 5 more gave than took at step
+     250). The pressure of the colony then rose as a whole by tens of units per step, away from
+     the open ground around it.
+   - **A site works only up to a pressure limit.** A site gives or takes its full flux while its
+     pressure lies within 4,096 · I0 of the mean pressure of all sites that give or take, on the
+     side it pushes to; the flux falls to nothing over the last quarter of that range. So a site
+     that no tube joins to the others stops, as a pump does against a closed pipe, and its part of
+     the network does not move away from the rest without limit.
+   - **Only a cell that conducts takes the momentum of the iteration.** With the momentum
+     (ω = 1.991) a pressure swings for hundreds of iterations. A cell without a tube swung by
+     itself beside the network. At the margin of a tube the trail flickers, so the tube body of a
+     cell crosses its limit of 0.05 again and again, and each time the cell brought its swing into
+     the network. In the CPU mirror this alone made the pressure grow by a factor of more than
+     10⁷ in 100 steps; with the plain damped iteration on the cells without a tube it stayed below
+     70 in 800 steps. A first try, the momentum only for cells with a mature tube body (from 0.25
+     or 0.1 on), was stable too, but the flux no longer reached along the Maze's route in time (0.5
+     of 8 across the middle of the maze at step 1,000), and the colony died.
+
+   Every open cell also has a conductivity of 0.00001 for the pressure iteration only: a cell
+   beside the network then holds the pressure of its neighbours before it joins. With the four
+   rules the pressure of the Tokyo scene stays within ±770 in all four fields from step 250 to
+   step 12,000 (flux 2, seed 1), and the flux of a cell is at most 22 at step 250, beside Tokyo's
+   seven sites, and at most 8 from step 500 on.
+
+   The flux of the local solver against an exact solution of Kirchhoff's law on the same network
+   (conjugate gradients to a residual of 10⁻⁸; Tokyo scene, flux 2, seed 1, two fields; the cells
+   whose exact flux is above 5 % of I0):
+
+   | Step                                   | Sum of the flux, local over exact | Error per cell, median | 90th percentile |
+   | -------------------------------------- | --------------------------------- | ---------------------- | --------------- |
+   | 500 (the colony grows, 24 sites)       | 132 % and 144 %                   | 11 % and 21 %          | 60 % and 80 %   |
+   | 2,000 (all 42 sites)                   | 97 % and 99 %                     | 6 %                    | 15 % and 16 %   |
+   | 4,000 (100 and 175 steps after a draw) | 96 % and 97 %                     | 21 % and 9 %           | 63 % and 24 %   |
+   | 8,000                                  | 102 % and 99 %                    | 4 % and 5 %            | 16 % and 10 %   |
+
+   So the local solver is within about 5 % of the exact flux in a settled network, and about 20 %
+   off while the colony grows fast and for about 100 steps after a field draws new roles.
+
+7. **Tero's adaptation, per cell.** The flux of a cell is half the sum of the absolute fluxes over
+   its four edges. A cell that holds a tube adapts: D ← D + 0.003 (f − D), with f the mean over the
+   four fields of Q^γ / (1 + Q^γ) and γ = 1.8 (Tero et al. 2010, Fig. 4). D is at least 0.0001.
+   Ground that never held a tube has D = 0.2. Ground that lost its tube keeps its D and recovers
+   slowly, by the factor 1.00023 per step up to 0.2. Reason for the last rule: when starved ground
+   was fresh again at once, agents came back at once, and faint strands lived for ever.
+
+8. **The flux decides where agents live.** An agent on a cell with the flow memory D dies with the
+   chance 0.02 · h² / (D² + h²) per step, h = 0.01. A dead agent draws one random cell per step; if
+   the cell is open, holds a tube and has D above 0.5, the agent comes to life there with the chance
+   0.2 · (D − 0.5) / 0.5. With the rule of one agent per cell the cell must be empty, and the agent
+   claims it as a move does (ADR 0008). So a tube that carries flux fills up and gets wider, until
+   the flux per cell falls. Rejected, with the prototype: (a) a deposit scaled by the flow memory
+   alone: the dead ends stay, because Jones' agents steer by the difference between their sensors
+   and not by the amount of trail; (b) starvation without births: the tube of the route dies out
+   too, more slowly.
+
+9. **With growth and shrinkage (ADR 0025), an agent does not divide on a starved cell.** An agent
+   divides only where D ≥ h (0.01), the level at which the chance of starvation is half its top
+   value. Reason: Jones' growth rule divides every agent in a thin part of the colony every 3
+   steps, faster than the starvation of at most 2 % per step removes agents. The flow supplies no
+   plasm for a child where it passed the cell by. Measured on the Tokyo scene (flux 2, seed 1, the
+   33 cities), with the rule and with only this rule off: without it the network keeps its mesh,
+   with TL 2.66 to 2.80 and 75 to 84 links from step 2,000 to step 24,000, and 61 % of its tube
+   cells have a flow memory below 0.01. With it TL falls from 2.77 at step 2,000 to 1.87 at step
+   12,000 and stays at 1.85 to 1.99 with 52 to 59 links up to step 24,000.
+
+10. **Thirty steps are one minute of model time.** A step is 2 s. An agent moves one cell per step;
+    on the Tokyo scene a cell is 0.54 mm of the plate of Fig. 1 (17 cm on 316 cells), so an agent
+    moves at 0.27 mm/s, the order of the flow in the tubes (1 mm/s; Tero et al. 2007, Sec. 2). With
+    this scale the constants give the times of the organism:
+
+    | Constant                      | Steps                           | Model time | The organism (Marbach et al. 2023) |
+    | ----------------------------- | ------------------------------- | ---------- | ---------------------------------- |
+    | The body follows the trail    | 1 / 0.02 = 50                   | 1.7 min    | delay of 1 to 3 min                |
+    | A tube adapts                 | 1 / 0.003 = 333                 | 11 min     | 10 to 100 min                      |
+    | A tube without flux starves   | ln(0.2 / 0.01) / 0.003 = 999    | 33 min     | veins vanish in 15 to 40 min       |
+    | The foods keep their roles    | 300                             | 10 min     | (this app's choice)                |
+    | Starved ground is fresh again | ln(2000) / ln(1.00023) = 33,050 | 18 h       | (this app's choice)                |
+
+    The roles change five times as slowly as the shuttle flow of the organism (2 min), because the
+    solver needs time after a draw: from a cold start it came within 5 % after 4,150 iterations,
+    260 steps. Tero et al. state that the mean of the shuttle flow over a period acts as a direct
+    current (2007, Sec. 6).
+
+11. **Two settings; the rest are constants.** "Flow in the tubes" (off) and "Flow strength", the
+    flux I0 of each site, from 0.1 to 32 on a logarithmic slider, 8 by default. The unit is the flux
+    through one cell at which f is one half. γ, the rates and the levels are constants in
+    `src/engine/flow.ts`, each with its source or its measurement here. Reason: each one moves a
+    time scale of the table above or a level that the tests pin.
+
+12. **Two scenes use the flow.** The Maze turns it on, with the default strength of 8: its text
+    said what was missing. A new scene, Tokyo rail network, rebuilds the experiment of Tero et al.
+    2010 (Fig. 1) with the map of ADR 0024: the 36 food sources, Tokyo as seven food sources (as in
+    the model of the paper, Fig. 4), walls along the coast (© OpenStreetMap contributors, ODbL) and
+    along the west, north and south edges of the map. The protocol is the first one of the paper:
+    a colony of about 50 agents starts on the food at Tokyo station (start layout "At the first
+    food") and grows with Jones' rule of 2011 (ADR 0025) as a mesh of tubes over the land; the
+    flow decides which tubes stay. The scene runs on a square lattice of 512 × 512 cells in a dish, so north is
+    up on every screen (ADR 0024, decision 4; a grid shaped like a tall screen would turn the
+    frame). Its flow strength is 2, the I0 of the model of the paper (Fig. 4), and the value whose
+    network has the measures of the organism (results below). Where the simplified coast came within 5.4 km of a
+    city, it follows a circle around the city on the seaward side (9.4 km around Tokyo, for its
+    seven food sources): the simplified line passed over harbour cities.
+
+13. **The flow is in the source of a pass only while it is on.** WGSL has no preprocessor, and an
+    override constant leaves its code and its bindings in the pass. So the lines of the flow in
+    `agents.wgsl` and `growth.wgsl` stand between the markers `//#if FLOW`, `//#else` and
+    `//#endif`, and `variant()` (`src/engine/shaders/variant.ts`) builds the source of a pass with
+    or without them. Without them the source is the one of `main`, character for character. GLSL
+    uses `#if FLOW`. The passes of the flow itself are `flow.wgsl` and `flow.frag`: `update` (the
+    flux, the memory, the body, the conductivity and the roles of each cell) and `pressure` (one
+    iteration), 17 passes per step.
+
+14. **The flow holds 80 B more per cell while it is on**: the memory of each cell in two textures
+    and the pressure of the four fields in three, each `rgba32float`. The memory fit counts them
+    only while the flow runs (`FLOW_BYTES_PER_CELL`).
+
+15. **The draws of the flow have their own random streams** (7 for starvation, 8 for the cell that
+    a dead agent draws), so they shift no other draw. A unit test checks that every stream number
+    is used once, in WGSL and in GLSL.
+
+## Results in the app
+
+All numbers are from the real engine with the final rules (2026-11-13, M3 Pro, Chromium with
+Metal), measured on dumps of the trail with the scripts of the prototype.
+
+### The Maze (flux 8)
+
+Ten seeds on WebGPU, three on WebGL2, three without the flow. "Dead ends over route": the mean
+trail in the dead ends over the mean trail in the corridor of the shortest route. Median and range.
+
+| Step                               | No flow, 3 seeds    | With the flow, WebGPU, 10 seeds | With the flow, WebGL2, 3 seeds |
+| ---------------------------------- | ------------------- | ------------------------------- | ------------------------------ |
+| Dead ends over route at 1,000      | 0.73 (0.68 to 0.75) | 0.53 (0.49 to 0.60)             | 0.52 (0.51 to 0.55)            |
+| at 1,500                           | 0.76 (0.72 to 0.76) | 0.094 (0.063 to 0.145)          | 0.077 (0.070 to 0.145)         |
+| at 2,000                           | 0.65 (0.65 to 0.68) | 0.029 (0.023 to 0.038)          | 0.018 (0.016 to 0.024)         |
+| at 3,000                           | 0.71 (0.64 to 0.78) | 0.012 (0.001 to 0.030)          | 0.003 (0.002 to 0.019)         |
+| at 5,000                           | 0.76 (0.73 to 0.91) | 0.000 (0.000 to 0.000)          | 0.000 (0.000 to 0.002)         |
+| at 15,000                          | 0.66 (0.60 to 0.77) | 0.000 (0.000 to 0.001)          | 0.000                          |
+| First measured step below 10 %     | never               | 1,500 (1,500 to 2,000)          | 1,500 (1,500 to 2,000)         |
+| First measured step below 2 %      | never               | 3,000 (2,500 to 4,000)          | 2,000 (2,000 to 3,000)         |
+| Foods joined at every step         | 3 of 3              | 10 of 10                        | 3 of 3 (2 of 3 at step 500)    |
+| Tube over shortest route at 15,000 | 1.15 (1.11 to 1.17) | 1.10 (1.08 to 1.13)             | 1.11 (1.10 to 1.14)            |
+| Agents alive at 15,000             | 4,467               | 4,035 (3,966 to 4,537)          | 4,100 (4,099 to 4,213)         |
+
+Without the flow a mesh stays in every corridor. With it one tube remains, and it pulls tight:
+1.20 times the shortest route at step 1,000 and 1.10 at step 15,000. Other flow strengths, two
+seeds each: with 2 the tube dies out (about 70 agents left, foods not joined), because the Maze has
+no growth and dead agents come to life only where the flow memory is above 0.5; with 4 a thinner
+tube remains (about 2,100 agents, 1.04 times the shortest route); with 16 a thicker one (about
+9,500 agents, 1.05).
+
+The local solver against the exact solution in the Maze (seed 1): the flux on the cells that carry
+more than 5 % of I0 is 40 % off at step 500, while the pressure still builds up along the route,
+6 % at step 1,000, 4 % at 1,500 and 1 to 2 % from step 2,000 on.
+
+### The Tokyo rail network
+
+The scene as it loads (flux 2), ten seeds on WebGPU, measured as in the paper (p. 440) on the 33
+food sources of its Fig. 2: the trail above 1.5 is the network, thinned to lines; a link is a line
+between two junctions or food sources. TL, MD and FT are over the values of the minimum spanning
+tree. Median and range over the seeds.
+
+| Step   | Model time | All 33 joined | All 36 joined | Links         | TL                  | MD                  | FT                  |
+| ------ | ---------- | ------------- | ------------- | ------------- | ------------------- | ------------------- | ------------------- |
+| 1,000  | 33 min     | 6 of 10       | 2 of 10       | 61 (34 to 73) | 1.98 (1.58 to 2.42) | 0.88 (0.84 to 0.98) | 0.92 (0.74 to 0.95) |
+| 2,000  | 1.1 h      | 10 of 10      | 10 of 10      | 86 (75 to 92) | 2.79 (2.64 to 2.95) | 0.83 (0.81 to 0.90) | 0.98 (0.93 to 0.99) |
+| 4,000  | 2.2 h      | 10 of 10      | 10 of 10      | 72 (62 to 89) | 2.42 (2.29 to 2.63) | 0.82 (0.81 to 0.91) | 0.97 (0.89 to 0.99) |
+| 8,000  | 4.4 h      | 9 of 10       | 9 of 10       | 70 (62 to 78) | 2.24 (2.11 to 2.55) | 0.81 (0.80 to 0.87) | 0.96 (0.92 to 0.99) |
+| 12,000 | 6.7 h      | 10 of 10      | 10 of 10      | 62 (52 to 75) | 2.00 (1.82 to 2.13) | 0.82 (0.81 to 0.91) | 0.93 (0.90 to 0.96) |
+| 24,000 | 13.3 h     | 10 of 10      | 9 of 10       | 56 (53 to 60) | 1.94 (1.81 to 2.06) | 0.81 (0.80 to 0.89) | 0.93 (0.88 to 0.95) |
+| 48,000 | 26.7 h     | 10 of 10      | 10 of 10      | 56 (51 to 65) | 1.94 (1.76 to 2.08) | 0.81 (0.80 to 0.83) | 0.92 (0.91 to 0.96) |
+
+At step 48,000, the end of the experiment in model time: TL 1.94 ± 0.10, MD 0.81 ± 0.01 and FT
+0.93 ± 0.02 (mean and standard deviation), and FT over TL is 0.48. The organism (p. 440): TL
+1.75 ± 0.30, MD 0.85 ± 0.04, FT 0.80 ± 0.13 without light and 0.86 ± 0.04 with light on the
+mountains, and FT over TL about 0.5. The check of the specification of 2026-11-11 (TL from 1.45 to
+2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds in 9 of 10 seeds at step
+24,000 and at step 48,000, and FT in 10 of 10. So the network of the scene is longer, more direct
+and more fault tolerant than the organism's. TL is 0.6, MD 1.0 and FT 1.0 standard deviations of
+the paper from the paper's mean without light; against the networks with light, FT is 1.7 standard
+deviations above. Where a table row has fewer than 10 of 10, one food source had no tube above the
+level of the measure at that step and had one again at the next step.
+
+The time course: the colony grows out from Tokyo as a mesh of tubes, reaches all 36 food sources
+by step 2,000 and has its most links there. Then the tubes without a flux between food sources
+starve, and the network thins, fast to step 12,000 and slowly after it. The organism covers the
+land in 11 to 16 h and has its network at 26 h (Fig. 1). The scene is at that stage after about 1 h
+and 7 h of model time: Jones' growth rule has no speed of its own to set, and it is about ten
+times as fast as the organism against the time of the adaptation.
+
+Other flow strengths (three seeds each to step 24,000; flux 2: the ten seeds above):
+
+| Flux | Seeds, last step | All 33 joined | All 36 joined | TL                  | MD                  | FT                  |
+| ---- | ---------------- | ------------- | ------------- | ------------------- | ------------------- | ------------------- |
+| 1    | 10, 48,000       | 10 of 10      | 8 of 10       | 1.62 (1.50 to 1.77) | 0.84 (0.82 to 0.86) | 0.85 (0.80 to 0.92) |
+| 2    | 10, 48,000       | 10 of 10      | 10 of 10      | 1.94 (1.76 to 2.08) | 0.81 (0.80 to 0.83) | 0.92 (0.91 to 0.96) |
+| 4    | 3, 24,000        | 3 of 3        | 3 of 3        | 2.07 (1.91 to 2.27) | 0.81 (0.81 to 0.82) | 0.95                |
+| 8    | 3, 24,000        | 3 of 3        | 3 of 3        | 2.14 (2.11 to 2.42) | 0.82 (0.81 to 0.82) | 0.97 (0.92 to 0.99) |
+
+More flux keeps more links, as in the model of the paper (supplement, Fig. S1). A flux of 1 gives
+the measures nearest to the organism's, each within half a standard deviation of the paper. But in
+2 of 10 seeds one of the three food sources at the edge of the map (those of Fig. 1 only) has lost
+its tube at step 48,000, and a food source that lost its tube does not get one again soon (decision
+7). With a flux of 2 all 36 are joined in 10 of 10 seeds. The scene uses 2: every food source
+joined counts more for a scene than a total length that is 0.3 nearer to the paper's mean. The
+owner can choose 1 (`TODO.md`).
+
+Without the flow (one seed) the mesh of Jones' growth rule stays: TL 2.70 to 2.88 and FT 0.96 to
+0.99 from step 2,000 to step 24,000, with 76 to 88 links. On WebGL2 (flux 2, two seeds) the scene
+gives TL 1.81 (1.72 to 1.90), MD 0.81 and FT 0.93 at step 24,000, as on WebGPU.
+
+### With the flow off
+
+With `flow` off the branch gives the bytes of `main` (`377f428`): the 16 scenes of `main` and the
+default settings, 500 steps from seed 12345, on WebGPU and on WebGL2; the Maze with its flow
+switched off. The SHA-256 digests of the agents, the trail, the scent and the environment are equal
+in 34 of 34 runs (M3 Pro, 2026-11-13). The sources of `agents.wgsl` and `growth.wgsl` without the
+lines of the flow equal the files of `main` character for character (decision 13).
+
+The Foraging maze with the flow switched on (flux 8, three seeds; the scene itself keeps it off):
+the colony grows from the first food and reaches the far food between step 4,000 and step 6,000.
+From then on both foods are covered, the flux runs, and the mesh thins to one tube: 1.03 to 1.06
+times the shortest route at step 12,000, with the dead ends at 9 to 14 % of the route's trail and
+falling.
+
+## Consequences
+
+- The Jones scenes, the Fogleman scenes and the extended scenes without the flow keep their bytes
+  (checks above). The Maze changes: it is the scene that shows the flow.
+- The rule is this app's, built from Tero's flux model and Jones' agents. It is not the model of
+  Tero et al. 2010: the flux runs on grid cells and not on a graph of tubes; all foods give or take
+  at once; a local solver follows the pressure with a lag; and agents, not tube radii, carry the
+  result. The texts of the scenes and of the help say so.
+- The flux per cell depends on the width of a tube in cells. So "Flow strength" has this app's
+  unit, and a value of the paper (I0 = 2) does not carry over.
+- The pressure lags the roles after each draw (decision 10), and it lags more across a weak tube.
+  The four fields and the slow adaptation (333 steps) average over this. The results in the app are
+  measured with this lag.
+- Starved ground stays closed to the colony for hours of model time. A colony that lost a region
+  does not grow back into it soon.
+- On the Tokyo scene the colony reaches all food sources about ten times as fast as in the
+  experiment, measured against the time of the adaptation (about 1 h of model time against 11 to
+  16 h): Jones' growth rule has no speed of its own to set.
+- North stays up on the Tokyo scene only on its lattice. A grid shaped like a tall screen, chosen
+  by the user, turns the map by 90°, as every scene (ADR 0019).
+- Cost: the flow takes about 2 ms more per step on 512 × 320 cells and 3 to 3.6 ms on 512 × 512
+  (M3 Pro; table (c)), ten times the step of these scenes without it. At the default speed of 120
+  steps per second that is a quarter to two fifths of the time. The frame budget (ADR 0028) lowers
+  the steps per second on a slower GPU, and the startup check can lower the grid.
+- The time limits of the new GPU tests follow ADR 0010. In the CI image (SwiftShader, 4 CPUs,
+  16 GB, Docker on an M3 Pro, 2026-11-13) the file `flow.gpu.test.ts` took 159 s for its 21 tests.
+  The slowest test took 15.5 s of its limit of 240 s (WebGL2 without float blending), the next
+  10.1 s of 240 s (Kirchhoff's law on WebGPU), and the two hooks that compile the pipelines about
+  35 s each of 360 s. Each is below a quarter of its limit; the times on GitHub are in the pull
+  request.

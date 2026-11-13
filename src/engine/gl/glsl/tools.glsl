@@ -33,11 +33,52 @@ struct Spot {
   int cell;
 };
 
+// Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/agents.wgsl): programs.ts compiles the agent pass and the
+// claim points with it, and gl/sim.ts uses them only while the flow is on. Without it the source is the one of the
+// code before.
+#ifndef FLOW
+#define FLOW 0
+#endif
+#if FLOW
+uniform sampler2D flowMemory; // x flow memory, y tube body (flow.frag)
+layout(std140) uniform Flow {
+  vec4 a;
+  vec4 b;
+  vec4 c; // z: the tube body below which a cell holds no tube
+  vec4 d;
+  vec4 e; // death, half², birth, birth from
+} F;
+const uint STARVE = 7u; // streams 4 to 6: growth.glsl
+const uint RESPAWN = 8u;
+
+// Where the flow brings a dead agent to life, or cell −1 (respawn in agents.wgsl): the agent draws one random point of
+// the grid. If its cell is open and holds a tube, the agent comes to life there with the chance
+// birth · (D − from) / (1 − from), D the flow memory of the cell.
+Spot respawn(vec4 a, uint i) {
+  Spot none = Spot(a.xy, a.z, -1);
+  if ((bitsOf(a) & ALIVE) != 0u) return none;
+  uint rng = rngSeed(i, RESPAWN);
+  float rx = rand(rng);
+  float ry = rand(rng);
+  vec2 p = vec2(rx * float(W()), ry * float(H()));
+  ivec2 q = cellXY(ivec2(floor(p)));
+  int c = indexOf(q);
+  if (!openCell(c)) return none;
+  vec4 m = texelFetch(flowMemory, q, 0);
+  if (m.y < F.c.z || rand(rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) return none;
+  return Spot(wrapPos(p), rand(rng) * TAU, c);
+}
+#endif
+
 // Inoculate takes a dead agent of the tool's strain to a random point of the brush, never a living one; cut takes a
 // living agent in the wound to the first of 8 random points outside it whose cell is open. A pure function of the
 // agent after shrinkage, so the claim pass, the claim points and the settle pass find the same spot.
 Spot placement(vec4 a, uint i) {
+#if FLOW
+  if (P.tool.w == 0.0) return respawn(a, i);
+#else
   if (P.tool.w == 0.0) return Spot(a.xy, a.z, -1); // no tool held: the usual step
+#endif
   uint rng = rngSeed(i, TOOL);
   uint bits = bitsOf(a);
   bool alive = (bits & ALIVE) != 0u;
@@ -52,5 +93,9 @@ Spot placement(vec4 a, uint i) {
       if (openCell(c) && toolDistance(p, P.tool.xy) >= P.tool.z) return Spot(wrapPos(p), a.z, c);
     }
   }
+#if FLOW
+  return respawn(a, i);
+#else
   return Spot(a.xy, a.z, -1);
+#endif
 }

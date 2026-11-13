@@ -1,5 +1,7 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
+import { at } from './at';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, packFlow } from './flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -15,10 +17,12 @@ import { readBuffer, readTexture } from './readback';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
+import flowWgsl from './shaders/flow.wgsl?raw';
 import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlan, viewTrailOn, type Diffuse } from './sizing';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
@@ -36,6 +40,8 @@ const CORE_RADIUS = 10.61 + SHAPE_RANGE + 0.05;
 const SORT_INTERVAL = 32;
 /** Cells per side of a sort tile (sort.wgsl SHIFT). */
 const SORT_TILE = 8;
+/** Cells per side of a workgroup of the flow passes (flow.wgsl). */
+const FLOW_GROUP = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -52,6 +58,19 @@ interface GrowthBuffers {
   deadSums: GPUBuffer;
   /** One uniform per pyramid level that a build pass writes (growth.wgsl `level`). */
   levels: GPUBuffer[];
+}
+/**
+ * The state of the flow in the tubes (flow.wgsl, ADR 0029), allocated while the flow is on: the memory of each cell
+ * (flow memory, tube body, conductivity, roles) in two textures that the update pass writes in turn, the pressure of
+ * the four lanes in three textures (the one in work, the one before as momentum, the one that an iteration writes), and
+ * the uniform block of the passes.
+ */
+interface FlowState {
+  memory: Pair<GPUTexture>;
+  memoryViews: Pair<GPUTextureView>;
+  pressure: GPUTexture[];
+  pressureViews: GPUTextureView[];
+  uniform: GPUBuffer;
 }
 /** A trail and a scent texture with their views: the view's pairs (viewTextures). */
 interface ViewPair {
@@ -119,6 +138,14 @@ export class Simulation implements Sim {
   private collision?: { occ: Pair<GPUBuffer>; claims: GPUBuffer };
   /** The buffers of growth and shrinkage, while growth is on (ADR 0025). */
   private growth?: GrowthBuffers | undefined;
+  /** The state of the flow in the tubes, while it is on (ADR 0029). */
+  private flow?: FlowState | undefined;
+  /** Which memory texture is current, and which pressure texture holds the pressure in work. */
+  private flowM: Bit = 0;
+  private flowP = 0;
+  /** The food sites that give and take the flux (foodSites()). */
+  private sites: [number, number][] = [];
+  private readonly flowData = new ArrayBuffer(FLOW_BYTES);
   private paintGroup?: GPUBindGroup;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.wgsl
@@ -381,6 +408,13 @@ export class Simulation implements Sim {
       this.viewOut = undefined;
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
     }
+    // The memory fit counts the textures of the flow only while it is on (sizing.ts).
+    if (!flowOn(settings) && this.flow) {
+      for (const t of [...this.flow.memory, ...this.flow.pressure]) t.destroy();
+      this.flow.uniform.destroy();
+      this.flow = undefined;
+      for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);
+    }
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -409,6 +443,7 @@ export class Simulation implements Sim {
         .end();
     }
     enc.clearBuffer(this.counts);
+    if (this.flow) this.clearFlow(enc, this.flow);
     const pass = enc.beginComputePass();
     const init = this.starts().init;
     pass.setPipeline(init);
@@ -492,6 +527,77 @@ export class Simulation implements Sim {
    */
   private starts(): Starts {
     return this.start < this.agents ? this.kernels.capacity() : this.kernels;
+  }
+
+  /**
+   * The centres of the food strokes on this grid, in cells and in the order of the strokes (ADR 0029): the food sites
+   * that give and take the flux of the flow in the tubes (flow.ts flowSites()). The engine sets them after each paint.
+   */
+  foodSites(centres: readonly (readonly [number, number])[]) {
+    this.sites = flowSites(centres, this.width, this.height);
+  }
+
+  /** The textures and the uniform block of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL). */
+  private ensureFlow(): FlowState {
+    if (!this.flow) {
+      const usage =
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.RENDER_ATTACHMENT |
+        GPUTextureUsage.COPY_SRC |
+        GPUTextureUsage.COPY_DST;
+      const make = () => this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
+      const memory: Pair<GPUTexture> = [make(), make()];
+      const pressure = [make(), make(), make()];
+      this.flow = {
+        memory,
+        memoryViews: [memory[0].createView(), memory[1].createView()],
+        pressure,
+        pressureViews: pressure.map((t) => t.createView()),
+        uniform: this.device.createBuffer({
+          size: FLOW_BYTES,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        }),
+      };
+      const enc = this.device.createCommandEncoder();
+      this.clearFlow(enc, this.flow);
+      this.device.queue.submit([enc.finish()]);
+    }
+    return this.flow;
+  }
+
+  /** The start of the flow: every cell with the memory of fresh ground, no tube, no pressure. */
+  private clearFlow(enc: GPUCommandEncoder, flow: FlowState) {
+    const clear = (view: GPUTextureView, clearValue: number[]) => {
+      enc.beginRenderPass({ colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue }] }).end();
+    };
+    for (const view of flow.memoryViews) clear(view, [FLOW.fresh, 0, 0, 0]);
+    for (const view of flow.pressureViews) clear(view, [0, 0, 0, 0]);
+    this.flowM = 0;
+    this.flowP = 0;
+  }
+
+  /**
+   * For tests: the memory of the flow per cell (flow memory, tube body, conductivity, roles), 4 values per cell; empty
+   * while the flow is off.
+   */
+  async readFlow(): Promise<Float32Array> {
+    if (!this.flow) return new Float32Array(0);
+    return readTexture(this.device, at(this.flow.memory, this.flowM), 4);
+  }
+
+  /** For tests: replaces the memory of the flow, 4 values per cell as readFlow() returns them. Only while it is on. */
+  writeFlow(data: Float32Array) {
+    if (!flowOn(this.settings)) return;
+    const texture = at(this.ensureFlow().memory, this.flowM);
+    const size = [this.width, this.height];
+    this.device.queue.writeTexture({ texture }, data, { bytesPerRow: this.width * 16 }, size);
+  }
+
+  /** For tests: the pressure of the four lanes of the flow, 4 values per cell; empty while the flow is off. */
+  async readPressure(): Promise<Float32Array> {
+    if (!this.flow) return new Float32Array(0);
+    return readTexture(this.device, at(this.flow.pressure, this.flowP), 4);
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -787,6 +893,10 @@ export class Simulation implements Sim {
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
     this.viewThird?.trail.destroy();
     this.viewThird?.scent.destroy();
+    if (this.flow) {
+      for (const t of [...this.flow.memory, ...this.flow.pressure]) t.destroy();
+      this.flow.uniform.destroy();
+    }
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -846,8 +956,15 @@ export class Simulation implements Sim {
     const senseWalls = this.walls && this.settings.model === 'extended';
     const saturate = trailSaturation(this.settings) > 0;
     // Bind groups of 'auto' layouts belong to their pipeline: the key names the variant.
-    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}`;
-    const agentPasses = saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k;
+    // With the flow in the tubes, the passes in which agents starve and come to life by the flow memory (agents.wgsl
+    // `//#if FLOW`, ADR 0029): they read the memory of the step before.
+    const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
+    if (flow) this.device.queue.writeBuffer(flow.uniform, 0, packFlow(this.settings, this.sites, this.flowData));
+    const flowing = flow ? k.flowing(senseWalls, saturate) : undefined;
+    const fm = this.flowM;
+    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${flow ? `flow${fm}` : ''}`;
+    const agentPasses = flowing ?? (saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k);
+    const [flowMemory, flowUniform] = flow ? [at(flow.memoryViews, fm), flow.uniform] : [null, null];
     if (!col) {
       const move = agentPasses.move;
       pass.setPipeline(move);
@@ -866,6 +983,8 @@ export class Simulation implements Sim {
           null,
           null,
           this.clearance,
+          flowMemory,
+          flowUniform,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
@@ -896,13 +1015,16 @@ export class Simulation implements Sim {
           null,
           null,
           this.clearance,
+          flowMemory,
+          flowUniform,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
-      pass.setPipeline(k.settle);
+      const settle = flowing?.settle ?? k.settle;
+      pass.setPipeline(settle);
       pass.setBindGroup(
         0,
-        this.bind(`settle${q}${a}`, k.settle, [
+        this.bind(`settle${q}${a}${flow ? `flow${fm}` : ''}`, settle, [
           this.params,
           this.agentBuffer,
           null,
@@ -915,11 +1037,13 @@ export class Simulation implements Sim {
           next,
           null,
           this.clearance,
+          flowMemory,
+          flowUniform,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
       this.occParity = flip(q);
-      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow);
+      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform);
     }
     let d = p;
     // The pass that adds the step's sources (diffuse.wgsl): the last moving first, the first sensing first (ADR 0027);
@@ -933,8 +1057,59 @@ export class Simulation implements Sim {
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
     }
+    if (flow) this.encodeFlow(pass, flow, d);
     pass.end();
     this.parity = d;
+  }
+
+  /**
+   * The flow in the tubes after the diffusion of a step (flow.wgsl, ADR 0029): the update of the memory from the
+   * pressure and the trail of this step, then the pressure iterations on the new conductivity. `trail`: the texture
+   * that holds the trail after the step.
+   */
+  private encodeFlow(pass: GPUComputePassEncoder, flow: FlowState, trail: Bit) {
+    const passes = this.kernels.flowPasses();
+    const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
+    const [m, next] = [this.flowM, flip(this.flowM)];
+    let p = this.flowP;
+    pass.setPipeline(passes.update);
+    pass.setBindGroup(
+      0,
+      this.bind(`flowUpdate${m}${p}${trail}`, passes.update, [
+        this.params,
+        flow.uniform,
+        this.trailViews[trail],
+        this.env,
+        flow.memoryViews[m],
+        flow.memoryViews[next],
+        at(flow.pressureViews, p),
+      ]),
+    );
+    pass.dispatchWorkgroups(...groups);
+    for (let i = 0; i < FLOW_ITERATIONS; i++) {
+      // The first two iterations take the pressure of the reference cell off (flow.wgsl RECENTRE).
+      const pipeline = at(passes.pressure, Math.min(i, 2) === 2 ? 0 : i + 1);
+      const [before, out] = [(p + 2) % 3, (p + 1) % 3];
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(
+        0,
+        this.bind(`flowPressure${Math.min(i, 2)}${next}${p}`, pipeline, [
+          this.params,
+          flow.uniform,
+          null,
+          this.env,
+          flow.memoryViews[next],
+          null,
+          at(flow.pressureViews, p),
+          at(flow.pressureViews, before),
+          at(flow.pressureViews, out),
+        ]),
+      );
+      pass.dispatchWorkgroups(...groups);
+      p = out;
+    }
+    this.flowM = next;
+    this.flowP = p;
   }
 
   /**
@@ -943,8 +1118,19 @@ export class Simulation implements Sim {
    * the alive count and the occupancy anew: the pass ends for their clears, and a new one returns, for the diffusion.
    * The occupancy at the start of the step holds the one after this step then.
    */
-  private encodeGrowth(enc: GPUCommandEncoder, pass: GPUComputePassEncoder, g: GrowthBuffers, grow: boolean) {
-    const k = this.kernels.growth();
+  private encodeGrowth(
+    enc: GPUCommandEncoder,
+    pass: GPUComputePassEncoder,
+    g: GrowthBuffers,
+    grow: boolean,
+    flowMemory: GPUTextureView | null,
+    flowUniform: GPUBuffer | null,
+  ) {
+    // With the flow in the tubes, the passes in which an agent on a starved cell does not divide (growth.wgsl
+    // `//#if FLOW`, ADR 0029): they read the flow memory that the agent passes of the step read.
+    const flow = flowMemory !== null;
+    const k = this.kernels.growth(flow);
+    const f = flow ? `flow${this.flowM}` : '';
     const a = this.agentParity;
     const moved = this.occParity;
     const after = this.ensureCollision().occ[moved];
@@ -967,12 +1153,14 @@ export class Simulation implements Sim {
       this.stats,
     ];
     // An 'auto' layout holds only the bindings that its entry point uses (GROWTH_BINDINGS).
-    const used = (name: keyof GrowthKernels, extra: GPUBuffer | null = null) =>
-      [...resources, extra].map((r, i) => (GROWTH_BINDINGS[name].includes(i) ? r : null));
+    const used = (name: keyof GrowthKernels, extra: GPUBuffer | null = null) => {
+      const bindings = flow ? [...GROWTH_BINDINGS[name], ...GROWTH_FLOW_BINDINGS[name]] : GROWTH_BINDINGS[name];
+      return [...resources, extra, flowMemory, flowUniform].map((r, i) => (bindings.includes(i) ? r : null));
+    };
     const run = (name: keyof GrowthKernels, groups: [number, number]) => {
       const pipeline = k[name];
       pass.setPipeline(pipeline);
-      pass.setBindGroup(0, this.bind(`grow-${name}${a}${moved}`, pipeline, used(name)));
+      pass.setBindGroup(0, this.bind(`grow-${name}${a}${moved}${f}`, pipeline, used(name)));
       pass.dispatchWorkgroups(...groups);
     };
     run('rowSums', cellGroups);
@@ -986,7 +1174,7 @@ export class Simulation implements Sim {
         pyramidLevels(n).forEach((size, i) => {
           const level = g.levels[i + 1];
           if (!level) throw new Error(`No uniform for pyramid level ${i + 1}`);
-          pass.setBindGroup(0, this.bind(`grow-${name}${i + 1}`, pipeline, used(name, level)));
+          pass.setBindGroup(0, this.bind(`grow-${name}${i + 1}${f}`, pipeline, used(name, level)));
           pass.dispatchWorkgroups(...this.groupsFor(size));
         });
       };
@@ -998,7 +1186,7 @@ export class Simulation implements Sim {
     enc.clearBuffer(next);
     const after2 = enc.beginComputePass();
     after2.setPipeline(k.birth);
-    after2.setBindGroup(0, this.bind(`grow-birth${a}${moved}`, k.birth, used('birth')));
+    after2.setBindGroup(0, this.bind(`grow-birth${a}${moved}${f}`, k.birth, used('birth')));
     after2.dispatchWorkgroups(...this.groups);
     this.occParity = flip(moved);
     return after2;
@@ -1155,6 +1343,20 @@ export const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   birth: [0, 1, 8, 9, 10, 11, 12, 13],
 };
 
+/**
+ * The bindings that a pass of growth.wgsl uses in addition with the flow in the tubes (`//#if FLOW`): the flow memory
+ * and the uniform block of the flow, in the passes that decide who divides.
+ */
+export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
+  rowSums: [],
+  windowSums: [],
+  test: [15, 16],
+  win: [15, 16],
+  buildCells: [],
+  buildDead: [],
+  birth: [],
+};
+
 /** The passes of growth and shrinkage (growth.wgsl, ADR 0025). */
 interface GrowthKernels {
   rowSums: GPUComputePipeline;
@@ -1170,6 +1372,17 @@ interface GrowthKernels {
 interface Steering {
   move: GPUComputePipeline;
   claim: GPUComputePipeline;
+}
+
+/** The agent passes with the flow in the tubes (Kernels.flowing()): `settle` places agents by the flow too. */
+interface Flowing extends Steering {
+  settle: GPUComputePipeline;
+}
+
+/** The passes of the flow in the tubes (flow.wgsl): the update, and the pressure iteration by RECENTRE (0, 1, 2). */
+interface FlowKernels {
+  update: GPUComputePipeline;
+  pressure: GPUComputePipeline[];
 }
 
 /** The pipelines for an environment that may hold walls (Kernels.walled()). */
@@ -1192,6 +1405,11 @@ class Kernels {
   private readonly viewPipelines = new Map<string, GPUComputePipeline>();
   private capacityPipelines?: Starts;
   private growthPipelines?: GrowthKernels;
+  private growthFlowPipelines?: GrowthKernels;
+  /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
+  private flowModule?: GPUShaderModule;
+  private readonly flowingPipelines = new Map<string, Flowing>();
+  private flowPipelines?: FlowKernels;
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -1216,7 +1434,43 @@ class Kernels {
     private readonly walls: GPUShaderModule,
     private readonly diffuseModule: GPUShaderModule,
     private readonly startModule: GPUShaderModule,
+    private readonly agentsSource: string,
   ) {}
+
+  /**
+   * The agent passes in which agents starve and come to life by the flow memory (agents.wgsl `//#if FLOW`, ADR 0029),
+   * built at their first use: every scene but the ones with the flow runs without them. Their source holds the lines
+   * of the flow; the source of every other agent pass is the one of the code before.
+   */
+  flowing(walls: boolean, saturate: boolean): Flowing {
+    const key = `${+walls}${+saturate}`;
+    let p = this.flowingPipelines.get(key);
+    if (!p) {
+      const module = (this.flowModule ??= this.device.createShaderModule({
+        code: common + variant(this.agentsSource, ['FLOW']),
+      }));
+      const constants = { ...(saturate ? { SATURATE: 1 } : {}), ...(walls ? { SENSE_WALLS: 1 } : {}) };
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
+      p = { move: pipeline('advance'), claim: pipeline('claim'), settle: pipeline('settle') };
+      this.flowingPipelines.set(key, p);
+    }
+    return p;
+  }
+
+  /** The passes of the flow in the tubes (flow.wgsl), built at their first use. */
+  flowPasses(): FlowKernels {
+    if (!this.flowPipelines) {
+      const module = this.device.createShaderModule({ code: common + flowWgsl });
+      const pipeline = (entryPoint: string, constants: Record<string, number> = {}) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
+      this.flowPipelines = {
+        update: pipeline('update'),
+        pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
+      };
+    }
+    return this.flowPipelines;
+  }
 
   /**
    * The start passes for a capacity above the start population (init.wgsl CAPACITY, ADR 0025), built at their first
@@ -1238,23 +1492,29 @@ class Kernels {
     return this.capacityPipelines;
   }
 
-  /** The passes of growth and shrinkage (growth.wgsl), built at their first use: every scene has growth off. */
-  growth(): GrowthKernels {
-    if (!this.growthPipelines) {
-      const module = this.device.createShaderModule({ code: common + growthWgsl });
-      const pipeline = (entryPoint: string) =>
-        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
-      this.growthPipelines = {
-        rowSums: pipeline('rowSums'),
-        windowSums: pipeline('windowSums'),
-        test: pipeline('test'),
-        win: pipeline('win'),
-        buildCells: pipeline('buildCells'),
-        buildDead: pipeline('buildDead'),
-        birth: pipeline('birth'),
-      };
-    }
-    return this.growthPipelines;
+  /**
+   * The passes of growth and shrinkage (growth.wgsl), built at their first use: only a scene with growth needs them.
+   * `flow`: with the lines of the flow in the tubes (`//#if FLOW`, ADR 0029); without them the source is the one of
+   * the code before.
+   */
+  growth(flow: boolean): GrowthKernels {
+    const built = flow ? this.growthFlowPipelines : this.growthPipelines;
+    if (built) return built;
+    const module = this.device.createShaderModule({ code: common + variant(growthWgsl, flow ? ['FLOW'] : []) });
+    const pipeline = (entryPoint: string) =>
+      this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+    const pipelines = {
+      rowSums: pipeline('rowSums'),
+      windowSums: pipeline('windowSums'),
+      test: pipeline('test'),
+      win: pipeline('win'),
+      buildCells: pipeline('buildCells'),
+      buildDead: pipeline('buildDead'),
+      birth: pipeline('birth'),
+    };
+    if (flow) this.growthFlowPipelines = pipelines;
+    else this.growthPipelines = pipelines;
+    return pipelines;
   }
 
   /**
@@ -1357,7 +1617,8 @@ class Kernels {
     initSource: string,
   ): Promise<Kernels> {
     const module = (code: string) => device.createShaderModule({ code: common + code });
-    const agents = module(agentsSource);
+    // Without the lines of the flow in the tubes (`//#if FLOW`, ADR 0029): the source of the code before.
+    const agents = module(variant(agentsSource));
     const compute = (m: GPUShaderModule, entryPoint: string, constants: Record<string, number> = {}) =>
       device.createComputePipelineAsync({ layout: 'auto', compute: { module: m, entryPoint, constants } });
     const C = GPUShaderStage.COMPUTE;
@@ -1480,6 +1741,7 @@ class Kernels {
       module(wallsWgsl),
       diffuseModule,
       start,
+      agentsSource,
     );
   }
 }

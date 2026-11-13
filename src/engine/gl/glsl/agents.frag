@@ -147,6 +147,18 @@ float steer(vec4 a, int s, inout uint rng, int clear) {
 // first, every step senses.
 bool senses() { return P.grid.w > 0u || P.model.w > 0.0; }
 
+#if FLOW
+// Starvation (starved in agents.wgsl, ADR 0029): an agent dies with the chance death · half² / (D² + half²), D the
+// flow memory of its cell.
+bool starved(vec4 a, uint i) {
+  ivec2 q = cellXY(ivec2(floor(a.xy)));
+  if (q.x < 0) return false;
+  float d = texelFetch(flowMemory, q, 0).x;
+  uint r = rngSeed(i, STARVE);
+  return rand(r) < F.e.x * F.e.y / (d * d + F.e.y);
+}
+
+#endif
 // Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
 // Clears the markers of the last step.
 bool shrinkage(inout vec4 a, uint i) {
@@ -156,6 +168,9 @@ bool shrinkage(inout vec4 a, uint i) {
     uint r = rngSeed(i, SHRINK);
     alive = rand(r) >= P.scent.w;
   }
+#if FLOW
+  if (alive) alive = !starved(a, i);
+#endif
   a.w = float(s | (alive ? ALIVE : 0u));
   return alive;
 }

@@ -217,6 +217,7 @@ test('More in Learn opens the topic for the source of the scene', async ({ page 
     ['spots', 'Jones 2010, Fig. 16 (top)', 'The model'],
     ['dunes', 'Fogleman 2020', 'About'],
     ['maze', 'Nakagaki et al. 2000', 'Physarum'],
+    ['tokyo', 'Tero et al. 2010, Fig. 1', 'Physarum'],
     ['three-strains', 'Made for this app', 'Scenes'],
   ] as const) {
     await preset(page).selectOption(id);

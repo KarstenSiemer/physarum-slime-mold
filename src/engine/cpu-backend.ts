@@ -48,6 +48,20 @@ export class CpuSim implements Sim {
     this.env.fill(0);
     this.hasEnvironment = false;
   }
+  /** The food sites of the last call, for the tests of the engine (ADR 0029). */
+  sites: (readonly [number, number])[] = [];
+  foodSites(centres: readonly (readonly [number, number])[]) {
+    this.sites = [...centres];
+  }
+  readFlow() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  readPressure() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  writeFlow() {
+    // nothing to write
+  }
   destroy() {
     this.calls.push('destroy');
   }

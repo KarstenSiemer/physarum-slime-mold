@@ -63,6 +63,11 @@ export interface Sim {
   /** Paints brush strokes in order: the only way food, light and walls reach a simulation. */
   paint(strokes: readonly Stroke[]): void;
   clearEnvironment(): void;
+  /**
+   * The centres of the food strokes on this grid, in cells and in the order of the strokes: the food sites that give and
+   * take the flux of the flow in the tubes (ADR 0029, flow.ts flowSites()). The engine sets them after each paint.
+   */
+  foodSites(centres: readonly (readonly [number, number])[]): void;
   destroy(): void;
   /** Resolves when all submitted GPU work is done. */
   finish(): Promise<void>;
@@ -87,6 +92,14 @@ export interface Sim {
    * tested growth or shrinkage counted them after its moves (ADR 0025). Empty before such a step.
    */
   readWindows(): Promise<Uint32Array>;
+  /**
+   * For tests: the memory of the flow in the tubes, 4 values per cell (flow memory, tube body, conductivity, roles of a
+   * food site), and the pressure of its four lanes, 4 values per cell (ADR 0029). Empty while the flow is off.
+   */
+  readFlow(): Promise<Float32Array>;
+  readPressure(): Promise<Float32Array>;
+  /** For tests: replaces the memory of the flow in the tubes, 4 values per cell as readFlow() returns them. */
+  writeFlow(data: Float32Array): void;
   /** Wall, food, light, unused per cell (0–255). */
   readEnv(): Promise<Uint8Array>;
   /**

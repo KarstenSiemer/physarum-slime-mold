@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { flowOn } from '../engine/flow';
   import { presetById, sourceKind, sourceText } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, linkUnchanged, loadPreset, openLearn, sceneChanged, type LearnTab } from './state.svelte';
@@ -36,6 +37,7 @@
     jones: 'The model',
     fogleman: 'About',
     nakagaki: 'Physarum',
+    tero: 'Physarum',
     later: 'The model',
     app: 'Scenes',
   };
@@ -59,6 +61,8 @@
       <span class="chip">{app.settings.model === 'jones' ? 'Only Jones’ rules' : 'Jones plus this app’s rules'}</span>
       {#if app.settings.collisions}<span class="chip">One agent per cell</span>{/if}
       {#if growthChip}<span class="chip">{growthChip}</span>{/if}
+      <!-- The flow in the tubes runs in the extended model only (ADR 0029). -->
+      {#if flowOn(app.settings)}<span class="chip">Flow in the tubes</span>{/if}
     </div>
     {#if sourceOpen}
       <div class="source-text" id="scene-source">

@@ -7,6 +7,7 @@ import {
   type StepOrder,
   type Strain,
 } from './params';
+import { tokyoShapes } from './tokyo';
 
 /**
  * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
@@ -409,18 +410,19 @@ PRESETS.push(
     name: 'Maze',
     group: 'experiments',
     source: 'Nakagaki et al. 2000',
-    summary: 'Food at both ends of a winding corridor: the network fills it, then thins to many paths.',
+    summary: 'Food at both ends of a winding corridor: the network fills it, then one tube remains.',
     watch:
-      'The network first fills every corridor. Then loops close and agents slowly die, so it thins to a mesh of paths that runs through the gaps between the walls. A path from food to food forms early and still holds at step 15,000, on wide, tall and square screens alike.',
+      'The network first fills every corridor. The flow runs from food to food and passes the dead ends by. They starve and are empty after about 4,000 steps. One thick tube remains and pulls tight along a short route. Turn Flow in the tubes off to see Jones’ rules alone: many paths remain.',
     about:
-      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends. The model keeps many paths instead of one tube: it has no flow that thickens the shortest one.',
+      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends. The flow in the tubes does what the flow in the real one does: the tube that carries it gets thicker, and the rest starves.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a slow shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Walls block movement and sensing, and they take in the trail. No sensor reads the trail behind a wall, so agents on one side of a thin wall do not follow the trail on the other side.',
+    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Flow in the tubes is on: each food gives or takes a flux of 8, after the model of Tero et al. Walls block movement and sensing, so no agent follows a trail behind a wall.',
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },
         // Sensors that walls block are the owner's rule for the Maze, not Jones': the extended model (ADR 0020, 0022).
-        { model: 'extended', density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001 },
+        // The flow in the tubes lets the dead ends starve, as in the real maze (ADR 0029).
+        { model: 'extended', density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001, flow: true },
       ),
     env: [
       wall(-0.4, -0.5, -0.4, 0.2),
@@ -467,6 +469,39 @@ PRESETS.push(
       food(0.64, 0.4, 0.018),
       food(-0.64, -0.4, 0.018),
     ],
+  },
+  {
+    id: 'tokyo',
+    name: 'Tokyo rail network',
+    group: 'experiments',
+    source: 'Tero et al. 2010, Fig. 1',
+    summary: 'Food at 36 cities around Tokyo: a colony grows from Tokyo and joins them with tubes.',
+    watch:
+      'The colony grows out from Tokyo as a mesh of tubes and reaches all 36 cities within about 2,000 steps. Then the tubes that carry no flow between cities starve. A network like the rail map remains, with loops around Tokyo Bay. It thins slowly: 48,000 steps stand for the 26 hours of the experiment.',
+    about:
+      'In 2010, Atsushi Tero and colleagues put oat flakes on a plate where the cities around Tokyo lie, with the coast as its edge. A slime mold grew out from Tokyo and joined all flakes within 26 hours. Its network was about as short, as fast and as robust as the real railway. Here, Jones’ agents grow from Tokyo, and the flow in the tubes decides which tubes stay.',
+    strainRoles: ['Jones’ foraging agent, drawn to food'],
+    why: 'Growth and shrinkage with Jones’ values of 2011 let the colony grow from Tokyo. Flow in the tubes is on: each food gives or takes a flux of 2, and Tokyo is seven foods, as in the model of the paper. The map has 512 × 512 cells on every screen, so north stays up. Sensor distance 7 and food weight 0.03 are the Maze’s. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
+    settings: () =>
+      jones(
+        { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
+        {
+          model: 'extended',
+          lattice: [512, 512],
+          density: 0.01,
+          capacity: 0.25,
+          layout: 'food',
+          boundary: 'dish',
+          foodStrength: 0.03,
+          growth: true,
+          flow: true,
+          // The flux of the model of Tero et al. 2010 (Fig. 4: I0 = 2), and the value whose network has the measures
+          // of the organism (ADR 0029).
+          flowStrength: 2,
+        },
+      ),
+    // The start layout 'food' places the colony on the first food: the station of Tokyo.
+    env: tokyoShapes(),
   },
 );
 
@@ -580,12 +615,13 @@ export function latticeLostNotice(lattice: Lattice, now: Pick<Settings, 'lattice
   return `This device cannot hold Jones’ grid of ${latticeText(lattice)} for this figure. The scene runs on a grid of ${gridText(now)}, so the result can be different from the paper.`;
 }
 
-export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'later' | 'app';
+export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Jones 2010')) return 'jones';
   if (p.source.startsWith('Fogleman 2020')) return 'fogleman';
   if (p.source.startsWith('Nakagaki')) return 'nakagaki';
+  if (p.source.startsWith('Tero')) return 'tero';
   if (p.source.startsWith('After Jones')) return 'later';
   return 'app';
 }
@@ -602,7 +638,9 @@ export function sourceText(p: Preset): string {
     case 'fogleman':
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';
     case 'nakagaki':
-      return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app.';
+      return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app. The flow in the tubes follows the model of Tero, Kobayashi and Nakagaki (2007).';
+    case 'tero':
+      return 'Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds the experiment of Fig. 1. The flow in the tubes follows the model of the paper; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.';
     case 'later':
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'app':

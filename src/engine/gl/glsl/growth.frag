@@ -53,6 +53,22 @@ uniform sampler2D occ; // agents per cell after this step's moves
 uniform sampler2D env;
 uniform int agentWidth;
 
+// Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl): programs.ts compiles this pass with it, and
+// gl/sim.ts uses that program only while the flow is on. An agent on a cell that the flux passed by does not divide.
+#ifndef FLOW
+#define FLOW 0
+#endif
+#if FLOW
+uniform sampler2D flowMemory; // x flow memory (flow.frag), of the step before
+layout(std140) uniform Flow {
+  vec4 a;
+  vec4 b;
+  vec4 c;
+  vec4 d;
+  vec4 e; // y: half², the square of the flow memory below which an agent does not divide
+} F;
+#endif
+
 bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
 bool empty(int c) { return habitable(c) && texelFetch(occ, cellCoord(c), 0).r < 0.5; }
 
@@ -63,6 +79,10 @@ int target(uint bits, int c, uint i) {
   bool moved = (bits & MOVED) != 0u;
   if (!growthTest() || !moved || n < float(P.growth.z) || n > float(P.growth.w)) return -1;
   ivec2 q = cellCoord(c);
+#if FLOW
+  float memory = texelFetch(flowMemory, q, 0).x;
+  if (memory * memory < F.e.y) return -1;
+#endif
   uint free = 0u;
   for (uint k = 0u; k < 8u; k++) {
     if (empty(cellAt(q + around(k)))) free++;

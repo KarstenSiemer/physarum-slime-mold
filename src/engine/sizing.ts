@@ -87,6 +87,13 @@ export const GROWTH_BYTES_PER_AGENT = 6;
  */
 export const VIEW_BYTES_PER_CELL = 24;
 
+/**
+ * More bytes per cell while the flow in the tubes is on (ADR 0029): the memory of each cell in two textures and the
+ * pressure of the four lanes in three, 16 B per cell each (sim.ts FlowState, gl/sim.ts `flow`). Both backends hold the
+ * same.
+ */
+export const FLOW_BYTES_PER_CELL = 80;
+
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
   s.stepOrder === 'move-first' && s.diffusion >= 2;

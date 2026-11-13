@@ -111,6 +111,7 @@ strains (one `vec4` lane each).
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
 | view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
+| flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H     | flow in the tubes, extended model only (ADR 0029)     |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -200,6 +201,25 @@ that a new bijection of the cells gives every step) and over the dead agents (by
 agent with rank r of a strain take the birth with rank r of that strain. The child gets a random
 position in its cell and a random heading and deposits nothing in its step. Then the occupancy and
 the alive count are counted anew. A step without a test runs no new pass.
+
+After 4, only while **Flow in the tubes** is on in the extended model (ADR 0029, `flow.wgsl`,
+`gl/glsl/flow.frag`; `flow-reference.ts` mirrors both for the tests): the grid is a network whose
+cells conduct by g = B (0.02 + D), with the tube body B (the trail smoothed over time; no tube below
+0.05) and the flow memory D. A food site is the centre cell of a food stroke; the colony covers it
+while that cell holds a tube. `update` takes the flux of each cell from the pressure of the step
+before, adapts D as Tero et al. do (dD/dt = f(Q) − D, f(Q) = Q^1.8 / (1 + Q^1.8)) while at least two
+sites give or take, and writes the body, the conductivity and the roles: among the covered sites as
+many give the flux I0 (Flow strength) as take it, in four pressure fields with their own draws, drawn
+again every 300 steps (`flowRoles()` in `flow.ts` is the same rule for the tests). Then `pressure`
+runs 16 times: a damped Jacobi iteration of Kirchhoff's law from the pressure of the step before,
+with a momentum term on the cells that conduct. A site gives or takes only up to a pressure limit, so
+no part of the network runs away from the rest. The agent passes read D of the step before: in step 2
+an agent on a cell with low D dies with a chance of up to 2 % per step, and a dead agent draws one
+random cell and comes to life there if the cell is open, holds a tube and has D above 0.5. With
+growth, an agent on a cell with D below 0.01 does not divide. The lines of the flow in `agents.wgsl`
+and `growth.wgsl` stand between `//#if FLOW` markers; a pass without the flow compiles from the
+source without them (`shaders/variant.ts`), so it keeps its bytes. Thirty steps stand for one minute
+of model time.
 
 All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
 deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
