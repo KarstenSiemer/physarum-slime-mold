@@ -832,7 +832,11 @@ W=384 node --import ./research/flow/register.mjs research/flow/view/tubes.ts v-r
 
 You must see a line with the flow memory on the cells with a tube, and a picture in which the
 network between the foods is thick and the strands outside it are thin. The lines of eight states
-are the record `logs/view/states.jsonl`.
+are the record `logs/view/states.jsonl`. This makes them again:
+
+```bash
+printf '%s\n' "512 v-maze-s1 4000" "512 g-tk-i1.4-s1 2000" "512 g-tk-i1.4-s1 8000" "512 g-tk-i1.4-s1 24000" "384 v-ring-s1 2000" "384 v-ring-s1 6000" "384 v-ring-s1 12000" "512 v-three-s1 2000" | while read w name step; do W=$w node --import ./research/flow/register.mjs research/flow/view/tubes.ts $name $step | head -1; done
+```
 
 The rules that were rejected, on the same state (`RULE`): the largest value of the discs, which
 shows scales on a thick tube; the same with a window of 9 × 9 cells for the strength across a
