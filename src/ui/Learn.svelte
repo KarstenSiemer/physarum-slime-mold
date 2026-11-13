@@ -116,7 +116,8 @@
         tubes with little flow fade. In experiments it found the shortest way through a maze (Nakagaki 2000) and built a
         network like the Tokyo rail system (Tero 2010). Jones’ model has no flow. The extended model of this app can add
         one: with Flow in the tubes, a tube that carries flow between foods stays, and the others starve. The scenes
-        Maze and Tokyo rail network use it.
+        Maze, Tokyo rail network and Food ring use it. In Rival networks and Tokyo, two networks, two strains each have
+        a flow of their own.
       </p>
       <p>
         It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food

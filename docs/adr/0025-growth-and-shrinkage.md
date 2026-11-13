@@ -2,6 +2,8 @@
 
 - Status: accepted (owner rule, 2026-11-11: every decision goes into an ADR)
 - Date: 2026-11-11
+- Changed by ADR 0031 (2026-11-13): the start layout "At the first food" starts a colony of each strain on a food of
+  its own, strain A on the first food as here, and the panel names it "On food, one colony each".
 
 ## Context
 

@@ -547,11 +547,11 @@ PRESETS.push(
     name: 'Food ring',
     group: 'experiments',
     source: 'Made for this app',
-    summary: 'Food in the middle and on a ring: a colony grows out and joins them like a wheel.',
+    summary: 'Food in the middle and on a ring: a colony grows out and joins all nine with tubes.',
     watch:
-      'The colony grows out from the middle food as a mesh and reaches the ring within about 1,000 steps. Then the flow thins the mesh. Spokes and parts of the ring remain, with loops. Raise Flow strength to keep more side routes, or lower it to come closer to a tree.',
+      'The colony grows out from the middle food as a mesh and covers all nine foods within about 2,000 steps. Then the flow thins the mesh, and the tubes that carry no flow between foods starve. A network with loops remains between the foods. It thins slowly, over 10,000 steps and more.',
     about:
-      'Nine food sources: one in the middle and eight on a ring around it. A small colony starts on the middle food and grows with Jones’ rule. The flow in the tubes then keeps the tubes that carry flow between foods, and the others starve. A network with loops remains, like a wheel with spokes.',
+      'Nine food sources: one in the middle and eight on a ring around it. A small colony starts on the middle food and grows with Jones’ rule. The flow in the tubes then keeps the tubes that carry flow between foods, and the others starve. A network with loops remains.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
     why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles. Flow in the tubes is on with a strength of 2. The dish has 384 × 384 cells on every screen. Sensor distance 7 and food weight 0.03 are the Maze’s. The middle food and the ring are this app’s choice: they show which links the flow keeps.',
     settings: () => forager({ lattice: L384(), flowStrength: 2 }),
@@ -565,7 +565,7 @@ PRESETS.push(
     source: 'Made for this app',
     summary: 'Two rival strains grow from two foods, and each builds its own network on all ten foods.',
     watch:
-      'Each strain grows from its own food as a mesh, and the two meshes push into each other. From about step 3,000 the flow thins them. Two networks remain on the same foods, one of each strain. Add a third strain: it starts on the third food and builds a third network.',
+      'Each strain grows from its own food as a mesh, and the two meshes push into each other. From about step 2,000 the flow thins them. Two networks remain on the same foods, one of each strain. Add a third strain: it starts on the third food and builds a third network.',
     about:
       'Ten food sources in a dish, and two strains that flee each other’s trail. Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. So each strain keeps the tubes that it needs, and the two networks lie side by side.',
     strainRoles: ['Starts on the food at the bottom left', 'The same settings as A, starts at the right'],
@@ -592,7 +592,7 @@ PRESETS.push(
     source: 'After Tero et al. 2010',
     summary: 'Two rival strains on the map around Tokyo: each joins the 36 cities with tubes of its own.',
     watch:
-      'Strain A grows out from Tokyo and strain B from Utsunomiya in the north. Both reach all cities, and their meshes push into each other. Then the flow thins each mesh. Two networks remain on the same cities, as two railway companies would build them.',
+      'Strain A grows out from Tokyo and strain B from Utsunomiya in the north. Both spread over the whole map, and their meshes push into each other. Then the flow thins each mesh. Two networks remain on the same cities, one of each strain.',
     about:
       'The map of the scene Tokyo rail network, with two strains that flee each other’s trail. Each strain is a slime mold of its own and has its own flow, so each keeps the tubes that carry its own flow between cities. The experiment of Tero and colleagues had one slime mold. This scene is this app’s question of what two rivals build.',
     strainRoles: ['Starts at Tokyo station', 'The same settings as A, starts at Utsunomiya'],

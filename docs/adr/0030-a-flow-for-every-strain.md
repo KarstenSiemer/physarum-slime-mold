@@ -275,7 +275,7 @@ After these changes the 18 runs with one strain give the same digests again.
   decay of 0.1. That scene has a decay of 0.6: its trail loses 60 % in every step. Without the
   rule of one agent per cell the same scene has up to 43 deposits, and the flow acts: all three
   strains cover both foods at step 1,000, and of 307,200 agents 4,060 live at step 3,000, 3,930
-  of them of one strain. A level that follows the decay of the strain is not built (`TODO.md`).
+  of them of one strain. Closed in ADR 0031: the levels follow the decay of the strain.
 - Open: a food site is one cell, the centre of a food dot (ADR 0029, decision 5). A strain covers
   a food only when its own tube holds that cell. Where rivals share a food dot, only the strains
   at its centre have it as a site (`TODO.md`).
