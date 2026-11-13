@@ -73,8 +73,11 @@ T. Nakagaki: Science 327: 439–442 (2010), with a supplement of two figures.
 - A second protocol, the plasmodium over all the land first and then all food sources at once, gave
   similar results (p. 439) [V].
 - The measures (p. 440) [V]: the total length TL, the mean shortest distance MD between two food
-  sources, and the fault tolerance FT, from the chance that a cut link separates a part. Each one is
-  divided by the value of the minimum spanning tree (MST).
+  sources, and the fault tolerance FT, from the chance that a cut link separates a part. TL and MD
+  are divided by the value of the minimum spanning tree (MST). The paper says the same of FT and
+  writes FT_MST. [I] That cannot be a division: a tree has FT = 0. FT is one minus the chance that
+  a cut link separates a part, as the numbers of the next point and of Fig. S1 show (FT 0.00 for a
+  tree).
 - The organism (21 runs): TL 1.75 ± 0.30, MD 0.85 ± 0.04. A cut link separates a part in 14 ± 4 % of
   the cases with light on the mountains and in 20 ± 13 % without. The rail network: TL about 1.8, MD
   0.85, 4 %.
@@ -101,6 +104,33 @@ Q. Ma, A. Johansson, A. Tero, T. Nakagaki, D. J. T. Sumpter: J. R. Soc. Interfac
 - [I] On a grid, the mean field of Eq. 2.16 with a time step of 1 is one weighted Jacobi iteration of
   Tero's Poisson equation per step. So the walk is Tero's model with a slow, local pressure solver
   and with sampling noise (measured in ADR 0029).
+- A node has a capacitance C_i (Eq. 2.15), and in the "biologically realistic" model the particles
+  of a node count against it (Sec. 2.4, Eq. 2.16). A solution of Kirchhoff's law needs "a global
+  solution over all nodes" (Sec. 2.2) [H, read on 2026-11-13 in the copy at PubMed Central, where
+  the equations are pictures].
+
+## Solvers for the pressure
+
+R. Bridson, M. Müller-Fischer: Fluid Simulation, SIGGRAPH 2007 Course Notes, chapter 4 ("Making
+Fluids Incompressible"). Read on 2026-11-13 for ADR 0029. The pressure of a fluid on a grid is the
+same kind of system as Tero's network Poisson equation.
+
+- The matrix is symmetric, with one row per cell and an entry for each neighbour. It is positive
+  definite, or positive semi-definite when nothing fixes the level of the pressure; then the
+  right-hand side must add up to zero, and the solution is fixed up to a constant (Sec. 4.3.2) [V].
+- Conjugate gradients: an iteration is one product of the matrix with a vector and a few sums
+  over all cells (Fig. 4.1). Without a preconditioner the number of iterations grows with the
+  width of the grid in cells (Sec. 4.3.2) [V].
+- Incomplete Cholesky, IC(0): a lower triangle L with the sparsity of the matrix, of which only a
+  diagonal is stored (Sec. 4.3.3, Eq. 4.29 to 4.31) [V].
+- Modified incomplete Cholesky, MIC(0): the entries that L · Lᵀ adds are put on the diagonal, so
+  that the row sums stay (Sec. 4.3.4, Eq. 4.33). The iteration count then grows with the square
+  root of the grid width. A weight τ = 0.97 between the two forms works best (Fig. 4.2). To apply
+  it, one sweep goes through the cells in order and one goes back (Fig. 4.3) [V].
+- The notes recommend this preconditioner for "regular PC's", as opposed to massively parallel
+  machines (Sec. 4.3.3) [V].
+- [I] In a sweep each cell needs the result of the cells before it. So the preconditioner is no
+  single pass on a GPU, where a pass computes all cells at once (ADR 0029, "Solver 1").
 
 ## Jones on flux
 
