@@ -7,7 +7,7 @@ layout(std140) uniform Flow {
   vec4 c; // weight, body rate, body low, fresh memory
   vec4 d; // memory floor, trail low, 1 / (trail full − trail low), site count
   vec4 e; // death, half², birth, birth from (tools.glsl, agents.frag)
-  vec4 f; // reference cell x, y, unused, unused
+  vec4 f; // reference cell x, y, the strain of the pass, unused
   vec4 g; // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
   vec4 sites[64]; // cell x, cell y, unused, unused
 } U;
@@ -145,9 +145,9 @@ void main() {
   } else {
     d = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));
   }
-  // The tube body follows the plasmodium, which the trail of all strains shows.
-  vec4 t = texelFetch(trail, p, 0);
-  float presence = clamp((t.x + t.y + t.z + t.w - U.d.y) * U.d.z, 0.0, 1.0);
+  // The tube body follows the plasmodium of the strain, which the trail of the strain shows (ADR 0030).
+  float t = texelFetch(trail, p, 0)[int(U.f.z)];
+  float presence = clamp((t - U.d.y) * U.d.z, 0.0, 1.0);
   float body = m.y + U.c.y * (presence - m.y);
   // Only a cell with a tube conducts: food that the plasmodium does not cover is open ground, as any other.
   bool food = texelFetch(env, p, 0).g > 0.0;

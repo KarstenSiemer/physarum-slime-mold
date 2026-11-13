@@ -2,7 +2,7 @@
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it, vi } from 'vitest';
 import { drawingOf } from '../model/link';
-import { defaultSettings, type Boundary, type Settings } from '../model/params';
+import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { presetById, shapesAt, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
@@ -163,6 +163,21 @@ describe('food, light and walls on a new simulation', () => {
     expect(engine.settings.resolution).toBe(512);
     const fresh = await engineWith({ ...maze.settings(), resolution: 512 });
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
+  });
+
+  // ADR 0030: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
+  it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
+    // 1320 B per cell and 80 for the flow of one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
+    const backend = new CpuBackend();
+    backend.bytesPerCell = 1320;
+    const one = { ...maze.settings(), resolution: 768 };
+    expect(one.flow).toBe(true);
+    const { engine, sim } = await engineWith(one, mazeEnv, canvas(), backend);
+    expect([sim().width, sim().height]).toEqual([768, 480]);
+    const [first] = engine.settings.strains;
+    if (!first) throw new Error('the Maze has a strain');
+    await engine.apply({ ...engine.settings, strains: [first, { ...defaultStrain(1) }] });
+    expect([sim().width, sim().height]).toEqual([512, 320]);
   });
 
   it('survive a switch between the dish and another arena, which changes the agent count', async () => {

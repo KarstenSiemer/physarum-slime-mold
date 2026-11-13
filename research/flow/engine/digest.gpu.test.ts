@@ -3,12 +3,12 @@
 // the app: it runs only when asked, with the configuration research/vitest.config.ts (README.md has the commands). It
 // writes one line per scene and backend to research/flow/out/engine/<name>.jsonl. Environment variables: VITE_KINDS
 // (list), VITE_STEPS, VITE_NAME, VITE_ONLY (scene ids; 'default' is the default settings without a scene), VITE_PATCH
-// (settings as JSON).
+// (settings as JSON), VITE_FLOW (1: also the digests of the state of the flow).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
 import { WebGl2Backend } from '../../../src/engine/gl/backend';
-import type { Backend } from '../../../src/engine/types';
+import type { Backend, Sim } from '../../../src/engine/types';
 import { WebGpuBackend } from '../../../src/engine/webgpu';
 import { constrain, defaultSettings, type Settings } from '../../../src/model/params';
 import { PRESETS } from '../../../src/model/presets';
@@ -19,6 +19,15 @@ const STEPS = Number(env.VITE_STEPS ?? 500);
 const NAME = env.VITE_NAME ?? 'digest';
 const ONLY = (env.VITE_ONLY ?? '').split(',').filter(Boolean);
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Partial<Settings>;
+/** VITE_FLOW=1: also the digests of the memory and the pressure of the flow of every strain (ADR 0030). */
+const FLOW_STATE = env.VITE_FLOW === '1';
+
+/** The memory or the pressure of the flow of each of the `strains` strains of a simulation, strain by strain. */
+async function flowState(sim: Sim, read: 'readFlow' | 'readPressure', strains: number): Promise<Float32Array[]> {
+  const parts: Float32Array[] = [];
+  for (let strain = 0; strain < strains; strain++) parts.push(await sim[read](strain));
+  return parts;
+}
 
 async function sha(parts: ArrayBufferView[]): Promise<string> {
   const total = parts.reduce((n, p) => n + p.byteLength, 0);
@@ -58,6 +67,7 @@ it('writes the digests of every scene', async () => {
         flat.set([a.x, a.y, a.heading, a.bits], i * 4);
       });
       const [trail, scent, envBytes] = [await sim.readTrail(), await sim.readScent(), await sim.readEnv()];
+      const strains = settings.strains.length;
       rows.push(
         JSON.stringify({
           kind,
@@ -71,6 +81,8 @@ it('writes the digests of every scene', async () => {
           trailSha: await sha([trail]),
           scentSha: await sha([scent]),
           envSha: await sha([envBytes]),
+          ...(FLOW_STATE ? { flowSha: await sha(await flowState(sim, 'readFlow', strains)) } : {}),
+          ...(FLOW_STATE ? { pressureSha: await sha(await flowState(sim, 'readPressure', strains)) } : {}),
         }),
       );
       engine.destroy();

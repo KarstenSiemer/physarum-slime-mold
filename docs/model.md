@@ -69,17 +69,18 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 
 **The fields** (per cell):
 
-| Symbol  | Field                                                                                  | Range    |
-| ------- | -------------------------------------------------------------------------------------- | -------- |
-| T_l     | trail of lane l, l = 0 … 3                                                             | ≥ 0      |
-| C_F     | food scent                                                                             | ≥ 0      |
-| C_L     | light repellent                                                                        | ≥ 0      |
-| w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]   |
-| n_l     | agents of strain l whose move ended in the cell in this step                           | integers |
-| occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers |
-| D, B    | flow memory and tube body (flow only, section 8)                                       | [0, 1]   |
-| G       | conductivity of the flow (flow only)                                                   | [0, 4]   |
-| P_k     | pressure of the flow in lane k = 0 … 3 (flow only)                                     | float    |
+| Symbol  | Field                                                                                  | Range     |
+| ------- | -------------------------------------------------------------------------------------- | --------- |
+| T_l     | trail of lane l, l = 0 … 3                                                             | ≥ 0       |
+| C_F     | food scent                                                                             | ≥ 0       |
+| C_L     | light repellent                                                                        | ≥ 0       |
+| w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]    |
+| n_l     | agents of strain l whose move ended in the cell in this step                           | integers  |
+| occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers  |
+| D       | flow memory (flow only, section 8)                                                     | [1e-4, 1] |
+| B       | tube body (flow only, section 8)                                                       | [0, 1]    |
+| G       | conductivity of the flow (flow only)                                                   | [0, 4]    |
+| P_k     | pressure of the flow in lane k = 0 … 3 (flow only)                                     | float     |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step.
 
@@ -184,8 +185,10 @@ Jones model the cut leaves the fields as they are (Jones 2010, p. 148).
 
 A brush stroke paints the cells of Ω whose centre lies within its radius r of the stroke (r ≥ 0.75 cells; a stroke of the user on
 steps of 1/16 cell). Wall: the wall byte 255, food and light 0. Food: the food byte 255. Light: max(old, 255 ·
-(1 − smoothstep(0.3 r, r, d))) at the distance d from the stroke. Erase: all bytes 0 (`shaders/paint.wgsl`,
-`gl/glsl/paint.frag`).
+t² (3 − 2t)) rounded to a byte, with t = clamp((d − r) / (0.3 r − r), 0, 1) at the distance d from the stroke: 255
+within 0.3 r, 0 at r. The shaders write this step out, because GLSL ES 3.00 leaves smoothstep undefined with its first
+edge above its second (ADR 0007, amendment of 2026-11-13). Erase: all bytes 0 (`shaders/paint.wgsl`,
+`gl/glsl/paint.frag`, CPU reference `lightByte()` in `brush.ts`).
 
 ### 6.8 Trail saturation K
 

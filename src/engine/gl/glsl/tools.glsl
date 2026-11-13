@@ -40,7 +40,12 @@ struct Spot {
 #define FLOW 0
 #endif
 #if FLOW
+// Every strain has a flow of its own (ADR 0030): the memory of the flow of strain A, and of strains B, C and D. A scene
+// with fewer strains binds the memory of strain A in their place, and no agent reads it there.
 uniform sampler2D flowMemory; // x flow memory, y tube body (flow.frag)
+uniform sampler2D flowMemory1;
+uniform sampler2D flowMemory2;
+uniform sampler2D flowMemory3;
 layout(std140) uniform Flow {
   vec4 a;
   vec4 b;
@@ -51,9 +56,17 @@ layout(std140) uniform Flow {
 const uint STARVE = 9u; // streams 4 to 6: growth.glsl; 7 and every 7 + k * 65536: the start (init.frag)
 const uint RESPAWN = 8u;
 
+// The memory of the flow of strain s at cell q (a layer of `flowMemory` in agents.wgsl).
+vec4 flowMemoryOf(uint s, ivec2 q) {
+  if (s == 1u) return texelFetch(flowMemory1, q, 0);
+  if (s == 2u) return texelFetch(flowMemory2, q, 0);
+  if (s == 3u) return texelFetch(flowMemory3, q, 0);
+  return texelFetch(flowMemory, q, 0);
+}
+
 // Where the flow brings a dead agent to life, or cell −1 (respawn in agents.wgsl): the agent draws one random point of
-// the grid. If its cell is open and holds a tube, the agent comes to life there with the chance
-// birth · (D − from) / (1 − from), D the flow memory of the cell.
+// the grid. If its cell is open and holds a tube of the agent's strain, the agent comes to life there with the chance
+// birth · (D − from) / (1 − from), D the flow memory of the cell for that strain.
 Spot respawn(vec4 a, uint i) {
   Spot none = Spot(a.xy, a.z, -1);
   if ((bitsOf(a) & ALIVE) != 0u) return none;
@@ -64,7 +77,7 @@ Spot respawn(vec4 a, uint i) {
   ivec2 q = cellXY(ivec2(floor(p)));
   int c = indexOf(q);
   if (!openCell(c)) return none;
-  vec4 m = texelFetch(flowMemory, q, 0);
+  vec4 m = flowMemoryOf(bitsOf(a) & 3u, q);
   if (m.y < F.c.z || rand(rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) return none;
   return Spot(wrapPos(p), rand(rng) * TAU, c);
 }

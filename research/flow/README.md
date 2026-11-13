@@ -74,6 +74,17 @@ code. Most numbers held bit for bit. Five things did not, and the ADR now says s
 - One line of a record was missing. Its run was made again.
 - The cost per step moves by about a sixth from run to run.
 
+**After the merge: a scene with several strains**
+([ADR 0030](../../docs/adr/0030-a-flow-for-every-strain.md), part 8). The owner tried the flow with
+a second strain. Agents of a strain that had no living agent appeared on the tubes of the first
+strain. The cause: the flow took all strains for one slime mold. The rule that brings dead agents
+to life did not look at the strain, and the flux ran through the tubes of all strains together.
+Now every strain is a slime mold of its own: the flow runs once for each strain, on the trail of
+that strain alone. A scene with one strain gives the same bytes as before (18 of 18 runs). The
+price: each strain costs the time and the memory of the flow again, about 1.8 ms per step in the
+Maze. One case is open: in the start scene with three strains and one agent per cell the trail is
+too weak for a tube, so the flow does nothing there.
+
 ## What is in this folder, and what you need to read
 
 | Part                                               | Size        | Read it?                                                |
@@ -624,18 +635,19 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 npm run build && npx playwright test --project e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 22, 27 and 3 tests pass.
+You must see 24, 45 and 3 tests pass.
 
-- `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block, the time scale, and the
-  growing mesh of part 5 with all rules on.
-- `flow.gpu.test.ts` (headless browser, 7 s; 51.0 to 66.5 s on GitHub, which has no GPU). Both
-  backends follow the CPU copy of the passes step by step; Kirchhoff's law; the shorter of two
-  tubes wins; starvation and births; the pressure limit; the same bytes for the same seed.
+- `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
+  scale, and the growing mesh of part 5 with all rules on.
+- `flow.gpu.test.ts` (headless browser, 13 s; its 27 tests of ADR 0029 took 51.0 to 66.5 s on
+  GitHub, which has no GPU). Both backends follow the CPU copy of the passes step by step;
+  Kirchhoff's law; the shorter of two tubes wins; starvation and births; the pressure limit; the
+  same bytes for the same seed; and a flow for every strain (part 8).
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
-A test is worth what it catches. This script puts 22 wrong rules into the code of the app, one at
-a time, and runs the GPU tests of the flow for each one (90 s):
+A test is worth what it catches. This script puts 39 wrong rules into the code of the app, one at
+a time, and runs the GPU tests of the flow for each one (5 minutes):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -643,30 +655,116 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
 
 It changes files below `src/` while it runs and writes each one back as it was. You must see a
 test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
-`logs/engine/mutations.txt`, and the ADR has it as a table ("The tests against wrong rules").
+`logs/engine/mutations-0030.txt`; `logs/engine/mutations.txt` is the record of the first 22 rules
+with the 27 tests of ADR 0029. Both ADRs have their rules as a table.
 
 Result: parts 2 to 6 are measurements that were made once. These tests run on every change. They
 hold the rule that the app got: a change that breaks Kirchhoff's law, the adaptation, the two
 backends against each other, or the bytes of a scene without the flow fails in CI.
 
+### 8. Does every strain have a flow of its own? [ADR 0030]
+
+The fault that the owner saw, as a test (4 s). Two strains, a tube in the trail of one of them,
+and 200 dead agents of each strain:
+
+```bash
+npx vitest run --project gpu src/engine/flow.gpu.test.ts -t "own strain"
+```
+
+You must see 6 tests pass. With the code before ADR 0030, 197 agents of the strain without a tube
+came to life.
+
+The owner's case in the real engine (1 minute): the Foraging maze with the flow and a second
+strain like the first one.
+
+```bash
+VITE_SCENE=foraging-maze VITE_STRAINS=2 VITE_STEPS=8000 VITE_NAME=strains-foraging npx vitest run --config research/vitest.config.ts research/flow/engine/strains.gpu.test.ts
+```
+
+It writes `research/flow/out/engine/strains-foraging.jsonl`: per sample of 500 steps the living
+agents of each strain (`alive`), the cells with a tube of the strain (`tubes`), and the food sites
+that give or take in its flow (`sites`). You must see `"alive":[...,0]` in every line: the second
+strain has no agent. The record is `logs/engine/strains-foraging-after.jsonl`. In
+`strains-foraging-before.jsonl`, made with `main` at `7d3a5ee`, the second strain has 560 agents at
+step 4,001 and 10,953 at step 5,001. That code had one flow for all strains, so its lines repeat
+the numbers of the flow for the second strain.
+
+One strain gives the bytes of before (2 minutes): the digests of nine runs on each backend after
+2,500 steps, with the state of the flow.
+
+```bash
+VITE_FLOW=1 VITE_STEPS=2500 VITE_ONLY=maze,tokyo VITE_NAME=flow-scenes npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+VITE_FLOW=1 VITE_STEPS=2500 VITE_ONLY=foraging-maze,shortest-path,network,light VITE_PATCH='{"flow":true,"model":"extended"}' VITE_NAME=flow-patched npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+VITE_FLOW=1 VITE_STEPS=2500 VITE_ONLY=maze VITE_PATCH='{"collisions":false}' VITE_NAME=flow-norule npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+VITE_FLOW=1 VITE_STEPS=2500 VITE_ONLY=maze,tokyo VITE_PATCH='{"trailSaturation":20}' VITE_NAME=flow-saturated npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+for n in scenes patched norule saturated; do node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/flow-$n.jsonl research/flow/logs/engine/strains-digest-7d3a5ee-$n.jsonl; done
+```
+
+The last command compares the four files with the digests of `main` at `7d3a5ee`, the code before
+ADR 0030 (made on an M3 Pro). It must print that 4, 8, 2 and 4 runs are equal. On another GPU,
+make the digests of `7d3a5ee` on your machine too, in a second checkout (part 6 has the way).
+
+The time of a step with one to four strains (1 minute each):
+
+```bash
+for n in 1 2 3 4; do VITE_SCENES=maze VITE_STRAINS=$n VITE_NAME=bench-strains-$n npx vitest run --config research/vitest.config.ts research/flow/engine/bench.gpu.test.ts; done
+```
+
+The open case of the ADR, the start scene Three strains with two foods in a dish (1 minute each):
+with one agent per cell and growth, and as the scene is.
+
+```bash
+VITE_SCENE=three-strains VITE_STRAINS=0 VITE_PATCH='{"collisions":true,"growth":true,"boundary":"dish","resolution":512}' VITE_FOODS='[[-0.15,0,0.02],[0.15,0,0.02]]' VITE_STEPS=6000 VITE_EVERY=1000 VITE_NAME=strains-three-dish npx vitest run --config research/vitest.config.ts research/flow/engine/strains.gpu.test.ts
+```
+
+```bash
+VITE_SCENE=three-strains VITE_STRAINS=0 VITE_PATCH='{"boundary":"dish","resolution":512}' VITE_FOODS='[[-0.15,0,0.02],[0.15,0,0.02]]' VITE_STEPS=3000 VITE_EVERY=1000 VITE_NAME=strains-three-norule npx vitest run --config research/vitest.config.ts research/flow/engine/strains.gpu.test.ts
+```
+
+`top` is the largest trail of each strain, in deposits of the strain; a cell holds a tube from 0.2
+on. With one agent per cell `top` stays below 0.27 and `tubes` is 0 for every strain: the flow does
+nothing. Without the rule `top` is above 30 at step 1,000, every strain has tubes, and almost all
+agents starve by step 3,000. The Maze has a `top` of about 2
+(`logs/engine/strains-maze-one.jsonl`).
+
+The record (`logs/engine/strains-bench-maze-*.jsonl`, two series): with the flow a step of the Maze
+takes 2.0, 3.8, 5.5 and 7.3 ms on WebGPU with one to four strains, and 2.4, 4.5, 6.6 and 8.7 ms on
+WebGL2; without the flow 0.2 and 0.4 ms.
+
+Result: every strain has a flow of its own, and a scene with one strain runs as before.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 126 files, 1.9 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 146 files, 1.8 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
 
-| Folder                       | What                                                                   | Made                                                  |
-| ---------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
-| `logs/maze-pair/`            | 60 runs of the prototype: table (a) and the numbers of the Context     | 2026-11-13, `campaign.ts maze-pair`                   |
-| `logs/maze-sites/`           | 30 runs of the prototype: a fixed flux at each food                    | 2026-11-12, `campaign.ts maze-sites`                  |
-| `logs/tokyo/`                | 6 runs of the prototype: table (b)                                     | 2026-11-12, `campaign.ts tokyo`                       |
-| `logs/alternatives/`         | 4 runs of the prototype: the rules that decisions 5 and 8 reject       | 2026-11-13, `campaign.ts alternatives`                |
-| `logs/engine/*.txt`          | the lines of `measure-maze.ts` and `measure-tokyo.ts` per run          | 2026-11-13, commit `92a63e7`, M3 Pro, Chromium, Metal |
-| `logs/engine/bench-*.jsonl`  | table (c): runs 1 and 2 are the table, runs 3 to 8 are later runs      | 2026-11-13; runs 3 to 8 with the code of `main`       |
-| `logs/engine/digest-*.jsonl` | the digests of `main` at `377f428`, and of `92a63e7` with the flow off | the same                                              |
-| `logs/engine/before-review/` | the Tokyo runs with the code before the review (commit `6ffed4b`)      | 2026-11-13                                            |
-| `logs/engine/mutations.txt`  | the tests that fail for each of 22 wrong rules (part 7)                | 2026-11-13, `engine/mutate.ts`, the code of `main`    |
+| Folder                           | What                                                                                                                                                                                                                            | Made                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `logs/maze-pair/`                | 60 runs of the prototype: table (a) and the numbers of the Context                                                                                                                                                              | 2026-11-13, `campaign.ts maze-pair`                   |
+| `logs/maze-sites/`               | 30 runs of the prototype: a fixed flux at each food                                                                                                                                                                             | 2026-11-12, `campaign.ts maze-sites`                  |
+| `logs/tokyo/`                    | 6 runs of the prototype: table (b)                                                                                                                                                                                              | 2026-11-12, `campaign.ts tokyo`                       |
+| `logs/alternatives/`             | 4 runs of the prototype: the rules that decisions 5 and 8 reject                                                                                                                                                                | 2026-11-13, `campaign.ts alternatives`                |
+| `logs/engine/*.txt`              | the lines of `measure-maze.ts` and `measure-tokyo.ts` per run                                                                                                                                                                   | 2026-11-13, commit `92a63e7`, M3 Pro, Chromium, Metal |
+| `logs/engine/bench-*.jsonl`      | table (c): runs 1 and 2 are the table, runs 3 to 8 are later runs                                                                                                                                                               | 2026-11-13; runs 3 to 8 with the code of `main`       |
+| `logs/engine/digest-*.jsonl`     | the digests of `main` at `377f428`, and of `92a63e7` with the flow off                                                                                                                                                          | the same                                              |
+| `logs/engine/before-review/`     | the Tokyo runs with the code before the review (commit `6ffed4b`)                                                                                                                                                               | 2026-11-13                                            |
+| `logs/engine/mutations.txt`      | the tests that fail for each of 22 wrong rules (part 7)                                                                                                                                                                         | 2026-11-13, `engine/mutate.ts`, the code of `main`    |
+| `logs/engine/mutations-0030.txt` | the same for 39 wrong rules, with the tests of ADR 0030                                                                                                                                                                         | 2026-11-13, the code of ADR 0030                      |
+| `logs/engine/strains-*.jsonl`    | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -712,11 +810,11 @@ Notes on the record:
 | `data/tokyo_scene.json`   | the map of the prototype: stations from Wikidata (CC0), coast © OpenStreetMap contributors (ODbL) |
 | `solvers.ts`              | the solvers on one network with the rule of the app (2026-11-13)                                  |
 | `rules.ts`, `bounded.ts`  | the passes with single rules as switches, and two scenes for them (2026-11-13)                    |
-| `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step, digests                                       |
+| `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step, digests, the strains of a scene               |
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 22 wrong rules, one at a time, against the GPU tests of the flow                                  |
+| `engine/mutate.ts`        | 39 wrong rules, one at a time, against the GPU tests of the flow                                  |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
 | `research.test.ts`        | the unit test that keeps the scripts and the logs together                                        |
 

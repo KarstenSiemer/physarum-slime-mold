@@ -4384,8 +4384,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         format: 'rgba32float',
         usage: GPUTextureUsage.TEXTURE_BINDING,
       });
-      // With the flow in the tubes, the passes that decide who divides also read the flow memory, a texture, and the
-      // uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029).
+      // With the flow in the tubes, the passes that decide who divides also read the flow memory, a texture with a
+      // layer per strain (ADR 0030), and the uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029).
       for (const flow of [false, true]) {
         const passes = kernels.growth(flow);
         expect(Object.keys(passes).sort()).toEqual(Object.keys(lists).sort());
@@ -4397,7 +4397,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           }));
           if (flow)
             for (const binding of more[name] ?? [])
-              entries.push({ binding, resource: binding === 15 ? texture.createView() : { buffer } });
+              entries.push({
+                binding,
+                resource: binding === 15 ? texture.createView({ dimension: '2d-array' }) : { buffer },
+              });
           device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
           expect((await device.popErrorScope())?.message, `${name}${flow ? ' with the flow' : ''}`).toBeUndefined();
         }

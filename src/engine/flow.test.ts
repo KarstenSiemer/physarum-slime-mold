@@ -253,7 +253,7 @@ describe('packFlow', () => {
     }
   });
 
-  it('measures the trail in deposits of strain A', () => {
+  it('measures the trail of a strain in deposits of that strain', () => {
     const of = (deposit: number) =>
       new Float32Array(packFlow({ ...settings, strains: [{ ...defaultStrain(0), deposit }] }, sites));
     const five = of(5);
@@ -264,6 +264,31 @@ describe('packFlow', () => {
     // A deposit of 0 gives finite thresholds.
     const none = of(0);
     expect(Number.isFinite(none[14] ?? NaN)).toBe(true);
+    // Every strain has a block of its own (ADR 0030): the levels of the trail are in deposits of the block's strain.
+    const strains = [5, 2, 8].map((deposit, i) => ({ ...defaultStrain(i), deposit }));
+    [5, 2, 8].forEach((deposit, strain) => {
+      const f = new Float32Array(packFlow({ ...settings, strains }, sites, undefined, strain));
+      expect(f[13], `strain ${String(strain)}`).toBeCloseTo(FLOW.trailLow * deposit, 6);
+      expect(f[14], `strain ${String(strain)}`).toBeCloseTo(1 / ((FLOW.trailFull - FLOW.trailLow) * deposit), 6);
+    });
+  });
+
+  it('names the strain of the block, and gives every strain the same constants and sites', () => {
+    const strains = [0, 1, 2, 3].map((i) => defaultStrain(i));
+    const blocks = strains.map(
+      (_, strain) => new Float32Array(packFlow({ ...settings, strains }, sites, undefined, strain)),
+    );
+    const [first] = blocks;
+    if (!first) throw new Error('no block');
+    blocks.forEach((f, strain) => {
+      // Slot 22 is U.f.z of flow.wgsl and flow.frag: the lane of the trail that the passes of the strain read.
+      expect(f[22]).toBe(strain);
+      f.forEach((v, i) => {
+        if (i !== 22) expect(v, `value ${String(i)} of strain ${String(strain)}`).toBe(first[i]);
+      });
+    });
+    // The first strain by default.
+    expect(new Float32Array(packFlow(settings, sites))[22]).toBe(0);
   });
 
   it('writes the sites after the constants, and the first site as the cell of reference', () => {
@@ -287,6 +312,24 @@ describe('packFlow', () => {
     const none = new Float32Array(packFlow(settings, [], buf));
     expect(none[15]).toBe(0);
     expect(none.subarray(28).every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe('the flow of a strain in the CPU copy of the passes (ADR 0030)', () => {
+  it('builds the tube body from the trail of the strain of the block alone', () => {
+    const n = 16;
+    const grid: FlowGrid = { width: n, height: n, boundary: 'box', env: new Uint8Array(n * n * 4) };
+    const strains = [0, 1].map((i) => defaultStrain(i));
+    const settings = { ...defaultSettings(), strains };
+    // A full trail of the second strain on one cell, and of the first strain on another.
+    const [mine, other] = [5 * n + 5, 9 * n + 9];
+    const trail = new Float32Array(n * n * 4);
+    trail[mine * 4 + 1] = 10;
+    trail[other * 4] = 10;
+    const u = new Float32Array(packFlow(settings, [], undefined, 1));
+    const fields = flowStep(grid, u, flowStart(grid, FLOW.fresh), trail, 0, settings.seed);
+    expect(fields.memory[mine * 4 + 1]).toBeCloseTo(FLOW.bodyRate, 6);
+    expect(fields.memory[other * 4 + 1]).toBe(0);
   });
 });
 

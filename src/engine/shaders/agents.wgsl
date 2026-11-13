@@ -30,7 +30,8 @@ override SATURATE: bool = false;
 // Flow in the tubes (ADR 0029, flow.wgsl). The lines between `//#if FLOW` and `//#endif` are part of the source only
 // while the flow is on (variant.ts); without them the source is the one of the code before, character for character,
 // so a simulation without the flow keeps its bytes. An agent on a cell whose flow memory is low starves, and a dead
-// agent comes to life on an empty cell whose flow memory is high: the tube that carries flux gets wider.
+// agent comes to life on an empty cell whose flow memory is high: the tube that carries flux gets wider. Every strain
+// has a flow of its own (ADR 0030): an agent reads the memory of its own strain, a layer of `flowMemory`.
 struct FlowRule {
   a: vec4f,
   b: vec4f,
@@ -38,7 +39,7 @@ struct FlowRule {
   d: vec4f,
   e: vec4f, // death, half², birth, birth from
 }
-@group(0) @binding(12) var flowMemory: texture_2d<f32>; // x flow memory, y tube body (flow.wgsl)
+@group(0) @binding(12) var flowMemory: texture_2d_array<f32>; // a layer per strain: x flow memory, y tube body
 @group(0) @binding(13) var<uniform> F: FlowRule;
 const STARVE = 9u; // streams 4 to 6: growth.wgsl; 7 and every 7 + k · 65536: the start (init.wgsl)
 const RESPAWN = 8u;
@@ -190,13 +191,13 @@ fn randomIn(center: vec2f, radius: f32, rng: ptr<function, u32>) -> vec2f {
 }
 
 //#if FLOW
-// Starvation (ADR 0029): an agent dies with the chance death · half² / (D² + half²), D the flow memory of its cell.
-// On a tube that carries flux D is far above `half`, and the chance is almost 0; on a cell that the flux passed by
-// for long it is `death`.
+// Starvation (ADR 0029): an agent dies with the chance death · half² / (D² + half²), D the flow memory of its cell
+// for its strain. On a tube that carries flux D is far above `half`, and the chance is almost 0; on a cell that the
+// flux passed by for long it is `death`.
 fn starved(a: Agent, id: u32) -> bool {
   let q = cellXY(vec2i(floor(a.pos)));
   if (q.x < 0) { return false; }
-  let d = textureLoad(flowMemory, q, 0).x;
+  let d = textureLoad(flowMemory, q, a.bits & 3u, 0).x;
   var r = rngSeed(id, STARVE);
   return rand(&r) < F.e.x * F.e.y / (d * d + F.e.y);
 }
@@ -229,9 +230,10 @@ fn openCell(c: i32) -> bool { return habitable(c) && (P.cfg.w == 0u || occ[c] ==
 
 //#if FLOW
 // Where the flow brings a dead agent to life (ADR 0029), or cell −1: the agent draws one random point of the grid. If
-// its cell is open (openCell) and holds a tube, the agent comes to life there with the chance
-// birth · (D − from) / (1 − from), D the flow memory of the cell. A pure function of the agent, the parameters, `env`,
-// `occ` and the flow memory, as placement() must be; with the rule the agent claims the cell like a move.
+// its cell is open (openCell) and holds a tube of the agent's strain, the agent comes to life there with the chance
+// birth · (D − from) / (1 − from), D the flow memory of the cell for that strain (ADR 0030: before, any tube gave
+// life to the agents of every strain). A pure function of the agent, the parameters, `env`, `occ` and the flow memory,
+// as placement() must be; with the rule the agent claims the cell like a move.
 fn respawn(a: Agent, id: u32) -> Spot {
   let none = Spot(a.pos, a.heading, -1);
   if ((a.bits & ALIVE) != 0u) { return none; }
@@ -240,7 +242,7 @@ fn respawn(a: Agent, id: u32) -> Spot {
   let q = cellXY(vec2i(floor(p)));
   let c = indexOf(q);
   if (!openCell(c)) { return none; }
-  let m = textureLoad(flowMemory, q, 0);
+  let m = textureLoad(flowMemory, q, a.bits & 3u, 0);
   if (m.y < F.c.z || rand(&rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) { return none; }
   return Spot(wrapPos(p), rand(&rng) * TAU, c);
 }

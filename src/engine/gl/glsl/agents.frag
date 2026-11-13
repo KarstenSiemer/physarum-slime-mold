@@ -149,11 +149,11 @@ bool senses() { return P.grid.w > 0u || P.model.w > 0.0; }
 
 #if FLOW
 // Starvation (starved in agents.wgsl, ADR 0029): an agent dies with the chance death · half² / (D² + half²), D the
-// flow memory of its cell.
+// flow memory of its cell for its strain.
 bool starved(vec4 a, uint i) {
   ivec2 q = cellXY(ivec2(floor(a.xy)));
   if (q.x < 0) return false;
-  float d = texelFetch(flowMemory, q, 0).x;
+  float d = flowMemoryOf(bitsOf(a) & 3u, q).x;
   uint r = rngSeed(i, STARVE);
   return rand(r) < F.e.x * F.e.y / (d * d + F.e.y);
 }

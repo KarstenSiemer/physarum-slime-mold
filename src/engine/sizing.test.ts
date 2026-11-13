@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings } from '../model/params';
+import { defaultSettings, defaultStrain } from '../model/params';
 import {
   agentCount,
   BYTES_PER_AGENT,
@@ -9,6 +9,7 @@ import {
   estimateBytes,
   fitResolution,
   FLOW_BYTES_PER_CELL,
+  flowBytesPerCell,
   gridSize,
   memoryBudget,
   VIEW_BYTES_PER_CELL,
@@ -120,5 +121,16 @@ describe('the flow in the tubes', () => {
     expect(estimateBytes(w, h, 1000, BYTES_PER_CELL + FLOW_BYTES_PER_CELL) - without).toBe(w * h * FLOW_BYTES_PER_CELL);
     // The Tokyo scene on its lattice: 20 MiB more.
     expect((512 * 512 * FLOW_BYTES_PER_CELL) / 2 ** 20).toBe(20);
+  });
+
+  // ADR 0030: every strain has a flow of its own, with textures of its own.
+  it('counts the textures of every strain, and none while the flow is off or the model is Jones’', () => {
+    const strains = (n: number) => Array.from({ length: n }, (_, i) => defaultStrain(i));
+    const on = { ...defaultSettings(), model: 'extended' as const, flow: true };
+    expect(flowBytesPerCell({ ...on, strains: strains(1) })).toBe(80);
+    expect(flowBytesPerCell({ ...on, strains: strains(3) })).toBe(240);
+    expect(flowBytesPerCell({ ...on, strains: strains(4) })).toBe(320);
+    expect(flowBytesPerCell({ ...on, flow: false, strains: strains(3) })).toBe(0);
+    expect(flowBytesPerCell({ ...on, model: 'jones', strains: strains(1) })).toBe(0);
   });
 });

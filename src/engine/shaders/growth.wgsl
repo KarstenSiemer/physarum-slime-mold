@@ -33,7 +33,8 @@
 
 // Flow in the tubes (ADR 0029, flow.wgsl). The lines between `//#if FLOW` and `//#endif` are part of the source only
 // while the flow is on (variant.ts); without them the source is the one of the code before, character for character.
-// An agent on a cell that the flux passed by does not divide: the flow supplies no plasm for a child there.
+// An agent on a cell that the flux of its strain passed by does not divide: the flow supplies no plasm for a child
+// there. Every strain has a flow of its own (ADR 0030): a layer of `flowMemory`.
 struct FlowRule {
   a: vec4f,
   b: vec4f,
@@ -41,7 +42,7 @@ struct FlowRule {
   d: vec4f,
   e: vec4f, // y: half², the square of the flow memory below which an agent does not divide
 }
-@group(0) @binding(15) var flowMemory: texture_2d<f32>; // x flow memory (flow.wgsl), of the step before
+@group(0) @binding(15) var flowMemory: texture_2d_array<f32>; // a layer per strain: x flow memory, of the step before
 @group(0) @binding(16) var<uniform> F: FlowRule;
 //#endif
 
@@ -136,7 +137,7 @@ fn divideInto(a: Agent, c: i32) -> i32 {
   if (!growthTest() || counts[c][s] == 0u || n < P.growth.z || n > P.growth.w) { return -1; }
   let q = cellCoord(u32(c));
 //#if FLOW
-  let memory = textureLoad(flowMemory, q, 0).x;
+  let memory = textureLoad(flowMemory, q, s, 0).x;
   if (memory * memory < F.e.y) { return -1; }
 //#endif
   // Bit k of `open`: neighbour k is habitable and empty. Bit k of `walls`: neighbour k is a wall.

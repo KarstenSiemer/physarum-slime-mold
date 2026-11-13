@@ -1,7 +1,7 @@
 import type { Boundary, Settings } from '../../model/params';
 import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, packFlow } from '../flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, flowStrains, packFlow } from '../flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -193,10 +193,11 @@ export class GlSim implements Sim {
   /** The targets of growth and shrinkage, while growth is on (ADR 0025). */
   private growth?: GlGrowth | undefined;
   /**
-   * The state of the flow in the tubes, while it is on (flow.frag, ADR 0029; `FlowState` in ../sim.ts): the memory of
-   * each cell in two targets, the pressure of the four lanes in three, and the uniform block of the passes.
+   * The state of the flow in the tubes, while it is on (flow.frag, ADR 0029; `FlowState` in ../sim.ts): per strain the
+   * memory of each cell in two targets and the pressure of the four lanes in three (ADR 0030), and the uniform block
+   * of the passes, which holds the block of one strain at a time.
    */
-  private flow?: { memory: Pair<Target>; pressure: Target[]; ubo: WebGLBuffer } | undefined;
+  private flow?: { memory: Pair<Target>[]; pressure: Target[][]; ubo: WebGLBuffer } | undefined;
   /** Which memory target is current, and which pressure target holds the pressure in work. */
   private flowM: Bit = 0;
   private flowP = 0;
@@ -452,8 +453,13 @@ export class GlSim implements Sim {
     this.sites = flowSites(centres, this.width, this.height);
   }
 
-  /** The targets and the uniform block of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL). */
+  /**
+   * The targets and the uniform block of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL), with the
+   * targets of every strain of the settings (ADR 0030). Settings with another number of strains get a new state.
+   */
   private ensureFlow() {
+    const strains = flowStrains(this.settings);
+    if (this.flow && this.flow.memory.length !== strains) this.dropFlow();
     if (!this.flow) {
       const gl = this.gl;
       const made: Target[] = [];
@@ -462,9 +468,11 @@ export class GlSim implements Sim {
         made.push(t);
         return t;
       };
+      const each = <T>(of: () => T) => Array.from({ length: strains }, of);
       try {
-        const memory: Pair<Target> = [make(), make()];
-        this.flow = { memory, pressure: [make(), make(), make()], ubo: uniformBlock(gl, FLOW_BYTES, FLOW_BINDING) };
+        const memory = each((): Pair<Target> => [make(), make()]);
+        const pressure = each(() => [make(), make(), make()]);
+        this.flow = { memory, pressure, ubo: uniformBlock(gl, FLOW_BYTES, FLOW_BINDING) };
       } catch (err) {
         for (const t of made) destroyTarget(gl, t);
         throw err;
@@ -474,41 +482,62 @@ export class GlSim implements Sim {
     return this.flow;
   }
 
-  /** The start of the flow: every cell with the memory of fresh ground, no tube, no pressure. */
+  /** The start of the flow of every strain: every cell with the memory of fresh ground, no tube, no pressure. */
   private clearFlow() {
     const gl = this.gl;
     if (!this.flow) return;
-    for (const t of this.flow.memory) {
+    for (const t of this.flow.memory.flat()) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
       gl.viewport(0, 0, t.width, t.height);
       gl.clearColor(FLOW.fresh, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
-    for (const t of this.flow.pressure) clear(gl, t);
+    for (const t of this.flow.pressure.flat()) clear(gl, t);
     this.flowM = 0;
     this.flowP = 0;
   }
 
   private dropFlow() {
     if (!this.flow) return;
-    for (const t of [...this.flow.memory, ...this.flow.pressure]) destroyTarget(this.gl, t);
+    for (const t of [...this.flow.memory.flat(), ...this.flow.pressure.flat()]) destroyTarget(this.gl, t);
     this.gl.deleteBuffer(this.flow.ubo);
     this.flow = undefined;
   }
 
-  readFlow(): Promise<Float32Array> {
-    if (!this.flow) return Promise.resolve(new Float32Array(0));
-    return Promise.resolve(readTarget(this.gl, this.flow.memory[this.flowM]) as Float32Array);
+  /** The uniform block of the flow with the block of a strain (flow.ts packFlow()): the passes that follow read it. */
+  private flowBlock(flow: NonNullable<GlSim['flow']>, strain: number) {
+    const gl = this.gl;
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, FLOW_BINDING, flow.ubo);
+    const block = packFlow(this.settings, this.sites, this.flowData, strain);
+    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(block));
   }
 
-  readPressure(): Promise<Float32Array> {
-    if (!this.flow) return Promise.resolve(new Float32Array(0));
-    return Promise.resolve(readTarget(this.gl, at(this.flow.pressure, this.flowP)) as Float32Array);
+  /**
+   * The memory of the flow of every strain for the agent passes and growth (flowMemoryOf in tools.glsl): the samplers
+   * `flowMemory`, `flowMemory1`, `flowMemory2` and `flowMemory3`. A strain that the settings do not hold gets the
+   * memory of the first strain: every sampler needs a texture, and no agent reads this one.
+   */
+  private flowMemories(flow: NonNullable<GlSim['flow']>): Record<string, WebGLTexture> {
+    const of = (strain: number) => (flow.memory[strain] ?? at(flow.memory, 0))[this.flowM].texture;
+    return { flowMemory: of(0), flowMemory1: of(1), flowMemory2: of(2), flowMemory3: of(3) };
   }
 
-  writeFlow(data: Float32Array) {
-    if (!flowOn(this.settings)) return;
-    writeTarget(this.gl, this.ensureFlow().memory[this.flowM], 0, 0, this.width, this.height, data);
+  /** Empty for a strain that the settings do not hold, and until the next step for a strain that is new (../sim.ts). */
+  readFlow(strain = 0): Promise<Float32Array> {
+    const memory = strain < flowStrains(this.settings) ? this.flow?.memory[strain] : undefined;
+    if (!memory) return Promise.resolve(new Float32Array(0));
+    return Promise.resolve(readTarget(this.gl, memory[this.flowM]) as Float32Array);
+  }
+
+  readPressure(strain = 0): Promise<Float32Array> {
+    const pressure = strain < flowStrains(this.settings) ? this.flow?.pressure[strain] : undefined;
+    if (!pressure) return Promise.resolve(new Float32Array(0));
+    return Promise.resolve(readTarget(this.gl, at(pressure, this.flowP)) as Float32Array);
+  }
+
+  writeFlow(data: Float32Array, strain = 0) {
+    if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
+    writeTarget(this.gl, at(this.ensureFlow().memory, strain)[this.flowM], 0, 0, this.width, this.height, data);
   }
 
   reset() {
@@ -1044,15 +1073,12 @@ export class GlSim implements Sim {
     const gl = this.gl;
     const dummy = this.counts.texture; // for the unused samplers of the agent passes, which never draw into it
     const agentProgram = this.agentProgram();
-    // The flow in the tubes (ADR 0029): the agent passes read the memory of the step before, with the roles of this
-    // step in the uniform block.
+    // The flow in the tubes (ADR 0029): the agent passes read the memory of the step before, each agent that of its
+    // strain (ADR 0030). They read only the constants of the uniform block, which every strain has: the block of the
+    // first strain. Growth, later in the step, reads the same block.
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
-    if (flow) {
-      gl.bindBufferBase(gl.UNIFORM_BUFFER, FLOW_BINDING, flow.ubo);
-      const block = packFlow(this.settings, this.sites, this.flowData);
-      gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(block));
-    }
-    const flowMemory: Record<string, WebGLTexture> = flow ? { flowMemory: flow.memory[this.flowM].texture } : {};
+    if (flow) this.flowBlock(flow, 0);
+    const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1124,35 +1150,41 @@ export class GlSim implements Sim {
   /**
    * The flow in the tubes after the diffusion of a step (flow.frag; encodeFlow in ../sim.ts, ADR 0029): the update of
    * the memory from the pressure and the trail of this step, then the pressure iterations on the new conductivity.
+   * Once per strain, each with its own targets and its own block (ADR 0030).
    */
   private encodeFlow(flow: NonNullable<GlSim['flow']>) {
     const programs = this.prog.flow();
     const env = this.env.texture;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
-    this.pass(
-      programs.update,
-      flow.memory[next],
-      {
-        env,
-        memory: flow.memory[m].texture,
-        pressureIn: at(flow.pressure, p).texture,
-        trail: this.trail[this.p].texture,
-      },
-      {},
-    );
-    const memory = flow.memory[next].texture;
-    for (let i = 0; i < FLOW_ITERATIONS; i++) {
-      const [before, out] = [(p + 2) % 3, (p + 1) % 3];
+    flow.memory.forEach((memories, strain) => {
+      const pressure = at(flow.pressure, strain);
+      this.flowBlock(flow, strain);
+      p = this.flowP;
       this.pass(
-        programs.pressure,
-        at(flow.pressure, out),
-        { env, memory, pressureIn: at(flow.pressure, p).texture, pressureBefore: at(flow.pressure, before).texture },
-        // The first two iterations take the pressure of the reference cell off (RECENTRE in flow.wgsl).
-        { recentre: i < 2 ? i + 1 : 0 },
+        programs.update,
+        memories[next],
+        {
+          env,
+          memory: memories[m].texture,
+          pressureIn: at(pressure, p).texture,
+          trail: this.trail[this.p].texture,
+        },
+        {},
       );
-      p = out;
-    }
+      const memory = memories[next].texture;
+      for (let i = 0; i < FLOW_ITERATIONS; i++) {
+        const [before, out] = [(p + 2) % 3, (p + 1) % 3];
+        this.pass(
+          programs.pressure,
+          at(pressure, out),
+          { env, memory, pressureIn: at(pressure, p).texture, pressureBefore: at(pressure, before).texture },
+          // The first two iterations take the pressure of the reference cell off (RECENTRE in flow.wgsl).
+          { recentre: i < 2 ? i + 1 : 0 },
+        );
+        p = out;
+      }
+    });
     this.flowM = next;
     this.flowP = p;
   }
@@ -1178,7 +1210,7 @@ export class GlSim implements Sim {
     // With the flow in the tubes, the test in which an agent on a starved cell does not divide (FLOW in growth.frag,
     // ADR 0029): it reads the flow memory that the agent pass of the step read.
     const flow = flowOn(this.settings) ? this.flow : undefined;
-    const flowMemory: Record<string, WebGLTexture> = flow ? { flowMemory: flow.memory[this.flowM].texture } : {};
+    const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
     this.pass(
       flow ? this.prog.growthFlowing() : p.test,
       tested,
