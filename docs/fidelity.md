@@ -1,6 +1,6 @@
 # How close the model comes to the slime mold
 
-Status: 2026-11-13, `main` at `e5e7710`. The rules of the model are in [model.md](model.md). The measurements are in
+Status: 2026-11-13, `main` at `e3bbefc`. The rules of the model are in [model.md](model.md). The measurements are in
 the ADRs that each row names. Decision: [ADR 0030](adr/0030-model-specification-and-fidelity.md).
 
 ## Two questions
@@ -94,8 +94,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology.
 
 - **Organism**: of two tubes between the same two foods, the longer one tends to disappear (Tero et al. 2007, Sec. 2)
   [V]. Near a new food the tubes dilate up to twofold (Kramar and Alim 2021) [H].
-- **Model**: the thickness of a tube is the number of agents across it, not a radius. Dead agents come to life where
-  the flow memory is above 0.5 (ADR 0029, decision 8).
+- **Model**: the thickness of a tube is the number of agents across it, not a radius. Dead agents come to life on a tube
+  of their own strain where the flow memory of their strain is above 0.5 (ADR 0029, decision 8; ADR 0031, decision 2).
 - **Measured**: a stronger flow gives a wider tube in the Maze: about 2,060 agents at a strength of 4 and about 9,600
   at 16 (2 seeds each, ADR 0029). The width of a tube against its own flux is not measured. The competition of two
   routes is not measured in the app; the prototype tested it only on Tero's ring (ADR 0029, prototype).
@@ -248,12 +248,18 @@ of attraction (Fogleman 2020) are an extension for the look, not biology.
 - The growth of Jones 2011 has no speed to set: on the Tokyo scene the colony reaches the foods about ten times as fast
   as the organism, and its network stands after 7 to 13 h of model time against 26 h (row 6).
 - The thickness of a tube is a count of agents, not a radius. The flux runs on the grid cells, not on a graph of tubes,
-  and all covered foods give or take at once, where Tero et al. 2010 draw one pair per step. So the flow is this app's
-  rule, built from Tero's model, and its strength has this app's unit (ADR 0029, Consequences).
+  and all foods that a strain covers give or take at once, in the flow of that strain, where Tero et al. 2010 draw one
+  pair per step. So the flow is this app's rule, built from Tero's model, and its strength has this app's unit
+  (ADR 0029, Consequences).
 - The local pressure solver is off the exact flux: 3 to 7 % per cell in a settled network, 9 to 25 % after a new draw
   of roles, and far off while the colony grows fast (ADR 0029, decision 6).
 - The front of the growth is not a fan of fine veins (row 6).
 - Light is this app's repellent, not the light of Jones' papers (row 13). Dryness is not modelled.
+- Two strains never fuse. With the flow every strain is a plasmodium of its own, and no flux passes between strains
+  ([ADR 0031](adr/0031-a-flow-for-every-strain.md), decision 4). Two plasmodia of _Physarum polycephalum_ fuse only when
+  they are alike at all of several loci; that line comes from the summaries of a web search, the papers were not read
+  ([flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia"). Every scene with the flow has one
+  strain.
 - The Jones model never runs the flow (ADR 0029, decision 1). Rows 1 to 7 and 14 to 16 hold for the extended model
   only.
 - The app differs from Jones 2010 in one point: agents update in parallel, where Jones picks them in random order (ADR
