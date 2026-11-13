@@ -253,23 +253,34 @@ not help it: on the fixed network it had not carried the flux to the sink after 
 
    Every open cell also has a conductivity of 0.00001 for the pressure iteration only: a cell
    beside the network then holds the pressure of its neighbours before it joins. With the four
-   rules the pressure of the Tokyo scene stays within ±770 in all four fields from step 250 to
-   step 12,000 (flux 2, seed 1), and the flux of a cell is at most 22 at step 250, beside Tokyo's
-   seven sites, and at most 8 from step 500 on.
+   rules the pressure of the Tokyo scene stays within ±600 in all four fields from step 250 to
+   step 12,000 (the scene's flux of 1.4, seed 1; ±770 with a flux of 2). While the colony grows,
+   1 to 2 % of the tube cells carry a flux above 3, at most 40 in one cell at step 1,000. From
+   step 2,000 on no cell carries more than 4.
 
    The flux of the local solver against an exact solution of Kirchhoff's law on the same network
-   (conjugate gradients to a residual of 10⁻⁸; Tokyo scene, flux 2, seed 1, two fields; the cells
-   whose exact flux is above 5 % of I0):
+   (conjugate gradients to a residual of 10⁻⁸; Tokyo scene, seed 1, two fields; the cells whose
+   exact flux is above 5 % of I0; commit `92a63e7`):
 
-   | Step                                   | Sum of the flux, local over exact | Error per cell, median | 90th percentile |
-   | -------------------------------------- | --------------------------------- | ---------------------- | --------------- |
-   | 500 (the colony grows, 24 sites)       | 132 % and 144 %                   | 11 % and 21 %          | 60 % and 80 %   |
-   | 2,000 (all 42 sites)                   | 97 % and 99 %                     | 6 %                    | 15 % and 16 %   |
-   | 4,000 (100 and 175 steps after a draw) | 96 % and 97 %                     | 21 % and 9 %           | 63 % and 24 %   |
-   | 8,000                                  | 102 % and 99 %                    | 4 % and 5 %            | 16 % and 10 %   |
+   | Flux | Step                                   | Sum of the flux, local over exact | Error per cell, median | 90th percentile |
+   | ---- | -------------------------------------- | --------------------------------- | ---------------------- | --------------- |
+   | 1.4  | 500 (the colony grows, 28 sites)       | 178 % and 286 %                   | 47 % and 26 %          | 164 % and 371 % |
+   | 1.4  | 2,000 (all 42 sites)                   | 97 % and 94 %                     | 9 % and 12 %           | 26 % and 31 %   |
+   | 1.4  | 4,000 (100 and 175 steps after a draw) | 97 % and 90 %                     | 25 % and 17 %          | 71 % and 46 %   |
+   | 1.4  | 8,000                                  | 102 % and 97 %                    | 7 % and 6 %            | 32 % and 16 %   |
+   | 2    | 500 (the colony grows, 29 sites)       | 201 % and 363 %                   | 53 % and 30 %          | 200 % and 714 % |
+   | 2    | 2,000 (all 42 sites)                   | 98 % and 97 %                     | 5 % and 7 %            | 16 % and 19 %   |
+   | 2    | 4,000 (100 and 175 steps after a draw) | 94 % and 95 %                     | 25 % and 9 %           | 71 % and 20 %   |
+   | 2    | 8,000                                  | 102 % and 98 %                    | 3 % and 3 %            | 17 % and 12 %   |
 
-   So the local solver is within about 5 % of the exact flux in a settled network, and about 20 %
-   off while the colony grows fast and for about 100 steps after a field draws new roles.
+   So in a settled network the local solver is 3 to 7 % off the exact flux (median per cell), more
+   with the weaker flux of the scene. It is 9 to 25 % off for about 100 steps after a field draws
+   new roles. While the colony still grows it is far off: at step 500 the pressure of tubes that
+   have just joined has not settled, and the flux of the local solver is two to four times the
+   exact flux in sum. The results of the scene are measured with this solver as it is. A run with
+   the code before the review (flux 2, seed 1) gave a sum of 132 % and 144 % and a median error of
+   11 % and 21 % at step 500, and the values of this table from step 2,000 on: the error of the
+   growth phase differs from run to run.
 
 7. **Tero's adaptation, per cell.** The flux of a cell is half the sum of the absolute fluxes over
    its four edges. A cell that holds a tube adapts: D ← D + 0.003 (f − D), with f the mean over the
@@ -369,10 +380,9 @@ All numbers are from the real engine (M3 Pro, Chromium with Metal, 2026-11-13), 
 of the trail with the scripts of the prototype. The tables are from the code after the review
 (commit `92a63e7`). The same runs with the code before the review gave the same picture; where
 they add something, the text names them. The review changed the random stream of the starvation
-draw and the cell that the pressure is recentred by: single runs differ, the rule does not. Three
-checks were not run again and are from the code before the review: the bounds of the pressure and
-the comparison with the exact solution (decision 6 and the Maze below), and the control without
-the growth gate (decision 9).
+draw and the cell that the pressure is recentred by: single runs differ, the rule does not. One
+check was not run again and is from the code before the review: the control without the growth
+gate (decision 9).
 
 Pictures from the app's own renderer (`npm run gallery`, seed 7): `docs/images/maze-flow.jpg` is
 the Maze at step 5,000 without and with the flow, `docs/images/tokyo-flow.jpg` the Tokyo scene at
@@ -407,7 +417,7 @@ tube remains (about 2,060 agents, 1.04 to 1.06 times the shortest route); with 1
 
 The local solver against the exact solution in the Maze (seed 1): the flux on the cells that carry
 more than 5 % of I0 is 40 % off at step 500, while the pressure still builds up along the route,
-6 % at step 1,000, 4 % at 1,500 and 1 to 2 % from step 2,000 on.
+and 1 to 6 % off from step 1,000 on (1 % at step 1,000 and at 3,000, 6 % at 1,500, 5 % at 2,000).
 
 ### The Tokyo rail network
 
