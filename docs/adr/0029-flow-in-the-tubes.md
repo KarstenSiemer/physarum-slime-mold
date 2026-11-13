@@ -550,16 +550,39 @@ A second reader went through the change before the merge. Each finding was check
   16 h): Jones' growth rule has no speed of its own to set.
 - North stays up on the Tokyo scene only on its lattice. A grid shaped like a tall screen, chosen
   by the user, turns the map by 90°, as every scene (ADR 0019).
-- Cost: the flow takes about 1.5 ms more per step on 512 × 320 cells and 2.3 to 2.5 ms on
+- Cost: the flow takes 1.5 to 1.7 ms more per step on 512 × 320 cells and 2.3 to 2.5 ms on
   512 × 512 (M3 Pro; table (c)), 5 to 10 times the step of these scenes without it. At the default
   speed of 120 steps per second the steps then take a fifth (Maze on WebGPU) to more than a third
-  (Tokyo on WebGL2) of the time. The frame budget (ADR 0028) lowers the steps per second on a slower GPU, and the
-  startup check can lower the grid.
+  (Tokyo on WebGL2) of the time. The frame budget (ADR 0028) lowers the steps per second on a
+  slower GPU, and the startup check can lower the grid.
 - The time limits of the new GPU tests follow ADR 0010: each limit is at least four times the time
-  of the test on GitHub. In the CI run of commit `92a63e7` on GitHub the file `flow.gpu.test.ts`
-  took 51 s in the WebGPU job and 67 s in the other job. Its slowest test took 24 s of its limit of
-  240 s (WebGL2 without float blending), the next 11 s of 240 s (Kirchhoff's law on WebGPU), and
-  the hook that compiles the pipelines at most 14 s of 600 s. So each test has a limit of at least
-  10 times its time there. In the CI image on an M3 Pro (SwiftShader, 4 CPUs, 16 GB) the slowest
-  test took 13.6 s and the compile hook 45 s on WebGPU. One test was added after that run; its
-  time on GitHub is in the pull request.
+  of the test on GitHub. In the three green CI runs of PR #44 on GitHub (commits `6ffed4b`,
+  `92a63e7` and `fa05359`) the file `flow.gpu.test.ts` took 51.0 to 64.3 s in the WebGPU job and
+  57.7 to 66.5 s in the other job. Its slowest test took 22.4 to 24.1 s of its limit of 240 s
+  (WebGL2 without float blending), the next 10.7 to 13.7 s of 240 s (Kirchhoff's law on WebGPU).
+  So the slowest test used at most 10.1 % of its limit, the next at most 5.7 %, and every other
+  test of the file at most 4.3 %. The hook that compiles the pipelines took less than 14.1 s of
+  600 s: that is the time of the file without the tests that the log lists. The test that was
+  added last (a change of the rule of one agent per cell, growth, the food or the flow itself
+  during a run) ran only in the third run: 1.1 s on WebGPU and 2.4 s on WebGL2, of 240 s. Two
+  tests of `sim.gpu.test.ts` now also compile the passes with the flow: each took less than 0.6 s
+  of its limit of 60 s. In the CI image on an M3 Pro (SwiftShader, 4 CPUs, 16 GB) the slowest test
+  took 13.6 s and the compile hook 45 s on WebGPU.
+
+## Correction after the merge (2026-11-13)
+
+Coordinator's choice under the owner's delegation of 2026-11-12. The last reading of the CI logs of
+PR #44, after its checks were green, found that the text as merged was not exact in three places
+of the Consequences. No decision changes.
+
+- It gave 67 s for the file `flow.gpu.test.ts` in the other job in the CI run of `92a63e7`. The
+  log gives 66.5 s.
+- It gave "at least 10 times" for the limit of the slowest test against its time in that run. The
+  log gives 9.97 times (24.1 s of 240 s). ADR 0010 allows a quarter of the limit.
+- It gave "about 1.5 ms" for the cost of the flow on 512 × 320 cells. Table (c) gives 1.49 ms on
+  WebGPU and 1.71 ms on WebGL2.
+
+The two points on the cost and on the time limits now give the range of table (c) and the numbers
+of all three green CI runs of PR #44, with the time of the test that was added last. The
+correction is its own pull request: the merge of PR #44 was released when its checks were green,
+and the correction changes no code and no decision.
