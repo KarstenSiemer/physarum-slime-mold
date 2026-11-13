@@ -87,13 +87,17 @@ describe('presets', () => {
       expect(s.collisions, p.id).toBe(true);
       expect(s.density, p.id).toBeLessThanOrEqual(1);
     }
-    // Fleeing light, the mazes and Tokyo use Jones' agents too; usesRule() marks every scene made for the rule.
+    // Fleeing light, the mazes, Tokyo and the scenes of the flow (ADR 0032) use Jones' agents too; usesRule() marks
+    // every scene made for the rule.
     expect(PRESETS.filter(usesRule).map((p) => p.id)).toEqual([
       ...jones.map((p) => p.id),
       'light',
       'maze',
       'foraging-maze',
       'tokyo',
+      'food-ring',
+      'rival-networks',
+      'tokyo-rivals',
     ]);
   });
 
@@ -135,6 +139,9 @@ describe('presets', () => {
   it('run each scene of Jones on the lattice of its figure, and the app’s scenes on a grid shaped like the screen', () => {
     const lattices: Record<string, [number, number]> = {
       tokyo: [512, 512], // this app's choice (ADR 0029)
+      'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
+      'rival-networks': [384, 384],
+      'tokyo-rivals': [512, 512], // the map of the Tokyo scene
       network: [200, 200], // Fig. 4, p. 135
       hexagons: [200, 200], // Fig. 5, p. 136
       spots: [200, 200], // Fig. 16 top, p. 144

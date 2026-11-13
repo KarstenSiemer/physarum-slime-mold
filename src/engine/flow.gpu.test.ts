@@ -464,6 +464,37 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(second.memory[lower * 4] ?? 0).toBeGreaterThan(f - 0.012);
   }, 240_000);
 
+  it('holds a tube on the weak trail of a strain whose trail decays fast', async () => {
+    const [w, h] = [32, 24];
+    // Two strains, one with Jones' decay of 0.1 and one with a decay of 0.6. No agents live (the layout Empty), and
+    // nothing diffuses: the trail that the test writes before a step is what the flow reads after the decay of that
+    // step.
+    const strains = [
+      { ...defaultStrain(0), decay: 0.1 },
+      { ...defaultStrain(1), decay: 0.6 },
+    ];
+    const settings = flowing({ layout: 'empty', collisions: false, diffusion: 0, strains });
+    const sim = await make(settings, w, h, 2);
+    // A row in which each strain holds 0.1 deposits after its decay.
+    const held = 0.1 * 5;
+    const trail = new Float32Array(w * h * 4);
+    for (let x = 4; x < 28; x++) trail.set([held / (1 - 0.1), held / (1 - 0.6), 0, 0], (12 * w + x) * 4);
+    for (let step = 0; step < 60; step++) {
+      sim.writeTrail(trail);
+      sim.run(1);
+    }
+    const [first, second] = [await sim.readFlow(0), await sim.readFlow(1)];
+    const [on, off] = [12 * w + 16, 6 * w + 16];
+    // At Jones' decay 0.1 deposits lie below the level of a tube (0.2 deposits): no tube body at all.
+    expect(first[on * 4 + 1]).toBe(0);
+    // At a decay of 0.6 a cell that an agent enters at every step holds 0.67 deposits, where Jones' holds 9. The
+    // levels follow: 0.1 deposits are a full tube there (ADR 0032), and the body is 1 − 0.98⁶⁰ = 0.70 after 60 steps.
+    expect(second[on * 4 + 1] ?? 0).toBeGreaterThan(0.65);
+    expect(second[on * 4 + 1] ?? 0).toBeLessThan(0.75);
+    expect(second[on * 4 + 2] ?? 0).toBeGreaterThan(0);
+    expect(second[off * 4 + 1]).toBe(0);
+  }, 120_000);
+
   it('lets an agent starve and come to life by the flow memory of its own strain', async () => {
     const [w, h] = [64, 64];
     // No food: no flux runs, and the memory that the test writes stays. Without the rule every draw can place. Four

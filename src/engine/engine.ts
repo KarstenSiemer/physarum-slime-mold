@@ -412,20 +412,26 @@ export class Engine {
 
   /**
    * The start layout 'food' (ADR 0025): every agent starts dead, and one step of the inoculate tool places about
-   * FOOD_START agents of strain A in a disc of FOOD_CELLS cells on the first food of the edit list, as Jones starts a
-   * foraging run at a food source. About FOOD_TRIES dead agents try a random point of the disc; with the rule one agent
-   * takes each cell they hit (about FOOD_START), and without it about FOOD_START agents try. Nothing happens without a
-   * food. The step is step 0 of the run, the same in every run of a seed.
+   * FOOD_START agents of a strain in a disc of FOOD_CELLS cells on a food of the edit list, as Jones starts a foraging
+   * run at a food source. Each strain has a food of its own (ADR 0032): strain A the first food of the list, strain B
+   * the second, and so on, one step for each. A strain without such a food starts without agents. About FOOD_TRIES
+   * dead agents try a random point of the disc; with the rule one agent takes each cell they hit (about FOOD_START),
+   * and without it about FOOD_START agents try. The steps are the first steps of the run, the same in every run of a
+   * seed. With one strain it is the one step on the first food that it was.
    */
   private seedAtFood() {
     if (this.settings.layout !== 'food') return;
-    const food = this.edits.find((e) => e.kind === 'food');
-    const at = food && strokeOn(food, this.sim.width, this.sim.height);
-    if (!at) return;
-    const dead = Math.max(1, strainAgents(this.settings.strains, this.sim.agents)[0] ?? 0);
-    const revive = Math.min(1, (this.settings.collisions ? FOOD_TRIES : FOOD_START) / dead);
-    const [x, y] = at.from;
-    this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain: 0, revive });
+    const foods = this.edits.filter((e) => e.kind === 'food');
+    const agents = strainAgents(this.settings.strains, this.sim.agents);
+    this.settings.strains.forEach((_, strain) => {
+      const food = foods[strain];
+      const at = food && strokeOn(food, this.sim.width, this.sim.height);
+      if (!at) return;
+      const dead = Math.max(1, agents[strain] ?? 0);
+      const revive = Math.min(1, (this.settings.collisions ? FOOD_TRIES : FOOD_START) / dead);
+      const [x, y] = at.from;
+      this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain, revive });
+    });
   }
 
   /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */

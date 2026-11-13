@@ -1,7 +1,8 @@
 # How close the model comes to the slime mold
 
-Status: 2026-11-13, `main` at `e3bbefc`. The rules of the model are in [model.md](model.md). The measurements are in
-the ADRs that each row names. Decision: [ADR 0030](adr/0030-model-specification-and-fidelity.md).
+Status: 2026-11-13, `main` at `f91dbc4` with the scenes of ADR 0032. The rules of the model are in
+[model.md](model.md). The measurements are in the ADRs that each row names. Decision:
+[ADR 0030](adr/0030-model-specification-and-fidelity.md).
 
 ## Two questions
 
@@ -26,7 +27,8 @@ This file keeps the two apart. Most of the app's measurements answer question 1.
 
 Marks on the organism's facts, as in [flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md): **[V]** read in the
 full text; **[H]** a helper read the copy at PubMed Central (results and captions, not the methods); **[J]** read in
-Jones 2010 (journal pages); **none** the docs hold no source.
+Jones 2010 (journal pages); **[S]** only the summary of a web search gave it, and nobody of this project read the
+page; **none** the docs hold no source.
 
 ## Summary
 
@@ -51,10 +53,11 @@ Jones 2010 (journal pages); **none** the docs hold no source.
 | 17  | Shuttle streaming, a period of about 2 min       | Not modelled                            | none                                  |
 | 18  | Food is eaten                                    | Not modelled                            | none                                  |
 | 19  | Pattern classes after the life conditions        | Not measured                            | none                                  |
+| 20  | Two plasmodia that do not fuse stay two bodies   | Partly                                  | Rival networks, Tokyo, two networks   |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
 figures (ADR 0027, Measurements: stripes 15.7 cells against 16.2, 19.7 spots against 20). Several strains with a table
-of attraction (Fogleman 2020) are an extension for the look, not biology.
+of attraction (Fogleman 2020) are an extension for the look, not biology; row 20 has what the flow does with them.
 
 ## The rows
 
@@ -238,6 +241,19 @@ of attraction (Fogleman 2020) are an extension for the look, not biology.
 - **Model**: the classes come from SA and RA (Fig. 13 and 14). No parameter is tied to food or light. Nobody measured
   the classes, not even against Jones.
 
+### 20. Two plasmodia that do not fuse
+
+- **Organism** [S]: two plasmodia of one species do not always fuse when they meet (Masui, Satoh and Seto 2018, on
+  _Physarum rigidum_). In _Physarum polycephalum_ they fuse only when they are alike at several loci (Carlile and Dee
+  1967). After a fusion of two strains that do not fit, a lethal reaction can follow. The papers were not read:
+  [flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia".
+- **Model**: each strain has a flow of its own, so no flux passes from the tubes of one strain into the tubes of another
+  (ADR 0031). The strains keep apart by a negative weight on each other's trail (Fogleman 2020), which is no rule of
+  the organism. The model has no fusion and no lethal reaction.
+- **Measured** (ADR 0032; seed 1, WebGPU): in Rival networks each of two strains keeps a network on all ten foods to
+  step 12,002, with 2,993 and 2,730 agents. On the Tokyo map each of two strains holds 38 and 41 of the 42 food sites
+  at step 14,002. The docs hold no number of the organism to compare with.
+
 ## What the model does not do
 
 - No oscillation and no shuttle streaming (row 17).
@@ -258,8 +274,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology.
 - Two strains never fuse. With the flow every strain is a plasmodium of its own, and no flux passes between strains
   ([ADR 0031](adr/0031-a-flow-for-every-strain.md), decision 4). Two plasmodia of _Physarum polycephalum_ fuse only when
   they are alike at all of several loci; that line comes from the summaries of a web search, the papers were not read
-  ([flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia"). Every scene with the flow has one
-  strain.
+  ([flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia"). Two scenes hold two strains with
+  the flow, Rival networks and Tokyo, two networks (row 20).
 - The Jones model never runs the flow (ADR 0029, decision 1). Rows 1 to 7 and 14 to 16 hold for the extended model
   only.
 - The app differs from Jones 2010 in one point: agents update in parallel, where Jones picks them in random order (ADR

@@ -88,7 +88,7 @@
     ring: 'Ring',
     center: 'Center spot',
     empty: 'Empty (inoculate)',
-    food: 'At the first food',
+    food: 'On food, one colony each',
   };
   const BOUNDARY_LABEL: Record<(typeof BOUNDARIES)[number], string> = {
     wrap: 'Wrap around (no edges)',

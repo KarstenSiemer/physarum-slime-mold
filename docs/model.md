@@ -1,9 +1,10 @@
 # The model: the rules in force
 
-Status: 2026-11-13, `main` at `e3bbefc`. This file states what the simulation computes, as mathematics, for both
-models, both orders of a step and both backends. The ADRs hold the reasons and the history; each section names its
-ADR. How close the model comes to the organism: [fidelity.md](fidelity.md). The GPU implementation (buffers, tiles,
-the sort of the agents): [design.md](design.md). Decision: [ADR 0030](adr/0030-model-specification-and-fidelity.md).
+Status: 2026-11-13, `main` at `f91dbc4` with the rules of ADR 0032. This file states what the simulation computes, as
+mathematics, for both models, both orders of a step and both backends. The ADRs hold the reasons and the history; each
+section names its ADR. How close the model comes to the organism: [fidelity.md](fidelity.md). The GPU implementation
+(buffers, tiles, the sort of the agents): [design.md](design.md). Decision:
+[ADR 0030](adr/0030-model-specification-and-fidelity.md).
 
 The code is the truth. If this file and the code differ, one of them has a bug: fix it, and change this file in the
 same pull request.
@@ -303,16 +304,21 @@ copy of both passes in `src/engine/flow-reference.ts`.
 **Every strain has a flow of its own** ([ADR 0031](adr/0031-a-flow-for-every-strain.md)). The rules below run once per
 strain s, on the trail T_s of that strain alone, with the fields B_s, D_s, G_s and P_s,k of that strain; below, B, D, G
 and P are those of the strain of the pass. The strains share the food sites, the flow strength I0 and every constant of
-`FLOW`; only the trail levels of the tube body are in deposits of each strain (8.1). No flux passes from the tubes of
-one strain into the tubes of another: the app has no fusion of strains. With one strain a run keeps the bytes that it
-had with the flow of ADR 0029 (18 runs checked, ADR 0031).
+`FLOW`; only the trail levels of the tube body are in the unit of the trail of each strain (8.1). No flux passes from
+the tubes of one strain into the tubes of another: the app has no fusion of strains. With one strain a run keeps the
+bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 
 ### 8.1 The network on the grid
 
 - Every open cell is a node; its 4 neighbours are its edges.
-- **Tube body**: B ← B + 0.02 · (π − B), with π = clamp((T_s − 0.2 · depT_s) / (0.8 · depT_s), 0, 1) from the trail of
-  the strain after this step's diffusion, and depT_s the deposit of the strain (at least 1e-6, `packFlow()`). A cell
-  holds a tube of the strain while B ≥ 0.05.
+- **Tube body**: B ← B + 0.02 · (π − B), with π = clamp((T_s − 0.2 · u_s) / (0.8 · u_s), 0, 1) from the trail of the
+  strain after this step's diffusion. A cell holds a tube of the strain while B ≥ 0.05.
+- **The unit of the trail** u_s = depT_s · κ(decT_s) / κ(0.1), with depT_s the deposit of the strain (at least 1e-6)
+  and decT_s its decay (ADR 0032). κ(d) is the trail that a cell holds in the end when an agent enters it at every
+  step, in deposits: (1 − d) / d when a step senses first, and 1 / d when it moves first (section 5), with d kept
+  inside [1e-4, 0.9]. At Jones' decay of 0.1 the unit is one deposit. A strain whose trail decays faster holds less
+  trail, and its levels are lower in the same ratio: at a decay of 0.6, sensing first, a thirteenth (`trailLevels()`
+  in `src/engine/flow.ts`).
 - **Conductivity**: G = B · (0.02 + D) on a tube, 4 B on a tube on food, 0 elsewhere.
 - **Edge conductance**: the harmonic mean H(a, b) = 2ab / (a + b), 0 if a or b is 0. The pressure solve uses
   Ĝ = H(G_a + 1e-5, G_b + 1e-5), so a cell holds a pressure before it joins the network.
@@ -400,8 +406,10 @@ Defaults (Jones 2011): Gf 3, Gw 9, Gmin 1, Gmax 10; Sf 3, Sw 5, Smin 0, Smax 20.
 
 `shaders/init.wgsl`, `gl/glsl/init.frag`. Every agent draws a heading. The layouts: mixed (uniform; with one agent per
 cell a random permutation of the cells), bands (the strains side by side), sectors, colonies (one disc per strain),
-ring, center, empty (every agent dead) and food (every agent dead; one inoculate step places about 50 agents on the
-first food, a disc of about 100 cells at half the density of a full sheet; ADR 0025). With one agent per cell,
+ring, center, empty (every agent dead) and food (every agent dead; for each strain one inoculate step places about 50
+agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A on
+the first food of the scene, strain B on the second, and so on, and a strain without such a food starts without
+agents; ADR 0025, ADR 0032). With one agent per cell,
 claim rounds give each alive agent its own cell: 1 round for the mixed layout on a periodic grid or a box, without walls; else 64
 (`startRounds()` in `src/engine/pack.ts`); a loser
 of the last round starts dead. Without the rule an agent draws again up to 32 times while its cell is not open. With a
@@ -497,6 +505,8 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                        |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |
+| A colony for each strain (10)           | `engine.gpu.test.ts`: three strains in the Foraging maze start two colonies on the two foods                                    |
 | A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
 | Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                    |
 
@@ -509,16 +519,15 @@ Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrin
 
 ## 14. Open points in the code
 
-Each one is open, not a rule. The first three were found while this file was written, the last two in ADR 0031:
+Each one is open, not a rule. The first three were found while this file was written, the last one in ADR 0031:
 
 - An agent under a wall that was painted onto it is not moved off the wall, and can step out (7.5).
 - A child of the growth rule can land diagonally across the corner of a wall (9).
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
-- The trail levels of a tube (8.1) are fixed in deposits, whatever the decay. In the scene Three strains (decay 0.6)
-  with one agent per cell, growth, the flow and two foods, the trail of a strain stays at 0.26 deposits at most, so no
-  tube forms and the flow does nothing (ADR 0031 and `TODO.md`).
 - A site is one cell (8.2). Where strains share a food dot, only the strains whose tube holds its cell cover it
   (ADR 0031 and `TODO.md`).
 
 Closed on 2026-11-13: respawn (7.2) brought a dead agent of any strain to life, so with the flow a strain appeared that
-nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031).
+nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031). And the flow did
+nothing for a strain whose trail stayed below 0.2 deposits, as in the start scene Three strains with one agent per
+cell. The levels follow the decay of the strain now (8.1, ADR 0032).

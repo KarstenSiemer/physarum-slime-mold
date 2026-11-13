@@ -157,6 +157,21 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'let memory = textureLoad(flowMemory, q, 0u, 0).x;',
     GPU,
   ],
+  // The levels of the trail follow the decay of the strain (ADR 0032): the block of the passes, for each backend.
+  [
+    'T1 block: the trail levels of a tube without the decay of the strain (the WebGPU tests)',
+    'src/engine/flow.ts',
+    'return [FLOW.trailLow * deposit * scale, FLOW.trailFull * deposit * scale];',
+    'return [FLOW.trailLow * deposit, FLOW.trailFull * deposit];',
+    GPU,
+  ],
+  [
+    'T2 block: the trail levels of a tube without the decay of the strain (the WebGL2 tests)',
+    'src/engine/flow.ts',
+    'return [FLOW.trailLow * deposit * scale, FLOW.trailFull * deposit * scale];',
+    'return [FLOW.trailLow * deposit, FLOW.trailFull * deposit];',
+    GL,
+  ],
   [
     'F1 glsl: the momentum on every cell',
     FRAG,

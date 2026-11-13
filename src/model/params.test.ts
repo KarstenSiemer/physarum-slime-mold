@@ -185,9 +185,9 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
     expect([d.shrinkEvery, d.shrinkWindow, d.shrinkMin, d.shrinkMax]).toEqual([3, 5, 0, 20]);
   });
 
-  it('keeps growth off in every scene but Foraging maze and Tokyo, and in a link without it', () => {
-    // Both scenes start as a small colony on a food and grow from it (ADR 0025, 0029).
-    const grows = ['foraging-maze', 'tokyo'];
+  it('keeps growth off in every scene but the foraging scenes, and in a link without it', () => {
+    // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031).
+    const grows = ['foraging-maze', 'tokyo', 'food-ring', 'rival-networks', 'tokyo-rivals'];
     for (const p of PRESETS) {
       const s = p.settings();
       expect(s.growth, p.id).toBe(grows.includes(p.id));
@@ -307,8 +307,9 @@ describe('flow in the tubes (ADR 0029)', () => {
     expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
   });
 
-  it('is on in the Maze and in the Tokyo rail network only', () => {
-    expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(['maze', 'tokyo']);
+  it('is on in the Maze, in the Tokyo rail network and in the scenes made for it (ADR 0032)', () => {
+    const flowing = ['maze', 'tokyo', 'food-ring', 'rival-networks', 'tokyo-rivals'];
+    expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
   });
 
@@ -555,6 +556,8 @@ describe('runsAsJones (links from before the model switch)', () => {
     expect(runsAsJones(strain({ food: 0.4 }), drawn('food'))).toBe(false);
     expect(runsAsJones(strain({ attraction: [-1, 0, 0, 0] }), drawn('food'))).toBe(false); // food +1, trail −1
     expect(runsAsJones({ ...s, trailSaturation: 30 })).toBe(false);
+    // The flow in the tubes is a rule of the extended model alone: the scene Food ring has it and no wall (ADR 0032).
+    expect(runsAsJones({ ...s, flow: true })).toBe(false);
     expect(runsAsJones({ ...s, diffusion: 2 })).toBe(false);
     expect(runsAsJones({ ...s, collisions: false })).toBe(false);
   });

@@ -304,6 +304,13 @@ GPU checks use invariants, not long exact trajectories:
   2026-11-12). The scene senses first, as on main, and in 30 steps the colony meets no wall. The
   threshold of 150 keeps its margin.
 
+  The unit test of the link decoder on random, truncated and changed bytes (`link.test.ts`) had the
+  default 5 s of a unit test (2026-11-13). On GitHub it took 4.1 s in one run of pull request #53 and
+  6.6 s in the next, which failed that run; on an M3 Pro it takes 0.4 s. It has 60 s now, by the rule
+  above. No other unit test without a limit of its own took more than a quarter of 5 s in these
+  runs: the next one took 1.0 s (`engine-env.test.ts`, "paints the sender's bytes on the sender's
+  grid").
+
 - The verify job keeps its limit of 30 min (`.github/workflows/ci.yml`). A limit adds no time to a
   wait that passes. On GitHub the verify jobs of PR 2, 3, 5 and 6 took 12.8 to 18.0 min. PR 6 on
   PR 3 (`f099dd1`) took 12.9 min: its GPU project (419 tests) 281 s, Fig. 10 on WebGPU 92 s and its
