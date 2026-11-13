@@ -93,13 +93,15 @@ export interface Sim {
    */
   readWindows(): Promise<Uint32Array>;
   /**
-   * For tests: the memory of the flow in the tubes, 4 values per cell (flow memory, tube body, conductivity, roles of a
-   * food site), and the pressure of its four lanes, 4 values per cell (ADR 0029). Empty while the flow is off.
+   * For tests: the memory of the flow in the tubes of a strain, 4 values per cell (flow memory, tube body,
+   * conductivity, roles of a food site), and the pressure of its four lanes, 4 values per cell (ADR 0029). Every
+   * strain has a flow of its own (ADR 0030); `strain` is the first one by default. Empty while the flow is off, and
+   * for a strain that the settings do not hold.
    */
-  readFlow(): Promise<Float32Array>;
-  readPressure(): Promise<Float32Array>;
-  /** For tests: replaces the memory of the flow in the tubes, 4 values per cell as readFlow() returns them. */
-  writeFlow(data: Float32Array): void;
+  readFlow(strain?: number): Promise<Float32Array>;
+  readPressure(strain?: number): Promise<Float32Array>;
+  /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
+  writeFlow(data: Float32Array, strain?: number): void;
   /** Wall, food, light, unused per cell (0–255). */
   readEnv(): Promise<Uint8Array>;
   /**

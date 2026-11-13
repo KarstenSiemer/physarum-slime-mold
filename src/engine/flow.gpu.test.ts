@@ -1,10 +1,12 @@
-// The flow in the tubes on both backends (ADR 0029), in Chromium with real GPU APIs (ADR 0010).
+// The flow in the tubes on both backends (ADR 0029), in Chromium with real GPU APIs (ADR 0010). Every strain has a
+// flow of its own (ADR 0030).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { defaultSettings, defaultStrain, type Settings, type Strain } from '../model/params';
 import { FLOW, flowSites, packFlow } from './flow';
 import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { compile } from './gl/programs';
+import { AgentToolKind } from './pack';
 import { GlSim } from './gl/sim';
 import type { AgentState, Backend, Sim, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -15,6 +17,8 @@ const BACKENDS = {
 };
 
 const ALIVE = 4;
+/** A tube of one cell along a line of cells: x0, y0, x1, y1. */
+type Line = readonly [number, number, number, number];
 /** An extended scene with the flow on: Jones' agent with the rule in a closed box. */
 const flowing = (patch: Partial<Settings> = {}): Settings => ({
   ...defaultSettings(),
@@ -66,9 +70,13 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     }).length;
   }
 
-  it('follows the CPU reference: the memory and the pressure of every step', async () => {
+  /**
+   * Six steps of the flow of the strain `strain` of a scene with the strains `strains`, against the CPU reference: the
+   * memory and the pressure of every step.
+   */
+  async function followsReference(strains: Strain[], strain: number) {
     const [w, h] = [48, 40];
-    const settings = flowing();
+    const settings = flowing({ strains });
     const sim = await make(settings, w, h, 500);
     // A wall with a gap, and two foods on either side of it. The first food of the list lies under the wall: its
     // centre is a closed cell, so it never gives or takes, and the passes recentre the pressure by the next food.
@@ -96,13 +104,13 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     // and without the momentum (ADR 0029, decision 6).
     const bare = (c: number) => c % w >= 28 && Math.floor(c / w) < 18;
     for (let c = 0; c < w * h; c++) fields.memory[c * 4 + 1] = bare(c) ? 0 : 1;
-    sim.writeFlow(fields.memory);
+    sim.writeFlow(fields.memory, strain);
     for (let step = 0; step < 6; step++) {
       sim.run(1);
       const trail = await sim.readTrail();
-      const u = new Float32Array(packFlow(settings, sites));
+      const u = new Float32Array(packFlow(settings, sites, undefined, strain));
       fields = flowStep(grid, u, fields, trail, step, settings.seed);
-      const [memory, pressure] = [await sim.readFlow(), await sim.readPressure()];
+      const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
       expect(memory.length).toBe(w * h * 4);
       let worst = 0;
       for (let i = 0; i < memory.length; i++)
@@ -131,23 +139,39 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
         if (bare(c) && memory[c * 4 + 2] === 0 && Math.abs(pressure[c * 4] ?? 0) > 0.01 * top) ghosts++;
       expect(ghosts, 'cells without a tube that hold a pressure').toBeGreaterThan(100);
     }
+  }
+
+  it('follows the CPU reference: the memory and the pressure of every step', async () => {
+    await followsReference([{ ...defaultStrain(0), sensorOffset: 5 }], 0);
+  }, 120_000);
+
+  it('follows the CPU reference for the second of two strains, with the trail and the deposit of that strain', async () => {
+    // The second strain deposits 2 where the first deposits 5: the levels of its trail are 0.4 and 2, not 1 and 5.
+    const second = { ...defaultStrain(1), sensorOffset: 5, deposit: 2 };
+    await followsReference([{ ...defaultStrain(0), sensorOffset: 5 }, second], 1);
   }, 120_000);
 
   /**
    * A simulation without diffusion and with almost no decay, so that the trail that the test writes stays: two foods
-   * at (4, 12) and (35, 12), and tubes of one cell along the lines of `lines` (x0, y0, x1, y1). Its one agent starts
-   * dead, and the flow brings it to life on a fed tube: with a deposit of 0 it leaves no trail of its own.
+   * at (4, 12) and (35, 12), and tubes of one cell along lines: `lines` in the trail of the strain `lane`, and `other`
+   * in the trail of the next strain. Its agents start dead, and the flow brings them to life on a fed tube: with a
+   * deposit of 0 they leave no trail of their own. The memory, the pressure and the flux that it gives are those of
+   * the flow of the strain `lane`; `of()` gives those of another strain.
    */
-  async function tubes(lines: readonly (readonly [number, number, number, number])[], steps: number) {
+  async function tubes(
+    lines: readonly Line[],
+    steps: number,
+    { strains = 1, agents = 1, lane = 0, other = [] as readonly Line[] } = {},
+  ) {
     const [w, h] = [40, 24];
     const settings = flowing({
       layout: 'empty',
       collisions: false,
       diffusion: 0,
       flowStrength: 2,
-      strains: [{ ...defaultStrain(0), decay: 0.0001, deposit: 0 }],
+      strains: Array.from({ length: strains }, (_, i) => ({ ...defaultStrain(i), decay: 0.0001, deposit: 0 })),
     });
-    const sim = await make(settings, w, h, 1);
+    const sim = await make(settings, w, h, agents);
     const centres: [number, number][] = [
       [4.5, 12.5],
       [35.5, 12.5],
@@ -155,20 +179,28 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     sim.paint(centres.map((c): Stroke => ({ kind: 'food', from: c, to: c, radius: 0.75 })));
     sim.foodSites(centres);
     sim.reset();
-    const tube = new Set<number>();
-    for (const [x0, y0, x1, y1] of lines)
-      for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
-        for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) tube.add(y * w + x);
+    const cells = (list: readonly Line[]) => {
+      const set = new Set<number>();
+      for (const [x0, y0, x1, y1] of list)
+        for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+          for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) set.add(y * w + x);
+      return set;
+    };
+    const tube = cells(lines);
     const trail = new Float32Array(w * h * 4);
-    for (const c of tube) trail[c * 4] = 10;
+    for (const c of tube) trail[c * 4 + lane] = 10;
+    for (const c of cells(other)) trail[c * 4 + lane + 1] = 10;
     sim.writeTrail(trail);
     for (let k = 0; k < steps; k += 100) {
       sim.run(100);
       await sim.finish();
     }
-    const [memory, pressure] = [await sim.readFlow(), await sim.readPressure()];
     const grid: FlowGrid = { width: w, height: h, boundary: 'box', env: await sim.readEnv() };
-    return { w, tube, memory, pressure, grid, i0: settings.flowStrength, flux: flowFlux(grid, memory, pressure) };
+    const of = async (strain: number) => {
+      const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
+      return { memory, pressure, flux: flowFlux(grid, memory, pressure) };
+    };
+    return { sim, w, tube, grid, i0: settings.flowStrength, of, ...(await of(lane)) };
   }
 
   it('obeys Kirchhoff’s law, adapts a tube to f(Q) and lets a dead end starve', async () => {
@@ -337,6 +369,143 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(((flux[short * 4] ?? 0) + (flux[long * 4] ?? 0)) / i0).toBeLessThan(1.07);
   }, 240_000);
 
+  it('brings a dead agent to life only on a tube of its own strain', async () => {
+    // One route between the foods, in the trail of the second of two strains. Every agent starts dead.
+    const route = [
+      [4, 6, 4, 12],
+      [4, 6, 35, 6],
+      [35, 6, 35, 12],
+    ] as const;
+    const { sim, w, memory } = await tubes([...route], 1500, { strains: 2, agents: 400, lane: 1 });
+    // The flux runs: the route has the memory at which the flow brings agents to life.
+    expect(memory[(6 * w + 20) * 4] ?? 0).toBeGreaterThan(FLOW.birthFrom + 0.2);
+    const [first, second] = await sim.alive();
+    // The second strain owns the tube: most of its 200 agents live. No agent of the first strain comes to life: it
+    // has no tube. Before, the flow gave life to the agents of every strain on any tube (the owner saw strains
+    // appear in a scene that had no agent of them, 2026-11-13).
+    expect(second).toBeGreaterThan(100);
+    expect(first).toBe(0);
+  }, 240_000);
+
+  it('lets no flux pass from the tubes of one strain into the tubes of another', async () => {
+    // One route between the foods in two halves that meet on row 6: the left half is in the trail of the first
+    // strain, the right half in the trail of the second.
+    const { w, tube, memory, pressure, of } = await tubes(
+      [
+        [4, 6, 4, 12],
+        [4, 6, 19, 6],
+      ],
+      600,
+      {
+        strains: 2,
+        other: [
+          [20, 6, 35, 6],
+          [35, 6, 35, 12],
+        ],
+      },
+    );
+    const second = await of(1);
+    // Each strain holds its half as a tube, and no tube on the half of the other strain.
+    const [left, right] = [6 * w + 10, 6 * w + 28];
+    expect(memory[left * 4 + 1] ?? 0).toBeGreaterThan(0.9);
+    expect(memory[right * 4 + 1] ?? 0).toBe(0);
+    expect(second.memory[right * 4 + 1] ?? 0).toBeGreaterThan(0.9);
+    expect(second.memory[left * 4 + 1] ?? 0).toBe(0);
+    // So each strain covers one food. In neither flow a site gives or takes, no pressure builds up, and no cell
+    // adapts. As one network of both strains, the two halves would carry the flux from food to food.
+    for (const flow of [{ memory, pressure }, second]) {
+      expect(flow.memory.some((v, i) => i % 4 === 3 && v !== 0)).toBe(false);
+      expect(flow.pressure.every((v) => v === 0)).toBe(true);
+    }
+    for (const c of tube) expect(memory[c * 4] ?? 0).toBe(Math.fround(FLOW.fresh));
+  }, 240_000);
+
+  it('gives every strain its whole flux on its own route between the same foods', async () => {
+    // Two routes between the foods: one over row 6 in the trail of the first strain, one over row 18 in the trail of
+    // the second. Both hold the cells of the two sites.
+    const { w, memory, flux, i0, of } = await tubes(
+      [
+        [4, 6, 4, 12],
+        [4, 6, 35, 6],
+        [35, 6, 35, 12],
+      ],
+      1500,
+      {
+        strains: 2,
+        other: [
+          [4, 12, 4, 18],
+          [4, 18, 35, 18],
+          [35, 12, 35, 18],
+        ],
+      },
+    );
+    const second = await of(1);
+    const [upper, lower, give, take] = [6 * w + 20, 18 * w + 20, 12 * w + 4, 12 * w + 35];
+    for (const flow of [{ memory }, second]) {
+      expect(roleSigns(flow.memory[give * 4 + 3] ?? 0)).toEqual([1, 1, 1, 1]);
+      expect(roleSigns(flow.memory[take * 4 + 3] ?? 0)).toEqual([-1, -1, -1, -1]);
+    }
+    // As two tubes of one network, the routes would share the flux I0. Each strain sends its whole flux along its
+    // own route, and none along the route of the other strain, where it has no tube.
+    expect(flux[upper * 4] ?? 0).toBeCloseTo(i0, 2);
+    expect(flux[lower * 4] ?? 0).toBe(0);
+    expect(second.flux[lower * 4] ?? 0).toBeCloseTo(i0, 2);
+    expect(second.flux[upper * 4] ?? 0).toBe(0);
+    const f = i0 ** FLOW.gamma / (1 + i0 ** FLOW.gamma);
+    expect(memory[upper * 4] ?? 0).toBeGreaterThan(f - 0.012);
+    expect(second.memory[lower * 4] ?? 0).toBeGreaterThan(f - 0.012);
+  }, 240_000);
+
+  it('lets an agent starve and come to life by the flow memory of its own strain', async () => {
+    const [w, h] = [64, 64];
+    // No food: no flux runs, and the memory that the test writes stays. Without the rule every draw can place. Two
+    // strains with 10,000 living and 10,000 dead agents each.
+    const strains = [0, 1].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
+    const settings = flowing({ boundary: 'wrap', collisions: false, seed: 11, strains });
+    const sim = await make(settings, w, h, 40_000, 20_000);
+    // The whole grid starved for the first strain and fed for the second; a tube of both everywhere.
+    const fill = (cell: number[]) => {
+      const memory = new Float32Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) memory.set(cell, c * 4);
+      return memory;
+    };
+    sim.writeFlow(fill([FLOW.floor, 1, 0.02, 0]), 0);
+    sim.writeFlow(fill([0.9, 1, 0.9, 0]), 1);
+    const before = await sim.readAgents();
+    sim.run(1);
+    const after = await sim.readAgents();
+    const alive = (a: AgentState) => (a.bits & ALIVE) !== 0;
+    // Gone: dead after the step, or alive far away (it starved and came to life elsewhere in the same step). An agent
+    // moves one cell per step, also around the edge of the periodic grid.
+    const around = (d: number, n: number) => Math.min(Math.abs(d), n - Math.abs(d));
+    const gone = (a: AgentState, b: AgentState) =>
+      !alive(b) || Math.hypot(around(a.x - b.x, w), around(a.y - b.y, h)) > 2;
+    const count = [0, 1].map(() => ({ alive: 0, gone: 0, dead: 0, born: 0 }));
+    before.forEach((a, i) => {
+      const [b, of] = [after[i], count[a.bits & 3]];
+      if (!b || !of) throw new Error('agent missing');
+      if (alive(a)) {
+        of.alive++;
+        if (gone(a, b)) of.gone++;
+      } else {
+        of.dead++;
+        if (alive(b)) of.born++;
+      }
+    });
+    const [first, second] = count;
+    if (!first || !second) throw new Error('two strains');
+    expect([first.alive, first.dead, second.alive, second.dead]).toEqual([10_000, 10_000, 10_000, 10_000]);
+    // The first strain starves with the chance of the floor of the memory, and none of its dead agents comes to life.
+    const p = (FLOW.death * FLOW.half ** 2) / (FLOW.floor ** 2 + FLOW.half ** 2);
+    expect(Math.abs(first.gone - first.alive * p)).toBeLessThan(6 * Math.sqrt(first.alive * p * (1 - p)));
+    expect(first.born).toBe(0);
+    // The second strain does not starve, and its dead agents come to life with birth · (D − from) / (1 − from).
+    const q = (FLOW.birth * (0.9 - FLOW.birthFrom)) / (1 - FLOW.birthFrom);
+    // At D = 0.9 the chance to starve is 2.5 in a million: 0.025 agents of 10,000.
+    expect(second.gone).toBeLessThanOrEqual(1);
+    expect(Math.abs(second.born - second.dead * q)).toBeLessThan(6 * Math.sqrt(second.dead * q * (1 - q)));
+  }, 120_000);
+
   it('lets agents starve on cells that the flux passed by, and brings dead agents to life on fed cells', async () => {
     const [w, h] = [64, 64];
     // No food: no flux runs, and the memory that the test writes stays. Without the rule every draw can place.
@@ -382,6 +551,44 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(dead).toBe(20_000);
     expect(Math.abs(born - dead * q)).toBeLessThan(6 * Math.sqrt(dead * q * (1 - q)));
     expect(bornLeft).toBe(0);
+  }, 120_000);
+
+  it('brings dead agents to life by the flow also in a step in which a tool is held', async () => {
+    const [w, h] = [64, 64];
+    // No food: the memory that the test writes stays. The whole grid is fed and holds a tube. Without the rule every
+    // draw can place.
+    const settings = flowing({ boundary: 'wrap', collisions: false, seed: 11 });
+    const sim = await make(settings, w, h, 40_000, 20_000);
+    const memory = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) memory.set([0.9, 1, 0.9, 0], c * 4);
+    sim.writeFlow(memory);
+    const before = await sim.readAgents();
+    // Inoculate, held on a disc of 6 cells: it places each dead agent in the disc with the chance one half.
+    const [cx, cy, r, revive] = [16, 16, 6, 0.5];
+    sim.run(1, { kind: AgentToolKind.inoculate, x: cx, y: cy, radius: r, strain: 0, revive });
+    const after = await sim.readAgents();
+    const alive = (a: AgentState) => (a.bits & ALIVE) !== 0;
+    let [dead, inside, outside] = [0, 0, 0];
+    before.forEach((a, i) => {
+      const b = after[i];
+      if (!b) throw new Error('agent missing');
+      if (alive(a)) return;
+      dead++;
+      if (!alive(b)) return;
+      if (Math.hypot(b.x - cx, b.y - cy) <= r) inside++;
+      else outside++;
+    });
+    expect(dead).toBe(20_000);
+    // A dead agent that the tool does not place draws a cell of the flow, as in a step without a tool: it comes to
+    // life with birth · (D − from) / (1 − from), anywhere on the grid (ADR 0029, decision 8).
+    const q = (FLOW.birth * (0.9 - FLOW.birthFrom)) / (1 - FLOW.birthFrom);
+    const disc = (Math.PI * r * r) / (w * h);
+    const byFlow = dead * (1 - revive) * q;
+    expect(Math.abs(outside - byFlow * (1 - disc))).toBeLessThan(6 * Math.sqrt(byFlow));
+    // In the disc: the agents that the tool placed, and the few births of the flow that fall into it. An agent has one
+    // placement per step, so no agent counts twice.
+    const byTool = dead * revive;
+    expect(Math.abs(inside - byTool - byFlow * disc)).toBeLessThan(6 * Math.sqrt(byTool * (1 - revive)));
   }, 120_000);
 
   it('keeps one agent per cell when the flow brings agents to life with the rule', async () => {
@@ -481,6 +688,20 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
         },
       ],
       [
+        'with a second strain: the flow gets the state of two strains',
+        () => {
+          sim.update({ ...base, strains: [...base.strains, { ...defaultStrain(1), sensorOffset: 5 }] });
+          sim.reset();
+        },
+      ],
+      [
+        'with one strain again',
+        () => {
+          sim.update(base);
+          sim.reset();
+        },
+      ],
+      [
         'after a clear of the environment',
         () => {
           sim.clearEnvironment();
@@ -497,6 +718,9 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     for (const [what, change] of changes) {
       change();
       expect(await moved(sim, 4), what).toBeGreaterThan(100);
+      // The flow holds a state for each strain of the settings, and for no other.
+      if (what.startsWith('with a second strain')) expect((await sim.readFlow(1)).length, what).toBe(w * h * 4);
+      if (what.startsWith('with one strain again')) expect((await sim.readFlow(1)).length, what).toBe(0);
     }
     expect((await device?.popErrorScope())?.message).toBeUndefined();
     // The flow runs at the end: the simulation holds its memory.
@@ -534,6 +758,43 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     // Just above the level `half` an agent divides, just below it does not.
     expect((await children(FLOW.half * 1.01)).left).toBeGreaterThan(60);
     expect((await children(FLOW.half * 0.99)).left).toBe(0);
+  }, 240_000);
+
+  it('lets an agent divide by the flow memory of its own strain', async () => {
+    const [w, h] = [96, 48];
+    const strains = [0, 1].map((i) => ({ ...defaultStrain(i), sensorOffset: 5 }));
+    const settings = flowing({
+      seed: 8,
+      growth: true,
+      growthEvery: 1,
+      shrinkEvery: 0,
+      density: 0.065,
+      capacity: 0.65,
+      strains,
+    });
+    // The agents of each strain that live after 12 steps and were dead at the start: children. `starved` is the strain
+    // whose whole ground starved; the ground of the other strain is fresh. No food: the memory keeps these values.
+    const children = async (starved: number) => {
+      const sim = await make(settings, w, h, 3000, 300);
+      for (const strain of [0, 1]) {
+        const memory = new Float32Array(w * h * 4);
+        for (let c = 0; c < w * h; c++) memory.set([strain === starved ? FLOW.floor : FLOW.fresh, 1, 0.1, 0], c * 4);
+        sim.writeFlow(memory, strain);
+      }
+      const before = await sim.readAgents();
+      sim.run(12);
+      const after = await sim.readAgents();
+      const alive = (a: AgentState | undefined) => a !== undefined && (a.bits & ALIVE) !== 0;
+      const born = after.filter((a, i) => alive(a) && !alive(before[i]));
+      return [0, 1].map((strain) => born.filter((a) => (a.bits & 3) === strain).length);
+    };
+    // Both strains walk the same cells. Only the strain whose ground is fresh has children.
+    const [none, some] = await children(0);
+    expect(none).toBe(0);
+    expect(some).toBeGreaterThan(60);
+    const [others, zero] = await children(1);
+    expect(zero).toBe(0);
+    expect(others).toBeGreaterThan(60);
   }, 240_000);
 
   it('gives the same bytes for the same seed, and others for another seed', async () => {

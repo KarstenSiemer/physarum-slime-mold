@@ -1,5 +1,6 @@
 // CPU mirror of the flow passes (shaders/flow.wgsl, gl/glsl/flow.frag), for tests only: flow.gpu.test.ts checks both
-// backends against it. It reads the uniform block as the shaders do (flow.ts packFlow()).
+// backends against it. It reads the uniform block as the shaders do (flow.ts packFlow()): the block names the strain
+// whose flow this is (ADR 0030), and the fields are those of that strain.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
 import { FLOW_CONSTANT_SLOTS, FLOW_ITERATIONS, flowRoles } from './flow';
@@ -95,6 +96,7 @@ export function flowUpdate(
   const [base, foodG] = [u[4] ?? 0, u[5] ?? 0];
   const [bodyRate, bodyLow, fresh] = [u[9] ?? 0, u[10] ?? 0, u[11] ?? 0];
   const [floor, trailLow, trailScale] = [u[12] ?? 0, u[13] ?? 0, u[14] ?? 0];
+  const strain = Math.trunc(u[22] ?? 0);
   const flux = flowFlux(grid, fields.memory, fields.pressure);
   const sites = siteCells(u, w);
   // A flux runs between foods while at least two food sites give or take (fed in flow.wgsl).
@@ -120,8 +122,9 @@ export function flowUpdate(
       const bodyOld = fields.memory[i + 1] ?? 0;
       if (bodyOld >= bodyLow) d = fed ? Math.max(floor, d + rate * (mean - d)) : d;
       else d = Math.min(fresh, Math.max(d, floor) * (1 + recover));
-      const total = (trail[i] ?? 0) + (trail[i + 1] ?? 0) + (trail[i + 2] ?? 0) + (trail[i + 3] ?? 0);
-      const presence = Math.min(1, Math.max(0, (total - trailLow) * trailScale));
+      // The trail of the strain of the block alone.
+      const own = trail[i + strain] ?? 0;
+      const presence = Math.min(1, Math.max(0, (own - trailLow) * trailScale));
       const body = bodyOld + bodyRate * (presence - bodyOld);
       // Only a cell with a tube conducts; a food cell then with the conductivity of food.
       const food = (env[i + 1] ?? 0) > 0;

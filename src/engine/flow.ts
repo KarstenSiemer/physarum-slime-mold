@@ -1,6 +1,7 @@
 // Flow in the tubes (ADR 0029): the constants of the rule, the uniform block of its passes and the schedule of the
 // foods that give and take. The passes are shaders/flow.wgsl and gl/glsl/flow.frag; flow-reference.ts mirrors them on
-// the CPU for the tests.
+// the CPU for the tests. Every strain has a flow of its own (ADR 0030): the passes run once per strain, on the trail
+// of that strain, with a state of their own.
 import type { Settings } from '../model/params';
 
 /**
@@ -25,8 +26,8 @@ export const STEPS_PER_MINUTE = 30;
  *   a tube would swing by itself, and add to the swing of the network each time the trail gives it a tube.
  * - `bodyRate`: the tube body follows the trail at this rate per step (50 steps, 1.7 min); below `bodyLow` no tube.
  * - `fresh`: flow memory of ground that never held a tube; `floor`: the least flow memory.
- * - `trailLow`, `trailFull`: the trail, in deposits of strain A, below which a cell holds no plasmodium and from which
- *   it holds a full tube.
+ * - `trailLow`, `trailFull`: the trail of a strain, in deposits of that strain, below which a cell holds no plasmodium
+ *   of the strain and from which it holds a full tube.
  * - `death`: chance per step that an agent on a starved cell dies; `half`: the flow memory at which it is half that.
  * - `birth`: the top chance that a dead agent comes to life on the empty cell it draws; from `birthFrom` on.
  * - `head`: the most pressure that a food site works against, per unit of its flux: a site gives or takes less as its
@@ -141,19 +142,21 @@ export function flowRoles(covered: readonly boolean[], step: number, seed: numbe
 }
 
 /**
- * The uniform block of the flow passes: the constants, the cell of the first site (the passes recentre the pressure
- * by it while no site gives or takes, flow.wgsl referenceCell()) and the sites. The passes
- * take the step and the seed from the parameters of the simulation. The deposit of strain A is the unit of the trail
- * thresholds.
+ * The uniform block of the flow passes of the strain `strain` (ADR 0030): the constants, the cell of the first site
+ * (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain and the
+ * sites. The passes take the step and the seed from the parameters of the simulation. The deposit of the strain is
+ * the unit of the trail thresholds. Every strain has the same sites and the same constants: the agent passes read the
+ * constants from the block of any strain.
  */
 export function packFlow(
   s: Pick<Settings, 'flowStrength' | 'strains'>,
   sites: readonly (readonly [number, number])[],
   buf = new ArrayBuffer(FLOW_BYTES),
+  strain = 0,
 ): ArrayBuffer {
   const f = new Float32Array(buf);
   f.fill(0);
-  const deposit = Math.max(s.strains[0]?.deposit ?? 5, 1e-6);
+  const deposit = Math.max(s.strains[strain]?.deposit ?? 5, 1e-6);
   const [low, full] = [FLOW.trailLow * deposit, FLOW.trailFull * deposit];
   const omega = 2 / (1 + Math.sqrt(1 - FLOW.radius * FLOW.radius));
   const n = Math.min(sites.length, FLOW_SITES);
@@ -164,7 +167,7 @@ export function packFlow(
   f.set([FLOW.floor, low, 1 / (full - low), n], 12);
   f.set([FLOW.death, FLOW.half * FLOW.half, FLOW.birth, FLOW.birthFrom], 16);
   const ref = sites[0] ?? [0, 0];
-  f.set([ref[0], ref[1], 0, 0], 20);
+  f.set([ref[0], ref[1], strain, 0], 20);
   f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), 0], 24);
   for (let i = 0; i < n; i++) f.set([sites[i]?.[0] ?? 0, sites[i]?.[1] ?? 0, 0, 0], FLOW_CONSTANT_SLOTS * 4 + i * 4);
   return buf;

@@ -1,5 +1,9 @@
 // Flow in the tubes (ADR 0029), for the extended model while the setting is on. Prepended with common.wgsl.
 //
+// Every strain is a plasmodium of its own, with a flow of its own (ADR 0030): sim.ts runs these passes once per strain,
+// with the memory and the pressure of that strain. The passes read the trail of that strain alone (U.f.z), so no flux
+// passes from the tubes of one strain into the tubes of another.
+//
 // The network: every open cell (inside the arena, no wall) is a node with a conductivity g, and two cells that share a
 // side are joined by an edge whose conductance is the harmonic mean of their conductivities. A food site that the
 // plasmodium covers gives or takes the flux I0 at its cell: the start of the food stroke, which is the centre of a
@@ -7,9 +11,9 @@
 // to 3 and 6; several sources and sinks at once). Four pressure fields run side by side, one per lane of the
 // textures: each has its own draw of which sites give and which take.
 //
-// `memory` holds per cell: x the flow memory D (Tero's conductivity of a tube, 0.0001 to 1), y the tube body (the
-// trail smoothed over time, 0 to 1), z the conductivity g, w the roles of a site's cell while the site gives or
-// takes in at least one lane, else 0.
+// `memory` holds per cell, for the strain of the pass: x the flow memory D (Tero's conductivity of a tube, 0.0001 to
+// 1), y the tube body (the trail of the strain smoothed over time, 0 to 1), z the conductivity g, w the roles of a
+// site's cell while the site gives or takes in at least one lane, else 0.
 //
 // A step runs `update` once and then `pressure` FLOW_ITERATIONS times:
 // - `update`: the flux of every lane through the cell, from the pressure and the conductivities of the step before;
@@ -28,7 +32,7 @@ struct Flow {
   c: vec4f, // weight, body rate, body low, fresh memory
   d: vec4f, // memory floor, trail low, 1 / (trail full − trail low), site count
   e: vec4f, // death, half², birth, birth from (agents.wgsl)
-  f: vec4f, // the first site's cell x, y (referenceCell()), unused, unused
+  f: vec4f, // the first site's cell x, y (referenceCell()), the strain of the pass, unused
   g: vec4f, // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
   sites: array<vec4f, 64>, // cell x, cell y, unused, unused
 }
@@ -97,8 +101,8 @@ fn roleSigns(code: f32) -> vec4f {
   return vec4f(d == vec4u(1u)) - vec4f(d == vec4u(2u));
 }
 
-// Whether the plasmodium covers site i: its cell held food and a tube in the step before. Every cell reads the
-// same memory, so all sites see the same covered sites.
+// Whether the plasmodium of the strain covers site i: its cell held food and a tube of the strain in the step before.
+// Every cell reads the same memory, so all sites see the same covered sites.
 fn covered(i: i32) -> bool {
   let s = vec2i(U.sites[i].xy);
   return envOf(env[s.y * i32(W()) + s.x]).y > 0.0 && textureLoad(memory, s, 0).y >= U.c.z;
@@ -220,9 +224,9 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   } else {
     d = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));
   }
-  // The tube body follows the plasmodium, which the trail of all strains shows.
-  let t = textureLoad(trail, p, 0);
-  let presence = clamp((t.x + t.y + t.z + t.w - U.d.y) * U.d.z, 0.0, 1.0);
+  // The tube body follows the plasmodium of the strain, which the trail of the strain shows (ADR 0030).
+  let t = textureLoad(trail, p, 0)[u32(U.f.z)];
+  let presence = clamp((t - U.d.y) * U.d.z, 0.0, 1.0);
   let body = m.y + U.c.y * (presence - m.y);
   // Only a cell with a tube conducts: food that the plasmodium does not cover is open ground, as any other. Else it
   // would hold a pressure of its own beside the network (ADR 0029, decision 6).

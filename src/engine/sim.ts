@@ -63,14 +63,22 @@ interface GrowthBuffers {
  * The state of the flow in the tubes (flow.wgsl, ADR 0029), allocated while the flow is on: the memory of each cell
  * (flow memory, tube body, conductivity, roles) in two textures that the update pass writes in turn, the pressure of
  * the four lanes in three textures (the one in work, the one before as momentum, the one that an iteration writes), and
- * the uniform block of the passes.
+ * the uniform block of the passes. Every strain has a flow of its own (ADR 0030): each texture has a layer per strain,
+ * and each strain has its uniform block.
  */
 interface FlowState {
+  /** The strains of the settings that the state was made for: the layers of every texture. */
+  strains: number;
   memory: Pair<GPUTexture>;
-  memoryViews: Pair<GPUTextureView>;
+  /** Every layer of each memory texture, for the agent passes and growth: an agent reads the layer of its strain. */
+  memoryArrays: Pair<GPUTextureView>;
+  /** Per strain: its layer of each memory texture, for the passes of the flow. */
+  memoryViews: Pair<GPUTextureView>[];
   pressure: GPUTexture[];
-  pressureViews: GPUTextureView[];
-  uniform: GPUBuffer;
+  /** Per strain: its layer of each pressure texture. */
+  pressureViews: GPUTextureView[][];
+  /** Per strain: the uniform block of its passes (flow.ts packFlow()). */
+  uniforms: GPUBuffer[];
 }
 /** A trail and a scent texture with their views: the view's pairs (viewTextures). */
 interface ViewPair {
@@ -409,12 +417,7 @@ export class Simulation implements Sim {
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
     }
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
-    if (!flowOn(settings) && this.flow) {
-      for (const t of [...this.flow.memory, ...this.flow.pressure]) t.destroy();
-      this.flow.uniform.destroy();
-      this.flow = undefined;
-      for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);
-    }
+    if (!flowOn(settings)) this.dropFlow();
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -538,8 +541,13 @@ export class Simulation implements Sim {
     this.sites = flowSites(centres, this.width, this.height);
   }
 
-  /** The textures and the uniform block of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL). */
+  /**
+   * The textures and the uniform blocks of the flow, made at their first use (sizing.ts FLOW_BYTES_PER_CELL), with a
+   * layer and a block per strain of the settings (ADR 0030). Settings with another number of strains get a new state.
+   */
   private ensureFlow(): FlowState {
+    const strains = this.settings.strains.length;
+    if (this.flow && this.flow.strains !== strains) this.dropFlow();
     if (!this.flow) {
       const usage =
         GPUTextureUsage.TEXTURE_BINDING |
@@ -547,18 +555,24 @@ export class Simulation implements Sim {
         GPUTextureUsage.RENDER_ATTACHMENT |
         GPUTextureUsage.COPY_SRC |
         GPUTextureUsage.COPY_DST;
-      const make = () => this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
+      const size = [this.width, this.height, strains];
+      const make = () => this.device.createTexture({ size, format: 'rgba32float', usage });
+      const whole = (t: GPUTexture) => t.createView({ dimension: '2d-array' });
+      const layer = (t: GPUTexture, strain: number) =>
+        t.createView({ dimension: '2d', baseArrayLayer: strain, arrayLayerCount: 1 });
+      const each = <T>(of: (strain: number) => T) => Array.from({ length: strains }, (_, strain) => of(strain));
       const memory: Pair<GPUTexture> = [make(), make()];
       const pressure = [make(), make(), make()];
       this.flow = {
+        strains,
         memory,
-        memoryViews: [memory[0].createView(), memory[1].createView()],
+        memoryArrays: [whole(memory[0]), whole(memory[1])],
+        memoryViews: each((strain): Pair<GPUTextureView> => [layer(memory[0], strain), layer(memory[1], strain)]),
         pressure,
-        pressureViews: pressure.map((t) => t.createView()),
-        uniform: this.device.createBuffer({
-          size: FLOW_BYTES,
-          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        }),
+        pressureViews: each((strain) => pressure.map((t) => layer(t, strain))),
+        uniforms: each(() =>
+          this.device.createBuffer({ size: FLOW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+        ),
       };
       const enc = this.device.createCommandEncoder();
       this.clearFlow(enc, this.flow);
@@ -567,38 +581,50 @@ export class Simulation implements Sim {
     return this.flow;
   }
 
-  /** The start of the flow: every cell with the memory of fresh ground, no tube, no pressure. */
+  /** The start of the flow of every strain: every cell with the memory of fresh ground, no tube, no pressure. */
   private clearFlow(enc: GPUCommandEncoder, flow: FlowState) {
     const clear = (view: GPUTextureView, clearValue: number[]) => {
       enc.beginRenderPass({ colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue }] }).end();
     };
-    for (const view of flow.memoryViews) clear(view, [FLOW.fresh, 0, 0, 0]);
-    for (const view of flow.pressureViews) clear(view, [0, 0, 0, 0]);
+    for (const view of flow.memoryViews.flat()) clear(view, [FLOW.fresh, 0, 0, 0]);
+    for (const view of flow.pressureViews.flat()) clear(view, [0, 0, 0, 0]);
     this.flowM = 0;
     this.flowP = 0;
   }
 
-  /**
-   * For tests: the memory of the flow per cell (flow memory, tube body, conductivity, roles), 4 values per cell; empty
-   * while the flow is off.
-   */
-  async readFlow(): Promise<Float32Array> {
-    if (!this.flow) return new Float32Array(0);
-    return readTexture(this.device, at(this.flow.memory, this.flowM), 4);
+  /** Frees the state of the flow, and every bind group that holds a part of it. */
+  private dropFlow() {
+    if (!this.flow) return;
+    for (const t of [...this.flow.memory, ...this.flow.pressure]) t.destroy();
+    for (const b of this.flow.uniforms) b.destroy();
+    this.flow = undefined;
+    for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);
   }
 
-  /** For tests: replaces the memory of the flow, 4 values per cell as readFlow() returns them. Only while it is on. */
-  writeFlow(data: Float32Array) {
-    if (!flowOn(this.settings)) return;
+  /**
+   * For tests: the memory of the flow of a strain per cell (flow memory, tube body, conductivity, roles), 4 values
+   * per cell; empty while the flow is off, and for a strain that the settings do not hold.
+   */
+  async readFlow(strain = 0): Promise<Float32Array> {
+    if (!this.flow || strain >= this.flow.strains) return new Float32Array(0);
+    return readTexture(this.device, at(this.flow.memory, this.flowM), 4, strain);
+  }
+
+  /**
+   * For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. Only while
+   * the flow is on, and for a strain of the settings.
+   */
+  writeFlow(data: Float32Array, strain = 0) {
+    if (!flowOn(this.settings) || strain >= this.settings.strains.length) return;
     const texture = at(this.ensureFlow().memory, this.flowM);
     const size = [this.width, this.height];
-    this.device.queue.writeTexture({ texture }, data, { bytesPerRow: this.width * 16 }, size);
+    this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
   }
 
-  /** For tests: the pressure of the four lanes of the flow, 4 values per cell; empty while the flow is off. */
-  async readPressure(): Promise<Float32Array> {
-    if (!this.flow) return new Float32Array(0);
-    return readTexture(this.device, at(this.flow.pressure, this.flowP), 4);
+  /** For tests: the pressure of the four lanes of the flow of a strain, 4 values per cell; empty as readFlow(). */
+  async readPressure(strain = 0): Promise<Float32Array> {
+    if (!this.flow || strain >= this.flow.strains) return new Float32Array(0);
+    return readTexture(this.device, at(this.flow.pressure, this.flowP), 4, strain);
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -894,10 +920,7 @@ export class Simulation implements Sim {
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
     this.viewThird?.trail.destroy();
     this.viewThird?.scent.destroy();
-    if (this.flow) {
-      for (const t of [...this.flow.memory, ...this.flow.pressure]) t.destroy();
-      this.flow.uniform.destroy();
-    }
+    this.dropFlow();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -958,14 +981,17 @@ export class Simulation implements Sim {
     const saturate = trailSaturation(this.settings) > 0;
     // Bind groups of 'auto' layouts belong to their pipeline: the key names the variant.
     // With the flow in the tubes, the passes in which agents starve and come to life by the flow memory (agents.wgsl
-    // `//#if FLOW`, ADR 0029): they read the memory of the step before.
+    // `//#if FLOW`, ADR 0029): they read the memory of the step before, each agent the layer of its strain (ADR 0030).
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
-    if (flow) this.device.queue.writeBuffer(flow.uniform, 0, packFlow(this.settings, this.sites, this.flowData));
+    flow?.uniforms.forEach((block, strain) => {
+      this.device.queue.writeBuffer(block, 0, packFlow(this.settings, this.sites, this.flowData, strain));
+    });
     const flowing = flow ? k.flowing(senseWalls, saturate) : undefined;
     const fm = this.flowM;
     const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${flow ? `flow${fm}` : ''}`;
     const agentPasses = flowing ?? (saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k);
-    const [flowMemory, flowUniform] = flow ? [at(flow.memoryViews, fm), flow.uniform] : [null, null];
+    // The agent passes read only the constants of the block, which every strain has: the block of the first strain.
+    const [flowMemory, flowUniform] = flow ? [at(flow.memoryArrays, fm), at(flow.uniforms, 0)] : [null, null];
     if (!col) {
       const move = agentPasses.move;
       pass.setPipeline(move);
@@ -1069,48 +1095,57 @@ export class Simulation implements Sim {
   /**
    * The flow in the tubes after the diffusion of a step (flow.wgsl, ADR 0029): the update of the memory from the
    * pressure and the trail of this step, then the pressure iterations on the new conductivity. `trail`: the texture
-   * that holds the trail after the step.
+   * that holds the trail after the step. Once per strain, each with its own layers and its own block (ADR 0030): the
+   * passes of a strain read no state of another strain.
    */
   private encodeFlow(pass: GPUComputePassEncoder, flow: FlowState, trail: Bit) {
     const passes = this.kernels.flowPasses();
     const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
-    pass.setPipeline(passes.update);
-    pass.setBindGroup(
-      0,
-      this.bind(`flowUpdate${m}${p}${trail}`, passes.update, [
-        this.params,
-        flow.uniform,
-        this.trailViews[trail],
-        this.env,
-        flow.memoryViews[m],
-        flow.memoryViews[next],
-        at(flow.pressureViews, p),
-      ]),
-    );
-    pass.dispatchWorkgroups(...groups);
-    for (let i = 0; i < FLOW_ITERATIONS; i++) {
-      // The first two iterations take the pressure of the reference cell off (flow.wgsl RECENTRE).
-      const pipeline = at(passes.pressure, Math.min(i, 2) === 2 ? 0 : i + 1);
-      const [before, out] = [(p + 2) % 3, (p + 1) % 3];
-      pass.setPipeline(pipeline);
+    for (let strain = 0; strain < flow.strains; strain++) {
+      const [uniform, memory, pressure] = [
+        at(flow.uniforms, strain),
+        at(flow.memoryViews, strain),
+        at(flow.pressureViews, strain),
+      ];
+      p = this.flowP;
+      pass.setPipeline(passes.update);
       pass.setBindGroup(
         0,
-        this.bind(`flowPressure${Math.min(i, 2)}${next}${p}`, pipeline, [
+        this.bind(`flowUpdate${strain}-${m}${p}${trail}`, passes.update, [
           this.params,
-          flow.uniform,
-          null,
+          uniform,
+          this.trailViews[trail],
           this.env,
-          flow.memoryViews[next],
-          null,
-          at(flow.pressureViews, p),
-          at(flow.pressureViews, before),
-          at(flow.pressureViews, out),
+          memory[m],
+          memory[next],
+          at(pressure, p),
         ]),
       );
       pass.dispatchWorkgroups(...groups);
-      p = out;
+      for (let i = 0; i < FLOW_ITERATIONS; i++) {
+        // The first two iterations take the pressure of the reference cell off (flow.wgsl RECENTRE).
+        const pipeline = at(passes.pressure, Math.min(i, 2) === 2 ? 0 : i + 1);
+        const [before, out] = [(p + 2) % 3, (p + 1) % 3];
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(
+          0,
+          this.bind(`flowPressure${strain}-${Math.min(i, 2)}${next}${p}`, pipeline, [
+            this.params,
+            uniform,
+            null,
+            this.env,
+            memory[next],
+            null,
+            at(pressure, p),
+            at(pressure, before),
+            at(pressure, out),
+          ]),
+        );
+        pass.dispatchWorkgroups(...groups);
+        p = out;
+      }
     }
     this.flowM = next;
     this.flowP = p;
