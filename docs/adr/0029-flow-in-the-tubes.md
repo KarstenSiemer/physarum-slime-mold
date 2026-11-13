@@ -6,6 +6,8 @@
   the mathematics and on how to check this record came on 2026-11-13, at the owner's request,
   with the research code in the repository (decision 16).
 - Date: 2026-11-12
+- In short: [`research/flow/README.md`](../../research/flow/README.md) tells on one page, in plain
+  words, how this decision came about. This record has the details.
 
 ## Context
 

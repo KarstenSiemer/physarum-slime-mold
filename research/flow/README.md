@@ -1,20 +1,105 @@
-# Flow in the tubes: how to retrace ADR 0029
+# Flow in the tubes: how the decision came about, and how to check it
 
-This folder holds the code and the logs behind
-[ADR 0029](../../docs/adr/0029-flow-in-the-tubes.md): the CPU prototype that compared the solvers,
-the scripts that measured the real engine, and the logs of the runs. With it you can do each step
-again on your own machine, with Node and one command per step.
+This folder belongs to [ADR 0029](../../docs/adr/0029-flow-in-the-tubes.md). The first part of
+this page tells in plain words how the decision came about. You need nothing else to follow it.
+The rest of the page is a reference: one command for each step, for the day when you want to run
+a step again.
 
-It is research code. The app does not load it, and the build does not hold it. The prototype keeps
-the rule that it had on 2026-11-12, because the ADR holds its numbers. Decision 16 of the ADR lists
-what changed on 2026-11-13: the paths, some names, one switch in `prototype/flow.ts`, one parameter
-in `prototype/tokyo.ts`, the second half of `prototype/static.ts`, which was written again, and
-the light on the Tokyo map, which no run used and which went away. `research.test.ts` checks that
-the scripts still give the rows of the logs.
+## The story in one page
+
+**The question.** In Jones' model the agents keep every corridor of a maze that they filled once.
+The real slime mold does not: it empties the dead ends and keeps one tube on the short way. Tero
+et al. explain this with a flow. A tube that carries much flow gets wider, and a tube without flow
+dies. The task was to give the app that flow.
+
+**What the flow needs.** We must know how much flows through every cell. For that, every cell
+gets a pressure, and the pressures must fit together: what flows into a cell must flow out again.
+That is one large system of equations, with one unknown per cell, and the app must solve it again
+in every step, on the GPU.
+
+**Three ways to solve it.**
+
+1. Exact (conjugate gradients). It gives the right answer. But each of its iterations needs sums
+   over the whole grid, and its good helper, the preconditioner, works cell after cell. A GPU is
+   fast only when all cells can be computed at the same time.
+2. Local (Jacobi iterations with a momentum). Each cell looks only at its four neighbours. A GPU
+   does one such pass very fast. The price: news travels only one cell per pass.
+3. Ma's walkers. Particles walk at random from one food to the other. No equations at all.
+
+**Step 1: are all three correct?** On a small ring with a known answer, all three give the answer
+of the paper (part 2 below). So a later difference comes from the size of a network, and not from
+an error.
+
+**Step 2: how much work is a real network?** We took the network that the agents build in the
+Maze: 47,544 cells, and 754 cells from one food to the other (part 3). The exact solver needs
+3,109 iterations in the form that a GPU can run. The local solver needs about 4,400 iterations
+from a pressure of zero to come within 5 % of the exact flow. The walkers are still 89 % wrong
+after 150,000 steps: they are out. So no solver can start from zero in every step. But the
+network changes by only 0.35 % per step.
+The idea that follows: do only 16 local passes per step, and keep the pressure of the step
+before. Then the solver never has to start from zero.
+
+**Step 3: do the agents see a difference?** This is the test that counts (part 4). The agents
+built the Maze network with each solver, ten seeds each. With 16 local passes per step the dead
+ends empty about as fast as with the exact solver (below 10 % of the route at step 2,500 against
+step 2,250), and the same tube stays. With the walkers the network dies in 10 of 10 seeds. The
+decision: Tero's flow, with the local solver and 16 passes per step.
+
+**Step 4: the first version in the app failed.** In the Tokyo scene the pressure grew without end
+while the colony grew, up to 10¹⁸. A small scene on the CPU showed the same fault and its causes
+(part 5). The largest one: the momentum also ran on cells without a tube. Four rules stop the
+growth, and with them the pressure stays small.
+
+**Step 5: what the app does now** (part 6). In the Maze the dead ends hold less than 1 % of the
+trail of the route by step 5,000, and one tube stays that is 1.10 times as long as the shortest
+way. In the Tokyo scene the network is
+as long as the network of the real slime mold (1.77 against 1.75 times the shortest tree that
+joins all cities). With the flow switched off, every scene gives the same bytes as before.
+
+**What it costs, and what is not exact.** The flow costs about 1.5 ms per step in the Maze and
+about 2.3 ms in the Tokyo scene. The local solver is 3 to 7 % off the exact flow in a network
+that has settled. It is further off while the colony grows and for about 100 steps after the
+foods change their roles. The tubes react slowly, over hundreds of steps, so they average over
+this error.
+
+**What the second look found.** For this folder every number of the ADR was made again from saved
+code. Most numbers held bit for bit. Five things did not, and the ADR now says so:
+
+- The local solver has one tuning number, the radius. It was tuned for a form of the rule that
+  the app does not use. With the form of the app another value is about three times as fast on a
+  fixed network. The app keeps its value for now: this is an open point.
+- One table held numbers from states of the prototype that no file kept. It is measured again.
+- In one campaign, 7 of 60 runs had used an older state of the code. The campaign ran again, and
+  one entry of one table changed.
+- One line of a record was missing. Its run was made again.
+- The cost per step moves by about a sixth from run to run.
+
+## What is in this folder, and what you need to read
+
+| Part                                               | Size        | Read it?                                                |
+| -------------------------------------------------- | ----------- | ------------------------------------------------------- |
+| This page, up to here                              | 1 page      | yes: it is the whole story                              |
+| The ADR, section "The solvers and the mathematics" | 300 lines   | if you want the formulas                                |
+| The rest of this page                              | 600 lines   | only to run a step again: it is a list of commands      |
+| `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
+| `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 1,200 lines | no: the scripts that made the other numbers of the ADR  |
+| `logs/`                                            | 1.9 MB      | never: the raw output of the runs, which a script reads |
+| `summary.ts`                                       | 370 lines   | no: it makes the tables of the ADR from `logs/`         |
+| `research.test.ts`                                 | 240 lines   | no: it checks that the scripts still give the same rows |
+
+The app does not load this folder, and the build does not hold it.
+
+## The reference starts here
+
+The prototype keeps the rule that it had on 2026-11-12, because the ADR holds its numbers.
+Decision 16 of the ADR lists what changed on 2026-11-13: the paths, some names, one switch in
+`prototype/flow.ts`, one parameter in `prototype/tokyo.ts`, the second half of
+`prototype/static.ts`, which was written again, and the light on the Tokyo map, which no run used
+and which went away. `research.test.ts` checks that the scripts still give the rows of the logs.
 
 ## What you need
 
-- Node 26 and the packages of the repository: `npm ci`. Checked with Node 26.10 and 26.13.
+- Node 26 and the packages of the repository: `npm ci`. Checked with Node 26.10, 26.13 and 26.13.1.
 - For part 6 and for the browser tests of part 7: the browser of the tests,
   `npx playwright install chromium`.
 - Run every command from the root of the repository.
@@ -309,9 +394,10 @@ the number of runs. You must see:
   from step 2,000 on holds `33: 1 joined`: the network is dead.
 
 A run gives the same numbers again: it has no thread, no clock, and no random numbers but those
-of its seed. Checked with Node 26.10 on macOS (ARM) and Node 26.13 on Linux (x64 and ARM). The
-language does not fix some functions of a run to the last bit (`Math.sin`, `Math.cos`,
-`Math.pow`, `Math.hypot`), so another version of Node can give other last digits.
+of its seed. Checked with Node 26.10 on macOS (ARM), Node 26.13 on Linux (x64 and ARM), and Node
+26.13.1 on GitHub (Linux x64). The language does not fix some functions of a run to the last bit
+(`Math.sin`, `Math.cos`, `Math.pow`, `Math.hypot`), so another version of Node can give other
+last digits.
 
 The rules that decisions 5 and 8 of the ADR reject are arguments of the same scripts. Each ran
 once with seed 1, as the campaign `alternatives` (9 minutes):
