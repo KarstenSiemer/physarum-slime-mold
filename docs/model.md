@@ -466,8 +466,9 @@ checks that this table names every key.
 "Model: both" means the parameter acts in both models with every value of its range. The Jones model requires one
 strain, one agent per cell, one diffusion pass and the own weight ±1 (`jonesFits()`), and binds the food weight to the
 own weight, the scent decay to the strain's decay, the share to 1, light and K to off, and the flow to off
-(`asJones()`). `speed`, `exposure`, `bloom`, `style` and `showScent` change only the view and the
-playback, not the model.
+(`asJones()`). `speed`, `exposure`, `bloom`, `style`, `showScent` and `showTubes` change only the view and the
+playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain;
+its rule is in [design.md](design.md), section 5, and in ADR 0034.
 
 ## 12. The two backends
 
