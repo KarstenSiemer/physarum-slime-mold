@@ -740,10 +740,23 @@ export class Engine {
     return this.rebuilding ? { ...l, strand: 0 } : l;
   }
 
+  /**
+   * Levels that the backend measures for the simulation of the engine. The backend waits for a measurement that is
+   * still running. A rebuild that starts in that time destroys the simulation, and the answer is then none of the new
+   * one: the engine asks again when the new simulation stands.
+   */
+  private async measuredFor(ask: (sim: Sim) => Promise<Levels>): Promise<Levels> {
+    let levels: Levels;
+    do {
+      await this.rebuilding;
+      levels = await ask(this.sim);
+    } while (this.rebuilding);
+    return levels;
+  }
+
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */
-  async settle(): Promise<Levels> {
-    await this.rebuilding;
-    return this.backend.settle(this.sim);
+  settle(): Promise<Levels> {
+    return this.measuredFor((sim) => this.backend.settle(sim));
   }
 
   /**
@@ -754,7 +767,7 @@ export class Engine {
   async snapshot(): Promise<Blob> {
     await this.rebuilding;
     const measure = this.settings.style !== 'agents' || this.settings.showScent;
-    const img = await this.capture(measure ? await this.backend.measured(this.sim) : undefined);
+    const img = await this.capture(measure ? await this.measuredFor((sim) => this.backend.measured(sim)) : undefined);
     const canvas = new OffscreenCanvas(img.width, img.height);
     canvas.getContext('2d')?.putImageData(img, 0, 0);
     return canvas.convertToBlob({ type: 'image/png' });

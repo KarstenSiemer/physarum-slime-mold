@@ -216,6 +216,8 @@ export class WebGl2Backend implements Backend<GlSim> {
    */
   private async read(sim: GlSim): Promise<Levels | undefined> {
     while (this.measuring) await this.measuring;
+    // A rebuild can destroy the simulation while this waits: then nothing asks it for its targets.
+    if (sim.destroyed) return undefined;
     const run = this.sample(sim);
     this.measuring = run
       .then(

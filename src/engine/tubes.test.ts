@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, tubeViewHelp, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { clearOf, tubePicture, tubeRoots, wallByte, type TubeGrid } from './tubes-reference';
+import { tubePicture, tubeRoots, wallByte, wallOnLine, type TubeGrid } from './tubes-reference';
 import { SHAPE_RANGE } from './types';
 
-/** A grid without walls: every byte of `shape` is 0, the byte of a cell 4 cells or more from a wall. */
+/** A grid without walls: every byte of `shape` is 0. */
 const open = (width: number, height: number, boundary: TubeGrid['boundary'] = 'box'): TubeGrid => ({
   width,
   height,
@@ -49,9 +49,9 @@ describe('the picture of the tubes', () => {
     for (const style of ['glow', 'gel', 'paper'] as const) expect(tubesShown({ ...on, style })).toBe(true);
   });
 
-  it('reaches no farther than the engine knows the distance to a wall', () => {
+  it('reaches 4 cells, so a pass looks at the 7 × 7 cells around a cell', () => {
     expect(TUBE_REACH).toBe(TUBES.radius + TUBES.edge / 2);
-    expect(TUBE_REACH).toBeLessThanOrEqual(SHAPE_RANGE);
+    expect(TUBE_REACH).toBe(4);
     // The whole cells nearer than the reach: a cell 4 cells away holds nothing of a disc.
     expect(TUBE_WINDOW).toBe(3);
   });
@@ -219,36 +219,127 @@ describe('the picture of the tubes', () => {
     expect([14, 12].map((y) => behind[(y * 32 + 16) * 4])).toEqual([8, 8]);
   });
 
-  it('never takes a wall byte for more than the distance that it was made from', () => {
-    // A byte holds a distance in steps of 8 / 255 cells, rounded. The distance that the wall test takes from it is
-    // at most the true one, and at most one step below it.
-    for (let d = 0; d <= SHAPE_RANGE; d += 0.001) {
-      const clear = clearOf(byteOf(-d));
-      expect(clear).toBeLessThanOrEqual(d);
-      expect(clear).toBeGreaterThan(d - (2 * SHAPE_RANGE) / 255 - 1e-9);
-    }
-    expect(clearOf(0)).toBeCloseTo(SHAPE_RANGE * (1 - 1 / 255), 9);
-    // One wall cell alone, with the bytes that the engine holds around it after a change of boundary: the distance
-    // to the centre of the wall cell, rounded (paint.wgsl floorByte()). The cell diagonally beside it gets byte 82,
-    // which stands for 1.4275 cells: more than the 1.4142 cells to the wall cell.
-    const g = open(32, 24);
-    const [wx, wy] = [16, 12];
-    for (let y = 0; y < g.height; y++)
-      for (let x = 0; x < g.width; x++) {
-        const n = (x - wx) ** 2 + (y - wy) ** 2;
-        g.shape[(y * g.width + x) * 4] = n === 0 ? 128 : n <= 18 ? byteOf(-Math.sqrt(n)) : 0;
+  // The cells that a line between two cell centres touches, by a way of its own: along the line the distance to the
+  // centre of a cell, as the larger of its two parts, falls and then rises. So it is least at an end of the line or
+  // where one of its parts is 0 or both are equal, and the line touches the cell if it is half a cell or less there.
+  // `a / b` is such a place on the line from 0 to 1, in whole numbers.
+  const touches = (ox: number, oy: number, i: number, j: number) => {
+    const places: [a: number, b: number][] = [
+      [0, 1],
+      [1, 1],
+      [i * Math.sign(ox), Math.abs(ox)],
+      [j * Math.sign(oy), Math.abs(oy)],
+      [(i - j) * Math.sign(ox - oy), Math.abs(ox - oy)],
+      [(i + j) * Math.sign(ox + oy), Math.abs(ox + oy)],
+    ];
+    return places.some(
+      ([a, b]) => b > 0 && a >= 0 && a <= b && 2 * Math.abs(ox * a - i * b) <= b && 2 * Math.abs(oy * a - j * b) <= b,
+    );
+  };
+
+  it('finds every cell that the line between two cells touches, also at a corner', () => {
+    const g = open(16, 16);
+    const [px, py] = [8, 8];
+    let [pairs, onLine] = [0, 0];
+    for (let oy = -TUBE_WINDOW; oy <= TUBE_WINDOW; oy++)
+      for (let ox = -TUBE_WINDOW; ox <= TUBE_WINDOW; ox++) {
+        if ((ox === 0 && oy === 0) || Math.hypot(ox, oy) >= TUBE_REACH) continue;
+        for (let j = -4; j <= 4; j++)
+          for (let i = -4; i <= 4; i++) {
+            if ((i === 0 && j === 0) || (i === ox && j === oy)) continue;
+            // One wall cell alone.
+            const c = ((py + j) * g.width + px + i) * 4;
+            g.shape[c] = 128;
+            const found = wallOnLine(g, px, py, ox, oy);
+            g.shape[c] = 0;
+            expect(found, `the line to (${String(ox)}, ${String(oy)}), a wall at (${String(i)}, ${String(j)})`).toBe(
+              touches(ox, oy, i, j),
+            );
+            pairs++;
+            if (found) onLine++;
+          }
       }
-    expect(wallByte(g, 11 * g.width + 15)).toBe(82);
-    // A tube cell diagonally beside the wall cell: its disc reaches neither the wall cell nor the cell behind it,
-    // 2.83 cells away on the line through the wall cell. Without the wall it reaches both.
-    const dot = memoryOf(g, (x, y) => (x === 15 && y === 11 ? [1, 1] : undefined));
-    const trail = trailOf(g, (x, y) => (x === 15 && y === 11 ? 8 : 0));
-    const walled = tubePicture(g, trail, tubeRoots(g, [dot]));
-    expect([walled[(12 * g.width + 16) * 4], walled[(13 * g.width + 17) * 4]]).toEqual([0, 0]);
-    expect(walled[(10 * g.width + 14) * 4]).toBeGreaterThan(4);
-    const free = open(32, 24);
-    const unwalled = tubePicture(free, trail, tubeRoots(free, [dot]));
-    expect(unwalled[(12 * g.width + 16) * 4]).toBeGreaterThan(4);
-    expect(unwalled[(13 * g.width + 17) * 4]).toBeGreaterThan(1);
+    // 44 cells lie in reach of a disc, and 79 places are left for the wall cell. The cells on a line: none, 1 and 2
+    // for a cell 1, 2 and 3 cells away along a row or a column, 2 and 5 on a diagonal, 2 for (2, 1), and 4 for
+    // (3, 1) and (3, 2). With 4, 4 and 8 cells of each kind that is 120.
+    expect([pairs, onLine]).toEqual([44 * 79, 4 * (0 + 1 + 2) + 4 * (2 + 5) + 8 * (2 + 4 + 4)]);
+    // The line to the cell 3 to the right and 1 down runs through the corner between four cells: all four are on it.
+    expect([touches(3, 1, 1, 0), touches(3, 1, 2, 0), touches(3, 1, 1, 1), touches(3, 1, 2, 1)]).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect([touches(3, 1, 3, 0), touches(3, 1, 0, 1), touches(1, 0, 2, 0)]).toEqual([false, false, false]);
+  });
+
+  /** A grid with these wall cells. */
+  const walled = (walls: [x: number, y: number][]) => {
+    const g = open(32, 24);
+    for (const [x, y] of walls) g.shape[(y * g.width + x) * 4] = 128;
+    return g;
+  };
+  /** The picture of one tube cell with the factor 1 and a trail of 8, at some cells. */
+  const dot = (g: TubeGrid, tube: [number, number], cells: [number, number][]) => {
+    const memory = memoryOf(g, (x, y) => (x === tube[0] && y === tube[1] ? [1, 1] : undefined));
+    const roots = tubeRoots(g, [memory]);
+    // One tube cell alone has a third of the strength: here it gets the full factor.
+    roots[(tube[1] * g.width + tube[0]) * 4] = 1;
+    const picture = tubePicture(
+      g,
+      trailOf(g, (x, y) => (x === tube[0] && y === tube[1] ? 8 : 0)),
+      roots,
+    );
+    return cells.map(([x, y]) => picture[(y * g.width + x) * 4] ?? 0);
+  };
+
+  it('stops a disc at a wall cell that the line touches off its centre', () => {
+    // A review found this case: one wall cell at (16, 12), a tube cell beside it at (15, 12), and a cell at
+    // (18, 13). The line between the two runs through the wall cell, 0.32 cells from its centre. The first wall
+    // test added the distances of the two cells to the centre of the wall cell, 1 and 2.24 cells: more than the
+    // 3.16 cells between the cells, so the disc passed.
+    const g = walled([[16, 12]]);
+    expect(1 + Math.hypot(2, 1)).toBeGreaterThan(Math.hypot(3, 1));
+    expect(wallOnLine(g, 15, 12, 3, 1)).toBe(true);
+    expect(dot(g, [15, 12], [[18, 13]])).toEqual([0]);
+    // The cells above and below the tube cell lie in the open, and the cell behind the wall cell does not.
+    expect(
+      dot(
+        g,
+        [15, 12],
+        [
+          [15, 9],
+          [15, 15],
+          [17, 12],
+        ],
+      ).map((v) => v > 0),
+    ).toEqual([true, true, false]);
+    expect(dot(open(32, 24), [15, 12], [[18, 13]])[0]).toBeGreaterThan(3);
+  });
+
+  it('stops a disc between two wall cells that touch at a corner', () => {
+    // A wall along a diagonal, one cell thick: its cells touch at their corners only. A tube cell at (17, 12) lies
+    // on one side of it, and the cell at (16, 13) on the other side, 1.41 cells away.
+    const diagonal: [number, number][] = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((x) => [x, x - 4]);
+    const g = walled(diagonal);
+    expect([wallByte(g, 12 * g.width + 16), wallByte(g, 13 * g.width + 17)]).toEqual([128, 128]);
+    expect(wallOnLine(g, 17, 12, -1, 1)).toBe(true);
+    // No cell on the other side of the wall holds a part of the tube: the cells below the diagonal.
+    const below: [number, number][] = [];
+    for (let y = 8; y <= 17; y++) for (let x = 12; x <= 21; x++) if (y > x - 4) below.push([x, y]);
+    expect(Math.max(...dot(g, [17, 12], below))).toBe(0);
+    // The cells on its own side hold it, and without the wall the cell across the diagonal holds all of it.
+    expect(
+      dot(
+        g,
+        [17, 12],
+        [
+          [18, 12],
+          [17, 11],
+          [19, 10],
+        ],
+      ).map((v) => v > 0),
+    ).toEqual([true, true, true]);
+    expect(dot(open(32, 24), [17, 12], [[16, 13]])).toEqual([8]);
   });
 });

@@ -959,3 +959,32 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: paused frames (ADR 0028)', (
     engine.destroy();
   }, 600_000); // GitHub, WebGL2: 98.7 and 101.4 s, then over 120 s in PR #40; WebGPU 12.0 to 15.3 s (ADR 0010)
 });
+
+// A PNG is drawn with levels that the backend measures for it (Engine.snapshot()). The measurement can wait, and a
+// rebuild in that time replaces the simulation: the engine then measures again, for the simulation that it draws.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: a PNG while a new simulation is built', (kind) => {
+  it('measures the levels for the simulation that it draws', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [160, 100];
+    const s: Settings = { ...defaultSettings(), resolution: 256, density: 0.5 };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    engine.frame(0, 40);
+    const first = engine.sim;
+    const measured = engine.backend.measured.bind(engine.backend);
+    const asked: unknown[] = [];
+    let rebuilt: Promise<void> | undefined;
+    engine.backend.measured = async (sim) => {
+      asked.push(sim);
+      const levels = await measured(sim);
+      // The first answer is here: before the engine gets it, new settings ask for a new simulation.
+      if (asked.length === 1) rebuilt = engine.apply({ ...s, resolution: 512 });
+      return levels;
+    };
+    const png = await engine.snapshot();
+    await rebuilt;
+    expect(engine.sim).not.toBe(first);
+    expect(asked).toEqual([first, engine.sim]);
+    expect(png.size).toBeGreaterThan(100);
+    engine.destroy();
+  }, 120_000);
+});

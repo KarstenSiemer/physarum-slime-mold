@@ -5,6 +5,7 @@ import { CpuBackend, hold } from './cpu-backend';
 import { Engine, MAX_IN_FLIGHT, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
 import { diffusePlan, equilibrium, FLOW_BYTES_PER_CELL, gridSize, memoryBudget, TUBES_BYTES_PER_CELL } from './sizing';
+import type { Levels } from './types';
 
 describe('gridSize', () => {
   it('puts the resolution on the long side', () => {
@@ -170,6 +171,39 @@ describe('the scent view', () => {
     release();
     await rebuilt;
     expect(engine.levels().strand).toBe(0); // the new run has measured none yet
+  });
+  // A measurement of the levels waits in the backend. A rebuild that starts in that time destroys the simulation, and
+  // the answer is none of the new one. So the engine asks again for the simulation that it holds then
+  // (Engine.settle(), and snapshot() for the levels of a PNG).
+  it('measures the levels again when a rebuild replaces the simulation during a measurement', async () => {
+    const backend = new CpuBackend();
+    const asked: unknown[] = [];
+    const answers: ((levels: Levels) => void)[] = [];
+    backend.settle = (sim?: unknown) => {
+      asked.push(sim);
+      return new Promise<Levels>((resolve) => answers.push(resolve));
+    };
+    const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const settings = { ...defaultSettings(), resolution: 256 };
+    const engine = await Engine.create(canvas, settings, undefined, backend);
+    const first = engine.sim;
+    const settled = engine.settle();
+    await turn();
+    expect(asked).toEqual([first]);
+    // New settings need a new simulation. The backend answers for the first one while the new one is built.
+    const release = hold(backend);
+    const rebuilt = engine.apply({ ...settings, resolution: 512 });
+    answers[0]?.({ gain: 1, black: 0, strand: 1 });
+    await turn();
+    expect(asked.length).toBe(1);
+    release();
+    await rebuilt;
+    await turn();
+    expect(engine.sim).not.toBe(first);
+    expect(asked).toEqual([first, engine.sim]);
+    answers[1]?.({ gain: 2, black: 0, strand: 2 });
+    expect(await settled).toEqual({ gain: 2, black: 0, strand: 2 });
   });
 });
 

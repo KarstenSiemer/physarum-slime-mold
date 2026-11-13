@@ -138,6 +138,8 @@ const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDra
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
   step = 0;
+  /** True from destroy() on: the textures and the targets are gone, and nothing may ask for them. */
+  destroyed = false;
   /**
    * Counts the changes of the trail, the scent and the shape outside steps (reset, strokes, clearing, writes, a new
    * hold of the shape); `step` counts the steps (sim.ts `revision`).
@@ -1023,6 +1025,7 @@ export class GlSim implements Sim {
   }
 
   destroy() {
+    this.destroyed = true;
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
     all.push(this.noScent, ...this.order, ...this.orderLevels);

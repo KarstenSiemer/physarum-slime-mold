@@ -113,7 +113,7 @@ export class AutoExposure {
    * Measures now; `blend` 1 jumps to the result (tests), smaller values smooth. Waits for a measurement that is still
    * running, so `blend` 1 always gets its own. `trails`: see read().
    */
-  async measure(trails: () => Trails, blend = 1): Promise<void> {
+  async measure(trails: () => Trails | undefined, blend = 1): Promise<void> {
     const l = await this.read(trails);
     if (l) this.apply(l, blend);
   }
@@ -123,14 +123,13 @@ export class AutoExposure {
    * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field or a replaced
    * simulation. `trails` gives the trail that the frame draws and the trail of the model. It is asked after the wait
    * for a measurement that is still running: new settings can free a texture meanwhile (the picture of the tubes, the
-   * view of a step that moves first).
+   * view of a step that moves first). It gives nothing if the simulation was destroyed in that time.
    */
-  async read(trails: () => Trails): Promise<Levels | undefined> {
-    const generation = this.generation;
+  async read(trails: () => Trails | undefined): Promise<Levels | undefined> {
     while (this.pending) await this.pending;
-    // The simulation was replaced during the wait: its textures are gone.
-    if (generation !== this.generation) return undefined;
-    const run = this.histogram(...trails());
+    const textures = trails();
+    if (!textures) return undefined;
+    const run = this.histogram(...textures);
     this.pending = run
       .then(
         () => undefined,

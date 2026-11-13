@@ -144,7 +144,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       expect(picture.length).toBe(w * h * 4);
       expect(worst(roots, want.roots), 'the factors of the radius').toBeLessThan(1e-5);
       expect(worst(picture, want.picture, 1), 'the picture').toBeLessThan(1e-5);
-      // The case is not empty: tubes of every strain widen the trail, and walls stop some of them.
+      // The case is not empty: tubes of every strain widen the trail, and the walls stop some of their discs.
       const view = await sim.readView();
       const wider = [0, 1, 2, 3].map((s) => {
         let n = 0;
@@ -152,6 +152,11 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
         return n;
       });
       for (const n of wider) expect(n).toBeGreaterThan(20);
+      // The same state without a wall test: every byte of `shape` says that no wall is near.
+      const open = tubePicture({ width: w, height: h, boundary, shape: new Uint8Array(w * h * 4) }, view, want.roots);
+      let stopped = 0;
+      for (let i = 0; i < picture.length; i++) if (Math.abs((open[i] ?? 0) - (picture[i] ?? 0)) > 0.01) stopped++;
+      expect(stopped).toBeGreaterThan(200);
     },
     120_000,
   );
@@ -335,9 +340,18 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     await check('after a new trail');
     sim.writeFlow(memoryOf(w, h, (x) => [x < 16 ? 0.002 : 0.5, 1]));
     await check('after a new memory');
+    // The trail is on row 6. With a flow memory of 0.5 its discs reach row 9, and with 0.002 they do not.
+    const row9 = async () => {
+      const picture = await sim.readPicture();
+      return [20, 4].map((x) => picture[(9 * w + x) * 4] ?? 0);
+    };
+    const [strong, weak] = await row9();
+    expect(strong).toBeGreaterThan(0.1);
+    expect(weak).toBe(0);
+    // A wall on rows 7 and 8 lies between: no disc of row 6 reaches row 9.
     sim.paint([{ kind: 'wall', from: [0, 8], to: [32, 8], radius: 1 }]);
     await check('after a new wall');
-    expect((await sim.readPicture())[(9 * w + 4) * 4]).toBe(0);
+    expect(await row9()).toEqual([0, 0]);
   });
 
   it('is made from the trail that the view draws when a step moves first', async () => {
@@ -365,24 +379,45 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     }
   });
 
-  it('keeps the strand of the scent view a level of the trail of the model', async () => {
+  // The levels are measured in three places: for the frames, at every sixth one on WebGPU and at every fifteenth on
+  // WebGL2 (draw() with `measure`); for a PNG, which is drawn with levels of its own (measured()); and at once, for
+  // tests (settle()).
+  it('keeps the strand of the scent view a level of the trail of the model, in a frame and for a PNG', async () => {
     const [w, h] = [64, 48];
+    const view: View = { center: [w / 2, h / 2], scale: 1 / 4 };
     const levelsOf = async (showTubes: boolean) => {
-      const sim = await make(flowing({ showTubes }), w, h);
+      const settings = flowing({ showTubes });
+      const sim = await make(settings, w, h);
       const trail = new Float32Array(w * h * 4);
       // A wide band of weak trail without a tube, and one row with a full tube and ten times the trail.
       for (let c = 0; c < w * h; c++) trail[c * 4] = Math.floor(c / w) < 30 ? 1 + noise(c, 3) : 0;
       for (let x = 0; x < w; x++) trail[(40 * w + x) * 4] = 15;
       sim.writeTrail(trail);
       sim.writeFlow(memoryOf(w, h, (_, y) => (y === 40 ? [1, 1] : undefined)));
-      return backend.settle(sim);
+      const png = await backend.measured(sim);
+      // The frames start from no levels. No measurement is on its way after a turn of the event loop, so one of
+      // fifteen frames in a row starts one. Another measurement waits for it: after that the frames hold its levels.
+      backend.forget();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      for (let i = 0; i < 15; i++) backend.draw(sim, settings, view, true);
+      await backend.measured(sim);
+      const frames = backend.levels();
+      return { png, frames, settled: await backend.settle(sim) };
     };
     const [plain, tubes] = [await levelsOf(false), await levelsOf(true)];
-    // The picture of the tubes holds other levels: the band is at a quarter, and the tube is wider.
-    expect(tubes.gain).not.toBeCloseTo(plain.gain, 2);
-    expect(tubes.strand).toBeGreaterThan(0);
-    expect(tubes.strand).toBe(plain.strand);
+    for (const place of ['png', 'frames', 'settled'] as const) {
+      // The picture of the tubes holds other levels: the band is at a quarter, and the tube is wider. The frames of
+      // WebGPU go a quarter of the way from the levels of before to a measurement.
+      expect(Math.abs(tubes[place].gain / plain[place].gain - 1), place).toBeGreaterThan(0.05);
+      expect(tubes[place].strand, place).toBeGreaterThan(0);
+      expect(tubes[place].strand, place).toBe(plain[place].strand);
+    }
+    // A measurement by itself and the one for a PNG give the same levels. The first one goes all the way from the
+    // levels of the frames to its result, which can cost the last digits.
+    for (const level of ['gain', 'black', 'strand'] as const)
+      expect(tubes.png[level], level).toBeCloseTo(tubes.settled[level], 6);
   });
+
   // The frames. The tests above read the picture; these read what the view draws from it. Fixed levels and no bloom,
   // so that a pixel shows its own cells alone.
   const LEVELS: Levels = { gain: 0.2, black: 0, strand: 1 };
@@ -541,62 +576,98 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect((await device?.popErrorScope())?.message).toBeUndefined();
   }, 120_000);
 
-  it('holds the wall distances to the boundary of the settings before it draws the picture', async () => {
+  it('stops a disc at a wall across the edge of the periodic grid, right after the boundary changed', async () => {
     const [w, h] = [40, 24];
     const sim = await make(flowing(), w, h);
-    // A wall of one column at the left edge of a box, and a full tube along the column 3 cells before the right edge.
+    // A wall of one column at the left edge of a box, and a full tube along the column at the right edge.
     sim.paint([{ kind: 'wall', from: [0.5, 0], to: [0.5, h], radius: 0.75 }]);
     const env = await sim.readEnv();
     expect([0, 1].map((x) => (env[(12 * w + x) * 4] ?? 0) >= 128)).toEqual([true, false]);
     const trail = new Float32Array(w * h * 4);
-    for (let y = 0; y < h; y++) trail[(y * w + w - 2) * 4] = 8;
+    for (let y = 0; y < h; y++) trail[(y * w + w - 1) * 4] = 8;
+    const tube = memoryOf(w, h, (x) => (x === w - 1 ? [1, 1] : undefined));
     sim.writeTrail(trail);
-    sim.writeFlow(memoryOf(w, h, (x) => (x === w - 2 ? [1, 1] : undefined)));
+    sim.writeFlow(tube);
     const at = (picture: Float32Array, x: number) => near(picture[(12 * w + x) * 4]);
-    // In the box column 1 is far from the tube. On the periodic grid it lies 3 cells from it, behind the wall: the
-    // tube must not reach it. The picture is read before anything else asks for the wall distances.
-    expect(at(await sim.readPicture(), 1)).toBe(0);
+    // In the box the tube is far from the columns 1 and 2. On the periodic grid it lies beside the wall, and the
+    // columns 1 and 2 lie behind the wall, 2 and 3 cells from the tube.
+    const boxed = await sim.readPicture();
+    expect([w - 2, 1, 2].map((x) => at(boxed, x))).toEqual([8, 0, 0]);
     sim.update(flowing({ boundary: 'wrap' }));
     const wrapped = await sim.readPicture();
-    expect([w - 1, 0, 1].map((x) => at(wrapped, x))).toEqual([8, 0, 0]);
+    expect([w - 2, w - 1, 0, 1, 2].map((x) => at(wrapped, x))).toEqual([8, 8, 0, 0, 0]);
     const want = await reference(sim, 'wrap', 1);
     expect(worst(wrapped, want.picture, 1)).toBeLessThan(1e-5);
-    // Without the wall the tube reaches column 1 across the edge.
+    // Without the wall the tube reaches 3 columns across the edge.
     sim.clearEnvironment();
     sim.writeTrail(trail);
-    sim.writeFlow(memoryOf(w, h, (x) => (x === w - 2 ? [1, 1] : undefined)));
+    sim.writeFlow(tube);
     const open = await sim.readPicture();
-    expect([w - 1, 0, 1, 2].map((x) => at(open, x))).toEqual([8, 8, 8, 0]);
+    expect([w - 1, 0, 1, 2, 3].map((x) => at(open, x))).toEqual([8, 8, 8, 8, 0]);
   });
-  it('stops a disc at a wall cell whose distances are rounded', async () => {
+
+  it('stops a disc at a wall cell beside its line, and at wall cells that touch at a corner', async () => {
     const [w, h] = [32, 24];
     const sim = await make(flowing(), w, h);
-    // One wall cell alone, written as bytes: the engine then holds, around it, the distance to its centre, rounded
-    // to a byte (paint.wgsl floorByte()). The cell diagonally beside it gets byte 82, which stands for 1.4275 cells,
-    // more than the 1.4142 cells to the wall cell. The wall test takes half a step of a byte off.
+    // Walls written as cells: one wall cell alone at (16, 12), and a wall along a diagonal whose cells touch at
+    // their corners only.
     const env = new Uint8Array(w * h * 4);
     env[(12 * w + 16) * 4] = 255;
+    for (let k = 0; k < 9; k++) env[((12 + k) * w + 3 + k) * 4] = 255;
     sim.writeEnv(env);
+    // A full tube on every open cell, and a trail that differs from cell to cell: every disc reaches as far as the
+    // walls let it, so one disc too many or too few changes the picture.
     const trail = new Float32Array(w * h * 4);
-    trail[(11 * w + 15) * 4] = 8;
-    const dot = memoryOf(w, h, (x, y) => (x === 15 && y === 11 ? [1, 1] : undefined));
+    for (let c = 0; c < w * h; c++) trail[c * 4] = (env[c * 4] ?? 0) >= 128 ? 0 : 1 + 19 * noise(c, 3);
     sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (x, y) => ((env[(y * w + x) * 4] ?? 0) >= 128 ? undefined : [1, 1])));
+    // The picture is read first: nothing else has asked the simulation for the wall bytes of the new cells yet.
+    const picture = await sim.readPicture();
+    const want = await reference(sim, 'box', 1);
+    expect(worst(picture, want.picture, 1)).toBeLessThan(1e-5);
+    // The walls stop many discs: without a wall test the picture differs on the cells around them.
+    const open = tubePicture(
+      { width: w, height: h, boundary: 'box', shape: new Uint8Array(w * h * 4) },
+      trail,
+      want.roots,
+    );
+    let stopped = 0;
+    for (let c = 0; c < w * h; c++) if (Math.abs((open[c * 4] ?? 0) - (picture[c * 4] ?? 0)) > 0.01) stopped++;
+    expect(stopped).toBeGreaterThan(100);
+    expect(picture[(12 * w + 16) * 4]).toBe(0);
+    // The cell (4, 12) lies beside the diagonal wall and (3, 13) across it, where two wall cells touch at a corner.
+    // A trail on (4, 12) alone shows in no cell across the wall.
+    const corner = new Float32Array(w * h * 4);
+    corner[(12 * w + 4) * 4] = 8;
+    sim.writeTrail(corner);
+    const across = await sim.readPicture();
+    expect(across[(12 * w + 4) * 4]).toBeGreaterThan(0);
+    for (const [x, y] of [
+      [3, 13],
+      [2, 13],
+      [3, 14],
+      [4, 14],
+      [2, 12],
+    ] as const)
+      expect(across[(y * w + x) * 4], `(${String(x)}, ${String(y)})`).toBe(0);
+
+    // One tube cell alone, diagonally beside the wall cell: its disc reaches neither the wall cell nor the cell
+    // behind it, 2.83 cells away on the line through the wall cell. Away from the wall cell it reaches as far.
+    const lone = new Float32Array(w * h * 4);
+    lone[(11 * w + 15) * 4] = 8;
+    const dot = memoryOf(w, h, (x, y) => (x === 15 && y === 11 ? [1, 1] : undefined));
+    sim.writeTrail(lone);
     sim.writeFlow(dot);
     const walled = await sim.readPicture();
-    expect((await sim.readShape())[(11 * w + 15) * 4]).toBe(82);
-    // A tube cell diagonally beside the wall cell: its disc reaches neither the wall cell nor the cell behind it,
-    // 2.83 cells away on the line through the wall cell. Away from the wall cell it reaches as far.
     expect([walled[(12 * w + 16) * 4], walled[(13 * w + 17) * 4]]).toEqual([0, 0]);
     expect(walled[(9 * w + 13) * 4]).toBeGreaterThan(1);
-    const want = await reference(sim, 'box', 1);
-    expect(worst(walled, want.picture, 1)).toBeLessThan(1e-5);
     // Without the wall cell the disc reaches both cells.
     sim.clearEnvironment();
-    sim.writeTrail(trail);
+    sim.writeTrail(lone);
     sim.writeFlow(dot);
-    const open = await sim.readPicture();
-    expect(open[(12 * w + 16) * 4]).toBeGreaterThan(4);
-    expect(open[(13 * w + 17) * 4]).toBeGreaterThan(1);
+    const free = await sim.readPicture();
+    expect(free[(12 * w + 16) * 4]).toBeGreaterThan(4);
+    expect(free[(13 * w + 17) * 4]).toBeGreaterThan(1);
   });
 
   it('measures the levels with the textures of the moment, also when settings free the picture meanwhile', async () => {
@@ -608,15 +679,74 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
     const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
     device?.pushErrorScope('validation');
-    // The second measurement waits for the first. Meanwhile the switch goes off, and the simulation frees the
-    // picture: the second must measure the trail that is drawn then, not a texture that is gone.
+    // The second measurement and the one for a PNG wait for the first. Meanwhile the switch goes off, and the
+    // simulation frees the picture: they must measure the trail that is drawn then, not a texture that is gone.
     const first = backend.settle(sim);
     const second = backend.settle(sim);
+    const png = backend.measured(sim);
     sim.update(flowing({ showTubes: false }));
-    const [withTubes, plain] = [await first, await second];
+    const [withTubes, plain, forPng] = [await first, await second, await png];
     expect((await device?.popErrorScope())?.message).toBeUndefined();
     expect(withTubes.gain).toBeGreaterThan(0);
     // The levels of the trail alone: those that a new measurement gives.
-    expect(plain.gain).toBeCloseTo((await backend.settle(sim)).gain, 6);
+    const fresh = await backend.settle(sim);
+    expect(plain.gain).toBeCloseTo(fresh.gain, 6);
+    expect(forPng.gain).toBeCloseTo(fresh.gain, 6);
+    expect(fresh.gain).not.toBeCloseTo(withTubes.gain, 2);
+  });
+
+  it('asks a simulation for nothing once it is destroyed, when a measurement waited for another one', async () => {
+    const [w, h] = [32, 24];
+    // A step that moves first, with two diffusion passes: the view of this simulation is in textures that it makes
+    // when it is asked for them. It is destroyed below, so afterEach() must not do it again.
+    const sim = await backend.createSim(flowing({ stepOrder: 'move-first', diffusion: 2 }), w, h, 8);
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const gl = kind === 'webgl2' ? (backend as unknown as { gl: WebGL2RenderingContext }).gl : undefined;
+    device?.pushErrorScope('validation');
+    gl?.getError();
+    // The measurement for a PNG and a second one wait for the first. A rebuild of the engine destroys the simulation
+    // in that time (Engine.rebuild()).
+    const first = backend.settle(sim);
+    const png = backend.measured(sim);
+    const second = backend.settle(sim);
+    sim.destroy();
+    const [before, forPng, after] = [await first, await png, await second];
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
+    if (gl) expect(gl.getError()).toBe(gl.NO_ERROR);
+    // The first measurement was on its way. The two others measure nothing: they give the levels of the frames.
+    expect(before.gain).toBeGreaterThan(0);
+    expect([forPng, after]).toEqual([before, before]);
+  });
+  it.runIf(kind === 'webgl2')('frees the first target of the picture when the second cannot be made', async () => {
+    const [w, h] = [32, 24];
+    const sim = await make(flowing(), w, h);
+    const trail = new Float32Array(w * h * 4);
+    for (let x = 0; x < w; x++) trail[(12 * w + x) * 4] = 8;
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+    const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
+    // The picture needs two targets. The framebuffer of the second one is not complete, as when the GPU is short
+    // of memory: the target frees its own texture, and the simulation must free the texture of the first target.
+    const [check, drop] = [gl.checkFramebufferStatus.bind(gl), gl.deleteTexture.bind(gl)];
+    let [checks, freed] = [0, 0];
+    gl.checkFramebufferStatus = (target) => (++checks === 2 ? gl.FRAMEBUFFER_UNSUPPORTED : check(target));
+    gl.deleteTexture = (texture) => {
+      freed++;
+      drop(texture);
+    };
+    try {
+      await expect((async () => sim.readPicture())()).rejects.toThrow(/incomplete/);
+    } finally {
+      gl.checkFramebufferStatus = check;
+      gl.deleteTexture = drop;
+    }
+    expect([checks, freed]).toEqual([2, 2]);
+    // The next picture makes both targets anew.
+    const want = await reference(sim, 'box', 1);
+    expect(worst(await sim.readPicture(), want.picture, 1)).toBeLessThan(1e-5);
   });
 });

@@ -42,14 +42,25 @@ void main() {
 
 #else
 uniform sampler2D trail; // the trail that the view draws without the tubes
-uniform sampler2D shape; // outline distances (shape.frag): r the wall byte
+uniform sampler2D shape; // shape.frag: r the wall byte
 uniform sampler2D roots; // PASS 0
 
-const float SHAPE_RANGE = 4.0; // cells; SHAPE_RANGE in shape.frag
-
-// The distance to the outline of the walls that the wall byte of a texel of `shape` stands for, cells, less half a
-// step of the byte (clearOf in tubes.wgsl).
-float clearOf(vec4 s) { return max(0.0, (1.0 - 2.0 * s.r - 1.0 / 255.0) * SHAPE_RANGE); }
+// Whether a cell of a wall lies on the line between the centres of the cell p and of the cell `o` cells from it
+// (wallOnLine in tubes.wgsl).
+bool wallOnLine(ivec2 p, ivec2 o) {
+  ivec2 lo = min(o, ivec2(0));
+  ivec2 hi = max(o, ivec2(0));
+  int span = abs(o.x) + abs(o.y);
+  for (int j = lo.y; j <= hi.y; j++) {
+    for (int i = lo.x; i <= hi.x; i++) {
+      ivec2 at = ivec2(i, j);
+      if (at == ivec2(0) || at == o || 2 * abs(i * o.y - j * o.x) > span) continue;
+      ivec2 c = cellXY(p + at);
+      if (c.x >= 0 && isWall(texelFetch(shape, c, 0))) return true;
+    }
+  }
+  return false;
+}
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -72,13 +83,13 @@ void main() {
         if (d >= reach) continue;
         ivec2 q = cellXY(p + ivec2(dx, dy));
         if (q.x < 0) continue;
-        // The disc of the cell itself reaches it. Another cell: not a wall cell, and no wall on the line between.
-        if (dx != 0 || dy != 0) {
-          vec4 there = texelFetch(shape, q, 0);
-          if (isWall(there) || clearOf(here) + clearOf(there) <= d) continue;
-        }
         vec4 root = texelFetch(roots, q, 0);
         vec4 weight = root * clamp((RADIUS * root + 0.5 * EDGE - d) / EDGE, 0.0, 1.0);
+        // Most cells hold no disc that reaches this far: they add nothing, and they need no look at the walls.
+        if (weight == vec4(0.0)) continue;
+        // The disc of the cell itself reaches it. The disc of another cell: not from a cell of a wall, and not
+        // across one.
+        if ((dx != 0 || dy != 0) && (isWall(texelFetch(shape, q, 0)) || wallOnLine(p, ivec2(dx, dy)))) continue;
         top = max(top, weight);
         sum += weight;
         lit += texelFetch(trail, q, 0) * weight;

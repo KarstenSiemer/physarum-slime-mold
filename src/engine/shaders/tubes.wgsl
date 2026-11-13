@@ -12,10 +12,9 @@ override EDGE: f32 = 1.0;      // TUBES.edge
 override SHEET: f32 = 0.25;    // TUBES.sheet
 override SPAN: f32 = 3.0;      // TUBES.span
 override BODY_LOW: f32 = 0.05; // FLOW.bodyLow: below it a cell holds no tube
-const SHAPE_RANGE = 4.0;       // cells; SHAPE_RANGE in paint.wgsl
 
 @group(0) @binding(1) var trail: texture_2d<f32>;                 // the trail that the view draws without the tubes
-@group(0) @binding(2) var<storage, read> shape: array<u32>;       // outline distances (paint.wgsl `outline`)
+@group(0) @binding(2) var<storage, read> shape: array<u32>;       // the wall byte of each cell (paint.wgsl `outline`)
 @group(0) @binding(3) var memory: texture_2d_array<f32>;          // the memory of the flow, a layer per strain
 @group(0) @binding(4) var rootsOut: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(5) var rootsIn: texture_2d<f32>;
@@ -47,13 +46,28 @@ fn roots(@builtin(global_invocation_id) gid: vec3u) {
   textureStore(rootsOut, p, sqrt(sqrt(vec4f(across[0], across[1], across[2], across[3]))));
 }
 
-// The wall byte of the cell at q (cellXY): its signed distance to the outline of the walls, WALL_BYTE and up in a wall.
+// The wall byte of the cell at q (cellXY): WALL_BYTE and up in a cell of a wall.
 fn wallByte(q: vec2i) -> u32 { return shape[q.y * i32(W()) + q.x] & 0xffu; }
 
-// The distance to the outline of the walls that a wall byte stands for, cells, at most SHAPE_RANGE, less half a step
-// of the byte: the byte is rounded, and this distance must never be above the distance to the centre of the nearest
-// wall cell (paint.wgsl floorByte()).
-fn clearOf(b: u32) -> f32 { return max(0.0, (1.0 - (2.0 * f32(b) + 1.0) / 255.0) * SHAPE_RANGE); }
+// Whether a cell of a wall lies on the line between the centres of the cell p and of the cell `o` cells from it. The
+// line touches the cell (i, j) cells from p if that cell lies in the box of the two cells and
+// 2 |i o.y - j o.x| <= |o.x| + |o.y|: its centre is then no farther from the line than a corner of a cell is from
+// its centre. A line through a corner touches every cell at that corner, so no disc passes between two wall cells
+// that touch at a corner.
+fn wallOnLine(p: vec2i, o: vec2i) -> bool {
+  let lo = min(o, vec2i(0));
+  let hi = max(o, vec2i(0));
+  let span = abs(o.x) + abs(o.y);
+  for (var j = lo.y; j <= hi.y; j++) {
+    for (var i = lo.x; i <= hi.x; i++) {
+      let at = vec2i(i, j);
+      if (all(at == vec2i(0)) || all(at == o) || 2 * abs(i * o.y - j * o.x) > span) { continue; }
+      let c = cellXY(p + at);
+      if (c.x >= 0 && wallByte(c) >= WALL_BYTE) { return true; }
+    }
+  }
+  return false;
+}
 
 @compute @workgroup_size(8, 8)
 fn picture(@builtin(global_invocation_id) gid: vec3u) {
@@ -78,13 +92,13 @@ fn picture(@builtin(global_invocation_id) gid: vec3u) {
         if (d >= reach) { continue; }
         let q = cellXY(p + vec2i(dx, dy));
         if (q.x < 0) { continue; }
-        // The disc of the cell itself reaches it. Another cell: not a wall cell, and no wall on the line between.
-        if (dx != 0 || dy != 0) {
-          let there = wallByte(q);
-          if (there >= WALL_BYTE || clearOf(here) + clearOf(there) <= d) { continue; }
-        }
         let root = textureLoad(rootsIn, q, 0);
         let weight = root * clamp((RADIUS * root + 0.5 * EDGE - d) / EDGE, vec4f(0.0), vec4f(1.0));
+        // Most cells hold no disc that reaches this far: they add nothing, and they need no look at the walls.
+        if (all(weight == vec4f(0.0))) { continue; }
+        // The disc of the cell itself reaches it. The disc of another cell: not from a cell of a wall, and not
+        // across one.
+        if ((dx != 0 || dy != 0) && (wallByte(q) >= WALL_BYTE || wallOnLine(p, vec2i(dx, dy)))) { continue; }
         top = max(top, weight);
         sum += weight;
         lit += textureLoad(trail, q, 0) * weight;

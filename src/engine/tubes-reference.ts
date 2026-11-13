@@ -4,7 +4,6 @@ import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
 import { FLOW } from './flow';
 import { TUBES, TUBE_REACH, TUBE_WINDOW } from './tubes';
-import { SHAPE_RANGE } from './types';
 
 /** The grid as the passes see it: 4 bytes per cell as Sim.readShape() returns them (the first is the wall byte). */
 export interface TubeGrid {
@@ -26,15 +25,26 @@ export function arenaCell(grid: TubeGrid, x: number, y: number): number {
   return y * w + x;
 }
 
-/** The wall byte of a cell: its signed distance to the outline of the walls, WALL_BYTE and up in a wall. */
+/** The wall byte of a cell: WALL_BYTE and up in a cell of a wall. */
 export const wallByte = (grid: TubeGrid, c: number) => grid.shape[c * 4] ?? 0;
 
 /**
- * The distance to the outline of the walls that a wall byte stands for, cells, at most SHAPE_RANGE, less half a step
- * of the byte: the byte is rounded, and this distance must never be above the distance to the centre of the nearest
- * wall cell (clearOf() in tubes.wgsl).
+ * Whether a cell of a wall lies on the line between the centres of the cell (x, y) and of the cell (ox, oy) cells
+ * from it. The line touches the cell (i, j) cells from the first one if that cell lies in the box of the two cells
+ * and 2 |i oy − j ox| ≤ |ox| + |oy|: its centre is then no farther from the line than a corner of a cell is from its
+ * centre. A line through a corner touches every cell at that corner, so no disc passes between two wall cells that
+ * touch at a corner (wallOnLine() in tubes.wgsl).
  */
-export const clearOf = (byte: number) => Math.max(0, (1 - (2 * byte + 1) / 255) * SHAPE_RANGE);
+export function wallOnLine(grid: TubeGrid, x: number, y: number, ox: number, oy: number): boolean {
+  const span = Math.abs(ox) + Math.abs(oy);
+  for (let j = Math.min(oy, 0); j <= Math.max(oy, 0); j++)
+    for (let i = Math.min(ox, 0); i <= Math.max(ox, 0); i++) {
+      if ((i === 0 && j === 0) || (i === ox && j === oy) || 2 * Math.abs(i * oy - j * ox) > span) continue;
+      const c = arenaCell(grid, x + i, y + j);
+      if (c >= 0 && wallByte(grid, c) >= WALL_BYTE) return true;
+    }
+  return false;
+}
 
 /**
  * The pass `roots`: per cell and strain (4 values per cell) the fourth root of the strength across the tube, and 0 on
@@ -91,11 +101,9 @@ export function tubePicture(grid: TubeGrid, trail: Float32Array, roots: Float32A
           if (d >= TUBE_REACH) continue;
           const q = arenaCell(grid, x + dx, y + dy);
           if (q < 0) continue;
-          // The disc of the cell itself reaches it. Another cell: not a wall cell, and no wall on the line between.
-          if (dx !== 0 || dy !== 0) {
-            const there = wallByte(grid, q);
-            if (there >= WALL_BYTE || clearOf(here) + clearOf(there) <= d) continue;
-          }
+          // The disc of the cell itself reaches it. The disc of another cell: not from a cell of a wall, and not
+          // across one.
+          if ((dx !== 0 || dy !== 0) && (wallByte(grid, q) >= WALL_BYTE || wallOnLine(grid, x, y, dx, dy))) continue;
           for (let s = 0; s < 4; s++) {
             const root = roots[q * 4 + s] ?? 0;
             const cover = Math.min(1, Math.max(0, (TUBES.radius * root + TUBES.edge / 2 - d) / TUBES.edge));

@@ -105,6 +105,8 @@ interface ViewPair {
 /** All simulation state on the GPU for one grid size and agent count (WebGPU). */
 export class Simulation implements Sim {
   step = 0;
+  /** True from destroy() on: the textures and the buffers are gone, and nothing may ask for them. */
+  destroyed = false;
   /**
    * Counts the changes of the trail, the scent and the shape outside steps (reset, strokes, clearing, writes, a new
    * hold of the shape); `step` counts the steps. Together they tell when a picture or a map made from them is old: the
@@ -1046,6 +1048,7 @@ export class Simulation implements Sim {
   }
 
   destroy() {
+    this.destroyed = true;
     for (const t of [...this.trail, ...this.scent, this.noScent]) t.destroy();
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();

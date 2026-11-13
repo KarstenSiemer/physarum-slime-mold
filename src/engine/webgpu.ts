@@ -1,7 +1,7 @@
 import type { Settings } from '../model/params';
 import { at } from './at';
 import { Bloom } from './bloom';
-import { AutoExposure } from './exposure';
+import { AutoExposure, type Trails } from './exposure';
 import { initGpu, OutOfMemoryError, type Gpu } from './gpu';
 import { Renderer, type Frame } from './render';
 import { Simulation } from './sim';
@@ -98,8 +98,17 @@ export class WebGpuBackend implements Backend<Simulation> {
     return this.renderer.capture(this.frame(sim, settings, view, false, levels), width, height);
   }
 
+  /**
+   * For a measurement of the levels: the trail that a frame of `sim` draws and the trail of its model, as they are
+   * when the measurement asks. Nothing once the simulation is destroyed: a rebuild can do that while a measurement
+   * waits for the one before it.
+   */
+  private trailsOf(sim: Simulation) {
+    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);
+  }
+
   async settle(sim: Simulation): Promise<Levels> {
-    await this.auto.measure(() => [sim.pictureTexture, sim.viewTexture]);
+    await this.auto.measure(this.trailsOf(sim));
     return this.levels();
   }
 
@@ -108,7 +117,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async measured(sim: Simulation): Promise<Levels> {
-    return (await this.auto.read(() => [sim.pictureTexture, sim.viewTexture])) ?? this.levels();
+    return (await this.auto.read(this.trailsOf(sim))) ?? this.levels();
   }
 
   /**
