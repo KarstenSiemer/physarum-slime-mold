@@ -466,26 +466,26 @@ No test compares the bytes of the two backends; the ADRs quote digests of runs m
 
 All in `src/engine/sim.gpu.test.ts` on both backends unless another file is named.
 
-| Rule                                    | Test                                                                                                                                                                                                                             |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Order of a step, both orders, step 0    | "the order of a step" (four tests)                                                                                                                                                                                               |
-| Turning (7.4)                           | the agent rule: keeps, turns right, turns left, random turn, all sensors equal                                                                                                                                                   |
-| Moving and walls (7.5)                  | blocked by a wall; a step of 3 and of 8 cells; no slip through a corner                                                                                                                                                          |
-| Walls block sensors (7.3)               | "walls block sensors"; sensor wall check in the extended model only                                                                                                                                                              |
-| The 3 × 3 mean and the decay (6.1, 6.2) | "apply a periodic 3 × 3 mean, then × (1 − decay)"; rounding per order                                                                                                                                                            |
-| Mass balance (6.2)                      | "balance mass with deposits"                                                                                                                                                                                                     |
-| Edges and walls in each model (6.3)     | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                                                                                                                 |
-| Jones' one map (6.4)                    | "keep trail + scent equal to Jones' one trail map"                                                                                                                                                                               |
-| Scent plateau and g (6.4)               | the plateau tests in each order; the scent against a CPU reference                                                                                                                                                               |
-| Covered food (6.5)                      | the covered food tests, also WebGL2 without float blending                                                                                                                                                                       |
-| Cut in the fields (6.6)                 | the cut clears the chemicals in the extended model only                                                                                                                                                                          |
-| K (6.8)                                 | turns with saturation against a CPU reference                                                                                                                                                                                    |
-| One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                                                                                                                               |
-| Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                                                                                                                   |
-| Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                                                                                                                         |
-| Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates                                                                                                  |
-| A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between the tubes of two strains; the whole flux of each strain on its own route; starvation, respawn and growth by the memory of the own strain, with four strains; respawn with one agent per cell |
-| Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                                                                                                                     |
+| Rule                                    | Test                                                                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Order of a step, both orders, step 0    | "the order of a step" (four tests)                                                                                              |
+| Turning (7.4)                           | the agent rule: keeps, turns right, turns left, random turn, all sensors equal                                                  |
+| Moving and walls (7.5)                  | blocked by a wall; a step of 3 and of 8 cells; no slip through a corner                                                         |
+| Walls block sensors (7.3)               | "walls block sensors"; sensor wall check in the extended model only                                                             |
+| The 3 × 3 mean and the decay (6.1, 6.2) | "apply a periodic 3 × 3 mean, then × (1 − decay)"; rounding per order                                                           |
+| Mass balance (6.2)                      | "balance mass with deposits"                                                                                                    |
+| Edges and walls in each model (6.3)     | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                |
+| Jones' one map (6.4)                    | "keep trail + scent equal to Jones' one trail map"                                                                              |
+| Scent plateau and g (6.4)               | the plateau tests in each order; the scent against a CPU reference                                                              |
+| Covered food (6.5)                      | the covered food tests, also WebGL2 without float blending                                                                      |
+| Cut in the fields (6.6)                 | the cut clears the chemicals in the extended model only                                                                         |
+| K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
+| One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
+| Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
+| Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                        |
+| Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
+| Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                    |
 
 Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
 (a test checks only that it changes), and agents under a painted wall.
