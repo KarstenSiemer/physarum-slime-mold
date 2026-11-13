@@ -2,6 +2,9 @@
 
 - Status: accepted. The owner found the fault on 2026-11-13. Every decision here is the
   coordinator's choice under the owner's delegation of 2026-11-12, with its date and reason.
+- Number: this record went into `main` as 0030 (pull request #50). The record of the model
+  specification had taken that number an hour before (pull request #49), so this one is 0031
+  since the same day. The rules of the model in force are in `docs/model.md`, section 8.
 - Date: 2026-11-13
 - In short: with the flow in the tubes (ADR 0029), every strain is a slime mold of its own. Its
   flux runs only through its own tubes, between the foods that it covers, and it gives life only to
@@ -290,7 +293,8 @@ After these changes the 18 runs with one strain give the same digests again.
   float blending took 16.2 s of 240 s. The tests that the review added or changed are not in that
   run. On an M3 Pro each of them takes 0.02 to 0.14 s. The tests of their kind in that run (the
   CPU copy for two strains, starvation and growth by strain) took 0.3 to 1.6 s on GitHub, of
-  limits of 120 and 240 s.
+  limits of 120 and 240 s. In the second run (commit `544d456`, 45 tests) the tests of the review
+  took 0.4 to 3.0 s on GitHub, the file 136.2 s and 109.5 s, and its slowest test 23.7 s of 240 s.
 - Not built: a fusion of strains (decision 4).
 
 ## How to check this record

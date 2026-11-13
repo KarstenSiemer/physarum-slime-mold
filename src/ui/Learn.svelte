@@ -120,11 +120,12 @@
         a flow of their own.
       </p>
       <p>
-        It moves toward food by chemotaxis: it follows chemical gradients. It flees light and dryness. When the food
-        runs out, it shrinks onto the remaining food sources. In the simulation food never runs out. With Random
-        shrinkage turned on, agents die off and a full sheet shrinks onto the food, as in the scene Shrinking
-        plasmodium. A network with few agents contracts between the food sources even without it, as in Shortest path
-        and Steiner tree.
+        It moves toward food by chemotaxis: it follows chemical gradients. It avoids bright light (Tero et al. 2010).
+        Dry or lit, it can turn into a dormant form, the sclerotium (Jones 2010, p. 142). After it has covered an area,
+        it shrinks to a network of tubes between the food sources (Jones 2010, p. 147). In the simulation food never
+        runs out. With Random shrinkage turned on, agents die off and a full sheet shrinks onto the food, as in the
+        scene Shrinking plasmodium. A network with few agents contracts between the food sources even without it, as in
+        Shortest path and Steiner tree.
       </p>
       <p>
         A real plasmodium also grows: from one oat flake it spreads over the agar until it finds more food. Agents do
@@ -227,8 +228,8 @@
       <p>
         In the extended model, a lower Scent decay spreads the food scent farther. Food then releases less scent, so the
         scent reaches farther, but it does not become stronger. Trail saturation makes a dense trail count less, so a
-        weak scent can still turn an agent on it. With Scent decay 0.1 and Trail saturation 0, the extended model runs a
-        scene of Jones as Jones does, until you paint a wall or use the Cut tool.
+        weak scent can still turn an agent on it. With Scent decay 0.1, a strain decay of 0.1 and Trail saturation 0,
+        the extended model runs a scene of Jones as Jones does, until you paint a wall or light or use the Cut tool.
       </p>
       <p>
         To see the scent, select Scent in the toolbar or press S. A green glow shows the scent of food, and a pink glow
