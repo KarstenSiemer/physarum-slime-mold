@@ -382,5 +382,7 @@ describe('the drawing of a link', () => {
       }
     }
     expect(decoded).toBeGreaterThan(100); // the checks above saw drawings, not only refusals
-  });
+    // 0.4 s on an M3 Pro. On GitHub it took 4.1 s and 6.6 s in two runs of 2026-11-13, and the default limit of 5 s
+    // failed the second: 60 s keeps it under a quarter (ADR 0010).
+  }, 60_000);
 });
