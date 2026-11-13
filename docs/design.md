@@ -1,7 +1,9 @@
 # Design: Physarum simulator for the browser
 
-Status: plan, 2026-11-08. Decisions are recorded in [`docs/adr/`](adr/). Facts and sources are
-in [`docs/knowledge-base/`](knowledge-base/). Progress is tracked in [`TODO.md`](../TODO.md).
+Status: written as the plan on 2026-11-08, kept up to date since. The rules of the model are in [`model.md`](model.md),
+and how close it comes to the organism is in [`fidelity.md`](fidelity.md). Decisions are recorded in
+[`docs/adr/`](adr/). Facts and sources are in [`docs/knowledge-base/`](knowledge-base/). Progress is tracked in
+[`TODO.md`](../TODO.md).
 
 ## 1. Goal
 
@@ -100,10 +102,10 @@ strains (one `vec4` lane each).
 
 | Resource           | Format                                           | Size             | Use                                                   |
 | ------------------ | ------------------------------------------------ | ---------------- | ----------------------------------------------------- |
-| `agents[2]`        | storage, `{pos: vec2f, heading: f32, meta: u32}` | 16 B × N each    | `meta`: strain (2 bit), alive (1 bit), id (24 bit)    |
+| `agents[2]`        | storage, `{pos: vec2f, heading: f32, bits: u32}` | 16 B × N each    | `bits`: strain (2 bit), alive (1 bit), id (24 bit)    |
 | `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
-| `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | agents that moved into the cell this step, per strain |
+| `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | successful moves that ended in the cell, per strain   |
 | `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light         |
 | `shape`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: outline distances, light, wall shadow  |
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
@@ -138,104 +140,40 @@ that measure it, and the agent passes that check for walls, are built at the fir
 
 ### One step
 
-Each scene runs the order of a step of its paper (`stepOrder`, ADR 0027), in both models. The
-textures always hold the map as the agents sense it.
-
-- **Move first** (the eight scenes of Jones 2010, p. 133): every agent moves and deposits, then
-  every agent senses and turns, then the trail map diffuses. The textures hold the last diffusion
-  plus the deposits, food and light of the last moves. So a step senses and turns for the moves of
-  the step before, moves, diffuses, and then adds the deposits and sources of its own moves. The
-  first step after a reset moves with the start heading, as Jones' first step does.
-- **Sense first** (Jones 2011, p. 1350, and his later papers, Fogleman, every other scene and the
-  default settings): every agent senses and turns, moves and deposits, then the map diffuses with
-  the step's deposits and sources. The textures hold the map after the diffusion, and every step
-  senses, the first too.
+The rules of a step, as mathematics, for both models and both orders: [model.md](model.md). The GPU runs a step in
+these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
 
 1. `clearBuffer(counts)` (and `claims` in collision mode).
-2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups):
-   - skip dead agents; apply shrinkage (`p_remove`), then the agent tools (ADR 0023): inoculation
-     takes dead agents of its strain into the brush, cut takes the agents of a wound out of it. Such an
-     agent spends its step there: no move, no deposit;
-   - **sense** at F, FL, FR (moving first, not in the first step after a reset):
-     `s = dot(trail, A[strain]) + food·scent.r − light·scent.g`,
-     walls and the outside read as −∞; in the extended model also a wall on the way to the
-     sensor (ADR 0020). With trail saturation K ≥ 1 (extended model only) each lane of `trail`
-     reads as `t / (1 + t / K)`. The Jones model packs Jones' one trail map: its one strain weighs
-     food as its own trail, and light has no weight (ADR 0022);
-   - **rotate** with the Jones rule (exact, see knowledge base); random turn with `pCD`;
-   - **move** by SS; wrap (periodic) or block (closed box, dish, wall, also a wall cell on the
-     way);
-   - blocked: random new heading, no deposit. Success: `atomicAdd(counts[cell][strain], 1)`.
-3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the
-   heading and calls `atomicMax(claims[target], key)` with a unique per-step key (bijective
-   hash of the agent id). Pass 2b moves the winners. Free target = empty at step start.
-   An agent that a tool places or moves claims its cell the same way, and a loser stays dead or
-   where it was (ADR 0023). Deterministic: integer atomics and unique keys.
-4. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the
-   tile saves about 25 % of this pass, see
+2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups): death, placement by a tool
+   or by the flow, sense, turn and move (model.md, section 7). A successful move runs
+   `atomicAdd(counts[cell][strain], 1)`; WebGL2 marks the agent and counts it with additive points.
+3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the heading and calls
+   `atomicMax(claims[target], key)` with a unique per-step key, pass 2b moves the winners (model.md, section 7.6).
+   Integer atomics and unique keys make it deterministic.
+4. **Growth passes**, on the steps of their intervals only (model.md, section 9; ADR 0025): a separable box sum of the
+   occupancy, claims for the children, and two pyramids of sums with a fan-in of 4 that match births to dead agents by
+   rank. A step without a test runs no pass.
+5. **Diffuse pass** (16 × 16 tiles with a 1-cell halo in workgroup memory; on an M3 Pro the tile saves about 25 % of
+   this pass, see
    [webgpu-platform.md](knowledge-base/webgpu-platform.md#swiftshader-and-the-tiled-diffuse-pass-measured-2026-11-09)),
-   repeated `passes` times (Jones 1, Fogleman 2): the 3 × 3 mean of 9 cells at every site of the
-   arena (Jones' mean filter), then on the last pass `× (1 − decay)`. Moving first, the last pass
-   then adds `counts · deposit`; sensing first, the first pass adds it before the mean.
-   Outside a closed arena the cells hold 0, so trail and scent that leave it are lost (absorbing
-   edges, Jones 2011). Walls diffuse as part of the lattice in the Jones model and are sinks that
-   hold 0 in the extended model; they take no deposit or source (ADR 0027). The same for `scent` with
-   `food · 255 · wProj · g` and `light · 255 · wLight · g` as sources. In the Jones model g = 1,
-   the scent decays with the strain's decay and light has no source, so trail + scent is Jones'
-   one trail map (ADR 0022). In the extended model `g = d / 0.1` moving first and
-   `g = (d / (1 − d)) / (0.1 / 0.9)` sensing first, with the scent decay d, so a large food reaches
-   the same scent at every decay in either order (ADR 0027). The cut tool
-   clears trail and scent in the wound only in the extended model. With covered food on, a food
-   cell releases the covered-food factor (0.001 by default, Adamatzky and Jones 2010) while the
-   3 × 3 window around it holds an agent after the moves (the occupancy comes from collision mode,
-   else from the `occupy` pass).
+   repeated `passes` times (model.md, section 6). WebGPU builds its variants with pipeline constants: the first and the
+   last pass, the mean, the order of the step, covered food and the view. WebGL2 uses uniforms for the first and the
+   last pass, the mean and the order (`P.model.w`), and separate programs for covered food and the view. The cut is a
+   uniform on both.
+6. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
+   iterations. The lines of the flow in `agents.wgsl` and `growth.wgsl` stand between `//#if FLOW` markers; a pass
+   without the flow compiles from the source without them (`shaders/variant.ts`), so it keeps its bytes.
 
-Between 3 and 4, on the steps whose number is a multiple of Gf or Sf and only while growth is on
-with the rule, **growth and shrinkage** (Jones 2011, Sec. 5.1; ADR 0025, `growth.wgsl`,
-`gl/glsl/growth.frag`): a separable box sum of the occupancy after the moves gives each cell the
-agents in its Gw × Gw and Sw × Sw window, its own agent included. Shrinkage deletes an agent whose
-count lies outside [Smin, Smax]. A survivor that moved in this step and counts [Gmin, Gmax] claims a
-random empty habitable cell of its 3 × 3 neighbourhood with the key of a move. The winners write
-births; two pyramids of sums with a fan-in of 4, over the births (one lane per strain, in an order
-that a new bijection of the cells gives every step) and over the dead agents (by id), let the dead
-agent with rank r of a strain take the birth with rank r of that strain. The child gets a random
-position in its cell and a random heading and deposits nothing in its step. Then the occupancy and
-the alive count are counted anew. A step without a test runs no new pass.
-
-After 4, only while **Flow in the tubes** is on in the extended model (ADR 0029, `flow.wgsl`,
-`gl/glsl/flow.frag`; `flow-reference.ts` mirrors both for the tests): the grid is a network whose
-cells conduct by g = B (0.02 + D), with the tube body B (the trail smoothed over time; no tube below
-0.05) and the flow memory D. A food site is the centre cell of a food stroke; the colony covers it
-while that cell holds a tube. `update` takes the flux of each cell from the pressure of the step
-before, adapts D as Tero et al. do (dD/dt = f(Q) − D, f(Q) = Q^1.8 / (1 + Q^1.8)) while at least two
-sites give or take, and writes the body, the conductivity and the roles: among the covered sites as
-many give the flux I0 (Flow strength) as take it, in four pressure fields with their own draws, drawn
-again every 300 steps (`flowRoles()` in `flow.ts` is the same rule for the tests). Then `pressure`
-runs 16 times: a damped Jacobi iteration of Kirchhoff's law from the pressure of the step before,
-with a momentum term on the cells that conduct. A site gives or takes only up to a pressure limit, so
-no part of the network runs away from the rest. The agent passes read D of the step before: in step 2
-an agent on a cell with low D dies with a chance of up to 2 % per step, and a dead agent draws one
-random cell and comes to life there if the cell is open, holds a tube and has D above 0.5. With
-growth, an agent on a cell with D below 0.01 does not divide. The lines of the flow in `agents.wgsl`
-and `growth.wgsl` stand between `//#if FLOW` markers; a pass without the flow compiles from the
-source without them (`shaders/variant.ts`), so it keeps its bytes. Thirty steps stand for one minute
-of model time.
-
-All random numbers come from a PCG hash of `(seed, step, agent id)`. The whole step is
-deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
-counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each
-other on the grid run together and hit the cache (ADR 0005). The model reads only the id, never
-the buffer slot.
+The whole step is deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
+counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each other on the grid run
+together and hit the cache (ADR 0005). The model reads only the id, never the buffer slot.
 
 ### Initial layouts
 
-`mixed` (uniform), `bands` (strains side by side), `sectors`, `colonies` (one disc per strain),
-`ring`, `center`, `empty` (every agent starts dead; the inoculate tool places them), `food` (every
-agent starts dead, and one step of the inoculate tool places about 50 agents of strain A on the
-first food, at half the density of a full sheet; ADR 0025). An agent whose cell is a wall or outside
-the arena draws again in its layout's region. In collision mode claim rounds give every alive agent
-a cell of its own, in every layout (ADR 0008, ADR 0019). A dish counts its agents over the square of
-its short side, as Jones counts %p; a box or a periodic grid over all its cells.
+The layouts and their claim rounds: model.md, section 10. An agent whose cell is a wall or outside the arena draws
+again in its layout's region. In collision mode claim rounds give every alive agent a cell of its own, in every layout
+(ADR 0008, ADR 0019). A dish counts its agents over the square of its short side, as Jones counts %p; a box or a
+periodic grid over all its cells.
 
 ## 4. Interaction
 
@@ -299,7 +237,7 @@ the arrows.
   is an oat flake below the trail (grain, a lit rim), which also shows through the gel style's
   trail; walls are bevelled ridges lit like the gel, with a soft drop shadow, and the trail goes
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
-  (they deposit nothing, Jones 2010, p. 133), and the agents style also shows the agents that
+  (a blocked agent deposits nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
 - Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
   glow and the light repellent (extended model only) as a pink glow over the picture, below the oat flake and the

@@ -71,7 +71,7 @@ Each decision with its date, who made it, and why.
    pass, no texture and no read in a sensor, works for every number of diffusion passes, with and without the rule,
    and keeps covered food, the cut, light, trail saturation and the sensor walk of ADR 0020 where they were. Reason:
    the correct order at no cost.
-3. **The first step after a reset moves without sensing** (this branch, 2026-11-11; `sensesFirst()` in
+3. **The first step after a reset moves without sensing** (this branch, 2026-11-11; `senses()` in
    `agents.wgsl` and `agents.frag`). Jones' first step moves with the start heading; a step here senses for the moves
    before it, and the first step has none. Without this an agent would sense the empty map once: a sensor in a wall or
    outside the arena would turn it, and the random turn pCD would draw. Reason: Jones' first step exactly. Tests that

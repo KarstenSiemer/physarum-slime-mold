@@ -104,11 +104,11 @@ of Jones 2010 unless the line names another paper.
 - No diffusion, or more than one 3 × 3 mean per step (Fogleman uses 2): not Jones' 5 × 5 or 7 × 7 mean.
 - Sensors that walls block on the way (ADR 0020): the owner's rule for the Maze, not Jones'.
 - A cut that also clears the trail and the scent of the wound (this app).
-- The normalised emission and trail saturation (decisions 4 to 9).
+- The normalised emission and trail saturation (decisions 12 to 17).
 
 **The separate scent field is Jones' one map.** For one strain the GPU keeps the trail and the food scent in two fields.
-Both take their sources in the first pass, the same means over the same habitable cells, and the same factor
-`1 − decayT`: the operations are linear, so trail + scent is Jones' map exactly, and the sensor reads
+Both take their sources in the same pass (the last one moving first, the first one sensing first, ADR 0027), the same
+means at the same sites, and the same factor `1 − decayT`: the operations are linear, so trail + scent is Jones' map exactly, and the sensor reads
 `w · trail + w · scent = w · map` with the strain's own weight w. In float32 the two sums round apart: a GPU test
 (`sim.gpu.test.ts`, "keep trail + scent equal to Jones' one trail map") steps a float64 CPU reference of the one map
 with the deposits of the GPU's agents, 40 steps in a box with a wall, on a periodic grid with chemorepulsion and in a
@@ -197,7 +197,9 @@ Each decision with its date, who made it, and why.
 11. **Backends without the rule run Jones' scenes on Extended** (this branch, 2026-11-11). `setScene()` and
     `ruleUnavailable()` give the scene and the scene's base the extended model with the rule off, so the card shows no
     change, and the notice says so. Reason: the Jones model always has the rule.
-12. **Normalised emission is extended only** (owner, 2026-11-11). In the extended model food and light release
+12. **Normalised emission is extended only** (owner, 2026-11-11). (Decisions 12 and 13 give g and the plateau of the
+    order that senses first. The amendment below gives those of the order that moves first: [model.md](../model.md),
+    section 6.4.) In the extended model food and light release
     255 · strength · g(d) per cell and step, with g(d) = (d / (1 − d)) / (0.1 / 0.9) (`emissionScale()`), d the scent
     decay. Reason: Jones projects food at a fixed strength into a map with the trail's decay; a source that depends on
     the decay is not his rule.

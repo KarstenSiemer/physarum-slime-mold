@@ -17,7 +17,8 @@ Jones runs agents in random sequential order; a GPU runs them in parallel.
    so results are not reproducible.
 3. **Two passes with claims**: pass A computes headings and targets and calls
    `atomicMax(claims[target], key)` with a unique per-step key (a bijective hash of the agent
-   id, ADR 0005, so priorities are random but never tie; WebGL2 uses `MAX` blending). A target
+   id, ADR 0005, so priorities are random but never tie; WebGL2 uses `MAX` blending). The two backends use
+   different hash functions for the key, so their winners differ ([model.md](../model.md), section 12). A target
    is free only if it was empty at the start of the step. Pass B moves the winners, deposits,
    and writes the next occupancy with `atomicAdd`.
 
@@ -39,7 +40,7 @@ blocked move (wall, closed boundary, occupied cell) means: no deposit, random ne
   (since 2026-11-10, ADR 0019). Claim rounds follow the init pass: every agent not placed yet
   claims its cell with a key unique per round (`atomicMax`, on WebGL2 `MAX` blending), the highest
   key takes the cell, and the others draw again in their layout's region. An agent with no free
-  cell after 32 rounds starts dead. The mixed layout's first draw is a bijective cell permutation,
+  cell after 32 rounds (64 since ADR 0027, decision 8) starts dead. The mixed layout's first draw is a bijective cell permutation,
   so without walls and dish one round places everyone. Before, only the mixed layout started on
   distinct cells: other layouts drew random positions, an agent in a wall or outside the dish
   moved to a random spot without a check, and rounding pushed an agent into the next cell.

@@ -384,13 +384,14 @@ where it was before), and it needs the least code. The sweep keeps an erased foo
   (`init.wgsl` `claimStart` and `settleStart`; WebGL2 `points.vert` kind 5 and `init.frag`): every
   agent not placed yet claims its cell with a key unique per round, the highest key takes the cell,
   and the others draw again in their layout's region (the mixed layout in the dish or the grid). 32
-  rounds; the mixed layout on a grid without walls and dish needs one (its first draw is a
+  rounds (64 since ADR 0027, decision 8); the mixed layout on a grid without walls and dish needs one (its first draw is a
   permutation of the grid, `startRounds` in `src/engine/pack.ts`). An agent without a free cell after
   the last round starts dead. A placed position is clamped below the next cell (`inCell`). Without
   the rule, an agent in a wall or outside the dish draws again in its region, up to 32 times. In
   the full dish of Shrinking plasmodium (64 %) the rounds rarely leave one agent without a cell: on
   WebGPU in 1 of 61 seeds on 512 × 288 and in 4 of 61 on 512 × 512, one agent each time. WebGL2
-  rounds its floats otherwise and gives other seeds (seed 21 on 512 × 512, not on 512 × 288).
+  gives other seeds (seed 21 on 512 × 512, not on 512 × 288): its start keys are another hash function
+  ([model.md](../model.md), section 12).
 - **The wrap seam.** A move that ended a hair below x = 0 was wrapped to x = W in f32, which lies in
   cell 0, while WebGPU counted the move and its occupancy in cell W − 1. Another agent could then
   enter cell 0, two agents in one cell (older than this ADR). `wrapPos` in `common.wgsl` and
