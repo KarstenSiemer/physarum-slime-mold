@@ -143,6 +143,8 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
   const seed = s.seed >>> 0;
   const { cellAt, cellOf } = grid(w, h, s.boundary);
   const habitable = (c: number) => c >= 0 && (env[c * 4] ?? 0) < 128;
+  // A cell outside a closed arena is no wall (wallIn in agents.wgsl).
+  const wall = (c: number) => c >= 0 && (env[c * 4] ?? 0) >= 128;
   const occ = occupancy(input.agents, w, h, s.boundary);
   const windows = windowCounts(occ, w, h, s.boundary, s.growthWindow, s.shrinkWindow);
   const agents = input.agents.map((a) => ({ ...a }));
@@ -158,9 +160,13 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
     const n = windows[c * 2] ?? 0;
     if (!grow || (counts[c * 4 + (a.bits & 3)] ?? 0) === 0 || n < s.growthMin || n > s.growthMax) return -1;
     const [x, y] = [c % w, Math.floor(c / w)];
-    const open = Array.from({ length: 8 }, (_, k) => cellAt(x + around(k)[0], y + around(k)[1])).filter(
-      (m) => habitable(m) && occ[m] === 0,
-    );
+    const at = (dx: number, dy: number) => cellAt(x + dx, y + dy);
+    // A diagonal neighbour only if the two cells beside the corner between it and c are not both walls (ADR 0025,
+    // amendment of 2026-11-13).
+    const open = Array.from({ length: 8 }, (_, k) => around(k))
+      .filter(([dx, dy]) => habitable(at(dx, dy)) && occ[at(dx, dy)] === 0)
+      .filter(([dx, dy]) => dx === 0 || dy === 0 || !(wall(at(dx, 0)) && wall(at(0, dy))))
+      .map(([dx, dy]) => at(dx, dy));
     if (open.length === 0) return -1;
     const pick = Math.min(Math.floor(stream(rngSeed(id, GROW, step, seed))() * open.length), open.length - 1);
     return open[pick] ?? -1;

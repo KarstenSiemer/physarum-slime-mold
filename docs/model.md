@@ -392,10 +392,12 @@ copy in `src/engine/growth-reference.ts`.
 - **Windows**: n_G(c) is the number of agents in the Gw × Gw block around c, n_S(c) in the Sw × Sw block, both after
   the moves and with the agent's own cell. Wrap wraps; in a box and a dish, cells outside count 0.
 - **Shrinkage**: an agent dies if n_S < Smin or n_S > Smax.
-- **Growth**: a survivor divides if it moved in this step, Gmin ≤ n_G ≤ Gmax, at least one of its 8 neighbours is open
-  and was empty after the moves, and (flow on) D_s ≥ 0.01 for its strain s on its cell after the moves, from the last
-  step. It claims one of the free neighbours at random, with the key of a move. The child may land diagonally across the
-  corner of a wall: the rule does not check corners.
+- **Growth**: a survivor divides if it moved in this step, Gmin ≤ n_G ≤ Gmax, at least one of its 8 neighbours is
+  free, and (flow on) D_s ≥ 0.01 for its strain s on its cell after the moves, from the last step. A neighbour is free
+  if it is open and was empty after the moves. A diagonal neighbour is free only if the two cells beside the corner
+  between it and the agent's cell are not both walls: with one wall a move from the agent's cell can reach it through
+  the other cell, with two walls no move can (7.5). A cell outside a box or the dish is no wall here, as for a move.
+  The agent claims one of the free neighbours at random, with the key of a move (ADR 0025, decision 35).
 - **Births**: the winners' births are matched to dead agents of the same strain by rank, in a new random order of the
   cells each step. A birth without a dead agent is dropped. The capacity limits the population.
 - **The child**: a uniform random position in its cell, a uniform random heading, no deposit in its step.
@@ -504,7 +506,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
-| Growth (9)                              | growth against the CPU copy in each arena; intervals; one agent per cell                                                        |
+| Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |
 | A colony for each strain (10)           | `engine.gpu.test.ts`: three strains in the Foraging maze start two colonies on the two foods                                    |
@@ -520,10 +522,9 @@ Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrin
 
 ## 14. Open points in the code
 
-Each one is open, not a rule. The first three were found while this file was written, the last one in ADR 0031:
+Each one is open, not a rule. The first two were found while this file was written, the last one in ADR 0031:
 
 - An agent under a wall that was painted onto it is not moved off the wall, and can step out (7.5).
-- A child of the growth rule can land diagonally across the corner of a wall (9).
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
 - A site is one cell (8.2). Where strains share a food dot, only the strains whose tube holds its cell cover it
   (ADR 0031 and `TODO.md`).
@@ -531,4 +532,5 @@ Each one is open, not a rule. The first three were found while this file was wri
 Closed on 2026-11-13: respawn (7.2) brought a dead agent of any strain to life, so with the flow a strain appeared that
 nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031). And the flow did
 nothing for a strain whose trail stayed below 0.2 deposits, as in the start scene Three strains with one agent per
-cell. The levels follow the decay of the strain now (8.1, ADR 0032).
+cell. The levels follow the decay of the strain now (8.1, ADR 0032). A child of the growth rule could land between two
+wall cells that touch at a corner, where no move can go (9); it no longer can (ADR 0025, decision 35).

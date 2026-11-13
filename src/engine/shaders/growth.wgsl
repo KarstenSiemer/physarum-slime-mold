@@ -5,8 +5,8 @@
 // - `rowSums`, `windowSums`: the agents in the growth and the shrinkage window around every cell, a separable box sum
 //   of the occupancy after the moves. Each count includes the cell's own agent (ADR 0024, decision 6).
 // - `test`: shrinkage deletes an agent whose count lies outside [Smin, Smax]. A survivor that moved and whose growth
-//   count lies in [Gmin, Gmax] picks a random empty cell of its 3 × 3 neighbourhood and claims it with the unique key
-//   of the step, as a move claims its cell (ADR 0008).
+//   count lies in [Gmin, Gmax] picks a random empty cell of its 3 × 3 neighbourhood, but no diagonal one between two
+//   walls that touch at a corner, and claims it with the unique key of the step, as a move claims its cell (ADR 0008).
 // - `win`: the winner of each claimed cell writes a birth there; every agent writes whether it is dead, by its id.
 // - `buildCells`, `buildDead`: two pyramids of sums with a fan-in of 4, over the births (one lane per strain) and over
 //   the dead agents.
@@ -55,8 +55,6 @@ fn index(gid: vec3u, groups: vec3u) -> u32 { return gid.x + gid.y * groups.x * 2
 
 fn growthTest() -> bool { return P.growth.x > 0u && P.grid.w % P.growth.x == 0u; }
 fn shrinkTest() -> bool { return P.shrinkage.x > 0u && P.grid.w % P.shrinkage.x == 0u; }
-
-fn habitable(c: i32) -> bool { return c >= 0 && !isWall(env[c]); }
 
 // A cell of the grid's rectangle for the box sums: wrapped on the periodic grid, −1 outside a box or a dish's grid.
 // Cells outside the dish lie in the rectangle and hold no agent, so a window counts the agents of the dish.
@@ -119,10 +117,20 @@ fn around(k: u32) -> vec2i {
   return vec2i(j % 3 - 1, j / 3 - 1);
 }
 
+// The number k of the neighbour at offset o ≠ (0, 0): around(k) is o.
+fn aroundIndex(o: vec2i) -> u32 {
+  let j = u32((o.y + 1) * 3 + o.x + 1);
+  return j - select(0u, 1u, j > 4u);
+}
+
 // The cell that a living agent in cell c divides into in this step, or −1. It divides on a growth test step if it
 // moved in this step and its growth count lies in [Gmin, Gmax], into a random cell of its 3 × 3 neighbourhood that
 // is habitable and empty after the moves (Jones 2011, Sec. 5.1: "if there is an empty location in the immediate
 // neighbourhood"). A pure function of the agent, the counts and the occupancy, so `test` and `win` agree.
+// A diagonal neighbour counts only if the two cells beside the corner between it and cell c are not both walls
+// (ADR 0025, amendment of 2026-11-13): then a move from cell c can reach it through the free one of them, and with
+// two walls no move can (clearPath and CORNER in agents.wgsl). A cell outside a closed arena is no wall there, as for
+// a move (wallIn in agents.wgsl).
 fn divideInto(a: Agent, c: i32) -> i32 {
   let s = a.bits & 3u;
   let n = windows[c].x;
@@ -132,18 +140,31 @@ fn divideInto(a: Agent, c: i32) -> i32 {
   let memory = textureLoad(flowMemory, q, s, 0).x;
   if (memory * memory < F.e.y) { return -1; }
 //#endif
-  var free = 0u;
+  // Bit k of `open`: neighbour k is habitable and empty. Bit k of `walls`: neighbour k is a wall.
+  var open = 0u;
+  var walls = 0u;
   for (var k = 0u; k < 8u; k++) {
     let m = cellAt(q + around(k));
-    if (habitable(m) && occ[m] == 0u) { free++; }
+    if (m < 0) { continue; }
+    if (isWall(env[m])) {
+      walls |= 1u << k;
+    } else if (occ[m] == 0u) {
+      open |= 1u << k;
+    }
   }
+  for (var k = 0u; k < 8u; k++) {
+    let o = around(k);
+    if (o.x == 0 || o.y == 0) { continue; }
+    let beside = (1u << aroundIndex(vec2i(o.x, 0))) | (1u << aroundIndex(vec2i(0, o.y)));
+    if ((walls & beside) == beside) { open &= ~(1u << k); }
+  }
+  let free = countOneBits(open);
   if (free == 0u) { return -1; }
   var rng = rngSeed(agentId(a), GROW);
   var pick = min(u32(rand(&rng) * f32(free)), free - 1u);
   for (var k = 0u; k < 8u; k++) {
-    let m = cellAt(q + around(k));
-    if (habitable(m) && occ[m] == 0u) {
-      if (pick == 0u) { return m; }
+    if ((open & (1u << k)) != 0u) {
+      if (pick == 0u) { return cellAt(q + around(k)); }
       pick--;
     }
   }

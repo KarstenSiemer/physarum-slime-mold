@@ -19,6 +19,12 @@ ivec2 around(uint k) {
   return ivec2(j % 3 - 1, j / 3 - 1);
 }
 
+// The number k of the neighbour at offset o != (0, 0): around(k) is o (aroundIndex in growth.wgsl).
+uint aroundIndex(ivec2 o) {
+  uint j = uint((o.y + 1) * 3 + o.x + 1);
+  return j - (j > 4u ? 1u : 0u);
+}
+
 // The position of cell c in the order of the births: a bijection of the cells, new for every step (place in
 // growth.wgsl).
 uint place(uint c) {
