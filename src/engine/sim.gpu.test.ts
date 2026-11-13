@@ -4101,7 +4101,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // One step that tests growth and shrinkage, against the CPU copy of the passes (growth-reference.ts) stepped
     // from the state after the moves: a twin without growth runs the same moves. On the periodic grid with a wall
     // across its seams, in a box with a wall at its edge, and in a dish, so that windows meet the grid's edges, the
-    // seam, walls and the rim.
+    // seam, walls and the rim. With walls, also two lines of single wall cells that touch only at their corners, one
+    // in each diagonal direction, where the colony grows: one runs across the seam of the periodic grid and from the
+    // edge of the box (ADR 0025, amendment of 2026-11-13).
     it.each([
       ['wrap', true],
       ['box', true],
@@ -4134,6 +4136,14 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         : [];
       for (const sim of [a, b]) {
         sim.paint(wall);
+        if (walls) {
+          const bytes = await sim.readEnv();
+          for (let k = 0; k < 24; k++) {
+            bytes[(((36 + k) % h) * w + 4 + k) * 4] = 255;
+            if (k < 16) bytes[((12 + k) * w + 20 - k) * 4] = 255;
+          }
+          sim.writeEnv(bytes);
+        }
         r = 5;
         seedAgents(sim, s, rnd, await sim.readEnv());
         sim.writeTrail(trail);
@@ -4164,21 +4174,46 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(died).toBeGreaterThan(20);
       expect(got).toEqual(expected.agents);
       // Each child lies in a cell that was empty and habitable after the moves, next to a parent of its strain that
-      // moved in this step.
+      // moved in this step, and not across the corner of a wall from it.
       const occ = occupancy(moved, w, h, boundary);
       const counts = await b.readCounts();
-      const wrap = (v: number, m: number) => (boundary === 'wrap' ? ((v % m) + m) % m : v);
+      const cellIndex = (x: number, y: number) => {
+        const [u, v] = boundary === 'wrap' ? [((x % w) + w) % w, ((y % h) + h) % h] : [x, y];
+        return u < 0 || v < 0 || u >= w || v >= h ? -1 : v * w + u;
+      };
+      const isWall = (x: number, y: number) => {
+        const c = cellIndex(x, y);
+        return c >= 0 && (env[c * 4] ?? 0) >= 128;
+      };
+      const around = [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => [dx, dy] as const));
+      /** From cell (x, y), the neighbour at (dx, dy) is diagonal and past the corner of a wall. */
+      const past = (x: number, y: number, [dx, dy]: readonly [number, number]) =>
+        dx !== 0 && dy !== 0 && (isWall(x + dx, y) || isWall(x, y + dy));
       for (const [id, g] of got.entries()) {
         if (!child(g, id)) continue;
         const [x, y] = [Math.floor(g.x), Math.floor(g.y)];
         expect(occ[y * w + x], `child ${id}`).toBe(0);
         expect(env[(y * w + x) * 4] ?? 0, `child ${id}`).toBeLessThan(128);
-        const parents = [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => wrap(y + dy, h) * w + wrap(x + dx, w)));
-        expect(
-          parents.some((c) => c >= 0 && (occ[c] ?? 0) > 0 && (counts[c * 4 + (g.bits & 3)] ?? 0) > 0),
-          `child ${id}`,
-        ).toBe(true);
+        const parents = around.filter(([dx, dy]) => {
+          const c = cellIndex(x + dx, y + dy);
+          return c >= 0 && (occ[c] ?? 0) > 0 && (counts[c * 4 + (g.bits & 3)] ?? 0) > 0 && !past(x, y, [dx, dy]);
+        });
+        expect(parents.length, `child ${id}`).toBeGreaterThan(0);
       }
+      // The corner rule acts: survivors that divide and have an empty diagonal neighbour past the corner of a wall,
+      // which the rule leaves out.
+      const corners = moved.filter((m) => {
+        const [x, y] = [Math.floor(m.x), Math.floor(m.y)];
+        const c = cellIndex(x, y);
+        if (!(m.bits & 4) || c < 0 || (counts[c * 4 + (m.bits & 3)] ?? 0) === 0) return false;
+        const [grow, keep] = [expected.windows[c * 2] ?? 0, expected.windows[c * 2 + 1] ?? 0];
+        if (grow < s.growthMin || grow > s.growthMax || keep < s.shrinkMin || keep > s.shrinkMax) return false;
+        return around.some((o) => {
+          const t = cellIndex(x + o[0], y + o[1]);
+          return t >= 0 && occ[t] === 0 && !isWall(x + o[0], y + o[1]) && past(x, y, o);
+        });
+      }).length;
+      if (walls) expect(corners).toBeGreaterThan(0);
       expect((await census(a, boundary)).most).toBe(1);
     });
 

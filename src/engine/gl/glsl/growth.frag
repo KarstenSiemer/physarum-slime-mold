@@ -69,11 +69,9 @@ layout(std140) uniform Flow {
 } F;
 #endif
 
-bool habitable(int c) { return c >= 0 && !isWall(texelFetch(env, cellCoord(c), 0)); }
-bool empty(int c) { return habitable(c) && texelFetch(occ, cellCoord(c), 0).r < 0.5; }
-
-// The neighbour that a living agent in cell c divides into, or −1 (target in growth.wgsl). It moved in this step if
-// the settle pass marked it MOVED.
+// The neighbour that a living agent in cell c divides into, or −1 (divideInto in growth.wgsl): a habitable cell
+// that is empty after the moves, and a diagonal one only if neither cell beside the corner between it and cell c is
+// a wall (ADR 0025, amendment of 2026-11-13). It moved in this step if the settle pass marked it MOVED.
 int target(uint bits, int c, uint i) {
   float n = texelFetch(windows, cellCoord(c), 0).r;
   bool moved = (bits & MOVED) != 0u;
@@ -83,15 +81,32 @@ int target(uint bits, int c, uint i) {
   float memory = texelFetch(flowMemory, q, 0).x;
   if (memory * memory < F.e.y) return -1;
 #endif
+  // Bit k of `open`: neighbour k is habitable and empty. Bit k of `walls`: neighbour k is a wall.
+  uint open = 0u;
+  uint walls = 0u;
+  for (uint k = 0u; k < 8u; k++) {
+    int m = cellAt(q + around(k));
+    if (m < 0) continue;
+    if (isWall(texelFetch(env, cellCoord(m), 0))) {
+      walls |= 1u << k;
+    } else if (texelFetch(occ, cellCoord(m), 0).r < 0.5) {
+      open |= 1u << k;
+    }
+  }
   uint free = 0u;
   for (uint k = 0u; k < 8u; k++) {
-    if (empty(cellAt(q + around(k)))) free++;
+    ivec2 o = around(k);
+    if (o.x != 0 && o.y != 0) {
+      uint beside = (1u << aroundIndex(ivec2(o.x, 0))) | (1u << aroundIndex(ivec2(0, o.y)));
+      if ((walls & beside) != 0u) open &= ~(1u << k);
+    }
+    free += (open >> k) & 1u;
   }
   if (free == 0u) return -1;
   uint rng = rngSeed(i, GROW);
   uint pick = min(uint(rand(rng) * float(free)), free - 1u);
   for (uint k = 0u; k < 8u; k++) {
-    if (empty(cellAt(q + around(k)))) {
+    if ((open & (1u << k)) != 0u) {
       if (pick == 0u) return int(k);
       pick--;
     }
