@@ -1,7 +1,8 @@
 // The tables of the amendment of ADR 0025 of 2026-11-13 from the lines of maze.gpu.test.ts (README.md).
 // Usage: node --import ./research/flow/register.mjs research/corner/tables.ts <command> <folders...>
 //
-// - `maze <folder>`: the table of the Foraging maze, `main` against the fix, from <folder>/main-*.txt and fix-*.txt.
+// - `maze <folder>`: the table of the Foraging maze, `main` against the rejected rule "either cell beside the corner
+//   blocks" (ADR 0025, decision 35), from <folder>/main-*.txt and either-*.txt, for each backend with files.
 // - `same <folder a> <folder b>`: for each file of the maze in both folders, whether its lines are equal. Ends with
 //   exit code 1 if a line differs, or if a file of folder a is missing in folder b.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -81,13 +82,13 @@ const agents = (runs: Run[]) => {
 
 function maze(folder: string) {
   console.log(
-    '| Backend | Flow | Screen | `main`: path, steps (median) | Near a wall | Fix: path, steps (median) | Near a wall | Agents at 15,000: `main` | Fix |',
+    '| Backend | Flow | Screen | `main`: path, steps (median) | Near a wall | Either blocks: path, steps (median) | Near a wall | Agents at 15,000: `main` | Either blocks |',
   );
   console.log('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
-  for (const [kind, kindName] of KINDS)
+  for (const [kind, kindName] of KINDS.filter(([k]) => existsSync(join(folder, `main-start-${k}.txt`))))
     for (const [flow, flowName] of FLOWS) {
       const before = load(join(folder, `main-${flow}-${kind}.txt`));
-      const after = load(join(folder, `fix-${flow}-${kind}.txt`));
+      const after = load(join(folder, `either-${flow}-${kind}.txt`));
       for (const [screen, screenName] of SCREENS) {
         const [a, b] = [before.get(screen) ?? [], after.get(screen) ?? []];
         if (a.length === 0 || b.length === 0) throw new Error(`no runs for ${kind} ${flow} ${screen}`);
@@ -99,7 +100,7 @@ function maze(folder: string) {
 
 function same(a: string, b: string) {
   let bad = 0;
-  for (const name of readdirSync(a).filter((f) => /^(main|fix)-.*\.txt$/.test(f))) {
+  for (const name of readdirSync(a).filter((f) => /^(main|either)-.*\.txt$/.test(f))) {
     const other = join(b, name);
     if (!existsSync(other)) {
       console.log(`${name}: missing in ${b}`);

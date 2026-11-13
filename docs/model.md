@@ -364,10 +364,10 @@ copy in `src/engine/growth-reference.ts`.
 - **Shrinkage**: an agent dies if n_S < Smin or n_S > Smax.
 - **Growth**: a survivor divides if it moved in this step, Gmin ≤ n_G ≤ Gmax, at least one of its 8 neighbours is
   free, and (flow on) D ≥ 0.01. A neighbour is free if it is open and was empty after the moves. A diagonal neighbour
-  is free only if neither of the two cells beside the corner between it and the agent's cell is a wall: the way from
-  the centre of one cell to the centre of the other passes through that corner, and a move on that way touches both
-  cells (7.5). A cell outside a box or the dish is no wall here, as for a move. The agent claims one of the free
-  neighbours at random, with the key of a move (ADR 0025, amendment of 2026-11-13).
+  is free only if the two cells beside the corner between it and the agent's cell are not both walls: with one wall a
+  move from the agent's cell can reach it through the other cell, with two walls no move can (7.5). A cell outside a
+  box or the dish is no wall here, as for a move. The agent claims one of the free neighbours at random, with the key
+  of a move (ADR 0025, decision 35).
 - **Births**: the winners' births are matched to dead agents of the same strain by rank, in a new random order of the
   cells each step. A birth without a dead agent is dropped. The capacity limits the population.
 - **The child**: a uniform random position in its cell, a uniform random heading, no deposit in its step.
@@ -473,7 +473,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
-| Growth (9)                              | growth against the CPU copy in each arena; no child past the corner of a wall; intervals; one agent per cell                    |
+| Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                    |
 

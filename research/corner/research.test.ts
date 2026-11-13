@@ -54,11 +54,15 @@ describe('the record of the corner rule', () => {
       const { code, text } = await tables(['maze', join(record, 'logs', 'maze')]);
       expect(code).toBe(0);
       const adr = readFileSync(here('../../docs/adr/0025-growth-and-shrinkage.md'), 'utf8');
-      const section = adr.split('\n## Amendment 2026-11-13: no child past the corner of a wall')[1] ?? '';
-      const table = section.split('\n').filter((line) => line.startsWith('| Backend | Flow | Screen | `main`'));
-      expect(table).toHaveLength(1);
-      const start = section.split('\n').indexOf(table[0] ?? '');
-      const rows = section.split('\n').slice(start);
+      const section =
+        adr.split('\n## Amendment 2026-11-13: no child between two walls that touch at a corner')[1] ?? '';
+      const lines = section.split('\n');
+      // The header of the table: Prettier pads its cells.
+      const start = lines.findIndex(
+        (line) => cells([line])[0]?.slice(0, 4).join('|') === 'Backend|Flow|Screen|`main`: path, steps (median)',
+      );
+      expect(start).toBeGreaterThan(0);
+      const rows = lines.slice(start);
       const end = rows.findIndex((line) => !line.startsWith('|'));
       expect(cells(rows.slice(0, end))).toEqual(cells(text.trim().split('\n')));
     },
@@ -75,11 +79,11 @@ describe('the record of the corner rule', () => {
       const changed = mkdtempSync(join(tmpdir(), 'research-corner-changed-'));
       try {
         cpSync(maze, changed, { recursive: true });
-        const file = join(changed, 'fix-start-webgpu.txt');
+        const file = join(changed, 'either-start-webgpu.txt');
         writeFileSync(file, readFileSync(file, 'utf8').replace('reached=', 'reached=1'));
         const differ = await tables(['same', maze, changed]);
         expect(differ.code).toBe(1);
-        expect(differ.text).toContain('fix-start-webgpu.txt: 1 line differs');
+        expect(differ.text).toContain('either-start-webgpu.txt: 1 line differs');
       } finally {
         rmSync(changed, { recursive: true, force: true });
       }
@@ -91,6 +95,6 @@ describe('the record of the corner rule', () => {
     const digest = createHash('sha256');
     for (const { name, data } of readArchive(ARCHIVE)) digest.update(`${name}\0${String(data.length)}\0`).update(data);
     // A new campaign changes the record: pack the archive again (README.md) and put the new number here.
-    expect(digest.digest('hex')).toBe('TO BE SET');
+    expect(digest.digest('hex')).toBe('251edc6c788fb5266d8bc00afff973aed5cb3af0a4e6be541f8cd959d525d224');
   });
 });

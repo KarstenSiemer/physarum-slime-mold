@@ -98,7 +98,8 @@ All decisions of 2026-11-11, by this branch unless marked.
 6. **The child**: a random cell of the 8 around the parent that is habitable and empty after the moves (uniform among
    these), a random position in it, a random heading, the parent's strain, and no deposit in its step. Reason: the
    papers' words; Jones does not state the heading, and the specifications took random as the likely choice. Since
-   the amendment of 2026-11-13 (decision 35), a diagonal cell past the corner of a wall is not among them.
+   the amendment of 2026-11-13 (decision 35), a diagonal cell between two wall cells that touch at the corner between
+   it and the parent's cell is not among them.
 7. **Two parents that pick one cell claim it** with the unique key of the step, as moves do (ADR 0008); only the
    winner gets a child there, and the loser does not divide in this step. Reason: no race and no duplicate. In
    Jones' sequential order the loser would pick another empty cell; this is the same synchronous difference as for
@@ -565,13 +566,14 @@ request #44) the Tokyo rail network has growth on as well: its colony grows out 
 `params.test.ts`, "keeps growth off in every scene but Foraging maze and Tokyo"). The rules of growth are in
 [model.md](../model.md), section 9.
 
-## Amendment 2026-11-13: no child past the corner of a wall
+## Amendment 2026-11-13: no child between two walls that touch at a corner
 
-**The gap.** The code reading for [model.md](../model.md) (the specification of the model, pull request #49) found that decision 6 lets a
-child land in a diagonal neighbour past the corner of a wall. A move cannot go there: it counts both cells beside a
-grid corner that it passes within 0.001 cells (`clearPath` and `CORNER` in `agents.wgsl` and `agents.frag`; ADR 0019,
-"Wall jumps"). So a line of wall cells that touch only at their corners stops the agents but not their children.
-Jones' papers do not say how a child treats the corner of a wall.
+**The gap.** The code reading for [model.md](../model.md) (the specification of the model, pull request #49) found
+that decision 6 lets a child land in a diagonal neighbour between two wall cells that touch at the corner between the
+two cells. A move cannot go there: it counts both cells beside a grid corner that it passes within 0.001 cells
+(`clearPath` and `CORNER` in `agents.wgsl` and `agents.frag`; ADR 0019, "Wall jumps"), and every other way into the
+diagonal cell crosses one of the two walls. So a line of single wall cells that touch only at their corners stops the
+agents but not their children. Jones' papers do not say how a child treats the corner of a wall.
 
 **Reproduced first.** The GPU test "places no child across the corner of a wall" (`sim.gpu.test.ts`, both backends):
 wall cells that touch only at their corners, one diagonal line in a box of 32 × 32 cells and two on the periodic grid,
@@ -580,43 +582,118 @@ which part the torus into two bands. A colony starts on one side, with growth in
 lie on the other side. A move cannot get there, so each one is a child that a parent placed across a corner, or a
 descendant of one. With the fix the other side holds no agent, and the colony still grows on its own side.
 
-35. **A diagonal neighbour is free only if neither of the two cells beside the corner between it and the parent's cell
-    is a wall.** Reason: the rule picks a cell, not a position. The way from the centre of the parent's cell to the
-    centre of a diagonal neighbour passes exactly through the corner between them, and the move rule counts both cells
-    beside such a corner: either one blocks a move on that way (the GPU test "cannot slip through two wall cells that
-    touch at a corner, nor touch a wall at a corner"). A cell outside a box or the dish is no wall here, as for a move
-    (`wallIn` in `agents.wgsl`). The other rules of decision 6 stay. My choice under the owner's delegation of
-    2026-11-12. The options:
-    - Neither cell beside the corner is a wall (chosen).
-    - Only both cells together block: the gap between two wall cells that touch at a corner closes, and a child still
-      passes the corner of a single wall cell. A move from the parent's own position can pass such a corner through
-      the free cell beside it. Rejected: at the time of the choice the child has no position yet. The dead agent that
-      takes the birth draws it later (decision 8, the stream `BIRTH`), so no way from the parent's position to the
-      child's exists then. The only way that the two cells define is the way between their centres, and the move rule
-      blocks it.
+35. **A diagonal neighbour is free only if the two cells beside the corner between it and the parent's cell are not
+    both walls.** Reason: the child then goes only where a move from the parent's cell can go. With one wall beside
+    the corner, a move from a position in the parent's cell reaches the diagonal cell through the free cell beside the
+    corner, as the plasmodium flows around the corner of an obstacle. With two walls no move can. The rule picks a
+    cell, not a position: the child gets its position later, from the dead agent that takes the birth (decision 8, the
+    stream `BIRTH`). A cell outside a box or the dish is no wall here, as for a move (`wallIn` in `agents.wgsl`). The
+    other rules of decision 6 stay. My choice under the owner's delegation of 2026-11-12, after a first version of
+    this branch with the second option below. The options:
+    - Two walls block, one does not (chosen). No scene holds two wall cells that touch at a corner with open cells on
+      both sides of it (`research/corner/walls.gpu.test.ts`: 0 such pairs in every scene on 16:9, 16:10 and 1:1), so
+      every scene keeps its bytes (below). The rule acts where a person paints such walls.
+    - Either wall blocks (the brief's proposal, and the first version of this branch): the way from the centre of the
+      parent's cell to the centre of the diagonal cell passes exactly through the corner, and the move rule blocks a
+      segment there if either cell beside the corner is a wall. Rejected. That part of the move rule serves the
+      rounding of float32: a walk exactly at a corner may enter either cell, so each one must block ("counts both
+      cells beside a corner the move passes, in every diagonal direction"). It is a rule for one segment and not for a
+      cell: a move from another position in the parent's cell passes the corner of one wall cell through the free
+      cell. And the option changes both scenes with growth at the corners of their walls (18 to 23 in the Foraging
+      maze, 815 on the coast of the Tokyo rail network): measured below, it slows the start of the Tokyo colony, and it
+      moves the steps of the Foraging maze within the spread of the seeds. It closes no gap that the chosen option
+      leaves open.
     - The way from the parent's position to the child's position, with the walk of a move: the child's position would
       have to be drawn in the pass `test`, before the births are matched to dead agents. That changes the random
       streams of every scene with growth, also where no wall is near. Rejected.
 36. **One loop with two masks of bits.** `divideInto()` in `growth.wgsl`, `target()` in `growth.frag` and `growthStep()`
     in `growth-reference.ts` read the 8 neighbours once into a mask of the free cells and a mask of the walls, then
-    take out the diagonal cells past a wall's corner, then pick. The code before read every neighbour twice (once to
-    count, once to pick). Where no wall lies beside a corner, the free cells and their order are those of the code
-    before, so the pick is the same: a scene without walls keeps its bytes. `aroundIndex()` (`growth.wgsl`,
-    `growth.glsl`) is the inverse of `around()`.
+    take out each diagonal cell whose two cells beside the corner are walls, then pick. The code before read every
+    neighbour twice (once to count, once to pick). Without such a pair of walls the free cells and their order are
+    those of the code before, so the pick is the same. `aroundIndex()` (`growth.wgsl`, `growth.glsl`) is the inverse
+    of `around()`.
 
 The tests:
 
-- The new test above fails on `main` and passes with the fix, on both backends.
-- "divide and die as the CPU copy of the passes does" holds, with walls, two more lines of single wall cells, one in
-  each diagonal direction, where the colony grows: one runs across the seam of the periodic grid and from the edge of
-  the box. The test also checks that each child has a parent that moved and is not past a corner from it, and that
-  some dividing agents have an empty diagonal neighbour past a corner (2 on the periodic grid, 4 in the box). The GPU
-  equals the CPU copy on both backends. A check by hand: the CPU copy without the corner rule fails all 4 cases with
-  walls.
-- The whole GPU suite passes (826 tests, M3 Pro).
+- The GPU test above fails on `main` and passes with the fix, on both backends.
+- A unit test of the CPU copy (`growth-reference.test.ts`, "the child at the corner of a wall"): a parent whose only
+  free cell is a diagonal one. Past the corner of one wall cell the child goes there; between two wall cells no child
+  comes. With the rejected option in the CPU copy the first case fails, without a corner rule the second.
+- "divide and die as the CPU copy of the passes does" has, with walls, single wall cells that touch only at their
+  corners where the colony grows: a diagonal line across the seam of the periodic grid and from the edge of the box,
+  and a lattice of diamonds. 10 to 11 dividing agents then have an empty diagonal neighbour between two walls, and 16
+  to 18 one past the corner of one wall cell; the test asks for both. It also checks that each child has a parent
+  that moved and is not between two walls from it. The GPU equals the CPU copy on both backends. A check by hand: the
+  CPU copy without a corner rule, and the CPU copy with the rejected option, each fail all 4 cases with walls. On
+  `main` the test fails on both backends: children whose only parents lie across a gap.
+- The whole GPU suite passes (844 tests, M3 Pro).
 
-The time of the growth passes was not measured: the machine ran other work at the time, and from the first corner
-that a colony meets, the colonies of `main` and of the fix differ, so the time of a step would compare other states.
-The passes now read each neighbour once instead of twice.
+The time of a step does not change. With the chosen rule the scenes run the states of `main` (the same agents alive),
+so their times compare: `research/flow/engine/bench.gpu.test.ts`, the median of 21 samples of 50 steps after 3,000
+steps, two runs of each version in turn, `main` at `e3bbefc`. The Foraging maze as it ships: 0.352 and 0.356 ms on
+`main`, 0.354 and 0.356 ms with the rule (WebGPU); 0.736 and 0.758 against 0.750 and 0.756 ms (WebGL2). The Tokyo
+rail network: 3.204 and 3.204 against 3.186 and 3.224 ms (WebGPU); 3.684 and 3.686 against 3.692 and 3.708 ms
+(WebGL2). The differences lie within those between two runs of one version. The machine ran other work at the time.
 
-MEASUREMENTS
+### Measurements of the amendment
+
+The record and its commands are in [research/corner](../../research/corner/README.md) (M3 Pro, Chromium, Metal).
+`main` is `7d3a5ee`; the chosen rule is this branch with `main` of 2026-11-13 merged in (pull requests #48 and #50);
+the rejected option is `91907bc`, the first version of this branch, measured before that merge. With the rejected
+option, the merge gives the bytes of `91907bc` at step 3,000 in both scenes with growth, on both backends.
+
+**Bytes, with the chosen rule.** The digests of `research/flow/engine/digest.gpu.test.ts` (the agents, the trail, the
+scent and the environment; the default settings and 17 scenes on both backends, from seed 12345) equal those of
+`main` in 36 of 36 runs after 500 steps, and in the Foraging maze and the Tokyo rail network after 15,000 steps on
+both backends. This follows from the walls too: the rule differs from the code before only between two
+wall cells that touch at a corner, and no scene has such a pair. So the numbers of D1b, of ADR 0027 and of ADR 0029
+hold with the chosen rule, and `docs/fidelity.md` keeps its numbers.
+
+**Bytes, with the rejected option.** After 500 steps 33 of 36 digests equal those of `main`. The other three are the
+two scenes with growth: the Foraging maze on WebGPU, and the Tokyo rail network on both backends. Then both scenes
+ran with the seeds of their records.
+
+**The Foraging maze, with the rejected option** (D1b, the harness of ADR 0027 "Growth after the merge of ADR 0025",
+sensing first as the scene ships; seeds 1 to 10 per screen, 15,000 steps; WebGPU). On `main` the harness gives the
+lines of the record of ADR 0027 byte for byte, so the column `main` is that table's column "Sense first".
+
+| Backend | Flow               | Screen | `main`: path, steps (median)                    | Near a wall | Either blocks: path, steps (median) | Near a wall | Agents at 15,000: `main` | Either blocks    |
+| ------- | ------------------ | ------ | ----------------------------------------------- | ----------- | ----------------------------------- | ----------- | ------------------------ | ---------------- |
+| WebGPU  | start              | 16:9   | 10 of 10, 2,501 to 3,901 (3,251)                | 38 %        | 10 of 10, 2,901 to 4,001 (3,151)    | 37 %        | 15,827 to 16,434         | 15,597 to 17,023 |
+| WebGPU  | start              | 16:10  | 10 of 10, 2,601 to 3,601 (3,401)                | 37 %        | 10 of 10, 2,701 to 3,901 (3,301)    | 37 %        | 16,337 to 18,783         | 17,224 to 17,914 |
+| WebGPU  | start              | 1:1    | 10 of 10 (at 15,000: 9), 4,201 to 5,401 (4,551) | 34 %        | 10 of 10, 3,901 to 6,201 (4,301)    | 33 %        | 25,043 to 27,209         | 24,783 to 26,856 |
+| WebGPU  | inoculate at 100   | 16:9   | 10 of 10, 2,920 to 4,020 (3,370)                | 37 %        | 10 of 10, 3,320 to 4,820 (3,470)    | 37 %        | 15,989 to 17,066         | 15,199 to 17,053 |
+| WebGPU  | inoculate at 100   | 16:10  | 10 of 10, 3,220 to 4,320 (3,620)                | 37 %        | 10 of 10, 2,920 to 4,720 (3,770)    | 36 %        | 16,531 to 18,569         | 17,215 to 18,089 |
+| WebGPU  | inoculate at 100   | 1:1    | 10 of 10, 4,020 to 6,020 (4,870)                | 33 %        | 10 of 10, 4,120 to 5,120 (4,570)    | 33 %        | 25,316 to 27,786         | 25,445 to 27,140 |
+| WebGPU  | inoculate at 1,000 | 16:9   | 10 of 10, 4,220 to 5,020 (4,520)                | 38 %        | 10 of 10, 3,820 to 5,220 (4,570)    | 37 %        | 15,375 to 16,737         | 15,607 to 16,888 |
+| WebGPU  | inoculate at 1,000 | 16:10  | 10 of 10, 3,820 to 5,220 (4,520)                | 36 %        | 10 of 10, 3,820 to 5,120 (4,420)    | 37 %        | 16,492 to 18,334         | 16,731 to 18,557 |
+| WebGPU  | inoculate at 1,000 | 1:1    | 10 of 10, 4,820 to 6,920 (5,870)                | 34 %        | 10 of 10, 5,020 to 6,220 (5,470)    | 33 %        | 25,391 to 27,195         | 25,066 to 27,610 |
+
+Every flow still reaches the far food in 10 of 10 seeds. The medians move by −400 to +150 steps, within the spread of
+the seeds. The runs on WebGL2 were stopped once the chosen rule kept every byte: 16 of the 30 runs of the start flow
+had run, all with a path (10 of 10 on 16:9, 6 of 6 on 16:10), and the lines of `main` among them equal the record of
+ADR 0027.
+
+**The Tokyo rail network, with the rejected option** (ADR 0029, "The Tokyo rail network": flux 1.4, seeds 1 to 10 on
+WebGPU, measured on the 33 food sources of Tero et al. 2010, Fig. 2; median and range over the seeds). The record is
+the table of ADR 0029.
+
+| Step   | Code     | All 33 joined | All 36 joined | Links           | TL                  | MD                  | FT                  | Agents alive           |
+| ------ | -------- | ------------- | ------------- | --------------- | ------------------- | ------------------- | ------------------- | ---------------------- |
+| 1,000  | record   | 5 of 10       | 0 of 10       | 64.5 (49 to 71) | 2.12 (1.72 to 2.32) | 0.87 (0.84 to 0.90) | 0.91 (0.86 to 0.92) | 6,427 (5,558 to 6,998) |
+| 1,000  | rejected | 1 of 10       | 0 of 10       | 54.5 (45 to 70) | 1.96 (1.78 to 2.34) | 0.86 (0.83 to 0.90) | 0.92 (0.84 to 0.96) | 5,701 (5,125 to 6,785) |
+| 2,000  | record   | 10 of 10      | 10 of 10      | 80.5 (72 to 92) | 2.73 (2.56 to 2.85) | 0.83 (0.82 to 0.90) | 0.97 (0.94 to 0.99) | 6,312 (5,951 to 6,724) |
+| 2,000  | rejected | 10 of 10      | 10 of 10      | 82.5 (75 to 98) | 2.73 (2.63 to 2.93) | 0.82 (0.81 to 0.83) | 0.97 (0.94 to 0.99) | 6,530 (6,326 to 6,797) |
+| 8,000  | record   | 10 of 10      | 10 of 10      | 61.5 (55 to 71) | 2.05 (1.87 to 2.28) | 0.82 (0.81 to 0.84) | 0.95 (0.90 to 0.96) | 4,272 (4,096 to 4,603) |
+| 8,000  | rejected | 10 of 10      | 10 of 10      | 63 (54 to 84)   | 2.08 (1.90 to 2.41) | 0.82 (0.80 to 0.84) | 0.94 (0.89 to 0.96) | 4,318 (4,159 to 4,723) |
+| 24,000 | record   | 10 of 10      | 9 of 10       | 53 (47 to 60)   | 1.77 (1.63 to 1.99) | 0.82 (0.81 to 0.84) | 0.92 (0.85 to 0.95) | 3,936 (3,736 to 4,205) |
+| 24,000 | rejected | 10 of 10      | 10 of 10      | 53 (48 to 63)   | 1.84 (1.66 to 2.05) | 0.82 (0.80 to 0.84) | 0.93 (0.86 to 0.94) | 3,917 (3,742 to 4,303) |
+| 48,000 | record   | 10 of 10      | 8 of 10       | 53 (45 to 65)   | 1.77 (1.51 to 1.98) | 0.83 (0.81 to 0.91) | 0.91 (0.78 to 0.96) | 4,003 (3,697 to 4,229) |
+| 48,000 | rejected | 10 of 10      | 8 of 10       | 51.5 (46 to 62) | 1.73 (1.60 to 1.97) | 0.83 (0.81 to 0.91) | 0.89 (0.81 to 0.94) | 3,928 (3,658 to 4,136) |
+
+At step 48,000, mean and standard deviation: TL 1.75 ± 0.12, MD 0.84 ± 0.03 and FT 0.88 ± 0.04 with the rejected
+option, against 1.77 ± 0.15, 0.84 ± 0.03 and 0.90 ± 0.05 in the record. The check of the specification (TL from 1.45
+to 2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds in 10 of 10 seeds at steps 24,000 and
+48,000, as in the record. The one change beyond the spread of the seeds is the start: at step 1,000 the colony has
+11 % fewer agents (median) and joins all 33 food sources in 1 seed of 10, against 5. Its children can no longer pass
+the 815 corners of the coast. From step 2,000 on the numbers lie within the spread of the record.
