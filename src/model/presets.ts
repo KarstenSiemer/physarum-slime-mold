@@ -481,7 +481,7 @@ PRESETS.push(
     about:
       'In 2010, Atsushi Tero and colleagues put oat flakes on a plate where the cities around Tokyo lie, with the coast as its edge. A slime mold grew out from Tokyo and joined all flakes within 26 hours. Its network was about as short, as fast and as robust as the real railway. Here, Jones’ agents grow from Tokyo, and the flow in the tubes decides which tubes stay.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
-    why: 'Growth and shrinkage with Jones’ values of 2011 let the colony grow from Tokyo. Flow in the tubes is on: each food gives or takes a flux of 2, and Tokyo is seven foods, as in the model of the paper. The map has 512 × 512 cells on every screen, so north stays up. Sensor distance 7 and food weight 0.03 are the Maze’s. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
+    why: 'Growth and shrinkage with Jones’ values of 2011 let the colony grow from Tokyo. Flow in the tubes is on with a strength of 1.4: the network is then as long as the organism’s. Tokyo is seven foods, as in the model of the paper. The map has 512 × 512 cells on every screen, so north stays up. Sensor distance 7 and food weight 0.03 are the Maze’s. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
     settings: () =>
       jones(
         { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
@@ -495,9 +495,10 @@ PRESETS.push(
           foodStrength: 0.03,
           growth: true,
           flow: true,
-          // The flux of the model of Tero et al. 2010 (Fig. 4: I0 = 2), and the value whose network has the measures
-          // of the organism (ADR 0029).
-          flowStrength: 2,
+          // Measured with 1, 1.4 and 2 over ten seeds each (ADR 0029): with 1.4 the total length of the network is
+          // that of the organism (1.77 against 1.75 times the minimum spanning tree), and the food sources at the
+          // edge of the map keep their tubes. The I0 = 2 of the model of Tero et al. 2010 (Fig. 4) has another unit.
+          flowStrength: 1.4,
         },
       ),
     // The start layout 'food' places the colony on the first food: the station of Tokyo.

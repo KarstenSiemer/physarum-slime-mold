@@ -15,7 +15,7 @@ import {
   packFlow,
   STEPS_PER_MINUTE,
 } from './flow';
-import { roleSigns } from './flow-reference';
+import { flowStart, flowStep, roleSigns, type FlowGrid } from './flow-reference';
 
 describe('flowOn', () => {
   it('runs the flow only with the switch on and in the extended model', () => {
@@ -278,4 +278,54 @@ describe('packFlow', () => {
     expect(none[15]).toBe(0);
     expect(none.subarray(28).every((v) => v === 0)).toBe(true);
   });
+});
+
+describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', () => {
+  // The case in which the first version of the app let the pressure run away. A mesh of tubes grows out from a food
+  // as a disc and reaches three more foods, and its cells flicker: in each step a cell of the disc changes between
+  // tube and no tube with a chance of 5 %, so cells cross the level of the tube body again and again, the centre
+  // cells of the foods too. With the momentum of the iteration on every cell this run reaches a pressure of 8 · 10⁸
+  // (measured 2026-11-13). With the rule that only a cell that conducts takes the momentum, the largest pressure is
+  // 433: a food that gives into a piece of tube without a way out, below the pressure limit of a site.
+  // flow.gpu.test.ts holds both backends to this copy, on cells with a tube and on cells without one.
+  it('stays bounded while a mesh of tubes grows over the foods and flickers', () => {
+    const n = 40;
+    const env = new Uint8Array(n * n * 4);
+    const foods: [number, number][] = [
+      [20.5, 20.5],
+      [5.5, 20.5],
+      [32.5, 29.5],
+      [23.5, 2.5],
+    ];
+    for (const [x, y] of foods)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) env[((Math.floor(y) + dy) * n + Math.floor(x) + dx) * 4 + 1] = 255;
+    const grid: FlowGrid = { width: n, height: n, boundary: 'box', env };
+    const settings = { ...defaultSettings(), flowStrength: 1, seed: 1 };
+    const u = new Float32Array(packFlow(settings, flowSites(foods, n, n)));
+    let fields = flowStart(grid, FLOW.fresh);
+    let rng = 12345;
+    let top = 0;
+    let most = 0;
+    for (let step = 0; step < 150; step++) {
+      // The disc grows by a quarter of a cell per step; its tubes lie 6 cells apart.
+      const radius = 3 + step * 0.25;
+      const trail = new Float32Array(n * n * 4);
+      for (let y = 0; y < n; y++)
+        for (let x = 0; x < n; x++) {
+          if (Math.hypot(x - 20, y - 20) > radius) continue;
+          let tube = x % 6 === 2 || y % 6 === 2;
+          rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0;
+          if (rng / 2 ** 32 < 0.05) tube = !tube;
+          if (tube) trail[(y * n + x) * 4] = 10;
+        }
+      fields = flowStep(grid, u, fields, trail, step, settings.seed);
+      top = fields.pressure.reduce((a, v) => Math.max(a, Math.abs(v)), top);
+      most = Math.max(most, fields.memory.filter((v, i) => i % 4 === 3 && v !== 0).length);
+    }
+    // All four foods gave or took in some step, and a pressure built up: the run is the case above.
+    expect(most).toBe(4);
+    expect(top).toBeGreaterThan(5);
+    expect(top).toBeLessThan(FLOW.head * settings.flowStrength);
+  }, 60_000);
 });

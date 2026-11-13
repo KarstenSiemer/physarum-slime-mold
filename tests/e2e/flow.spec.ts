@@ -78,7 +78,7 @@ for (const viewport of [
       const e = globalThis.physarum;
       return e && { size: [e.sim.width, e.sim.height], lattice: e.settings.lattice, flux: e.settings.flowStrength };
     });
-    expect(state).toEqual({ size: [512, 512], lattice: [512, 512], flux: 2 });
+    expect(state).toEqual({ size: [512, 512], lattice: [512, 512], flux: 1.4 });
     const card = page.getByRole('region', { name: 'Scene', exact: true });
     await expect(card.getByRole('heading', { name: 'Tokyo rail network' })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Tero et al. 2010, Fig. 1' })).toBeVisible();

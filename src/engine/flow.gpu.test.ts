@@ -73,9 +73,12 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
     const sites = flowSites(centres, w, h);
     const grid: FlowGrid = { width: w, height: h, boundary: 'box', env: await sim.readEnv() };
     let fields = flowStart(grid, FLOW.fresh);
-    // Every cell holds a tube from the start, so both foods give or take from the first step on. The memory adapts
-    // from the second step on: a step reads which sites gave or took in the step before.
-    for (let c = 0; c < w * h; c++) fields.memory[c * 4 + 1] = 1;
+    // Every cell but those of a block holds a tube from the start, so both foods give or take from the first step
+    // on. The memory adapts from the second step on: a step reads which sites gave or took in the step before. The
+    // cells of the block hold no tube: they take part in the pressure iteration only, with the ghost conductivity
+    // and without the momentum (ADR 0029, decision 6).
+    const bare = (c: number) => c % w >= 28 && Math.floor(c / w) < 18;
+    for (let c = 0; c < w * h; c++) fields.memory[c * 4 + 1] = bare(c) ? 0 : 1;
     sim.writeFlow(fields.memory);
     for (let step = 0; step < 6; step++) {
       sim.run(1);
@@ -100,6 +103,13 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
       // The roles lie on the two centre cells, and nowhere else.
       const roles = [...memory].flatMap((v, i) => (i % 4 === 3 && v !== 0 ? [(i - 3) / 4] : []));
       expect(roles).toEqual([8 * w + 8, 30 * w + 40]);
+      // At the end cells of the block still conduct nothing, and they hold a pressure: that of the tubes beside
+      // them.
+      if (step < 5) continue;
+      let ghosts = 0;
+      for (let c = 0; c < w * h; c++)
+        if (bare(c) && memory[c * 4 + 2] === 0 && Math.abs(pressure[c * 4] ?? 0) > 0.01 * top) ghosts++;
+      expect(ghosts, 'cells without a tube that hold a pressure').toBeGreaterThan(100);
     }
   }, 120_000);
 
@@ -256,6 +266,36 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (_kind, c
     expect(span).toBeGreaterThan(1);
     const top = pressure.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
     expect(top).toBeLessThan(2 * span);
+  }, 240_000);
+
+  it('stops a food at its pressure limit when no tube joins it to the other food, so both tubes starve', async () => {
+    // Each food holds a piece of tube of its own, and open ground lies between the two.
+    const { w, memory, pressure, i0, flux } = await tubes(
+      [
+        [4, 8, 4, 12],
+        [35, 8, 35, 12],
+      ],
+      600,
+    );
+    const [a, b] = [12 * w + 4, 12 * w + 35];
+    // Both foods are covered, so one gives and the other takes.
+    expect(roleSigns(memory[a * 4 + 3] ?? 0)).toEqual([1, 1, 1, 1]);
+    expect(roleSigns(memory[b * 4 + 3] ?? 0)).toEqual([-1, -1, -1, -1]);
+    // The pressure between them is almost twice the limit of a site and no more. Without the limit it is 20 times
+    // as high here, and the whole flux I0 runs through the open ground (CPU copy, 2026-11-13).
+    const limit = FLOW.head * i0;
+    for (let k = 0; k < 4; k++) {
+      const span = (pressure[a * 4 + k] ?? 0) - (pressure[b * 4 + k] ?? 0);
+      expect(span).toBeGreaterThan(1.9 * limit);
+      expect(span).toBeLessThanOrEqual(2 * limit);
+    }
+    const top = pressure.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    expect(top).toBeLessThanOrEqual(2 * limit);
+    // So almost no flux passes the two pieces of tube, and their memory falls below the fresh memory: they starve.
+    for (const c of [9 * w + 4, 11 * w + 4, 9 * w + 35, 11 * w + 35]) {
+      expect(flux[c * 4] ?? 0).toBeLessThan(0.05 * i0);
+      expect(memory[c * 4] ?? 0).toBeLessThan(0.3 * FLOW.fresh);
+    }
   }, 240_000);
 
   it('sends more flux through the shorter of two tubes, and gives it the higher memory', async () => {

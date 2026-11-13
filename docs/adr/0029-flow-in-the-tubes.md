@@ -266,8 +266,9 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
    chance 0.02 · h² / (D² + h²) per step, h = 0.01. A dead agent draws one random cell per step; if
    the cell is open, holds a tube and has D above 0.5, the agent comes to life there with the chance
    0.2 · (D − 0.5) / 0.5. With the rule of one agent per cell the cell must be empty, and the agent
-   claims it as a move does (ADR 0008). So a tube that carries flux fills up and gets wider, until
-   the flux per cell falls. Rejected, with the prototype: (a) a deposit scaled by the flow memory
+   claims it as a move does (ADR 0008). In a step in which a tool places agents (inoculate or cut,
+   ADR 0023), the flow brings none to life: an agent has one placement per step. So a tube that
+   carries flux fills up and gets wider, until the flux per cell falls. Rejected, with the prototype: (a) a deposit scaled by the flow memory
    alone: the dead ends stay, because Jones' agents steer by the difference between their sensors
    and not by the amount of trail; (b) starvation without births: the tube of the route dies out
    too, more slowly.
@@ -313,12 +314,17 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
     along the west, north and south edges of the map. The protocol is the first one of the paper:
     a colony of about 50 agents starts on the food at Tokyo station (start layout "At the first
     food") and grows with Jones' rule of 2011 (ADR 0025) as a mesh of tubes over the land; the
-    flow decides which tubes stay. The scene runs on a square lattice of 512 × 512 cells in a dish, so north is
-    up on every screen (ADR 0024, decision 4; a grid shaped like a tall screen would turn the
-    frame). Its flow strength is 2, the I0 of the model of the paper (Fig. 4), and the value whose
-    network has the measures of the organism (results below). Where the simplified coast came within 5.4 km of a
-    city, it follows a circle around the city on the seaward side (9.4 km around Tokyo, for its
-    seven food sources): the simplified line passed over harbour cities.
+    flow decides which tubes stay. The scene runs on a square lattice of 512 × 512 cells in a dish,
+    so north is up on every screen (ADR 0024, decision 4; a grid shaped like a tall screen would
+    turn the frame). Where the simplified coast came within 5.4 km of a city, it follows a circle
+    around the city on the seaward side (9.4 km around Tokyo, for its seven food sources): the
+    simplified line passed over harbour cities.
+
+    The flow strength of the scene is 1.4. Reason: the measurement with 1, 1.4 and 2 over ten seeds
+    each (results below). With 1.4 the total length of the network is that of the organism, every
+    measure lies within one standard deviation of the paper, and the food sources at the edge of
+    the map keep their tubes. The model of the paper uses I0 = 2 (Fig. 4), but the flux of this app
+    has another unit (Consequences), so that value does not carry over.
 
 13. **The flow is in the source of a pass only while it is on.** WGSL has no preprocessor, and an
     override constant leaves its code and its bindings in the pass. So the lines of the flow in
@@ -341,6 +347,11 @@ help it: on the fixed network it had not carried the flux to the sink after 150,
 
 All numbers are from the real engine with the final rules (2026-11-13, M3 Pro, Chromium with
 Metal), measured on dumps of the trail with the scripts of the prototype.
+
+Pictures from the app's own renderer (`npm run gallery`, seed 7): `docs/images/maze-flow.jpg` is
+the Maze at step 5,000 without and with the flow, `docs/images/tokyo-flow.jpg` the Tokyo scene at
+step 12,000 without and with the flow, and `docs/images/tokyo-time.jpg` the Tokyo scene at step
+1,000 and at step 48,000.
 
 ### The Maze (flux 8)
 
@@ -374,59 +385,75 @@ more than 5 % of I0 is 40 % off at step 500, while the pressure still builds up 
 
 ### The Tokyo rail network
 
-The scene as it loads (flux 2), ten seeds on WebGPU, measured as in the paper (p. 440) on the 33
+The scene as it loads (flux 1.4), ten seeds on WebGPU, measured as in the paper (p. 440) on the 33
 food sources of its Fig. 2: the trail above 1.5 is the network, thinned to lines; a link is a line
 between two junctions or food sources. TL, MD and FT are over the values of the minimum spanning
 tree. Median and range over the seeds.
 
-| Step   | Model time | All 33 joined | All 36 joined | Links         | TL                  | MD                  | FT                  |
-| ------ | ---------- | ------------- | ------------- | ------------- | ------------------- | ------------------- | ------------------- |
-| 1,000  | 33 min     | 6 of 10       | 2 of 10       | 61 (34 to 73) | 1.98 (1.58 to 2.42) | 0.88 (0.84 to 0.98) | 0.92 (0.74 to 0.95) |
-| 2,000  | 1.1 h      | 10 of 10      | 10 of 10      | 86 (75 to 92) | 2.79 (2.64 to 2.95) | 0.83 (0.81 to 0.90) | 0.98 (0.93 to 0.99) |
-| 4,000  | 2.2 h      | 10 of 10      | 10 of 10      | 72 (62 to 89) | 2.42 (2.29 to 2.63) | 0.82 (0.81 to 0.91) | 0.97 (0.89 to 0.99) |
-| 8,000  | 4.4 h      | 9 of 10       | 9 of 10       | 70 (62 to 78) | 2.24 (2.11 to 2.55) | 0.81 (0.80 to 0.87) | 0.96 (0.92 to 0.99) |
-| 12,000 | 6.7 h      | 10 of 10      | 10 of 10      | 62 (52 to 75) | 2.00 (1.82 to 2.13) | 0.82 (0.81 to 0.91) | 0.93 (0.90 to 0.96) |
-| 24,000 | 13.3 h     | 10 of 10      | 9 of 10       | 56 (53 to 60) | 1.94 (1.81 to 2.06) | 0.81 (0.80 to 0.89) | 0.93 (0.88 to 0.95) |
-| 48,000 | 26.7 h     | 10 of 10      | 10 of 10      | 56 (51 to 65) | 1.94 (1.76 to 2.08) | 0.81 (0.80 to 0.83) | 0.92 (0.91 to 0.96) |
+| Step   | Model time | All 33 joined | All 36 joined | Links           | TL                  | MD                  | FT                  |
+| ------ | ---------- | ------------- | ------------- | --------------- | ------------------- | ------------------- | ------------------- |
+| 2,000  | 1.1 h      | 10 of 10      | 10 of 10      | 88 (78 to 94)   | 2.81 (2.64 to 2.96) | 0.82 (0.81 to 0.84) | 0.98 (0.94 to 0.99) |
+| 4,000  | 2.2 h      | 10 of 10      | 9 of 10       | 73.5 (68 to 85) | 2.43 (2.27 to 2.63) | 0.82 (0.81 to 0.83) | 0.97 (0.93 to 0.99) |
+| 8,000  | 4.4 h      | 10 of 10      | 9 of 10       | 59.5 (55 to 81) | 2.06 (1.82 to 2.29) | 0.82 (0.81 to 0.91) | 0.94 (0.91 to 0.97) |
+| 12,000 | 6.7 h      | 10 of 10      | 10 of 10      | 57 (49 to 63)   | 1.87 (1.76 to 2.01) | 0.82 (0.81 to 0.90) | 0.92 (0.84 to 0.95) |
+| 16,000 | 8.9 h      | 10 of 10      | 10 of 10      | 60.5 (51 to 71) | 1.91 (1.58 to 2.28) | 0.82 (0.81 to 0.84) | 0.93 (0.84 to 0.96) |
+| 24,000 | 13.3 h     | 10 of 10      | 8 of 10       | 50.5 (46 to 61) | 1.71 (1.59 to 2.00) | 0.82 (0.82 to 0.90) | 0.90 (0.80 to 0.95) |
+| 32,000 | 17.8 h     | 10 of 10      | 10 of 10      | 53.5 (50 to 58) | 1.81 (1.61 to 1.95) | 0.83 (0.81 to 0.93) | 0.91 (0.84 to 0.95) |
+| 40,000 | 22.2 h     | 10 of 10      | 10 of 10      | 52 (49 to 56)   | 1.72 (1.66 to 1.93) | 0.83 (0.82 to 0.91) | 0.90 (0.82 to 0.92) |
+| 48,000 | 26.7 h     | 10 of 10      | 10 of 10      | 51.5 (46 to 55) | 1.79 (1.56 to 1.96) | 0.82 (0.81 to 0.90) | 0.90 (0.82 to 0.95) |
 
-At step 48,000, the end of the experiment in model time: TL 1.94 ± 0.10, MD 0.81 ± 0.01 and FT
-0.93 ± 0.02 (mean and standard deviation), and FT over TL is 0.48. The organism (p. 440): TL
+At step 48,000, the end of the experiment in model time: TL 1.77 ± 0.14, MD 0.83 ± 0.03 and FT
+0.90 ± 0.04 (mean and standard deviation), and FT over TL is 0.51. The organism (p. 440): TL
 1.75 ± 0.30, MD 0.85 ± 0.04, FT 0.80 ± 0.13 without light and 0.86 ± 0.04 with light on the
 mountains, and FT over TL about 0.5. The check of the specification of 2026-11-11 (TL from 1.45 to
-2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds in 9 of 10 seeds at step
-24,000 and at step 48,000, and FT in 10 of 10. So the network of the scene is longer, more direct
-and more fault tolerant than the organism's. TL is 0.6, MD 1.0 and FT 1.0 standard deviations of
-the paper from the paper's mean without light; against the networks with light, FT is 1.7 standard
-deviations above. Where a table row has fewer than 10 of 10, one food source had no tube above the
-level of the measure at that step and had one again at the next step.
+2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds in 10 of 10 seeds at step
+24,000 and at step 48,000, and FT in 10 of 10. So the network of the scene is as long as the organism's, and it is a
+little more direct and more fault tolerant: MD is 0.5 and FT 0.7 standard deviations of the paper
+from the paper's mean without light (FT 0.9 above the mean with light).
+
+All 33 food sources of Fig. 2 are joined in every sample. Where a row has fewer than 10 of 10 for
+all 36, one of the three food sources at the edge of the map (those that only Fig. 1 has) had no
+tube above the level of the measure in that sample, and it had one again in the next sample.
 
 The time course: the colony grows out from Tokyo as a mesh of tubes, reaches all 36 food sources
 by step 2,000 and has its most links there. Then the tubes without a flux between food sources
 starve, and the network thins, fast to step 12,000 and slowly after it. The organism covers the
-land in 11 to 16 h and has its network at 26 h (Fig. 1). The scene is at that stage after about 1 h
-and 7 h of model time: Jones' growth rule has no speed of its own to set, and it is about ten
-times as fast as the organism against the time of the adaptation.
+land in 11 to 16 h and has its network at 26 h (Fig. 1). The scene is at these stages after about
+1 h and after 7 to 13 h of model time: Jones' growth rule has no speed of its own to set, and it is
+about ten times as fast as the organism against the time of the adaptation.
 
-Other flow strengths (three seeds each to step 24,000; flux 2: the ten seeds above):
+Three flow strengths, ten seeds each on WebGPU to step 48,000. The measures are the mean and the
+standard deviation at step 48,000. "Samples" are the 8 measured steps from 4,000 to 48,000 of each
+seed, 80 in all.
 
-| Flux | Seeds, last step | All 33 joined | All 36 joined | TL                  | MD                  | FT                  |
-| ---- | ---------------- | ------------- | ------------- | ------------------- | ------------------- | ------------------- |
-| 1    | 10, 48,000       | 10 of 10      | 8 of 10       | 1.62 (1.50 to 1.77) | 0.84 (0.82 to 0.86) | 0.85 (0.80 to 0.92) |
-| 2    | 10, 48,000       | 10 of 10      | 10 of 10      | 1.94 (1.76 to 2.08) | 0.81 (0.80 to 0.83) | 0.92 (0.91 to 0.96) |
-| 4    | 3, 24,000        | 3 of 3        | 3 of 3        | 2.07 (1.91 to 2.27) | 0.81 (0.81 to 0.82) | 0.95                |
-| 8    | 3, 24,000        | 3 of 3        | 3 of 3        | 2.14 (2.11 to 2.42) | 0.82 (0.81 to 0.82) | 0.97 (0.92 to 0.99) |
+| Flux         | TL          | MD          | FT                         | All 36 joined at 48,000 | All 36 joined, samples | Check of the specification at 48,000 |
+| ------------ | ----------- | ----------- | -------------------------- | ----------------------- | ---------------------- | ------------------------------------ |
+| 1            | 1.64 ± 0.10 | 0.84 ± 0.01 | 0.86 ± 0.04                | 8 of 10                 | 70 of 80               | 10 of 10                             |
+| 1.4          | 1.77 ± 0.14 | 0.83 ± 0.03 | 0.90 ± 0.04                | 10 of 10                | 76 of 80               | 10 of 10                             |
+| 2            | 1.94 ± 0.10 | 0.81 ± 0.01 | 0.93 ± 0.02                | 10 of 10                | 75 of 80               | 9 of 10                              |
+| The organism | 1.75 ± 0.30 | 0.85 ± 0.04 | 0.80 ± 0.13 or 0.86 ± 0.04 | all                     |                        |                                      |
 
-More flux keeps more links, as in the model of the paper (supplement, Fig. S1). A flux of 1 gives
-the measures nearest to the organism's, each within half a standard deviation of the paper. But in
-2 of 10 seeds one of the three food sources at the edge of the map (those of Fig. 1 only) has lost
-its tube at step 48,000, and a food source that lost its tube does not get one again soon (decision
-7). With a flux of 2 all 36 are joined in 10 of 10 seeds. The scene uses 2: every food source
-joined counts more for a scene than a total length that is 0.3 nearer to the paper's mean. The
-owner can choose 1 (`TODO.md`).
+More flux keeps more links, as in the model of the paper (supplement, Fig. S1): with a flux of 4
+and of 8 (three seeds each, step 24,000) TL is 2.07 (1.91 to 2.27) and 2.14 (2.11 to 2.42), and FT
+is 0.95 and 0.97. With 1 and with 1.4 every measure lies within one standard deviation of the
+organism's. With 2 the network is longer (TL 0.6 standard deviations above), MD is one standard
+deviation off, and FT one (without light) to two (with light).
+
+One food source is without a tube above the level of the measure in 10 of 80 samples with 1, in 4
+with 1.4 and in 5 with 2. With 1 and with 1.4 it is always one of the three at the edge of the map;
+with 2 it is once one of the 33 of Fig. 2. No such gap is longer than two samples in a row (flux 1)
+or one sample (1.4 and 2). The reason for the difference: a tube that ends at a
+food source carries the flux I0 of that source. In a tube of one cell, f(I0) is 0.50 for a flux of
+1, 0.65 for 1.4 and 0.78 for 2, and dead agents come to life only where the flow memory is above
+0.5 (decision 8). So with a flux of 1 the tubes to the edge live from the growth rule alone.
+
+The scene uses 1.4: its total length is the organism's, and its food sources stay joined as with 2. A flux of 1 is a little nearer to the organism in MD and FT and 0.4 standard deviations
+shorter in TL; its tubes to the edge of the map are thinner.
 
 Without the flow (one seed) the mesh of Jones' growth rule stays: TL 2.70 to 2.88 and FT 0.96 to
-0.99 from step 2,000 to step 24,000, with 76 to 88 links. On WebGL2 (flux 2, two seeds) the scene
-gives TL 1.81 (1.72 to 1.90), MD 0.81 and FT 0.93 at step 24,000, as on WebGPU.
+0.99 from step 2,000 to step 24,000, with 76 to 88 links. On WebGL2 (two seeds) the scene
+gives TL 1.85 and 1.95, MD 0.81 and 0.82 and FT 0.92 and 0.87 at step 24,000, within the range of
+the ten seeds on WebGPU.
 
 ### With the flow off
 
