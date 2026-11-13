@@ -151,6 +151,12 @@ the start of decision 2.
 - `research/flow/engine/mutate.ts` has two more wrong rules, the levels without the decay of the
   strain for each backend. Both fail the GPU test above.
 
+The times on GitHub, which has no GPU (the run of pull request #53 at `e35c6a2`, 2026-11-13; ADR
+0010 asks for at most a quarter of a limit): the test of the colonies took 4.3 s and 7.9 s in the
+two GPU jobs, and the test of the weak trail 0.7 s and 0.3 s, of a limit of 60 s. The file
+`flow.gpu.test.ts` took 130 s and 83 s, and `engine.gpu.test.ts` 216 s and 162 s. The log of the
+e2e jobs has no time for a single test; `flow.spec.ts` is not among the slow files that it names.
+
 ### The cost
 
 The time of a step in ms, the median of 21 samples of 50 steps after 3,000 steps
