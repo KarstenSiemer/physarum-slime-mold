@@ -69,7 +69,7 @@ version of this branch) and the chosen rule (this branch). To measure them side 
 folder of its own (`git worktree add`) and run the commands in each. A version without this folder needs
 `maze.gpu.test.ts` copied into it. Two runs at the same time need two ports: add `--api.port=5942 --api.strictPort`
 with a port of their own. `91907bc` is a commit of the branch of this pull request; GitHub keeps it after the squash
-merge (`git fetch origin pull/<number>/head`).
+merge (`git fetch origin pull/54/head`).
 
 ### 1. The test that shows the gap
 
