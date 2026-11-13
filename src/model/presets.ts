@@ -2,6 +2,7 @@ import {
   defaultSettings,
   defaultStrain,
   MAX_STRAINS,
+  strainLike,
   type Lattice,
   type Settings,
   type StepOrder,
@@ -150,6 +151,43 @@ const wall = (x1: number, y1: number, x2: number, y2: number): EnvShape => ({
   to: [x2, y2],
   r: 0.008,
 });
+
+/**
+ * A colony that forages with the flow in the tubes (ADR 0031): Jones' foraging agent of 2011 with growth and
+ * shrinkage, a start on food, the Maze's sensor distance and food weight, and the flow. `rivals`: so many strains like
+ * it, each with a colony on a food of its own; each strain flees the trail of the others.
+ */
+const forager = (extra: Partial<Settings>, rivals = 1): Settings => {
+  const s = jones(
+    { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
+    {
+      model: 'extended',
+      density: 0.01,
+      capacity: 0.25,
+      layout: 'food',
+      boundary: 'dish',
+      foodStrength: 0.03,
+      growth: true,
+      flow: true,
+      ...extra,
+    },
+  );
+  const [first] = s.strains;
+  if (!first) return s;
+  return { ...s, strains: Array.from({ length: rivals }, (_, i) => (i === 0 ? first : strainLike(first, i))) };
+};
+
+/** The lattice of the dish scenes with the flow (ADR 0031): the same picture on every screen. */
+const L384 = (): Lattice => [384, 384];
+
+/** `count` foods on a ring of radius `radius` around the middle, the first one on the right. */
+const ring = (count: number, radius: number, r: number): EnvShape[] =>
+  Array.from({ length: count }, (_, i) => {
+    const angle = (2 * Math.PI * i) / count;
+    // Rounded, so that a scene and a link to it hold the same numbers.
+    const at = (v: number) => Math.round(radius * v * 1e4) / 1e4;
+    return food(at(Math.cos(angle)), at(Math.sin(angle)), r);
+  });
 
 const FOGLEMAN_WHY =
   'Not derived from biology. Fogleman’s program draws random settings and prints them, and he saved this set under its name. The values are copied exactly: radians turned into degrees, his kept fraction into decay = 1 − kept, and his repulsion factor into a negative weight on the other strains’ trails.';
@@ -503,6 +541,65 @@ PRESETS.push(
       ),
     // The start layout 'food' places the colony on the first food: the station of Tokyo.
     env: tokyoShapes(),
+  },
+  {
+    id: 'food-ring',
+    name: 'Food ring',
+    group: 'experiments',
+    source: 'Made for this app',
+    summary: 'Food in the middle and on a ring: a colony grows out and joins them like a wheel.',
+    watch:
+      'The colony grows out from the middle food as a mesh and reaches the ring within about 1,000 steps. Then the flow thins the mesh. Spokes and parts of the ring remain, with loops. Raise Flow strength to keep more side routes, or lower it to come closer to a tree.',
+    about:
+      'Nine food sources: one in the middle and eight on a ring around it. A small colony starts on the middle food and grows with Jones’ rule. The flow in the tubes then keeps the tubes that carry flow between foods, and the others starve. A network with loops remains, like a wheel with spokes.',
+    strainRoles: ['Jones’ foraging agent, drawn to food'],
+    why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles. Flow in the tubes is on with a strength of 2. The dish has 384 × 384 cells on every screen. Sensor distance 7 and food weight 0.03 are the Maze’s. The middle food and the ring are this app’s choice: they show which links the flow keeps.',
+    settings: () => forager({ lattice: L384(), flowStrength: 2 }),
+    // The start layout 'food' places the colony on the first food: the one in the middle.
+    env: [food(0, 0, 0.014), ...ring(8, 0.3, 0.014)],
+  },
+  {
+    id: 'rival-networks',
+    name: 'Rival networks',
+    group: 'experiments',
+    source: 'Made for this app',
+    summary: 'Two rival strains grow from two foods, and each builds its own network on all ten foods.',
+    watch:
+      'Each strain grows from its own food as a mesh, and the two meshes push into each other. From about step 3,000 the flow thins them. Two networks remain on the same foods, one of each strain. Add a third strain: it starts on the third food and builds a third network.',
+    about:
+      'Ten food sources in a dish, and two strains that flee each other’s trail. Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. So each strain keeps the tubes that it needs, and the two networks lie side by side.',
+    strainRoles: ['Starts on the food at the bottom left', 'The same settings as A, starts at the right'],
+    why: 'Jones’ foraging agent with growth and shrinkage, twice. A weight of −1 on the other strain’s trail keeps the tubes apart. The start layout puts each strain on a food of its own. Flow in the tubes is on with a strength of 2 for each strain. The dish has 384 × 384 cells on every screen. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    settings: () => forager({ lattice: L384(), flowStrength: 2 }, 2),
+    // The start layout 'food' places strain A on the first food and strain B on the second, at opposite sides.
+    env: [
+      food(-0.35, 0.27, 0.014),
+      food(0.36, -0.2, 0.014),
+      food(0.02, 0.33, 0.014),
+      food(-0.28, 0.22, 0.014),
+      food(0.3, 0.18, 0.014),
+      food(-0.33, -0.05, 0.014),
+      food(-0.05, 0.02, 0.014),
+      food(0.22, -0.08, 0.014),
+      food(-0.2, -0.27, 0.014),
+      food(0.1, -0.3, 0.014),
+    ],
+  },
+  {
+    id: 'tokyo-rivals',
+    name: 'Tokyo, two networks',
+    group: 'experiments',
+    source: 'After Tero et al. 2010',
+    summary: 'Two rival strains on the map around Tokyo: each joins the 36 cities with tubes of its own.',
+    watch:
+      'Strain A grows out from Tokyo and strain B from Utsunomiya in the north. Both reach all cities, and their meshes push into each other. Then the flow thins each mesh. Two networks remain on the same cities, as two railway companies would build them.',
+    about:
+      'The map of the scene Tokyo rail network, with two strains that flee each other’s trail. Each strain is a slime mold of its own and has its own flow, so each keeps the tubes that carry its own flow between cities. The experiment of Tero and colleagues had one slime mold. This scene is this app’s question of what two rivals build.',
+    strainRoles: ['Starts at Tokyo station', 'The same settings as A, starts at Utsunomiya'],
+    why: 'The settings of the scene Tokyo rail network, twice: Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 1.4 for each strain. A weight of −1 on the other strain’s trail keeps the tubes apart. The start layout puts strain A on Tokyo and strain B on Utsunomiya. The map has 512 × 512 cells. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
+    settings: () => forager({ lattice: [512, 512], flowStrength: 1.4 }, 2),
+    // The start layout 'food' places strain A on the first food and strain B on the second.
+    env: tokyoShapes(['Tokyo', 'Utsunomiya']),
   },
 );
 
