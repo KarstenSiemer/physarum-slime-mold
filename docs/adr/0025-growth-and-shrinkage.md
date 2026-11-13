@@ -384,7 +384,8 @@ The target of 9 of 10 seeds holds on 16:9 and 16:10 and fails on the square scre
 (kept below as history) blamed the far food's distance from the walls. A behaviour analysis of 2026-11-11 (a second
 agent, with variants of the code; the review of this branch) found the causes, and they replace that reading:
 
-- **The passes on 16:9 and 16:10 rest on the walls.** The diffusion takes the 3 × 3 mean over habitable cells only, so
+- **The passes on 16:9 and 16:10 rest on the walls.** The diffusion then (before ADR 0027) took the 3 × 3 mean over
+  habitable cells only, so
   a wall or a closed edge reflects the trail (`diffuse.wgsl`, the mean over open neighbours; ADR 0007; both models).
   Jones absorbs the chemoattractant at the edges ("absorbed at the edges", Jones 2011, p. 1353) and runs the mean at
   every lattice site (2014, 2015, 2017). Beside a wall the trail at the agents is 7.4 to 7.6, far from walls 5.5 to
@@ -555,3 +556,10 @@ See `TODO.md` (M2):
   32 B per agent more (54 B on WebGL2 since ADR 0028, decision 14).
 - The scenes of the later papers (a later pull request) set their papers' values; this branch adds one scene, the
   Foraging maze (decision 30).
+
+## Amendment 2026-11-13: the Tokyo scene grows too
+
+Decision 1 and the list of unit tests name the Foraging maze as the only scene with growth on. Since ADR 0029 (pull
+request #44) the Tokyo rail network has growth on as well: its colony grows out from Tokyo (`src/model/presets.ts`;
+`params.test.ts`, "keeps growth off in every scene but Foraging maze and Tokyo"). The rules of growth are in
+[model.md](../model.md), section 9.
