@@ -161,11 +161,11 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
     if (!grow || (counts[c * 4 + (a.bits & 3)] ?? 0) === 0 || n < s.growthMin || n > s.growthMax) return -1;
     const [x, y] = [c % w, Math.floor(c / w)];
     const at = (dx: number, dy: number) => cellAt(x + dx, y + dy);
-    // A diagonal neighbour only if neither cell beside the corner between it and c is a wall (ADR 0025, amendment
-    // of 2026-11-13).
+    // A diagonal neighbour only if the two cells beside the corner between it and c are not both walls (ADR 0025,
+    // amendment of 2026-11-13).
     const open = Array.from({ length: 8 }, (_, k) => around(k))
       .filter(([dx, dy]) => habitable(at(dx, dy)) && occ[at(dx, dy)] === 0)
-      .filter(([dx, dy]) => dx === 0 || dy === 0 || (!wall(at(dx, 0)) && !wall(at(0, dy))))
+      .filter(([dx, dy]) => dx === 0 || dy === 0 || !(wall(at(dx, 0)) && wall(at(0, dy))))
       .map(([dx, dy]) => at(dx, dy));
     if (open.length === 0) return -1;
     const pick = Math.min(Math.floor(stream(rngSeed(id, GROW, step, seed))() * open.length), open.length - 1);

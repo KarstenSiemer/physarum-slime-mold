@@ -83,8 +83,8 @@ vec4 flowMemoryOf(uint s, ivec2 q) {
 #endif
 
 // The neighbour that a living agent in cell c divides into, or −1 (divideInto in growth.wgsl): a habitable cell
-// that is empty after the moves, and a diagonal one only if neither cell beside the corner between it and cell c is
-// a wall (ADR 0025, amendment of 2026-11-13). It moved in this step if the settle pass marked it MOVED.
+// that is empty after the moves, and a diagonal one only if the two cells beside the corner between it and cell c
+// are not both walls (ADR 0025, amendment of 2026-11-13). It moved in this step if the settle pass marked it MOVED.
 int target(uint bits, int c, uint i) {
   float n = texelFetch(windows, cellCoord(c), 0).r;
   bool moved = (bits & MOVED) != 0u;
@@ -111,7 +111,7 @@ int target(uint bits, int c, uint i) {
     ivec2 o = around(k);
     if (o.x != 0 && o.y != 0) {
       uint beside = (1u << aroundIndex(ivec2(o.x, 0))) | (1u << aroundIndex(ivec2(0, o.y)));
-      if ((walls & beside) != 0u) open &= ~(1u << k);
+      if ((walls & beside) == beside) open &= ~(1u << k);
     }
     free += (open >> k) & 1u;
   }

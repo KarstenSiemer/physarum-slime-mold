@@ -5,8 +5,8 @@
 // - `rowSums`, `windowSums`: the agents in the growth and the shrinkage window around every cell, a separable box sum
 //   of the occupancy after the moves. Each count includes the cell's own agent (ADR 0024, decision 6).
 // - `test`: shrinkage deletes an agent whose count lies outside [Smin, Smax]. A survivor that moved and whose growth
-//   count lies in [Gmin, Gmax] picks a random empty cell of its 3 × 3 neighbourhood, but no diagonal one past the
-//   corner of a wall, and claims it with the unique key of the step, as a move claims its cell (ADR 0008).
+//   count lies in [Gmin, Gmax] picks a random empty cell of its 3 × 3 neighbourhood, but no diagonal one between two
+//   walls that touch at a corner, and claims it with the unique key of the step, as a move claims its cell (ADR 0008).
 // - `win`: the winner of each claimed cell writes a birth there; every agent writes whether it is dead, by its id.
 // - `buildCells`, `buildDead`: two pyramids of sums with a fan-in of 4, over the births (one lane per strain) and over
 //   the dead agents.
@@ -127,10 +127,10 @@ fn aroundIndex(o: vec2i) -> u32 {
 // moved in this step and its growth count lies in [Gmin, Gmax], into a random cell of its 3 × 3 neighbourhood that
 // is habitable and empty after the moves (Jones 2011, Sec. 5.1: "if there is an empty location in the immediate
 // neighbourhood"). A pure function of the agent, the counts and the occupancy, so `test` and `win` agree.
-// A diagonal neighbour counts only if neither of the two cells beside the corner between it and cell c is a wall
-// (ADR 0025, amendment of 2026-11-13): the way from the centre of c to the centre of that neighbour passes exactly
-// through the corner, and a move on that way would touch both cells (clearPath and CORNER in agents.wgsl). A cell
-// outside a closed arena is no wall there, as for a move (wallIn in agents.wgsl).
+// A diagonal neighbour counts only if the two cells beside the corner between it and cell c are not both walls
+// (ADR 0025, amendment of 2026-11-13): then a move from cell c can reach it through the free one of them, and with
+// two walls no move can (clearPath and CORNER in agents.wgsl). A cell outside a closed arena is no wall there, as for
+// a move (wallIn in agents.wgsl).
 fn divideInto(a: Agent, c: i32) -> i32 {
   let s = a.bits & 3u;
   let n = windows[c].x;
@@ -156,7 +156,7 @@ fn divideInto(a: Agent, c: i32) -> i32 {
     let o = around(k);
     if (o.x == 0 || o.y == 0) { continue; }
     let beside = (1u << aroundIndex(vec2i(o.x, 0))) | (1u << aroundIndex(vec2i(0, o.y)));
-    if ((walls & beside) != 0u) { open &= ~(1u << k); }
+    if ((walls & beside) == beside) { open &= ~(1u << k); }
   }
   let free = countOneBits(open);
   if (free == 0u) { return -1; }

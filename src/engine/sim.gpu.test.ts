@@ -4174,7 +4174,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(died).toBeGreaterThan(20);
       expect(got).toEqual(expected.agents);
       // Each child lies in a cell that was empty and habitable after the moves, next to a parent of its strain that
-      // moved in this step, and not across the corner of a wall from it.
+      // moved in this step, and not between two wall cells that touch at the corner between them.
       const occ = occupancy(moved, w, h, boundary);
       const counts = await b.readCounts();
       const cellIndex = (x: number, y: number) => {
@@ -4186,9 +4186,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         return c >= 0 && (env[c * 4] ?? 0) >= 128;
       };
       const around = [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => [dx, dy] as const));
-      /** From cell (x, y), the neighbour at (dx, dy) is diagonal and past the corner of a wall. */
-      const past = (x: number, y: number, [dx, dy]: readonly [number, number]) =>
-        dx !== 0 && dy !== 0 && (isWall(x + dx, y) || isWall(x, y + dy));
+      /** From cell (x, y), the neighbour at (dx, dy) is diagonal, and `n` of the two cells beside the corner are walls. */
+      const beside = (x: number, y: number, [dx, dy]: readonly [number, number], n: number) =>
+        dx !== 0 && dy !== 0 && Number(isWall(x + dx, y)) + Number(isWall(x, y + dy)) === n;
       for (const [id, g] of got.entries()) {
         if (!child(g, id)) continue;
         const [x, y] = [Math.floor(g.x), Math.floor(g.y)];
@@ -4196,24 +4196,30 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(env[(y * w + x) * 4] ?? 0, `child ${id}`).toBeLessThan(128);
         const parents = around.filter(([dx, dy]) => {
           const c = cellIndex(x + dx, y + dy);
-          return c >= 0 && (occ[c] ?? 0) > 0 && (counts[c * 4 + (g.bits & 3)] ?? 0) > 0 && !past(x, y, [dx, dy]);
+          return c >= 0 && (occ[c] ?? 0) > 0 && (counts[c * 4 + (g.bits & 3)] ?? 0) > 0 && !beside(x, y, [dx, dy], 2);
         });
         expect(parents.length, `child ${id}`).toBeGreaterThan(0);
       }
-      // The corner rule acts: survivors that divide and have an empty diagonal neighbour past the corner of a wall,
-      // which the rule leaves out.
-      const corners = moved.filter((m) => {
-        const [x, y] = [Math.floor(m.x), Math.floor(m.y)];
-        const c = cellIndex(x, y);
+      // The corner rule acts: survivors that divide and have an empty diagonal neighbour between two wall cells, which
+      // the rule leaves out, and ones with an empty diagonal neighbour past the corner of one wall cell, which it keeps.
+      const dividers = moved.filter((m) => {
+        const c = cellIndex(Math.floor(m.x), Math.floor(m.y));
         if (!(m.bits & 4) || c < 0 || (counts[c * 4 + (m.bits & 3)] ?? 0) === 0) return false;
         const [grow, keep] = [expected.windows[c * 2] ?? 0, expected.windows[c * 2 + 1] ?? 0];
-        if (grow < s.growthMin || grow > s.growthMax || keep < s.shrinkMin || keep > s.shrinkMax) return false;
-        return around.some((o) => {
-          const t = cellIndex(x + o[0], y + o[1]);
-          return t >= 0 && occ[t] === 0 && !isWall(x + o[0], y + o[1]) && past(x, y, o);
-        });
-      }).length;
-      if (walls) expect(corners).toBeGreaterThan(0);
+        return grow >= s.growthMin && grow <= s.growthMax && keep >= s.shrinkMin && keep <= s.shrinkMax;
+      });
+      const corners = (n: number) =>
+        dividers.filter((m) => {
+          const [x, y] = [Math.floor(m.x), Math.floor(m.y)];
+          return around.some((o) => {
+            const t = cellIndex(x + o[0], y + o[1]);
+            return t >= 0 && occ[t] === 0 && !isWall(x + o[0], y + o[1]) && beside(x, y, o, n);
+          });
+        }).length;
+      if (walls) {
+        expect(corners(2)).toBeGreaterThan(0);
+        expect(corners(1)).toBeGreaterThan(0);
+      }
       expect((await census(a, boundary)).most).toBe(1);
     });
 
@@ -4294,12 +4300,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       },
     ); // At most 0.2 s on SwiftShader on an M3 Pro, after the hook's builds: the default 60 s (ADR 0010).
 
-    // ADR 0025, amendment of 2026-11-13: a child goes to a diagonal neighbour only where a move from the centre of its
-    // parent's cell to the centre of that neighbour could go (clearPath in agents.wgsl, CORNER): not across the
-    // corner where two wall cells touch. Walls of single cells that touch only at their corners: in a box one
-    // diagonal line, and on the periodic grid two, across the seams, which part the torus into two bands. The colony
-    // starts on one side, and a move cannot cross such a wall (the test of the corners above). So an agent on the
-    // other side is a child that a parent placed across a corner.
+    // ADR 0025, decision 35: a child goes to a diagonal neighbour only where a move from its parent's cell could go
+    // (clearPath in agents.wgsl, CORNER): not between two wall cells that touch at the corner between them (the unit
+    // test of growth-reference.ts has the corner of one wall cell). Walls of single cells that touch only at their
+    // corners: in a box one diagonal line, and on the periodic grid two, across the seams, which part the torus into
+    // two bands. The colony starts on one side, and a move cannot cross such a wall (the test of the corners above).
+    // So an agent on the other side is a child that a parent placed across a corner.
     it.each(['box', 'wrap'] as const)('places no child across the corner of a wall (%s)', async (boundary) => {
       const [w, h] = [32, 32];
       const d = (x: number, y: number) => (((x - y) % w) + w) % w;
