@@ -76,8 +76,9 @@ function pcg(v: number): number {
 }
 
 /**
- * The food sites of a simulation: the centre cell of each food stroke, in the order of the strokes, each cell once.
- * With more than FLOW_SITES, sites spread evenly over the list.
+ * The food sites of a simulation: the cell at the start of each food stroke, in the order of the strokes, each cell
+ * once. For a food dot the start is its centre, and every food of a scene is a dot. With more than FLOW_SITES, sites
+ * spread evenly over the list.
  */
 export function flowSites(
   centres: readonly (readonly [number, number])[],

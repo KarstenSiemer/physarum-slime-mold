@@ -323,7 +323,7 @@ PRESETS.push(
     watch:
       'Agents die at random, half of them within about 2,800 steps. The sheet shrinks onto the food sources and leaves a network of veins between them, nearly the same one in each run.',
     about:
-      'The dish starts packed with agents, which soon form a solid sheet. In every step each agent dies with a small chance, so the sheet thins out and shrinks onto the food sources, as a starving plasmodium does. In the paper, three runs ended in the same network (Fig. 21).',
+      'The dish starts packed with agents, which soon form a solid sheet. In every step each agent dies with a small chance, so the sheet thins out and shrinks onto the food sources, as a real plasmodium does after it has covered the dish (p. 147). In the paper, three runs ended in the same network (Fig. 21).',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 21 (p. 147): as many agents as 50 % of the square around the dish, so they start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Slow removal lets the sheet adapt; faster removal tears holes into it (p. 148). Jones used 300 × 300 cells and the 19 foods of Fig. 21. Food weight 0.05 and the food radius are this app’s choice.',
     settings: () =>
@@ -414,7 +414,7 @@ PRESETS.push(
     watch:
       'The network first fills every corridor. The flow runs from food to food and passes the dead ends by. They starve and are empty after about 4,000 steps. One thick tube remains and pulls tight along a short route. Turn Flow in the tubes off to see Jones’ rules alone: many paths remain.',
     about:
-      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends. The flow in the tubes does what the flow in the real one does: the tube that carries it gets thicker, and the rest starves.',
+      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends, with one route between them. The flow in the tubes does what the flow in the real one does: the tube that carries it stays and gets wider, and the dead ends starve.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Flow in the tubes is on: each food gives or takes a flux of 8, after the model of Tero et al. Walls block movement and sensing, so no agent follows a trail behind a wall.',
     settings: () =>
@@ -477,7 +477,7 @@ PRESETS.push(
     source: 'Tero et al. 2010, Fig. 1',
     summary: 'Food at 36 cities around Tokyo: a colony grows from Tokyo and joins them with tubes.',
     watch:
-      'The colony grows out from Tokyo as a mesh of tubes and reaches all 36 cities within about 2,000 steps. Then the tubes that carry no flow between cities starve. A network like the rail map remains, with loops around Tokyo Bay. It thins slowly: 48,000 steps stand for the 26 hours of the experiment.',
+      'The colony grows from Tokyo and reaches all 36 cities within about 2,000 steps, ten times as fast as the real one. Then the tubes without flow between cities starve. A network with loops around Tokyo Bay remains, as long as the organism’s. 48,000 steps stand for the 26 hours of the experiment.',
     about:
       'In 2010, Atsushi Tero and colleagues put oat flakes on a plate where the cities around Tokyo lie, with the coast as its edge. A slime mold grew out from Tokyo and joined all flakes within 26 hours. Its network was about as short, as fast and as robust as the real railway. Here, Jones’ agents grow from Tokyo, and the flow in the tubes decides which tubes stay.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
@@ -639,9 +639,9 @@ export function sourceText(p: Preset): string {
     case 'fogleman':
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';
     case 'nakagaki':
-      return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app. The flow in the tubes follows the model of Tero, Kobayashi and Nakagaki (2007).';
+      return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app. The flow in the tubes is built from the model of Tero, Kobayashi and Nakagaki (2007), on the cells of the grid.';
     case 'tero':
-      return 'Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds the experiment of Fig. 1. The flow in the tubes follows the model of the paper; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.';
+      return 'Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds the experiment of Fig. 1. The flow in the tubes is built from the model of the paper, on the grid’s cells; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.';
     case 'later':
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'app':

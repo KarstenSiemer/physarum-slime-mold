@@ -57,7 +57,9 @@ step. Strong trails attract more agents, which strengthen the trail: a network f
   which only the renderer reads.
 
 Details: [design](docs/design.md), [decisions (ADRs)](docs/adr/),
-[knowledge base](docs/knowledge-base/) (paper notes, variants, GPU and GitHub Pages facts).
+[knowledge base](docs/knowledge-base/) (paper notes, variants, GPU and GitHub Pages facts), and
+[research](research/flow/README.md) (the prototype, the measure scripts and the logs behind the
+flow in the tubes, with a command for each step).
 
 ## Browser support
 
@@ -86,11 +88,11 @@ pre-commit install   # hooks for commit and push
 
 Tests:
 
-| Command            | What                                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| `npm test`         | unit tests (parameters, presets and their texts, URL parsing with fuzzing, packing, colors, levels) |
-| `npm run test:gpu` | shaders compile; every model rule on **both** backends, mass balance, determinism, Fig. 10          |
-| `npm run test:e2e` | the built app in Chromium: boot, WebGL2 fallback, tools, presets, keyboard, axe a11y scan           |
+| Command            | What                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm test`         | unit tests (parameters, presets and their texts, URL parsing with fuzzing, packing, colors, levels), and the research scripts against their logs |
+| `npm run test:gpu` | shaders compile; every model rule on **both** backends, mass balance, determinism, Fig. 10                                                       |
+| `npm run test:e2e` | the built app in Chromium: boot, WebGL2 fallback, tools, presets, keyboard, axe a11y scan                                                        |
 
 GPU tests use the real GPU locally and SwiftShader on GPU-less CI.
 

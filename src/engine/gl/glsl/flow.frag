@@ -46,13 +46,13 @@ float conductivity(ivec2 q) {
   return texelFetch(memory, q, 0).z;
 }
 
-// Whether the plasmodium covers site i: its centre cell held food and a tube in the step before (covered in flow.wgsl).
+// Whether the plasmodium covers site i: its cell held food and a tube in the step before (covered in flow.wgsl).
 bool covered(int i) {
   ivec2 s = ivec2(U.sites[i].xy);
   return texelFetch(env, s, 0).g > 0.0 && texelFetch(memory, s, 0).y >= U.c.z;
 }
 
-// The roles of the food site whose centre cell is p, as a number whose digit k in base 3 is its role in lane k: 1
+// The roles of the food site whose cell is p, as a number whose digit k in base 3 is its role in lane k: 1
 // gives, 2 takes, 0 neither (roleCode in flow.wgsl; flowRoles() in ../../flow.ts has the rule and the reasons).
 float roleCode(ivec2 p) {
   int n = int(U.d.w);
@@ -137,8 +137,8 @@ void main() {
   vec4 qg = mix(pow(max(flux, vec4(1e-30)), vec4(U.a.y)), vec4(0.0), lessThanEqual(flux, vec4(0.0)));
   vec4 f = qg / (1.0 + qg);
   float mean = (f.x + f.y + f.z + f.w) * 0.25;
-  // A cell that held a tube adapts while a flux runs between foods (Tero 2007, Eq. 5). Ground without a tube keeps
-  // its memory; the mark fades slowly.
+  // A cell that held a tube adapts while a flux runs between foods (Tero 2007, Eq. 5). Ground without a tube has at
+  // most the memory of fresh ground; a smaller memory stays, and the mark fades slowly (update in flow.wgsl).
   float d = m.x;
   if (m.y >= U.c.z) {
     if (fed()) d = max(U.d.x, d + U.a.z * (mean - d));
@@ -153,7 +153,7 @@ void main() {
   bool food = texelFetch(env, p, 0).g > 0.0;
   float g = 0.0;
   if (body >= U.c.z) g = body * (food ? U.b.y : U.b.x + d);
-  // The roles, if this cell is the centre of a food site that the plasmodium covers (roleCode()).
+  // The roles, if this cell is the cell of a food site that the plasmodium covers (roleCode()).
   float code = 0.0;
   if (food && m.y >= U.c.z) code = roleCode(p);
   result = vec4(d, body, g, code);
@@ -165,7 +165,7 @@ float ghostEdge(float a, ivec2 q) {
   return edge(a + U.b.z, texelFetch(memory, q, 0).z + U.b.z);
 }
 
-// The roles of a site's centre cell as a sign per lane: +1 gives, −1 takes, 0 neither.
+// The roles of a site's cell as a sign per lane: +1 gives, −1 takes, 0 neither.
 vec4 roleSigns(float code) {
   uint c = uint(code);
   uvec4 d = uvec4(c % 3u, (c / 3u) % 3u, (c / 9u) % 3u, (c / 27u) % 3u);
@@ -173,7 +173,8 @@ vec4 roleSigns(float code) {
 }
 
 // The share of its flux that the site at this cell gives or takes, per lane: all of it while its pressure lies within
-// the limit U.g.y of the mean pressure of all sites that give or take, and none beyond (headroom in flow.wgsl).
+// the limit U.g.y of the mean pressure of the sites that give or take in at least one lane, and none beyond (headroom
+// in flow.wgsl).
 vec4 headroom(vec4 pc, vec4 signs) {
   int n = int(U.d.w);
   vec4 level = vec4(0.0);
@@ -190,7 +191,7 @@ vec4 headroom(vec4 pc, vec4 signs) {
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4(0.0), vec4(1.0));
 }
 
-// The cell whose pressure the first two iterations of a step take off: the centre of the first site that gives or
+// The cell whose pressure the first two iterations of a step take off: the cell of the first site that gives or
 // takes, else the cell of the uniform block (referenceCell in flow.wgsl).
 ivec2 referenceCell() {
   int n = int(U.d.w);

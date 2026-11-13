@@ -3,8 +3,9 @@
 Source: Jeff Jones, _Characteristics of Pattern Formation and Evolution in Approximations of
 Physarum Transport Networks_, Artificial Life 16(2): 127–153, 2010,
 DOI [10.1162/artl.2010.16.2.16202](https://doi.org/10.1162/artl.2010.16.2.16202).
-Local copy: [`artl.2010.16.2.pdf`](../../artl.2010.16.2.pdf). Page numbers below are journal pages
-(PDF page = journal page − 126).
+A local copy, `artl.2010.16.2.pdf` in the root of a checkout, is not in the repository: the paper is copyrighted.
+Page numbers below are journal pages (PDF page = journal page − 126). The rules of this app as they are now:
+[model.md](../model.md).
 
 ## Core idea
 
@@ -24,7 +25,8 @@ agents are sol flux, blocked agents are the gel matrix (p. 132).
 | (Hazard)  | Optional projection of hazardous stimuli (mentioned, not used, p. 131)  |
 
 The framework is _semi-continuous_: agents keep float position and heading; the discrete cell
-is the rounded position (p. 132).
+is the rounded position (p. 132). The app takes the floor of the position, with the centre of cell i at i + ½: the
+same rule, with the origin moved by half a cell.
 
 ## Agent morphology (p. 133, Fig. 3)
 
@@ -49,7 +51,8 @@ center. FL and FR are rotated by ±SA from the heading. Sensor width SW (1 pixel
 
 Scheduler (p. 133): every agent first attempts its move (motor stage), then the whole
 population runs the sensory stage. Agents are processed in random order in both stages to
-avoid order bias. After each system step the trail map is diffused.
+avoid order bias. After each system step the trail map is diffused. The app updates all agents at the same time,
+with claims for the cells (ADR 0008), and runs this order in the scenes of Jones 2010 (ADR 0027).
 
 Important details:
 

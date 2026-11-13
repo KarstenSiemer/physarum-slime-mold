@@ -210,7 +210,7 @@ export const globalSpec = {
   },
   shrink: {
     label: 'Random shrinkage',
-    help: 'Chance per step that an agent dies. A full sheet then shrinks onto the food, like a starving plasmodium. Growth and shrinkage is the rule of Jones’ later papers: there an agent dies only where agents crowd.',
+    help: 'Chance per step that an agent dies. A full sheet then shrinks onto the food, as in Jones’ Fig. 21. Growth and shrinkage is the rule of Jones’ later papers: there an agent dies only where agents crowd.',
     min: 0,
     max: 0.002,
     step: 0.00001,
@@ -336,7 +336,7 @@ export type GlobalKey = keyof typeof globalSpec;
 /** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
 export const modelHelp = {
   label: 'Model',
-  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, walls that take in the trail, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or use the Cut tool. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
+  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, walls that take in the trail, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1, a strain decay of 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or light or use the Cut tool. Every scene of Jones has a decay of 0.1. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
   ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014',
 } as const;
 

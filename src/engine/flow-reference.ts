@@ -68,7 +68,7 @@ export function flowFlux(grid: FlowGrid, memory: Float32Array, pressure: Float32
   return flux;
 }
 
-/** The centre cell of each food site of the uniform block `u`, as an index. */
+/** The cell of each food site of the uniform block `u`, as an index. */
 function siteCells(u: Float32Array, w: number): number[] {
   const count = u[15] ?? 0;
   const at = FLOW_CONSTANT_SLOTS * 4;
@@ -99,7 +99,7 @@ export function flowUpdate(
   const sites = siteCells(u, w);
   // A flux runs between foods while at least two food sites give or take (fed in flow.wgsl).
   const fed = sites.filter((c) => (fields.memory[c * 4 + 3] ?? 0) !== 0).length >= 2;
-  // The sites that the plasmodium covers: food and a tube at their centre cell in the step before; and their roles.
+  // The sites that the plasmodium covers: food and a tube at their cell in the step before; and their roles.
   const covered = sites.map((c) => (env[c * 4 + 1] ?? 0) > 0 && (fields.memory[c * 4 + 1] ?? 0) >= bodyLow);
   const roles = flowRoles(covered, step, seed);
   const out = new Float32Array(w * h * 4);
@@ -134,7 +134,7 @@ export function flowUpdate(
   return out;
 }
 
-/** The roles of a site's centre cell as a sign per lane: +1 gives, −1 takes, 0 none. */
+/** The roles of a site's cell as a sign per lane: +1 gives, −1 takes, 0 none. */
 export function roleSigns(code: number): number[] {
   return [0, 1, 2, 3].map((k) => {
     const digit = Math.floor(code / 3 ** k) % 3;
@@ -155,10 +155,10 @@ export function flowPressure(
   const [i0, ghost, omega, weight] = [u[0] ?? 0, u[6] ?? 0, u[7] ?? 0, u[8] ?? 0];
   const [limit, limitScale] = [u[25] ?? 0, u[26] ?? 0];
   const acting = siteCells(u, w).filter((c) => (memory[c * 4 + 3] ?? 0) !== 0);
-  // The cell that the first two iterations recentre by: the centre of the first site that gives or takes, else the
+  // The cell that the first two iterations recentre by: the cell of the first site that gives or takes, else the
   // cell of the uniform block (referenceCell in flow.wgsl).
   const ref = (acting[0] ?? Math.trunc(u[21] ?? 0) * w + Math.trunc(u[20] ?? 0)) * 4;
-  // The mean pressure of the sites that give or take, per lane (headroom in flow.wgsl).
+  // The mean pressure, per lane, of the sites that give or take in at least one lane (headroom in flow.wgsl).
   const level = [0, 1, 2, 3].map((k) =>
     acting.length > 0 ? acting.reduce((a, c) => a + (pressure[c * 4 + k] ?? 0), 0) / acting.length : 0,
   );
