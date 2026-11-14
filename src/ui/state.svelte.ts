@@ -174,6 +174,8 @@ export function setScene(p: Preset) {
   s.showScent = app.settings.showScent;
   // So is the picture of the tubes (ADR 0034).
   s.showTubes = app.settings.showTubes;
+  // And the colour of the gel: the style is the scene's, the colour of its gel is the user's (ADR 0009).
+  s.gelColor = app.settings.gelColor;
   // Without the rule a scene of Jones runs on the extended model: the Jones model always has it (constrain()).
   if (!app.canCollide) s = constrain({ ...s, collisions: false });
   const base = structuredClone(s);

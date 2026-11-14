@@ -52,6 +52,20 @@ describe('the current scene', () => {
     expect(app.settings.showScent).toBe(false);
   });
 
+  // So is the colour of the gel (ADR 0009, amendment 2026-11-14): the style is the scene's, the colour of its gel is
+  // the user's.
+  it('keeps the colour of the gel on a new scene, and does not count it as a change', async () => {
+    const { app, loadPreset, sceneChanged } = await fresh();
+    loadPreset('network');
+    expect(app.settings.gelColor).toBe('mild');
+    app.settings.gelColor = 'strong';
+    expect(sceneChanged()).toBe(false);
+    loadPreset('maze');
+    expect(app.settings.gelColor).toBe('strong');
+    expect(app.sceneBase?.gelColor).toBe('strong');
+    expect(sceneChanged()).toBe(false);
+  });
+
   // So is the picture of the tubes (ADR 0034): a switch of the view, not of a scene.
   it('keeps the picture of the tubes on a new scene, and does not count it as a change', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();

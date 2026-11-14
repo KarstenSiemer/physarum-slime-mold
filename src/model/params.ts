@@ -128,6 +128,8 @@ export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center
 export const FOOD_START = 50;
 export const BOUNDARIES = ['wrap', 'box', 'dish'] as const;
 export const STYLES = ['glow', 'gel', 'paper', 'agents'] as const;
+/** How the gel style colours thin gel against thick gel (ADR 0009, amendment 2026-11-14; GEL_FX in engine/render.ts). */
+export const GEL_COLORS = ['mild', 'strong'] as const;
 export const RESOLUTIONS = [256, 512, 768, 1024, 1536, 2048, 3072, 4096] as const;
 /**
  * A grid of fixed size, width × height cells, that does not follow the screen (ADR 0026). Its sides are those of the
@@ -148,6 +150,7 @@ export type StepOrder = (typeof STEP_ORDERS)[number];
 export type Layout = (typeof LAYOUTS)[number];
 export type Boundary = (typeof BOUNDARIES)[number];
 export type Style = (typeof STYLES)[number];
+export type GelColor = (typeof GEL_COLORS)[number];
 export type Model = (typeof MODELS)[number];
 
 export const globalSpec = {
@@ -435,6 +438,8 @@ export interface Settings extends Record<GlobalKey, number> {
   /** Flow in the tubes (flowHelp, ADR 0029), with `flowStrength`. Only in the extended model (constrain()). */
   flow: boolean;
   style: Style;
+  /** In the gel style: how pale and how clear thin gel is against thick gel. Display only. */
+  gelColor: GelColor;
   /** The view draws the food scent and the light repellent over the picture (scentViewHelp). Display only. */
   showScent: boolean;
   /**
@@ -496,6 +501,7 @@ export function defaultSettings(): Settings {
     stepOrder: 'sense-first',
     flow: false,
     style: 'glow',
+    gelColor: 'mild',
     showScent: false,
     showTubes: true,
     density: 1,
@@ -584,6 +590,7 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   out.layout = oneOf(raw.layout, LAYOUTS, d.layout);
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
+  out.gelColor = oneOf(raw.gelColor, GEL_COLORS, d.gelColor);
   out.showScent = raw.showScent === true;
   // A link from before the picture of the tubes holds no switch for it: the picture is on, as for a new scene. It
   // changes no result (ADR 0034).

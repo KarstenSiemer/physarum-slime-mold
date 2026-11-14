@@ -72,6 +72,7 @@ export function strainNumbers(s: Settings, i: number, env: readonly EnvShape[] =
 const NOT_MODEL = new Set<keyof Settings>([
   'seed',
   'style',
+  'gelColor',
   'showScent',
   'showTubes',
   'exposure',

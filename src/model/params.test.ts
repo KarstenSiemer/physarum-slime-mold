@@ -128,6 +128,15 @@ describe('sanitize (untrusted input)', () => {
     for (const v of [1, 'true', {}, null, undefined]) expect(sanitize({ showScent: v }).showScent).toBe(false);
   });
 
+  // The colour of the gel is a setting of the look (ADR 0009, amendment 2026-11-14). A link from before it holds
+  // none: the gel is mild, as it was then.
+  it('takes the colour of the gel, and the mild one for any other value', () => {
+    expect(defaultSettings().gelColor).toBe('mild');
+    expect(sanitize({}).gelColor).toBe('mild');
+    expect(sanitize({ gelColor: 'strong' }).gelColor).toBe('strong');
+    for (const v of ['Strong', 'none', 1, true, {}, null]) expect(sanitize({ gelColor: v }).gelColor).toBe('mild');
+  });
+
   // The picture of the tubes is a setting of the look (ADR 0034). It is on for a new scene and for a link from before
   // it: only `false` turns it off.
   it('keeps the picture of the tubes on unless a link says false', () => {

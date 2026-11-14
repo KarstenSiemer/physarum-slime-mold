@@ -404,6 +404,34 @@ for (const [name, query] of [
     await expect(alert).not.toContainText('error');
   });
 
+// The colour of the gel is a choice of the look (ADR 0009, amendment 2026-11-14): shown with the gel style only, it
+// reaches the engine and the link, it changes no scene, and it stays when a scene loads.
+test('the gel color is a choice of the look in the gel style', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('light');
+  // The engine builds a new simulation for this scene: wait for it to end before counting restarts.
+  await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2 && !globalThis.physarum.busy);
+  const changed = page.getByRole('region', { name: 'Scene', exact: true }).getByText('changed', { exact: true });
+  await page.locator('summary', { hasText: 'Look' }).click();
+  const color = page.getByRole('combobox', { name: 'Gel color' });
+  await expect(color).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Style' }).selectOption('gel');
+  await expect(color).toHaveValue('mild');
+  const restarts = await page.evaluate(() => globalThis.physarum?.restarts);
+  await color.selectOption('strong');
+  await page.waitForFunction(() => globalThis.physarum?.settings.gelColor === 'strong');
+  await expect(changed).toHaveCount(0);
+  await expect
+    .poll(async () => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.settings.gelColor)
+    .toBe('strong');
+  expect(await page.evaluate(() => globalThis.physarum?.restarts)).toBe(restarts);
+  // A new scene brings its own style, and the color of the gel stays.
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('spots');
+  await page.waitForFunction(() => globalThis.physarum?.settings.collisions === true);
+  expect(await page.evaluate(() => globalThis.physarum?.settings.gelColor)).toBe('strong');
+  expect(errors).toEqual([]);
+});
+
 // The legend lies on the glass of the other panels, without a backdrop blur (ADR 0028), and its text keeps WCAG 2.2
 // contrast (1.4.3: 4.5:1) over a white canvas, as glass.test.ts asks of the panels: the worst case of the paper style.
 test('the scent legend keeps its text readable on the glass over a white canvas', async ({ page }) => {
