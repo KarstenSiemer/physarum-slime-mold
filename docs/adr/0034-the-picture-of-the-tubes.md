@@ -471,3 +471,15 @@ a small net motion, and a swing alone.
   of the swing, one at a time, each failed at least one of these tests: the swing the other way round in each shader,
   a swing of 8 cells in each shader, a swing of one copy of the pattern only, no swing, 20 cells on in a period, a
   swing in 30 steps, and the two phases in the slot of each other.
+
+## Amendment 2026-11-14: the cost on a large grid with several strains
+
+The check of the speed of 2026-11-14 (ADR 0028) measured the picture of the tubes, with its grains, in the start scene
+with the flow on: three strains on 1,536 × 960 cells, a canvas of 2560 × 1600 pixels. There it costs 14.5 to 15 ms of a
+frame on WebGPU and 20 to 21 ms on WebGL2, about a fifth of the frame, where a step with the flow takes about 57 ms
+(ADR 0031). This ADR had measured 0.28 to 0.56 ms on grids of at most 512 × 512 cells with one or two strains. The
+cost grows with the cells and the strains: the start scene has 5.6 times the cells of Tokyo and three strains.
+
+Not decided yet (`TODO.md`). The options to measure: draw the picture of a state only every few frames while the
+simulation runs; skip the tiles that hold no tube of any strain; read fewer cells for the disc of a tube. The switch
+"Draw the tubes by their flow" turns the picture off today.
