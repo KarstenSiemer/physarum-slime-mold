@@ -4,8 +4,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
-import { TUBES } from './tubes';
-import { tubePicture, tubeRoots, type TubeGrid } from './tubes-reference';
+import { TUBE_REACH, TUBE_WINDOW, TUBES } from './tubes';
+import { arenaCell, tubePicture, tubeRoots, wallOnLine, type TubeGrid } from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -61,6 +61,28 @@ const near = (v: number | undefined) => Math.round((v ?? 0) * 1e4) / 1e4;
  * `least` 1: at the edge of a disc its cover is a small difference of numbers near 4, so a GPU with 32-bit floats
  * gives the cover to about 1 part in a million of 1, not of its own size. The trails here are up to 20.
  */
+/**
+ * How many discs of strain A the walls stop on their line: the pairs of a cell and a cell with a disc that reaches
+ * it, with a cell of a wall on the line between the two. Without such pairs a scene does not test the wall test.
+ */
+function stoppedDiscs(grid: TubeGrid, roots: Float32Array): number {
+  let pairs = 0;
+  for (let y = 0; y < grid.height; y++)
+    for (let x = 0; x < grid.width; x++) {
+      const p = arenaCell(grid, x, y);
+      if (p < 0 || (grid.shape[p * 4] ?? 0) >= 128) continue;
+      for (let dy = -TUBE_WINDOW; dy <= TUBE_WINDOW; dy++)
+        for (let dx = -TUBE_WINDOW; dx <= TUBE_WINDOW; dx++) {
+          const d = Math.hypot(dx, dy);
+          const q = arenaCell(grid, x + dx, y + dy);
+          if (d === 0 || d >= TUBE_REACH || q < 0) continue;
+          const root = roots[q * 4] ?? 0;
+          if (root > 0 && TUBES.radius * root + TUBES.edge / 2 > d && wallOnLine(grid, x, y, dx, dy)) pairs++;
+        }
+    }
+  return pairs;
+}
+
 function worst(got: Float32Array, want: Float32Array, least = 1e-6): number {
   let w = 0;
   for (let i = 0; i < want.length; i++)
@@ -121,6 +143,8 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       const strokes: Stroke[] = [
         { kind: 'wall', from: [20, 4], to: [20, 22], radius: 1 },
         { kind: 'wall', from: [6, 26], to: [30, 23], radius: 1.5 },
+        // A thin wall along a diagonal: one cell thick, so that many discs reach across it.
+        { kind: 'wall', from: [26, 4], to: [37, 15], radius: 0.6 },
         { kind: 'food', from: [10.5, 10.5], to: [10.5, 10.5], radius: 2.5 },
       ];
       sim.paint(strokes);
@@ -152,11 +176,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
         return n;
       });
       for (const n of wider) expect(n).toBeGreaterThan(20);
-      // The same state without a wall test: every byte of `shape` says that no wall is near.
-      const open = tubePicture({ width: w, height: h, boundary, shape: new Uint8Array(w * h * 4) }, view, want.roots);
-      let stopped = 0;
-      for (let i = 0; i < picture.length; i++) if (Math.abs((open[i] ?? 0) - (picture[i] ?? 0)) > 0.01) stopped++;
-      expect(stopped).toBeGreaterThan(200);
+      // And the walls stop discs of strain A on their line.
+      const grid: TubeGrid = { width: w, height: h, boundary, shape: await sim.readShape() };
+      expect(stoppedDiscs(grid, want.roots)).toBeGreaterThan(100);
     },
     120_000,
   );
@@ -576,7 +598,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect((await device?.popErrorScope())?.message).toBeUndefined();
   }, 120_000);
 
-  it('stops a disc at a wall across the edge of the periodic grid, right after the boundary changed', async () => {
+  it('stops a disc at a wall across the edge of the periodic grid', async () => {
     const [w, h] = [40, 24];
     const sim = await make(flowing(), w, h);
     // A wall of one column at the left edge of a box, and a full tube along the column at the right edge.
@@ -625,15 +647,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     const picture = await sim.readPicture();
     const want = await reference(sim, 'box', 1);
     expect(worst(picture, want.picture, 1)).toBeLessThan(1e-5);
-    // The walls stop many discs: without a wall test the picture differs on the cells around them.
-    const open = tubePicture(
-      { width: w, height: h, boundary: 'box', shape: new Uint8Array(w * h * 4) },
-      trail,
-      want.roots,
-    );
-    let stopped = 0;
-    for (let c = 0; c < w * h; c++) if (Math.abs((open[c * 4] ?? 0) - (picture[c * 4] ?? 0)) > 0.01) stopped++;
-    expect(stopped).toBeGreaterThan(100);
+    // The walls stop many discs on their line.
+    const grid: TubeGrid = { width: w, height: h, boundary: 'box', shape: await sim.readShape() };
+    expect(stoppedDiscs(grid, want.roots)).toBeGreaterThan(500);
     expect(picture[(12 * w + 16) * 4]).toBe(0);
     // The cell (4, 12) lies beside the diagonal wall and (3, 13) across it, where two wall cells touch at a corner.
     // A trail on (4, 12) alone shows in no cell across the wall.
@@ -650,6 +666,14 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       [2, 12],
     ] as const)
       expect(across[(y * w + x) * 4], `(${String(x)}, ${String(y)})`).toBe(0);
+    // The strength across a tube stays on its side of the diagonal wall. A weak tube runs along one side of it and a
+    // strong tube along the other side: a cell of the weak one touches a cell of the strong one at a corner, between
+    // two wall cells. It takes only the three cells of its own tube: 3 × 0.0025 over 3.
+    sim.writeFlow(memoryOf(w, h, (x, y) => (y === x + 8 ? [0.0025, 1] : y === x + 10 ? [1, 1] : undefined)));
+    const [factors, sides] = [await sim.readTubeRoots(), await reference(sim, 'box', 1)];
+    expect(worst(factors, sides.roots)).toBeLessThan(1e-5);
+    expect(factors[(16 * w + 8) * 4]).toBeCloseTo(0.0025 ** 0.25, 5);
+    expect(factors[(17 * w + 7) * 4]).toBeCloseTo(1, 5);
 
     // One tube cell alone, diagonally beside the wall cell: its disc reaches neither the wall cell nor the cell
     // behind it, 2.83 cells away on the line through the wall cell. Away from the wall cell it reaches as far.
@@ -693,6 +717,27 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(plain.gain).toBeCloseTo(fresh.gain, 6);
     expect(forPng.gain).toBeCloseTo(fresh.gain, 6);
     expect(fresh.gain).not.toBeCloseTo(withTubes.gain, 2);
+  });
+
+  it('measures for a PNG that waited while the levels of the frames started anew', async () => {
+    const [w, h] = [32, 24];
+    const sim = await make(flowing(), w, h);
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+    // The measurement for a PNG waits for the first one. A restart of the run starts the levels of the frames anew
+    // in that time (Engine.reset()): the first measurement is one of the old run and is dropped, and the one for
+    // the PNG still measures the simulation.
+    const first = backend.settle(sim);
+    const png = backend.measured(sim);
+    backend.forget();
+    const [dropped, forPng] = [await first, await png];
+    expect(dropped.gain).toBe(0);
+    const fresh = await backend.settle(sim);
+    expect(fresh.gain).toBeGreaterThan(0);
+    expect(forPng.gain).toBeCloseTo(fresh.gain, 6);
+    expect(forPng.strand).toBeCloseTo(fresh.strand, 6);
   });
 
   it('asks a simulation for nothing once it is destroyed, when a measurement waited for another one', async () => {

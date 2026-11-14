@@ -5,9 +5,12 @@
 // for the tests.
 //
 // 1. The strength of the tube of a cell is its tube body times its flow memory, and 0 on a cell without a tube
-//    (FLOW.bodyLow). The flow memory is the conductivity of a tube in the model of Tero, Kobayashi and Nakagaki.
+//    (FLOW.bodyLow) and on a cell of a wall. The flow memory is the conductivity of a tube in the model of Tero,
+//    Kobayashi and Nakagaki.
 // 2. The strength across the tube, on a cell with a tube: the sum of the strengths over the 3 × 3 cells around the
-//    cell, over the 3 cells that a tube is long there (`span`), and at most 1. On the middle line of a tube up to
+//    cell, over the 3 cells that a tube is long there (`span`), and at most 1. A cell at a corner of the cell adds
+//    nothing if the two cells beside that corner are both walls: no plasmodium goes from one to the other, as growth
+//    puts no child there (growth.wgsl). On the middle line of a tube up to
 //    3 cells wide that is the sum across it. At the edge of a tube and in a wider band of cells it is the sum of the
 //    2 or 3 cells across that the 3 × 3 cells hold. A cell without a tube has none: it is no disc.
 // 3. The radius of the disc of a cell is `radius` cells times the fourth root of that strength: for Poiseuille's flow
@@ -20,8 +23,9 @@
 //    `sheet` times its own trail: the plasmodium without a tube stays in the picture, fainter than a tube.
 // 5. A disc does not pass a wall: it reaches another cell only if neither cell is a wall cell and no wall cell lies
 //    on the line between the centres of the two cells. A line through the corner of a cell is on that cell, so no
-//    disc passes between two wall cells that touch at a corner. A cell that is no wall is always reached by its own
-//    disc.
+//    disc passes between two wall cells that touch at a corner. That is the rule of a move of the model, which
+//    takes no line that touches a wall cell (clearPath in agents.wgsl). A cell that is no wall is always reached by
+//    its own disc.
 import type { Settings } from '../model/params';
 import { flowOn } from './flow';
 

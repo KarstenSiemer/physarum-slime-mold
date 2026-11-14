@@ -425,8 +425,9 @@ export class GlSim implements Sim {
     this.writeParams();
     const tubes = this.ensureTubes();
     const k = this.prog.tubes();
-    this.pass(k.roots, tubes.roots, this.flowMemories(flow), { strains: flow.memory.length });
-    this.pass(k.picture, tubes.picture, { trail, shape: this.shape.texture, roots: tubes.roots.texture }, {});
+    const shape = this.shape.texture;
+    this.pass(k.roots, tubes.roots, { ...this.flowMemories(flow), shape }, { strains: flow.memory.length });
+    this.pass(k.picture, tubes.picture, { trail, shape, roots: tubes.roots.texture }, {});
     this.tubesStale = false;
     return tubes;
   }

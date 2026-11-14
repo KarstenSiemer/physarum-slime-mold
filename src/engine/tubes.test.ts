@@ -342,4 +342,50 @@ describe('the picture of the tubes', () => {
     ).toEqual([true, true, true]);
     expect(dot(open(32, 24), [17, 12], [[16, 13]])).toEqual([8]);
   });
+
+  it('keeps the strength across a tube on its own side of a wall', () => {
+    // A wall along a diagonal, one cell thick: its cells touch at their corners only. A weak tube runs along one side
+    // of it and a strong tube along the other side. A cell of the weak tube touches a cell of the strong one at a
+    // corner, between two wall cells.
+    const diagonal: [number, number][] = [];
+    for (let x = 4; x <= 19; x++) diagonal.push([x, x]);
+    const tubes = (g: TubeGrid) =>
+      memoryOf(g, (x, y) => (y === x + 1 ? [0.0025, 1] : y === x - 1 ? [1, 1] : undefined));
+    const factor = (g: TubeGrid, x: number, y: number) => tubeRoots(g, [tubes(g)])[(y * g.width + x) * 4] ?? 0;
+    const g = walled(diagonal);
+    // Three cells of the weak tube lie in the 3 × 3 cells around one of them: 3 × 0.0025 over 3.
+    expect(factor(g, 10, 11)).toBeCloseTo(0.0025 ** 0.25, 6);
+    expect(factor(g, 11, 10)).toBeCloseTo(1, 6);
+    // Without the wall the weak cell also takes the strong cell at its corner: (3 × 0.0025 + 1) / 3.
+    expect(factor(open(32, 24), 10, 11)).toBeCloseTo(((3 * 0.0025 + 1) / 3) ** 0.25, 6);
+    // So the weak tube stays faint in the picture: a quarter of its trail. With the strong cell in its strength its
+    // own disc would show 0.76 of its trail.
+    const trail = trailOf(g, (x, y) => (y === x + 1 ? 8 : 0));
+    expect(tubePicture(g, trail, tubeRoots(g, [tubes(g)]))[(11 * 32 + 10) * 4]).toBeCloseTo(2, 6);
+    // A tube along a wall keeps its own cells: two cells of the weak tube touch at a corner beside one wall cell,
+    // and plasmodium goes from one to the other through the open cell beside that corner.
+    const alone = walled(diagonal);
+    const weak = memoryOf(alone, (x, y) => (y === x + 1 ? [0.0025, 1] : undefined));
+    expect(tubeRoots(alone, [weak])[(11 * 32 + 10) * 4]).toBeCloseTo(0.0025 ** 0.25, 6);
+  });
+
+  it('takes a cell of a wall for no tube', () => {
+    // A full tube along row 12, and a wall cell on it at (16, 12): its memory still holds the tube that it had.
+    const g = walled([[16, 12]]);
+    const tube = memoryOf(g, (_, y) => (y === 12 ? [1, 1] : undefined));
+    const roots = tubeRoots(g, [tube]);
+    const factor = (x: number) => roots[(12 * g.width + x) * 4] ?? 0;
+    // The wall cell is no disc. The cells beside it hold two cells of the tube in their 3 × 3 cells, not three.
+    expect(factor(16)).toBe(0);
+    expect([15, 17].map(factor)).toEqual([(2 / 3) ** 0.25, (2 / 3) ** 0.25].map((v) => Math.fround(v)));
+    expect([14, 18].map(factor)).toEqual([1, 1]);
+    // No disc shows on the wall cell, and none crosses it along the row.
+    const picture = tubePicture(
+      g,
+      trailOf(g, (x, y) => (y === 12 && x < 16 ? 8 : 0)),
+      roots,
+    );
+    expect([16, 17, 18].map((x) => picture[(12 * g.width + x) * 4])).toEqual([0, 0, 0]);
+    expect(picture[(12 * g.width + 15) * 4]).toBeCloseTo(8, 6);
+  });
 });

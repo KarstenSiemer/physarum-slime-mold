@@ -960,10 +960,11 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: paused frames (ADR 0028)', (
   }, 600_000); // GitHub, WebGL2: 98.7 and 101.4 s, then over 120 s in PR #40; WebGPU 12.0 to 15.3 s (ADR 0010)
 });
 
-// A PNG is drawn with levels that the backend measures for it (Engine.snapshot()). The measurement can wait, and a
-// rebuild in that time replaces the simulation: the engine then measures again, for the simulation that it draws.
-describe.each(Object.keys(BACKENDS) as Kind[])('%s: a PNG while a new simulation is built', (kind) => {
-  it('measures the levels for the simulation that it draws', async () => {
+// A PNG is drawn with levels that the backend measures for it (Engine.snapshot()). The measurement waits for the GPU.
+// A restart or a rebuild in that time starts a new run: the engine then measures again, for the run that it draws.
+describe.each(Object.keys(BACKENDS) as Kind[])('%s: a PNG while a new run starts', (kind) => {
+  /** A PNG of an engine whose first measurement for it meets `meanwhile` before the engine gets the answer. */
+  async function snapshot(meanwhile: (engine: Engine, s: Settings) => Promise<void> | void) {
     const canvas = document.createElement('canvas');
     [canvas.width, canvas.height] = [160, 100];
     const s: Settings = { ...defaultSettings(), resolution: 256, density: 0.5 };
@@ -972,19 +973,41 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: a PNG while a new simulation
     const first = engine.sim;
     const measured = engine.backend.measured.bind(engine.backend);
     const asked: unknown[] = [];
-    let rebuilt: Promise<void> | undefined;
     engine.backend.measured = async (sim) => {
       asked.push(sim);
       const levels = await measured(sim);
-      // The first answer is here: before the engine gets it, new settings ask for a new simulation.
-      if (asked.length === 1) rebuilt = engine.apply({ ...s, resolution: 512 });
+      if (asked.length === 1) await meanwhile(engine, s);
       return levels;
     };
     const png = await engine.snapshot();
+    expect(png.size).toBeGreaterThan(100);
+    return { engine, first, asked };
+  }
+
+  it('measures the levels for the new simulation when a rebuild starts before the answer', async () => {
+    let rebuilt: Promise<void> | undefined;
+    const { engine, first, asked } = await snapshot((e, s) => {
+      rebuilt = e.apply({ ...s, resolution: 512 });
+    });
     await rebuilt;
     expect(engine.sim).not.toBe(first);
     expect(asked).toEqual([first, engine.sim]);
-    expect(png.size).toBeGreaterThan(100);
+    engine.destroy();
+  }, 120_000);
+
+  it('measures the levels for the new simulation when a rebuild has ended before the answer', async () => {
+    const { engine, first, asked } = await snapshot((e, s) => e.apply({ ...s, resolution: 512 }));
+    expect(engine.sim).not.toBe(first);
+    expect(asked).toEqual([first, engine.sim]);
+    engine.destroy();
+  }, 120_000);
+
+  it('measures the levels again when the run restarted before the answer', async () => {
+    const { engine, first, asked } = await snapshot((e) => {
+      e.reset();
+    });
+    expect(engine.sim).toBe(first);
+    expect(asked).toEqual([first, first]);
     engine.destroy();
   }, 120_000);
 });

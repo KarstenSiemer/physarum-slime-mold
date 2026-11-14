@@ -407,7 +407,7 @@ export class Simulation implements Sim {
       this.bind(`tubeRoots${this.flowM}`, k.roots, [
         this.params,
         null,
-        null,
+        this.shapeBuffer,
         flow.memoryArrays[this.flowM],
         tubes.rootsView,
       ]),

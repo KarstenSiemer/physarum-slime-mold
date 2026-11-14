@@ -741,17 +741,19 @@ export class Engine {
   }
 
   /**
-   * Levels that the backend measures for the simulation of the engine. The backend waits for a measurement that is
-   * still running. A rebuild that starts in that time destroys the simulation, and the answer is then none of the new
-   * one: the engine asks again when the new simulation stands.
+   * Levels that the backend measures for the run of the engine. The backend waits for a measurement that is still
+   * running, and then for the GPU. A restart or a rebuild in that time starts a new run: the backend then drops the
+   * measurement or measures a simulation that is gone, and its answer is none of the new run. So the engine asks
+   * again, until an answer is for the run that it holds.
    */
   private async measuredFor(ask: (sim: Sim) => Promise<Levels>): Promise<Levels> {
-    let levels: Levels;
-    do {
+    for (;;) {
       await this.rebuilding;
-      levels = await ask(this.sim);
-    } while (this.rebuilding);
-    return levels;
+      const run = this.restarts;
+      const levels = await ask(this.sim);
+      // Every restart and every rebuild counts as one (`restarts`), also a rebuild that has ended by now.
+      if (!this.rebuilding && this.restarts === run) return levels;
+    }
   }
 
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */

@@ -47,9 +47,31 @@ export function wallOnLine(grid: TubeGrid, x: number, y: number, ox: number, oy:
 }
 
 /**
+ * The cells of the 3 × 3 cells around the cell (x, y) whose strength adds to the strength across a tube there, as
+ * their indices: the cells of the arena that are no cell of a wall, and that no wall parts from the cell. A wall
+ * parts the cell from a cell at one of its corners if the two cells beside that corner are both cells of a wall
+ * (openCells() in tubes.wgsl).
+ */
+export function openCells(grid: TubeGrid, x: number, y: number): number[] {
+  const wallAt = (qx: number, qy: number) => {
+    const c = arenaCell(grid, qx, qy);
+    return c >= 0 && wallByte(grid, c) >= WALL_BYTE;
+  };
+  const open: number[] = [];
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++) {
+      const q = arenaCell(grid, x + dx, y + dy);
+      if (q < 0 || wallByte(grid, q) >= WALL_BYTE) continue;
+      if (dx !== 0 && dy !== 0 && wallAt(x + dx, y) && wallAt(x, y + dy)) continue;
+      open.push(q);
+    }
+  return open;
+}
+
+/**
  * The pass `roots`: per cell and strain (4 values per cell) the fourth root of the strength across the tube, and 0 on
- * a cell without a tube of the strain. `memories`: the memory of the flow of each strain, 4 values per cell as
- * Sim.readFlow() returns them.
+ * a cell without a tube of the strain and on a cell of a wall. `memories`: the memory of the flow of each strain, 4
+ * values per cell as Sim.readFlow() returns them.
  */
 export function tubeRoots(grid: TubeGrid, memories: readonly Float32Array[]): Float32Array {
   const { width: w, height: h } = grid;
@@ -57,18 +79,17 @@ export function tubeRoots(grid: TubeGrid, memories: readonly Float32Array[]): Fl
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const p = arenaCell(grid, x, y);
-      if (p < 0) continue;
+      // A cell of a wall holds no tube.
+      if (p < 0 || wallByte(grid, p) >= WALL_BYTE) continue;
+      const open = openCells(grid, x, y);
       memories.slice(0, 4).forEach((memory, s) => {
         // A cell without a tube of the strain is no disc.
         if ((memory[p * 4 + 1] ?? 0) < FLOW.bodyLow) return;
         let sum = 0;
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const q = arenaCell(grid, x + dx, y + dy);
-            if (q < 0) continue;
-            const [d, body] = [memory[q * 4] ?? 0, memory[q * 4 + 1] ?? 0];
-            if (body >= FLOW.bodyLow) sum += d * body;
-          }
+        for (const q of open) {
+          const [d, body] = [memory[q * 4] ?? 0, memory[q * 4 + 1] ?? 0];
+          if (body >= FLOW.bodyLow) sum += d * body;
+        }
         out[p * 4 + s] = Math.sqrt(Math.sqrt(Math.min(sum / TUBES.span, 1)));
       });
     }
@@ -101,9 +122,9 @@ export function tubePicture(grid: TubeGrid, trail: Float32Array, roots: Float32A
           if (d >= TUBE_REACH) continue;
           const q = arenaCell(grid, x + dx, y + dy);
           if (q < 0) continue;
-          // The disc of the cell itself reaches it. The disc of another cell: not from a cell of a wall, and not
-          // across one.
-          if ((dx !== 0 || dy !== 0) && (wallByte(grid, q) >= WALL_BYTE || wallOnLine(grid, x, y, dx, dy))) continue;
+          // The disc of the cell itself reaches it. The disc of another cell: not across a cell of a wall. A cell of
+          // a wall is no disc (tubeRoots()).
+          if (wallOnLine(grid, x, y, dx, dy)) continue;
           for (let s = 0; s < 4; s++) {
             const root = roots[q * 4 + s] ?? 0;
             const cover = Math.min(1, Math.max(0, (TUBES.radius * root + TUBES.edge / 2 - d) / TUBES.edge));
