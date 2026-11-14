@@ -5509,10 +5509,15 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         for (let y = 0; y < h; y++)
           for (let x = 0; x < w; x++) {
             const c = y * w + x;
-            const tube = Math.abs(y - 24 - 6 * Math.sin(x / 7)) < 5 || Math.abs(x - 2) < 3;
-            trail[c * 4] = tube ? 20 : 1;
-            trail[c * 4 + 1] = Math.hypot(x - 44, y - 12) < 6 ? 14 : 0;
-            memory.set(tube ? [1, 1, 0.3, 0] : [0.2, 0, 0, 0], c * 4);
+            // A smooth trail, and tubes that conduct but have no flow memory, so they are no discs: the picture is a
+            // quarter of the trail. At a steep rim of the gel the height that the GPU filters decides how much the
+            // gel covers, and SwiftShader filters it a little differently: there a frame is up to 5 of 255 from the
+            // reference (ADR 0010).
+            const across = y - 24 - 6 * Math.sin(x / 7);
+            const tube = Math.abs(across) < 6 || Math.abs(x - 2) < 3;
+            trail[c * 4] = 1 + 30 * Math.exp(-(across * across) / 18) + 30 * Math.exp(-((x - 2) ** 2) / 8);
+            trail[c * 4 + 1] = 20 * Math.exp(-((x - 44) ** 2 + (y - 12) ** 2) / 32);
+            memory.set(tube ? [0, 1, 0.3, 0] : [0.2, 0, 0, 0], c * 4);
             pressure.set([-0.4 * x - 0.2 * y, 1.5 * Math.sin(y / 3), 0, 0], c * 4);
           }
         sim.writeTrail(trail);
@@ -5541,7 +5546,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           }
           expect(max, style).toBeLessThanOrEqual(3);
           expect(sum / ((ref.length / 4) * 3), style).toBeLessThan(0.75);
-          // The grains are in the frame: without them the reference is another picture.
+          // The grains are in the frame: without them the reference is another picture in many values, at least 161
+          // (the gel zoomed out).
           const plain = styleReference(
             { trail: drawn.trail },
             [w, h],
@@ -5551,8 +5557,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             sizes,
           );
           let apart = 0;
-          for (let i = 0; i < ref.length; i++) if (Math.abs((plain[i] ?? 0) - (ref[i] ?? 0)) > 12) apart++;
-          expect(apart, style).toBeGreaterThan(scale > 1 ? 20 : 100);
+          for (let i = 0; i < ref.length; i++) if (Math.abs((plain[i] ?? 0) - (ref[i] ?? 0)) > 8) apart++;
+          expect(apart, style).toBeGreaterThan(100);
         }
       },
     );
