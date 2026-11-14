@@ -181,7 +181,7 @@ void main() {
 
 #if PASS == 4
 // The births (birth in growth.wgsl): the dead agent with rank r among the dead agents of its strain takes the birth
-// with rank r of that strain. The pyramids keep level k in texture k mod 2, from row levelRow[k].
+// with rank r of that strain. The pyramids keep level k in texture k mod 2, from row cellRow[k] and deadRow[k].
 uniform sampler2D agentsIn;
 uniform sampler2D births;
 uniform sampler2D cells0;
@@ -194,7 +194,6 @@ uniform int cellRow[13];
 uniform int cellSize[13];
 uniform int deadTop;
 uniform int deadRow[13];
-uniform int deadSize[13];
 
 vec4 cellNode(int k, int e) {
   if (k == 0) {

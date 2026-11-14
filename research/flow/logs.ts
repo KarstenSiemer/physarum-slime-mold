@@ -100,15 +100,19 @@ export function packLogs(from = HERE, file = ARCHIVE): number {
   return names.length;
 }
 
-// Only when Node runs this file as a script, and not when a test loads it.
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const action = process.argv[2] ?? 'unpack';
-  if (action === 'unpack') console.log(`${unpackLogs()} logs are in ${join(HERE, 'logs')}`);
-  else if (action === 'pack') console.log(`${packLogs()} logs are in ${ARCHIVE}`);
+/** The commands of a logs script: unpack the archive `file` of the folder `here`, pack it again, or list it. */
+export function runLogs(action: string, here = HERE, file = ARCHIVE): void {
+  if (action === 'unpack') console.log(`${unpackLogs(here, file)} logs are in ${join(here, 'logs')}`);
+  else if (action === 'pack') console.log(`${packLogs(here, file)} logs are in ${file}`);
   else if (action === 'list') {
-    for (const { name, data } of readArchive()) console.log(`${String(data.length).padStart(8)}  ${name}`);
+    for (const { name, data } of readArchive(file)) console.log(`${String(data.length).padStart(8)}  ${name}`);
   } else {
     console.error('Usage: logs.ts [unpack | pack | list]');
     process.exit(1);
   }
+}
+
+// Only when Node runs this file as a script, and not when a test loads it.
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runLogs(process.argv[2] ?? 'unpack');
 }

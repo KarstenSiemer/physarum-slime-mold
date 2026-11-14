@@ -14,7 +14,6 @@ import {
   START_ROUNDS,
   startEnds,
   startRounds,
-  STEP_OFFSET,
   stepChance,
   strainAgents,
   strainEnds,
@@ -46,7 +45,6 @@ describe('Params layout', () => {
     const u = new Uint32Array(buf);
     const f = new Float32Array(buf);
     expect([...u.slice(0, 4)]).toEqual([64, 32, 1000, 7]);
-    expect(u[STEP_OFFSET / 4]).toBe(7);
     expect([...u.slice(4, 8)]).toEqual([s.seed, 2, 0, 0]);
     expect(f[2 * 4]).toBeCloseTo((22.5 * Math.PI) / 180);
     expect([...f.slice(3 * 4, 3 * 4 + 2)]).toEqual([9, 20]);
