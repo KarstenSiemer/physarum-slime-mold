@@ -21,7 +21,7 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 - Turn on **flow in the tubes**: tubes that carry flow between foods stay, the others starve.
   The Maze then keeps one tube along a short route. The picture draws every tube as wide as its
   flow memory says: a tube that keeps much flow stays thick, the others get thin and faint. Small
-  grains move in each tube with the flow.
+  grains move back and forth in each tube with the flow.
 - Read what each scene shows: where its settings come from, what to watch, and why it uses them.
 - Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the settings,
   the scene and its food, light and walls as a link.

@@ -177,14 +177,15 @@ type Vec3 = [number, number, number];
  * 2026-11-14. Its lighting runs a trail filter for every height lookup, as before its height pre-pass: zoomed out the
  * four taps, which the height field still takes. The box edge and the dish rim fade over one pixel into the outside
  * colour, as render.wgsl draws them now. `stream`: the stream of the plasm of the state, 4 values per cell, and the
- * phase of the pattern of its grains (ADR 0034, amendment 2026-11-14). Returns sRGB bytes without the dither.
+ * phases of the pattern of its grains and of their swing (ADR 0034, amendments of 2026-11-14). Returns sRGB bytes
+ * without the dither.
  */
 function styleReference(
   {
     trail,
     counts,
     stream,
-  }: { trail: Float32Array; counts?: Float32Array; stream?: { field: Float32Array; phase: number } },
+  }: { trail: Float32Array; counts?: Float32Array; stream?: { field: Float32Array; phase: number; swing: number } },
   [w, h]: [number, number],
   settings: Settings,
   view: View,
@@ -320,7 +321,7 @@ function styleReference(
     });
   };
   // The grains of the stream (streaming() in render.wgsl): a pattern of points 2.2 cells apart, shifted along the
-  // stream by up to 20 cells in a period, in two copies that take turns.
+  // stream by up to 10 cells in a period, in two copies that take turns, and by 12 cells to each side in a swing.
   const grainAt = (i: number, j: number) => {
     let x = (Math.imul(i, 1664525) + Math.imul(j, 1013904223)) >>> 0;
     x = Math.imul(x ^ (x >>> 16), 0x7feb352d) >>> 0;
@@ -350,8 +351,11 @@ function styleReference(
     const speed = Math.hypot(vx, vy);
     if (speed <= 0) return 0;
     const t = stream.phase;
-    const copy = (phase: number, shift: number) =>
-      grains((px - vx * 20 * (phase - 0.5)) / 2.2 + shift * 37, (py - vy * 20 * (phase - 0.5)) / 2.2 + shift * 17);
+    const swing = 12 * Math.sin(2 * Math.PI * stream.swing);
+    const copy = (phase: number, shift: number) => {
+      const along = 10 * (phase - 0.5) + swing;
+      return grains((px - vx * along) / 2.2 + shift * 37, (py - vy * along) / 2.2 + shift * 17);
+    };
     const first = 1 - Math.abs(2 * t - 1);
     const n = copy((t + 0.5) % 1, 1) * (1 - first) + copy(t, 0) * first;
     return Math.sqrt(speed) * smoothstep(0.45, 0.8, n) * Math.min(1, Math.max(0, 3 - 2 * view.scale));
@@ -5553,7 +5557,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const levels = await backend.settle(sim);
           const img = await backend.capture(sim, settings, view, SIZE, SIZE);
           const exposure = levels.gain * 2 ** settings.exposure;
-          const stream = { field, phase: (step % 32) / 32 };
+          const stream = { field, phase: (step % 32) / 32, swing: (step % 60) / 60 };
           const drawn = { trail: await sim.readPicture(), stream };
           const sizes: [number, number] = [SIZE, SIZE];
           const ref = styleReference(drawn, [w, h], settings, view, { exposure, black: levels.black }, sizes);

@@ -32,7 +32,9 @@
 //    conductivity of the cell, over `fast`: the conductivity of a round tube grows with the fourth power of its
 //    radius (point 3), so its root is the area that the flux passes. Of the strains with a tube in the cell, the one
 //    with the fastest flow counts. The view draws grains that move along the stream (`streaming` in render.wgsl), and
-//    their pattern starts again after `period` steps.
+//    their pattern starts again after `period` steps. The grains go back and forth once in `swing` steps, as the plasm
+//    of the organism does in about 2 minutes, and they go on with the stream a little in each swing. The model holds
+//    the mean flow alone: the swing is in the picture only.
 import type { Settings } from '../model/params';
 import { flowOn } from './flow';
 
@@ -52,6 +54,8 @@ export const STREAM = {
   fast: 2,
   /** The steps after which the pattern of the grains starts again. */
   period: 32,
+  /** The steps of one back and forth of the grains: 2 minutes of the model (docs/model.md, 8.6). */
+  swing: 60,
 } as const;
 
 /** The farthest that a disc reaches, cells: the radius and half the edge. */

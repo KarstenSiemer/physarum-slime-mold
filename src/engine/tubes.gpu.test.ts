@@ -1022,19 +1022,26 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       }
       return best[0];
     };
-    // Steps 4 and 8 are an eighth and a quarter of the period. In between a grain moves 20 cells times the speed of
-    // 0.5 times an eighth: 1.25 cells, 10 pixels, to the east.
-    expect(STREAM.period).toBe(32);
-    const [early, late] = [band(await frame(4)), band(await frame(8))];
+    // A grain goes on with the stream, 10 cells in a period of 32 steps where the speed is 1, and it goes back and
+    // forth, 12 cells to each side in a swing of 60 steps. The speed is 0.5 here. From step 4 to step 6 the grains go
+    // on by 0.31 cells, and the swing takes them 12 × 0.5 × (sin 36° − sin 24°) = 1.09 cells on: 1.40 cells, 11
+    // pixels, to the east.
+    expect([STREAM.period, STREAM.swing]).toEqual([32, 60]);
+    const [early, late] = [band(await frame(4)), band(await frame(6))];
     const moved = shift(early, late);
-    expect(moved).toBeGreaterThanOrEqual(9);
-    expect(moved).toBeLessThanOrEqual(11);
+    expect(moved).toBeGreaterThanOrEqual(10);
+    expect(moved).toBeLessThanOrEqual(12);
+    // Later in the swing the grains come back. From step 22 to step 26 they go on by 0.63 cells, and the swing takes
+    // them 12 × 0.5 × (sin 156° − sin 132°) = −2.02 cells: 1.39 cells, 11 pixels, back to the west.
+    const back = shift(band(await frame(22)), band(await frame(26)));
+    expect(back).toBeGreaterThanOrEqual(-12);
+    expect(back).toBeLessThanOrEqual(-10);
     // The grains are there: the band is not flat along a row.
     const spread = (rows: number[][]) => Math.max(...rows.map((r) => Math.max(...r) - Math.min(...r)));
     expect(spread(early)).toBeGreaterThan(40);
-    // With the pressure the other way the grains move to the west.
+    // With the pressure the other way the grains move to the west first.
     sim.writePressure(pressing(w, h, (x) => [2 * x, 0, 0, 0]));
-    expect(shift(band(await frame(4)), band(await frame(8)))).toBeLessThanOrEqual(-9);
+    expect(shift(band(await frame(4)), band(await frame(6)))).toBeLessThanOrEqual(-10);
     // The gel and the paper show grains too.
     sim.writePressure(flowing8);
     for (const style of ['gel', 'paper'] as const) {

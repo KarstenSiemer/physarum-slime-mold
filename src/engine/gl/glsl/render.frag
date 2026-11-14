@@ -178,7 +178,8 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
 
 // ---- The stream of the plasm (see render.wgsl) ----
 const float STREAM_GRAIN = 2.2;  // cells between two points of the pattern of the grains
-const float STREAM_REACH = 20.0; // cells that a grain moves in one period of the pattern where the speed is 1
+const float STREAM_REACH = 10.0; // cells that a grain goes on in one period of the pattern where the speed is 1
+const float STREAM_SWING = 12.0; // cells that a grain goes to each side in a swing where the speed is 1
 const float STREAM_GAIN = 1.5;   // how much more trail a grain shows where the speed is 1
 const float STREAM_DARK = 0.3;   // how much darker a grain makes the gel there
 
@@ -212,8 +213,9 @@ float streaming(vec2 p) {
   float speed = length(v);
   if (speed <= 0.0) return 0.0;
   float t = V.streamFx.y;
-  float first = grains((p - v * STREAM_REACH * (t - 0.5)) / STREAM_GRAIN);
-  float second = grains((p - v * STREAM_REACH * (fract(t + 0.5) - 0.5)) / STREAM_GRAIN + vec2(37.0, 17.0));
+  float swing = STREAM_SWING * sin(6.283185307 * V.streamFx.z);
+  float first = grains((p - v * (STREAM_REACH * (t - 0.5) + swing)) / STREAM_GRAIN);
+  float second = grains((p - v * (STREAM_REACH * (fract(t + 0.5) - 0.5) + swing)) / STREAM_GRAIN + vec2(37.0, 17.0));
   float n = mix(second, first, 1.0 - abs(2.0 * t - 1.0));
   return sqrt(speed) * smoothstep(0.45, 0.8, n) * clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
 }

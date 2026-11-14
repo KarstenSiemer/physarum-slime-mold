@@ -426,3 +426,48 @@ owner's.
   - `sim.gpu.test.ts`, on both backends: a frame with grains against the CPU copy of the styles,
     within 3 of 255, in the glow, the gel and on paper, zoomed in, across the wrap seam and zoomed
     out.
+
+## Amendment 2026-11-14: the grains go back and forth
+
+### Context
+
+The plasm of the organism streams back and forth with a period of about 2 minutes (`docs/fidelity.md`, 17). The grains
+of the amendment above moved one way, with the mean flow of the model. The owner asked to see the back and forth, or to
+note it for later if it is too much work (2026-11-14).
+
+A model of the back and forth is much work: the organism pumps its tubes, and waves of that pumping run along the
+network. That is a new rule of the model with a study of its own. It is noted in `TODO.md`, under Later.
+
+A back and forth in the picture alone is little work, and it does not contradict the model. The flow memory follows
+the size of the flux of a lane, not its direction (`docs/model.md`, 8.4), and the model of Tero, Kobayashi and Nakagaki
+takes the mean of the flux over the period. So the model holds no direction that a swing of the grains could
+contradict.
+
+### Decision
+
+Under the owner's delegation of 2026-11-12. The owner got moving pictures of two variants on 2026-11-14: a swing with
+a small net motion, and a swing alone.
+
+1. **The grains swing along the stream**: 12 cells to each side where the speed is 1 (`STREAM_SWING`), once in 60
+   steps (`STREAM.swing`). 60 steps are 2 minutes of the model (`docs/model.md`, 8.6), the period of the organism.
+   Both copies of the pattern swing together.
+2. **The grains still go on with the stream**, half as fast as before: 10 cells in a period of 32 steps where the
+   speed is 1 (`STREAM_REACH`), 0.31 cells per step. At the fastest point of a swing a grain moves 1.26 cells per
+   step, so it goes on 1.57 cells per step one way and comes back at 0.94 cells per step. The net motion shows where
+   the mean flow of the model runs.
+3. **The swing is in the picture alone.** It has one period and one phase in the whole network, and the model holds
+   neither. The organism has waves: its tubes do not swing in step. The help of the switch says that the model holds
+   only the mean flow.
+4. **A swing alone, without a net motion, is not built**: the grains would then not show where the mean flow runs,
+   which the amendment above built. It is the same code with `STREAM_REACH` 0.
+
+### Consequences
+
+- The grains of every scene with the flow go back and forth. At 60 steps per second that is one swing per second.
+- No pass and no texture is new: the uniform block of the view holds the phase of the swing in a slot that was free.
+- Tests, on both backends: in a drawn frame the grains go 11 pixels on from step 4 to step 6, and 11 pixels back
+  from step 22 to step 26 (`tubes.gpu.test.ts`); a frame with grains matches the CPU copy of the styles within 3 of
+  255 at three steps of the swing (`sim.gpu.test.ts`). Nine wrong rules
+  of the swing, one at a time, each failed at least one of these tests: the swing the other way round in each shader,
+  a swing of 8 cells in each shader, a swing of one copy of the pattern only, no swing, 20 cells on in a period, a
+  swing in 30 steps, and the two phases in the slot of each other.
