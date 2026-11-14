@@ -384,8 +384,8 @@ export class Renderer {
     // draws the same pixels.
     const variant = sim.hasEnvironment ? 1 : 0;
     const enc = this.device.createCommandEncoder();
-    // The gel style samples its height field five times per pixel: once per frame at grid
-    // resolution here, instead of five full trail filters per pixel.
+    // The gel style samples its height field nine times per pixel: once per frame at grid
+    // resolution here, instead of nine full trail filters per pixel.
     if (f.settings.style === 'gel') {
       const pre = enc.beginRenderPass({ colorAttachments: [{ view: heights, loadOp: 'clear', storeOp: 'store' }] });
       pre.setPipeline(this.heightPipelines[variant]);

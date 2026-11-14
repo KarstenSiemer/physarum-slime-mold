@@ -4,7 +4,8 @@
 // passes, once for each drawn state. It writes one line per scene, backend and setting of the switch to
 // research/flow/out/engine/<name>.jsonl. Environment variables: VITE_KINDS, VITE_SCENES (lists), VITE_WARM (steps
 // before the measurement), VITE_BATCH (frames per sample), VITE_BATCHES, VITE_NAME, VITE_STRAINS (the scene with this
-// many strains like its first one), VITE_PATCH (settings as JSON, on top of the scene's).
+// many strains like its first one), VITE_PATCH (settings as JSON, on top of the scene's), VITE_SIZE (the pixels of the
+// canvas, width and height).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
@@ -23,14 +24,15 @@ const BATCHES = Number(env.VITE_BATCHES ?? 21);
 const NAME = env.VITE_NAME ?? 'picture';
 const STRAINS = Number(env.VITE_STRAINS ?? 0);
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Record<string, unknown>;
+const [WIDTH = 1280, HEIGHT = 800] = (env.VITE_SIZE ?? '').split(',').filter(Boolean).map(Number);
 
 it('measures the time of a frame with and without the picture of the tubes', async () => {
   const rows: string[] = [];
   for (const kind of KINDS)
     for (const scene of SCENES) {
       const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 800;
+      canvas.width = WIDTH;
+      canvas.height = HEIGHT;
       const backend: Backend = kind === 'webgpu' ? await WebGpuBackend.create(canvas) : WebGl2Backend.create(canvas);
       const preset = presetById(scene);
       if (!preset) throw new Error(`no scene ${scene}`);

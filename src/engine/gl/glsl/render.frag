@@ -131,7 +131,11 @@ float heightFiltered(vec2 p) {
                  heightAt(p + vec2(o, o)));
 }
 
-float height(vec2 p) { return 1.0 - exp(-max(heightFiltered(p), 0.0)); }
+// How thick the gel is where the height field holds y (see thick in render.wgsl).
+float thick(float y) {
+  float h = max(y, 0.0);
+  return h / (1.0 + 0.25 * h);
+}
 
 // A flake of food (see flakeAt in render.wgsl).
 struct Flake {
@@ -142,24 +146,35 @@ struct Flake {
 };
 
 const float GEL_CLEAR = 0.6; // how much of a flake of food shows through the gel style's trail
+const float GEL_HIGH = 4.0;  // cells of height for one unit of the gel's thickness
+const float GEL_PALE = 0.35; // how much white the colour of the thinnest gel holds
+const float GEL_FILM = 0.5;  // how much of the ground the thinnest gel hides
 
-// Over a flake of food the gel takes in its colour (see gel in render.wgsl).
+// A gel with a wet surface (see gel in render.wgsl). Over a flake of food the gel takes in its colour.
 vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
-  float d = max(V.scale, 0.75);
-  float h = height(p);
-  float gx = height(p + vec2(d, 0.0)) - height(p - vec2(d, 0.0));
-  float gy = height(p + vec2(0.0, d)) - height(p - vec2(0.0, d));
-  vec3 n = normalize(vec3(-gx, -gy, 0.35 * d));
+  float a = 1.25 * max(V.scale, 1.0);
+  float b = 0.5 * max(V.scale, 1.0);
+  vec2 east = vec2(thick(heightFiltered(p + vec2(a, b))), thick(heightFiltered(p + vec2(a, -b))));
+  vec2 west = vec2(thick(heightFiltered(p + vec2(-a, b))), thick(heightFiltered(p + vec2(-a, -b))));
+  vec2 south = vec2(thick(heightFiltered(p + vec2(b, a))), thick(heightFiltered(p + vec2(-b, a))));
+  vec2 north = vec2(thick(heightFiltered(p + vec2(b, -a))), thick(heightFiltered(p + vec2(-b, -a))));
+  vec2 rise = vec2(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
+  vec3 n = normalize(vec3(-GEL_HIGH * rise, 1.0));
   vec3 l = normalize(vec3(-0.45, -0.6, 0.65));
-  float diffuse = max(dot(n, l), 0.0);
-  float spec = pow(max(dot(n, normalize(l + vec3(0.0, 0.0, 1.0))), 0.0), 48.0);
+  float diffuse = clamp((dot(n, l) + 0.35) / 1.35, 0.0, 1.0);
+  float shine = max(dot(n, normalize(l + vec3(0.0, 0.0, 1.0))), 0.0);
+  float spec = 0.9 * pow(shine, 120.0) + 0.1 * pow(shine, 14.0);
   float total = v.x + v.y + v.z + v.w;
   vec3 albedo = total > 1e-6 ? tint(v) / total : V.colors[0].rgb;
 #if ENV
   if (f.cover > 0.0) albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover);
 #endif
-  vec3 lit = albedo * (0.25 + 0.9 * diffuse) + 0.6 * spec * h;
-  return mix(base, lit, smoothstep(0.02, 0.35, h));
+  float here = heightFiltered(p);
+  vec2 around = max(max(east, west), max(south, north));
+  float full = smoothstep(0.12, 0.85, max(thick(here), max(around.x, around.y)));
+  vec3 lit = mix(albedo, vec3(1.0), GEL_PALE * (1.0 - full)) * (0.3 + 0.8 * diffuse);
+  float body = smoothstep(0.02, 0.14, here);
+  return mix(base, lit, body * mix(GEL_FILM, 1.0, full)) + spec * body;
 }
 
 // Agents in the cell, per strain; in collision mode also those that stayed put (see render.wgsl).

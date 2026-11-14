@@ -237,8 +237,8 @@ the arrows.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed
   (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009).
 - Bloom: thresholded, normalised mip chain on a half-resolution `rgba16float` target.
-- Gel relief style: trail as a height field, normals from finite differences, wet specular
-  highlight; yellow plasmodium on dark agar.
+- Gel relief style: the trail as a wet gel on dark agar. A thick tube is higher than a thin one, has the full colour
+  of its strain and hides the ground. Thin gel is pale and clear (ADR 0009, amendment 2026-11-14).
 - Paper style: dark trails on white, like the figures in Jones 2010.
 - Food and walls (ADR 0009): outlines rebuilt from distances with a smooth spline, one pixel of
   anti-aliasing at any zoom, every cell centre on the side of the outline that `env` holds. Food

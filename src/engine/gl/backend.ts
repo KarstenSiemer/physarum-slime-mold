@@ -318,8 +318,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     const variant = sim.hasEnvironment ? 1 : 0;
     // A sampler that the program never reads still needs a texture: the counts stand in for the occupancy.
     const cells = { trail, shape: sim.shapeTexture, occ: occ ?? sim.countsTexture };
-    // The gel style samples its height field five times per pixel: once per frame at grid
-    // resolution here, instead of five full trail filters per pixel.
+    // The gel style samples its height field nine times per pixel: once per frame at grid
+    // resolution here, instead of nine full trail filters per pixel.
     if (s.style === 'gel') {
       const h = this.prog.height[variant];
       gl.bindFramebuffer(gl.FRAMEBUFFER, heights.fbo);
