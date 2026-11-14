@@ -200,7 +200,7 @@ periodic grid over all its cells.
 | Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                                                    |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
 | Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
-| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush                                |
+| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush; straight lines (Shift)        |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                                                    |
@@ -217,7 +217,13 @@ lives (ADR 0023), and no tool runs any beside a closed arena, where it reaches n
 periodic grid the tools act on the cells under the pointer, also on a copy of the grid and across
 its edges (ADR 0026).
 
-Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn.
+With Shift held, the brush tools Food, Light, Wall and Erase draw straight lines (ADR 0035): a click sets the start,
+and the next click paints the line from it as one stroke, as wide as the brush. The end of a line is the start of the
+next while Shift is held. A preview over the canvas shows the line until the second click. Escape, letting go of
+Shift, a click without Shift or another tool ends a start that waits. The agent tools ignore Shift.
+
+Keyboard: Space pause, `.` step, R reset, 1–7 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn,
+Shift and two clicks a straight line, Escape ends it.
 A key is a shortcut unless the focused element uses it: a field takes every key, a button Space and Enter, a slider
 the arrows.
 

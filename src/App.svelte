@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { at } from './engine/at';
   import { Engine } from './engine/engine';
   import { MIN_RADIUS } from './engine/environment';
@@ -31,7 +31,7 @@
     type Tool,
   } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
-  import { BrushDrag } from './ui/drag';
+  import { BrushDrag, StraightLine } from './ui/drag';
   import { GridTuner } from './ui/tune';
 
   let canvas: HTMLCanvasElement;
@@ -192,6 +192,13 @@
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- pointer bookkeeping, never rendered
   const pointers = new Map<number, [number, number]>();
   const drag = new BrushDrag();
+  const line = new StraightLine();
+  /** The press began with Shift: it set or ended a straight line, and its drag paints nothing (ADR 0035). */
+  let straightPress = false;
+  /** The pointer over the canvas, also without a press: the end of the preview of a straight line. */
+  let hover: [number, number] | undefined;
+  /** The preview of a straight line in CSS pixels, as wide as the brush; the UI draws it over the canvas. */
+  let preview = $state<{ from: [number, number]; to: [number, number]; width: number } | undefined>();
   let held: [number, number] | undefined;
   /** The notice that no dead agents are left came during this press of the inoculate tool. */
   let toldNoDead = false;
@@ -217,6 +224,25 @@
     if (painting(app.tool)) drag.to(e, p, app.tool, Math.max(MIN_RADIUS, brushCells(e)));
   }
 
+  /** The line from the waiting start to the pointer, or to the start itself while the pointer is off the canvas. */
+  function showPreview(e: Engine | undefined) {
+    const start = e && painting(app.tool) ? line.startOn(e) : undefined;
+    if (!e || !start) {
+      preview = undefined;
+      return;
+    }
+    const k = canvas.width / canvas.clientWidth;
+    const [x, y] = e.toCanvas(...start);
+    const [hx, hy] = hover ?? [x, y];
+    const width = (2 * Math.max(MIN_RADIUS, brushCells(e))) / e.view.scale / k;
+    preview = { from: [x / k, y / k], to: [hx / k, hy / k], width };
+  }
+
+  function endLine() {
+    line.end();
+    showPreview(getEngine());
+  }
+
   function onpointerdown(ev: PointerEvent) {
     const e = getEngine();
     if (!e) return;
@@ -231,6 +257,13 @@
     }
     if (ev.button !== 0 || app.tool === 'pan') return;
     drag.end();
+    if (ev.shiftKey && painting(app.tool)) {
+      straightPress = true;
+      line.click(e, p, app.tool, Math.max(MIN_RADIUS, brushCells(e)));
+      showPreview(e);
+      return;
+    }
+    endLine();
     paintTo(e, p);
     if (app.tool === 'inoculate' || app.tool === 'cut') held = p;
     toldNoDead = false;
@@ -239,8 +272,9 @@
   function onpointermove(ev: PointerEvent) {
     const e = getEngine();
     const prev = pointers.get(ev.pointerId);
-    if (!e || !prev) return;
     const p = pos(ev);
+    if (pointers.size <= 1) hover = p;
+    if (!e || !prev) return;
     pointers.set(ev.pointerId, p);
     if (pointers.size === 2) {
       const [a, b] = twoPointers();
@@ -250,7 +284,7 @@
       pinch = d;
     } else if (app.tool === 'pan' || (ev.buttons & 4) !== 0) {
       e.panBy(p[0] - prev[0], p[1] - prev[1]);
-    } else {
+    } else if (!straightPress) {
       paintTo(e, p);
     }
     // Also while another tool is selected: a key can select the held tool again before the pointer goes up.
@@ -260,8 +294,20 @@
   function onpointerup(ev: PointerEvent) {
     pointers.delete(ev.pointerId);
     drag.end();
+    straightPress = false;
     held = undefined;
   }
+
+  function onpointerleave() {
+    hover = undefined;
+  }
+
+  // A straight line belongs to one tool: another tool ends its start (ADR 0035).
+  // The effect reads only the tool: the preview also reads the brush, and a new brush size keeps the start.
+  $effect(() => {
+    const _tool = app.tool;
+    untrack(endLine);
+  });
 
   function onwheel(ev: WheelEvent) {
     ev.preventDefault();
@@ -274,6 +320,8 @@
     let raf = 0;
     const tick = () => {
       const e = getEngine();
+      // The view moves by the wheel, a pinch, the F key or a new grid: the preview follows it in every frame.
+      if (line.waiting || preview) showPreview(e);
       if (e && held && (app.tool === 'cut' || app.tool === 'inoculate')) {
         const [x, y] = e.toGrid(...held);
         const radius = brushCells(e);
@@ -320,6 +368,7 @@
     if (ev.metaKey || ev.ctrlKey || ev.altKey || keyUsed(ev.target as HTMLElement, ev.key)) return;
     const tool = toolsFor(app.settings.model).find((x) => x.key === ev.key);
     if (tool) app.tool = tool.id;
+    else if (ev.key === 'Escape' && line.waiting) endLine();
     else if (ev.key === ' ') app.paused = !app.paused;
     else if (ev.key === '.') {
       app.paused = true;
@@ -335,10 +384,15 @@
     ev.preventDefault();
   }
 
+  // Without Shift no straight line waits. The page can lose the key going up when it loses the focus.
+  function onkeyup(ev: KeyboardEvent) {
+    if (ev.key === 'Shift') endLine();
+  }
+
   const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)} k` : `${n}`);
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} {onkeyup} onblur={endLine} />
 
 <main
   class="app"
@@ -356,8 +410,31 @@
     {onpointermove}
     {onpointerup}
     onpointercancel={onpointerup}
+    {onpointerleave}
     {onwheel}
   ></canvas>
+
+  {#if preview}
+    <!-- A dark rim around a light band: it shows over the dark styles and over the white paper style. -->
+    <svg class="line-preview" aria-hidden="true">
+      <line
+        class="rim"
+        x1={preview.from[0]}
+        y1={preview.from[1]}
+        x2={preview.to[0]}
+        y2={preview.to[1]}
+        stroke-width={preview.width + 3}
+      />
+      <line
+        class="band"
+        x1={preview.from[0]}
+        y1={preview.from[1]}
+        x2={preview.to[0]}
+        y2={preview.to[1]}
+        stroke-width={preview.width}
+      />
+    </svg>
+  {/if}
 
   <!-- One column, so the scene name never covers a notice: header, scene name, notice. -->
   <div class="top ui" bind:clientHeight={topHeight}>
@@ -425,6 +502,22 @@
   }
   canvas.tool-pan {
     cursor: grab;
+  }
+  .line-preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .line-preview line {
+    stroke-linecap: round;
+  }
+  .line-preview .rim {
+    stroke: rgba(0, 0, 0, 0.55);
+  }
+  .line-preview .band {
+    stroke: rgba(255, 255, 255, 0.4);
   }
   canvas.tool-pan:active {
     cursor: grabbing;
