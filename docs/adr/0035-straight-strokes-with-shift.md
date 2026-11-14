@@ -1,6 +1,6 @@
 # 0035: Straight strokes with Shift
 
-- Status: accepted (owner decisions, 2026-11-14), not built yet (`TODO.md`)
+- Status: accepted (owner decisions, 2026-11-14), built 2026-11-14 (the amendment below)
 - Date: 2026-11-14
 
 ## Context
@@ -44,3 +44,42 @@ needs no new rule of the simulation: it is one stroke.
 - The preview is drawn by the UI over the canvas. No byte of a simulation changes, and the simulation never reads it.
 - Tests to add when it is built: an e2e test that Shift, a click and a second click paint a straight wall that the
   edit list holds as one stroke, for each brush tool; a test that the agent tools ignore Shift.
+
+## Amendment 2026-11-14: built, and the open points of decision 5
+
+The owner asked to work on without him on 2026-11-14 at night. So I chose the open points of decision 5 under the
+delegation of 2026-11-12, each with its reason.
+
+1. **A line ends where the next one starts.** While Shift is held, the end of a line is the start of the next one, so
+   clicks in a row draw a line with corners, such as the walls of a maze. A single straight line needs no more clicks
+   than before: let go of Shift after the second click. On the same grid the next line starts exactly at the end of
+   the last one, with the same radius if the brush did not change. So painted food in a row of clicks is one
+   connected food. If decision 17 of ADR 0029 is built, it is one food site, because that decision joins a food
+   stroke to the last one when it starts at its end.
+2. **What ends a start that waits:** Escape, letting go of Shift, a click without Shift, another tool, and the page
+   losing the focus. The line exists only while Shift is held, so letting go of Shift is the plain way to stop. A page
+   that loses the focus can miss the key going up, and a start the user cannot see would then wait for a later click.
+3. **The start is a point of the scene.** It stays where it was clicked when the view moves or zooms between the
+   clicks. It is kept in cells of the grid on screen with that grid (`StraightLine` in `src/ui/drag.ts`). When the
+   startup check builds a new grid between the clicks, the canonical frame of the arena takes the start there, as it
+   takes an edit (`toFrame()` and `fromFrame()` in `src/engine/environment.ts`).
+4. **A press with Shift paints nothing while it drags.** The press set or ended a line. Without this, letting go of
+   Shift before the button would paint a freehand drag from where the pointer is.
+5. **The preview** is a band as wide as the brush from the start to the pointer: a light band with a dark rim, the same
+   in every style. The light band shows on the dark styles (glow, gel, agents), and the dark rim on the white paper
+   style. The UI draws it as an SVG over the canvas, so no byte of the simulation changes. While the pointer is off the
+   canvas, the preview is a dot at the start. It follows the view in every frame, so a zoom between the clicks moves
+   it with the scene.
+6. **A touch screen without a keyboard has no straight lines.** The owner asked for Shift. A button for touch would be
+   a control nobody asked for. A tablet with a keyboard has Shift.
+7. **The engine gets two read-only parts:** `Engine.toCanvas()`, the inverse of `toGrid()`, for the preview, and
+   `Engine.gridOnScreen`, the grid whose cells `toGrid()` gives.
+
+Consequences:
+
+- With Shift held, the keys 1 to 7 and `[` `]` give other characters on the common keyboard layouts (`!` for 1 on a US
+  and on a German layout), so they switch no tool and change no brush size then. The toolbar and the slider still do.
+- Tests: `src/ui/drag.test.ts` (the first click paints nothing, the second one stroke, a row of clicks joins, `end()`,
+  no grid on screen, a new grid in each arena); in `tests/e2e/ui.spec.ts` one stroke per brush tool with its preview,
+  a straight erase that removes a straight wall, a row of clicks with Escape, Shift let go and another tool, and Cut
+  with Shift held.

@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { decodeLink } from '../../src/model/url';
 import { openSmallScene, smallScene, watchErrors } from './helpers';
 
@@ -220,6 +220,175 @@ test('a slow drag records a segment only once the pointer moved half a brush rad
     );
   // 24 moves of one pixel, half a radius about 9 pixels: a dab and two strokes, not 25.
   expect(strokes.length).toBeLessThan(8);
+});
+
+/** Records every stroke the page paints, in the cells of the grid on screen, before the engine snaps it. */
+async function spyStrokes(page: Page) {
+  await page.evaluate(() => {
+    const e = globalThis.physarum;
+    if (!e) throw new Error('no engine');
+    const paint = e.paint.bind(e);
+    const g = globalThis as unknown as { strokes: Parameters<typeof paint>[0][] };
+    g.strokes = [];
+    e.paint = (s) => {
+      g.strokes.push(s);
+      paint(s);
+    };
+  });
+  return () =>
+    page.evaluate(
+      () => (globalThis as unknown as { strokes: { kind: string; from: number[]; to: number[] }[] }).strokes,
+    );
+}
+
+/** The grid position under a point of the page, as the canvas maps it (App.svelte pos() and Engine.toGrid()). */
+const gridAt = (page: Page, [x, y]: [number, number]) =>
+  page.evaluate(
+    ([x, y]) => {
+      const e = globalThis.physarum;
+      const c = document.querySelector('canvas');
+      if (!e || !c) throw new Error('no engine');
+      const r = c.getBoundingClientRect();
+      const k = c.width / r.width;
+      return e.toGrid((x - r.left) * k, (y - r.top) * k);
+    },
+    [x, y] as const,
+  );
+
+const near = (a: number[] | undefined, b: number[]) => {
+  expect(a?.[0]).toBeCloseTo(b[0] ?? NaN, 6);
+  expect(a?.[1]).toBeCloseTo(b[1] ?? NaN, 6);
+};
+
+// ADR 0035: with Shift, a click sets the start and the next click paints the line from it as one stroke.
+for (const tool of ['Food', 'Light', 'Wall', 'Erase'] as const)
+  test(`Shift and two clicks paint a straight line with ${tool} as one stroke`, async ({ page }) => {
+    // Paused, a frame only draws: on SwiftShader in CI a pointer move can wait for a frame.
+    await page.getByRole('button', { name: 'Pause' }).click();
+    await page.getByRole('radio', { name: tool }).click();
+    const strokes = await spyStrokes(page);
+    const box = await page.locator('canvas').boundingBox();
+    if (!box) throw new Error('no canvas');
+    const a: [number, number] = [box.x + box.width * 0.3, box.y + box.height * 0.4];
+    const b: [number, number] = [box.x + box.width * 0.6, box.y + box.height * 0.55];
+    const before = await page.evaluate(() => globalThis.physarum?.envList().length ?? -1);
+    await page.keyboard.down('Shift');
+    await page.mouse.click(...a);
+    expect(await strokes()).toEqual([]);
+    // Until the pointer moves, the preview is a dot at the start: a line of length 0, which Playwright calls hidden.
+    const preview = page.locator('.line-preview .band');
+    await expect(preview).toHaveCount(1);
+    // The preview runs from the start to the pointer, and its drag paints nothing.
+    await page.mouse.move(...b, { steps: 4 });
+    const canvasBox = await page.locator('.line-preview').boundingBox();
+    if (!canvasBox) throw new Error('no preview');
+    expect(Number(await preview.getAttribute('x2')) + canvasBox.x).toBeCloseTo(b[0], 0);
+    expect(Number(await preview.getAttribute('y2')) + canvasBox.y).toBeCloseTo(b[1], 0);
+    expect(await strokes()).toEqual([]);
+    await page.mouse.click(...b);
+    await page.keyboard.up('Shift');
+    await expect(page.locator('.line-preview')).toHaveCount(0);
+    const list = await strokes();
+    expect(list).toHaveLength(1);
+    expect(list[0]?.kind).toBe(tool.toLowerCase());
+    near(list[0]?.from, await gridAt(page, a));
+    near(list[0]?.to, await gridAt(page, b));
+    // The sweep deletes an erase that clears nothing (Engine.paint()): only the others stay in the edit list.
+    if (tool !== 'Erase') expect(await page.evaluate(() => globalThis.physarum?.envList().length)).toBe(before + 1);
+  });
+
+test('a straight erase along a straight wall removes the wall', async ({ page }) => {
+  await page.getByRole('button', { name: 'Pause' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  const a: [number, number] = [box.x + box.width * 0.3, box.y + box.height * 0.5];
+  const b: [number, number] = [box.x + box.width * 0.6, box.y + box.height * 0.5];
+  const walls = () =>
+    page.evaluate(async () => {
+      const env = await globalThis.physarum?.sim.readEnv();
+      if (!env) throw new Error('no engine');
+      let n = 0;
+      for (let i = 0; i < env.length; i += 4) if ((env[i] ?? 0) > 0) n++;
+      return n;
+    });
+  for (const tool of ['Wall', 'Erase']) {
+    await page.getByRole('radio', { name: tool }).click();
+    await page.keyboard.down('Shift');
+    await page.mouse.click(...a);
+    await page.mouse.click(...b);
+    await page.keyboard.up('Shift');
+    // A frame paints what the clicks recorded.
+    if (tool === 'Wall') await expect.poll(walls, { timeout: 60_000 }).toBeGreaterThan(50);
+  }
+  await expect.poll(walls, { timeout: 60_000 }).toBe(0);
+});
+
+test('clicks in a row with Shift draw a line with corners, and Escape or letting go of Shift ends it', async ({
+  page,
+}) => {
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await page.getByRole('radio', { name: 'Wall' }).click();
+  const strokes = await spyStrokes(page);
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  const at = (u: number, v: number): [number, number] => [box.x + box.width * u, box.y + box.height * v];
+  await page.keyboard.down('Shift');
+  for (const p of [at(0.3, 0.3), at(0.6, 0.3), at(0.6, 0.6)]) await page.mouse.click(...p);
+  let list = await strokes();
+  expect(list).toHaveLength(2);
+  // The second line starts exactly where the first one ends, so the edits join.
+  expect(list[1]?.from).toEqual(list[0]?.to);
+  // Escape: the next press only sets a start, and its drag paints nothing.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.line-preview')).toHaveCount(0);
+  await page.mouse.move(...at(0.4, 0.7));
+  await page.mouse.down();
+  await page.mouse.move(...at(0.5, 0.8), { steps: 5 });
+  await page.mouse.up();
+  expect(await strokes()).toHaveLength(2);
+  await expect(page.locator('.line-preview')).toHaveCount(1);
+  // Letting go of Shift ends the start too, and a click without Shift paints a dab at once.
+  await page.keyboard.up('Shift');
+  await expect(page.locator('.line-preview')).toHaveCount(0);
+  await page.mouse.click(...at(0.7, 0.7));
+  list = await strokes();
+  expect(list).toHaveLength(3);
+  expect(list[2]?.from).toEqual(list[2]?.to);
+  // Another tool ends a start as well.
+  await page.keyboard.down('Shift');
+  await page.mouse.click(...at(0.2, 0.2));
+  await expect(page.locator('.line-preview')).toHaveCount(1);
+  await page.getByRole('radio', { name: 'Food' }).click();
+  await expect(page.locator('.line-preview')).toHaveCount(0);
+  await page.keyboard.up('Shift');
+});
+
+test('the agent tools ignore Shift: a held Cut acts at once and paints nothing', async ({ page }) => {
+  await page.evaluate(() => {
+    const e = globalThis.physarum;
+    if (!e) throw new Error('no engine');
+    const agentTool = e.agentTool.bind(e);
+    const g = globalThis as unknown as { held: number };
+    g.held = 0;
+    e.agentTool = (t) => {
+      g.held++;
+      agentTool(t);
+    };
+  });
+  const strokes = await spyStrokes(page);
+  await page.getByRole('radio', { name: 'Cut' }).click();
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  await page.keyboard.down('Shift');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await expect
+    .poll(() => page.evaluate(() => (globalThis as unknown as { held: number }).held), { timeout: 60_000 })
+    .toBeGreaterThan(2);
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  expect(await strokes()).toEqual([]);
+  await expect(page.locator('.line-preview')).toHaveCount(0);
 });
 
 // Paused, a frame draws only what is new (ADR 0028): the stats then give no rate of frames or steps, which would read

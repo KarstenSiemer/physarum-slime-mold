@@ -78,6 +78,9 @@ with `?backend=webgl2`.
 Space play/pause · `.` single step · R reset · 1–7 tools · `[` `]` brush size · F fit view ·
 S scent view · H hide panels · L learn
 
+Shift and two clicks paint a straight line with Food, Light, Wall or Erase. While Shift is held, each further click
+adds a line from the last end. Escape or letting go of Shift stops the line.
+
 ## Development
 
 Requires Node 26 and npm 11.10 or later. Dependencies install without lifecycle scripts and
