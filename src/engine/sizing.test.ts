@@ -12,6 +12,7 @@ import {
   flowBytesPerCell,
   gridSize,
   memoryBudget,
+  tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
   type Limits,
@@ -132,5 +133,16 @@ describe('the flow in the tubes', () => {
     expect(flowBytesPerCell({ ...on, strains: strains(4) })).toBe(320);
     expect(flowBytesPerCell({ ...on, flow: false, strains: strains(3) })).toBe(0);
     expect(flowBytesPerCell({ ...on, model: 'jones', strains: strains(1) })).toBe(0);
+  });
+
+  // ADR 0034: the picture of the tubes has two textures of 16 B per cell. Its switch changes only the view, so the
+  // memory counts them with the flow, whatever the switch says: the switch must not change the grid that fits.
+  it('counts the picture of the tubes while the flow is on, with its switch on or off', () => {
+    const on = { ...defaultSettings(), model: 'extended' as const, flow: true };
+    expect(tubesBytesPerCell(on)).toBe(32);
+    const off = { ...on, showTubes: false };
+    expect(tubesBytesPerCell(off)).toBe(32);
+    expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
+    expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
   });
 });

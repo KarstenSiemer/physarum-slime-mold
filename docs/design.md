@@ -114,6 +114,7 @@ strains (one `vec4` lane each).
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
 | view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 | flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
+| tubes (with flow)  | `rgba32float` textures: radius factors, picture  | 32 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -254,6 +255,22 @@ the arrows.
   the scale, what the line means and what the scene holds. Zoomed out the view reads a coarser map of the scent, filled again only when the scent changed. It changes
   nothing in the simulation, goes into the link like the style, stays on when a scene loads, and without it the
   render pass draws the pixels of before at the same cost.
+- Picture of the tubes (ADR 0034): while the flow in the tubes is on, the view draws every tube as wide and as bright
+  as its flow memory says, with a switch below the flow strength that is on at the start. Two passes run once for each
+  drawn state (`shaders/tubes.wgsl`, `gl/glsl/tubes.frag`; the rule and its numbers in `src/engine/tubes.ts`, a CPU
+  copy in `tubes-reference.ts`). The first writes, per cell and strain, the fourth root of the strength across the
+  tube: on a cell with a tube the sum of tube body times flow memory over the 3 × 3 cells around the cell, over 3, at
+  most 1, and 0 on a cell without a tube and on a cell of a wall. A wall cell adds nothing to the sum, and neither
+  does a cell at a corner with a wall cell on both sides of that corner. The second draws every cell with a tube as a disc of 3.5 cells times that
+  factor, with an edge 1 cell wide, so a tube is at most 3 cells wider on each side than its band of cells. A cell of
+  the picture takes the largest weight (factor times cover) of the discs that reach it, times the mean of the trails
+  of their cells by weight, and at least a quarter of its own trail. A disc reaches another cell only if neither is a
+  cell of a wall and no cell of a wall lies on the line between the two cells (`shape` says which cells are walls),
+  so no tube is drawn across a wall. The render pass, the height field, the
+  glow, the auto levels, the coarse map of the trail and PNG read the picture in place of the trail; the strand of
+  the scent view stays a level of the trail of the model; the agents style has no picture of the tubes. The fit of the
+  grid to the memory of the GPU counts the two textures while the flow is on, with the switch on or off, so the
+  switch never changes the grid. The simulation never reads the picture.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.

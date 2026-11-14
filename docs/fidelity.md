@@ -99,6 +99,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   [V]. Near a new food the tubes dilate up to twofold (Kramar and Alim 2021) [H].
 - **Model**: the thickness of a tube is the number of agents across it, not a radius. Dead agents come to life on a tube
   of their own strain where the flow memory of their strain is above 0.5 (ADR 0029, decision 8; ADR 0031, decision 2).
+  The view can draw a radius: the picture of the tubes draws a disc on every cell of a tube, with a radius that grows
+  with the fourth root of its conductivity, as Poiseuille's law gives it (ADR 0034). That changes the picture only.
 - **Measured**: a stronger flow gives a wider tube in the Maze: about 2,060 agents at a strength of 4 and about 9,600
   at 16 (2 seeds each, ADR 0029). The width of a tube against its own flux is not measured. The competition of two
   routes is not measured in the app; the prototype tested it only on Tero's ring (ADR 0029, prototype).
@@ -263,10 +265,10 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   mm). The Maze, the Foraging maze and the scenes of Jones have no length, and the scenes of Jones have no time.
 - The growth of Jones 2011 has no speed to set: on the Tokyo scene the colony reaches the foods about ten times as fast
   as the organism, and its network stands after 7 to 13 h of model time against 26 h (row 6).
-- The thickness of a tube is a count of agents, not a radius. The flux runs on the grid cells, not on a graph of tubes,
-  and all foods that a strain covers give or take at once, in the flow of that strain, where Tero et al. 2010 draw one
-  pair per step. So the flow is this app's rule, built from Tero's model, and its strength has this app's unit
-  (ADR 0029, Consequences).
+- The thickness of a tube is a count of agents, not a radius; the radius in the picture of the tubes is a drawing of
+  the flow memory (ADR 0034). The flux runs on the grid cells, not on a graph of tubes, and all foods that a strain
+  covers give or take at once, in the flow of that strain, where Tero et al. 2010 draw one pair per step. So the flow
+  is this app's rule, built from Tero's model, and its strength has this app's unit (ADR 0029, Consequences).
 - The local pressure solver is off the exact flux: 3 to 7 % per cell in a settled network, 9 to 25 % after a new draw
   of roles, and far off while the colony grows fast (ADR 0029, decision 6).
 - The front of the growth is not a fan of fine veins (row 6).

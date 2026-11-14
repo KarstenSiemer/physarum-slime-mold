@@ -834,8 +834,8 @@ not help it: on the fixed network it had not carried the flux to the sink after 
     - Node runs the TypeScript files through `research/flow/register.mjs`, with the TypeScript
       compiler that the repository has. Rejected: a build step or a new package.
     - The logs are in the repository as one archive, `research/flow/logs.tar.gz` (owner,
-      2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0031, 157 since ADR 0032).
-      `research/flow/logs.ts` unpacks it to
+      2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0031, 157 since
+      ADR 0032, 160 since ADR 0034). `research/flow/logs.ts` unpacks it to
       `research/flow/logs/`, which git ignores; a path `research/flow/logs/…` in this record is a
       path in that folder. Reason for the logs: the tables come from them in a second
       (`summary.ts`), and the runs behind them take hours. Reason for the archive: the first form
@@ -886,7 +886,9 @@ from the code before the review: the control without the growth gate (decision 9
 Pictures from the app's own renderer (`npm run gallery`, seed 7): `docs/images/maze-flow.jpg` is
 the Maze at step 5,000 without and with the flow, `docs/images/tokyo-flow.jpg` the Tokyo scene at
 step 12,000 without and with the flow, and `docs/images/tokyo-time.jpg` the Tokyo scene at step
-1,000 and at step 48,000.
+1,000 and at step 48,000. They were made again on 2026-11-13 with the picture of the tubes
+(ADR 0034), which draws every tube as wide as its flow memory says: `tests/pictures/readme.spec.ts`
+makes the three files.
 
 ### The Maze (flux 8)
 

@@ -146,6 +146,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     // An export shows the scent view as asked: wait for its programs, unless the context is lost.
     while (settings.showScent && !this.fixed && !this.prog.scent() && !gl.isContextLost())
       await new Promise((r) => setTimeout(r, 2));
+    // A rebuild can destroy the simulation during that wait. Then nothing is left to draw, and the engine asks
+    // again for the new one (Engine.ofRun()).
+    if (sim.destroyed) return new ImageData(width, height);
     const t = target(gl, width, height, gl.RGBA8);
     this.encode(sim, settings, view, width, height, t, levels);
     const pixels = new Uint8ClampedArray(width * height * 4);
@@ -216,6 +219,8 @@ export class WebGl2Backend implements Backend<GlSim> {
    */
   private async read(sim: GlSim): Promise<Levels | undefined> {
     while (this.measuring) await this.measuring;
+    // A rebuild can destroy the simulation while this waits: then nothing asks it for its targets.
+    if (sim.destroyed) return undefined;
     const run = this.sample(sim);
     this.measuring = run
       .then(
@@ -226,6 +231,11 @@ export class WebGl2Backend implements Backend<GlSim> {
     return run;
   }
 
+  /**
+   * The black level and the gain from the trail that the frame draws, and the strand from the trail of the model:
+   * the frame draws another trail while it shows the picture of the tubes (ADR 0034). Both sets of samples are
+   * drawn before any wait: a target may be freed while the readback is on its way.
+   */
   private async sample(sim: GlSim): Promise<Levels | undefined> {
     const gl = this.gl;
     const generation = this.generation;
@@ -235,31 +245,40 @@ export class WebGl2Backend implements Backend<GlSim> {
       this.sampleTarget = target(gl, SAMPLES, h, gl.RGBA32F);
     }
     const t = this.sampleTarget;
-    // Before the target is bound: the view's passes (gl/sim.ts viewTargets()) bind their own.
-    const trail = sim.viewTargets().trail.texture;
+    // Before the target is bound: the passes of the view and of the picture (gl/sim.ts) bind their own.
+    const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];
     const p = this.prog.sample;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
-    gl.viewport(0, 0, t.width, t.height);
-    gl.useProgram(p.program);
-    textures(gl, p.program, { trail });
-    gl.uniform2f(p.loc('outSize'), t.width, t.height);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    let px: Float32Array;
+    const read = (trail: WebGLTexture) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.viewport(0, 0, t.width, t.height);
+      gl.useProgram(p.program);
+      textures(gl, p.program, { trail });
+      gl.uniform2f(p.loc('outSize'), t.width, t.height);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // The pixels go to a buffer of their own now, so the next draw into the target does not change them.
+      return readTargetAsync(gl, t);
+    };
+    const reads = drawn === model ? [read(drawn)] : [read(drawn), read(model)];
+    let px: Float32Array[];
     try {
-      px = await readTargetAsync(gl, t);
+      px = await Promise.all(reads);
     } catch {
       return undefined; // context lost: nothing to measure
     }
     if (generation !== this.generation) return undefined;
-    const bins = new Array<number>(BINS).fill(0);
-    for (let i = 0; i < px.length; i += 4) {
-      const v = px[i] ?? 0;
-      if (v <= 0) continue;
-      const b = Math.min(BINS - 1, Math.max(0, Math.floor((Math.log2(v) + 10) * 2)));
-      bins[b] = (bins[b] ?? 0) + 1;
-    }
+    const binsOf = (samples: Float32Array) => {
+      const bins = new Array<number>(BINS).fill(0);
+      for (let i = 0; i < samples.length; i += 4) {
+        const v = samples[i] ?? 0;
+        if (v <= 0) continue;
+        const b = Math.min(BINS - 1, Math.max(0, Math.floor((Math.log2(v) + 10) * 2)));
+        bins[b] = (bins[b] ?? 0) + 1;
+      }
+      return bins;
+    };
+    const bins = binsOf(at(px, 0));
     const l = levels(bins, t.width * t.height);
-    return l && { ...l, strand: strandLevel(bins, t.width * t.height) };
+    return l && { ...l, strand: strandLevel(px[1] ? binsOf(px[1]) : bins, t.width * t.height) };
   }
 
   /**
@@ -278,9 +297,10 @@ export class WebGl2Backend implements Backend<GlSim> {
     const gl = this.gl;
     sim.syncShape();
     // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027), made before any
-    // target is bound: the view's passes (gl/sim.ts viewTargets()) bind their own.
-    const mapped = sim.viewTargets();
-    const [trail, viewScent] = [mapped.trail.texture, mapped.scent.texture];
+    // target is bound: the view's passes (gl/sim.ts viewTargets()) bind their own. The trail is the picture of the tubes
+    // while the settings show it (ADR 0034): every map below is made from the trail that is drawn.
+    const viewScent = sim.viewTargets().scent.texture;
+    const trail = sim.pictureTarget().texture;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
     const l = given ?? this.levels();

@@ -22,9 +22,11 @@ import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlan, viewTrailOn, type Diffuse } from './sizing';
+import { TUBES, tubesShown } from './tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
@@ -42,6 +44,8 @@ const SORT_INTERVAL = 32;
 const SORT_TILE = 8;
 /** Cells per side of a workgroup of the flow passes (flow.wgsl). */
 const FLOW_GROUP = 8;
+/** Cells per side of a workgroup of the passes of the picture of the tubes (tubes.wgsl). */
+const TUBE_GROUP = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -80,6 +84,16 @@ interface FlowState {
   /** Per strain: the uniform block of its passes (flow.ts packFlow()). */
   uniforms: GPUBuffer[];
 }
+/**
+ * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
+ * strain the factor of the radius of its tube, and the trail that the view draws.
+ */
+interface TubeState {
+  roots: GPUTexture;
+  rootsView: GPUTextureView;
+  picture: GPUTexture;
+  pictureView: GPUTextureView;
+}
 /** A trail and a scent texture with their views: the view's pairs (viewTextures). */
 interface ViewPair {
   trail: GPUTexture;
@@ -91,6 +105,8 @@ interface ViewPair {
 /** All simulation state on the GPU for one grid size and agent count (WebGPU). */
 export class Simulation implements Sim {
   step = 0;
+  /** True from destroy() on: the textures and the buffers are gone, and nothing may ask for them. */
+  destroyed = false;
   /**
    * Counts the changes of the trail, the scent and the shape outside steps (reset, strokes, clearing, writes, a new
    * hold of the shape); `step` counts the steps. Together they tell when a picture or a map made from them is old: the
@@ -128,6 +144,9 @@ export class Simulation implements Sim {
   /** The textures that hold the view's map (viewTextures), and whether a change of the state since made it stale. */
   private viewOut?: { trail: GPUTexture; scent: GPUTexture } | undefined;
   private viewStale = true;
+  /** The picture of the tubes (pictureTexture), and whether a change of the state since made it stale. */
+  private tubes?: TubeState | undefined;
+  private tubesStale = true;
   readonly counts: GPUBuffer;
   readonly env: GPUBuffer;
   /** Outline distances, light and the walls' shadow, for the renderer only (paint.wgsl `outline`). */
@@ -350,6 +369,107 @@ export class Simulation implements Sim {
     return this.viewThird;
   }
 
+  /** A change of the state: the view's map and the picture of the tubes are made anew at their next use. */
+  private changed() {
+    this.viewStale = true;
+    this.tubesStale = true;
+  }
+
+  /**
+   * The trail that the picture draws. Without the picture of the tubes that is the view's trail (viewTexture). While
+   * the settings show the tubes (tubes.ts tubesShown()) and the flow holds a state, it is the trail with every tube as
+   * wide and as bright as its flow memory says (tubes.wgsl, ADR 0034). Made once for each state, at the first frame or
+   * readback that draws it. Display only: no pass of the simulation reads it.
+   */
+  get pictureTexture(): GPUTexture {
+    if (!tubesShown(this.settings) || !this.flow) return this.viewTexture;
+    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;
+    return this.tubes.picture;
+  }
+
+  /** The passes of pictureTexture: the factor of the radius of every tube, then the picture. */
+  private encodeTubes(flow: FlowState): TubeState {
+    this.syncShape();
+    // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
+    const trail = this.viewTexture;
+    this.writeParams();
+    const tubes = this.ensureTubes();
+    // The trail of the view: one of the pair, or the view's third.
+    const from = trail === this.trail[0] ? 0 : trail === this.trail[1] ? 1 : 2;
+    const trailView = from === 2 ? this.ensureViewThird().trailView : this.trailViews[from];
+    const k = this.kernels.tubes();
+    const groups = [Math.ceil(this.width / TUBE_GROUP), Math.ceil(this.height / TUBE_GROUP)] as const;
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(k.roots);
+    pass.setBindGroup(
+      0,
+      this.bind(`tubeRoots${this.flowM}`, k.roots, [
+        this.params,
+        null,
+        this.shapeBuffer,
+        flow.memoryArrays[this.flowM],
+        tubes.rootsView,
+      ]),
+    );
+    pass.dispatchWorkgroups(...groups);
+    pass.setPipeline(k.picture);
+    pass.setBindGroup(
+      0,
+      this.bind(`tubePicture${from}`, k.picture, [
+        this.params,
+        trailView,
+        this.shapeBuffer,
+        null,
+        null,
+        tubes.rootsView,
+        tubes.pictureView,
+      ]),
+    );
+    pass.dispatchWorkgroups(...groups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.tubesStale = false;
+    return tubes;
+  }
+
+  /** The textures of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
+  private ensureTubes(): TubeState {
+    if (!this.tubes) {
+      const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
+      const make = () => this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
+      const [roots, picture] = [make(), make()];
+      this.tubes = { roots, rootsView: roots.createView(), picture, pictureView: picture.createView() };
+    }
+    return this.tubes;
+  }
+
+  /** Frees the textures of the picture of the tubes, and every bind group that holds a part of the picture's passes. */
+  private dropTubes() {
+    this.tubes?.roots.destroy();
+    this.tubes?.picture.destroy();
+    this.tubes = undefined;
+    this.forgetTubes();
+  }
+
+  /** Drops the bind groups of the picture's passes: they hold the memory of the flow and the trail of the view. */
+  private forgetTubes() {
+    for (const key of [...this.bindCache.keys()]) if (key.startsWith('tube')) this.bindCache.delete(key);
+    this.tubesStale = true;
+  }
+
+  /** For tests: the trail that the picture draws (pictureTexture), 4 lanes per cell. */
+  readPicture(): Promise<Float32Array> {
+    return readTexture(this.device, this.pictureTexture, 4);
+  }
+
+  /** For tests: the factor of the radius of the tube of every cell and strain, 4 values per cell; empty without it. */
+  async readTubeRoots(): Promise<Float32Array> {
+    if (!tubesShown(this.settings) || !this.flow) return new Float32Array(0);
+    const tubes = this.tubesStale || !this.tubes ? this.encodeTubes(this.flow) : this.tubes;
+    return readTexture(this.device, tubes.roots, 4);
+  }
+
   /** For tests: the trail map that the view draws (viewTexture), 4 lanes per cell. */
   readView(): Promise<Float32Array> {
     return readTexture(this.device, this.viewTextures.trail, 4);
@@ -406,7 +526,7 @@ export class Simulation implements Sim {
     // of the scent (ADR 0027); the step after them changes the step count anyway.
     if (settings.stepOrder === 'move-first' || this.settings.stepOrder === 'move-first') this.revision++;
     this.settings = settings;
-    this.viewStale = true;
+    this.changed();
     if (switchedOn) this.rebuildOccupancy();
     // The memory fit counts the view's third texture only while a step moves first with two passes or more.
     if (!viewTrailOn(settings) && this.viewThird) {
@@ -415,7 +535,11 @@ export class Simulation implements Sim {
       this.viewThird = undefined;
       this.viewOut = undefined;
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
+      this.forgetTubes();
     }
+    // The picture of the tubes holds its textures only while the settings show it (tubes.ts). The memory fit counts
+    // them with the flow, shown or not (sizing.ts tubesBytesPerCell()).
+    if (!tubesShown(settings)) this.dropTubes();
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
     if (!flowOn(settings)) this.dropFlow();
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
@@ -428,7 +552,7 @@ export class Simulation implements Sim {
   }
 
   reset() {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     // The scent textures are cleared below, and without a food or a light no step adds scent.
     this.scentless = !this.sources;
@@ -599,6 +723,7 @@ export class Simulation implements Sim {
     for (const b of this.flow.uniforms) b.destroy();
     this.flow = undefined;
     for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);
+    this.forgetTubes();
   }
 
   /** Whether the state of the flow holds this strain, and the settings hold it too (readFlow(), readPressure()). */
@@ -625,6 +750,9 @@ export class Simulation implements Sim {
     const texture = at(this.ensureFlow().memory, this.flowM);
     const size = [this.width, this.height];
     this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
+    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.
+    this.changed();
+    this.revision++;
   }
 
   /** For tests: the pressure of the four lanes of the flow of a strain, 4 values per cell; empty as readFlow(). */
@@ -635,7 +763,7 @@ export class Simulation implements Sim {
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
-    if (steps > 0) this.viewStale = true;
+    if (steps > 0) this.changed();
     for (let k = 0; k < steps; k++) {
       this.writeParams(tool);
       const enc = this.device.createCommandEncoder();
@@ -687,7 +815,7 @@ export class Simulation implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
     // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
@@ -795,7 +923,7 @@ export class Simulation implements Sim {
   }
 
   clearEnvironment() {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
@@ -882,7 +1010,7 @@ export class Simulation implements Sim {
   }
 
   writeScent(data: Float32Array) {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     this.scentless = false;
     this.device.queue.writeTexture({ texture: this.current.scent }, data, { bytesPerRow: this.width * 8 }, [
@@ -892,7 +1020,7 @@ export class Simulation implements Sim {
   }
 
   writeTrail(data: Float32Array) {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     this.device.queue.writeTexture({ texture: this.current.trail }, data, { bytesPerRow: this.width * 16 }, [
       this.width,
@@ -905,7 +1033,7 @@ export class Simulation implements Sim {
    * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`.
    */
   writeEnv(data: Uint8Array) {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     this.device.queue.writeBuffer(this.env, 0, data);
     const enc = this.device.createCommandEncoder();
@@ -920,6 +1048,7 @@ export class Simulation implements Sim {
   }
 
   destroy() {
+    this.destroyed = true;
     for (const t of [...this.trail, ...this.scent, this.noScent]) t.destroy();
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
@@ -927,6 +1056,7 @@ export class Simulation implements Sim {
     this.viewThird?.trail.destroy();
     this.viewThird?.scent.destroy();
     this.dropFlow();
+    this.dropTubes();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -1430,6 +1560,12 @@ interface FlowKernels {
   pressure: GPUComputePipeline[];
 }
 
+/** The passes of the picture of the tubes (tubes.wgsl, ADR 0034). */
+interface TubeKernels {
+  roots: GPUComputePipeline;
+  picture: GPUComputePipeline;
+}
+
 /** The pipelines for an environment that may hold walls (Kernels.walled()). */
 interface Walled extends Steering {
   markWalls: GPUComputePipeline;
@@ -1455,6 +1591,7 @@ class Kernels {
   private flowModule?: GPUShaderModule;
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
+  private tubePipelines?: TubeKernels;
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -1515,6 +1652,31 @@ class Kernels {
       };
     }
     return this.flowPipelines;
+  }
+
+  /** The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. */
+  tubes(): TubeKernels {
+    if (!this.tubePipelines) {
+      const module = this.device.createShaderModule({ code: common + tubesWgsl });
+      const constants = {
+        RADIUS: TUBES.radius,
+        EDGE: TUBES.edge,
+        SHEET: TUBES.sheet,
+        SPAN: TUBES.span,
+        BODY_LOW: FLOW.bodyLow,
+      };
+      // A pipeline takes only the constants that its entry point uses.
+      const pipeline = (entryPoint: string, names: (keyof typeof constants)[]) =>
+        this.device.createComputePipeline({
+          layout: 'auto',
+          compute: { module, entryPoint, constants: Object.fromEntries(names.map((n) => [n, constants[n]])) },
+        });
+      this.tubePipelines = {
+        roots: pipeline('roots', ['SPAN', 'BODY_LOW']),
+        picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET']),
+      };
+    }
+    return this.tubePipelines;
   }
 
   /**

@@ -52,6 +52,22 @@ describe('the current scene', () => {
     expect(app.settings.showScent).toBe(false);
   });
 
+  // So is the picture of the tubes (ADR 0034): a switch of the view, not of a scene.
+  it('keeps the picture of the tubes on a new scene, and does not count it as a change', async () => {
+    const { app, loadPreset, sceneChanged } = await fresh();
+    loadPreset('maze');
+    expect(app.settings.showTubes).toBe(true);
+    app.settings.showTubes = false;
+    expect(sceneChanged()).toBe(false);
+    loadPreset('tokyo');
+    expect(app.settings.showTubes).toBe(false);
+    expect(app.sceneBase?.showTubes).toBe(false);
+    expect(sceneChanged()).toBe(false);
+    app.settings.showTubes = true;
+    loadPreset('maze');
+    expect(app.settings.showTubes).toBe(true);
+  });
+
   it('does not count a grid the device lowered as a change', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
     loadPreset('three-strains');

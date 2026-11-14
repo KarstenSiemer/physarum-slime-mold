@@ -1,7 +1,7 @@
 import type { Settings } from '../model/params';
 import { at } from './at';
 import { Bloom } from './bloom';
-import { AutoExposure } from './exposure';
+import { AutoExposure, type Trails } from './exposure';
 import { initGpu, OutOfMemoryError, type Gpu } from './gpu';
 import { Renderer, type Frame } from './render';
 import { Simulation } from './sim';
@@ -94,12 +94,25 @@ export class WebGpuBackend implements Backend<Simulation> {
     return this.renderer.draw(this.frame(sim, settings, view, measure));
   }
 
-  capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
+  async capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
+    // An export shows the view as asked: its pipelines are built first. A rebuild can destroy the simulation in
+    // that time. Then nothing is left to draw, and the engine asks again for the new one (Engine.ofRun()).
+    await this.renderer.ready(settings);
+    if (sim.destroyed) return new ImageData(width, height);
     return this.renderer.capture(this.frame(sim, settings, view, false, levels), width, height);
   }
 
+  /**
+   * For a measurement of the levels: the trail that a frame of `sim` draws and the trail of its model, as they are
+   * when the measurement asks. Nothing once the simulation is destroyed: a rebuild can do that while a measurement
+   * waits for the one before it.
+   */
+  private trailsOf(sim: Simulation) {
+    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);
+  }
+
   async settle(sim: Simulation): Promise<Levels> {
-    await this.auto.measure(sim.viewTexture);
+    await this.auto.measure(this.trailsOf(sim));
     return this.levels();
   }
 
@@ -108,7 +121,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   }
 
   async measured(sim: Simulation): Promise<Levels> {
-    return (await this.auto.read(sim.viewTexture)) ?? this.levels();
+    return (await this.auto.read(this.trailsOf(sim))) ?? this.levels();
   }
 
   /**
@@ -139,12 +152,14 @@ export class WebGpuBackend implements Backend<Simulation> {
    * this frame alone (an export), in place of those of the frames.
    */
   private frame(sim: Simulation, s: Settings, view: View, measure: boolean, given?: Levels): Frame {
-    // The map after the step's diffusion in either order of a step (ADR 0027).
-    const trail = sim.viewTexture;
+    // The map after the step's diffusion in either order of a step (ADR 0027), or the picture of the tubes made from it
+    // (ADR 0034): the levels and the bloom are those of the trail that the frame draws.
+    const trail = sim.pictureTexture;
     const agents = s.style === 'agents';
     const fallback = 0.4 / equilibrium(s);
-    // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009).
-    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback);
+    // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009). The
+    // strand is a level of the trail of the model, with or without the picture of the tubes.
+    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback, sim.viewTexture);
     const l = given ?? this.levels();
     const base = agents ? 0.4 / s.density : l.gain || fallback;
     const exposure = base * 2 ** s.exposure;

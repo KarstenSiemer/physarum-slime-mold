@@ -362,6 +362,12 @@ export const flowHelp = {
   ref: 'Tero, Kobayashi and Nakagaki 2007, J. Theor. Biol. 244: 553; Tero et al. 2010, Science 327: 439; Marbach et al. 2023, eLife 12: e78100',
 } as const;
 
+/** Help for the switch "Draw the tubes by their flow" below Flow in the tubes (ADR 0034); Learn → Controls lists it. */
+export const tubeViewHelp = {
+  label: 'Draw the tubes by their flow',
+  help: 'Changes only the picture, not the simulation. Each tube is as wide and as bright as its flow memory says. The flow memory is the conductivity of a tube: it grows where much flow runs, and it falls where little flow runs. So a tube that keeps much flow stays thick, and a tube with little flow gets thin and faint. A new tube starts with a middle value: it is thick at first, until its flow memory follows its flow. For the flow of a liquid in a round tube the conductivity grows with the fourth power of the radius (Poiseuille’s law), so the picture draws a radius that grows with the fourth root of the conductivity. A tube with the largest value is 3 cells wider on each side. Plasmodium without a tube stays in the picture at a quarter of its brightness. A wall stops a tube: no tube is drawn across it. Without the switch the picture shows the trail alone, as it does without the flow.',
+} as const;
+
 /** Help for the view switch "Scent" (ADR 0009, amendments of 2026-11-11 and 2026-11-12); Learn → Controls lists it. */
 export const scentViewHelp = {
   label: 'Scent',
@@ -431,6 +437,11 @@ export interface Settings extends Record<GlobalKey, number> {
   style: Style;
   /** The view draws the food scent and the light repellent over the picture (scentViewHelp). Display only. */
   showScent: boolean;
+  /**
+   * While the flow in the tubes is on, the view draws every tube as wide and as bright as its flow memory says
+   * (tubeViewHelp, ADR 0034). Display only.
+   */
+  showTubes: boolean;
   strains: Strain[];
 }
 
@@ -486,6 +497,7 @@ export function defaultSettings(): Settings {
     flow: false,
     style: 'glow',
     showScent: false,
+    showTubes: true,
     density: 1,
     diffusion: 1,
     foodStrength: 0.05,
@@ -573,6 +585,9 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   out.boundary = oneOf(raw.boundary, BOUNDARIES, d.boundary);
   out.style = oneOf(raw.style, STYLES, d.style);
   out.showScent = raw.showScent === true;
+  // A link from before the picture of the tubes holds no switch for it: the picture is on, as for a new scene. It
+  // changes no result (ADR 0034).
+  out.showTubes = raw.showTubes !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
   // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).

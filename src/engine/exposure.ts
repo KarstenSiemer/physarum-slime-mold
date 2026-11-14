@@ -63,6 +63,9 @@ export function levels(bins: ArrayLike<number>, cells: number): { black: number;
   return { black, gain: TARGET / (white - black) };
 }
 
+/** The trail that a frame draws, and the trail of the model (the same texture without the picture of the tubes). */
+export type Trails = [drawn: GPUTexture, model: GPUTexture];
+
 /** Auto exposure: a GPU histogram every few frames, read back without stalling, smoothed over time. */
 export class AutoExposure {
   private readonly pipeline: GPUComputePipeline;
@@ -89,34 +92,44 @@ export class AutoExposure {
       size: BINS * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
-    this.readback = device.createBuffer({ size: BINS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    // Two histograms: the trail that the frame draws, and the trail of the model where that is another one.
+    this.readback = device.createBuffer({ size: BINS * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
 
-  /** Call once per frame; `fallback` is used until the first measurement. */
-  update(trail: GPUTexture, fallback: number): number {
+  /**
+   * Call once per frame; `fallback` is used until the first measurement. `trail`: the trail that the frame draws.
+   * `model`: the trail of the model, where the frame draws another one (the picture of the tubes, ADR 0034): the
+   * strand is a level of the model's trail.
+   */
+  update(trail: GPUTexture, fallback: number, model = trail): number {
     if (this.gain === 0) this.gain = fallback;
     if (this.pending || this.frame++ % 6 !== 0) return this.gain;
-    void this.measure(trail, 0.25);
+    // No measurement is running, so this one encodes at once, with the textures of this frame.
+    void this.measure(() => [trail, model], 0.25);
     return this.gain;
   }
 
   /**
    * Measures now; `blend` 1 jumps to the result (tests), smaller values smooth. Waits for a measurement that is still
-   * running, so `blend` 1 always gets its own.
+   * running, so `blend` 1 always gets its own. `trails`: see read().
    */
-  async measure(trail: GPUTexture, blend = 1): Promise<void> {
-    const l = await this.read(trail);
+  async measure(trails: () => Trails | undefined, blend = 1): Promise<void> {
+    const l = await this.read(trails);
     if (l) this.apply(l, blend);
   }
 
   /**
    * The levels measured now, without changing the levels that frames use: an export draws with them, and the line of
    * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field or a replaced
-   * simulation.
+   * simulation. `trails` gives the trail that the frame draws and the trail of the model. It is asked after the wait
+   * for a measurement that is still running: new settings can free a texture meanwhile (the picture of the tubes, the
+   * view of a step that moves first). It gives nothing if the simulation was destroyed in that time.
    */
-  async read(trail: GPUTexture): Promise<Levels | undefined> {
+  async read(trails: () => Trails | undefined): Promise<Levels | undefined> {
     while (this.pending) await this.pending;
-    const run = this.histogram(trail);
+    const textures = trails();
+    if (!textures) return undefined;
+    const run = this.histogram(...textures);
     this.pending = run
       .then(
         () => undefined,
@@ -132,32 +145,40 @@ export class AutoExposure {
     this.strand += (l.strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
   }
 
-  private async histogram(trail: GPUTexture): Promise<Levels | undefined> {
+  /**
+   * The black level and the gain from the trail that the frame draws, and the strand from the trail of the model. Both
+   * histograms go into one submission, before any wait: a texture may be freed while the readback is on its way.
+   */
+  private async histogram(trail: GPUTexture, model: GPUTexture): Promise<Levels | undefined> {
     const generation = this.generation;
+    const textures = model === trail ? [trail] : [trail, model];
     const enc = this.device.createCommandEncoder();
-    enc.clearBuffer(this.bins);
-    const pass = enc.beginComputePass();
-    pass.setPipeline(this.pipeline);
-    pass.setBindGroup(
-      0,
-      this.device.createBindGroup({
-        layout: this.pipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: trail.createView() },
-          { binding: 1, resource: { buffer: this.bins } },
-        ],
-      }),
-    );
-    pass.dispatchWorkgroups(Math.ceil(trail.width / 16), Math.ceil(trail.height / 16));
-    pass.end();
-    enc.copyBufferToBuffer(this.bins, 0, this.readback, 0, BINS * 4);
+    textures.forEach((texture, i) => {
+      enc.clearBuffer(this.bins);
+      const pass = enc.beginComputePass();
+      pass.setPipeline(this.pipeline);
+      pass.setBindGroup(
+        0,
+        this.device.createBindGroup({
+          layout: this.pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: texture.createView() },
+            { binding: 1, resource: { buffer: this.bins } },
+          ],
+        }),
+      );
+      pass.dispatchWorkgroups(Math.ceil(texture.width / 16), Math.ceil(texture.height / 16));
+      pass.end();
+      enc.copyBufferToBuffer(this.bins, 0, this.readback, i * BINS * 4, BINS * 4);
+    });
     this.device.queue.submit([enc.finish()]);
     const cells = trail.width * trail.height;
     try {
       await this.readback.mapAsync(GPUMapMode.READ);
-      const bins = new Uint32Array(this.readback.getMappedRange());
-      const l = levels(bins, cells);
-      const strand = strandLevel(bins, cells);
+      const all = new Uint32Array(this.readback.getMappedRange());
+      const drawn = all.subarray(0, BINS);
+      const l = levels(drawn, cells);
+      const strand = strandLevel(textures.length > 1 ? all.subarray(BINS, 2 * BINS) : drawn, cells);
       this.readback.unmap();
       return l && generation === this.generation ? { ...l, strand } : undefined;
     } catch {

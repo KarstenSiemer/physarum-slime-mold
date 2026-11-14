@@ -83,6 +83,12 @@ export class CpuSim implements Sim {
   readViewScent() {
     return Promise.resolve(new Float32Array(0));
   }
+  readPicture() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  readTubeRoots() {
+    return Promise.resolve(new Float32Array(0));
+  }
   readScent() {
     return Promise.resolve(new Float32Array(0));
   }

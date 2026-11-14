@@ -175,8 +175,12 @@ export class Renderer {
   private readonly heightSampler: GPUSampler;
   private readonly uniform: GPUBuffer;
   private readonly data = new ArrayBuffer(VIEW_BYTES);
-  /** By trail texture, then by occupancy buffer: both alternate between two. */
-  private readonly groups = new Map<GPUTexture, Map<GPUBuffer, Groups>>();
+  /**
+   * By trail texture, then by scent texture, then by occupancy buffer. The trail and the scent of the view alternate
+   * between two textures together, but the picture of the tubes is one trail texture for both (ADR 0034), so the trail
+   * does not name the scent. The textures are weak keys: a texture that its simulation freed leaves no group behind.
+   */
+  private groups = new WeakMap<GPUTexture, WeakMap<GPUTexture, Map<GPUBuffer, Groups>>>();
   /** Gel height field: one texel per cell plus a one-cell border (render.wgsl `heightField`). */
   private heights: { texture: GPUTexture; view: GPUTextureView } | undefined;
   private frame = 0;
@@ -265,13 +269,17 @@ export class Renderer {
     return this.encode(this.context.getCurrentTexture(), width, height, f);
   }
 
+  /** Waits until a frame with these settings shows the view as asked: the pipelines of the scent view are built. */
+  async ready(settings: Settings): Promise<void> {
+    if (settings.showScent && this.fixed === undefined) await this.scentNow(true);
+  }
+
   /**
    * Renders one frame offscreen and reads it back as RGBA pixels (PNG export, tests). A WebGPU
-   * canvas clears its buffer after presentation, so the canvas itself cannot be read later.
+   * canvas clears its buffer after presentation, so the canvas itself cannot be read later. The caller waits for
+   * ready() before it builds the frame: a frame holds textures of the simulation, which can be gone after a wait.
    */
   async capture(f: Frame, width: number, height: number): Promise<ImageData> {
-    // An export shows the view as asked: wait for its pipelines.
-    if (f.settings.showScent && this.fixed === undefined) await this.scentNow(true);
     const texture = this.device.createTexture({
       size: [width, height],
       format: this.format,
@@ -308,8 +316,10 @@ export class Renderer {
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
-    // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027).
-    const { trail, scent } = sim.viewTextures;
+    // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027). The trail is the
+    // picture of the tubes while the settings show it (ADR 0034): every map below is made from the trail that is drawn.
+    const { scent } = sim.viewTextures;
+    const trail = sim.pictureTexture;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
     const view = f.settings.showScent && this.fixed === undefined ? this.scentNow() : undefined;
@@ -317,10 +327,15 @@ export class Renderer {
     // Zoomed out, a pixel reads the trail from a coarser map, filled below (trailDown in render.wgsl).
     const trailMap = trailLevel(f.view.scale);
     const trailCoarse = trailMap > 0 ? this.trailCoarseFor(trail) : undefined;
-    let byOcc = this.groups.get(trail);
+    let byScent = this.groups.get(trail);
+    if (!byScent) {
+      byScent = new WeakMap();
+      this.groups.set(trail, byScent);
+    }
+    let byOcc = byScent.get(scent);
     if (!byOcc) {
       byOcc = new Map();
-      this.groups.set(trail, byOcc);
+      byScent.set(scent, byOcc);
     }
     let cached = byOcc.get(occ);
     if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {
@@ -484,7 +499,7 @@ export class Renderer {
       });
       this.coarse = { texture, view: texture.createView() };
       this.coarseHolds = undefined;
-      this.groups.clear();
+      this.groups = new WeakMap();
     }
     return this.coarse.view;
   }
@@ -501,7 +516,7 @@ export class Renderer {
       });
       this.trailCoarse = { texture, view: texture.createView() };
       this.trailHolds = undefined;
-      this.groups.clear();
+      this.groups = new WeakMap();
     }
     return this.trailCoarse.view;
   }
@@ -517,14 +532,14 @@ export class Renderer {
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
       });
       this.heights = { texture, view: texture.createView() };
-      this.groups.clear();
+      this.groups = new WeakMap();
     }
     return this.heights.view;
   }
 
   /** Bind groups hold textures of one Simulation; drop them when it is replaced. */
   forget() {
-    this.groups.clear();
+    this.groups = new WeakMap();
     this.coarseHolds = undefined;
     this.trailHolds = undefined;
   }

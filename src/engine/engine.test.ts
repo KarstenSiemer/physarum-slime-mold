@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
 import { Engine, MAX_IN_FLIGHT, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
-import { diffusePlan, equilibrium, gridSize } from './sizing';
+import { diffusePlan, equilibrium, FLOW_BYTES_PER_CELL, gridSize, memoryBudget, TUBES_BYTES_PER_CELL } from './sizing';
+import type { Levels } from './types';
 
 describe('gridSize', () => {
   it('puts the resolution on the long side', () => {
@@ -171,6 +172,167 @@ describe('the scent view', () => {
     await rebuilt;
     expect(engine.levels().strand).toBe(0); // the new run has measured none yet
   });
+  // A measurement of the levels waits in the backend. A restart or a rebuild in that time starts a new run, and the
+  // answer is none of the new run. So the engine asks again for the run that it holds then (Engine.settle(), and
+  // snapshot() for the levels of a PNG).
+  describe('a measurement of the levels while a new run starts', () => {
+    /** An engine on a backend whose measurements answer when the test says so. */
+    async function measuring() {
+      const backend = new CpuBackend();
+      const asked: unknown[] = [];
+      const answers: ((levels: Levels) => void)[] = [];
+      backend.settle = (sim?: unknown) => {
+        asked.push(sim);
+        return new Promise<Levels>((resolve) => answers.push(resolve));
+      };
+      const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+      const settings = { ...defaultSettings(), resolution: 256 };
+      const engine = await Engine.create(canvas, settings, undefined, backend);
+      return { backend, engine, settings, asked, answers, first: engine.sim };
+    }
+    const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const old: Levels = { gain: 1, black: 0, strand: 1 };
+    const fresh: Levels = { gain: 2, black: 0, strand: 2 };
+
+    it('asks again when the answer comes while a rebuild is still on its way', async () => {
+      const { backend, engine, settings, asked, answers, first } = await measuring();
+      const settled = engine.settle();
+      await turn();
+      expect(asked).toEqual([first]);
+      // New settings need a new simulation. The backend answers for the first one while the new one is built.
+      const release = hold(backend);
+      const rebuilt = engine.apply({ ...settings, resolution: 512 });
+      answers[0]?.(old);
+      await turn();
+      expect(asked.length).toBe(1);
+      release();
+      await rebuilt;
+      await turn();
+      expect(engine.sim).not.toBe(first);
+      expect(asked).toEqual([first, engine.sim]);
+      answers[1]?.(fresh);
+      expect(await settled).toEqual(fresh);
+    });
+
+    it('asks again when the answer comes after a rebuild that has ended', async () => {
+      const { engine, settings, asked, answers, first } = await measuring();
+      const settled = engine.settle();
+      await turn();
+      // The whole rebuild runs while the backend measures: no rebuild is on its way when the answer comes.
+      await engine.apply({ ...settings, resolution: 512 });
+      expect(engine.busy).toBe(false);
+      expect(engine.sim).not.toBe(first);
+      answers[0]?.(old);
+      await turn();
+      expect(asked).toEqual([first, engine.sim]);
+      answers[1]?.(fresh);
+      expect(await settled).toEqual(fresh);
+    });
+
+    it('asks again when the run restarted during the measurement', async () => {
+      const { engine, asked, answers, first } = await measuring();
+      const settled = engine.settle();
+      await turn();
+      // A restart keeps the simulation and starts its run anew: the backend drops a measurement of the old run.
+      engine.reset();
+      answers[0]?.(old);
+      await turn();
+      expect(asked).toEqual([first, first]);
+      answers[1]?.(fresh);
+      expect(await settled).toEqual(fresh);
+    });
+
+    it('asks for a picture again when a new run started while the backend drew it', async () => {
+      const { backend, engine, settings, first } = await measuring();
+      const drawn: unknown[] = [];
+      const pictures: ((image: ImageData) => void)[] = [];
+      backend.capture = (sim?: unknown) => {
+        drawn.push(sim);
+        return new Promise<ImageData>((resolve) => pictures.push(resolve));
+      };
+      const [stale, right] = [{ width: 1 }, { width: 2 }] as unknown as [ImageData, ImageData];
+      const captured = engine.capture();
+      await turn();
+      expect(drawn).toEqual([first]);
+      // The backend waits, for example for the programs of the scent view. A whole rebuild runs in that time.
+      await engine.apply({ ...settings, resolution: 512 });
+      pictures[0]?.(stale);
+      await turn();
+      expect(drawn).toEqual([first, engine.sim]);
+      // And the run restarts while the backend draws the second picture.
+      engine.reset();
+      pictures[1]?.(stale);
+      await turn();
+      expect(drawn).toEqual([first, engine.sim, engine.sim]);
+      pictures[2]?.(right);
+      expect(await captured).toBe(right);
+    });
+
+    it('fails when the rebuild failed while the backend measured', async () => {
+      vi.stubGlobal('cancelAnimationFrame', () => undefined); // Engine.stop() in Node
+      try {
+        const { backend, engine, settings, asked, answers } = await measuring();
+        const settled = engine.settle();
+        await turn();
+        // The next allocation fails: the engine stops, and it holds no simulation.
+        backend.before = () => Promise.reject(new Error('no memory for the test'));
+        await expect(engine.apply({ ...settings, resolution: 512 })).rejects.toThrow('no memory for the test');
+        answers[0]?.(old);
+        await expect(settled).rejects.toThrow('No simulation runs');
+        // A later measurement fails at once: the backend gets no question about a simulation that is gone.
+        await expect(engine.settle()).rejects.toThrow('No simulation runs');
+        expect(asked.length).toBe(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('asks once when the run stays', async () => {
+      const { engine, settings, asked, answers, first } = await measuring();
+      const settled = engine.settle();
+      await turn();
+      // Settings of the view need no new run.
+      await engine.apply({ ...settings, showScent: true });
+      answers[0]?.(old);
+      expect(await settled).toEqual(old);
+      expect(asked).toEqual([first]);
+    });
+  });
+});
+
+// The picture of the tubes (ADR 0034) changes the view only, as the scent view: no restart and no new simulation, and
+// its switch does not change the grid that fits the memory.
+describe('the picture of the tubes', () => {
+  it('neither restarts nor rebuilds the simulation', async () => {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const settings: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true };
+    const engine = await Engine.create(canvas, settings, undefined, new CpuBackend());
+    const [sim, restarts] = [engine.sim, engine.restarts];
+    engine.frame(0, 3);
+    await engine.apply({ ...settings, showTubes: false });
+    engine.frame(16, 3);
+    await engine.apply({ ...settings, showTubes: true });
+    expect(engine.sim).toBe(sim);
+    expect(engine.restarts).toBe(restarts);
+    expect(engine.sim.step).toBe(6);
+  });
+
+  it('counts the memory of the picture with the flow, whatever the switch says', async () => {
+    const backend = new CpuBackend();
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const base: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true, density: 0.001 };
+    const engine = await Engine.create(canvas, base, undefined, backend);
+    const perCell = backend.bytesPerCell + FLOW_BYTES_PER_CELL + TUBES_BYTES_PER_CELL;
+    // The largest square lattice that would fit with 16 B less per cell, and the largest that fits with 16 B more.
+    const [tooLarge, small] = [-16, 16].map((more) => Math.floor(Math.sqrt(memoryBudget() / (perCell + more))));
+    for (const showTubes of [true, false]) {
+      const fit = (side = 0) => engine.fit({ ...base, showTubes, lattice: [side, side] }).lattice;
+      expect(fit(tooLarge), `the picture ${showTubes ? 'on' : 'off'}`).toBeNull();
+      expect(fit(small), `the picture ${showTubes ? 'on' : 'off'}`).toEqual([small, small]);
+    }
+    // Without the flow the same lattice fits: the picture has no textures then.
+    expect(engine.fit({ ...base, flow: false, lattice: [tooLarge ?? 0, tooLarge ?? 0] }).lattice).not.toBeNull();
+  });
 });
 
 // ADR 0026: beside a closed lattice nothing may happen. A tool there reaches no cell of the arena, so it is idle, and a
@@ -293,6 +455,7 @@ describe('frames that show nothing new', () => {
       e.apply({ ...e.settings, strains: e.settings.strains.map((s, i) => (i === 0 ? { ...s, color: '#123456' } : s)) }),
     'another exposure': (e) => e.apply({ ...e.settings, exposure: 0.5 }),
     'the scent view': (e) => e.apply({ ...e.settings, showScent: true }),
+    'the picture of the tubes': (e) => e.apply({ ...e.settings, showTubes: false }),
     'a restart from another seed': (e) => e.apply({ ...e.settings, seed: e.settings.seed + 1 }),
     'another grid': (e) => e.apply({ ...e.settings, resolution: 512 }),
     'a stroke': (e) => {

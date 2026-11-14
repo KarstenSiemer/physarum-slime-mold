@@ -17,6 +17,7 @@
     STEP_ORDERS,
     stepOrderHelp,
     STYLES,
+    tubeViewHelp,
     type Lattice,
     type Strain,
   } from '../model/params';
@@ -116,6 +117,7 @@
   let coveredHelp = $state(false);
   let growthHelpOpen = $state(false);
   let flowHelpOpen = $state(false);
+  let tubeHelpOpen = $state(false);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
   const canGrow = $derived(app.canCollide && s.collisions);
   /** The most Capacity can be: one agent per cell with the rule (capacityOf()). */
@@ -462,6 +464,28 @@
       {/if}
       {#if s.flow}
         <Slider spec={globalSpec.flowStrength} bind:value={s.flowStrength} id="flow-strength" />
+        <!-- The picture of the tubes changes the view only (ADR 0034). -->
+        <div class="check">
+          <label>
+            <input
+              type="checkbox"
+              bind:checked={s.showTubes}
+              aria-describedby={tubeHelpOpen ? 'tube-help' : undefined}
+            />
+            <span>{tubeViewHelp.label}</span>
+          </label>
+          <button
+            class="help"
+            type="button"
+            aria-expanded={tubeHelpOpen}
+            aria-controls="tube-help"
+            aria-label="About {tubeViewHelp.label}"
+            onclick={() => (tubeHelpOpen = !tubeHelpOpen)}>?</button
+          >
+        </div>
+        {#if tubeHelpOpen}
+          <p class="helptext" id="tube-help">{tubeViewHelp.help}</p>
+        {/if}
       {/if}
     </Section>
   {/if}

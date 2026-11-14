@@ -14,6 +14,7 @@ import {
   type AgentTool,
 } from '../pack';
 import { diffusePlan, viewTrailOn } from '../sizing';
+import { tubesShown } from '../tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
   clear,
@@ -137,6 +138,8 @@ const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDra
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
   step = 0;
+  /** True from destroy() on: the textures and the targets are gone, and nothing may ask for them. */
+  destroyed = false;
   /**
    * Counts the changes of the trail, the scent and the shape outside steps (reset, strokes, clearing, writes, a new
    * hold of the shape); `step` counts the steps (sim.ts `revision`).
@@ -228,6 +231,13 @@ export class GlSim implements Sim {
   /** The targets that hold the view's map (viewTargets()), and whether a change of the state since made it stale. */
   private viewOut: { trail: Target; scent: Target } | undefined;
   private viewStale = true;
+  /**
+   * The targets of the picture of the tubes (tubes.frag, ADR 0034), allocated while the settings show it: per cell and
+   * strain the factor of the radius of its tube, and the trail that the view draws. `tubesStale`: a change of the state
+   * since made the picture stale.
+   */
+  private tubes: { roots: Target; picture: Target } | undefined;
+  private tubesStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
@@ -390,6 +400,75 @@ export class GlSim implements Sim {
     this.viewThird = undefined;
   }
 
+  /** A change of the state: the view's map and the picture of the tubes are made anew at their next use. */
+  private changed() {
+    this.viewStale = true;
+    this.tubesStale = true;
+  }
+
+  /**
+   * The trail that the picture draws (../sim.ts pictureTexture): the view's trail, or, while the settings show the
+   * tubes and the flow holds a state, the trail with every tube as wide and as bright as its flow memory says
+   * (tubes.frag, ADR 0034). Made once for each state. Its passes bind their own targets, as those of viewTargets().
+   */
+  pictureTarget(): Target {
+    if (!tubesShown(this.settings) || !this.flow) return this.viewTrail();
+    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;
+    return this.tubes.picture;
+  }
+
+  /** The passes of pictureTarget(): the factor of the radius of every tube, then the picture. */
+  private encodeTubes(flow: NonNullable<GlSim['flow']>) {
+    this.syncShape();
+    // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
+    const trail = this.viewTrail().texture;
+    this.writeParams();
+    const tubes = this.ensureTubes();
+    const k = this.prog.tubes();
+    const shape = this.shape.texture;
+    this.pass(k.roots, tubes.roots, { ...this.flowMemories(flow), shape }, { strains: flow.memory.length });
+    this.pass(k.picture, tubes.picture, { trail, shape, roots: tubes.roots.texture }, {});
+    this.tubesStale = false;
+    return tubes;
+  }
+
+  /** The targets of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
+  private ensureTubes() {
+    if (!this.tubes) {
+      const gl = this.gl;
+      const roots = target(gl, this.width, this.height, gl.RGBA32F);
+      try {
+        this.tubes = { roots, picture: target(gl, this.width, this.height, gl.RGBA32F) };
+      } catch (error) {
+        // The second target did not fit: the first must not stay behind.
+        destroyTarget(gl, roots);
+        throw error;
+      }
+    }
+    return this.tubes;
+  }
+
+  /** Frees the targets of the picture of the tubes. */
+  private dropTubes() {
+    if (!this.tubes) return;
+    destroyTarget(this.gl, this.tubes.roots);
+    destroyTarget(this.gl, this.tubes.picture);
+    this.tubes = undefined;
+    this.tubesStale = true;
+  }
+
+  /** For tests: the trail that the picture draws (pictureTarget()), 4 lanes per cell. */
+  readPicture(): Promise<Float32Array> {
+    return Promise.resolve(readTarget(this.gl, this.pictureTarget()) as Float32Array);
+  }
+
+  /** For tests: the factor of the radius of the tube of every cell and strain, 4 values per cell; empty without it. */
+  readTubeRoots(): Promise<Float32Array> {
+    if (!tubesShown(this.settings) || !this.flow) return Promise.resolve(new Float32Array(0));
+    const tubes = this.tubesStale || !this.tubes ? this.encodeTubes(this.flow) : this.tubes;
+    return Promise.resolve(readTarget(this.gl, tubes.roots) as Float32Array);
+  }
+
   /** For tests: the trail map that the view draws (viewTargets()), 4 lanes per cell. */
   readView(): Promise<Float32Array> {
     return Promise.resolve(readTarget(this.gl, this.viewTargets().trail) as Float32Array);
@@ -428,7 +507,7 @@ export class GlSim implements Sim {
     // of the scent (ADR 0027); the step after them changes the step count anyway.
     if (settings.stepOrder === 'move-first' || this.settings.stepOrder === 'move-first') this.revision++;
     this.settings = settings;
-    this.viewStale = true;
+    this.changed();
     // The memory fit counts the view's third target only while a step moves first with two passes or more.
     if (!viewTrailOn(settings) && this.viewThird) {
       this.dropViewThird();
@@ -447,6 +526,9 @@ export class GlSim implements Sim {
     }
     // The memory fit counts the targets of the flow only while it is on.
     if (!flowOn(settings) && this.flow) this.dropFlow();
+    // The picture of the tubes holds its targets only while the settings show it (tubes.ts). The memory fit counts them
+    // with the flow, shown or not (sizing.ts tubesBytesPerCell()).
+    if (!tubesShown(settings)) this.dropTubes();
   }
 
   foodSites(centres: readonly (readonly [number, number])[]) {
@@ -538,12 +620,15 @@ export class GlSim implements Sim {
   writeFlow(data: Float32Array, strain = 0) {
     if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
     writeTarget(this.gl, at(this.ensureFlow().memory, strain)[this.flowM], 0, 0, this.width, this.height, data);
+    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.
+    this.changed();
+    this.revision++;
   }
 
   reset() {
     this.revision++;
     const gl = this.gl;
-    this.viewStale = true;
+    this.changed();
     // The scent targets are cleared below, and without a food or a light no step adds scent.
     this.scentless = !this.sources;
     this.step = 0;
@@ -604,7 +689,7 @@ export class GlSim implements Sim {
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
-    if (steps > 0) this.viewStale = true;
+    if (steps > 0) this.changed();
     for (let k = 0; k < steps; k++) {
       this.writeParams(tool);
       if (this.sortInterval > 0 && this.step % this.sortInterval === 0 && this.sortedFor !== this.step) {
@@ -702,7 +787,7 @@ export class GlSim implements Sim {
    */
   paint(strokes: readonly Stroke[]) {
     if (strokes.length === 0) return;
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
     // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
@@ -788,7 +873,7 @@ export class GlSim implements Sim {
   }
 
   clearEnvironment() {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
@@ -905,14 +990,14 @@ export class GlSim implements Sim {
   }
 
   writeScent(data: Float32Array) {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     this.scentless = false;
     writeTarget(this.gl, this.currentScent, 0, 0, this.width, this.height, data);
   }
 
   writeTrail(data: Float32Array) {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     writeTarget(this.gl, this.currentTrail, 0, 0, this.width, this.height, data);
   }
@@ -923,7 +1008,7 @@ export class GlSim implements Sim {
    * `env`.
    */
   writeEnv(data: Uint8Array) {
-    this.viewStale = true;
+    this.changed();
     this.revision++;
     writeTarget(this.gl, this.env, 0, 0, this.width, this.height, data);
     clear(this.gl, this.shape);
@@ -941,6 +1026,7 @@ export class GlSim implements Sim {
   }
 
   destroy() {
+    this.destroyed = true;
     const gl = this.gl;
     const all = [...this.agentsTex, ...this.trail, ...this.scent, this.counts, this.env, this.shape, this.tally];
     all.push(this.noScent, ...this.order, ...this.orderLevels);
@@ -953,6 +1039,7 @@ export class GlSim implements Sim {
     for (const f of this.mrt) gl.deleteFramebuffer(f);
     this.dropViewThird();
     this.dropFlow();
+    this.dropTubes();
     gl.deleteBuffer(this.ubo);
   }
 

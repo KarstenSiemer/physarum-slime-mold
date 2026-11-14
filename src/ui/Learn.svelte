@@ -9,6 +9,7 @@
     stepOrderHelp,
     scentViewHelp,
     strainSpec,
+    tubeViewHelp,
   } from '../model/params';
   import { GROUPS, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
@@ -55,7 +56,8 @@
     // The switch Flow in the tubes comes before its value, as in the panel.
     flowHelp,
     globalSpec.flowStrength,
-    // The view switch last: it changes only the picture.
+    // The view switches last: they change only the picture.
+    tubeViewHelp,
     scentViewHelp,
   ];
 
