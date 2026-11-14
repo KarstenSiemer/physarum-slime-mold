@@ -25,7 +25,7 @@ Source: <https://cargocollective.com/sagejenson/physarum> (read 2026-11-08).
 
 ## Michael Fogleman (2020), Go
 
-Source: `/Users/karstensiemer/git/KarstenSiemer/physarum` (MIT, © 2020 Michael Fogleman).
+Source: <https://github.com/fogleman/physarum> (MIT, © 2020 Michael Fogleman).
 
 Step order (`pkg/physarum/model.go:60-159`):
 

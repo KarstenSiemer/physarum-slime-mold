@@ -18,8 +18,8 @@ primary source.
   in-place blur of a `read_write` texture (workgroups read halo cells another group already
   updated).
 - Optimisation found in Bit-Physics: counting sort of agents by 8 × 8 tile every 32 steps cut
-  step time from 1.29 ms to 0.80 ms (self-reported). Candidate if profiling shows agent-pass
-  cache misses.
+  step time from 1.29 ms to 0.80 ms (self-reported). Built here: every 32 steps a counting sort by 8 × 8 tiles
+  reorders the agents (ADR 0005, [design.md](../design.md)).
 
 ## One agent per cell on the GPU
 

@@ -17,8 +17,7 @@ Quality bar:
 
 1. Performance: ≥ 60 frames/s with ≥ 2 M agents on a 2024 laptop GPU (Apple M-series,
    integrated Intel/AMD); scales to 16 M agents on discrete GPUs.
-2. Fidelity: reproduces the paper's behaviours (table in
-   [jones-2010-model.md](knowledge-base/jones-2010-model.md#results-to-reproduce)).
+2. Fidelity: reproduces the paper's behaviours ([fidelity.md](fidelity.md) holds the status of each one).
 3. Visual quality: crisp filaments, no banding, good exposure for every preset.
 4. Interaction: every parameter changes live; tools work with mouse, touch and keyboard.
 5. Runs in current Chrome, Edge, Safari and Firefox. Static hosting, no backend.
@@ -28,12 +27,14 @@ Non-goals: 3-D simulation, server-side rendering, user accounts, analytics.
 ## 2. Architecture
 
 ```
-index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainCard, Matrix, Toolbar, Learn)
+index.html ── main.ts ── App.svelte ── ui/ (Svelte 5: Panel, StrainCard, Matrix, Toolbar, Learn, SceneCard)
                              │
                              └── engine/engine.ts   settings, frame loop, view, tools (backend-independent)
                                     ├── webgpu.ts   WebGPU backend: sim.ts, render.ts, bloom.ts, exposure.ts, shaders/*.wgsl
+                                    ├── flow.ts, tubes.ts, scent.ts   constants and CPU code of the flow, the picture of the tubes, the scent view
+                                    ├── *-reference.ts   CPU copies of GPU passes, for the tests
                                     └── gl/         WebGL2 fallback: sim.ts, backend.ts, glsl/*.{vert,frag} (ADR 0003)
-                             model/ params.ts (schema = single source of truth), presets.ts, url.ts, link.ts, color.ts
+                             model/ params.ts (schema = single source of truth), presets.ts, scene.ts, tokyo.ts, url.ts, link.ts, color.ts
 ```
 
 - `model/params.ts` defines every parameter once: key, label, unit, range, default, help
@@ -116,6 +117,10 @@ strains (one `vec4` lane each).
 | flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
 | tubes (with flow)  | `rgba32float` textures: radius, picture, stream  | 48 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
 
+The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
+to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
+blending, the counting panels.
+
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
 (ADR 0025). The first agents of each strain, as many as Agents per cell gives, start alive; the
@@ -147,7 +152,8 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
 1. `clearBuffer(counts)` (and `claims` in collision mode).
 2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups): death, placement by a tool
    or by the flow, sense, turn and move (model.md, section 7). A successful move runs
-   `atomicAdd(counts[cell][strain], 1)`; WebGL2 marks the agent and counts it with additive points.
+   `atomicAdd(counts[cell][strain], 1)`; WebGL2 marks the agent and counts it with additive points. With covered food
+   and without one agent per cell, an `occupy` pass then marks the cells that hold an agent (model.md, section 6.5).
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the heading and calls
    `atomicMax(claims[target], key)` with a unique per-step key, pass 2b moves the winners (model.md, section 7.6).
    Integer atomics and unique keys make it deterministic.
@@ -185,24 +191,22 @@ periodic grid over all its cells.
 
 ## 4. Interaction
 
-| Area                | Controls                                                                                                                                |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                                                      |
-| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model; extended: scent decay, K                                     |
-| Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight                              |
-| Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)                                        |
-| Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                                               |
-| Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                 |
-| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush                           |
-| Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), palette, background, exposure (auto), bloom; scent view (toolbar, S) |
-| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                            |
-| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                                               |
+| Area                | Controls                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Playback            | play/pause, single step, reset (toolbar)                                                                                                     |
+| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model, step order; extended: scent decay, K                              |
+| Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight                                   |
+| Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)                                             |
+| Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                                                    |
+| Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
+| Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
+| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush                                |
+| Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
+| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
+| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                                                    |
 
-Guided experiments (each sets a preset, an environment and a text that says what to watch):
-dynamic network (Fig. 4), hexagonal minimization (Fig. 5), scale by SO (Fig. 10), SA × RA
-classes (Fig. 13), repulsion spots and stripes (Fig. 16), shortest path between two foods
-(Fig. 18), Steiner tree (Fig. 19), shrinking sheet (Fig. 21), wound repair (Fig. 22–23),
-competing strains (Fogleman presets).
+Scenes (each sets a preset, an environment and a text that says what to watch): the list is `PRESETS` in
+`src/model/presets.ts`, and the summary of [fidelity.md](fidelity.md) says how close each one comes to its source.
 
 While the pointer is held, inoculate and cut act on every step. Inoculate uses only dead agents. It
 places an amount per second of holding at any frame rate. With none left, a notice says so. A
@@ -275,20 +279,20 @@ the arrows.
   draws grains that go back and forth along the stream, 12 cells to each side in 60 steps where the speed is 1, and
   go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
   switch on or off, so the switch never changes the grid. The simulation never reads the picture.
-- Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
-- Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
-  mapping) when the browser and display support it.
+- Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
+  `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).
+- Dither before 8-bit output against banding. An HDR canvas is not built (`TODO.md`).
 
 ## 6. Testing (the development loop)
 
-| Layer               | Tool                                                                                            | Runs where       |
-| ------------------- | ----------------------------------------------------------------------------------------------- | ---------------- |
-| Types, lint, format | `tsc`, ESLint, Prettier, `svelte-check`                                                         | pre-commit, CI   |
-| Unit                | Vitest (Node): params, URL parsing (fuzz), presets, colors, RNG, CPU reference model, engine    | pre-commit, CI   |
-| GPU                 | Vitest browser mode, Chromium + `--enable-unsafe-webgpu` (Metal locally, SwiftShader in CI)     | CI, local        |
-| E2E                 | Playwright: boot, no console errors, non-blank canvas, tools, presets, URL round trip, axe a11y | CI, local        |
-| Visual              | Playwright screenshots at fixed seed/steps, reviewed by eye; pattern metrics as asserts         | local loop       |
-| Performance         | steps/s via `timestamp-query`, JSON report                                                      | local (real GPU) |
+| Layer               | Tool                                                                                                                | Runs where       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| Types, lint, format | `tsc`, ESLint, Prettier, `svelte-check`                                                                             | pre-commit, CI   |
+| Unit                | Vitest (Node): params, URL parsing (fuzz), presets, colors, RNG, CPU reference model, engine                        | pre-commit, CI   |
+| GPU                 | Vitest browser mode, Chromium + `--enable-unsafe-webgpu` (Metal locally, SwiftShader in CI)                         | CI, local        |
+| E2E                 | Playwright: boot, no console errors, non-blank canvas, tools, presets, URL round trip, axe a11y                     | CI, local        |
+| Visual              | Playwright screenshots at fixed seed/steps, reviewed by eye; pattern metrics as asserts                             | local loop       |
+| Performance         | the time of a step per scene, `research/flow/engine/bench.gpu.test.ts`; paired runs of production builds (ADR 0028) | local (real GPU) |
 
 GPU tests compare against a small CPU reference model and check invariants:
 

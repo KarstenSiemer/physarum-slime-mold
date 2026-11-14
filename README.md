@@ -76,7 +76,7 @@ with `?backend=webgl2`.
 ## Keyboard
 
 Space play/pause · `.` single step · R reset · 1–7 tools · `[` `]` brush size · F fit view ·
-H hide panels · L learn
+S scent view · H hide panels · L learn
 
 ## Development
 

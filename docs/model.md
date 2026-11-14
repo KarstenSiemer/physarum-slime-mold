@@ -1,6 +1,6 @@
 # The model: the rules in force
 
-Status: 2026-11-13, `main` at `f91dbc4` with the rules of ADR 0032. This file states what the simulation computes, as
+Status: the rules of `main`; a pull request that changes a rule changes this file too (ADR 0030). This file states what the simulation computes, as
 mathematics, for both models, both orders of a step and both backends. The ADRs hold the reasons and the history; each
 section names its ADR. How close the model comes to the organism: [fidelity.md](fidelity.md). The GPU implementation
 (buffers, tiles, the sort of the agents): [design.md](design.md). Decision:
