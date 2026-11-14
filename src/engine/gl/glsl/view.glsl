@@ -17,6 +17,7 @@ layout(std140) uniform View {
   uvec4 frame; // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
   vec4 fx;     // bloom strength, black level, copies (packView), level of the trail's map (0 to 4)
   vec4 streamFx; // the stream of the plasm: drawn (1) or not (0), the phase of its pattern (0 to 1), unused, unused
+  vec4 gelFx;    // gel style: the white in the colour of the thinnest gel, the ground that it hides, unused, unused
   vec4 scentFx; // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
   vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())

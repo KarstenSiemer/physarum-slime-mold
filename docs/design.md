@@ -185,18 +185,18 @@ periodic grid over all its cells.
 
 ## 4. Interaction
 
-| Area                | Controls                                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                            |
-| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model; extended: scent decay, K           |
-| Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight    |
-| Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)              |
-| Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                     |
-| Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                       |
-| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush |
-| Look                | style (glow, gel relief, paper, agents), palette, background, exposure (auto), bloom; scent view (toolbar, S) |
-| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings  |
-| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                     |
+| Area                | Controls                                                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Playback            | play/pause, single step, speed (steps per second), reset, new seed                                                                      |
+| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model; extended: scent decay, K                                     |
+| Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight                              |
+| Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)                                        |
+| Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                                               |
+| Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                 |
+| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush                           |
+| Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), palette, background, exposure (auto), bloom; scent view (toolbar, S) |
+| Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                            |
+| Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                                               |
 
 Guided experiments (each sets a preset, an environment and a text that says what to watch):
 dynamic network (Fig. 4), hexagonal minimization (Fig. 5), scale by SO (Fig. 10), SA × RA
@@ -238,7 +238,8 @@ the arrows.
   (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009).
 - Bloom: thresholded, normalised mip chain on a half-resolution `rgba16float` target.
 - Gel relief style: the trail as a wet gel on dark agar. A thick tube is higher than a thin one, has the full colour
-  of its strain and hides the ground. Thin gel is pale and clear (ADR 0009, amendment 2026-11-14).
+  of its strain and hides the ground. Thin gel is pale and clear, a little with the mild gel color and much with the
+  strong one, a setting of the look (ADR 0009, amendments of 2026-11-14).
 - Paper style: dark trails on white, like the figures in Jones 2010.
 - Food and walls (ADR 0009): outlines rebuilt from distances with a smooth spline, one pixel of
   anti-aliasing at any zoom, every cell centre on the side of the outline that `env` holds. Food

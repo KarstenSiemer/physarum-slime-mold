@@ -7,6 +7,7 @@ import {
   defaultSettings,
   defaultStrain,
   emissionScale,
+  GEL_COLORS,
   LAYOUTS,
   MODELS,
   STEP_ORDERS,
@@ -42,7 +43,7 @@ import { grid, growthStep, occupancy } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
-import { BACKGROUND, LATTICE_COPIES, TRAIL_LEVELS_MAX, trailLevel } from './render';
+import { BACKGROUND, GEL_FX, LATTICE_COPIES, TRAIL_LEVELS_MAX, trailLevel } from './render';
 import {
   levelSize,
   SCENT_LOW,
@@ -310,9 +311,11 @@ function styleReference(
     const here = heightOf(px, py);
     const full = smoothstep(0.12, 0.85, Math.max(here / (1 + 0.25 * here), ...east, ...west, ...south, ...north));
     const body = smoothstep(0.02, 0.14, here);
-    const cover = body * (0.5 + 0.5 * full);
+    // The colour of thin gel that the settings choose.
+    const [pale, film] = GEL_FX[settings.gelColor];
+    const cover = body * (film + (1 - film) * full);
     return albedo.map((x, k) => {
-      const lit = (x + (1 - x) * 0.35 * (1 - full)) * (0.3 + 0.8 * diffuse);
+      const lit = (x + (1 - x) * pale * (1 - full)) * (0.3 + 0.8 * diffuse);
       return (bg[k] ?? 0) * (1 - cover) + lit * cover + spec * body;
     });
   };
@@ -5463,18 +5466,34 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const levels = await backend.settle(sim);
       expect(levels.black).toBeGreaterThan(1); // above the trail of the empty cells
       const view = { center: [cx, cy] as [number, number], scale };
-      const img = await backend.capture(sim, settings, view, SIZE, SIZE);
       const exposure = levels.gain * 2 ** settings.exposure;
-      const ref = styleReference({ trail }, [w, h], settings, view, { exposure, black: levels.black }, [SIZE, SIZE]);
-      // The dither moves a channel by at most 1, hardware filtering of the height field by at most 2.
-      let [max, sum] = [0, 0];
-      for (let i = 0; i < ref.length; i++) {
-        if (i % 4 === 3) continue;
-        const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
-        [max, sum] = [Math.max(max, d), sum + d];
+      const sizes: [number, number] = [SIZE, SIZE];
+      const frames: Uint8ClampedArray[] = [];
+      // Both colours of the gel (the setting of the look, ADR 0009): the candidates B and C of its amendment of
+      // 2026-11-14, as the white in the colour of the thinnest gel and the ground that it hides.
+      expect(GEL_FX).toEqual({ mild: [0.35, 0.5], strong: [0.6, 0.35] });
+      for (const gelColor of GEL_COLORS) {
+        const chosen: Settings = { ...settings, gelColor };
+        sim.update(chosen);
+        const img = await backend.capture(sim, chosen, view, SIZE, SIZE);
+        const ref = styleReference({ trail }, [w, h], chosen, view, { exposure, black: levels.black }, sizes);
+        frames.push(ref);
+        // The dither moves a channel by at most 1, hardware filtering of the height field by at most 2.
+        let [max, sum] = [0, 0];
+        for (let i = 0; i < ref.length; i++) {
+          if (i % 4 === 3) continue;
+          const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
+          [max, sum] = [Math.max(max, d), sum + d];
+        }
+        expect(max, gelColor).toBeLessThanOrEqual(3);
+        expect(sum / ((ref.length / 4) * 3), gelColor).toBeLessThan(0.75);
       }
-      expect(max).toBeLessThanOrEqual(3);
-      expect(sum / ((ref.length / 4) * 3)).toBeLessThan(0.75);
+      // The two colours are two pictures: thin gel is paler and clearer in the strong one. Zoomed out, 30 values
+      // of the picture differ by more than 8.
+      const [mild, strong] = frames;
+      let apart = 0;
+      for (let i = 0; i < (mild?.length ?? 0); i++) if (Math.abs((mild?.[i] ?? 0) - (strong?.[i] ?? 0)) > 8) apart++;
+      expect(apart).toBeGreaterThan(20);
     });
   });
 

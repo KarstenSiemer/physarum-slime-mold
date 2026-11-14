@@ -18,6 +18,7 @@ struct View {
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
   fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), level of the trail's map (0 to 4)
   streamFx: vec4f,    // the stream of the plasm: drawn (1) or not (0), the phase of its pattern (0 to 1), unused, unused
+  gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, unused, unused
   scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
@@ -310,7 +311,8 @@ fn thick(y: f32) -> f32 {
 }
 
 // Trail as a gel with a wet surface, over `base` (ADR 0009, amendment 2026-11-14). A thick tube is higher than a thin
-// one, has the full colour of its strain and hides the ground. Thin gel is pale and clear. The gel is clear enough to
+// one, has the full colour of its strain and hides the ground. Thin gel is pale and clear, as much as the setting of
+// the gel colour says (V.gelFx, GEL_FX in render.ts). The gel is clear enough to
 // show a flake of food below it (`f`, see flakeAt): over food its colour takes in the flake's, grain and outline.
 fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   // The slope of the thickness from 8 lookups around p, 2 on each side: their mean smooths the cells.
@@ -335,10 +337,10 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   // The thickness of the tube that p is a part of: the largest around p, so a tube has one colour up to its rim.
   let around = max(max(east, west), max(south, north));
   let full = smoothstep(0.12, 0.85, max(thick(here), max(around.x, around.y)));
-  let lit = mix(albedo, vec3f(1.0), GEL_PALE * (1.0 - full)) * (0.3 + 0.8 * diffuse);
+  let lit = mix(albedo, vec3f(1.0), V.gelFx.x * (1.0 - full)) * (0.3 + 0.8 * diffuse);
   // The gel ends at a line, as a drop does.
   let body = smoothstep(0.02, 0.14, here);
-  return mix(base, lit, body * mix(GEL_FILM, 1.0, full)) + spec * body;
+  return mix(base, lit, body * mix(V.gelFx.y, 1.0, full)) + spec * body;
 }
 
 // ---- The stream of the plasm (ADR 0034, amendment 2026-11-14) -----------------------------------------------------------
@@ -410,8 +412,6 @@ const PRESENCE = 0.9;      // tone-curve input of an occupied food cell: 1 − e
 const PRESENCE_RAMP = 1.5; // cells inside the food outline over which presence fades in
 const GEL_CLEAR = 0.6;     // how much of a flake of food shows through the gel style's trail (see gel)
 const GEL_HIGH = 4.0;      // cells of height for one unit of the gel's thickness (see gel)
-const GEL_PALE = 0.35;     // how much white the colour of the thinnest gel holds
-const GEL_FILM = 0.5;      // how much of the ground the thinnest gel hides
 const SUN = normalize(vec3f(-0.45, -0.6, 0.65)); // toward the light, as in gel(): top left (grid y points down)
 
 // The cell of `shape` for a grid cell: wrapped on the periodic grid, else clamped to the arena, so an

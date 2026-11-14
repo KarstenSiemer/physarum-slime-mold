@@ -16,6 +16,7 @@
     sameLattice,
     STEP_ORDERS,
     stepOrderHelp,
+    GEL_COLORS,
     STYLES,
     tubeViewHelp,
     type Lattice,
@@ -99,6 +100,10 @@
   const MODEL_LABEL: Record<(typeof MODELS)[number], string> = {
     jones: 'Jones (only Jones’ published rules)',
     extended: 'Extended (Jones plus this app’s rules)',
+  };
+  const GEL_COLOR_LABEL: Record<(typeof GEL_COLORS)[number], string> = {
+    mild: 'Mild: thin gel a little pale',
+    strong: 'Strong: thin gel nearly white',
   };
   const STYLE_LABEL: Record<(typeof STYLES)[number], string> = {
     glow: 'Glow',
@@ -497,6 +502,15 @@
         {#each STYLES as st (st)}<option value={st}>{STYLE_LABEL[st]}</option>{/each}
       </select>
     </label>
+    {#if s.style === 'gel'}
+      <!-- How pale and how clear thin gel is against thick gel (ADR 0009). -->
+      <label class="field">
+        <span>Gel color</span>
+        <select bind:value={s.gelColor}>
+          {#each GEL_COLORS as c (c)}<option value={c}>{GEL_COLOR_LABEL[c]}</option>{/each}
+        </select>
+      </label>
+    {/if}
     <Slider spec={globalSpec.exposure} bind:value={s.exposure} id="exposure" />
     {#if s.style === 'glow'}
       <Slider spec={globalSpec.bloom} bind:value={s.bloom} id="bloom" />

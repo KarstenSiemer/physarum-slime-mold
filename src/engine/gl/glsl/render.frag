@@ -148,8 +148,6 @@ struct Flake {
 
 const float GEL_CLEAR = 0.6; // how much of a flake of food shows through the gel style's trail
 const float GEL_HIGH = 4.0;  // cells of height for one unit of the gel's thickness
-const float GEL_PALE = 0.35; // how much white the colour of the thinnest gel holds
-const float GEL_FILM = 0.5;  // how much of the ground the thinnest gel hides
 
 // A gel with a wet surface (see gel in render.wgsl). Over a flake of food the gel takes in its colour.
 vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
@@ -173,9 +171,9 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
   float here = heightFiltered(p);
   vec2 around = max(max(east, west), max(south, north));
   float full = smoothstep(0.12, 0.85, max(thick(here), max(around.x, around.y)));
-  vec3 lit = mix(albedo, vec3(1.0), GEL_PALE * (1.0 - full)) * (0.3 + 0.8 * diffuse);
+  vec3 lit = mix(albedo, vec3(1.0), V.gelFx.x * (1.0 - full)) * (0.3 + 0.8 * diffuse);
   float body = smoothstep(0.02, 0.14, here);
-  return mix(base, lit, body * mix(GEL_FILM, 1.0, full)) + spec * body;
+  return mix(base, lit, body * mix(V.gelFx.y, 1.0, full)) + spec * body;
 }
 
 // ---- The stream of the plasm (see render.wgsl) ----

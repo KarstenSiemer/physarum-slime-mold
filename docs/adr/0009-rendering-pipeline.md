@@ -1162,3 +1162,35 @@ form alone, B with a mild colour by thickness too, and C with a strong one.
   tooth (gel)" failed without decision 6: 42 levels along the wall against a limit of 16.
 - Not done: the gel zoomed out still takes four taps for each lookup of its height field (ADR 0028), now for 9
   lookups in place of 5.
+
+## Amendment 2026-11-14: the colour of the gel is a setting of the look
+
+### Context
+
+Decision 7 of the amendment above built the mild colour by thickness (candidate B) and left the strong one (candidate
+C) as an open choice of the owner. The owner asked to make it a choice in the section Look of the panel (2026-11-14).
+
+### Decision
+
+1. **A setting `gelColor`** with the values `mild` (the start value, candidate B) and `strong` (candidate C). Each is
+   two numbers (`GEL_FX` in `render.ts`): the white in the colour of the thinnest gel, 0.35 or 0.6, and the part of
+   the ground that the thinnest gel hides, 0.5 or 0.35.
+2. **The shaders read the two numbers from the uniform block of the view** (`gelFx`), in place of the constants
+   `GEL_PALE` and `GEL_FILM`. One pipeline and one program draw both colours.
+3. **The section Look shows the choice "Gel color" while the style is the gel.** Without the gel style it has no
+   effect, so it is not shown, as the slider Glow is shown with the glow style only.
+4. **It is a setting of the look.** It goes into the link, it is no change of a scene, and it changes no result. A
+   link from before it holds none and opens with the mild colour, which is the gel of that link.
+5. **It stays when a scene loads**, as the scent view and the picture of the tubes do (my choice): the style is the
+   scene's, and the colour of its gel is the user's. A user who chose the strong colour does not choose it again
+   for each scene.
+
+### Consequences
+
+- The open choice between B and C is closed (`TODO.md`).
+- The uniform block of the view grows by 16 B. No pass and no texture is new, and a frame costs the same.
+- Tests: "matches the reference colours" (`sim.gpu.test.ts`, both backends) holds a frame of each colour to the CPU
+  copy within 3 of 255 and pins the four numbers. Five wrong rules, one at a time, each failed it: the numbers in
+  another slot of the uniform block, always the mild colour, another number, and the two numbers swapped in each
+  shader. Unit tests hold the start value, the link, a scene and a new scene; an e2e test holds the choice in the
+  built app.

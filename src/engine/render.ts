@@ -1,5 +1,5 @@
 import { hexToLinear } from '../model/color';
-import { BOUNDARIES, MAX_STRAINS, STYLES, type Settings } from '../model/params';
+import { BOUNDARIES, MAX_STRAINS, STYLES, type GelColor, type Settings } from '../model/params';
 import { readPixels } from './readback';
 import { levelSize, scentLevel, scentLevelSize, scentSensors } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
@@ -30,7 +30,14 @@ export interface Frame {
   sampler: GPUSampler;
 }
 
-export const VIEW_BYTES = 208;
+/**
+ * The colour of thin gel in the gel style (ADR 0009, amendment 2026-11-14): how much white the colour of the thinnest
+ * gel holds, and how much of the ground the thinnest gel hides. Thick gel has the colour of its strain and hides the
+ * ground.
+ */
+export const GEL_FX: Record<GelColor, [pale: number, film: number]> = { mild: [0.35, 0.5], strong: [0.6, 0.35] };
+
+export const VIEW_BYTES = 224;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 /** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
@@ -88,13 +95,14 @@ export function packView(
   fl.set([settings.bloom, black, copies, trailLevel(view.scale)], 32);
   // The pattern of the grains starts again after STREAM.period steps.
   fl.set(stream === undefined ? [0, 0, 0, 0] : [1, (stream % STREAM.period) / STREAM.period, 0, 0], 36);
+  fl.set([...GEL_FX[settings.gelColor], 0, 0], 40);
   // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
   // sensors of its line, their half spread and the hold of a strand (scentSensors()).
   const level = settings.showScent ? scentLevel(view.scale) : 0;
-  fl.set([level, settings.model === 'extended' ? 1 : 0, 0, 0], 40);
+  fl.set([level, settings.model === 'extended' ? 1 : 0, 0, 0], 44);
   const sensors = scentSensors(settings, strand);
-  fl.set(sensors.half, 44);
-  fl.set(sensors.holds, 48);
+  fl.set(sensors.half, 48);
+  fl.set(sensors.holds, 52);
 }
 
 /** How much of the scene the copies around a periodic lattice show (packView). */

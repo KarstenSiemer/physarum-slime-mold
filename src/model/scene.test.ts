@@ -66,6 +66,7 @@ describe('modelChanged', () => {
     const looks = {
       ...again,
       style: 'paper' as const,
+      gelColor: 'strong' as const,
       showScent: true,
       showTubes: false,
       exposure: 1,
