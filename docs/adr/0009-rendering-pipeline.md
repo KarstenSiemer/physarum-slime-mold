@@ -1084,3 +1084,81 @@ The coordinator of ADR 0028 decided it under the owner's delegation of 2026-11-1
   the shape or the level changed" counts the passes. Mutations, each reverted after its run: a lookup of two columns
   (12 of 12 tests failed), whole cells in the map on a side that 2 does not divide (6 of 12, the odd sides), and a
   wrap by the grid's size in place of the map's (4 of 12, the periodic ones).
+
+## Amendment 2026-11-14: a gel that looks more like the organism
+
+### Context
+
+The owner asked for a gel relief that looks more like a slime mold (2026-11-13). The gel style also showed the picture
+of the tubes (ADR 0034) less clearly than the glow and the paper style.
+
+The gel of decision 4 had three faults. They are read from `gel()` and measured on six scenes at seed 1 (Transport
+network, Three strains, Shortest path, Maze, Tokyo rail network, Food ring):
+
+- It hid the ground from a height of 0.35 on, which is a height field of 0.43. On the cells that the gel draws, the
+  median of the height field is 0.12 to 0.87 and its 90th percentile 0.79 to 1.61. So most of a thin tube was as
+  opaque as the thickest tube.
+- The colour did not change with the thickness.
+- The normal came from the height at 4 points 0.75 cells away, and one unit of height stood for 5.7 cells. So each
+  cell lit a bevel of its own, and the surface showed the noise of the trail from cell to cell.
+
+Photos of the organism show what is missing (Wikimedia Commons, category "Physarum polycephalum", seen on 2026-11-14;
+no photo is in the repository). A thick vein is deep yellow and opaque. A thin vein is pale and lets the ground show.
+The surface is wet, with small bright highlights.
+
+### Decision
+
+Under the owner's delegation of 2026-11-12. The owner got pictures of three candidates on 2026-11-14: A with the new
+form alone, B with a mild colour by thickness too, and C with a strong one.
+
+1. **The thickness has no top**: `thick(y) = y / (1 + 0.25 y)` over the height field `y`, in place of `1 − e^(−y)`.
+   A height field of 0.5, 1 and 2 gives 0.44, 0.8 and 1.33, so a thick tube is higher than a thin one. The 0.25
+   keeps a very high field finite: the thickness stays below 4.
+2. **A smooth slope from 8 lookups**: two on each of the four sides of a pixel, 1.25 cells away and one cell apart.
+   Their differences give the slope, and their means smooth the noise from cell to cell. Zoomed out, the size of a
+   pixel takes the place of the cell. One unit of thickness is 4 cells high (`GEL_HIGH`).
+3. **The light of a wet body**: the light of decision 4, from the top left. It reaches around the form,
+   `(n · l + 0.35) / 1.35`, so the side away from the light is not black. The highlight is small and bright, with a
+   wide weak one: `0.9 s^120 + 0.1 s^14`.
+4. **The colour by the thickness of the tube**: a value `full` goes from 0 to 1 while the largest thickness of the 9
+   lookups goes from 0.12 to 0.85. The largest one stands for the tube that the pixel is a part of, so a thick tube
+   has one colour up to its rim. The colour is that of the strain, with 0.35 · (1 − `full`) of white (`GEL_PALE`). The
+   gel hides 0.5 + 0.5 · `full` of the ground (`GEL_FILM`).
+5. **The gel ends at a line**: its body goes from 0 to 1 over a height field of 0.02 to 0.14. Before, the gel faded
+   in up to a height field of 0.43.
+6. **The height of a wall cell reaches two cells into a wall**: a wall cell with only walls around it takes the mean
+   of the cells outside walls in the 5 × 5 around it (`besideWall()`). The lookups of decision 2 reach that far, and
+   without it the gel shows a saw tooth along a slanted wall.
+7. **B is built**, as the coordinator's choice under the delegation. A does not show which tube is weak. In C a thin
+   tube is nearly white, so in a scene with three strains the thin strands of two strains are hard to tell apart. C
+   is B with `GEL_PALE` 0.6 and `GEL_FILM` 0.35.
+8. **Drawn and rejected**:
+   - A colour that gets deeper with the thickness: it looks like honey, and the organism does not.
+   - A film of slime beside the tubes that shows only its highlight: it is not visible.
+   - A shadow of the gel on the ground: the ground of the gel style is nearly black, so it is not visible.
+   - A pass of its own that smooths the thickness per cell: it gives the same picture, but it needs 6 B per cell more
+     and a new target in both backends.
+
+### Consequences
+
+- In the gel style a tube with much flow is high, deep in colour and opaque, and a tube with little flow is pale and
+  clear: the picture of the tubes shows as clearly as in the glow style. Without the flow the middle of a band has
+  the full colour, and its thin parts are pale. `tests/pictures/tubes.spec.ts` draws the Tokyo rail network and the
+  Food ring in the gel style.
+- The other styles keep their pixels, and no byte of a simulation changes.
+- The cost, on 2560 × 1600 pixels (M3 Pro): the time of one step with one drawn picture, as the median of 11 samples
+  of 50 frames, twice for each case. On WebGPU the start scene without the flow takes 5.40 and 5.53 ms before and
+  5.69 and 5.71 ms now, and the Transport network 1.40 and 1.41 ms before and 1.61 and 1.65 ms now: 0.2 to 0.3 ms
+  more for a frame. On WebGL2 the difference is below the spread of the runs, which is about 0.5 ms: 16.7 and 16.9 ms
+  before and 16.9 and 17.2 ms now, and 4.7 and 4.8 ms before and 4.7 and 5.2 ms now. The Tokyo rail network with
+  the flow, without and with the picture of the tubes: 4.41 and 4.58 ms before and 4.16 and 4.63 ms now on WebGPU,
+  6.65 and 7.21 ms before and 6.97 and 7.86 ms now on WebGL2. The command, on this commit and on the one before it:
+  `VITE_SIZE=2560,1600 VITE_SCENES=three-strains,network VITE_WARM=1500 VITE_BATCHES=11 VITE_PATCH='{"style":"gel","flow":false}' npx vitest run --config research/vitest.config.ts research/flow/engine/picture.gpu.test.ts`
+  (for the Tokyo rail network: `VITE_SCENES=tokyo` and no `"flow":false`).
+- Tests (`sim.gpu.test.ts`, both backends): the CPU copy of the styles holds the new gel, and "matches the reference
+  colours" holds a frame to it within 3 of 255, fitted, zoomed in and zoomed out, across the wrap seam and at the
+  edge of a box. Six wrong numbers in `gel()` of `render.wgsl`, one at a time, each failed all five cases on WebGPU,
+  and one wrong number in `render.frag` failed all five on WebGL2. "draw the trail along a slanted wall without a saw
+  tooth (gel)" failed without decision 6: 42 levels along the wall against a limit of 16.
+- Not done: the gel zoomed out still takes four taps for each lookup of its height field (ADR 0028), now for 9
+  lookups in place of 5.

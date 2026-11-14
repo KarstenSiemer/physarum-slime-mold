@@ -172,10 +172,10 @@ type Vec3 = [number, number, number];
  * The styles on the CPU without food, light and walls, as render.wgsl drew them before PR 3 (ef7f2af): the trail
  * filtered bilinearly, levels(), then glow (without bloom), paper or gel; the agents style draws the agent counts of
  * the cell under each pixel. Zoomed out, the trail is the mean over the square of the pixel, from the coarse map of the
- * level that trailLevel() gives (ADR 0028; before, four bilinear taps). The gel lighting runs a trail filter for every
- * height lookup, as before its height pre-pass: zoomed out the four taps, which the height field still takes. The box
- * edge and the dish rim fade over one pixel into the outside colour, as render.wgsl draws them now. Returns sRGB bytes
- * without the dither.
+ * level that trailLevel() gives (ADR 0028; before, four bilinear taps). The gel is that of ADR 0009, amendment
+ * 2026-11-14. Its lighting runs a trail filter for every height lookup, as before its height pre-pass: zoomed out the
+ * four taps, which the height field still takes. The box edge and the dish rim fade over one pixel into the outside
+ * colour, as render.wgsl draws them now. Returns sRGB bytes without the dither.
  */
 function styleReference(
   { trail, counts }: { trail: Float32Array; counts?: Float32Array },
@@ -273,8 +273,13 @@ function styleReference(
       const absorb = colors.reduce((sum, col, s) => sum + (v[s] ?? 0) * (0.15 + 0.85 * (1 - (col[k] ?? 0))), 0);
       return b * Math.exp(-absorb * exposure);
     });
-  const height = (px: number, py: number) =>
-    1 - Math.exp(-levels(tapped(px, py)).reduce((a, b) => a + b, 0) * exposure);
+  /** The height field at (px, py), at least 0. */
+  const heightOf = (px: number, py: number) => levels(tapped(px, py)).reduce((a, b) => a + b, 0) * exposure;
+  /** thick() over the height field in render.wgsl, at two points. */
+  const thick = (ax: number, ay: number, bx: number, by: number): [number, number] => {
+    const [ya, yb] = [heightOf(ax, ay), heightOf(bx, by)];
+    return [ya / (1 + 0.25 * ya), yb / (1 + 0.25 * yb)];
+  };
   const norm = (v: Vec3): Vec3 => {
     const l = Math.hypot(...v);
     return [v[0] / l, v[1] / l, v[2] / l];
@@ -283,17 +288,28 @@ function styleReference(
   const light = norm([-0.45, -0.6, 0.65]);
   const half = norm([light[0], light[1], light[2] + 1]);
   const gel = (px: number, py: number, v: number[]) => {
-    const d = Math.max(view.scale, 0.75);
-    const hh = height(px, py);
-    const gx = height(px + d, py) - height(px - d, py);
-    const gy = height(px, py + d) - height(px, py - d);
-    const n = norm([-gx, -gy, 0.35 * d]);
-    const diffuse = Math.max(dot(n, light), 0);
-    const spec = Math.max(dot(n, half), 0) ** 48;
-    const total = v.reduce((a, b) => a + b, 0);
+    const [a, b] = [1.25 * Math.max(view.scale, 1), 0.5 * Math.max(view.scale, 1)];
+    const east = thick(px + a, py + b, px + a, py - b);
+    const west = thick(px - a, py + b, px - a, py - b);
+    const south = thick(px + b, py + a, px - b, py + a);
+    const north = thick(px + b, py - a, px - b, py - a);
+    const rise = [east[0] + east[1] - west[0] - west[1], south[0] + south[1] - north[0] - north[1]].map(
+      (r) => r / (4 * a),
+    );
+    const n = norm([-4 * (rise[0] ?? 0), -4 * (rise[1] ?? 0), 1]);
+    const diffuse = Math.min(1, Math.max(0, (dot(n, light) + 0.35) / 1.35));
+    const shine = Math.max(dot(n, half), 0);
+    const spec = 0.9 * shine ** 120 + 0.1 * shine ** 14;
+    const total = v.reduce((x, y) => x + y, 0);
     const albedo = total > 1e-6 ? tint(v).map((t) => t / total) : (colors[0] ?? bg);
-    const mix = smoothstep(0.02, 0.35, hh);
-    return albedo.map((a, k) => (bg[k] ?? 0) * (1 - mix) + (a * (0.25 + 0.9 * diffuse) + 0.6 * spec * hh) * mix);
+    const here = heightOf(px, py);
+    const full = smoothstep(0.12, 0.85, Math.max(here / (1 + 0.25 * here), ...east, ...west, ...south, ...north));
+    const body = smoothstep(0.02, 0.14, here);
+    const cover = body * (0.5 + 0.5 * full);
+    return albedo.map((x, k) => {
+      const lit = (x + (1 - x) * 0.35 * (1 - full)) * (0.3 + 0.8 * diffuse);
+      return (bg[k] ?? 0) * (1 - cover) + lit * cover + spec * body;
+    });
   };
   const srgb = (c: number) => {
     const x = Math.min(1, Math.max(0, c));

@@ -3,7 +3,8 @@
 // black level times the exposure, an affine function of the trail, so filtering it equals filtering
 // the trail first. Clamped to keep fp16 finite. In collision mode occupied food cells raise it by up
 // to PRESENCE, weighted by the spline of render.frag at the cell centre. A wall cell takes the mean of
-// its neighbours outside walls (see besideWall). Prepended with view.glsl.
+// its neighbours outside walls, and of the 5 × 5 cells if it has none (see besideWall in render.wgsl). Prepended
+// with view.glsl.
 
 float levelAt(ivec2 c) {
   vec4 v = trailAt(c);
@@ -12,17 +13,20 @@ float levelAt(ivec2 c) {
 
 #if ENV
 float besideWall(ivec2 c, float y) {
-  float sum = 0.0;
-  float n = 0.0;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
-      ivec2 k = c + ivec2(i, j);
-      if (cellXY(k).x < 0 || shapeAt(k).r >= 0.5) continue;
-      sum += levelAt(k);
-      n += 1.0;
+  for (int r = 1; r <= 2; r++) {
+    float sum = 0.0;
+    float n = 0.0;
+    for (int j = -r; j <= r; j++) {
+      for (int i = -r; i <= r; i++) {
+        ivec2 k = c + ivec2(i, j);
+        if (cellXY(k).x < 0 || shapeAt(k).r >= 0.5) continue;
+        sum += levelAt(k);
+        n += 1.0;
+      }
     }
+    if (n > 0.0) return sum / n;
   }
-  return n > 0.0 ? sum / n : y;
+  return y;
 }
 #endif
 

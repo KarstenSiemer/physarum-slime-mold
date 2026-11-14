@@ -264,21 +264,25 @@ fn heightField(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 
 // The height of a wall cell: the mean of its neighbours outside walls. Walls hold no trail in the extended model and
 // less than the cells beside them in the Jones model (diffuse.wgsl, ADR 0027), so their cells would pull the filtered
-// height down in steps of whole cells along a slanted wall, and the gel would light
-// that staircase where the smooth outline of the wall no longer covers it. The wall is drawn over this.
+// height down in steps of whole cells along a slanted wall, and the gel would light that staircase where the smooth
+// outline of the wall no longer covers it. The wall is drawn over this. The gel reads the height up to 2 cells from a
+// pixel (see gel), so a cell with walls all around it takes the mean of the 5 × 5.
 fn besideWall(c: vec2i, y: f32) -> f32 {
-  var sum = 0.0;
-  var n = 0.0;
-  for (var j = -1; j <= 1; j++) {
-    for (var i = -1; i <= 1; i++) {
-      let k = c + vec2i(i, j);
-      if (cellAt(k) < 0 || (shape[shapeIndex(k)] & 0xffu) >= 128u) { continue; }
-      let t = trailAt(k);
-      sum += (t.x + t.y + t.z + t.w - V.fx.y) * V.exposure;
-      n += 1.0;
+  for (var r = 1; r <= 2; r++) {
+    var sum = 0.0;
+    var n = 0.0;
+    for (var j = -r; j <= r; j++) {
+      for (var i = -r; i <= r; i++) {
+        let k = c + vec2i(i, j);
+        if (cellAt(k) < 0 || (shape[shapeIndex(k)] & 0xffu) >= 128u) { continue; }
+        let t = trailAt(k);
+        sum += (t.x + t.y + t.z + t.w - V.fx.y) * V.exposure;
+        n += 1.0;
+      }
     }
+    if (n > 0.0) { return sum / n; }
   }
-  return select(y, sum / n, n > 0.0);
+  return y;
 }
 
 // The height field with hardware bilinear filtering at grid position q (wrapped for the periodic
@@ -297,24 +301,42 @@ fn heightFiltered(p: vec2f) -> f32 {
                  heightAt(p + vec2f(-o, o)) + heightAt(p + vec2f(o, o)));
 }
 
-fn height(p: vec2f) -> f32 { return 1.0 - exp(-max(heightFiltered(p), 0.0)); }
+// How thick the gel is where the height field holds y: it has no top, so a thick tube is higher than a thin one.
+fn thick(y: f32) -> f32 {
+  let h = max(y, 0.0);
+  return h / (1.0 + 0.25 * h);
+}
 
-// Trail as a height field, lit like a wet gel, over `base`. The gel is clear enough to show a flake of
-// food below it (`f`, see flakeAt): over food its colour takes in the flake's, grain and outline.
+// Trail as a gel with a wet surface, over `base` (ADR 0009, amendment 2026-11-14). A thick tube is higher than a thin
+// one, has the full colour of its strain and hides the ground. Thin gel is pale and clear. The gel is clear enough to
+// show a flake of food below it (`f`, see flakeAt): over food its colour takes in the flake's, grain and outline.
 fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
-  let d = max(V.scale, 0.75);
-  let h = height(p);
-  let gx = height(p + vec2f(d, 0.0)) - height(p - vec2f(d, 0.0));
-  let gy = height(p + vec2f(0.0, d)) - height(p - vec2f(0.0, d));
-  let n = normalize(vec3f(-gx, -gy, 0.35 * d));
+  // The slope of the thickness from 8 lookups around p, 2 on each side: their mean smooths the cells.
+  let a = 1.25 * max(V.scale, 1.0);
+  let b = 0.5 * max(V.scale, 1.0);
+  let east = vec2f(thick(heightFiltered(p + vec2f(a, b))), thick(heightFiltered(p + vec2f(a, -b))));
+  let west = vec2f(thick(heightFiltered(p + vec2f(-a, b))), thick(heightFiltered(p + vec2f(-a, -b))));
+  let south = vec2f(thick(heightFiltered(p + vec2f(b, a))), thick(heightFiltered(p + vec2f(-b, a))));
+  let north = vec2f(thick(heightFiltered(p + vec2f(b, -a))), thick(heightFiltered(p + vec2f(-b, -a))));
+  let rise = vec2f(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
+  let n = normalize(vec3f(-GEL_HIGH * rise, 1.0));
   let l = normalize(vec3f(-0.45, -0.6, 0.65));
-  let diffuse = max(dot(n, l), 0.0);
-  let spec = pow(max(dot(n, normalize(l + vec3f(0.0, 0.0, 1.0))), 0.0), 48.0);
+  // Light goes a little way through the gel, so the side away from the light is not black.
+  let diffuse = clamp((dot(n, l) + 0.35) / 1.35, 0.0, 1.0);
+  // A wet surface: a small bright highlight and a wide weak one.
+  let shine = max(dot(n, normalize(l + vec3f(0.0, 0.0, 1.0))), 0.0);
+  let spec = 0.9 * pow(shine, 120.0) + 0.1 * pow(shine, 14.0);
   let total = v.x + v.y + v.z + v.w;
   var albedo = select(V.colors[0].rgb, tint(v) / max(total, 1e-6), total > 1e-6);
   if (ENV && f.cover > 0.0) { albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover); }
-  let lit = albedo * (0.25 + 0.9 * diffuse) + 0.6 * spec * h;
-  return mix(base, lit, smoothstep(0.02, 0.35, h));
+  let here = heightFiltered(p);
+  // The thickness of the tube that p is a part of: the largest around p, so a tube has one colour up to its rim.
+  let around = max(max(east, west), max(south, north));
+  let full = smoothstep(0.12, 0.85, max(thick(here), max(around.x, around.y)));
+  let lit = mix(albedo, vec3f(1.0), GEL_PALE * (1.0 - full)) * (0.3 + 0.8 * diffuse);
+  // The gel ends at a line, as a drop does.
+  let body = smoothstep(0.02, 0.14, here);
+  return mix(base, lit, body * mix(GEL_FILM, 1.0, full)) + spec * body;
 }
 
 // Agents in the cell under p, per strain. `counts` holds the agents that moved this step. In collision
@@ -335,6 +357,9 @@ const SHAPE_RANGE = 4.0; // cells; outline distances in `shape` are clamped to �
 const PRESENCE = 0.9;      // tone-curve input of an occupied food cell: 1 − e^−0.9 ≈ 0.59 (see `presence`)
 const PRESENCE_RAMP = 1.5; // cells inside the food outline over which presence fades in
 const GEL_CLEAR = 0.6;     // how much of a flake of food shows through the gel style's trail (see gel)
+const GEL_HIGH = 4.0;      // cells of height for one unit of the gel's thickness (see gel)
+const GEL_PALE = 0.35;     // how much white the colour of the thinnest gel holds
+const GEL_FILM = 0.5;      // how much of the ground the thinnest gel hides
 const SUN = normalize(vec3f(-0.45, -0.6, 0.65)); // toward the light, as in gel(): top left (grid y points down)
 
 // The cell of `shape` for a grid cell: wrapped on the periodic grid, else clamped to the arena, so an
