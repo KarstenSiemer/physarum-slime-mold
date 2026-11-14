@@ -21,6 +21,7 @@ export class WebGpuBackend implements Backend<Simulation> {
 
   readonly description: string;
   readonly lost: Promise<string>;
+  onOutOfMemory: ((message: string) => void) | undefined;
   private renderer: Renderer;
   private readonly context: GPUCanvasContext;
   private readonly format: GPUTextureFormat;
@@ -41,6 +42,10 @@ export class WebGpuBackend implements Backend<Simulation> {
     this.auto = new AutoExposure(gpu.device);
     const i = gpu.info;
     this.description = `WebGPU · ${[i.vendor, i.architecture, i.description].filter(Boolean).join(' ')}`;
+    // A buffer or texture that a pass makes at its first use is outside the scopes of createSim(): its error goes here.
+    gpu.device.addEventListener('uncapturederror', (e) => {
+      if (e.error instanceof GPUOutOfMemoryError) this.onOutOfMemory?.(e.error.message);
+    });
     // destroy() below ends the device on purpose; any other end of it is a loss, also a destroy() from elsewhere.
     this.lost = gpu.device.lost.then((info) =>
       this.ending ? new Promise<string>(() => undefined) : info.message || `device ${info.reason}`,

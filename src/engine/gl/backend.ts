@@ -12,7 +12,17 @@ import {
   equilibrium,
 } from '../sizing';
 import type { Backend, Levels, View } from '../types';
-import { clear, destroyTarget, readTargetAsync, target, textures, uniformBlock, type GL, type Target } from './gl';
+import {
+  allOrNothing,
+  clear,
+  destroyTarget,
+  readTargetAsync,
+  target,
+  textures,
+  uniformBlock,
+  type GL,
+  type Target,
+} from './gl';
 import { compile, VIEW_BINDING, viewPrograms, type Program, type Programs } from './programs';
 import { GlSim } from './sim';
 
@@ -447,8 +457,11 @@ export class WebGl2Backend implements Backend<GlSim> {
     const h = Math.ceil(sim.height / 2);
     if (this.bloomChain[0]?.width !== w || this.bloomChain[0].height !== h) {
       for (const t of this.bloomChain) destroyTarget(gl, t);
-      this.bloomChain = Array.from({ length: BLOOM_LEVELS }, (_, i) =>
-        target(gl, Math.max(1, Math.ceil(w / 2 ** i)), Math.max(1, Math.ceil(h / 2 ** i)), gl.RGBA16F, true),
+      this.bloomChain = []; // none of the old chain stays, also if the new one fails
+      this.bloomChain = allOrNothing(gl, (keep) =>
+        Array.from({ length: BLOOM_LEVELS }, (_, i) =>
+          keep(target(gl, Math.max(1, Math.ceil(w / 2 ** i)), Math.max(1, Math.ceil(h / 2 ** i)), gl.RGBA16F, true)),
+        ),
       );
     }
     const chain = this.bloomChain;

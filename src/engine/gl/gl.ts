@@ -1,6 +1,19 @@
 // Small WebGL2 helpers: programs, float render targets, uniform blocks.
+import { OutOfMemoryError } from '../gpu';
 
 export type GL = WebGL2RenderingContext;
+
+/**
+ * True if the GL reports that it ran out of memory. Reads every error flag that is set, so an older error of another
+ * kind does not hide it. Only for allocations: each call waits for the GPU process.
+ */
+function outOfMemory(gl: GL): boolean {
+  let oom = false;
+  for (let e = gl.getError(); e !== gl.NO_ERROR && e !== gl.CONTEXT_LOST_WEBGL; e = gl.getError()) {
+    if (e === gl.OUT_OF_MEMORY) oom = true;
+  }
+  return oom;
+}
 
 export function program(gl: GL, vertex: string, fragment: string): WebGLProgram {
   const started = startProgram(gl, vertex, fragment);
@@ -65,6 +78,12 @@ export function target(gl: GL, width: number, height: number, format: number, li
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texStorage2D(gl.TEXTURE_2D, 1, format, width, height);
+  // Also after the start: a pass that makes a target at its first use lets the engine step the grid down
+  // (Engine.outOfMemory()).
+  if (outOfMemory(gl)) {
+    gl.deleteTexture(texture);
+    throw new OutOfMemoryError(`Render target ${width}×${height}: out of memory`);
+  }
   const filter = linear ? gl.LINEAR : gl.NEAREST;
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
@@ -88,6 +107,11 @@ export function stencilTarget(gl: GL, width: number, height: number, format: num
   const depthStencil = gl.createRenderbuffer();
   gl.bindRenderbuffer(gl.RENDERBUFFER, depthStencil);
   gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+  if (outOfMemory(gl)) {
+    gl.deleteRenderbuffer(depthStencil);
+    destroyTarget(gl, t);
+    throw new OutOfMemoryError(`Stencil target ${width}×${height}: out of memory`);
+  }
   gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
   gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, depthStencil);
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
@@ -110,6 +134,20 @@ export function destroyTarget(gl: GL, t: Target) {
   gl.deleteTexture(t.texture);
   gl.deleteFramebuffer(t.fbo);
   if (t.depthStencil) gl.deleteRenderbuffer(t.depthStencil);
+}
+
+/**
+ * Runs `build`, which makes its render targets through `keep`. If a step of it throws, the targets made so far are
+ * freed and the error goes on, so a failed allocation leaves nothing behind.
+ */
+export function allOrNothing<T>(gl: GL, build: (keep: (t: Target) => Target) => T): T {
+  const made: Target[] = [];
+  try {
+    return build((t) => (made.push(t), t));
+  } catch (err) {
+    for (const t of made) destroyTarget(gl, t);
+    throw err;
+  }
 }
 
 /** Reads a whole target (rows from y = 0). */

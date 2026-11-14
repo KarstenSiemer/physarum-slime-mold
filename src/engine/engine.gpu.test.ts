@@ -61,6 +61,22 @@ function lend(kind: Kind = 'webgpu') {
   return { lent, failures };
 }
 
+// ADR 0028, amendment of 2026-11-14: a buffer or texture that a pass makes at its first use is outside the scopes of
+// createSim(). The device reports its error as uncaptured, and the backend passes an out-of-memory error on to the
+// engine (Backend.onOutOfMemory), which steps the grid down (engine-env.test.ts). Before, it went to the console only.
+it('passes an uncaptured out-of-memory error of the WebGPU device on to the engine, and no other error', () => {
+  const backend = shared.webgpu;
+  if (!(backend instanceof WebGpuBackend)) throw new Error('no webgpu backend');
+  const heard: string[] = [];
+  backend.onOutOfMemory = (message) => heard.push(message);
+  const report = (error: GPUError) =>
+    backend.gpu.device.dispatchEvent(new GPUUncapturedErrorEvent('uncapturederror', { error }));
+  report(new GPUValidationError('a validation error'));
+  report(new GPUOutOfMemoryError('out of memory'));
+  backend.onOutOfMemory = undefined;
+  expect(heard).toEqual(['out of memory']);
+});
+
 it('frees the old simulation before it allocates the new one (peak memory: one simulation)', async () => {
   const canvas = document.createElement('canvas');
   canvas.width = 320;
