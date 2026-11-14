@@ -2,7 +2,8 @@
 // that the engine spends on the sites after a paint (src/engine/sites.ts SiteCells, Engine.syncSites()).
 //
 // - The sites of a scene: as the engine makes them on the scene's grid (on a canvas of 16:10 for a scene without a
-//   lattice, as the runs of engine/ have it), the count and the cells of each.
+//   lattice, as the runs of engine/ have it): the sites, their cells, and the entries of the list with the ends of the
+//   blocks (sites.ts SITE_BLOCK).
 // - The time: a drag across a grid of 1,536 × 960 cells (the default grid), a segment each half radius, beside 40
 //   dabs, one call after each segment as the engine makes it during a drag; then one call with nothing new, as after a
 //   paint of another kind, and one call without cells kept from before, as on a new grid.
@@ -29,7 +30,8 @@ for (const id of ['maze', 'tokyo', 'food-ring', 'rival-networks', 'tokyo-rivals'
       grid: [w, h],
       strokes: strokes.length,
       sites: sites.list.length,
-      cells: sites.cells.length,
+      cells: counts.reduce((a, b) => a + b, 0),
+      entries: sites.cells.length,
       cellsPerSite: [Math.min(...counts), Math.max(...counts)],
     }),
   );
@@ -64,7 +66,7 @@ for (const radius of [6, 30, 90]) {
       radius,
       segments: drag.length,
       dragCells: sites.list[40]?.count,
-      allCells: sites.cells.length,
+      allCells: sites.list.reduce((a, s) => a + s.count, 0),
       msPerSegment: +(later.reduce((a, b) => a + b, 0) / later.length).toFixed(2),
       msLastSegment: +(each[each.length - 1] ?? 0).toFixed(2),
       msFirstCall: +(each[0] ?? 0).toFixed(2),

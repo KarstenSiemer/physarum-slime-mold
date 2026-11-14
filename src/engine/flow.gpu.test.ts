@@ -399,11 +399,12 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
   }, 120_000);
 
   it('finds the port of a large site that a tube covers only far from its centre, as the CPU reference does', async () => {
-    // A dab of radius 40: about 5,000 cells, in 79 blocks of 64 entries of its list. The tube meets it only on row 10,
-    // 38 cells and more from its centre, so its nearest covered cell lies in block 70 or so: the passes look at the
-    // blocks of a site in 64 lanes, and this one is in the second round of a lane. The other cells of row 10 that it
-    // covers lie in other blocks and other lanes, farther out.
-    const [w, h] = [128, 96];
+    // A dab of radius 60: about 11,300 cells, in 177 blocks of 64 entries of its list. The passes look at the blocks of
+    // a site in 64 lanes, lane l at the blocks l, l + 64 and l + 128. A tube comes down column 70 into the dab and ends
+    // 38 cells from its centre: it covers the cells of the column from 38 to 60 cells out, one in each of many blocks.
+    // The nearest lies in the second round of its lane, and farther ones lie in lanes before and after it, in the
+    // second and the third round: only the least hit of all lanes is the port.
+    const [w, h] = [144, 144];
     const settings = flowing({
       layout: 'empty',
       collisions: false,
@@ -412,12 +413,20 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       strains: [{ ...defaultStrain(0), decay: 0.0001, deposit: 0 }],
     });
     const sim = await make(settings, w, h, 1);
-    const sites = feed(sim, [dab([48.5, 48.5], 40), dab([120.5, 48.5], 2)]);
+    const sites = feed(sim, [dab([70.5, 72.5], 60), dab([140.5, 6.5], 2)]);
     sim.reset();
-    expect(sites.list[0]?.count ?? 0).toBeGreaterThan(64 * 64);
     const tube = new Set<number>();
-    for (let x = 48; x <= 120; x++) tube.add(10 * w + x);
-    for (let y = 10; y <= 48; y++) tube.add(y * w + 120);
+    for (let y = 2; y <= 34; y++) tube.add(y * w + 70);
+    for (let x = 70; x <= 140; x++) tube.add(2 * w + x);
+    for (let y = 2; y <= 6; y++) tube.add(y * w + 140);
+    // Where the cells of the column lie in the list of the dab: the nearest in the second round of its lane, and a
+    // farther one in the third round of a lane before it.
+    const entry = (y: number) => sites.cells.indexOf(y * w + 70);
+    const [block, lane] = [(y: number) => Math.floor(entry(y) / 64), (y: number) => Math.floor(entry(y) / 64) % 64];
+    expect(Math.floor(block(34) / 64)).toBe(1);
+    const column = Array.from({ length: 34 - 12 + 1 }, (_, k) => 12 + k);
+    expect(column.some((y) => block(y) >= 128 && lane(y) < lane(34))).toBe(true);
+    expect(column.some((y) => block(y) > block(34) && lane(y) > lane(34))).toBe(true);
     const trail = new Float32Array(w * h * 4);
     for (const c of tube) trail[c * 4] = 10;
     sim.writeTrail(trail);
@@ -427,19 +436,10 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     for (const c of tube) fields.memory[c * 4 + 1] = 1;
     sim.writeFlow(fields.memory);
     sim.run(1);
-    fields = flowStep(
-      grid,
-      new Float32Array(packFlow(settings, sites)),
-      fields,
-      await sim.readTrail(),
-      0,
-      5,
-      sites.cells,
-    );
-    expect([fields.ports[0], fields.ports[2]]).toEqual([10 * w + 48, 48 * w + 120]);
-    // The entry of the port in the list of its site lies past 64 blocks.
-    expect(sites.cells.indexOf(10 * w + 48)).toBeGreaterThan(64 * 64);
-    expect(roleCells(await sim.readFlow())).toEqual([10 * w + 48, 48 * w + 120]);
+    const u = new Float32Array(packFlow(settings, sites));
+    fields = flowStep(grid, u, fields, await sim.readTrail(), 0, 5, sites.cells);
+    expect([fields.ports[0], fields.ports[2]]).toEqual([34 * w + 70, 6 * w + 140]);
+    expect(roleCells(await sim.readFlow())).toEqual([6 * w + 140, 34 * w + 70].sort((a, b) => a - b));
   }, 120_000);
 
   it('follows a change of the food sites during a run, as after a paint', async () => {

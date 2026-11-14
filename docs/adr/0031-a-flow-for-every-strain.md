@@ -6,6 +6,10 @@
   specification had taken that number an hour before (pull request #49), so this one is 0031
   since the same day. The rules of the model in force are in `docs/model.md`, section 8.
 - Date: 2026-11-13
+- Changed by [ADR 0029](0029-flow-in-the-tubes.md), amendment 2026-11-14 (2): a food site is a painted stroke with
+  every cell that it paints. Strain s covers a site while any of its cells holds food and a tube of the strain, and
+  its flux enters at the covered cell nearest the centre of the stroke, so two strains on one food can cover it at
+  cells of their own. The open point at the end of the Consequences is closed.
 - In short: with the flow in the tubes (ADR 0029), every strain is a slime mold of its own. Its
   flux runs only through its own tubes, between the foods that it covers, and it gives life only to
   its own agents. A scene with one strain keeps its bytes.
