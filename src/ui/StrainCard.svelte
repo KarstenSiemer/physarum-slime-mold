@@ -1,5 +1,6 @@
 <script lang="ts">
   import { strainSpec, type Strain, type StrainKey } from '../model/params';
+  import { letter } from '../model/scene';
   import SensorDiagram from './SensorDiagram.svelte';
   import Slider from './Slider.svelte';
 
@@ -13,7 +14,7 @@
   }
   let { strain = $bindable(), index, removable, jones = false, onremove }: Props = $props();
 
-  const name = $derived(`Strain ${'ABCD'[index] ?? index + 1}`);
+  const name = $derived(`Strain ${letter(index)}`);
   const MAIN: StrainKey[] = ['sensorAngle', 'sensorOffset', 'rotationAngle', 'stepSize', 'decay'];
   const MORE = $derived<StrainKey[]>(jones ? ['deposit', 'randomTurn'] : ['deposit', 'randomTurn', 'food', 'light']);
   let more = $state(false);

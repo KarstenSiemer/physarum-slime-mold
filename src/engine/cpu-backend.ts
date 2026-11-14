@@ -147,6 +147,8 @@ export class CpuBackend implements Backend<CpuSim> {
   coveredBytesPerCell = 0;
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);
+  /** Set by the engine; a test calls it as the WebGPU device does (Backend.onOutOfMemory). */
+  onOutOfMemory: ((message: string) => void) | undefined;
   /** Runs before the next allocation only: a test can hold it or make it fail. */
   before: (() => Promise<void>) | undefined;
   /** Every simulation built, in order. */

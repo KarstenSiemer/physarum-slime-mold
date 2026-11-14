@@ -232,13 +232,10 @@ const plainProgram = (gl: GL, frag: string) =>
 
 /**
  * A view pass from `frag` (render.frag, height.frag or a version of them, after view.glsl) without (index 0) and with
- * (1) the food, light and walls; `defines` go first, such as SCENT for the scent view.
+ * (1) the food, light and walls.
  */
-export function viewPrograms(gl: GL, frag: string, defines = ''): [Program, Program] {
-  return [
-    plainProgram(gl, defines + '#define ENV 0\n' + viewGlsl + frag),
-    plainProgram(gl, defines + '#define ENV 1\n' + viewGlsl + frag),
-  ];
+export function viewPrograms(gl: GL, frag: string): [Program, Program] {
+  return [plainProgram(gl, '#define ENV 0\n' + viewGlsl + frag), plainProgram(gl, '#define ENV 1\n' + viewGlsl + frag)];
 }
 
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */

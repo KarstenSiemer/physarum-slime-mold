@@ -1122,9 +1122,8 @@ export class Simulation implements Sim {
     this.collision?.claims.destroy();
   }
 
-  /** `boundary` replaces the current one for a brush stroke (Stroke.boundary); the next step writes it back. */
-  private writeParams(tool?: AgentTool, round = 0, boundary = this.settings.boundary) {
-    const s = boundary === this.settings.boundary ? this.settings : { ...this.settings, boundary };
+  /** The parameters of the next pass. A brush stroke gets its boundary by a dynamic offset instead (Stroke.boundary). */
+  private writeParams(tool?: AgentTool, round = 0) {
     const rt = {
       width: this.width,
       height: this.height,
@@ -1135,7 +1134,7 @@ export class Simulation implements Sim {
       round,
       start: this.start,
     };
-    this.device.queue.writeBuffer(this.params, 0, packParams(s, rt, this.paramData));
+    this.device.queue.writeBuffer(this.params, 0, packParams(this.settings, rt, this.paramData));
   }
 
   private encodeStep(enc: GPUCommandEncoder) {
@@ -1644,8 +1643,8 @@ class Kernels {
   private capacityPipelines?: Starts;
   private growthPipelines?: GrowthKernels;
   private growthFlowPipelines?: GrowthKernels;
-  /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
   private flowModule?: GPUShaderModule;
+  /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
   private tubePipelines?: TubeKernels;
