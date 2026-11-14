@@ -1,6 +1,7 @@
 # How close the model comes to the slime mold
 
-Status: 2026-11-13, `main` at `f91dbc4` with the scenes of ADR 0032. The rules of the model are in
+Status: the scenes and measurements of `main`; a pull request that changes a measured behaviour changes its row
+here too (ADR 0030). The rules of the model are in
 [model.md](model.md). The measurements are in the ADRs that each row names. Decision:
 [ADR 0030](adr/0030-model-specification-and-fidelity.md).
 
@@ -121,7 +122,7 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   shortest path was left after 12 h.
 - **Model**: the Maze with the flow.
 - **Measured**: one tube remains, 1.10 times as long as the shortest route at step 15,000 (ADR 0029, The Maze).
-- **Limits**: every wall of the Maze touches the edge of the box or a wall that does (`src/model/presets.ts:428-432`).
+- **Limits**: every wall of the Maze touches the edge of the box or a wall that does (the preset `maze` in `src/model/presets.ts`).
   So the free space has one route only, and the scene shows how the dead ends die and the tube pulls tight. It does not
   show a choice between two routes.
 
@@ -276,11 +277,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   of roles, and far off while the colony grows fast (ADR 0029, decision 6).
 - The front of the growth is not a fan of fine veins (row 6).
 - Light is this app's repellent, not the light of Jones' papers (row 13). Dryness is not modelled.
-- Two strains never fuse. With the flow every strain is a plasmodium of its own, and no flux passes between strains
-  ([ADR 0031](adr/0031-a-flow-for-every-strain.md), decision 4). Two plasmodia of _Physarum polycephalum_ fuse only when
-  they are alike at all of several loci; that line comes from the summaries of a web search, the papers were not read
-  ([flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia"). Two scenes hold two strains with
-  the flow, Rival networks and Tokyo, two networks (row 20).
+- Two strains never fuse: no flux passes between strains (row 20; [ADR 0031](adr/0031-a-flow-for-every-strain.md),
+  decision 4).
 - The Jones model never runs the flow (ADR 0029, decision 1). Rows 1 to 7 and 14 to 16 hold for the extended model
   only.
 - The app differs from Jones 2010 in one point: agents update in parallel, where Jones picks them in random order (ADR
