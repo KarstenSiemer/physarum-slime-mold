@@ -724,10 +724,10 @@ export class Engine {
     this.sim.finish().then(done, done);
   }
 
-  /** The current frame as pixels, rendered offscreen at canvas size; `levels` in place of those of the frames. */
-  capture(levels?: Levels): Promise<ImageData> {
+  /** The current frame as pixels, rendered offscreen at canvas size. */
+  capture(): Promise<ImageData> {
     const { width, height } = this.canvas;
-    return this.ofRun((sim) => this.backend.capture(sim, this.settings, this.view, width, height, levels));
+    return this.ofRun((sim) => this.backend.capture(sim, this.settings, this.view, width, height));
   }
 
   /**

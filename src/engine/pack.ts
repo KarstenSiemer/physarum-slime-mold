@@ -244,6 +244,3 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   u.set(startEnds(strains, rt.agents, rt.start), slot('startEnd'));
   return buf;
 }
-
-/** Byte offset of the step counter (`grid.w`), patched before every step. */
-export const STEP_OFFSET = (slot('grid') + 3) * 4;

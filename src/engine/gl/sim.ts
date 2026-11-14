@@ -1374,7 +1374,6 @@ export class GlSim implements Sim {
           gl.uniform1iv(prog.loc('cellRow'), padded(c.rows));
           gl.uniform1iv(prog.loc('cellSize'), padded(c.sizes));
           gl.uniform1iv(prog.loc('deadRow'), padded(d.rows));
-          gl.uniform1iv(prog.loc('deadSize'), padded(d.sizes));
         },
       );
       this.a = flip(this.a);

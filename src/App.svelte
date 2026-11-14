@@ -6,6 +6,7 @@
   import { GpuUnavailableError } from './engine/gpu';
   import { AgentToolKind, inoculateRate } from './engine/pack';
   import { presetById, START } from './model/presets';
+  import { letter } from './model/scene';
   import { decodeLink, encodeLink } from './model/url';
   import Learn from './ui/Learn.svelte';
   import Panel from './ui/Panel.svelte';
@@ -284,9 +285,8 @@
           e.agentTool({ kind: AgentToolKind.inoculate, x, y, radius, strain: app.strain, rate, idle: dead !== true });
           if (!toldNoDead && dead === false) {
             toldNoDead = true;
-            const letter = 'ABCD'[app.strain] ?? String(app.strain + 1);
             showNotice(
-              `All agents of strain ${letter} are alive. Inoculate uses only dead agents. To get dead agents, raise ` +
+              `All agents of strain ${letter(app.strain)} are alive. Inoculate uses only dead agents. To get dead agents, raise ` +
                 'Capacity in the section Growth (this restarts the scene), set Random shrinkage above 0, or select the ' +
                 'start layout Empty. In that layout all agents are dead at the start.',
               NO_DEAD_NOTICE_MS,
