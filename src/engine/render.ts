@@ -269,13 +269,17 @@ export class Renderer {
     return this.encode(this.context.getCurrentTexture(), width, height, f);
   }
 
+  /** Waits until a frame with these settings shows the view as asked: the pipelines of the scent view are built. */
+  async ready(settings: Settings): Promise<void> {
+    if (settings.showScent && this.fixed === undefined) await this.scentNow(true);
+  }
+
   /**
    * Renders one frame offscreen and reads it back as RGBA pixels (PNG export, tests). A WebGPU
-   * canvas clears its buffer after presentation, so the canvas itself cannot be read later.
+   * canvas clears its buffer after presentation, so the canvas itself cannot be read later. The caller waits for
+   * ready() before it builds the frame: a frame holds textures of the simulation, which can be gone after a wait.
    */
   async capture(f: Frame, width: number, height: number): Promise<ImageData> {
-    // An export shows the view as asked: wait for its pipelines.
-    if (f.settings.showScent && this.fixed === undefined) await this.scentNow(true);
     const texture = this.device.createTexture({
       size: [width, height],
       format: this.format,

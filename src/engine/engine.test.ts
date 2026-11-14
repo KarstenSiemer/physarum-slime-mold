@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
@@ -240,6 +240,51 @@ describe('the scent view', () => {
       expect(asked).toEqual([first, first]);
       answers[1]?.(fresh);
       expect(await settled).toEqual(fresh);
+    });
+
+    it('asks for a picture again when a new run started while the backend drew it', async () => {
+      const { backend, engine, settings, first } = await measuring();
+      const drawn: unknown[] = [];
+      const pictures: ((image: ImageData) => void)[] = [];
+      backend.capture = (sim?: unknown) => {
+        drawn.push(sim);
+        return new Promise<ImageData>((resolve) => pictures.push(resolve));
+      };
+      const [stale, right] = [{ width: 1 }, { width: 2 }] as unknown as [ImageData, ImageData];
+      const captured = engine.capture();
+      await turn();
+      expect(drawn).toEqual([first]);
+      // The backend waits, for example for the programs of the scent view. A whole rebuild runs in that time.
+      await engine.apply({ ...settings, resolution: 512 });
+      pictures[0]?.(stale);
+      await turn();
+      expect(drawn).toEqual([first, engine.sim]);
+      // And the run restarts while the backend draws the second picture.
+      engine.reset();
+      pictures[1]?.(stale);
+      await turn();
+      expect(drawn).toEqual([first, engine.sim, engine.sim]);
+      pictures[2]?.(right);
+      expect(await captured).toBe(right);
+    });
+
+    it('fails when the rebuild failed while the backend measured', async () => {
+      vi.stubGlobal('cancelAnimationFrame', () => undefined); // Engine.stop() in Node
+      try {
+        const { backend, engine, settings, asked, answers } = await measuring();
+        const settled = engine.settle();
+        await turn();
+        // The next allocation fails: the engine stops, and it holds no simulation.
+        backend.before = () => Promise.reject(new Error('no memory for the test'));
+        await expect(engine.apply({ ...settings, resolution: 512 })).rejects.toThrow('no memory for the test');
+        answers[0]?.(old);
+        await expect(settled).rejects.toThrow('No simulation runs');
+        // A later measurement fails at once: the backend gets no question about a simulation that is gone.
+        await expect(engine.settle()).rejects.toThrow('No simulation runs');
+        expect(asked.length).toBe(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it('asks once when the run stays', async () => {

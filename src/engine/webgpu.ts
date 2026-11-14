@@ -94,7 +94,11 @@ export class WebGpuBackend implements Backend<Simulation> {
     return this.renderer.draw(this.frame(sim, settings, view, measure));
   }
 
-  capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
+  async capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
+    // An export shows the view as asked: its pipelines are built first. A rebuild can destroy the simulation in
+    // that time. Then nothing is left to draw, and the engine asks again for the new one (Engine.ofRun()).
+    await this.renderer.ready(settings);
+    if (sim.destroyed) return new ImageData(width, height);
     return this.renderer.capture(this.frame(sim, settings, view, false, levels), width, height);
   }
 

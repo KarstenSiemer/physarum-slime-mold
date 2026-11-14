@@ -725,9 +725,9 @@ export class Engine {
   }
 
   /** The current frame as pixels, rendered offscreen at canvas size; `levels` in place of those of the frames. */
-  async capture(levels?: Levels): Promise<ImageData> {
-    await this.rebuilding;
-    return this.backend.capture(this.sim, this.settings, this.view, this.canvas.width, this.canvas.height, levels);
+  capture(levels?: Levels): Promise<ImageData> {
+    const { width, height } = this.canvas;
+    return this.ofRun((sim) => this.backend.capture(sim, this.settings, this.view, width, height, levels));
   }
 
   /**
@@ -741,24 +741,33 @@ export class Engine {
   }
 
   /**
-   * Levels that the backend measures for the run of the engine. The backend waits for a measurement that is still
-   * running, and then for the GPU. A restart or a rebuild in that time starts a new run: the backend then drops the
-   * measurement or measures a simulation that is gone, and its answer is none of the new run. So the engine asks
-   * again, until an answer is for the run that it holds.
+   * Asks the backend for levels or for a picture of the run of the engine, and gives its answer. The backend can
+   * wait: for a measurement that is still running, for the GPU, or for the programs of the scent view. A restart or
+   * a rebuild in that time starts a new run: the backend then drops a measurement, or the simulation that it was
+   * asked about is gone, and its answer is none of the new run. So the engine asks again, until an answer is for
+   * the run that it holds. Without a simulation there is nothing to ask: a rebuild that failed leaves none.
    */
-  private async measuredFor(ask: (sim: Sim) => Promise<Levels>): Promise<Levels> {
+  private async ofRun<T>(ask: (sim: Sim) => Promise<T>): Promise<T> {
     for (;;) {
-      await this.rebuilding;
+      while (this.rebuilding) await this.rebuilding;
+      if (!this.live) throw new Error('No simulation runs: the last rebuild failed.');
       const run = this.restarts;
-      const levels = await ask(this.sim);
-      // Every restart and every rebuild counts as one (`restarts`), also a rebuild that has ended by now.
-      if (!this.rebuilding && this.restarts === run) return levels;
+      const answer = await ask(this.sim);
+      if (this.holds(run)) return answer;
     }
+  }
+
+  /**
+   * Whether the engine still holds the run that had this count of restarts: every restart and every rebuild counts
+   * as one, also a rebuild that has ended by now.
+   */
+  private holds(run: number): boolean {
+    return this.live && !this.rebuilding && this.restarts === run;
   }
 
   /** Measures auto levels now instead of waiting for the smoothed per-frame measurement. */
   settle(): Promise<Levels> {
-    return this.measuredFor((sim) => this.backend.settle(sim));
+    return this.ofRun((sim) => this.backend.settle(sim));
   }
 
   /**
@@ -767,9 +776,13 @@ export class Engine {
    * levels; only the scent view's mark needs them there.
    */
   async snapshot(): Promise<Blob> {
-    await this.rebuilding;
-    const measure = this.settings.style !== 'agents' || this.settings.showScent;
-    const img = await this.capture(measure ? await this.measuredFor((sim) => this.backend.measured(sim)) : undefined);
+    // The levels and the picture are those of one run: a new run during either asks for both again.
+    const img = await this.ofRun(async (sim) => {
+      const measure = this.settings.style !== 'agents' || this.settings.showScent;
+      const levels = measure ? await this.backend.measured(sim) : undefined;
+      const { width, height } = this.canvas;
+      return this.backend.capture(sim, this.settings, this.view, width, height, levels);
+    });
     const canvas = new OffscreenCanvas(img.width, img.height);
     canvas.getContext('2d')?.putImageData(img, 0, 0);
     return canvas.convertToBlob({ type: 'image/png' });

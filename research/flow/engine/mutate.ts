@@ -404,7 +404,15 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V12 wgsl: a disc passes a wall',
+    'V12 wgsl: the corner rule of the strength without the arena: no wrap, and a wall byte outside the dish counts',
+    TUBES_WGSL,
+    '  let c = cellXY(q);\n  return c.x >= 0 && wallByte(c) >= WALL_BYTE;',
+    '  let c = clamp(q, vec2i(0), vec2i(i32(W()) - 1, i32(H()) - 1));\n  return wallByte(c) >= WALL_BYTE;',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V13 wgsl: a disc passes a wall',
     TUBES_WGSL,
     '        if (wallOnLine(p, vec2i(dx, dy))) { continue; }\n',
     '',
@@ -412,16 +420,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V13 wgsl: a line through a corner passes between two wall cells',
+    'V14 wgsl: a line through a corner passes between two wall cells',
     TUBES_WGSL,
     '2 * abs(i * o.y - j * o.x) > span',
     '2 * abs(i * o.y - j * o.x) >= span',
     GPU,
     TUBES_SPEC,
   ],
-  ['V14 wgsl: a disc on a cell of a wall', TUBES_WGSL, 'if (here < WALL_BYTE) {', 'if (true) {', GPU, TUBES_SPEC],
+  ['V15 wgsl: a disc on a cell of a wall', TUBES_WGSL, 'if (here < WALL_BYTE) {', 'if (true) {', GPU, TUBES_SPEC],
   [
-    'V15 wgsl: no plasmodium without a tube',
+    'V16 wgsl: no plasmodium without a tube',
     TUBES_WGSL,
     'textureStore(pictureOut, p, max(SHEET * textureLoad(trail, p, 0), tube));',
     'textureStore(pictureOut, p, tube);',
@@ -429,7 +437,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V16 wgsl: the mean trail without the largest weight',
+    'V17 wgsl: the mean trail without the largest weight',
     TUBES_WGSL,
     'let tube = top * lit / max(sum, vec4f(1e-20));',
     'let tube = lit / max(sum, vec4f(1e-20));',
@@ -437,7 +445,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V17 wgsl: the largest value of the discs, not the mean of their trails',
+    'V18 wgsl: the largest value of the discs, not the mean of their trails',
     TUBES_WGSL,
     'lit += textureLoad(trail, q, 0) * weight;',
     'lit = max(lit, textureLoad(trail, q, 0) * weight); sum = top;',
@@ -445,7 +453,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V18 wgsl: a weight without the factor of the radius',
+    'V19 wgsl: a weight without the factor of the radius',
     TUBES_WGSL,
     'let weight = root * clamp(',
     'let weight = clamp(',
@@ -453,7 +461,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V19 wgsl: the edge of a disc twice as wide',
+    'V20 wgsl: the edge of a disc twice as wide',
     TUBES_WGSL,
     '- d) / EDGE, vec4f(0.0), vec4f(1.0));',
     '- d) / (2.0 * EDGE), vec4f(0.0), vec4f(1.0));',
@@ -461,7 +469,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V20 wgsl: a picture outside the arena',
+    'V21 wgsl: a picture outside the arena',
     TUBES_WGSL,
     'if (cellXY(p).x < 0) {\n    textureStore(pictureOut, p, vec4f(0.0));',
     'if (false) {\n    textureStore(pictureOut, p, vec4f(0.0));',
@@ -469,7 +477,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V21 glsl: the square root of the strength, not the fourth root',
+    'V22 glsl: the square root of the strength, not the fourth root',
     TUBES_FRAG,
     'result = sqrt(sqrt(a));',
     'result = sqrt(a);',
@@ -477,7 +485,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V22 glsl: the strength of a cell below the level of a tube in the sum',
+    'V23 glsl: the strength of a cell below the level of a tube in the sum',
     TUBES_FRAG,
     'if (m.y >= BODY_LOW) sum += m.x * m.y;',
     'if (m.y >= 0.0) sum += m.x * m.y;',
@@ -485,7 +493,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V23 glsl: the flow memory without the body',
+    'V24 glsl: the flow memory without the body',
     TUBES_FRAG,
     'if (m.y >= BODY_LOW) sum += m.x * m.y;',
     'if (m.y >= BODY_LOW) sum += m.x;',
@@ -493,16 +501,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V24 glsl: the sum of the 3 × 3 cells over one cell of length',
+    'V25 glsl: the sum of the 3 × 3 cells over one cell of length',
     TUBES_FRAG,
     'return min(sum / SPAN, 1.0);',
     'return min(sum, 1.0);',
     GL,
     TUBES_SPEC,
   ],
-  ['V25 glsl: a strength above 1', TUBES_FRAG, 'return min(sum / SPAN, 1.0);', 'return sum / SPAN;', GL, TUBES_SPEC],
+  ['V26 glsl: a strength above 1', TUBES_FRAG, 'return min(sum / SPAN, 1.0);', 'return sum / SPAN;', GL, TUBES_SPEC],
   [
-    'V26 glsl: the sum of the strengths of the second strain from the memory of the first strain',
+    'V27 glsl: the sum of the strengths of the second strain from the memory of the first strain',
     TUBES_FRAG,
     'if (tube.y) a.y = across(flowMemory1, p, open);',
     'if (tube.y) a.y = across(flowMemory, p, open);',
@@ -510,7 +518,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V27 glsl: a tube of a strain that the scene does not hold',
+    'V28 glsl: a tube of a strain that the scene does not hold',
     TUBES_FRAG,
     'strains > 2 && texelFetch(flowMemory2, p, 0).y >= BODY_LOW,',
     'texelFetch(flowMemory2, p, 0).y >= BODY_LOW,',
@@ -518,7 +526,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V28 glsl: a disc on a cell without a tube',
+    'V29 glsl: a disc on a cell without a tube',
     TUBES_FRAG,
     'texelFetch(flowMemory, p, 0).y >= BODY_LOW,',
     'texelFetch(flowMemory, p, 0).y >= -1.0,',
@@ -526,7 +534,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V29 glsl: a cell of a wall holds a tube',
+    'V30 glsl: a cell of a wall holds a tube',
     TUBES_FRAG,
     'if (cellXY(p).x < 0 || isWall(texelFetch(shape, p, 0))) return;',
     'if (cellXY(p).x < 0) return;',
@@ -534,7 +542,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V30 glsl: a cell of a wall adds to the strength of the tube beside it',
+    'V31 glsl: a cell of a wall adds to the strength of the tube beside it',
     TUBES_FRAG,
     'if (q.x < 0 || isWall(texelFetch(shape, q, 0))) continue;',
     'if (q.x < 0) continue;',
@@ -542,7 +550,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V31 glsl: the strength of a tube sums across the corner between two wall cells',
+    'V32 glsl: the strength of a tube sums across the corner between two wall cells',
     TUBES_FRAG,
     'if (o.x != 0 && o.y != 0 && wallAt(p + ivec2(o.x, 0)) && wallAt(p + ivec2(0, o.y))) continue;',
     '',
@@ -550,7 +558,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V32 glsl: one wall cell at a corner parts two cells of a tube',
+    'V33 glsl: one wall cell at a corner parts two cells of a tube',
     TUBES_FRAG,
     'if (o.x != 0 && o.y != 0 && wallAt(p + ivec2(o.x, 0)) && wallAt(p + ivec2(0, o.y))) continue;',
     'if (o.x != 0 && o.y != 0 && (wallAt(p + ivec2(o.x, 0)) || wallAt(p + ivec2(0, o.y)))) continue;',
@@ -558,7 +566,15 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V33 glsl: a disc passes a wall',
+    'V34 glsl: the corner rule of the strength without the arena: no wrap, and a wall byte outside the dish counts',
+    TUBES_FRAG,
+    '  ivec2 c = cellXY(q);\n  return c.x >= 0 && isWall(texelFetch(shape, c, 0));',
+    '  ivec2 c = clamp(q, ivec2(0), textureSize(shape, 0) - 1);\n  return isWall(texelFetch(shape, c, 0));',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V35 glsl: a disc passes a wall',
     TUBES_FRAG,
     '        if (wallOnLine(p, ivec2(dx, dy))) continue;\n',
     '',
@@ -566,16 +582,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V34 glsl: a line through a corner passes between two wall cells',
+    'V36 glsl: a line through a corner passes between two wall cells',
     TUBES_FRAG,
     '2 * abs(i * o.y - j * o.x) > span',
     '2 * abs(i * o.y - j * o.x) >= span',
     GL,
     TUBES_SPEC,
   ],
-  ['V35 glsl: a disc on a cell of a wall', TUBES_FRAG, 'if (!isWall(here)) {', 'if (true) {', GL, TUBES_SPEC],
+  ['V37 glsl: a disc on a cell of a wall', TUBES_FRAG, 'if (!isWall(here)) {', 'if (true) {', GL, TUBES_SPEC],
   [
-    'V36 glsl: no plasmodium without a tube',
+    'V38 glsl: no plasmodium without a tube',
     TUBES_FRAG,
     'result = max(SHEET * texelFetch(trail, p, 0), tube);',
     'result = tube;',
@@ -583,7 +599,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V37 glsl: the mean trail without the largest weight',
+    'V39 glsl: the mean trail without the largest weight',
     TUBES_FRAG,
     'vec4 tube = top * lit / max(sum, vec4(1e-20));',
     'vec4 tube = lit / max(sum, vec4(1e-20));',
@@ -591,7 +607,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V38 glsl: the largest value of the discs, not the mean of their trails',
+    'V40 glsl: the largest value of the discs, not the mean of their trails',
     TUBES_FRAG,
     'lit += texelFetch(trail, q, 0) * weight;',
     'lit = max(lit, texelFetch(trail, q, 0) * weight); sum = top;',
@@ -599,7 +615,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V39 glsl: a weight without the factor of the radius',
+    'V41 glsl: a weight without the factor of the radius',
     TUBES_FRAG,
     'vec4 weight = root * clamp(',
     'vec4 weight = clamp(',
@@ -607,7 +623,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V40 glsl: the edge of a disc twice as wide',
+    'V42 glsl: the edge of a disc twice as wide',
     TUBES_FRAG,
     '- d) / EDGE, 0.0, 1.0);',
     '- d) / (2.0 * EDGE), 0.0, 1.0);',
@@ -615,7 +631,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V41 glsl: a picture outside the arena',
+    'V43 glsl: a picture outside the arena',
     TUBES_FRAG,
     'if (cellXY(p).x < 0) {\n    result = vec4(0.0);\n    return;\n  }\n  float reach',
     'if (false) {\n    result = vec4(0.0);\n    return;\n  }\n  float reach',
@@ -623,7 +639,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V42 webgpu: the picture does not follow a new memory of the flow',
+    'V44 webgpu: the picture does not follow a new memory of the flow',
     'src/engine/sim.ts',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();\n    this.revision++;',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.revision++;',
@@ -631,7 +647,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V43 webgpu: a new memory of the flow is no change for the maps of a frame',
+    'V45 webgpu: a new memory of the flow is no change for the maps of a frame',
     'src/engine/sim.ts',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();\n    this.revision++;',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();',
@@ -639,7 +655,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V44 webgpu: the picture from the trail before the diffusion of a step that moves first',
+    'V46 webgpu: the picture from the trail before the diffusion of a step that moves first',
     'src/engine/sim.ts',
     '    const trail = this.viewTexture;\n    this.writeParams();\n    const tubes = this.ensureTubes();',
     '    const trail = this.trail[this.parity];\n    this.writeParams();\n    const tubes = this.ensureTubes();',
@@ -647,7 +663,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V45 webgpu: the picture with its switch off',
+    'V47 webgpu: the picture with its switch off',
     'src/engine/sim.ts',
     'if (!tubesShown(this.settings) || !this.flow) return this.viewTexture;\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
     'if (!this.flow) return this.viewTexture;\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
@@ -655,7 +671,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V46 webgpu: the picture before the wall bytes follow new cells of a wall',
+    'V48 webgpu: the picture before the wall bytes follow new cells of a wall',
     'src/engine/sim.ts',
     '  private encodeTubes(flow: FlowState): TubeState {\n    this.syncShape();',
     '  private encodeTubes(flow: FlowState): TubeState {',
@@ -663,7 +679,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V47 webgpu: the bind groups of the picture outlive the third pair of the view',
+    'V49 webgpu: the bind groups of the picture outlive the third pair of the view',
     'src/engine/sim.ts',
     "      for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);\n      this.forgetTubes();",
     "      for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);",
@@ -671,7 +687,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V48 webgpu: the bind groups of the picture outlive the state of the flow',
+    'V50 webgpu: the bind groups of the picture outlive the state of the flow',
     'src/engine/sim.ts',
     "    for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);\n    this.forgetTubes();",
     "    for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);",
@@ -679,7 +695,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V49 webgpu: the strand of the scent view from the picture, for a PNG and at once',
+    'V51 webgpu: the strand of the scent view from the picture, for a PNG and at once',
     'src/engine/webgpu.ts',
     '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
     '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.pictureTexture]);',
@@ -687,7 +703,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V50 webgpu: the levels of a PNG from the trail without the tubes',
+    'V52 webgpu: the levels of a PNG from the trail without the tubes',
     'src/engine/webgpu.ts',
     '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
     '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.viewTexture, sim.viewTexture]);',
@@ -695,7 +711,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V51 webgpu: a measurement that waits keeps the textures of before its wait',
+    'V53 webgpu: a measurement that waits keeps the textures of before its wait',
     'src/engine/webgpu.ts',
     '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
     '    const early: Trails = [sim.pictureTexture, sim.viewTexture];\n    return (): Trails | undefined => (sim.destroyed ? undefined : early);',
@@ -703,7 +719,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V52 webgpu: a measurement asks a destroyed simulation for its textures',
+    'V54 webgpu: a measurement asks a destroyed simulation for its textures',
     'src/engine/webgpu.ts',
     '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
     '    return (): Trails | undefined => [sim.pictureTexture, sim.viewTexture];',
@@ -711,7 +727,15 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V53 webgpu: a measurement that waited through a restart of the levels gives nothing',
+    'V55 webgpu: a picture is drawn of a simulation that was destroyed while it waited',
+    'src/engine/webgpu.ts',
+    '    if (sim.destroyed) return new ImageData(width, height);\n',
+    '',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V56 webgpu: a measurement that waited through a restart of the levels gives nothing',
     'src/engine/exposure.ts',
     '    while (this.pending) await this.pending;\n    const textures = trails();',
     '    const generation = this.generation;\n    while (this.pending) await this.pending;\n    if (generation !== this.generation) return undefined;\n    const textures = trails();',
@@ -719,7 +743,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V54 webgpu: the strand of the scent view from the picture, in the frames',
+    'V57 webgpu: the strand of the scent view from the picture, in the frames',
     'src/engine/webgpu.ts',
     'this.auto.update(trail, fallback, sim.viewTexture);',
     'this.auto.update(trail, fallback);',
@@ -727,7 +751,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V55 webgpu: the levels of the frames from the trail without the tubes',
+    'V58 webgpu: the levels of the frames from the trail without the tubes',
     'src/engine/webgpu.ts',
     'this.auto.update(trail, fallback, sim.viewTexture);',
     'this.auto.update(sim.viewTexture, fallback, sim.viewTexture);',
@@ -735,7 +759,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V56 webgpu: a frame draws the trail of the view',
+    'V59 webgpu: a frame draws the trail of the view',
     'src/engine/render.ts',
     '    const trail = sim.pictureTexture;',
     '    const trail = sim.viewTexture;',
@@ -743,7 +767,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V57 webgpu: the glow of a frame from the trail of the view',
+    'V60 webgpu: the glow of a frame from the trail of the view',
     'src/engine/webgpu.ts',
     '    const trail = sim.pictureTexture;\n    const agents',
     '    const trail = sim.viewTexture;\n    const agents',
@@ -751,7 +775,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V58 webgpu: a frame keeps the scent of the frame that built its bind group',
+    'V61 webgpu: a frame keeps the scent of the frame that built its bind group',
     'src/engine/render.ts',
     '    let byOcc = byScent.get(scent);\n    if (!byOcc) {\n      byOcc = new Map();\n      byScent.set(scent, byOcc);',
     '    let byOcc = byScent.get(trail);\n    if (!byOcc) {\n      byOcc = new Map();\n      byScent.set(trail, byOcc);',
@@ -759,7 +783,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V59 webgl2: the picture does not follow a new memory of the flow',
+    'V62 webgl2: the picture does not follow a new memory of the flow',
     'src/engine/gl/sim.ts',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();\n    this.revision++;',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.revision++;',
@@ -767,7 +791,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V60 webgl2: a new memory of the flow is no change for the maps of a frame',
+    'V63 webgl2: a new memory of the flow is no change for the maps of a frame',
     'src/engine/gl/sim.ts',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();\n    this.revision++;',
     '    // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.\n    this.changed();',
@@ -775,7 +799,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V61 webgl2: the picture from the trail before the diffusion of a step that moves first',
+    'V64 webgl2: the picture from the trail before the diffusion of a step that moves first',
     'src/engine/gl/sim.ts',
     '    const trail = this.viewTrail().texture;\n    this.writeParams();\n    const tubes = this.ensureTubes();',
     '    const trail = this.currentTrail.texture;\n    this.writeParams();\n    const tubes = this.ensureTubes();',
@@ -783,7 +807,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V62 webgl2: the picture with its switch off',
+    'V65 webgl2: the picture with its switch off',
     'src/engine/gl/sim.ts',
     'if (!tubesShown(this.settings) || !this.flow) return this.viewTrail();\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
     'if (!this.flow) return this.viewTrail();\n    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).picture;',
@@ -791,7 +815,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V63 webgl2: the picture before the wall bytes follow new cells of a wall',
+    'V66 webgl2: the picture before the wall bytes follow new cells of a wall',
     'src/engine/gl/sim.ts',
     "  private encodeTubes(flow: NonNullable<GlSim['flow']>) {\n    this.syncShape();",
     "  private encodeTubes(flow: NonNullable<GlSim['flow']>) {",
@@ -799,7 +823,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V64 webgl2: the first target of the picture stays when the second cannot be made',
+    'V67 webgl2: the first target of the picture stays when the second cannot be made',
     'src/engine/gl/sim.ts',
     '        destroyTarget(gl, roots);\n        throw error;',
     '        throw error;',
@@ -807,7 +831,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V65 webgl2: the strand of the scent view from the picture',
+    'V68 webgl2: the strand of the scent view from the picture',
     'src/engine/gl/backend.ts',
     'const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];',
     'const [drawn, model] = [sim.pictureTarget().texture, sim.pictureTarget().texture];',
@@ -815,7 +839,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V66 webgl2: the levels from the trail without the tubes',
+    'V69 webgl2: the levels from the trail without the tubes',
     'src/engine/gl/backend.ts',
     'const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];',
     'const [drawn, model] = [sim.viewTargets().trail.texture, sim.viewTargets().trail.texture];',
@@ -823,7 +847,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V67 webgl2: a measurement asks a destroyed simulation for its targets',
+    'V70 webgl2: a measurement asks a destroyed simulation for its targets',
     'src/engine/gl/backend.ts',
     '    if (sim.destroyed) return undefined;\n',
     '',
@@ -831,7 +855,15 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V68 webgl2: a frame and its glow from the trail of the view',
+    'V71 webgl2: a picture is drawn of a simulation that was destroyed while it waited',
+    'src/engine/gl/backend.ts',
+    '    if (sim.destroyed) return new ImageData(width, height);\n',
+    '',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V72 webgl2: a frame and its glow from the trail of the view',
     'src/engine/gl/backend.ts',
     '    const trail = sim.pictureTarget().texture;',
     '    const trail = sim.viewTargets().trail.texture;',
@@ -839,7 +871,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     TUBES_SPEC,
   ],
   [
-    'V69 both: the picture in the style that draws the agents',
+    'V73 both: the picture in the style that draws the agents',
     'src/engine/tubes.ts',
     "s.showTubes && flowOn(s) && s.style !== 'agents';",
     's.showTubes && flowOn(s);',

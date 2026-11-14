@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, tubeViewHelp, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { tubePicture, tubeRoots, wallByte, wallOnLine, type TubeGrid } from './tubes-reference';
+import { arenaCell, tubePicture, tubeRoots, wallByte, wallOnLine, type TubeGrid } from './tubes-reference';
 import { SHAPE_RANGE } from './types';
 
 /** A grid without walls: every byte of `shape` is 0. */
@@ -387,5 +387,48 @@ describe('the picture of the tubes', () => {
     );
     expect([16, 17, 18].map((x) => picture[(12 * g.width + x) * 4])).toEqual([0, 0, 0]);
     expect(picture[(12 * g.width + 15) * 4]).toBeCloseTo(8, 6);
+  });
+  it('keeps the rule of a corner across the edge of the periodic grid, and takes no cell outside a dish for a wall', () => {
+    const [weak, both] = [(0.0025 / 3) ** 0.25, ((0.0025 + 1) / 3) ** 0.25];
+    const pair = (g: TubeGrid, p: [number, number], q: [number, number]) =>
+      tubeRoots(g, [
+        memoryOf(g, (x, y) => (x === p[0] && y === p[1] ? [0.0025, 1] : x === q[0] && y === q[1] ? [1, 1] : undefined)),
+      ])[(p[1] * g.width + p[0]) * 4] ?? 0;
+    // On the periodic grid the cells (0, 10) and (31, 11) touch at a corner across the edge. The two cells beside
+    // that corner are (31, 10) and (0, 11).
+    const torus = open(32, 24, 'wrap');
+    expect(pair(torus, [0, 10], [31, 11])).toBeCloseTo(both, 6);
+    for (const [x, y] of [
+      [31, 10],
+      [0, 11],
+    ] as const)
+      torus.shape[(y * 32 + x) * 4] = 128;
+    expect(pair(torus, [0, 10], [31, 11])).toBeCloseTo(weak, 6);
+    // In a dish: two cells inside that touch at a corner, with one cell beside that corner outside the rim and the
+    // other inside. Both hold the byte of a wall. The cell outside is no wall of the dish, as for a move and for a
+    // child of growth, so the two cells are not parted.
+    const dish = open(32, 24, 'dish');
+    const inside = (x: number, y: number) => arenaCell(dish, x, y) >= 0;
+    let found: [number, number] | undefined;
+    for (let y = 0; y < 23 && !found; y++)
+      for (let x = 0; x < 31 && !found; x++)
+        if (inside(x, y) && inside(x + 1, y + 1) && inside(x, y + 1) && !inside(x + 1, y)) found = [x, y];
+    expect(found).toBeDefined();
+    const [x, y] = found ?? [0, 0];
+    for (const [wx, wy] of [
+      [x + 1, y],
+      [x, y + 1],
+    ] as const)
+      dish.shape[(wy * 32 + wx) * 4] = 128;
+    expect(pair(dish, [x, y], [x + 1, y + 1])).toBeCloseTo(both, 6);
+    // With both cells beside the corner inside the dish, the same two walls part the cells: one row lower.
+    const lower = open(32, 24, 'dish');
+    expect([inside(x + 1, y + 1), inside(x, y + 2), inside(x + 1, y + 2)]).toEqual([true, true, true]);
+    for (const [wx, wy] of [
+      [x + 1, y + 1],
+      [x, y + 2],
+    ] as const)
+      lower.shape[(wy * 32 + wx) * 4] = 128;
+    expect(pair(lower, [x, y + 1], [x + 1, y + 2])).toBeCloseTo(weak, 6);
   });
 });

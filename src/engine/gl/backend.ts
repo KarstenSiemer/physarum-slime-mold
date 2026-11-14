@@ -146,6 +146,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     // An export shows the scent view as asked: wait for its programs, unless the context is lost.
     while (settings.showScent && !this.fixed && !this.prog.scent() && !gl.isContextLost())
       await new Promise((r) => setTimeout(r, 2));
+    // A rebuild can destroy the simulation during that wait. Then nothing is left to draw, and the engine asks
+    // again for the new one (Engine.ofRun()).
+    if (sim.destroyed) return new ImageData(width, height);
     const t = target(gl, width, height, gl.RGBA8);
     this.encode(sim, settings, view, width, height, t, levels);
     const pixels = new Uint8ClampedArray(width * height * 4);

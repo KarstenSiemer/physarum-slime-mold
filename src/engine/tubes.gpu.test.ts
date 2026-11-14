@@ -628,6 +628,63 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect([w - 1, 0, 1, 2, 3].map((x) => at(open, x))).toEqual([8, 8, 8, 8, 0]);
   });
 
+  it('keeps the rule of a corner across the edge of the periodic grid and at the rim of a dish', async () => {
+    const [w, h] = [32, 24];
+    const [weak, both] = [(0.0025 / 3) ** 0.25, ((0.0025 + 1) / 3) ** 0.25];
+    /** A weak tube on the cell p and a strong one on the cell q, and no other tube. */
+    const pair = (p: readonly [number, number], q: readonly [number, number]) =>
+      memoryOf(w, h, (x, y) =>
+        x === p[0] && y === p[1] ? [0.0025, 1] : x === q[0] && y === q[1] ? [1, 1] : undefined,
+      );
+    const walls = (cells: (readonly [number, number])[]) => {
+      const env = new Uint8Array(w * h * 4);
+      for (const [x, y] of cells) env[(y * w + x) * 4] = 255;
+      return env;
+    };
+    // On the periodic grid the cells (0, 10) and (31, 11) touch at a corner across the edge. The two cells beside
+    // that corner are (31, 10) and (0, 11). Without walls the weak cell takes the strong one, and with a wall on
+    // both it does not.
+    const torus = await make(flowing({ boundary: 'wrap' }), w, h);
+    torus.writeFlow(pair([0, 10], [31, 11]));
+    expect((await torus.readTubeRoots())[10 * w * 4]).toBeCloseTo(both, 5);
+    torus.writeEnv(
+      walls([
+        [31, 10],
+        [0, 11],
+      ]),
+    );
+    torus.writeFlow(pair([0, 10], [31, 11]));
+    const across = await torus.readTubeRoots();
+    expect(across[10 * w * 4]).toBeCloseTo(weak, 5);
+    expect(worst(across, (await reference(torus, 'wrap', 1)).roots)).toBeLessThan(1e-5);
+
+    // In a dish: two cells inside that touch at a corner, with one cell beside that corner outside the rim and the
+    // other inside. Both are walls in a box. In the dish the cell outside keeps the byte of a wall, but it is no
+    // wall of the dish, as for a move and for a child of growth: the two cells are not parted.
+    const rim: TubeGrid = { width: w, height: h, boundary: 'dish', shape: new Uint8Array(w * h * 4) };
+    const inside = (x: number, y: number) => arenaCell(rim, x, y) >= 0;
+    let found: [number, number] | undefined;
+    for (let y = 0; y < h - 1 && !found; y++)
+      for (let x = 0; x < w - 1 && !found; x++)
+        if (inside(x, y) && inside(x + 1, y + 1) && inside(x, y + 1) && !inside(x + 1, y)) found = [x, y];
+    expect(found).toBeDefined();
+    const [x, y] = found ?? [0, 0];
+    const dish = await make(flowing({ boundary: 'box' }), w, h);
+    dish.writeEnv(
+      walls([
+        [x + 1, y],
+        [x, y + 1],
+      ]),
+    );
+    expect(((await dish.readShape())[(y * w + x + 1) * 4] ?? 0) >= 128).toBe(true);
+    dish.update(flowing({ boundary: 'dish' }));
+    dish.writeFlow(pair([x, y], [x + 1, y + 1]));
+    const atRim = await dish.readTubeRoots();
+    expect(((await dish.readShape())[(y * w + x + 1) * 4] ?? 0) >= 128).toBe(true);
+    expect(atRim[(y * w + x) * 4]).toBeCloseTo(both, 5);
+    expect(worst(atRim, (await reference(dish, 'dish', 1)).roots)).toBeLessThan(1e-5);
+  });
+
   it('stops a disc at a wall cell beside its line, and at wall cells that touch at a corner', async () => {
     const [w, h] = [32, 24];
     const sim = await make(flowing(), w, h);
@@ -766,6 +823,38 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(before.gain).toBeGreaterThan(0);
     expect([forPng, after]).toEqual([before, before]);
   });
+
+  it('draws nothing of a simulation that is destroyed while a picture waits for the scent view', async () => {
+    const [w, h] = [32, 24];
+    const view: View = { center: [w / 2, h / 2], scale: 1 / 4 };
+    // A backend of its own: it has not built the programs of the scent view yet, so its first picture with the scent
+    // view waits for them. A rebuild of the engine destroys the simulation in that time (Engine.rebuild()).
+    const fresh = await create(document.createElement('canvas'));
+    const settings = flowing({ showScent: true });
+    const sim = await fresh.createSim(settings, w, h, 8);
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
+    sim.writeTrail(trail);
+    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+    const device = kind === 'webgpu' ? (fresh as WebGpuBackend).gpu.device : undefined;
+    const gl = kind === 'webgl2' ? (fresh as unknown as { gl: WebGL2RenderingContext }).gl : undefined;
+    device?.pushErrorScope('validation');
+    gl?.getError();
+    const waiting = fresh.capture(sim, settings, view, 32, 24);
+    sim.destroy();
+    const image = await waiting;
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
+    if (gl) expect(gl.getError()).toBe(gl.NO_ERROR);
+    // Nothing is left to draw: the picture is empty, and the engine asks again for its new simulation.
+    expect([image.width, image.height, Math.max(...image.data)]).toEqual([32, 24, 0]);
+    // The same for a picture that is asked of a simulation that is gone already.
+    device?.pushErrorScope('validation');
+    const late = await fresh.capture(sim, settings, view, 32, 24);
+    expect((await device?.popErrorScope())?.message).toBeUndefined();
+    if (gl) expect(gl.getError()).toBe(gl.NO_ERROR);
+    expect(Math.max(...late.data)).toBe(0);
+    fresh.destroy();
+  }, 120_000);
   it.runIf(kind === 'webgl2')('frees the first target of the picture when the second cannot be made', async () => {
     const [w, h] = [32, 24];
     const sim = await make(flowing(), w, h);

@@ -1002,6 +1002,33 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: a PNG while a new run starts
     engine.destroy();
   }, 120_000);
 
+  it('measures and draws again when the run restarted while the PNG was drawn', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [160, 100];
+    const s: Settings = { ...defaultSettings(), resolution: 256, density: 0.5 };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    engine.frame(0, 40);
+    const [measured, capture] = [
+      engine.backend.measured.bind(engine.backend),
+      engine.backend.capture.bind(engine.backend),
+    ];
+    let [measurements, pictures] = [0, 0];
+    engine.backend.measured = (sim) => {
+      measurements++;
+      return measured(sim);
+    };
+    engine.backend.capture = async (...args) => {
+      const image = await capture(...args);
+      // The first picture is drawn: before the engine gets it, the run restarts.
+      if (++pictures === 1) engine.reset();
+      return image;
+    };
+    const png = await engine.snapshot();
+    expect(png.size).toBeGreaterThan(100);
+    expect([measurements, pictures]).toEqual([2, 2]);
+    engine.destroy();
+  }, 120_000);
+
   it('measures the levels again when the run restarted before the answer', async () => {
     const { engine, first, asked } = await snapshot((e) => {
       e.reset();

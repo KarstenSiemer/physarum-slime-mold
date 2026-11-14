@@ -153,26 +153,31 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
   const tubes = page.getByRole('checkbox', { name: 'Draw the tubes by their flow', exact: true });
   await expect(tubes).toBeChecked();
   expect(await page.evaluate(() => globalThis.physarum?.settings.showTubes)).toBe(true);
-  // How many cells the picture draws with another trail than the view of the model, and the step. The simulation
-  // rests while the two are read: on a slow machine it steps between two reads, and every cell would differ.
+  // How many cells the picture draws with another trail than the view of the model, how many of them with more, and
+  // the step. Only a tube draws a cell with more than its trail: without a tube a cell holds a quarter of its trail.
+  // The simulation rests while the two are read: on a slow machine it steps between two reads, and every cell would
+  // differ.
   const differs = () =>
     page.evaluate(async () => {
       const engine = globalThis.physarum;
-      if (!engine) return { cells: -1, step: -1 };
+      if (!engine) return { cells: -1, more: -1, step: -1 };
       const { sim, paused } = engine;
       engine.paused = true;
       try {
         await sim.finish();
         const [picture, view] = [await sim.readPicture(), await sim.readView()];
-        let cells = 0;
-        for (let i = 0; i < view.length; i += 4) if (picture[i] !== view[i]) cells++;
-        return { cells, step: sim.step };
+        let [cells, more] = [0, 0];
+        for (let i = 0; i < view.length; i += 4) {
+          if (picture[i] !== view[i]) cells++;
+          if ((picture[i] ?? 0) > (view[i] ?? 0)) more++;
+        }
+        return { cells, more, step: sim.step };
       } finally {
         engine.paused = paused;
       }
     });
-  // The colony holds tubes after some steps: the picture then differs from the trail on many cells.
-  await expect.poll(async () => (await differs()).cells, { timeout: 120_000 }).toBeGreaterThan(100);
+  // The colony holds tubes after some steps: their discs then draw many cells with more than their trail.
+  await expect.poll(async () => (await differs()).more, { timeout: 120_000 }).toBeGreaterThan(100);
   const before = (await differs()).step;
   await tubes.uncheck();
   await page.waitForFunction(() => globalThis.physarum?.settings.showTubes === false);
@@ -188,7 +193,7 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
   await page.getByRole('button', { name: 'About Draw the tubes by their flow', exact: true }).click();
   await expect(page.getByText(/grows with the fourth root of the conductivity/)).toBeVisible();
   await tubes.check();
-  await expect.poll(async () => (await differs()).cells, { timeout: 60_000 }).toBeGreaterThan(100);
+  await expect.poll(async () => (await differs()).more, { timeout: 60_000 }).toBeGreaterThan(100);
   // Without the flow there is no switch: the picture is the trail.
   await page.getByRole('checkbox', { name: 'Flow in the tubes', exact: true }).uncheck();
   await expect(tubes).toHaveCount(0);
