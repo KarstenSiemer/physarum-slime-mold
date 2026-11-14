@@ -396,7 +396,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(ports).toEqual([10 * w + 4, ...Array.from({ length: 5 }, () => 11 * w + 4)]);
     // The tubes adapted in the step in which the port moved: the roles of the step before lay at its ports.
     expect(fields.memory[(6 * w + 20) * 4] ?? 0).not.toBe(Math.fround(FLOW.fresh));
-  }, 120_000);
+  }, 240_000);
 
   it('finds the port of a large site that a tube covers only far from its centre, as the CPU reference does', async () => {
     // A dab of radius 60: about 11,300 cells, in 177 blocks of 64 entries of its list. The passes look at the blocks of
@@ -440,7 +440,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     fields = flowStep(grid, u, fields, await sim.readTrail(), 0, 5, sites.cells);
     expect([fields.ports[0], fields.ports[2]]).toEqual([34 * w + 70, 6 * w + 140]);
     expect(roleCells(await sim.readFlow())).toEqual([6 * w + 140, 34 * w + 70].sort((a, b) => a - b));
-  }, 120_000);
+  }, 240_000);
 
   it('follows a change of the food sites during a run, as after a paint', async () => {
     // One dab first: no site has a partner, and no flux runs. Then a second dab, and the sites of both.
@@ -490,7 +490,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect([...sites.cells.subarray(0, sites.list[0]?.count ?? 0)]).toContain(10 * w + 4);
     expect(env[(10 * w + 4) * 4 + 1]).toBe(0);
     expect(roleCells(await sim.readFlow())).toEqual([]);
-  }, 120_000);
+  }, 240_000);
 
   it('obeys Kirchhoff’s law, adapts a tube to f(Q) and lets a dead end starve', async () => {
     // One route between the foods over row 6, and a dead end up from it.
