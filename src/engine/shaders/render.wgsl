@@ -17,8 +17,8 @@ struct View {
   background: vec4f,  // linear RGB
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
   fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), level of the trail's map (0 to 4)
-  streamFx: vec4f,    // the stream of the plasm: drawn (1) or not (0), the phase of its pattern (0 to 1), unused, unused
-  gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, unused, unused
+  streamFx: vec4f,    // the stream of the plasm: drawn (1) or not (0), the phases of its pattern and its swing, unused
+  gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
   scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
@@ -37,7 +37,7 @@ const DISH_FILL = 0.945;
 @group(0) @binding(7) var heightSampler: sampler;   // bilinear, clamped
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
-@group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed (tubes.wgsl)
+@group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
@@ -343,10 +343,12 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   return mix(base, lit, body * mix(V.gelFx.y, 1.0, full)) + spec * body;
 }
 
-// ---- The stream of the plasm (ADR 0034, amendment 2026-11-14) -----------------------------------------------------------
-// Grains that move along the flow in each tube, faster where the flow is faster. Display only.
+// ---- The stream of the plasm (ADR 0034, amendments of 2026-11-14) -----------------------------------------------
+// Grains that move along the flow in each tube, faster where the flow is faster. They go back and forth, as the plasm
+// of the organism does, and go on with the flow a little in each swing. Display only.
 const STREAM_GRAIN = 2.2;  // cells between two points of the pattern of the grains
-const STREAM_REACH = 20.0; // cells that a grain moves in one period of the pattern where the speed is 1
+const STREAM_REACH = 10.0; // cells that a grain goes on in one period of the pattern where the speed is 1
+const STREAM_SWING = 12.0; // cells that a grain goes to each side in a swing where the speed is 1
 const STREAM_GAIN = 1.5;   // how much more trail a grain shows where the speed is 1
 const STREAM_DARK = 0.3;   // how much darker a grain makes the gel there
 
@@ -376,7 +378,7 @@ fn grains(x: vec2f) -> f32 {
 
 // How much of a grain lies at p, 0 to 1. The pattern is shifted along the stream by the phase, so a grain moves with
 // the flow. A shift that grows without end would tear the pattern where the stream turns, so two copies of the
-// pattern take turns: each starts again while the other one shows.
+// pattern take turns: each starts again while the other one shows. Both copies swing back and forth together.
 fn streaming(p: vec2f) -> f32 {
   let q = p - 0.5;
   let c = vec2i(floor(q));
@@ -386,8 +388,9 @@ fn streaming(p: vec2f) -> f32 {
   let speed = length(v);
   if (speed <= 0.0) { return 0.0; }
   let t = V.streamFx.y;
-  let first = grains((p - v * STREAM_REACH * (t - 0.5)) / STREAM_GRAIN);
-  let second = grains((p - v * STREAM_REACH * (fract(t + 0.5) - 0.5)) / STREAM_GRAIN + vec2f(37.0, 17.0));
+  let swing = STREAM_SWING * sin(6.283185307 * V.streamFx.z);
+  let first = grains((p - v * (STREAM_REACH * (t - 0.5) + swing)) / STREAM_GRAIN);
+  let second = grains((p - v * (STREAM_REACH * (fract(t + 0.5) - 0.5) + swing)) / STREAM_GRAIN + vec2f(37.0, 17.0));
   let n = mix(second, first, 1.0 - abs(2.0 * t - 1.0));
   // A grain is smaller than a pixel from 1.5 cells per pixel on: it fades out before.
   return sqrt(speed) * smoothstep(0.45, 0.8, n) * clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);

@@ -166,5 +166,6 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - Jenson-style contagion between strains; adaptive sensing ("36 Points" idea, own parameters only, license note in knowledge base)
 - Oscillation (Jones 2012), MCPM steering
 - Tracer agent with path history (shuttle streaming, Jones Fig. 7); video recording
+- A modelled back and forth of the plasm (shuttle streaming, `docs/fidelity.md`, 17): a pumping of the tubes that drives the flux, with waves along the network (Alim et al. 2013, PNAS 110: 13306, not yet read for this project; Kramar and Alim 2021), or the oscillation of Jones above. Today the model holds the mean flow (Tero et al. 2007), and the picture of the tubes swings its grains with one fixed period, in the picture alone (ADR 0034, second amendment of 2026-11-14). The owner asked to note it for later (2026-11-14)
 - Sensor width > 1 and sensitivity threshold `sMin`
 - Custom domain `physarum.karstensiemer.de` (steps in `knowledge-base/github-pages.md`)

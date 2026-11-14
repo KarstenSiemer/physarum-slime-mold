@@ -93,8 +93,10 @@ export function packView(
   // Copies of the grid around a periodic lattice show at this brightness (ADR 0026); 1 shows them as they are.
   const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
   fl.set([settings.bloom, black, copies, trailLevel(view.scale)], 32);
-  // The pattern of the grains starts again after STREAM.period steps.
-  fl.set(stream === undefined ? [0, 0, 0, 0] : [1, (stream % STREAM.period) / STREAM.period, 0, 0], 36);
+  // The pattern of the grains starts again after STREAM.period steps, and the grains go back and forth once in
+  // STREAM.swing steps.
+  const phases = (step: number) => [(step % STREAM.period) / STREAM.period, (step % STREAM.swing) / STREAM.swing];
+  fl.set(stream === undefined ? [0, 0, 0, 0] : [1, ...phases(stream), 0], 36);
   fl.set([...GEL_FX[settings.gelColor], 0, 0], 40);
   // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
   // sensors of its line, their half spread and the hold of a strand (scentSensors()).
