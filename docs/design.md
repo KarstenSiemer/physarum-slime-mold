@@ -260,7 +260,8 @@ the arrows.
   drawn state (`shaders/tubes.wgsl`, `gl/glsl/tubes.frag`; the rule and its numbers in `src/engine/tubes.ts`, a CPU
   copy in `tubes-reference.ts`). The first writes, per cell and strain, the fourth root of the strength across the
   tube: on a cell with a tube the sum of tube body times flow memory over the 3 × 3 cells around the cell, over 3, at
-  most 1, and 0 on a cell without a tube. The second draws every cell with a tube as a disc of 3.5 cells times that
+  most 1, and 0 on a cell without a tube and on a cell of a wall. A wall cell adds nothing to the sum, and neither
+  does a cell at a corner with a wall cell on both sides of that corner. The second draws every cell with a tube as a disc of 3.5 cells times that
   factor, with an edge 1 cell wide, so a tube is at most 3 cells wider on each side than its band of cells. A cell of
   the picture takes the largest weight (factor times cover) of the discs that reach it, times the mean of the trails
   of their cells by weight, and at least a quarter of its own trail. A disc reaches another cell only if neither is a

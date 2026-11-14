@@ -161,7 +161,7 @@ describe('the archive of the logs', () => {
     const files = readArchive();
     expect(files).toHaveLength(161);
     // A new campaign changes the record: pack the archive again (`logs.ts pack`) and put the new number here.
-    expect(digestOf(files)).toBe('591b2e863a4bfaac7ea3f2d37d7386daee2027f559a593c0c8a1bcf0ccbc62fe');
+    expect(digestOf(files)).toBe('1c83e007e09608df40ec976bbe4daace06406276709a3ed94ad0d5c9680bf2a8');
   });
 
   it('packs a folder so that unpacking gives the same files', () => {

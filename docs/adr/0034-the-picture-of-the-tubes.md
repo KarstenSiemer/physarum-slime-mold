@@ -48,7 +48,8 @@ What stood in the way:
 2. **The rule**, per strain (`src/engine/tubes.ts` has the numbers):
 
    ```text
-   strength of a cell      S = tube body · flow memory   on a cell with a tube, else 0
+   strength of a cell      S = tube body · flow memory   on a cell with a tube, else 0;
+                           a cell of a wall holds no tube
    strength across a tube  σ = min(1, sum of S over the 3 × 3 cells around the cell / 3)
                            on a cell with a tube, else 0
    factor                  ρ = σ^(1/4)
@@ -106,9 +107,18 @@ What stood in the way:
    second review). A disc of the cell q reaches the cell p only if neither cell is a cell of a
    wall, and no cell of a wall lies on the line between the centres of the two cells. A line
    through the corner of a cell is on that cell, so no disc passes between two wall cells that
-   touch at a corner. The disc of a cell always reaches the cell itself. A cell outside the arena
-   holds no picture. The passes read which cells are walls from `shape`, which the renderer has
-   for the outlines of the walls.
+   touch at a corner. That is the rule of a move of the model, which takes no line that touches a
+   wall cell (`docs/model.md`, 7.5). The disc of a cell that is no wall always reaches the cell
+   itself. A cell outside the arena holds no picture. The passes read which cells are walls from
+   `shape`, which the renderer has for the outlines of the walls.
+
+   The strength across a tube stays behind a wall too (2026-11-14, after a third review). A cell
+   of a wall holds no tube and adds nothing to the sum of decision 2. A cell at a corner of a
+   cell adds nothing if the two cells beside that corner are both walls: no plasmodium goes from
+   one to the other, and growth puts no child there (ADR 0025, amendment of 2026-11-13). Before,
+   a weak tube along a wall of cells that touch at their corners took the strength of a strong
+   tube on the other side. One wall cell beside a corner parts nothing here: a tube that runs
+   along a wall keeps its own cells.
 
    The first wall test read no cell on the line. It used the distances of the two cells to the
    outline of the walls, which `shape` holds too: a disc passed if they were together more than
@@ -215,32 +225,34 @@ same run (`research/flow/engine/picture.gpu.test.ts`; the record is `picture.jso
 
 | Scene               | Cells     | Strains | WebGPU, off | WebGPU, on | WebGL2, off | WebGL2, on |
 | ------------------- | --------- | ------- | ----------- | ---------- | ----------- | ---------- |
-| Maze                | 512 × 320 | 1       | 2.50        | 2.87       | 4.84        | 5.51       |
-| Tokyo rail network  | 512 × 512 | 1       | 3.53        | 3.98       | 6.23        | 6.75       |
-| Food ring           | 384 × 384 | 1       | 1.98        | 2.21       | 4.68        | 4.96       |
-| Rival networks      | 384 × 384 | 2       | 2.85        | 3.34       | 5.35        | 5.93       |
-| Tokyo, two networks | 512 × 512 | 2       | 6.00        | 6.52       | 8.31        | 8.74       |
+| Maze                | 512 × 320 | 1       | 2.51        | 2.83       | 4.84        | 5.48       |
+| Tokyo rail network  | 512 × 512 | 1       | 3.50        | 3.99       | 6.16        | 6.78       |
+| Food ring           | 384 × 384 | 1       | 1.97        | 2.25       | 4.80        | 4.90       |
+| Rival networks      | 384 × 384 | 2       | 2.86        | 3.35       | 5.34        | 5.98       |
+| Tokyo, two networks | 512 × 512 | 2       | 5.97        | 6.53       | 8.35        | 8.58       |
 
-The picture costs 0.23 to 0.52 ms for each drawn state on WebGPU and 0.27 to 0.68 ms on WebGL2.
+The picture costs 0.28 to 0.56 ms for each drawn state on WebGPU and 0.10 to 0.64 ms on WebGL2.
 The view draws at most one state per frame, so the cost does not grow with the steps per frame.
 With the first wall test (decision 3) the picture took 0.33 to 0.61 ms on WebGPU, on 2026-11-13
 with the same command: the exact test costs no more.
 
 ### The tests
 
-- `src/engine/tubes.test.ts`, 11 tests: the rule on the CPU, in plain cases with numbers. The
+- `src/engine/tubes.test.ts`, 13 tests: the rule on the CPU, in plain cases with numbers. The
   strength across a tube only on a cell with a tube, the radius and the edge of a disc, the mean
   by weight, the plasmodium without a tube, the edges of the three arenas, and the walls: a wall
   of two rows and of one row, every cell that a line between two cells touches (against a second
-  way to compute it), a wall cell beside the middle of a line, and a wall of cells that touch at
-  their corners.
-- `src/engine/tubes.gpu.test.ts`, 19 tests on each backend and one more on WebGL2:
+  way to compute it), a wall cell beside the middle of a line, a wall of cells that touch at their
+  corners, a weak and a strong tube on the two sides of such a wall, and a wall cell that still
+  holds the memory of a tube.
+- `src/engine/tubes.gpu.test.ts`, 20 tests on each backend and one more on WebGL2:
   - the two passes against the CPU reference (`tubes-reference.ts`) on a box, on the periodic grid
-    and in a dish, with walls and four strains: the factors to 1 part in 100,000, and the picture
-    to 1 part in 100,000 of a value, or of 1 for a value below 1; and the same plain cases;
-  - walls from strokes and walls written as cells, with a tube on every open cell, so that one
-    disc too many or too few changes the picture; and a wall across the edge of the periodic grid,
-    right after the boundary changed;
+    and in a dish, with four strains and three walls, one of them one cell thick along a diagonal:
+    the factors to 1 part in 100,000, and the picture to 1 part in 100,000 of a value, or of 1
+    for a value below 1. The walls stop more than 100 discs on their line in each of these scenes;
+  - the same plain cases as on the CPU; walls written as cells, with a tube on every open cell, so
+    that one disc too many or too few changes the picture; a weak and a strong tube on the two
+    sides of a diagonal wall; and a wall across the edge of the periodic grid;
   - the picture after a step, a new trail, a new memory and a new wall; the picture of a step that
     moves first; the trail alone with the switch off, without the flow and in the agents style;
   - a drawn frame: zoomed in and zoomed out in each style that draws the trail, its glow, and the
@@ -250,15 +262,16 @@ with the same command: the exact test costs no more.
     picture;
   - settings that free and make the textures that the picture reads (a third pair of the view, a
     flow with one more strain): the picture stays right, and WebGPU reports no error; a measurement
-    that waits while the settings free the picture, or while the simulation is destroyed; and on
-    WebGL2 a second target that cannot be made.
+    that waits while the settings free the picture, while the levels of the frames start anew, or
+    while the simulation is destroyed; and on WebGL2 a second target that cannot be made.
 - `src/engine/engine.test.ts` and `engine.gpu.test.ts`: a measurement of the levels, and a PNG,
-  while a rebuild replaces the simulation: the engine measures again for the new one.
+  while a restart or a rebuild starts a new run: the engine measures again for the new run, also
+  when the rebuild has ended before the answer comes.
 - `src/engine/engine.test.ts`, `sizing.test.ts`, `params.test.ts`, `state.test.ts`: the switch
   neither restarts nor rebuilds a simulation, the fit of the grid counts the picture with the
   switch on and off, a link without the switch has it on, and a new scene keeps it.
 - `tests/e2e/flow.spec.ts`: the switch in the built app.
-- `research/flow/engine/mutate.ts` has 62 wrong rules of the picture (V1 to V62): each line of the
+- `research/flow/engine/mutate.ts` has 69 wrong rules of the picture (V1 to V69): each line of the
   rule in the WGSL and in the GLSL pass, and the code of each backend that makes the picture and
   hands it to the readers of decision 4. Each one fails at least one test
   (`logs/view/mutations.txt`). Three runs each found a wrong rule that no test caught, and a test
@@ -267,18 +280,26 @@ with the same command: the exact test costs no more.
   which showed only at every second step; and on both, a picture that is made before the wall
   bytes follow new cells of a wall.
 
-Two independent reviews found faults that the tests of that time did not catch.
+Three independent reviews found faults that the tests of that time did not catch.
 
 - 2026-11-13: on WebGPU the renderer kept the scent of an older frame, or a texture that was
   freed, below the picture; a measurement of the levels read textures that it took before a wait;
   a cell beside a tube was a disc too; and a wall byte could stand for more than its distance.
-- 2026-11-14: the first wall test let a disc pass a wall cell (decision 3); the tests
-  of the levels covered only the measurement that tests ask for, not the one of the frames and
-  not the one of a PNG; a measurement that waited could ask a simulation that a rebuild had
-  destroyed for its textures; and a PNG that waited through a rebuild was drawn with levels of the
-  old simulation.
+- 2026-11-14, the second review: the first wall test let a disc pass a wall cell (decision 3);
+  the tests of the levels covered only the measurement that tests ask for, not the one of the
+  frames and not the one of a PNG; a measurement that waited could ask a simulation that a rebuild
+  had destroyed for its textures; and a PNG that waited through a rebuild was drawn with levels of
+  the old simulation.
+- 2026-11-14, the third review: the engine measured again only while a rebuild was still on its
+  way, not after a rebuild that had ended and not after a restart; the strength across a tube
+  crossed a wall of cells that touch at their corners (decision 3); and two tests passed for
+  another reason than their name says.
 
 Each fault is fixed, and each fix has a test that fails without it.
+
+The first run of the tests on GitHub found a fault in a test: the e2e test of the switch read the
+picture and the trail of the view in two reads, and on the slow machine the simulation ran a step
+between them. The simulation now rests during the two reads (ADR 0010).
 
 ## Consequences
 
