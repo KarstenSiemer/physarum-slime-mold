@@ -2,7 +2,8 @@
 // tests only: sim.gpu.test.ts steps it from the state after the moves of a step and compares both GPU backends with it.
 import type { Boundary, Settings } from '../model/params';
 import { DISH_FILL } from './brush';
-import { pyramidLevels, strainEnds } from './pack';
+import { pcg } from './flow';
+import { strainEnds } from './pack';
 import type { AgentState } from './types';
 
 const ALIVE = 4;
@@ -11,13 +12,6 @@ const TAU = Math.fround(6.28318530717959);
 const GROW = 4;
 const BIRTH = 5;
 const PLACE_ORDER = 6;
-
-/** PCG hash of common.wgsl and common.glsl. */
-export function pcg(v: number): number {
-  const state = (Math.imul(v >>> 0, 747796405) + 2891336453) >>> 0;
-  const word = Math.imul(((state >>> ((state >>> 28) + 4)) ^ state) >>> 0, 277803737) >>> 0;
-  return ((word >>> 22) ^ word) >>> 0;
-}
 
 /** rngSeed() of common.wgsl: the stream of agent `id` in step `step` for `salt`. */
 export function rngSeed(id: number, salt: number, step: number, seed: number): number {
@@ -216,6 +210,3 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
   });
   return { agents, windows };
 }
-
-/** Nodes of the levels of a pyramid over n elements, the elements first (for tests of the sizes). */
-export const pyramidSizes = (n: number) => [n, ...pyramidLevels(n)];

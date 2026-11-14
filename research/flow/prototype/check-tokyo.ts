@@ -5,7 +5,7 @@ import { outDir } from './out.ts';
 import { mapScale, measures, mst, network, tokyoWorld } from './tokyo.ts';
 import { picture, writePng } from './world.ts';
 
-const OUT = outDir();
+const OUT = outDir(process.env.SUB);
 const n = 400;
 const t = tokyoWorld(n);
 const set33 = t.cities.map((c, i) => (c.stat ? i : -1)).filter((i) => i >= 0);

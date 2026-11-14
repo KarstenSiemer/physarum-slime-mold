@@ -1,7 +1,6 @@
 <script lang="ts">
+  import { letter } from '../model/scene';
   import { app, getEngine, showNotice, toolsFor } from './state.svelte';
-
-  const letter = (i: number) => 'ABCD'[i] ?? String(i + 1);
 
   function step() {
     app.paused = true;

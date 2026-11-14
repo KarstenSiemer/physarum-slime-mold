@@ -8,7 +8,7 @@ import { mazeWorld } from './maze.ts';
 import { outDir } from './out.ts';
 import { centreCell } from './world.ts';
 
-const OUT = outDir();
+const OUT = outDir(process.env.SUB);
 const world = mazeWorld();
 const n = world.w * world.h;
 const trail = new Float32Array(readFileSync(`${OUT}trail-s1-1000.f32`).buffer.slice(0));

@@ -8,6 +8,7 @@ import {
   BYTES_PER_CELL_HALF_FLOAT,
   COVERED_BYTES_PER_CELL_HALF_FLOAT,
 } from '../sizing';
+import { OutOfMemoryError } from '../gpu';
 import type { AgentState } from '../types';
 import { WebGl2Backend } from './backend';
 import { fence } from './gl';
@@ -16,13 +17,17 @@ import { GlSim } from './sim';
 
 /**
  * A canvas whose WebGL2 context counts live textures, framebuffers and renderbuffers, records
- * synchronous readPixels calls, and can fail a completeness check.
+ * synchronous readPixels calls, and can fail a completeness check or report that the storage of a texture ran out of
+ * memory.
  */
 function countingCanvas() {
   const live = { textures: 0, framebuffers: 0, renderbuffers: 0 };
   const syncReads: number[] = [];
   let checks = 0;
   let failAt = Infinity;
+  let storages = 0;
+  let oomAt = Infinity;
+  let oom = false;
   const canvas = document.createElement('canvas');
   const getContext = canvas.getContext.bind(canvas);
   const wrap = (gl: WebGL2RenderingContext) =>
@@ -52,6 +57,17 @@ function countingCanvas() {
             };
           case 'checkFramebufferStatus':
             return (target: number) => (++checks === failAt ? 0 : t.checkFramebufferStatus(target));
+          case 'texStorage2D':
+            return (...a: Parameters<WebGL2RenderingContext['texStorage2D']>) => {
+              if (++storages === oomAt) oom = true;
+              t.texStorage2D(...a);
+            };
+          case 'getError':
+            return () => {
+              if (!oom) return t.getError();
+              oom = false;
+              return t.OUT_OF_MEMORY;
+            };
           case 'readPixels':
             return (...a: unknown[]) => {
               if (ArrayBuffer.isView(a[6])) syncReads.push(performance.now());
@@ -66,7 +82,13 @@ function countingCanvas() {
     const gl = getContext(type, attrs);
     return gl instanceof WebGL2RenderingContext ? wrap(gl) : gl;
   }) as unknown as typeof canvas.getContext;
-  return { canvas, live, syncReads, failAt: (n: number) => (failAt = checks + n) };
+  return {
+    canvas,
+    live,
+    syncReads,
+    failAt: (n: number) => (failAt = checks + n),
+    oomAt: (n: number) => (oomAt = storages + n),
+  };
 }
 
 /** A WebGL2 context with float render targets, and whether it blends 32-bit floats. */
@@ -123,6 +145,28 @@ describe.each(PATHS)('float blending %s', (floatBlend) => {
     // collisions ×3 or the counting panels (×2 checks)
     expect(failures).toBeGreaterThanOrEqual(floatBlend ? 13 : 12);
   }, 120_000); // GitHub: 18.1 s, PR #40 (ADR 0010)
+
+  // ADR 0028, amendment of 2026-11-14: growth makes its targets at its first test step, after createSim(). When the GPU
+  // runs out of memory there, the step throws an OutOfMemoryError, which the engine answers with a smaller grid
+  // (Engine.outOfMemory()), and the targets made before it are freed. Before, the error stopped the app, and the
+  // targets made before it stayed behind. Growth needs one agent per cell, which needs float blending.
+  it.runIf(floatBlend)('throws out of memory from a target made after the start, and frees the others', () => {
+    const { canvas, live, oomAt } = countingCanvas();
+    const { gl, prog } = context(canvas);
+    const empty = { ...live };
+    const settings = settingsWith({ collisions: true, growth: true, growthEvery: 1, shrinkEvery: 1 });
+    const sim = new GlSim(gl, prog, settings, 64, 32, 100, floatBlend);
+    const before = { ...live };
+    oomAt(3); // the third target of growth
+    expect(() => {
+      sim.run(1);
+    }).toThrow(OutOfMemoryError);
+    expect(live).toEqual(before);
+    sim.run(1); // growth holds nothing yet, so this step makes every target
+    expect(live.textures).toBeGreaterThan(before.textures);
+    sim.destroy();
+    expect(live).toEqual(empty);
+  });
 
   // Half floats count exactly to 2048 only; condensed networks hold thousands of agents per cell.
   it('counts deposits exactly far above 2048 agents per cell and strain', async () => {

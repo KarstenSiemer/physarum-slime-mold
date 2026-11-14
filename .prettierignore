@@ -1,7 +1,2 @@
 package-lock.json
-dist/
-coverage/
-playwright-report/
-test-results/
-*.pdf
 .claude/skills/

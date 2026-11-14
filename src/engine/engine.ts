@@ -211,6 +211,9 @@ export class Engine {
   ): Promise<Engine> {
     const engine = new Engine(backend ?? (await createBackend(canvas)), canvas, settings);
     engine.onAdjust = onAdjust;
+    engine.backend.onOutOfMemory = (message) => {
+      engine.outOfMemory(new OutOfMemoryError(message));
+    };
     engine.settings = engine.supported(settings);
     await engine.rebuild();
     return engine;
@@ -365,26 +368,11 @@ export class Engine {
         try {
           this.sim = await this.backend.createSim(this.settings, w, h, agents, start);
         } catch (err) {
-          // The estimate was too optimistic for this GPU: step the grid down and try again. A lattice keeps its cells
-          // or goes: the next grid is the largest one shaped like the screen with fewer cells (ADR 0026). For a grid
-          // shaped like the screen that is the next resolution below.
-          const aspect = this.canvas.width / Math.max(1, this.canvas.height);
-          const lower = [...RESOLUTIONS].reverse().find((r) => {
-            const [gw, gh] = gridSize(r, aspect);
-            return gw * gh < w * h;
-          });
-          if (!(err instanceof OutOfMemoryError) || lower === undefined) {
+          // The estimate was too optimistic for this GPU: step the grid down and try again.
+          if (!(err instanceof OutOfMemoryError) || !this.lowerGrid(w, h)) {
             this.stop(); // nothing is left to draw
             throw err;
           }
-          this.settings = { ...this.settings, lattice: null, resolution: lower };
-          if (lattice)
-            this.onAdjust?.(
-              `The GPU ran out of memory for a lattice of ${latticeText(lattice)}. The scene runs on a grid of ${lower} cells on the long side.`,
-              lower,
-              lattice,
-            );
-          else this.onAdjust?.(`Lowered the grid to ${lower} cells: the GPU ran out of memory.`, lower);
           continue;
         }
         old = this.sim;
@@ -402,6 +390,49 @@ export class Engine {
       this.restarts++;
     })().finally(() => (this.rebuilding = undefined));
     return this.rebuilding;
+  }
+
+  /**
+   * After the GPU ran out of memory for a grid of w × h cells: the settings take the next grid with fewer cells, and
+   * `onAdjust` says so. False if there is none. A lattice keeps its cells or goes: the next grid is the largest one
+   * shaped like the screen with fewer cells (ADR 0026). For a grid shaped like the screen that is the next resolution
+   * below.
+   */
+  private lowerGrid(w: number, h: number): boolean {
+    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
+    const lower = [...RESOLUTIONS].reverse().find((r) => {
+      const [gw, gh] = gridSize(r, aspect);
+      return gw * gh < w * h;
+    });
+    if (lower === undefined) return false;
+    const { lattice } = this.settings;
+    this.settings = { ...this.settings, lattice: null, resolution: lower };
+    if (lattice)
+      this.onAdjust?.(
+        `The GPU ran out of memory for a lattice of ${latticeText(lattice)}. The scene runs on a grid of ${lower} cells on the long side.`,
+        lower,
+        lattice,
+      );
+    else this.onAdjust?.(`Lowered the grid to ${lower} cells: the GPU ran out of memory.`, lower);
+    return true;
+  }
+
+  /**
+   * The GPU ran out of memory after the simulation was built: a pass of the simulation or of the picture made a buffer
+   * or texture at its first use (the flow, growth, the picture of the tubes, the view of a step that moves first, the
+   * maps of the view), outside the scope of createSim(). The WebGPU backend hears of it from the device
+   * (Backend.onOutOfMemory), the WebGL2 backend throws it from the step or the draw (frame()). The engine steps the
+   * grid down and builds a new simulation, as for a failed createSim() (ADR 0028, amendment of 2026-11-14). While a
+   * new simulation is built, nothing is done: it allocates afresh.
+   */
+  private outOfMemory(err: OutOfMemoryError) {
+    if (this.rebuilding) return;
+    if (!this.lowerGrid(this.sim.width, this.sim.height)) {
+      this.stop(); // the smallest grid does not fit either: nothing is left to draw
+      this.onError?.(err);
+      return;
+    }
+    this.rebuild().catch((e: unknown) => this.onError?.(e));
   }
 
   reset() {
@@ -664,6 +695,15 @@ export class Engine {
    * time: its steps would only move the paused scene.
    */
   frame(now: number, forceSteps?: number) {
+    try {
+      this.frameOf(now, forceSteps);
+    } catch (err) {
+      if (!(err instanceof OutOfMemoryError)) throw err;
+      this.outOfMemory(err);
+    }
+  }
+
+  private frameOf(now: number, forceSteps?: number) {
     if (this.rebuilding) return;
     if (this.sweepFor(Infinity, performance.now() + FRAME_MS)) this.onEdits?.();
     this.flushEnv();
@@ -724,10 +764,10 @@ export class Engine {
     this.sim.finish().then(done, done);
   }
 
-  /** The current frame as pixels, rendered offscreen at canvas size; `levels` in place of those of the frames. */
-  capture(levels?: Levels): Promise<ImageData> {
+  /** The current frame as pixels, rendered offscreen at canvas size. */
+  capture(): Promise<ImageData> {
     const { width, height } = this.canvas;
-    return this.ofRun((sim) => this.backend.capture(sim, this.settings, this.view, width, height, levels));
+    return this.ofRun((sim) => this.backend.capture(sim, this.settings, this.view, width, height));
   }
 
   /**

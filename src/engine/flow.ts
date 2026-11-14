@@ -76,8 +76,8 @@ export const FLOW_CONSTANT_SLOTS = 7;
 export const FLOW_SLOTS = FLOW_CONSTANT_SLOTS + FLOW_SITES;
 export const FLOW_BYTES = FLOW_SLOTS * 16;
 
-/** PCG hash, as common.wgsl `pcg` (growth-reference.ts has the same). */
-function pcg(v: number): number {
+/** PCG hash of common.wgsl and common.glsl. */
+export function pcg(v: number): number {
   const state = (Math.imul(v, 747796405) + 2891336453) >>> 0;
   const word = Math.imul(((state >>> ((state >>> 28) + 4)) ^ state) >>> 0, 277803737) >>> 0;
   return ((word >>> 22) ^ word) >>> 0;
