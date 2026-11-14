@@ -95,9 +95,18 @@ export const VIEW_BYTES_PER_CELL = 24;
  */
 export const FLOW_BYTES_PER_CELL = 80;
 
-/** The bytes per cell of the flow of these settings: every strain has a flow of its own (ADR 0031); 0 while it is off. */
+/**
+ * More bytes per cell while the flow is on, once for all strains: the cells of the food sites (ADR 0029, decision 17;
+ * sim.ts `siteCells`, gl/sim.ts siteCells()), an index of 4 B for each, and no cell in two sites (sites.ts).
+ */
+export const SITE_BYTES_PER_CELL = 4;
+
+/**
+ * The bytes per cell of the flow of these settings: every strain has a flow of its own (ADR 0031), and all share the
+ * cells of the food sites; 0 while the flow is off.
+ */
 export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>) =>
-  flowOn(s) ? FLOW_BYTES_PER_CELL * flowStrains(s) : 0;
+  flowOn(s) ? FLOW_BYTES_PER_CELL * flowStrains(s) + SITE_BYTES_PER_CELL : 0;
 
 /**
  * More bytes per cell for the picture of the tubes (tubes.ts, ADR 0034): per cell and strain the factor of the radius

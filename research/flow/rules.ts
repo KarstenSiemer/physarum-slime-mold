@@ -168,5 +168,6 @@ export function step(
   let [now, before] = [fields.pressure, fields.before];
   for (let i = 0; i < FLOW_ITERATIONS; i++)
     [before, now] = [now, pressure(grid, u, memory, now, before, i === 0 ? 1 : i === 1 ? 2 : 0, rules)];
-  return { memory, pressure: now, before };
+  // A site of this copy is the one cell of the block (bounded.ts), so it needs no ports: they stay as they came.
+  return { memory, pressure: now, before, ports: fields.ports };
 }

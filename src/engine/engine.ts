@@ -14,6 +14,7 @@ import { paintsCell } from './brush';
 import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import { flowOn } from './flow';
+import { foodStrokes, NO_SITES, SiteCells } from './sites';
 import { AgentToolKind, growthOn, stepChance, strainAgents, type AgentTool } from './pack';
 import {
   agentCount,
@@ -173,6 +174,8 @@ export class Engine {
   private edits: EnvEdit[] = [];
   /** How many of `edits` the current simulation holds; the next frame paints the rest. */
   private painted = 0;
+  /** The cells of each food stroke on the grid of the simulation, kept from one call of syncSites() to the next. */
+  private readonly siteCells = new SiteCells();
   /** Every edit on the grid on screen, for the sweep: mapped once per grid and kept in step with `edits`. */
   private placement: Placement | undefined;
   /** The sweep that runs on `placement`, over several frames when it is long, and the clearing strokes after it. */
@@ -446,15 +449,17 @@ export class Engine {
   /**
    * The start layout 'food' (ADR 0025): every agent starts dead, and one step of the inoculate tool places about
    * FOOD_START agents of a strain in a disc of FOOD_CELLS cells on a food of the edit list, as Jones starts a foraging
-   * run at a food source. Each strain has a food of its own (ADR 0032): strain A the first food of the list, strain B
-   * the second, and so on, one step for each. A strain without such a food starts without agents. About FOOD_TRIES
+   * run at a food source. Each strain has a food of its own (ADR 0032): strain A the first food stroke of the list,
+   * strain B the second, and so on, one step for each, at the start of the stroke. A food stroke is a dab or every
+   * segment of one drag, as a food site of the flow is (ADR 0029, decision 17; sites.ts foodStrokes()): so a dragged
+   * line is one food here too. A strain without such a food starts without agents. About FOOD_TRIES
    * dead agents try a random point of the disc; with the rule one agent takes each cell they hit (about FOOD_START),
    * and without it about FOOD_START agents try. The steps are the first steps of the run, the same in every run of a
    * seed. With one strain it is the one step on the first food that it was.
    */
   private seedAtFood() {
     if (this.settings.layout !== 'food') return;
-    const foods = this.edits.filter((e) => e.kind === 'food');
+    const foods = foodStrokes(this.edits).map((stroke) => stroke[0]);
     const agents = strainAgents(this.settings.strains, this.sim.agents);
     this.settings.strains.forEach((_, strain) => {
       const food = foods[strain];
@@ -475,7 +480,7 @@ export class Engine {
     [this.running, this.queue] = [undefined, []];
     if (this.live) {
       this.sim.clearEnvironment();
-      this.sim.foodSites([]);
+      this.sim.foodSites(NO_SITES);
     }
     this.onEdits?.();
   }
@@ -614,19 +619,18 @@ export class Engine {
   }
 
   /**
-   * The food sites of the flow in the tubes (ADR 0029): the start point of each food edit that the simulation holds,
-   * on its grid and in the order of the list. After each paint, after the sweep deleted edits, after a load and when
-   * the flow turns on. Only the flow reads the sites: while it is off, a paint does not map the list again.
+   * The food sites of the flow in the tubes (ADR 0029, decision 17): each food stroke of the edits that the simulation
+   * holds, a dab or the segments of one drag (sites.ts foodStrokes()), with the cells that it paints on the grid of the
+   * simulation, in the order of the list. After each paint, after the sweep deleted edits, after a load and when the
+   * flow turns on. Only the flow reads the sites: while it is off, a paint does not map the list again.
    */
   private syncSites() {
     if (!flowOn(this.settings)) return;
     const { width, height } = this.sim;
-    const centres: [number, number][] = [];
-    for (const e of this.edits.slice(0, this.painted)) {
-      const at = e.kind === 'food' ? strokeOn(e, width, height) : undefined;
-      if (at) centres.push(at.from);
-    }
-    this.sim.foodSites(centres);
+    const strokes = foodStrokes(this.edits.slice(0, this.painted)).map((stroke) =>
+      stroke.flatMap((e) => strokeOn(e, width, height) ?? []),
+    );
+    this.sim.foodSites(this.siteCells.sites(strokes, width, height, this.settings.boundary));
   }
 
   /**

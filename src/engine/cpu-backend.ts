@@ -1,7 +1,9 @@
 // A backend for the engine tests in Node, for tests only: it paints with paint-reference.ts, the CPU mirror of the
 // paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and simulates nothing else.
 import type { Settings } from '../model/params';
+import type { AgentTool } from './pack';
 import { paintReference } from './paint-reference';
+import { NO_SITES, type FlowSites } from './sites';
 import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
 import type { Backend, Sim, Stroke } from './types';
 
@@ -31,8 +33,11 @@ export class CpuSim implements Sim {
     this.revision++;
     this.calls.push('reset');
   }
-  run(steps: number) {
+  /** The agent tools of the steps that ran, in order (the start layout 'food' places its colonies with one). */
+  readonly tools: AgentTool[] = [];
+  run(steps: number, tool?: AgentTool) {
     this.step += steps;
+    if (tool) this.tools.push(tool);
   }
   paint(strokes: readonly Stroke[]) {
     if (strokes.length > 0) this.revision++;
@@ -48,10 +53,10 @@ export class CpuSim implements Sim {
     this.env.fill(0);
     this.hasEnvironment = false;
   }
-  /** The food sites of the last call, for the tests of the engine (ADR 0029). */
-  sites: (readonly [number, number])[] = [];
-  foodSites(centres: readonly (readonly [number, number])[]) {
-    this.sites = [...centres];
+  /** The food sites of the last call, for the tests of the engine (ADR 0029, decision 17). */
+  sites: FlowSites = NO_SITES;
+  foodSites(sites: FlowSites) {
+    this.sites = sites;
   }
   readFlow() {
     return Promise.resolve(new Float32Array(0));

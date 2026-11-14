@@ -1,13 +1,16 @@
 // The flow in the tubes on both backends (ADR 0029), in Chromium with real GPU APIs (ADR 0010). Every strain has a
 // flow of its own (ADR 0031).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, type Settings, type Strain } from '../model/params';
-import { FLOW, flowSites, packFlow } from './flow';
+import { packDrawing, unpackDrawing } from '../model/link';
+import { defaultSettings, defaultStrain, type Boundary, type Settings, type Strain } from '../model/params';
+import { fromStroke, strokeOn } from './environment';
+import { FLOW, packFlow } from './flow';
 import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { compile } from './gl/programs';
 import { AgentToolKind } from './pack';
 import { GlSim } from './gl/sim';
+import { flowSites, foodStrokes, type FlowSites, type FoodStroke } from './sites';
 import type { AgentState, Backend, Sim, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -19,6 +22,21 @@ const BACKENDS = {
 const ALIVE = 4;
 /** A tube of one cell along a line of cells: x0, y0, x1, y1. */
 type Line = readonly [number, number, number, number];
+/** A food dab of `radius` cells at `at`. */
+const dab = (at: [number, number], radius: number): FoodStroke => [{ kind: 'food', from: at, to: at, radius }];
+/**
+ * Paints food strokes into a simulation and gives it their sites, as the engine does after a paint (ADR 0029,
+ * decision 17): a site per stroke, with the cells that it paints.
+ */
+function feed(sim: Sim, strokes: readonly FoodStroke[], boundary: Boundary = 'box'): FlowSites {
+  sim.paint(strokes.flat());
+  const sites = flowSites(strokes, sim.width, sim.height, boundary);
+  sim.foodSites(sites);
+  return sites;
+}
+/** The cells that hold a role in a memory (4 values per cell). */
+const roleCells = (memory: Float32Array) =>
+  [...memory].flatMap((v, i) => (i % 4 === 3 && v !== 0 ? [(i - 3) / 4] : []));
 /** An extended scene with the flow on: Jones' agent with the rule in a closed box. */
 const flowing = (patch: Partial<Settings> = {}): Settings => ({
   ...defaultSettings(),
@@ -78,23 +96,26 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const [w, h] = [48, 40];
     const settings = flowing({ strains });
     const sim = await make(settings, w, h, 500);
-    // A wall with a gap, and two foods on either side of it. The first food of the list lies under the wall: its
-    // centre is a closed cell, so it never gives or takes, and the passes recentre the pressure by the next food.
-    const strokes: Stroke[] = [
-      { kind: 'food', from: [24.5, 10.5], to: [24.5, 10.5], radius: 2.5 },
-      { kind: 'wall', from: [24, 0], to: [24, 24], radius: 1 },
-      { kind: 'food', from: [8.5, 8.5], to: [8.5, 8.5], radius: 2.5 },
-      { kind: 'food', from: [40.5, 30.5], to: [40.5, 30.5], radius: 2.5 },
+    // A wall with a gap, painted over foods on either side of it. The first food of the list lies under the wall, a
+    // dab of one cell: it never gives or takes, and the passes recentre the pressure by the next food. The second food
+    // lies half under the wall: its open cells hold its port. The fifth lies at the edge of the block without a tube
+    // (below): its port is the covered cell nearest its centre, not its centre. The sixth is painted over the wall:
+    // its cells under the wall hold food and stay closed, so its port is an open cell beside them.
+    const foods = [
+      dab([24.5, 10.5], 0.75),
+      dab([24.5, 20.5], 2.5),
+      dab([8.5, 8.5], 2.5),
+      dab([40.5, 30.5], 2.5),
+      dab([29.5, 17.5], 2.5),
     ];
-    sim.paint(strokes);
-    const centres: [number, number][] = [
-      [24.5, 10.5],
-      [8.5, 8.5],
-      [40.5, 30.5],
-    ];
-    sim.foodSites(centres);
+    const over = dab([24.5, 4.5], 1.5);
+    sim.paint(foods.flat());
+    sim.paint([{ kind: 'wall', from: [24, 0], to: [24, 24], radius: 1 }]);
+    sim.paint(over);
+    const sites = flowSites([...foods, over], w, h, 'box');
+    sim.foodSites(sites);
     sim.reset();
-    const sites = flowSites(centres, w, h);
+    expect(sites.list.map((s) => s.count)).toEqual([1, 21, 21, 21, 21, 9]);
     const env = await sim.readEnv();
     const grid: FlowGrid = { width: w, height: h, boundary: 'box', env };
     let fields = flowStart(grid, FLOW.fresh);
@@ -109,7 +130,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       sim.run(1);
       const trail = await sim.readTrail();
       const u = new Float32Array(packFlow(settings, sites, undefined, strain));
-      fields = flowStep(grid, u, fields, trail, step, settings.seed);
+      fields = flowStep(grid, u, fields, trail, step, settings.seed, sites.cells);
       const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
       expect(memory.length).toBe(w * h * 4);
       let worst = 0;
@@ -125,9 +146,17 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
         off = Math.max(off, Math.abs((pressure[i] ?? 0) - (fields.pressure[i] ?? 0)));
       expect(top, 'a pressure builds up').toBeGreaterThan(0);
       expect(off / top, `pressure at step ${String(step)}`).toBeLessThan(1e-3);
-      // The roles lie on the centre cells of the two foods beside the wall, and nowhere else.
-      const roles = [...memory].flatMap((v, i) => (i % 4 === 3 && v !== 0 ? [(i - 3) / 4] : []));
-      expect(roles).toEqual([8 * w + 8, 30 * w + 40]);
+      // The roles lie on the ports of the reference, and on none of the first food. At the start the fourth food has
+      // its port on the cell below its centre: the cells around the centre hold no tube.
+      const roles = roleCells(memory);
+      expect(roles).toEqual(roleCells(fields.memory));
+      if (step === 0) {
+        const ports = [-1, 20 * w + 25, 8 * w + 8, 30 * w + 40, 18 * w + 29, 4 * w + 25];
+        expect(fields.ports.subarray(0, 12)).toEqual(Int32Array.from(ports.flatMap((c) => [c, -1])));
+        expect(roles.length).toBe(5);
+        expect(env[(4 * w + 24) * 4 + 1] ?? 0).toBe(255);
+      }
+      expect(roles).not.toContain(10 * w + 24);
       // The centre of the first food of the list is a closed cell: it holds no pressure.
       expect(env[(10 * w + 24) * 4] ?? 0).toBeGreaterThanOrEqual(128);
       expect([0, 1, 2, 3].map((k) => pressure[(10 * w + 24) * 4 + k])).toEqual([0, 0, 0, 0]);
@@ -161,15 +190,21 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
 
   /**
    * A simulation without diffusion and with almost no decay, so that the trail that the test writes stays: two foods
-   * at (4, 12) and (35, 12), and tubes of one cell along lines: `lines` in the trail of the strain `lane`, and `other`
-   * in the trail of the next strain. Its agents start dead, and the flow brings them to life on a fed tube: with a
-   * deposit of 0 they leave no trail of their own. The memory, the pressure and the flux that it gives are those of
-   * the flow of the strain `lane`; `of()` gives those of another strain.
+   * at (4, 12) and (35, 12) of one cell each, or the strokes `foods`, and tubes of one cell along lines: `lines` in
+   * the trail of the strain `lane`, and `other` in the trail of the next strain. Its agents start dead, and the flow
+   * brings them to life on a fed tube: with a deposit of 0 they leave no trail of their own. The memory, the pressure
+   * and the flux that it gives are those of the flow of the strain `lane`; `of()` gives those of another strain.
    */
   async function tubes(
     lines: readonly Line[],
     steps: number,
-    { strains = 1, agents = 1, lane = 0, other = [] as readonly Line[] } = {},
+    {
+      strains = 1,
+      agents = 1,
+      lane = 0,
+      other = [] as readonly Line[],
+      foods = [dab([4.5, 12.5], 0.75), dab([35.5, 12.5], 0.75)] as readonly FoodStroke[],
+    } = {},
   ) {
     const [w, h] = [40, 24];
     const settings = flowing({
@@ -180,12 +215,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       strains: Array.from({ length: strains }, (_, i) => ({ ...defaultStrain(i), decay: 0.0001, deposit: 0 })),
     });
     const sim = await make(settings, w, h, agents);
-    const centres: [number, number][] = [
-      [4.5, 12.5],
-      [35.5, 12.5],
-    ];
-    sim.paint(centres.map((c): Stroke => ({ kind: 'food', from: c, to: c, radius: 0.75 })));
-    sim.foodSites(centres);
+    const sites = feed(sim, foods);
     sim.reset();
     const cells = (list: readonly Line[]) => {
       const set = new Set<number>();
@@ -208,8 +238,259 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
       return { memory, pressure, flux: flowFlux(grid, memory, pressure) };
     };
-    return { sim, w, tube, grid, i0: settings.flowStrength, of, ...(await of(lane)) };
+    return { sim, w, tube, grid, sites, cells, i0: settings.flowStrength, of, ...(await of(lane)) };
   }
+
+  it('makes one food site of a dragged line of food, with its port at the covered cell nearest its start', async () => {
+    // A line of food dragged up column 4 from row 12 to row 2: ten segments and the dab of its first one, recorded as
+    // the engine records them, and held in a link made before decision 17 (ADR 0021). The tube covers the line only
+    // from row 6 up, and joins it to a dab at (35, 12).
+    const drag = Array.from({ length: 11 }, (_, k): Stroke => {
+      const [y0, y1] = [12.5 - Math.max(0, k - 1), 12.5 - k];
+      return { kind: 'food', from: [4.5, y0], to: [4.5, y1], radius: 0.75 };
+    });
+    const list = [...drag, ...dab([35.5, 12.5], 0.75)].map((s) => fromStroke(s, [40, 24], 'box'));
+    const bytes = packDrawing({ scene: '', revision: 0, origins: [0], shapes: [], strokes: list });
+    const link = unpackDrawing(bytes ?? new Uint8Array());
+    const strokes = foodStrokes(link?.strokes ?? []).map((st) => st.flatMap((e) => strokeOn(e, 40, 24) ?? []));
+    expect(strokes.map((st) => st.length)).toEqual([11, 1]);
+    const route = [
+      [4, 2, 4, 6],
+      [4, 6, 35, 6],
+      [35, 6, 35, 12],
+    ] as const;
+    const { w, memory, flux, i0, sites } = await tubes(route, 1500, { foods: strokes });
+    // Two sites: the line with its 11 cells, and the dab.
+    expect(sites.list.map((s) => s.count)).toEqual([11, 1]);
+    // Two sites give or take, so the line gives in every lane and the dab takes: one cell each, the line at row 6.
+    // Before, each segment of the line was a site: five of them covered, each with a flux of its own.
+    expect(roleCells(memory)).toEqual([6 * w + 4, 12 * w + 35]);
+    expect(roleSigns(memory[(6 * w + 4) * 4 + 3] ?? 0)).toEqual([1, 1, 1, 1]);
+    expect(roleSigns(memory[(12 * w + 35) * 4 + 3] ?? 0)).toEqual([-1, -1, -1, -1]);
+    // The flux of the line is I0, as that of a dab: the whole of it runs along row 6, and none up the line.
+    expect(flux[(6 * w + 20) * 4] ?? 0).toBeCloseTo(i0, 2);
+    expect(flux[(4 * w + 4) * 4] ?? 0).toBeLessThan(1e-3);
+  }, 240_000);
+
+  it('lets a strain cover a site from any of its cells, and moves the port to the covered cell nearest the centre', async () => {
+    // Two dabs of radius 2.9 at (4, 12) and (35, 12): five cells across. The tube reaches each dab at its top cell,
+    // two cells above its centre, and none reaches a centre.
+    const foods = [dab([4.5, 12.5], 2.9), dab([35.5, 12.5], 2.9)];
+    const route = [
+      [4, 6, 4, 10],
+      [4, 6, 35, 6],
+      [35, 6, 35, 10],
+    ] as const;
+    const { sim, w, memory, flux, i0, cells, of } = await tubes(route, 1500, { foods });
+    // Before, a site was covered only at its centre: no flux would run. Now the top cells are the ports.
+    expect(roleCells(memory)).toEqual([10 * w + 4, 10 * w + 35]);
+    expect(flux[(6 * w + 20) * 4] ?? 0).toBeCloseTo(i0, 2);
+    // The tube grows down into the dabs to the row below their centres: the ports move to the centres.
+    const trail = new Float32Array(w * 24 * 4);
+    for (const c of cells([...route, [4, 10, 4, 13], [35, 10, 35, 13]])) trail[c * 4] = 10;
+    sim.writeTrail(trail);
+    for (let k = 0; k < 300; k += 100) {
+      sim.run(100);
+      await sim.finish();
+    }
+    const later = await of(0);
+    expect(roleCells(later.memory)).toEqual([12 * w + 4, 12 * w + 35]);
+    expect(later.flux[(6 * w + 20) * 4] ?? 0).toBeCloseTo(i0, 1);
+  }, 240_000);
+
+  it('gives each of two strains on the same strokes its whole flux, through cells of its own', async () => {
+    // The dabs of the test before. The first strain reaches them from above, the second from below: each covers both
+    // sites, at other cells.
+    const foods = [dab([4.5, 12.5], 2.9), dab([35.5, 12.5], 2.9)];
+    const { w, memory, flux, i0, of } = await tubes(
+      [
+        [4, 6, 4, 10],
+        [4, 6, 35, 6],
+        [35, 6, 35, 10],
+      ],
+      1500,
+      {
+        strains: 2,
+        foods,
+        other: [
+          [4, 14, 4, 18],
+          [4, 18, 35, 18],
+          [35, 14, 35, 18],
+        ],
+      },
+    );
+    const second = await of(1);
+    expect(roleCells(memory)).toEqual([10 * w + 4, 10 * w + 35]);
+    expect(roleCells(second.memory)).toEqual([14 * w + 4, 14 * w + 35]);
+    // No share: each strain carries the whole I0 along its own route.
+    expect(flux[(6 * w + 20) * 4] ?? 0).toBeCloseTo(i0, 2);
+    expect(second.flux[(18 * w + 20) * 4] ?? 0).toBeCloseTo(i0, 2);
+  }, 240_000);
+
+  it('keeps two food dabs that touch two sites, each with a port of its own', async () => {
+    // Two dabs at (4, 12) and (7, 12) that overlap, and a third at (35, 12). The tube covers all three.
+    const foods = [dab([4.5, 12.5], 2), dab([7.5, 12.5], 2), dab([35.5, 12.5], 0.75)];
+    const { w, memory, sites } = await tubes(
+      [
+        [2, 12, 35, 12],
+        [4, 10, 4, 14],
+        [7, 10, 7, 14],
+      ],
+      600,
+      { foods },
+    );
+    expect(sites.list.length).toBe(3);
+    // Three sites that the strain covers: their centres hold their roles, and the two dabs are no single site.
+    expect(roleCells(memory)).toEqual([12 * w + 4, 12 * w + 7, 12 * w + 35]);
+  }, 240_000);
+
+  it('follows the CPU reference while a port moves to a cell nearer the centre', async () => {
+    // The two dabs of the tests before, a tube from the top cell of each, and a trail in the cell below the top cell
+    // of the first one. That cell starts with a tube body just below the level of a tube, and reaches it after one
+    // step: the port of the first site moves there in the second step. With two sites only, the flux of that step runs
+    // only if the passes read the roles of the step before at the ports of the step before.
+    const [w, h] = [40, 24];
+    const settings = flowing({
+      layout: 'empty',
+      collisions: false,
+      diffusion: 0,
+      flowStrength: 2,
+      strains: [{ ...defaultStrain(0), decay: 0.0001, deposit: 0 }],
+    });
+    const sim = await make(settings, w, h, 1);
+    const sites = feed(sim, [dab([4.5, 12.5], 2.9), dab([35.5, 12.5], 2.9)]);
+    sim.reset();
+    const tube = new Set<number>();
+    for (let x = 4; x <= 35; x++) tube.add(6 * w + x);
+    for (let y = 6; y <= 10; y++) [4, 35].forEach((x) => tube.add(y * w + x));
+    const trail = new Float32Array(w * h * 4);
+    for (const c of [...tube, 11 * w + 4]) trail[c * 4] = 10;
+    sim.writeTrail(trail);
+    const env = await sim.readEnv();
+    const grid: FlowGrid = { width: w, height: h, boundary: 'box', env };
+    let fields = flowStart(grid, FLOW.fresh);
+    for (const c of tube) fields.memory[c * 4 + 1] = 1;
+    fields.memory[(11 * w + 4) * 4 + 1] = 0.035;
+    sim.writeFlow(fields.memory);
+    const ports: number[] = [];
+    for (let step = 0; step < 6; step++) {
+      sim.run(1);
+      const u = new Float32Array(packFlow(settings, sites));
+      fields = flowStep(grid, u, fields, await sim.readTrail(), step, settings.seed, sites.cells);
+      ports.push(fields.ports[0] ?? -1);
+      const [memory, pressure] = [await sim.readFlow(), await sim.readPressure()];
+      let worst = 0;
+      for (let i = 0; i < memory.length; i++)
+        worst = Math.max(
+          worst,
+          Math.abs((memory[i] ?? 0) - (fields.memory[i] ?? 0)) / (1e-5 + Math.abs(fields.memory[i] ?? 0)),
+        );
+      expect(worst, `memory at step ${String(step)}`).toBeLessThan(1e-4);
+      const top = fields.pressure.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
+      let off = 0;
+      for (let i = 0; i < pressure.length; i++)
+        off = Math.max(off, Math.abs((pressure[i] ?? 0) - (fields.pressure[i] ?? 0)));
+      expect(off / top, `pressure at step ${String(step)}`).toBeLessThan(1e-3);
+      expect(roleCells(memory)).toEqual(roleCells(fields.memory));
+    }
+    expect(ports).toEqual([10 * w + 4, ...Array.from({ length: 5 }, () => 11 * w + 4)]);
+    // The tubes adapted in the step in which the port moved: the roles of the step before lay at its ports.
+    expect(fields.memory[(6 * w + 20) * 4] ?? 0).not.toBe(Math.fround(FLOW.fresh));
+  }, 120_000);
+
+  it('finds the port of a large site that a tube covers only far from its centre, as the CPU reference does', async () => {
+    // A dab of radius 40: about 5,000 cells, in 79 blocks of 64 entries of its list. The tube meets it only on row 10,
+    // 38 cells and more from its centre, so its nearest covered cell lies in block 70 or so: the passes look at the
+    // blocks of a site in 64 lanes, and this one is in the second round of a lane. The other cells of row 10 that it
+    // covers lie in other blocks and other lanes, farther out.
+    const [w, h] = [128, 96];
+    const settings = flowing({
+      layout: 'empty',
+      collisions: false,
+      diffusion: 0,
+      flowStrength: 2,
+      strains: [{ ...defaultStrain(0), decay: 0.0001, deposit: 0 }],
+    });
+    const sim = await make(settings, w, h, 1);
+    const sites = feed(sim, [dab([48.5, 48.5], 40), dab([120.5, 48.5], 2)]);
+    sim.reset();
+    expect(sites.list[0]?.count ?? 0).toBeGreaterThan(64 * 64);
+    const tube = new Set<number>();
+    for (let x = 48; x <= 120; x++) tube.add(10 * w + x);
+    for (let y = 10; y <= 48; y++) tube.add(y * w + 120);
+    const trail = new Float32Array(w * h * 4);
+    for (const c of tube) trail[c * 4] = 10;
+    sim.writeTrail(trail);
+    const env = await sim.readEnv();
+    const grid: FlowGrid = { width: w, height: h, boundary: 'box', env };
+    let fields = flowStart(grid, FLOW.fresh);
+    for (const c of tube) fields.memory[c * 4 + 1] = 1;
+    sim.writeFlow(fields.memory);
+    sim.run(1);
+    fields = flowStep(
+      grid,
+      new Float32Array(packFlow(settings, sites)),
+      fields,
+      await sim.readTrail(),
+      0,
+      5,
+      sites.cells,
+    );
+    expect([fields.ports[0], fields.ports[2]]).toEqual([10 * w + 48, 48 * w + 120]);
+    // The entry of the port in the list of its site lies past 64 blocks.
+    expect(sites.cells.indexOf(10 * w + 48)).toBeGreaterThan(64 * 64);
+    expect(roleCells(await sim.readFlow())).toEqual([10 * w + 48, 48 * w + 120]);
+  }, 120_000);
+
+  it('follows a change of the food sites during a run, as after a paint', async () => {
+    // One dab first: no site has a partner, and no flux runs. Then a second dab, and the sites of both.
+    const route = [
+      [4, 6, 4, 12],
+      [4, 6, 35, 6],
+      [35, 6, 35, 12],
+    ] as const;
+    const { sim, w, memory, of } = await tubes(route, 300, { foods: [dab([4.5, 12.5], 2)] });
+    expect(roleCells(memory)).toEqual([]);
+    feed(sim, [dab([4.5, 12.5], 2), dab([35.5, 12.5], 2)]);
+    for (let k = 0; k < 300; k += 100) {
+      sim.run(100);
+      await sim.finish();
+    }
+    expect(roleCells((await of(0)).memory)).toEqual([12 * w + 4, 12 * w + 35]);
+  }, 240_000);
+
+  it('lets no cell of a site that an erase cleared hold its port', async () => {
+    // The tube reaches the first dab at its top cell, and an erase cleared the top of that dab: the strain covers no
+    // cell of it, so no site has a partner and no flux runs.
+    const route = [
+      [4, 6, 4, 10],
+      [4, 6, 35, 6],
+      [35, 6, 35, 10],
+    ] as const;
+    const foods = [dab([4.5, 12.5], 2.9), dab([35.5, 12.5], 2.9)];
+    const [w, h] = [40, 24];
+    const settings = flowing({
+      layout: 'empty',
+      collisions: false,
+      diffusion: 0,
+      flowStrength: 2,
+      strains: [{ ...defaultStrain(0), decay: 0.0001, deposit: 0 }],
+    });
+    const sim = await make(settings, w, h, 1);
+    const sites = feed(sim, foods);
+    sim.paint([{ kind: 'erase', from: [4.5, 9.5], to: [4.5, 9.5], radius: 1.6 }]);
+    sim.reset();
+    const trail = new Float32Array(w * h * 4);
+    for (const [x0, y0, x1, y1] of route)
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) trail[(y * w + x) * 4] = 10;
+    sim.writeTrail(trail);
+    sim.run(300);
+    const env = await sim.readEnv();
+    // The cell (4, 10) is a cell of the first site that holds no food now.
+    expect([...sites.cells.subarray(0, sites.list[0]?.count ?? 0)]).toContain(10 * w + 4);
+    expect(env[(10 * w + 4) * 4 + 1]).toBe(0);
+    expect(roleCells(await sim.readFlow())).toEqual([]);
+  }, 120_000);
 
   it('obeys Kirchhoff’s law, adapts a tube to f(Q) and lets a dead end starve', async () => {
     // One route between the foods over row 6, and a dead end up from it.
@@ -292,13 +573,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       strains: [{ ...defaultStrain(0), decay: 0.0001, deposit: 0 }],
     });
     const sim = await make(settings, w, h, 1);
-    const centres: [number, number][] = [
-      [4.5, 12.5],
-      [35.5, 12.5],
-      [20.5, 18.5],
-    ];
-    sim.paint(centres.map((c): Stroke => ({ kind: 'food', from: c, to: c, radius: 1.5 })));
-    sim.foodSites(centres);
+    feed(sim, [dab([4.5, 12.5], 1.5), dab([35.5, 12.5], 1.5), dab([20.5, 18.5], 1.5)]);
     sim.reset();
     const trail = new Float32Array(w * h * 4);
     for (let x = 4; x <= 35; x++) trail[(12 * w + x) * 4] = 10;
@@ -310,8 +585,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const [memory, pressure] = [await sim.readFlow(), await sim.readPressure()];
     const env = await sim.readEnv();
     // The two foods on the tube give and take; the third food has no role and conducts nowhere.
-    const roles = [...memory].flatMap((v, i) => (i % 4 === 3 && v !== 0 ? [(i - 3) / 4] : []));
-    expect(roles).toEqual([12 * w + 4, 12 * w + 35]);
+    expect(roleCells(memory)).toEqual([12 * w + 4, 12 * w + 35]);
     let foodCells = 0;
     for (let c = 0; c < w * h; c++) {
       if ((env[c * 4 + 1] ?? 0) === 0 || Math.abs((c % w) - 20) > 2 || Math.abs(Math.floor(c / w) - 18) > 2) continue;
@@ -355,6 +629,29 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     for (const c of [9 * w + 4, 11 * w + 4, 9 * w + 35, 11 * w + 35]) {
       expect(flux[c * 4] ?? 0).toBeLessThan(0.05 * i0);
       expect(memory[c * 4] ?? 0).toBeLessThan(0.3 * FLOW.fresh);
+    }
+  }, 240_000);
+
+  it('stops a food at its pressure limit by the mean pressure at the ports, also off the centre of a dab', async () => {
+    // The test before with two dabs of five cells across: each piece of tube reaches its dab at the top cell, two
+    // cells above the centre, so the port of each site is not the first cell of its list. The limit of each site
+    // counts from the mean pressure at the two ports: almost twice the limit between them, and no more.
+    const foods = [dab([4.5, 12.5], 2.9), dab([35.5, 12.5], 2.9)];
+    const { w, memory, pressure, i0 } = await tubes(
+      [
+        [4, 6, 4, 10],
+        [35, 6, 35, 10],
+      ],
+      600,
+      { foods },
+    );
+    const [a, b] = [10 * w + 4, 10 * w + 35];
+    expect(roleCells(memory)).toEqual([a, b]);
+    const limit = FLOW.head * i0;
+    for (let k = 0; k < 4; k++) {
+      const span = (pressure[a * 4 + k] ?? 0) - (pressure[b * 4 + k] ?? 0);
+      expect(span).toBeGreaterThan(1.9 * limit);
+      expect(span).toBeLessThanOrEqual(2 * limit);
     }
   }, 240_000);
 
@@ -893,12 +1190,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const run = async (seed: number) => {
       const settings = flowing({ seed, density: 0.2 });
       const sim = await make(settings, w, h, Math.round(0.2 * w * h));
-      const centres: [number, number][] = [
-        [10.5, 10.5],
-        [52.5, 38.5],
-      ];
-      sim.paint(centres.map((c): Stroke => ({ kind: 'food', from: c, to: c, radius: 2 })));
-      sim.foodSites(centres);
+      feed(sim, [dab([10.5, 10.5], 2), dab([52.5, 38.5], 2)]);
       sim.reset();
       sim.run(150);
       return { agents: await sim.readAgents(), trail: await sim.readTrail(), flow: await sim.readFlow() };
@@ -943,12 +1235,7 @@ describe('the flow in the tubes on WebGL2 without float blending', () => {
     const run = async (seed: number) => {
       const settings = flowing({ seed, collisions: false, density: 0.3 });
       const sim = new GlSim(context, programs, settings, w, h, 2 * Math.round(0.3 * w * h), false);
-      const centres: [number, number][] = [
-        [10.5, 10.5],
-        [52.5, 38.5],
-      ];
-      sim.paint(centres.map((c): Stroke => ({ kind: 'food', from: c, to: c, radius: 2 })));
-      sim.foodSites(centres);
+      feed(sim, [dab([10.5, 10.5], 2), dab([52.5, 38.5], 2)]);
       sim.reset();
       sim.run(400);
       const out = { agents: await sim.readAgents(), flow: await sim.readFlow() };
@@ -958,9 +1245,11 @@ describe('the flow in the tubes on WebGL2 without float blending', () => {
     const [a, b] = [await run(31), await run(31)];
     expect(b.agents).toEqual(a.agents);
     expect(b.flow).toEqual(a.flow);
-    // Both foods give or take: their centre cells hold their roles.
-    const roles = [...a.flow].flatMap((v, i) => (i % 4 === 3 && v !== 0 ? [(i - 3) / 4] : []));
-    expect(roles).toEqual([10 * w + 10, 38 * w + 52]);
+    // Both foods give or take: a cell of each holds its roles, its port.
+    const roles = roleCells(a.flow);
+    expect(roles.length).toBe(2);
+    const near = (c: number, x: number, y: number) => Math.hypot((c % w) + 0.5 - x, Math.floor(c / w) + 0.5 - y) <= 2;
+    expect(near(roles[0] ?? 0, 10.5, 10.5) && near(roles[1] ?? 0, 52.5, 38.5)).toBe(true);
     // The memory adapted: above the fresh value where the flux runs, below it elsewhere.
     const memory = a.flow.filter((_, i) => i % 4 === 0);
     expect(Math.max(...memory)).toBeGreaterThan(FLOW.fresh + 0.2);
