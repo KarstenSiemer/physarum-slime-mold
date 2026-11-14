@@ -1223,8 +1223,8 @@ sources were read as summaries only, as marked below.
   of `research/flow/solvers.ts` on the fixed Maze network (TODO.md has them); no run on Tokyo or on a network that
   moves.
 - **Starved ground** comes back by the factor 1.00023 per step from the floor 10⁻⁴ to 0.2: ln(2000) / ln(1.00023) =
-  33,051 steps, 18.4 h of model time (decision 7). The reason for a slow return is in decision 7: faint strands lived for
-  ever when starved ground was fresh again at once. That observation has no log, and no run varied the factor.
+  33,051 steps, 18.4 h of model time (decision 7). The reason for a slow return is in decision 7: faint strands lived
+  for ever when starved ground was fresh again at once. That observation has no log, and no run varied the factor.
   The organism avoids ground with its own extracellular slime (Reid et al. 2012, PNAS; a Y-maze and a U-shaped trap,
   read as a summary). The slime is a cue that the ground likely holds no food, and the plasmodium enters it when it
   perceives food (Reid et al. 2013, Behavioral Ecology; abstract only). No source found says how long the effect lasts.
