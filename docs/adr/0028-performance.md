@@ -515,3 +515,55 @@ device: the tests below make the error.
   On WebGL2 (`gl/sim.gpu.test.ts`) a step whose third target of growth runs out of memory throws an
   `OutOfMemoryError`, leaves no texture, framebuffer or renderbuffer behind, and the next step makes all of them.
   Each test failed with its part of the change taken out, one at a time.
+
+## Check of 2026-11-14: a step and a frame after the work on the flow
+
+The owner asked on 2026-11-14 for a check of the speed. After `e3bbefc`, which already has a flow of its own for each
+strain (ADR 0031), came the scenes of the flow, the wall corner of growth, and from `a37c2b5` on the picture of the
+tubes, its grains, the new gel relief and its colour (pull requests #52 to #63). Each of those measured its own cost
+against its parent. This check measures `main` against the commit before those changes, `e3bbefc` for a step and
+`a37c2b5` for a frame, in turn, on an Apple M3 Pro under the load of other sessions (load average about 4). Two runs of
+one commit differed by up to 0.14 ms for a step and by up to 16 ms for a frame of the start scene, so only differences
+above that spread count.
+
+**A step** (`research/flow/engine/bench.gpu.test.ts` as it ships: 3,000 steps, then the median of 21 samples of 50
+steps; ms per step, one value per run):
+
+| Backend | Scene           | Flow | `e3bbefc`                         | `505d500`                         |
+| ------- | --------------- | ---- | --------------------------------- | --------------------------------- |
+| WebGPU  | Maze, 512 × 320 | off  | 0.212, 0.218                      | 0.192, 0.216                      |
+| WebGPU  | Maze, 512 × 320 | on   | 2.196, 2.224, 2.362, 2.358, 2.354 | 2.434, 2.294, 2.356, 2.374, 2.394 |
+| WebGPU  | Tokyo, 512²     | off  | 0.468, 0.510                      | 0.530, 0.454                      |
+| WebGPU  | Tokyo, 512²     | on   | 3.578, 3.632                      | 3.834, 3.618                      |
+| WebGL2  | Maze, 512 × 320 | off  | 0.488, 0.470                      | 0.476, 0.472                      |
+| WebGL2  | Maze, 512 × 320 | on   | 2.752, 2.678                      | 2.758, 2.704                      |
+| WebGL2  | Tokyo, 512²     | off  | 0.834, 0.820                      | 0.832, 0.830                      |
+| WebGL2  | Tokyo, 512²     | on   | 4.102, 4.110                      | 4.018, 4.062                      |
+
+No step got slower: in the three last pairs of the Maze with the flow the two commits differ by at most 0.04 ms. The
+records of ADR 0031 (2.0 ms for the Maze) and of ADR 0025 (3.2 ms for Tokyo, on `e3bbefc` itself) were taken under less
+load.
+
+**A frame** (`research/flow/engine/picture.gpu.test.ts` on a canvas of 2560 × 1600 pixels: 1,500 steps, then the median
+of 11 samples of 50 frames, each one step and one drawn picture, in the glow style; the benchmark switches the flow on
+in every scene, and the Jones model never runs it; the file was copied into `a37c2b5`, which did not have it; ms per
+frame, two runs):
+
+| Backend | Scene                     | Picture of the tubes | `a37c2b5`  | `505d500`    |
+| ------- | ------------------------- | -------------------- | ---------- | ------------ |
+| WebGPU  | Transport network, 200²   | off / on             | 1.61, 1.64 | 1.67, 1.67   |
+| WebGPU  | Tokyo, 512²               | off                  | 5.31, 4.97 | 5.64, 5.70   |
+| WebGPU  | Tokyo, 512²               | on                   | 5.34, 5.30 | 6.23, 6.56   |
+| WebGPU  | Three strains, 1536 × 960 | off                  | 70.3, 69.9 | 71.7, 76.6   |
+| WebGPU  | Three strains, 1536 × 960 | on                   | 70.3, 70.6 | 86.2, 91.6   |
+| WebGL2  | Tokyo, 512²               | on                   | 6.95, 8.20 | 8.36, 8.37   |
+| WebGL2  | Three strains, 1536 × 960 | off                  | 62.4, 82.5 | 84.0, 82.0   |
+| WebGL2  | Three strains, 1536 × 960 | on                   | 62.4, 83.4 | 104.3, 103.1 |
+
+The commit before has no picture of the tubes, so its two rows are the same frame. Without the picture `main` is within
+the spread of the runs. With it, the picture costs 0.6 to 0.9 ms on Tokyo on WebGPU (ADR 0034 measured 0.28 to 0.56 ms
+there on its own; the grains came after it) and 14.5 to 15 ms on WebGPU and 20 to 21 ms on WebGL2 in the start scene
+with the flow: three strains on 1,536 × 960 cells, about a fifth of its frame. ADR 0034, amendment of 2026-11-14,
+records that cost, and `TODO.md` has it. In the gel style the frame of the Transport network took 2.08 and 2.09 ms
+against 1.24 and 1.77 ms before; the gel relief of ADR 0009 (amendment of 2026-11-14) measured 0.2 to 0.3 ms on its
+own, and the runs of the commit before differ too much here to say more.
