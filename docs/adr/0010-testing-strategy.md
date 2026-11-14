@@ -318,6 +318,12 @@ GPU checks use invariants, not long exact trajectories:
   failed in both tries of the first run of pull request #55. The simulation now rests during the
   two reads.
 
+  A test of a wait makes that wait itself (2026-11-14). A test of a picture that waits for the
+  programs of the scent view (`tubes.gpu.test.ts`, ADR 0034) passed on an M3 Pro, where WebGL2
+  compiles its programs in parallel. The image of CI has no parallel compiling: the programs
+  were there at once, the picture did not wait, and the test failed in the third run of pull
+  request #55. The test now holds the programs back until its own step is done.
+
 - The verify job keeps its limit of 30 min (`.github/workflows/ci.yml`). A limit adds no time to a
   wait that passes. On GitHub the verify jobs of PR 2, 3, 5 and 6 took 12.8 to 18.0 min. PR 6 on
   PR 3 (`f099dd1`) took 12.9 min: its GPU project (419 tests) 281 s, Fig. 10 on WebGPU 92 s and its

@@ -306,9 +306,11 @@ Four independent reviews found faults that the tests of that time did not catch.
 
 Each fault is fixed, and each fix has a test that fails without it.
 
-The first run of the tests on GitHub found a fault in a test: the e2e test of the switch read the
-picture and the trail of the view in two reads, and on the slow machine the simulation ran a step
-between them. The simulation now rests during the two reads (ADR 0010).
+Two runs of the tests on GitHub each found a fault in a test (ADR 0010). The e2e test of the
+switch read the picture and the trail of the view in two reads, and on the slow machine the
+simulation ran a step between them: the simulation now rests during the two reads. And a WebGL2
+test took for granted that a picture waits for the programs of the scent view, which the image
+of CI has at once: the test now holds them back itself.
 
 ## Consequences
 

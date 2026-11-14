@@ -830,6 +830,19 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     // A backend of its own: it has not built the programs of the scent view yet, so its first picture with the scent
     // view waits for them. A rebuild of the engine destroys the simulation in that time (Engine.rebuild()).
     const fresh = await create(document.createElement('canvas'));
+    // On WebGL2 a machine without parallel shader compiling has the programs at once, as the image of CI. The test
+    // holds them back until the simulation is destroyed, so that the picture waits on every machine. On WebGPU a
+    // picture always waits for its pipelines.
+    let release: (() => void) | undefined;
+    if (kind === 'webgl2') {
+      const prog = (fresh as unknown as { prog: { scent: () => unknown } }).prog;
+      const scent = prog.scent.bind(prog);
+      let held = true;
+      prog.scent = () => (held ? undefined : scent());
+      release = () => {
+        held = false;
+      };
+    }
     const settings = flowing({ showScent: true });
     const sim = await fresh.createSim(settings, w, h, 8);
     const trail = new Float32Array(w * h * 4);
@@ -842,6 +855,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     gl?.getError();
     const waiting = fresh.capture(sim, settings, view, 32, 24);
     sim.destroy();
+    release?.();
     const image = await waiting;
     expect((await device?.popErrorScope())?.message).toBeUndefined();
     if (gl) expect(gl.getError()).toBe(gl.NO_ERROR);
