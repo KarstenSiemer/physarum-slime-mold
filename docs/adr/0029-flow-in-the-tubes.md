@@ -883,9 +883,9 @@ text names them. The review changed the random stream of the starvation draw and
 pressure is recentred by: single runs differ, the rule does not. One check was not run again and is
 from the code before the review: the control without the growth gate (decision 9).
 
-Pictures from the app's own renderer (`npm run gallery`, seed 7): `docs/images/maze-flow.jpg` is
-the Maze at step 5,000 without and with the flow, `docs/images/tokyo-flow.jpg` the Tokyo scene at
-step 12,000 without and with the flow, and `docs/images/tokyo-time.jpg` the Tokyo scene at step
+Pictures from the app's own renderer (`npm run gallery`, seed 7): [maze-flow.jpg](../images/maze-flow.jpg) is
+the Maze at step 5,000 without and with the flow, [tokyo-flow.jpg](../images/tokyo-flow.jpg) the Tokyo scene at
+step 12,000 without and with the flow, and [tokyo-time.jpg](../images/tokyo-time.jpg) the Tokyo scene at step
 1,000 and at step 48,000. They were made again on 2026-11-13 with the picture of the tubes
 (ADR 0034), which draws every tube as wide as its flow memory says: `tests/pictures/readme.spec.ts`
 makes the three files.

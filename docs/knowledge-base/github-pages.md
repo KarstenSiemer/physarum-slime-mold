@@ -17,9 +17,7 @@
   `https://karstensiemer.github.io`. Project sites are at `/<repository>/`, and a user site is at
   the root. GitHub requires the lowercase repository name `karstensiemer.github.io` for the user
   site. A custom domain on the user site would move every project site without its own custom
-  domain to that domain. Only `physarum-slime-mold` has a Pages site: `has_pages` is false for
-  the 29 other repositories in `gh api --paginate 'user/repos?affiliation=owner'`, which also
-  lists the 7 private ones.
+  domain to that domain.
 - Headless Chromium (Playwright 1.64.1, `channel: 'chromium'`, Apple M3 Pro, Metal) ran the
   live site on WebGPU with 4.0 million agents. With `?backend=webgl2` it loaded
   `assets/backend-*.js`, and the startup check lowered the grid to 0.995 million agents. Both
