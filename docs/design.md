@@ -205,7 +205,8 @@ periodic grid over all its cells.
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                                                    |
 
-Scenes (each sets a preset, an environment and a text that says what to watch): the list is `PRESETS` in
+Scenes (each sets a preset, an environment, a text that says what to watch and, where a figure of its paper shows its
+result, a link to that figure, ADR 0037): the list is `PRESETS` in
 `src/model/presets.ts`, and the summary of [fidelity.md](fidelity.md) says how close each one comes to its source.
 
 While the pointer is held, inoculate and cut act on every step. Inoculate uses only dead agents. It

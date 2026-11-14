@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
 import {
   GROUPS,
+  JONES_PDF,
   latticeLostNotice,
   latticeNotice,
   latticeText,
@@ -344,5 +345,36 @@ describe('presets', () => {
     expect(ruleOffNotice(preset('network'))).toMatch(/straight lines/);
     expect(ruleOffNotice(preset('steiner'))).toMatch(/straight lines/);
     for (const id of ['spots', 'stripes', 'wound']) expect(ruleOffNotice(preset(id)), id).not.toMatch(/lines/);
+  });
+});
+
+describe('the link to the figure of the paper (ADR 0037)', () => {
+  // The page of each figure in the PDF of the repository, read from the PDF (page 1 is page 127 of the journal).
+  const JONES_PAGES: Record<string, number> = { '4': 9, '5': 10, '16': 18, '18': 19, '19': 20, '21': 21, '22': 22 };
+
+  it('opens the free PDF of Jones 2010 at the page of the figure that the scene names', () => {
+    const jones = PRESETS.filter((p) => sourceKind(p) === 'jones');
+    expect(jones).toHaveLength(8);
+    for (const p of jones) {
+      const fig = /Fig\. (\d+)/.exec(p.source)?.[1] ?? '';
+      const page = JONES_PAGES[fig];
+      expect(page, p.id).toBeDefined();
+      expect(p.figure?.label.startsWith(`Fig. ${fig}`), p.id).toBe(true);
+      expect(p.figure?.href, p.id).toBe(`${JONES_PDF}#page=${String(page)}`);
+      expect(p.figure?.note, p.id).toBe(`page ${String(page)} of the free PDF`);
+    }
+  });
+
+  it('links the maze and Tokyo to Fig. 1 of their papers', () => {
+    expect(preset('maze').figure?.href).toBe('https://www.nature.com/articles/35035159/figures/1');
+    expect(preset('tokyo').figure?.href).toBe('https://doi.org/10.1126/science.1177894');
+  });
+
+  it('is absent where no figure shows the result of the scene', () => {
+    const linked = PRESETS.filter((p) => p.figure).map((p) => p.id);
+    expect(linked).toHaveLength(10);
+    for (const p of PRESETS)
+      if (sourceKind(p) === 'app' || sourceKind(p) === 'fogleman' || p.source.startsWith('After'))
+        expect(p.figure, p.id).toBeUndefined();
   });
 });
