@@ -2,7 +2,7 @@
 // tests only: sim.gpu.test.ts steps it from the state after the moves of a step and compares both GPU backends with it.
 import type { Boundary, Settings } from '../model/params';
 import { DISH_FILL } from './brush';
-import { pyramidLevels, strainEnds } from './pack';
+import { strainEnds } from './pack';
 import type { AgentState } from './types';
 
 const ALIVE = 4;
@@ -216,6 +216,3 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
   });
   return { agents, windows };
 }
-
-/** Nodes of the levels of a pyramid over n elements, the elements first (for tests of the sizes). */
-export const pyramidSizes = (n: number) => [n, ...pyramidLevels(n)];
