@@ -153,15 +153,23 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
   const tubes = page.getByRole('checkbox', { name: 'Draw the tubes by their flow', exact: true });
   await expect(tubes).toBeChecked();
   expect(await page.evaluate(() => globalThis.physarum?.settings.showTubes)).toBe(true);
-  // How many cells the picture draws with another trail than the view of the model, and the step.
+  // How many cells the picture draws with another trail than the view of the model, and the step. The simulation
+  // rests while the two are read: on a slow machine it steps between two reads, and every cell would differ.
   const differs = () =>
     page.evaluate(async () => {
-      const sim = globalThis.physarum?.sim;
-      if (!sim) return { cells: -1, step: -1 };
-      const [picture, view] = [await sim.readPicture(), await sim.readView()];
-      let cells = 0;
-      for (let i = 0; i < view.length; i += 4) if (picture[i] !== view[i]) cells++;
-      return { cells, step: sim.step };
+      const engine = globalThis.physarum;
+      if (!engine) return { cells: -1, step: -1 };
+      const { sim, paused } = engine;
+      engine.paused = true;
+      try {
+        await sim.finish();
+        const [picture, view] = [await sim.readPicture(), await sim.readView()];
+        let cells = 0;
+        for (let i = 0; i < view.length; i += 4) if (picture[i] !== view[i]) cells++;
+        return { cells, step: sim.step };
+      } finally {
+        engine.paused = paused;
+      }
     });
   // The colony holds tubes after some steps: the picture then differs from the trail on many cells.
   await expect.poll(async () => (await differs()).cells, { timeout: 120_000 }).toBeGreaterThan(100);
