@@ -258,6 +258,12 @@
         this dialog.
       </p>
       <p>
+        Food, Light, Wall and Erase paint where you drag. For a straight line, hold Shift, click the start and then
+        click the end. A preview shows the line as wide as the brush until the second click. While you hold Shift, each
+        further click adds a line from the last end, so you can draw a wall with corners. Press Escape or let go of
+        Shift to stop. A touch screen without a keyboard has no straight lines.
+      </p>
+      <p>
         The page address is a link to what you see: the settings, the scene, and the food, light and walls you painted.
         Copy it to share the scene or to come back to it. The agents and their trails start again when the link opens.
         If the drawing is too large for a link, a notice says so. The link then opens the scene as it loads, without the
