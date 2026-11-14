@@ -4128,6 +4128,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       it.each([false, true])(
         'places every agent under the wall off it at once, with its heading (collisions %s)',
         async (collisions) => {
+          if (collisions && !backend.supportsCollisions) return; // WebGL2 without float blending has no collision mode
           const [seed, density] = [9, collisions ? 0.1 : 1];
           const sim = await make({ layout: 'mixed', collisions, density, seed }, w, h, Math.round(density * w * h));
           sim.run(4);
@@ -4213,6 +4214,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       // Toward the wall the move is blocked: it stays and takes the heading of the stream of a blocked move. Away
       // from the wall it moves one cell.
       it.each([false, true])('leaves an agent beside the wall to its move (collisions %s)', async (collisions) => {
+        if (collisions && !backend.supportsCollisions) return; // WebGL2 without float blending has no collision mode
         const seed = 3;
         const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1 }];
         const settings = { ...defaultSettings(), layout: 'empty' as const, strains, seed };
