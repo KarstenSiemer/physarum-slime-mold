@@ -82,6 +82,8 @@ Plan: [docs/design.md](docs/design.md). Decisions: [docs/adr/](docs/adr/). Sourc
 - [ ] The Tokyo scene has no light on the mountains and lakes (the illuminated runs of Tero et al. 2010, Fig. 2) and no large food source outside the map; the map data for both is in the specification of 2026-11-11 (owner decision)
 - [ ] North stays up on the Tokyo scene on its lattice. A grid shaped like a tall screen, chosen in the panel, turns the map by 90°, as every scene (ADR 0019, ADR 0024 decision 4): keep, or give a scene a frame that never turns (owner decision)
 - [ ] Starved ground stays closed to the colony for about 18 h of model time (ADR 0029, decision 7): a colony does not grow back into a region that it lost. Keep, or let the mark fade faster (owner decision)
+- [ ] An agent under a wall that was painted onto it is not moved off the wall (`docs/model.md`, section 7.5, found while the specification was written, 2026-11-13). A move checks the cells on its way but not its start cell, so the agent can step out of the wall. Not measured how often it happens. To decide: move such an agent off the wall, kill it, or keep the rule
+- [ ] The stream of random numbers of a start round can equal another stream at a later step (`docs/model.md`, section 7.7, found while the specification was written, 2026-11-13). For seeds 0 to 999, start rounds 0 to 64 and steps below 10^6, this happens at one step in each of 134 (seed, round, stream) cases. Then the two draws give every agent the same number. Not measured whether a run shows an effect
 - [x] Diffuse pass (tiled 3 × 3 mean, passes, decay, walls, food and light scent)
 - [x] Collision mode (claims, ADR 0008)
 - [x] Brush pass (food, light, wall, erase)
