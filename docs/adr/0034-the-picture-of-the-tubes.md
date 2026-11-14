@@ -238,21 +238,23 @@ with the same command: the exact test costs no more.
 
 ### The tests
 
-- `src/engine/tubes.test.ts`, 13 tests: the rule on the CPU, in plain cases with numbers. The
+- `src/engine/tubes.test.ts`, 14 tests: the rule on the CPU, in plain cases with numbers. The
   strength across a tube only on a cell with a tube, the radius and the edge of a disc, the mean
   by weight, the plasmodium without a tube, the edges of the three arenas, and the walls: a wall
   of two rows and of one row, every cell that a line between two cells touches (against a second
   way to compute it), a wall cell beside the middle of a line, a wall of cells that touch at their
-  corners, a weak and a strong tube on the two sides of such a wall, and a wall cell that still
-  holds the memory of a tube.
-- `src/engine/tubes.gpu.test.ts`, 20 tests on each backend and one more on WebGL2:
+  corners, a weak and a strong tube on the two sides of such a wall, a wall cell that still holds
+  the memory of a tube, and the rule of a corner across the edge of the periodic grid and at the
+  rim of a dish.
+- `src/engine/tubes.gpu.test.ts`, 22 tests on each backend and one more on WebGL2:
   - the two passes against the CPU reference (`tubes-reference.ts`) on a box, on the periodic grid
     and in a dish, with four strains and three walls, one of them one cell thick along a diagonal:
     the factors to 1 part in 100,000, and the picture to 1 part in 100,000 of a value, or of 1
     for a value below 1. The walls stop more than 100 discs on their line in each of these scenes;
   - the same plain cases as on the CPU; walls written as cells, with a tube on every open cell, so
     that one disc too many or too few changes the picture; a weak and a strong tube on the two
-    sides of a diagonal wall; and a wall across the edge of the periodic grid;
+    sides of a diagonal wall; a wall across the edge of the periodic grid; and the rule of a
+    corner across that edge and at the rim of a dish;
   - the picture after a step, a new trail, a new memory and a new wall; the picture of a step that
     moves first; the trail alone with the switch off, without the flow and in the agents style;
   - a drawn frame: zoomed in and zoomed out in each style that draws the trail, its glow, and the
@@ -263,15 +265,17 @@ with the same command: the exact test costs no more.
   - settings that free and make the textures that the picture reads (a third pair of the view, a
     flow with one more strain): the picture stays right, and WebGPU reports no error; a measurement
     that waits while the settings free the picture, while the levels of the frames start anew, or
-    while the simulation is destroyed; and on WebGL2 a second target that cannot be made.
-- `src/engine/engine.test.ts` and `engine.gpu.test.ts`: a measurement of the levels, and a PNG,
-  while a restart or a rebuild starts a new run: the engine measures again for the new run, also
-  when the rebuild has ended before the answer comes.
+    while the simulation is destroyed; a picture that waits for the scent view while the
+    simulation is destroyed; and on WebGL2 a second target that cannot be made.
+- `src/engine/engine.test.ts` and `engine.gpu.test.ts`: a measurement of the levels, a picture and
+  a PNG, while a restart or a rebuild starts a new run: the engine asks again for the new run,
+  also when the rebuild has ended before the answer comes, and it fails with an error when the
+  rebuild failed.
 - `src/engine/engine.test.ts`, `sizing.test.ts`, `params.test.ts`, `state.test.ts`: the switch
   neither restarts nor rebuilds a simulation, the fit of the grid counts the picture with the
   switch on and off, a link without the switch has it on, and a new scene keeps it.
 - `tests/e2e/flow.spec.ts`: the switch in the built app.
-- `research/flow/engine/mutate.ts` has 69 wrong rules of the picture (V1 to V69): each line of the
+- `research/flow/engine/mutate.ts` has 73 wrong rules of the picture (V1 to V73): the parts of the
   rule in the WGSL and in the GLSL pass, and the code of each backend that makes the picture and
   hands it to the readers of decision 4. Each one fails at least one test
   (`logs/view/mutations.txt`). Three runs each found a wrong rule that no test caught, and a test
@@ -280,7 +284,7 @@ with the same command: the exact test costs no more.
   which showed only at every second step; and on both, a picture that is made before the wall
   bytes follow new cells of a wall.
 
-Three independent reviews found faults that the tests of that time did not catch.
+Four independent reviews found faults that the tests of that time did not catch.
 
 - 2026-11-13: on WebGPU the renderer kept the scent of an older frame, or a texture that was
   freed, below the picture; a measurement of the levels read textures that it took before a wait;
@@ -294,6 +298,11 @@ Three independent reviews found faults that the tests of that time did not catch
   way, not after a rebuild that had ended and not after a restart; the strength across a tube
   crossed a wall of cells that touch at their corners (decision 3); and two tests passed for
   another reason than their name says.
+- 2026-11-14, the fourth review, which found no fault in the passes: a PNG checked its run only
+  until it had the levels, and the backend can wait again while it draws the picture; a rebuild
+  that failed during a measurement counted as the same run; the e2e test of the switch counted
+  cells that need no tube; and the rule of a corner had no test at the edge of the periodic grid
+  and at the rim of a dish.
 
 Each fault is fixed, and each fix has a test that fails without it.
 

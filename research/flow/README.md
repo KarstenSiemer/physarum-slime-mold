@@ -675,7 +675,7 @@ You must see 27, 47 and 5 tests pass.
 
 A test is worth what it catches. This script puts 41 wrong rules of the flow into the code of the
 app, one at a time, and runs the GPU tests of the flow for each one (5 minutes). Without a name it
-also runs the 69 wrong rules of the picture of the tubes (part 10):
+also runs the 73 wrong rules of the picture of the tubes (part 10):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -895,7 +895,7 @@ test passed: it writes its lines to `research/flow/out/engine/picture.jsonl`. Th
 VITE_NAME=picture npx vitest run --config research/vitest.config.ts research/flow/engine/picture.gpu.test.ts
 ```
 
-The tests of the picture: you must see 13 tests pass, and 41 with 1 skipped. The test of the switch
+The tests of the picture: you must see 14 tests pass, and 45 with 1 skipped. The test of the switch
 in the built app is one of the tests of `tests/e2e/flow.spec.ts` (part 7).
 
 ```bash
@@ -906,8 +906,8 @@ npx vitest run --project unit src/engine/tubes.test.ts
 npx vitest run --project gpu src/engine/tubes.gpu.test.ts
 ```
 
-The tests of a measurement of the levels, and of a PNG, while a restart or a rebuild starts a new
-run: you must see 4 tests pass, and then 6.
+The tests of a measurement of the levels, of a picture and of a PNG, while a restart or a rebuild
+starts a new run: you must see 6 tests pass, and then 8.
 
 ```bash
 npx vitest run --project unit src/engine/engine.test.ts -t "a measurement of the levels while"
@@ -917,13 +917,13 @@ npx vitest run --project unit src/engine/engine.test.ts -t "a measurement of the
 npx vitest run --project gpu src/engine/engine.gpu.test.ts -t "a PNG while"
 ```
 
-The 69 wrong rules of the picture (3 minutes): every block must name at least one test that fails,
+The 73 wrong rules of the picture (3 minutes): every block must name at least one test that fails,
 marked `×`, and no block may say `NO TEST FAILS`. The script changes files below `src/` while it
 runs, and it writes each one back as it was: do not change those files while it runs. The record
 is `logs/view/mutations.txt`.
 
 ```bash
-node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 69)
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 73)
 ```
 
 Result: the picture draws a tube with a large flow memory thick, and a tube with a small one thin
@@ -951,7 +951,7 @@ asks for the new digest.
 | `logs/engine/mutations-0031.txt`                     | the same for 39 wrong rules, with the tests of ADR 0031                                                                                                                                                                         | 2026-11-13, the code of ADR 0031                      |
 | `logs/engine/strains-*.jsonl`                        | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
 | `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0032                                                                                       | 2026-11-13, M3 Pro                                    |
-| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, and its 69 wrong rules                                                    | 2026-11-13, M3 Pro                                    |
+| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, and its 73 wrong rules                                                    | 2026-11-13, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1001,7 +1001,7 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 110 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
+| `engine/mutate.ts`        | 114 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
