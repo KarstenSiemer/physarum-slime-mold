@@ -1197,3 +1197,81 @@ fixed, and tests hold the fixes of the tools (`research.test.ts`).
 
 Not in the record: the Tokyo run without the growth gate (decision 9). It needs a build without
 the two lines of the gate.
+
+## Amendment 2026-11-14: four open points, a fault of painted food, and the plan
+
+### Context
+
+The owner asked on 2026-11-14 about four open points of `TODO.md`: where a strain has a food site, the radius of the
+pressure solver, how long starved ground stays closed, and light on the Tokyo map. A reader went through the code,
+this ADR, the text of Tero et al. 2010 and a web search; the coordinator checked the main numbers again. The web
+sources were read as summaries only, as marked below.
+
+### What is true today
+
+- **Food sites.** `Engine.syncSites()` takes the start point (`from`) of every painted food stroke, and `flowSites()`
+  (`src/engine/flow.ts`) makes each one a site of one cell, each cell once, at most `FLOW_SITES` = 64. A strain covers a
+  site while that cell holds food and the strain's tube body there is at least 0.05 (`covered()` in `flow.wgsl`).
+  Several strains on the same cell each give or take the full I0 in their own flow (ADR 0031): the flux is not split.
+  The setting Covered food ([model.md](../model.md), section 6.5) is another rule: it lowers the scent of a food cell
+  next to an agent of any strain, it reads nothing of the flow, and it is off in every scene.
+- **The radius of the solver** (decision 3) is a number of the local solver only. Tero et al. solve the linear system
+  exactly with conjugate gradients (Solver 1 above). Today r = 0.99999 gives ω = 1.9911. The slowest mode measured on
+  the fixed Maze network, μ ≈ 1 − 6.5·10⁻⁷ (above both radii below), falls to 1/e in about 6,770 iterations, 423
+  steps, while the roles of a lane hold 300 steps (`FLOW_HOLD`). With r = 0.999999 it takes about 1,730 iterations, 108
+  steps. The coordinator computed both from the recurrence of the iteration. The only measured data are the cold starts
+  of `research/flow/solvers.ts` on the fixed Maze network (TODO.md has them); no run on Tokyo or on a network that
+  moves.
+- **Starved ground** comes back by the factor 1.00023 per step from the floor 10⁻⁴ to 0.2: ln(2000) / ln(1.00023) =
+  33,051 steps, 18.4 h of model time (decision 7). The reason for a slow return is in decision 7: faint strands lived for
+  ever when starved ground was fresh again at once. That observation has no log, and no run varied the factor.
+  The organism avoids ground with its own extracellular slime (Reid et al. 2012, PNAS; a Y-maze and a U-shaped trap,
+  read as a summary). The slime is a cue that the ground likely holds no food, and the plasmodium enters it when it
+  perceives food (Reid et al. 2013, Behavioral Ecology; abstract only). No source found says how long the effect lasts.
+- **Light on the Tokyo map.** Tero et al. 2010 (p. 440, captions of Fig. 2 and 3) lit the map with a mask: brighter
+  with the altitude of the land, and bright light on the ocean and the inland lakes, so that the plasmodium grew in the
+  lowlands. The lit networks looked closer to the rail network. One number: a cut of one link isolated a part in
+  14 ± 4 % of the lit networks and in 20 ± 13 % of the networks without light; the rail network has 4 %. The app's
+  Tokyo scene has the coast as walls and no light, so Lake Kasumigaura is open land (`src/model/tokyo.ts`). None of
+  the 36 cities lies in the mountains. The rail lines run on the plain and along the foot of the mountains, and the few
+  that cross them use tunnels, for example the Chūō line through the Sasago tunnel; the Jōban line passes west of
+  Kasumigaura (web search, summaries). A light shape of the app has one strength only (`src/model/presets.ts`).
+
+### A fault: a dragged food line gives many sites
+
+The brush records a segment each time the pointer has moved half a brush radius (`BrushDrag`, `src/ui/drag.ts`), and
+each segment is a stroke of the edit list. So a dragged line of food gives one site for every half radius of its
+length, and each site gives or takes the full I0: a long line pulls more flux than a dab. Above 64 sites `flowSites()`
+takes an even spread of them, which can drop the food of a scene (the Tokyo map has 42 sites, ADR 0032). Not measured
+in a run; it follows from the code. `TODO.md` has it.
+
+### Decision
+
+The coordinator's choices under the owner's delegation of 2026-11-12, told to the owner on 2026-11-14. Each one is
+built and measured in a pull request of its own, which records its numbers here.
+
+17. **A food site is one painted food stroke of the user or the scene: a dab, or every segment of one drag together.**
+    A strain covers it while its tube holds any cell of it, and its flux enters at the covered cell nearest the centre
+    of the stroke, so the roles, the pressure limit and the zero point keep working on one cell. Every strain keeps
+    the full I0: a share of the food between strains would be a rule without a source. Food dots that touch stay
+    sites of their own, or the seven dabs of Tokyo itself (`TOKYO_DABS`, seven sources as in Fig. 4 of the paper)
+    would become one site. This also ends the fault above. The edit list must then know which segments form one drag,
+    and a link must carry that (ADR 0021). The Maze and the Tokyo scene change their bytes, so their measurements of
+    this ADR are run again.
+18. **The radius 0.999999 is the candidate, and it is taken only after measurements:** `solvers.ts` on a dump of
+    Tokyo and with a new draw of roles on a warm network; the tests of the bounded pressure (decision 6); the local
+    flux against the exact one on Tokyo dumps at steps 500, 2,000, 4,000 and 8,000; and the campaigns of the Maze and
+    of Tokyo with 10 seeds and the flow strengths 1, 1.4 and 2, because 1.4 was chosen with the old radius. The largest
+    radius that keeps the pressure bounded and lowers the error is taken.
+19. **The time until starved ground is fresh again is measured, not set:** 18, 6, 3 and 1 h on Tokyo with 10 seeds, and
+    a test in which the network grows back into a cut region. The shortest time at which the faint strands of decision
+    7 do not come back is taken. A later option, closer to the organism: the scent of food lifts the mark.
+20. **A second Tokyo scene, with light on the lakes and the mountains.** The scene of today stays unchanged: it is the
+    protocol without light, and every number of this ADR is measured on it. The new scene needs an elevation map and
+    the lakes under licences that fit the project, checked first, and a decision between light of one strength and
+    light that grows with the altitude, which is a new rule.
+
+### Consequences
+
+- The order of the work: decision 17 first, as it also ends the fault; then 18, 19 and 20.
+- `TODO.md` names this amendment in the four items and has an item for the fault.
