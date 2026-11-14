@@ -275,8 +275,9 @@ for (const tool of ['Food', 'Light', 'Wall', 'Erase'] as const)
     await page.keyboard.down('Shift');
     await page.mouse.click(...a);
     expect(await strokes()).toEqual([]);
+    // Until the pointer moves, the preview is a dot at the start: a line of length 0, which Playwright calls hidden.
     const preview = page.locator('.line-preview .band');
-    await expect(preview).toBeVisible();
+    await expect(preview).toHaveCount(1);
     // The preview runs from the start to the pointer, and its drag paints nothing.
     await page.mouse.move(...b, { steps: 4 });
     const canvasBox = await page.locator('.line-preview').boundingBox();
@@ -337,10 +338,13 @@ test('clicks in a row with Shift draw a line with corners, and Escape or letting
   expect(list).toHaveLength(2);
   // The second line starts exactly where the first one ends, so the edits join.
   expect(list[1]?.from).toEqual(list[0]?.to);
-  // Escape: the next click only sets a start.
+  // Escape: the next press only sets a start, and its drag paints nothing.
   await page.keyboard.press('Escape');
   await expect(page.locator('.line-preview')).toHaveCount(0);
-  await page.mouse.click(...at(0.4, 0.7));
+  await page.mouse.move(...at(0.4, 0.7));
+  await page.mouse.down();
+  await page.mouse.move(...at(0.5, 0.8), { steps: 5 });
+  await page.mouse.up();
   expect(await strokes()).toHaveLength(2);
   await expect(page.locator('.line-preview')).toHaveCount(1);
   // Letting go of Shift ends the start too, and a click without Shift paints a dab at once.
