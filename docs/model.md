@@ -333,10 +333,10 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
   a link made before it gives the same sites. A new dab exactly at the end of a drag, with the same radius, joins the
   drag; a drag splits where the view, the grid or the radius changed during it, or where it left a closed arena.
 - The **cells** of a site are the cells that its segments paint with food, by the rule of the paint passes; its
-  **centre** is the start of its first segment, for a dab its centre. A cell that two sites paint belongs to the one
-  whose centre is nearer, on a tie to the one earlier in the list, so two strokes that touch stay two sites and no
-  cell is in two sites. A stroke without a cell is no site. With more than 64 strokes, 64 spread evenly over the list
-  take part, the first one always (`SiteCells`).
+  **centre** is the start of its first segment, for a dab its centre. A cell that two strokes paint belongs to the one
+  whose centre is nearer, on a tie to the one earlier in the list, among all strokes of the list; so two strokes that
+  touch stay two sites, and no cell is in two sites. A stroke left without a cell is no site. With more than 64
+  strokes that keep a cell, 64 of them spread evenly over those take part, the first one always (`SiteCells`).
 - A site is **covered** by the strain while one of its cells is open and holds food and a tube of the strain (B ≥ 0.05
   in the last step). Its **port** is the covered cell nearest its centre, on a tie the one with the lower index
   y · W + x; on a periodic grid the distance is to the nearest copy of the centre. The flux of the strain enters and
@@ -531,12 +531,13 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 `flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
 route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of
 four); a change of the number of strains during a run. For the food sites (ADR 0029, decision 17) it tests on both
-backends: a dragged line, held in a link of before, is one site with its port at the covered cell nearest its start;
-a strain covers a site from any of its cells, and its port moves to the covered cell nearest the centre; two strains
-on the same strokes each carry I0 through cells of their own; two dabs that touch stay two sites; the CPU copy while a
-port moves, with food under a wall and at the edge of a tube; a change of the sites during a run; an erased cell holds
-no port. `engine-env.test.ts` holds the engine to the rule: a drag of the brush is one site, a link gives the sites of
-its list, and the start layout Food puts each strain on a stroke of its own.
+backends: a dragged line, held in a link of before, is one site with its port at the covered cell nearest its start; a
+strain covers a site from any of its cells, and its port moves to the covered cell nearest the centre; two strains on
+the same strokes each carry I0 through cells of their own; two dabs that touch stay two sites; the CPU copy while a port
+moves, with food under a wall and at the edge of a tube; a large site in lanes before and after its port, also with two
+strains; a change of the sites during a run, also when the list gets shorter; 64 sites of 65 strokes; an erased cell
+holds no port. `engine-env.test.ts` holds the engine to the rule: a drag of the brush is one site, a link gives the
+sites of its list, and the start layout Food puts each strain on a stroke of its own.
 
 Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
 (a test checks only that it changes), and agents under a painted wall.

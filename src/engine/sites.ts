@@ -101,19 +101,36 @@ const sameSegment = (a: Stroke, b: Stroke | undefined) =>
   a.to[0] === b.to[0] &&
   a.to[1] === b.to[1];
 
-const meet = (a: Painted, b: Painted) =>
-  a.box[0] <= b.box[1] && b.box[0] <= a.box[1] && a.box[2] <= b.box[3] && b.box[2] <= a.box[3];
+/**
+ * Whether the box of each stroke meets the box of another (Painted.box), so that the two can share a cell: the boxes in
+ * the order of their first column, each against those that start before it ends.
+ */
+function meetOthers(painted: readonly Painted[]): boolean[] {
+  const meets = painted.map(() => false);
+  const order = painted.map((_, i) => i).sort((a, b) => (painted[a]?.box[0] ?? 0) - (painted[b]?.box[0] ?? 0));
+  order.forEach((i, k) => {
+    const a = painted[i]?.box;
+    if (!a) return;
+    for (let m = k + 1; m < order.length; m++) {
+      const j = order[m] ?? 0;
+      const b = painted[j]?.box;
+      if (!b || b[0] > a[1]) break;
+      if (a[2] <= b[3] && b[2] <= a[3]) meets[i] = meets[j] = true;
+    }
+  });
+  return meets;
+}
 
 /**
  * The food sites of a grid from its food strokes (ADR 0029, decision 17):
  *
  * - The cells of a stroke are the cells that its segments paint with food, by the rule of the paint passes
- *   (someCell()). A stroke that paints no cell is no site.
- * - Its centre is the start of its first segment: for a dab, the centre of the dab.
- * - With more than FLOW_SITES strokes, strokes spread evenly over the list take part, the first one always.
- * - A cell that two of them paint belongs to the one whose centre is nearer, on a tie to the earlier one. So two
- *   strokes that touch or overlap stay two sites, and no two sites share a cell: a cell is the port of one site at
- *   most. A stroke left without a cell is no site.
+ *   (someCell()). Its centre is the start of its first segment: for a dab, the centre of the dab.
+ * - A cell that two strokes paint belongs to the one whose centre is nearer, on a tie to the earlier one in the list,
+ *   among all strokes of the list. So two strokes that touch or overlap stay two sites, and no two sites share a cell:
+ *   a cell is the port of one site at most.
+ * - A stroke left without a cell, or that paints none, is no site. With more than FLOW_SITES strokes that keep a cell,
+ *   FLOW_SITES of them spread evenly over those take part, the first one always.
  *
  * It keeps the cells of each stroke for the next call: while a drag goes on, only its new segment is painted and
  * sorted into the cells of the drag. Strokes whose cells span boxes that meet no other box keep all their cells
@@ -157,38 +174,41 @@ export class SiteCells {
       kept.set(key, [...(kept.get(key) ?? []), p]);
     }
     this.kept = kept;
+    // A cell of two strokes belongs to the one with the nearer centre, on a tie to the earlier one, among all strokes:
+    // only those whose boxes meet can share a cell, and only they are walked.
     const all = painted.flatMap((p, stroke) => (p.cells.length > 0 ? [{ p, stroke }] : []));
-    const chosen =
-      all.length <= FLOW_SITES
-        ? all
-        : Array.from({ length: FLOW_SITES }, (_, i) => all[Math.floor((i * all.length) / FLOW_SITES)]).filter(
-            (c) => c !== undefined,
-          );
-    // A cell of two sites belongs to the one with the nearer centre, on a tie to the earlier one. Only strokes whose
-    // boxes meet can share a cell.
-    const shares = chosen.map(({ p }, i) => chosen.some(({ p: q }, j) => j !== i && meet(p, q)));
+    const shares = meetOthers(all.map(({ p }) => p));
     if (this.round > 2 ** 30) [this.owners, this.round] = [new Int32Array(this.owners.length), 0];
     const base = this.round + 1;
-    this.round += FLOW_SITES + 1;
+    this.round += all.length + 1;
     const owners = this.owners;
-    chosen.forEach(({ p }, i) => {
+    all.forEach(({ p }, i) => {
       if (!shares[i]) return;
       for (const c of p.cells) {
-        const other = chosen[(owners[c] ?? 0) - base]?.p;
+        const other = all[(owners[c] ?? 0) - base]?.p;
         if (!other || distance(c, p) < distance(c, other)) owners[c] = base + i;
       }
     });
+    // The strokes that keep a cell; with more than FLOW_SITES, those spread evenly over them.
+    const owned = all.flatMap(({ p, stroke }, i) => {
+      const own = shares[i] ? p.cells.filter((c) => owners[c] === base + i) : p.cells;
+      return own.length > 0 ? [{ own, stroke }] : [];
+    });
+    const chosen =
+      owned.length <= FLOW_SITES
+        ? owned
+        : Array.from({ length: FLOW_SITES }, (_, i) => owned[Math.floor((i * owned.length) / FLOW_SITES)]).filter(
+            (c) => c !== undefined,
+          );
     const list: FlowSite[] = [];
     const runs: Uint32Array[] = [];
     let offset = 0;
-    chosen.forEach(({ p, stroke }, i) => {
-      const own = shares[i] ? p.cells.filter((c) => owners[c] === base + i) : p.cells;
-      const at = own[0];
-      if (at === undefined) return;
+    for (const { own, stroke } of chosen) {
+      const at = own[0] ?? 0;
       list.push({ x: at % width, y: Math.floor(at / width), offset, count: own.length, stroke });
       runs.push(own);
       offset += Math.ceil(own.length / SITE_BLOCK) * SITE_BLOCK;
-    });
+    }
     const cells = new Uint32Array(offset).fill(NO_CELL);
     list.forEach((site, i) => {
       const run = runs[i];

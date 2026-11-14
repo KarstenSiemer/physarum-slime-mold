@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Boundary } from '../model/params';
 import { packDrawing, unpackDrawing } from '../model/link';
-import { BrushDrag } from '../ui/drag';
+import { BrushDrag, StraightLine } from '../ui/drag';
 import { fromStroke, strokeOn, type EnvEdit } from './environment';
 import { FLOW_SITES } from './flow';
 import { paintReference } from './paint-reference';
@@ -65,6 +65,37 @@ describe('the food strokes of an edit list', () => {
     expect((strokes[0]?.length ?? 0) + (strokes[1]?.length ?? 0)).toBe(recorded.length);
     // The first edit of each drag is a dab.
     for (const s of strokes) expect(s[0]?.from).toEqual(s[0]?.to);
+  });
+
+  it('take a row of straight lines with Shift as one stroke, the first line no dab', () => {
+    const recorded: EnvEdit[] = [];
+    // The parts of the engine that StraightLine uses (ADR 0035), at 2 pixels per cell on 512 × 320 cells.
+    const engine = {
+      gridOnScreen: [512, 320] as const,
+      settings: { boundary: 'box' } as never,
+      toGrid: (x: number, y: number): [number, number] => [x / 2, y / 2],
+      paint: (s: Stroke) => recorded.push(edit({ ...s, from: [...s.from], to: [...s.to] })),
+    };
+    const line = new StraightLine();
+    for (const p of [
+      [40, 40],
+      [240, 40],
+      [240, 300],
+      [90, 310],
+    ] as const)
+      line.click(engine, [p[0], p[1]], 'food', 3);
+    expect(recorded.length).toBe(3);
+    expect(recorded[0]?.from).not.toEqual(recorded[0]?.to);
+    const strokes = foodStrokes(recorded);
+    expect(strokes).toEqual([recorded]);
+    const sites = flowSites(
+      strokes.map((st) => st.flatMap((e) => strokeOn(e, 512, 320) ?? [])),
+      512,
+      320,
+      'box',
+    );
+    expect(sites.list.length).toBe(1);
+    expect([sites.list[0]?.x, sites.list[0]?.y]).toEqual([19, 19]);
   });
 
   it('keep dabs apart, also dabs that touch or overlap, as the seven of Tokyo', () => {
@@ -187,6 +218,18 @@ describe('the cells of a food site', () => {
     );
   });
 
+  it('give out a cell of two dabs whose cells meet in one column only', () => {
+    // The dabs paint the columns 17 to 23 and 23 to 29: they share the cell (23, 20), as far from both centres. It goes
+    // to the first, and the second does not hold it too.
+    const [a, b] = [food([20.5, 20.5], [20.5, 20.5], 3), food([26.5, 20.5], [26.5, 20.5], 3)];
+    const sites = flowSites([[a], [b]], w, h, 'box');
+    const [ca, cb] = [cellsOf(sites, 0), cellsOf(sites, 1)];
+    expect(Math.max(...ca.map((c) => c % w))).toBe(23);
+    expect(Math.min(...cb.map((c) => c % w))).toBe(24);
+    expect(ca).toContain(20 * w + 23);
+    expect(cb).not.toContain(20 * w + 23);
+  });
+
   it('drop a stroke that paints no cell, and a stroke whose every cell is nearer another centre', () => {
     const outside = food([-20, -20], [-20, -20], 3);
     const big = food([20.5, 20.5], [20.5, 20.5], 6);
@@ -206,6 +249,28 @@ describe('the cells of a food site', () => {
       expect(gap === 3 || gap === 4, String(gap)).toBe(true);
     }
     expect(sites.list.every((s) => s.count === 1)).toBe(true);
+  });
+
+  it('give out the shared cells among all strokes first, then take FLOW_SITES of those that keep a cell', () => {
+    // 70 dabs, the second a smaller twin at the centre of the first: every cell of it is as near the centre of the
+    // first, which is earlier, so the twin keeps no cell. Of the 69 strokes that keep one, 64 take part, the first one
+    // always, and the twin is none of them. Picked before the cells were given out, the twin would take a place and
+    // leave it empty: 63 sites.
+    const twin = [food([4.5, 4.5], [4.5, 4.5], 3), food([4.5, 4.5], [4.5, 4.5], 1.5)];
+    const rest = Array.from({ length: 68 }, (_, i) => food([12.5 + 8 * (i % 30), 12.5 + 8 * Math.floor(i / 30)]));
+    const strokes = [...twin, ...rest].map((s): FoodStroke => [s]);
+    const sites = flowSites(strokes, 256, 40, 'box');
+    expect(sites.list.length).toBe(FLOW_SITES);
+    expect(sites.list[0]?.stroke).toBe(0);
+    expect(sites.list.map((s) => s.stroke)).not.toContain(1);
+    // Spread evenly over the 69 strokes with a cell (0, 2, 3, ... 69): stroke k of them is the stroke k + 1 but for the
+    // first.
+    const keep = [0, ...Array.from({ length: 68 }, (_, i) => i + 2)];
+    expect(sites.list.map((s) => s.stroke)).toEqual(
+      Array.from({ length: FLOW_SITES }, (_, i) => keep[Math.floor((i * keep.length) / FLOW_SITES)]),
+    );
+    // The dab of the twin keeps every cell that it paints.
+    expect(sites.list[0]?.count).toBe(painted([twin[0] ?? food([0, 0])], 256, 40, 'box').length);
   });
 
   it('give the same sites from cells kept between calls as from a fresh start', () => {

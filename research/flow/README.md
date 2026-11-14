@@ -679,7 +679,7 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 npm run build && npx playwright test --project=e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 24, 65 and 5 tests pass (27 and 47 before the food sites of part 11).
+You must see 24, 71 and 5 tests pass (27 and 47 before the food sites of part 11).
 
 - `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
   scale, and the growing mesh of part 5 with all rules on.
@@ -690,10 +690,10 @@ You must see 24, 65 and 5 tests pass (27 and 47 before the food sites of part 11
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
-A test is worth what it catches. This script puts 75 wrong rules of the flow and of its food sites
-into the code of the app, one at a time, and runs the tests of the flow for each one (40 minutes;
-the 34 of the food sites are part 11). Without a name it also runs the 73 wrong rules of the
-picture of the tubes (part 10):
+A test is worth what it catches. This script puts 83 wrong rules of the flow and of its food sites
+into the code of the app, one at a time, and runs the tests of the flow for each one (45 minutes;
+the 42 of the food sites are part 11). Without a name it also runs the 73 wrong rules of the picture
+of the tubes (part 10):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -702,7 +702,7 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
 It changes files below `src/` while it runs and writes each one back as it was. You must see a
 test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
 `logs/engine/mutations-0031.txt` for 39 of them, and `logs/engine/scenes-mutations.txt` for the
-two of ADR 0032, and `logs/engine/sites-mutations*.txt` for all 75 with the food sites (part 11);
+two of ADR 0032, and `logs/engine/sites-mutations*.txt` for all 83 with the food sites (part 11);
 `logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests of ADR 0029. ADR
 0029 and ADR 0031 have their rules as a table.
 
@@ -1042,15 +1042,21 @@ The scenes of ADR 0032 with the sites of the amendment (3 minutes): the commands
 the names `sites-scenes-food-ring`, `sites-scenes-rival-networks` and
 `sites-scenes-tokyo-rivals`; the records are `logs/engine/sites-scenes-*.jsonl`.
 
-The wrong rules of the flow, with the 34 new ones of the food sites. The script changes files below `src/`
-while it runs: start no other run and change no file while it runs. The records are
-`logs/engine/sites-mutations.txt`, a run of the 41 rules of the flow and the first 30 of the
-sites with the first build, in which two rules were not caught until a test came for them, and
+The wrong rules of the flow, with the 42 new ones of the food sites. The script changes files below
+`src/` while it runs: start no other run and change no file while it runs. The records are
+`logs/engine/sites-mutations.txt`, a run of the 41 rules of the flow and the first 30 of the sites
+with the first build, in which two rules were not caught until a test came for them, and
 `logs/engine/sites-mutations-blocks.txt`, the 38 rules of the food sites and of the passes of the
-ports with the passes in blocks and every test of this part (25 minutes):
+ports with the passes in blocks and every test of this part (25 minutes), and
+`logs/engine/sites-mutations-review.txt`, the rules of the tests that a review asked for (10
+minutes):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts W5 W9 F5 F9 P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11 P12 S4 Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10 Q11 Q12 L4 C1 C2 C3 C4 C5 C6 E1 E2
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts C1 C2 C3 C4 C5 C6 C7 C8 P13 P14 R1 Q13 Q14 Q15
 ```
 
 Every block must name a test that fails, marked `×`, and no block may say `NO TEST FAILS`.
@@ -1064,7 +1070,7 @@ the noise of the bench, also for a food of 250,000 cells that no tube covers.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 181 files, 2.0 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 182 files, 2.0 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1135,7 +1141,7 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 148 wrong rules, one at a time, against the tests of the flow and of the picture of the tubes     |
+| `engine/mutate.ts`        | 156 wrong rules, one at a time, against the tests of the flow and of the picture of the tubes     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

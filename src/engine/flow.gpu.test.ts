@@ -5,7 +5,8 @@ import { packDrawing, unpackDrawing } from '../model/link';
 import { defaultSettings, defaultStrain, type Boundary, type Settings, type Strain } from '../model/params';
 import { fromStroke, strokeOn } from './environment';
 import { FLOW, packFlow } from './flow';
-import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowGrid } from './flow-reference';
+import { at } from './at';
+import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowFields, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { compile } from './gl/programs';
 import { AgentToolKind } from './pack';
@@ -440,6 +441,154 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     fields = flowStep(grid, u, fields, await sim.readTrail(), 0, 5, sites.cells);
     expect([fields.ports[0], fields.ports[2]]).toEqual([34 * w + 70, 6 * w + 140]);
     expect(roleCells(await sim.readFlow())).toEqual([6 * w + 140, 34 * w + 70].sort((a, b) => a - b));
+  }, 240_000);
+
+  /**
+   * A simulation of `strains` strains without agents of their own, no diffusion and almost no decay, whose trail is
+   * the cells of `tubes` (one set per strain) from the start, and the memory of the CPU copy for each strain with a
+   * full tube body on those cells: so the passes and the CPU copy start from the same state.
+   */
+  async function painted(w: number, h: number, foods: readonly FoodStroke[], tubes: readonly Set<number>[]) {
+    const settings = flowing({
+      layout: 'empty',
+      collisions: false,
+      diffusion: 0,
+      flowStrength: 2,
+      strains: tubes.map((_, i) => ({ ...defaultStrain(i), decay: 0.0001, deposit: 0 })),
+    });
+    const sim = await make(settings, w, h, 1);
+    const sites = feed(sim, foods);
+    sim.reset();
+    const trail = new Float32Array(w * h * 4);
+    tubes.forEach((tube, strain) => {
+      for (const c of tube) trail[c * 4 + strain] = 10;
+    });
+    sim.writeTrail(trail);
+    const grid: FlowGrid = { width: w, height: h, boundary: 'box', env: await sim.readEnv() };
+    const fields = tubes.map((tube, strain) => {
+      const f = flowStart(grid, FLOW.fresh);
+      for (const c of tube) f.memory[c * 4 + 1] = 1;
+      sim.writeFlow(f.memory, strain);
+      return f;
+    });
+    return { settings, sim, sites, grid, fields };
+  }
+
+  /** The largest difference of the memory of a strain from the CPU copy, relative, and of its pressure, over the top. */
+  async function offReference(sim: Sim, strain: number, fields: FlowFields) {
+    const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
+    let worst = 0;
+    for (let i = 0; i < memory.length; i++)
+      worst = Math.max(
+        worst,
+        Math.abs((memory[i] ?? 0) - (fields.memory[i] ?? 0)) / (1e-5 + Math.abs(fields.memory[i] ?? 0)),
+      );
+    const top = fields.pressure.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
+    let off = 0;
+    for (let i = 0; i < pressure.length; i++)
+      off = Math.max(off, Math.abs((pressure[i] ?? 0) - (fields.pressure[i] ?? 0)));
+    return { memory: worst, pressure: top > 0 ? off / top : off, roles: roleCells(memory) };
+  }
+
+  it('finds the ports of two strains on a large site, each in the rows of the hits of its own strain', async () => {
+    // The large dab of the test before on a grid of 144 cells across: its 178 blocks fill two rows of the hits of a
+    // strain on WebGL2, and the rows of the second strain start at row 2. The first strain comes into the dab from
+    // above, the second from below; each reaches the small dab from its own side. Each strain has its port in the dab
+    // on its own side, as the CPU copy has it.
+    const [w, h] = [144, 144];
+    const foods = [dab([70.5, 72.5], 60), dab([140.5, 6.5], 2)];
+    const above = new Set<number>();
+    for (let y = 2; y <= 34; y++) above.add(y * w + 70);
+    for (let x = 70; x <= 140; x++) above.add(2 * w + x);
+    for (let y = 2; y <= 6; y++) above.add(y * w + 140);
+    const below = new Set<number>();
+    for (let y = 111; y <= 141; y++) below.add(y * w + 70);
+    for (let x = 70; x <= 140; x++) below.add(141 * w + x);
+    for (let y = 7; y <= 141; y++) below.add(y * w + 140);
+    const { settings, sim, sites, grid, fields } = await painted(w, h, foods, [above, below]);
+    expect(Math.ceil(sites.cells.length / 64 / w)).toBe(2);
+    for (let step = 0; step < 3; step++) {
+      sim.run(1);
+      const trail = await sim.readTrail();
+      for (let strain = 0; strain < 2; strain++) {
+        const u = new Float32Array(packFlow(settings, sites, undefined, strain));
+        const f = flowStep(grid, u, at(fields, strain), trail, step, settings.seed, sites.cells);
+        fields[strain] = f;
+        const off = await offReference(sim, strain, f);
+        expect(off.memory, `memory of strain ${String(strain)} at step ${String(step)}`).toBeLessThan(1e-4);
+        expect(off.pressure, `pressure of strain ${String(strain)} at step ${String(step)}`).toBeLessThan(1e-3);
+        expect(off.roles).toEqual(roleCells(f.memory));
+      }
+    }
+    // The port of each strain in the large dab: 38 cells above its centre and 39 below it.
+    expect(at(fields, 0).ports[0]).toBe(34 * w + 70);
+    expect(at(fields, 1).ports[0]).toBe(111 * w + 70);
+  }, 240_000);
+
+  it('follows the CPU copy while the list of sites gets shorter, reading the roles of the step before at every port', async () => {
+    // Three sites: one that no tube covers, then two joined by a tube. The tube gives and takes from the first step on.
+    // After two steps the first site goes (an erase, and the list of the engine without it): the two others move to the
+    // places 0 and 1, and the roles of the step before lie at the ports of the places 1 and 2. The step after it adapts
+    // only if the passes read the ports of the step before at every place, also at those past the sites of now.
+    const [w, h] = [40, 24];
+    const [lone, a, b] = [dab([20.5, 20.5], 0.75), dab([4.5, 12.5], 0.75), dab([35.5, 12.5], 0.75)];
+    const tube = new Set<number>();
+    for (let x = 4; x <= 35; x++) tube.add(6 * w + x);
+    for (let y = 6; y <= 12; y++) [4, 35].forEach((x) => tube.add(y * w + x));
+    const ready = await painted(w, h, [lone, a, b], [tube]);
+    const { settings, sim, grid } = ready;
+    let [sites, fields] = [ready.sites, at(ready.fields, 0)];
+    let before = 0;
+    for (let step = 0; step < 6; step++) {
+      if (step === 2) {
+        sim.paint([{ kind: 'erase', from: [20.5, 20.5], to: [20.5, 20.5], radius: 2 }]);
+        sites = flowSites([a, b], w, h, 'box');
+        sim.foodSites(sites);
+        grid.env = await sim.readEnv();
+      }
+      sim.run(1);
+      const u = new Float32Array(packFlow(settings, sites));
+      fields = flowStep(grid, u, fields, await sim.readTrail(), step, settings.seed, sites.cells);
+      const off = await offReference(sim, 0, fields);
+      expect(off.memory, `memory at step ${String(step)}`).toBeLessThan(1e-4);
+      expect(off.pressure, `pressure at step ${String(step)}`).toBeLessThan(1e-3);
+      expect(off.roles).toEqual([12 * w + 4, 12 * w + 35]);
+      // In the step after the erase the roles of the step before lie at the ports of the places 1 and 2, and the tube
+      // adapts: the flow memory leaves the fresh value there.
+      if (step === 2) {
+        expect([...fields.ports.subarray(0, 6)]).toEqual([12 * w + 4, -1, 12 * w + 35, 12 * w + 4, -1, 12 * w + 35]);
+        expect(fields.memory[(6 * w + 20) * 4]).not.toBe(before);
+      }
+      before = fields.memory[(6 * w + 20) * 4] ?? 0;
+    }
+  }, 240_000);
+
+  it('follows the CPU copy with 64 sites of 65 strokes, every one of them covered', async () => {
+    // 65 dabs of one cell and a tube on every cell: 64 sites take part, spread over the 65 strokes, and all 64 give
+    // or take, 32 and 32 in each lane. A pass that leaves out the last site, or a 65th, does not give these roles.
+    const [w, h] = [48, 40];
+    const foods = Array.from({ length: 65 }, (_, i) => dab([2.5 + 5 * (i % 9), 2.5 + 4 * Math.floor(i / 9)], 0.75));
+    const all = new Set(Array.from({ length: w * h }, (_, c) => c));
+    const { settings, sim, sites, grid, fields } = await painted(w, h, foods, [all]);
+    expect(sites.list.length).toBe(64);
+    expect(sites.list.map((site) => site.stroke)).toEqual(Array.from({ length: 64 }, (_, i) => i));
+    let f = at(fields, 0);
+    for (let step = 0; step < 3; step++) {
+      sim.run(1);
+      const u = new Float32Array(packFlow(settings, sites));
+      f = flowStep(grid, u, f, await sim.readTrail(), step, settings.seed, sites.cells);
+      const off = await offReference(sim, 0, f);
+      expect(off.memory, `memory at step ${String(step)}`).toBeLessThan(1e-4);
+      expect(off.pressure, `pressure at step ${String(step)}`).toBeLessThan(1e-3);
+      expect(off.roles.length, `roles at step ${String(step)}`).toBe(64);
+      expect(off.roles).toEqual(roleCells(f.memory));
+    }
+    // Every lane has 32 sites that give and 32 that take.
+    const signs = sites.list.map((site) => roleSigns(f.memory[(site.y * w + site.x) * 4 + 3] ?? 0));
+    for (let k = 0; k < 4; k++) {
+      expect(signs.filter((sg) => sg[k] === 1).length).toBe(32);
+      expect(signs.filter((sg) => sg[k] === -1).length).toBe(32);
+    }
   }, 240_000);
 
   it('follows a change of the food sites during a run, as after a paint', async () => {

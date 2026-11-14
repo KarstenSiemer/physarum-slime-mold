@@ -157,16 +157,16 @@ describe('the archive of the logs', () => {
     return digest.digest('hex');
   };
 
-  it('holds the 181 logs of the record, unchanged', () => {
+  it('holds the 182 logs of the record, unchanged', () => {
     const files = readArchive();
-    expect(files).toHaveLength(181);
+    expect(files).toHaveLength(182);
     // A new campaign changes the record: pack the archive again (`logs.ts pack`) and put the new number here.
-    expect(digestOf(files)).toBe('310a4b0d0e9f2ab240f84ce917a87612247aea63f583c5894b23f076ff4084fc');
+    expect(digestOf(files)).toBe('7caa8b90e9e8a6b376e3f6ae8dd8025186bae00c69e02912380284dd8b2f1b38');
   });
 
   it('packs a folder so that unpacking gives the same files', () => {
     const again = join(record, 'again.tar.gz');
-    expect(packLogs(record, again)).toBe(181);
+    expect(packLogs(record, again)).toBe(182);
     expect(digestOf(readArchive(again))).toBe(digestOf(readArchive()));
   });
 
