@@ -284,6 +284,13 @@ with the same command: the exact test costs no more.
   which showed only at every second step; and on both, a picture that is made before the wall
   bytes follow new cells of a wall.
 
+The times on GitHub, which has no GPU (the run of `ccc0ddc`; ADR 0010 allows a test a quarter of
+its limit): `tubes.gpu.test.ts` took 9.1 s in the WebGL2 job and 25.8 s in the WebGPU job. Its
+slowest test, the picture that waits for the scent view on a backend of its own, took 9.4 s of
+120 s on WebGPU. Every other test of the picture took 2.3 s or less, with a limit of 60 s or of
+120 s, and each of the four tests of a PNG during a new run (`engine.gpu.test.ts`) 1.8 to 2.4 s of
+120 s.
+
 Four independent reviews found faults that the tests of that time did not catch.
 
 - 2026-11-13: on WebGPU the renderer kept the scent of an older frame, or a texture that was
