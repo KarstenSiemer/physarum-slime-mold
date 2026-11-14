@@ -675,7 +675,9 @@ You must see 27, 47 and 5 tests pass.
 
 A test is worth what it catches. This script puts 41 wrong rules of the flow into the code of the
 app, one at a time, and runs the GPU tests of the flow for each one (5 minutes). Without a name it
-also runs the 73 wrong rules of the picture of the tubes (part 10):
+also runs the 73 wrong rules of the picture of the tubes (part 10), and the 6 wrong rules of an
+agent under a painted wall (`U1` to `U6`, ADR 0038) against the tests of the agents in
+`sim.gpu.test.ts`:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -1001,7 +1003,7 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 114 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
+| `engine/mutate.ts`        | 120 wrong rules, one at a time, against the GPU tests of the flow, of the tubes and of the agents |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

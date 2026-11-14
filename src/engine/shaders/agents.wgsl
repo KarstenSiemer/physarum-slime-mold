@@ -248,28 +248,40 @@ fn respawn(a: Agent, id: u32) -> Spot {
 }
 
 //#endif
+// An alive agent whose cell is a wall: a wall was painted onto it (ADR 0038). Only while the environment may hold
+// walls, so a step without walls reads nothing more.
+fn underWall(a: Agent) -> bool {
+  if (P.extra.y == 0u || (a.bits & ALIVE) == 0u) { return false; }
+  let c = cellOf(a.pos);
+  return c >= 0 && isWall(env[c]);
+}
+
 // Inoculate takes a dead agent of the tool's strain, with the chance P.tool2.y, to a random point of the brush, and
 // never a living one. Cut takes a living agent in the wound to the first of 8 random points outside it whose cell
-// is open (Jones 2010, Sec. 4.3). After shrinkage, so a pure function of the agent as `claim` leaves it, the
-// parameters, `env` and `occ`: `claim` and `settle` find the same spot. With the rule the agent claims the cell like
-// a move (`claim`), and only the winner goes there (`settle`).
+// is open (Jones 2010, Sec. 4.3). An agent under a wall goes the cut's way, with or without a tool, and outside the
+// wound while the cut is held (ADR 0038): one loop of the stream TOOL, so an agent draws its points once in a step.
+// After shrinkage, so a pure function of the agent as `claim` leaves it, the parameters, `env` and `occ`: `claim` and
+// `settle` find the same spot. With the rule the agent claims the cell like a move (`claim`), and only the winner goes
+// there (`settle`).
 fn placement(a: Agent, id: u32) -> Spot {
+  let walled = underWall(a);
 //#if FLOW
-  if (P.tool.w == 0.0) { return respawn(a, id); }
+  if (P.tool.w == 0.0 && !walled) { return respawn(a, id); }
 //#else
-  if (P.tool.w == 0.0) { return Spot(a.pos, a.heading, -1); } // no tool held: the usual step
+  if (P.tool.w == 0.0 && !walled) { return Spot(a.pos, a.heading, -1); } // no tool held: the usual step
 //#endif
   var rng = rngSeed(id, TOOL);
   let alive = (a.bits & ALIVE) != 0u;
+  let cut = P.tool.w == 2.0;
   if (P.tool.w == 1.0 && !alive && f32(a.bits & 3u) == P.tool2.x && rand(&rng) < P.tool2.y) {
     let p = randomIn(P.tool.xy, P.tool.z, &rng);
     let c = cellOf(p);
     if (openCell(c)) { return Spot(wrapPos(p), rand(&rng) * TAU, c); }
-  } else if (P.tool.w == 2.0 && alive && toolDistance(a.pos, P.tool.xy) < P.tool.z) {
+  } else if (walled || (cut && alive && toolDistance(a.pos, P.tool.xy) < P.tool.z)) {
     for (var k = 0u; k < 8u; k++) {
       let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
       let c = cellOf(p);
-      if (openCell(c) && toolDistance(p, P.tool.xy) >= P.tool.z) { return Spot(wrapPos(p), a.heading, c); }
+      if (openCell(c) && (!cut || toolDistance(p, P.tool.xy) >= P.tool.z)) { return Spot(wrapPos(p), a.heading, c); }
     }
   }
 //#if FLOW

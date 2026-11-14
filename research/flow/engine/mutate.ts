@@ -1,7 +1,7 @@
-// Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules") and of the picture of
-// the tubes (ADR 0034). The script puts one wrong rule at a time into a source file of the app, runs the GPU tests of
-// the flow or of the picture on the backend of that file, and puts the file back. Every wrong rule must fail at least
-// one test.
+// Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
+// tubes (ADR 0034) and of an agent under a painted wall (ADR 0038). The script puts one wrong rule at a time into a
+// source file of the app, runs the GPU tests of the flow, of the picture or of the agents on the backend of that file,
+// and puts the file back. Every wrong rule must fail at least one test.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/mutate.ts [W1 F3 ...]
 // It changes files below src/ while it runs, and it writes each one back as it was. It stops if a file has changed
 // since the mutations were written: then the text of a mutation no longer fits.
@@ -19,6 +19,11 @@ const TUBES_SPEC = 'src/engine/tubes.gpu.test.ts';
 const FLOW_SPEC = 'src/engine/flow.gpu.test.ts';
 /** The tests of one backend: a part of the test names. */
 const [GPU, GL] = ['webgpu', 'webgl2|WebGL2'];
+/** The rule for an agent under a painted wall (ADR 0038), and the tests of it on each backend. */
+const AGENTS_WGSL = 'src/engine/shaders/agents.wgsl';
+const TOOLS_GLSL = 'src/engine/gl/glsl/tools.glsl';
+const SIM_SPEC = 'src/engine/sim.gpu.test.ts';
+const [UNDER_WALL_GPU, UNDER_WALL_GL] = ['webgpu .*under a painted wall', 'webgl2 .*under a painted wall'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run, and their
@@ -877,6 +882,55 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     's.showTubes && flowOn(s);',
     `${GPU}|${GL}`,
     TUBES_SPEC,
+  ],
+  // An agent under a painted wall (ADR 0038), against the tests of the agents in sim.gpu.test.ts.
+  [
+    'U1 wgsl: an agent under a wall stays on it',
+    AGENTS_WGSL,
+    'let walled = underWall(a);',
+    'let walled = false;',
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U2 wgsl: the rule reads the cell of the move, not the cell of the agent',
+    AGENTS_WGSL,
+    '  let c = cellOf(a.pos);\n  return c >= 0 && isWall(env[c]);',
+    '  let c = cellOf(destination(a));\n  return c >= 0 && isWall(env[c]);',
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U3 wgsl: an agent under a wall lands in the wound of a held cut',
+    AGENTS_WGSL,
+    'if (openCell(c) && (!cut || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    'if (openCell(c) && (!cut || walled || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U4 glsl: an agent under a wall stays on it',
+    TOOLS_GLSL,
+    'bool walled = underWall(a);',
+    'bool walled = false;',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
+  [
+    'U5 glsl: the rule reads the cell of the move, not the cell of the agent',
+    TOOLS_GLSL,
+    '  ivec2 q = cellXY(ivec2(floor(a.xy)));\n  return q.x >= 0 && isWall(texelFetch(env, q, 0));',
+    '  ivec2 q = cellXY(ivec2(floor(destination(a))));\n  return q.x >= 0 && isWall(texelFetch(env, q, 0));',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
+  [
+    'U6 glsl: an agent under a wall lands in the wound of a held cut',
+    TOOLS_GLSL,
+    'if (openCell(c) && (!cut || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    'if (openCell(c) && (!cut || walled || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    UNDER_WALL_GL,
+    SIM_SPEC,
   ],
 ];
 
