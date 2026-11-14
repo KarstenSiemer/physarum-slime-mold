@@ -110,6 +110,58 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 
+  // ADR 0028, amendment of 2026-11-14: a pass that makes a buffer or texture at its first use (the flow, growth, the
+  // picture of the tubes, the view) is outside the scopes of createSim(). The WebGPU device reports such an error
+  // (Backend.onOutOfMemory), and a WebGL2 step or draw throws it. Before, the WebGPU error went to the console and the
+  // run went on with textures that held nothing; the WebGL2 error stopped the app.
+  describe('after an allocation that runs out of memory after the start', () => {
+    it('survive the step-down when the device reports it', async () => {
+      const { engine, backend, sim } = await engineWith({ ...maze.settings(), resolution: 1024 });
+      const before = sim();
+      backend.onOutOfMemory?.('test');
+      expect(engine.busy).toBe(true);
+      await engine.apply(engine.settings); // the rebuild on its way
+      expect(engine.settings.resolution).toBe(768);
+      expect(sim()).not.toBe(before);
+      const fresh = await engineWith({ ...maze.settings(), resolution: 768 });
+      expect(differing(sim().env, fresh.sim().env)).toBe(0);
+    });
+
+    it('survive the step-down when a step throws it', async () => {
+      const { engine, sim } = await engineWith({ ...maze.settings(), resolution: 1024 });
+      sim().run = () => {
+        throw new OutOfMemoryError('test');
+      };
+      engine.frame(0, 1);
+      expect(engine.busy).toBe(true);
+      await engine.apply(engine.settings);
+      expect(engine.settings.resolution).toBe(768);
+      expect([sim().width, sim().height]).toEqual([768, 480]);
+    });
+
+    it('leave the grid alone when it comes while a new simulation is built', async () => {
+      const { engine, backend } = await engineWith({ ...maze.settings(), resolution: 1024 });
+      const release = hold(backend);
+      const rebuilt = engine.apply({ ...engine.settings, resolution: 512 });
+      // The new simulation allocates afresh. Stepping down from the old grid of 1024 would set 768.
+      backend.onOutOfMemory?.('test');
+      release();
+      await rebuilt;
+      expect(engine.settings.resolution).toBe(512);
+    });
+
+    it('report it when no grid with fewer cells is left', async () => {
+      vi.stubGlobal('cancelAnimationFrame', () => undefined); // Engine.stop() in Node
+      const { engine, backend } = await engineWith({ ...maze.settings(), resolution: 256 });
+      const errors: unknown[] = [];
+      engine.onError = (err) => errors.push(err);
+      backend.onOutOfMemory?.('test');
+      expect(engine.busy).toBe(false);
+      expect(errors).toEqual([expect.any(OutOfMemoryError)]);
+      vi.unstubAllGlobals();
+    });
+  });
+
   it('survive the memory fit, also when the canvas changed shape before a later setting change', async () => {
     // 1000 bytes per cell: the 512 MiB budget holds 768 × 480 but not 1024 × 640, nor 768 × 768.
     const backend = new CpuBackend();

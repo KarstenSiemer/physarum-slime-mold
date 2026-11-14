@@ -17,6 +17,7 @@ import { diffusePlan, viewTrailOn } from '../sizing';
 import { tubesShown } from '../tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
+  allOrNothing,
   clear,
   destroyTarget,
   fence,
@@ -379,8 +380,10 @@ export class GlSim implements Sim {
   private ensureViewThird() {
     if (!this.viewThird) {
       const gl = this.gl;
-      const trail = target(gl, this.width, this.height, gl.RGBA32F);
-      const scent = target(gl, this.width, this.height, gl.RG32F);
+      const [trail, scent] = allOrNothing(gl, (keep) => [
+        keep(target(gl, this.width, this.height, gl.RGBA32F)),
+        keep(target(gl, this.width, this.height, gl.RG32F)),
+      ]);
       const fbo = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, trail.texture, 0);
@@ -1414,23 +1417,26 @@ export class GlSim implements Sim {
   private ensureGrowth(): GlGrowth {
     if (!this.growth) {
       const gl = this.gl;
-      const pyramid = (n: number, width: number, format: number): Pyramid => {
-        const { sizes, rows, heights, top } = pyramidLayout(n, width);
-        const textures: Pair<Target> = [
-          target(gl, width, Math.max(1, heights[0] ?? 0), format),
-          target(gl, width, Math.max(1, heights[1] ?? 0), format),
-        ];
-        return { textures, width, sizes, rows, top };
-      };
       const [w, h] = [this.width, this.height];
-      this.growth = {
-        rows: target(gl, w, h, gl.RG32F),
-        windows: target(gl, w, h, gl.RG32F),
-        claims: target(gl, w, h, gl.R32F),
-        births: target(gl, w, h, gl.RG32F),
-        cells: pyramid(w * h, w, gl.RGBA32F),
-        dead: pyramid(this.agents, this.agentWidth, gl.R32F),
-      };
+      this.growth = allOrNothing(gl, (keep) => {
+        const make = (width: number, height: number, format: number) => keep(target(gl, width, height, format));
+        const pyramid = (n: number, width: number, format: number): Pyramid => {
+          const { sizes, rows, heights, top } = pyramidLayout(n, width);
+          const textures: Pair<Target> = [
+            make(width, Math.max(1, heights[0] ?? 0), format),
+            make(width, Math.max(1, heights[1] ?? 0), format),
+          ];
+          return { textures, width, sizes, rows, top };
+        };
+        return {
+          rows: make(w, h, gl.RG32F),
+          windows: make(w, h, gl.RG32F),
+          claims: make(w, h, gl.R32F),
+          births: make(w, h, gl.RG32F),
+          cells: pyramid(w * h, w, gl.RGBA32F),
+          dead: pyramid(this.agents, this.agentWidth, gl.R32F),
+        };
+      });
     }
     return this.growth;
   }

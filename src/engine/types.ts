@@ -173,6 +173,12 @@ export interface Backend<S extends Sim = Sim> {
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;
   /**
+   * Set by the engine: called when the GPU runs out of memory for a buffer or texture that a pass makes at its first
+   * use, after createSim() (WebGPU: an uncaptured GPUOutOfMemoryError of the device). The WebGL2 backend throws an
+   * OutOfMemoryError from the step or the draw instead.
+   */
+  onOutOfMemory?: ((message: string) => void) | undefined;
+  /**
    * A simulation of `agents` agents, alive and dead. `start`: how many the layout places at the start, the first ones
    * of each strain (default all). Fewer when the capacity holds more agents than the start population (ADR 0025).
    */

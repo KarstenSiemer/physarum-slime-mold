@@ -452,3 +452,66 @@ The details of the measurements below are in
     texture, 4 B or 8 B more per agent.
   - A GPU that renders without tiles was not measured: there the scattered order may cost less, and the sort costs its
     0.6 ms per step all the same.
+
+## Amendment 2026-11-14: allocations after the start
+
+### Context
+
+`createSim()` runs inside error scopes: on WebGPU an out-of-memory and a validation scope (`webgpu.ts`), on WebGL2 a
+check of `gl.getError()` (`gl/backend.ts`). An `OutOfMemoryError` there makes the engine step the grid down and try
+again (`Engine.rebuild()`, ADR 0026 for a lattice).
+
+Several buffers and textures are made later, at their first use, outside those scopes:
+
+- WebGPU, the simulation (`sim.ts`): the flow (`ensureFlow()`), growth (`ensureGrowth()`), the picture of the tubes
+  (`ensureTubes()`) and the third trail and scent of the view of a step that moves first (`ensureViewThird()`).
+- WebGPU, the picture (`render.ts`, `bloom.ts`): the gel height field, the coarse maps of the view and the bloom chain.
+- WebGL2: the same, and the target that marks the cells with an agent for covered food without float blending
+  (`occupancyAfterMoves()`).
+
+A review of 2026-11-13 found the flow and growth (`TODO.md`); the code reading for the cleanup of 2026-11-14 found the
+others. The memory fit (`sizing.ts`) counts their bytes before, so the case is rare. If it happened, on WebGPU the error
+went to the console as an uncaptured error, and the run went on with textures that held nothing. On WebGL2 `target()`
+threw a plain `Error` from the step or the draw, the frame loop passed it to `onError`, and the app stopped. The targets
+that growth, the view's third pair or the bloom chain made before the one that failed stayed behind. Not reproduced on a
+device: the tests below make the error.
+
+### Options
+
+1. **A net for every allocation after the start** (chosen). WebGPU reports an error outside every scope to the device
+   as an `uncapturederror` event; WebGL2 reports it to `gl.getError()` right after the allocation.
+2. A `prepare()` of each simulation, under the scopes, after `createSim()` and after every change of the settings, that
+   makes what the passes will need. It keeps no frame with an invalid texture, but it must repeat the conditions of
+   every pass and of the picture, and a pass that a later change adds outside them is again unguarded.
+3. Make everything with the simulation. The flow alone would hold 80 B × S per cell in every scene, also with the flow
+   off (ADR 0031).
+
+### Decision
+
+15. **An out-of-memory error after the start steps the grid down, as one in `createSim()` does** (my choice under the
+    owner's delegation of 2026-11-12, option 1, because it guards every allocation after the start, also the ones of
+    the picture and those that later code adds, and it needs no copy of the conditions of the passes).
+    - WebGPU: the backend listens to `uncapturederror` on its device and passes a `GPUOutOfMemoryError` on through
+      `Backend.onOutOfMemory`, which the engine sets. Other errors still go to the console only: they are faults of
+      the code, which the tests find.
+    - WebGL2: `target()` and `stencilTarget()` (`gl/gl.ts`) read every error flag after the storage of a texture or a
+      renderbuffer, and throw an `OutOfMemoryError` on `OUT_OF_MEMORY`. Each read waits for the GPU process; it runs
+      only when a target is made. `allOrNothing()` frees the targets that a set made before the one that failed:
+      growth, the view's third pair and the bloom chain use it, as the tubes and the flow already freed theirs.
+    - The engine: `frame()` catches an `OutOfMemoryError` of the step or the draw. `Engine.outOfMemory()` then steps
+      the grid down with the rule of `rebuild()` (`lowerGrid()`, shared with it), says so through `onAdjust`, and
+      builds a new simulation. While a new simulation is built it does nothing: that one allocates afresh. With no
+      grid of fewer cells left it stops the frames and reports the error through `onError`.
+    - On WebGPU the frames between the error and its event can draw textures that hold nothing. How many frames that
+      is was not measured.
+
+### Consequences
+
+- No byte of a run or a frame changes while the GPU has the memory.
+- New tests: in Node (`engine-env.test.ts`), an out-of-memory error that the device reports and one that a step throws
+  each step the grid down to 768 from 1024, and the new grid paints the same environment; one while a new simulation
+  is built leaves the grid of that simulation; one on the smallest grid reaches `onError`. On WebGPU
+  (`engine.gpu.test.ts`) the backend passes an uncaptured `GPUOutOfMemoryError` on and a `GPUValidationError` not.
+  On WebGL2 (`gl/sim.gpu.test.ts`) a step whose third target of growth runs out of memory throws an
+  `OutOfMemoryError`, leaves no texture, framebuffer or renderbuffer behind, and the next step makes all of them.
+  Each test failed with its part of the change taken out, one at a time.
