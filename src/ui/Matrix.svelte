@@ -1,9 +1,9 @@
 <script lang="ts">
   import { attractionSpec, type Strain } from '../model/params';
+  import { letter } from '../model/scene';
 
   let { strains = $bindable() }: { strains: Strain[] } = $props();
 
-  const letter = (i: number) => 'ABCD'[i] ?? String(i + 1);
   // Diverging color: blue repels, warm attracts.
   const tint = (v: number) =>
     v >= 0 ? `rgba(242, 160, 70, ${Math.min(1, v / 2) * 0.55})` : `rgba(80, 150, 255, ${Math.min(1, -v / 2) * 0.55})`;

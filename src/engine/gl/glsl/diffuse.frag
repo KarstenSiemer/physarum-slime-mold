@@ -19,7 +19,7 @@ layout(location = 1) out vec4 outScent;
 #define COVERED 0
 #endif
 
-// The view of a step that moves first (VIEW in diffuse.wgsl, gl/sim.ts viewTarget(), ADR 0027): the step's diffusion
+// The view of a step that moves first (VIEW in diffuse.wgsl, gl/sim.ts viewTargets(), ADR 0027): the step's diffusion
 // and decay without its sources and its cut, into targets that the simulation does not read. A program of its own.
 #ifndef VIEW
 #define VIEW 0
