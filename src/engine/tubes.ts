@@ -1,5 +1,6 @@
 // The picture of the tubes (ADR 0034): while the flow in the tubes is on, the view draws every tube as wide and as
-// bright as its tube body and its flow memory say. Display only: no pass of the simulation reads the picture.
+// bright as its tube body and its flow memory say, and grains that move with the flux. Display only: no pass of the
+// simulation reads the picture.
 //
 // The rule, per strain. `tubes.wgsl` and `gl/glsl/tubes.frag` run it on the GPU, and `tubes-reference.ts` on the CPU
 // for the tests.
@@ -26,6 +27,12 @@
 //    disc passes between two wall cells that touch at a corner. That is the rule of a move of the model, which
 //    takes no line that touches a wall cell (clearPath in agents.wgsl). A cell that is no wall is always reached by
 //    its own disc.
+// 6. The stream of the plasm, on a cell with a tube: the direction of the flux of the lane with the largest flux
+//    through the cell, times the speed of that flow, at most 1. The speed is the flux over the root of the
+//    conductivity of the cell, over `fast`: the conductivity of a round tube grows with the fourth power of its
+//    radius (point 3), so its root is the area that the flux passes. Of the strains with a tube in the cell, the one
+//    with the fastest flow counts. The view draws grains that move along the stream (`streaming` in render.wgsl), and
+//    their pattern starts again after `period` steps.
 import type { Settings } from '../model/params';
 import { flowOn } from './flow';
 
@@ -38,6 +45,13 @@ export const TUBES = {
   sheet: 0.25,
   /** The cells that a tube is long in the 3 × 3 cells around a cell. */
   span: 3,
+} as const;
+
+export const STREAM = {
+  /** The speed of the flow that counts as 1: the flux of a lane over the root of the conductivity of the cell. */
+  fast: 2,
+  /** The steps after which the pattern of the grains starts again. */
+  period: 32,
 } as const;
 
 /** The farthest that a disc reaches, cells: the radius and half the edge. */

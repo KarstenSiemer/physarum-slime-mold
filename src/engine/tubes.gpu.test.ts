@@ -4,8 +4,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
-import { TUBE_REACH, TUBE_WINDOW, TUBES } from './tubes';
-import { arenaCell, tubePicture, tubeRoots, wallOnLine, type TubeGrid } from './tubes-reference';
+import { STREAM, TUBE_REACH, TUBE_WINDOW, TUBES } from './tubes';
+import { arenaCell, tubePicture, tubeRoots, tubeStream, wallOnLine, type TubeGrid } from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -869,32 +869,215 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(Math.max(...late.data)).toBe(0);
     fresh.destroy();
   }, 120_000);
-  it.runIf(kind === 'webgl2')('frees the first target of the picture when the second cannot be made', async () => {
-    const [w, h] = [32, 24];
-    const sim = await make(flowing(), w, h);
-    const trail = new Float32Array(w * h * 4);
-    for (let x = 0; x < w; x++) trail[(12 * w + x) * 4] = 8;
-    sim.writeTrail(trail);
-    sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
-    const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
-    // The picture needs two targets. The framebuffer of the second one is not complete, as when the GPU is short
-    // of memory: the target frees its own texture, and the simulation must free the texture of the first target.
-    const [check, drop] = [gl.checkFramebufferStatus.bind(gl), gl.deleteTexture.bind(gl)];
-    let [checks, freed] = [0, 0];
-    gl.checkFramebufferStatus = (target) => (++checks === 2 ? gl.FRAMEBUFFER_UNSUPPORTED : check(target));
-    gl.deleteTexture = (texture) => {
-      freed++;
-      drop(texture);
-    };
-    try {
-      await expect((async () => sim.readPicture())()).rejects.toThrow(/incomplete/);
-    } finally {
-      gl.checkFramebufferStatus = check;
-      gl.deleteTexture = drop;
+  // The stream of the plasm (tubes.ts, point 6): the pass against the CPU reference, plain cases, and the grains that
+  // the view draws from it.
+  /** A memory with a tube of the conductivity that `of` gives for a cell (body 1), and none where it gives 0. */
+  function conducting(w: number, h: number, of: (x: number, y: number) => number) {
+    const m = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) {
+      const g = of(c % w, Math.floor(c / w));
+      m.set(g > 0 ? [1, 1, g, 0] : [FLOW.fresh, 0, 0, 0], c * 4);
     }
-    expect([checks, freed]).toEqual([2, 2]);
-    // The next picture makes both targets anew.
-    const want = await reference(sim, 'box', 1);
-    expect(worst(await sim.readPicture(), want.picture, 1)).toBeLessThan(1e-5);
+    return m;
+  }
+
+  /** A pressure with what `of` gives for a cell in each of the 4 lanes. */
+  function pressing(w: number, h: number, of: (x: number, y: number) => [number, number, number, number]) {
+    const p = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) p.set(of(c % w, Math.floor(c / w)), c * 4);
+    return p;
+  }
+
+  /** The stream that the reference gives for the state of a simulation. */
+  async function streamReference(sim: Sim, boundary: Boundary, strains: number) {
+    const grid: TubeGrid = { width: sim.width, height: sim.height, boundary, shape: await sim.readShape() };
+    const each = <T>(of: (s: number) => Promise<T>) => Promise.all(Array.from({ length: strains }, (_, s) => of(s)));
+    return tubeStream(grid, await each((s) => sim.readFlow(s)), await each((s) => sim.readPressure(s)));
+  }
+
+  it.each(['box', 'wrap', 'dish'] as const)(
+    'gives the stream of the CPU reference on a %s grid with four strains',
+    async (boundary) => {
+      const [w, h] = [40, 32];
+      const sim = await make(flowing({ boundary, strains: [0, 1, 2, 3].map((i) => defaultStrain(i)) }), w, h);
+      for (let s = 0; s < 4; s++) {
+        const memory = new Float32Array(w * h * 4);
+        const pressure = new Float32Array(w * h * 4);
+        for (let c = 0; c < w * h; c++) {
+          // Half the cells hold a tube. A body on both sides of the least one, and some tubes that conduct nothing.
+          const body = noise(c, 10 + s) < 0.5 ? 0.08 * noise(c, 20 + s) : noise(c, 30 + s);
+          const d = 10 ** (-4 * noise(c, 40 + s));
+          // The conductivity as the model gives it to a tube (model.md, 8.1).
+          memory.set([d, body, noise(c, 50 + s) < 0.1 ? 0 : body * (0.02 + d), 0], c * 4);
+          // Pressures that give speeds below 1 and above it.
+          for (let lane = 0; lane < 4; lane++) pressure[c * 4 + lane] = 25 * noise(c, 60 + 4 * s + lane) ** 2;
+        }
+        sim.writeFlow(memory, s);
+        sim.writePressure(pressure, s);
+      }
+      const want = await streamReference(sim, boundary, 4);
+      const got = await sim.readStream();
+      expect(got.length).toBe(w * h * 4);
+      expect(worst(got, want, 1)).toBeLessThan(1e-4);
+      // The case is not empty: cells without a stream, cells at the largest speed, and cells between the two.
+      const speeds = Array.from({ length: w * h }, (_, c) => Math.hypot(want[c * 4] ?? 0, want[c * 4 + 1] ?? 0));
+      const share = (of: (v: number) => boolean) => speeds.filter(of).length / speeds.length;
+      const shares = [share((v) => v === 0), share((v) => v > 0.05 && v < 0.95), share((v) => v > 0.999)];
+      for (const part of shares) expect(part, shares.join(' ')).toBeGreaterThan(0.03);
+    },
+  );
+
+  it('gives a stream from high to low pressure, as fast as the flux over the root of the conductivity', async () => {
+    const [w, h] = [24, 12];
+    const sim = await make(flowing({ strains: [defaultStrain(0), defaultStrain(1)] }), w, h);
+    const at = (stream: Float32Array, x: number, y: number) =>
+      [stream[(y * w + x) * 4], stream[(y * w + x) * 4 + 1]].map((v) => near(v));
+    // A tube along a row with a conductivity of 0.25. The pressure of one lane falls by 2 per cell to the east: the
+    // flux is 0.5, and over the root of 0.25 and over STREAM.fast that is a speed of 0.5 (tubes.test.ts has the sum).
+    const row = conducting(w, h, (x, y) => (y === 6 && x >= 4 && x <= 19 ? 0.25 : 0));
+    expect(STREAM.fast).toBe(2);
+    sim.writeFlow(row, 0);
+    sim.writePressure(
+      pressing(w, h, (x) => [0, 0, -2 * x, 0]),
+      0,
+    );
+    const east = await sim.readStream();
+    expect(at(east, 10, 6)).toEqual([0.5, 0]);
+    expect(at(east, 4, 6)).toEqual([0.25, 0]);
+    expect(at(east, 10, 5)).toEqual([0, 0]);
+    // The other way round, and a lane with a larger flux the first way: the largest counts, cut to a speed of 1.
+    sim.writePressure(
+      pressing(w, h, (x) => [0, 0, 2 * x, 0]),
+      0,
+    );
+    expect(at(await sim.readStream(), 10, 6)).toEqual([-0.5, 0]);
+    sim.writePressure(
+      pressing(w, h, (x) => [0, -5 * x, 2 * x, 0]),
+      0,
+    );
+    expect(at(await sim.readStream(), 10, 6)).toEqual([1, 0]);
+    // A tube down the grid, where y grows.
+    sim.writeFlow(
+      conducting(w, h, (x, y) => (x === 12 && y >= 2 && y <= 9 ? 0.25 : 0)),
+      0,
+    );
+    sim.writePressure(
+      pressing(w, h, (_, y) => [-2 * y, 0, 0, 0]),
+      0,
+    );
+    expect(at(await sim.readStream(), 12, 5)).toEqual([0, 0.5]);
+    // Two strains in the same tube: the faster flow counts.
+    sim.writeFlow(row, 0);
+    sim.writeFlow(row, 1);
+    sim.writePressure(
+      pressing(w, h, (x) => [-x, 0, 0, 0]),
+      0,
+    );
+    sim.writePressure(
+      pressing(w, h, (x) => [2 * x, 0, 0, 0]),
+      1,
+    );
+    expect(at(await sim.readStream(), 10, 6)).toEqual([-0.5, 0]);
+    expect(worst(await sim.readStream(), await streamReference(sim, 'box', 2), 1)).toBeLessThan(1e-5);
   });
+
+  it('moves grains along the stream in every style that draws the trail, and draws none without a flow', async () => {
+    const [w, h] = [64, 48];
+    const sim = await make(flowing({ bloom: 0 }), w, h);
+    // A band of trail with a tube in every cell. The pressure falls to the east, so the stream is (0.5, 0) in the band.
+    const trail = new Float32Array(w * h * 4);
+    for (let y = 18; y <= 30; y++) for (let x = 0; x < w; x++) trail[(y * w + x) * 4] = 8;
+    sim.writeTrail(trail);
+    sim.writeFlow(conducting(w, h, (_, y) => (y >= 18 && y <= 30 ? 0.25 : 0)));
+    const flowing8 = pressing(w, h, (x) => [-2 * x, 0, 0, 0]);
+    sim.writePressure(flowing8);
+    expect(near((await sim.readStream())[(24 * w + 32) * 4])).toBe(0.5);
+    // 8 pixels per cell around the cell (32, 24).
+    const view: View = { center: [32, 24], scale: 1 / 8 };
+    const frame = async (step: number, style: Settings['style'] = 'glow') => {
+      // The pattern of the grains follows the step of the state (render.ts packView()).
+      (sim as unknown as { step: number }).step = step;
+      const settings = flowing({ bloom: 0, style });
+      sim.update(settings);
+      return backend.capture(sim, settings, view, 512, 384, LEVELS);
+    };
+    /** The brightness of the rows of pixels well inside the band, as one list. */
+    const band = (img: ImageData) => {
+      const rows: number[][] = [];
+      for (let y = 140; y < 244; y += 4)
+        rows.push(Array.from({ length: 512 }, (_, x) => red(img, x, y) + (img.data[(y * 512 + x) * 4 + 1] ?? 0)));
+      return rows;
+    };
+    /** The shift in pixels to the east at which the grains of `b` lie best on the grains of `a`. */
+    const shift = (a: number[][], b: number[][]) => {
+      const centred = (rows: number[][]) => rows.map((r) => r.map((v) => v - r.reduce((x, y) => x + y, 0) / r.length));
+      const [ca, cb] = [centred(a), centred(b)];
+      let best = [0, -Infinity];
+      for (let s = -24; s <= 24; s++) {
+        let sum = 0;
+        ca.forEach((r, j) => {
+          for (let x = 32; x < 480; x++) sum += (r[x] ?? 0) * (cb[j]?.[x + s] ?? 0);
+        });
+        if (sum > (best[1] ?? 0)) best = [s, sum];
+      }
+      return best[0];
+    };
+    // Steps 4 and 8 are an eighth and a quarter of the period. In between a grain moves 20 cells times the speed of
+    // 0.5 times an eighth: 1.25 cells, 10 pixels, to the east.
+    expect(STREAM.period).toBe(32);
+    const [early, late] = [band(await frame(4)), band(await frame(8))];
+    const moved = shift(early, late);
+    expect(moved).toBeGreaterThanOrEqual(9);
+    expect(moved).toBeLessThanOrEqual(11);
+    // The grains are there: the band is not flat along a row.
+    const spread = (rows: number[][]) => Math.max(...rows.map((r) => Math.max(...r) - Math.min(...r)));
+    expect(spread(early)).toBeGreaterThan(40);
+    // With the pressure the other way the grains move to the west.
+    sim.writePressure(pressing(w, h, (x) => [2 * x, 0, 0, 0]));
+    expect(shift(band(await frame(4)), band(await frame(8)))).toBeLessThanOrEqual(-9);
+    // The gel and the paper show grains too.
+    sim.writePressure(flowing8);
+    for (const style of ['gel', 'paper'] as const) {
+      const [on, off] = [await frame(4, style), await frame(8, style)];
+      let differ = 0;
+      for (let x = 32; x < 480; x++) if (pixelDiff(on, off, x, 192) > 12) differ++;
+      expect(differ, style).toBeGreaterThan(40);
+    }
+    // Without a fall of the pressure nothing flows: the frames of two steps are the same but for the dither.
+    sim.writePressure(pressing(w, h, () => [0, 0, 0, 0]));
+    for (const style of ['glow', 'gel', 'paper'] as const)
+      expect(frameDiff(await frame(4, style), await frame(8, style)), style).toBeLessThanOrEqual(2);
+  });
+
+  it.runIf(kind === 'webgl2').each([2, 3])(
+    'frees the targets of the picture that are made when target %i cannot be made',
+    async (failing) => {
+      const [w, h] = [32, 24];
+      const sim = await make(flowing(), w, h);
+      const trail = new Float32Array(w * h * 4);
+      for (let x = 0; x < w; x++) trail[(12 * w + x) * 4] = 8;
+      sim.writeTrail(trail);
+      sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
+      const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
+      // The picture needs three targets. The framebuffer of one is not complete, as when the GPU is short of memory:
+      // the target frees its own texture, and the simulation must free the textures of the targets before it.
+      const [check, drop] = [gl.checkFramebufferStatus.bind(gl), gl.deleteTexture.bind(gl)];
+      let [checks, freed] = [0, 0];
+      gl.checkFramebufferStatus = (target) => (++checks === failing ? gl.FRAMEBUFFER_UNSUPPORTED : check(target));
+      gl.deleteTexture = (texture) => {
+        freed++;
+        drop(texture);
+      };
+      try {
+        await expect((async () => sim.readPicture())()).rejects.toThrow(/incomplete/);
+      } finally {
+        gl.checkFramebufferStatus = check;
+        gl.deleteTexture = drop;
+      }
+      expect([checks, freed]).toEqual([failing, failing]);
+      // The next picture makes the targets anew.
+      const want = await reference(sim, 'box', 1);
+      expect(worst(await sim.readPicture(), want.picture, 1)).toBeLessThan(1e-5);
+    },
+  );
 });

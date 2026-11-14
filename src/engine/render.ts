@@ -4,6 +4,7 @@ import { readPixels } from './readback';
 import { levelSize, scentLevel, scentLevelSize, scentSensors } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Simulation } from './sim';
+import { STREAM } from './tubes';
 import type { View } from './types';
 
 export const BACKGROUND: Record<Settings['style'], string> = {
@@ -29,7 +30,7 @@ export interface Frame {
   sampler: GPUSampler;
 }
 
-export const VIEW_BYTES = 192;
+export const VIEW_BYTES = 208;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 /** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
@@ -55,7 +56,8 @@ export function trailLevel(scale: number): number {
 
 /**
  * Fills `struct View` (render.wgsl), which is also the std140 `View` block of the WebGL2 renderer. `occupancy`:
- * the simulation keeps agents per cell (collision mode), for the agents style and for agents on food.
+ * the simulation keeps agents per cell (collision mode), for the agents style and for agents on food. `stream`: the
+ * step of the state, while the view draws the stream of the plasm (tubes.ts, point 6).
  */
 export function packView(
   data: ArrayBuffer,
@@ -69,6 +71,7 @@ export function packView(
   overlays: boolean,
   occupancy: boolean,
   strand: number,
+  stream?: number,
 ) {
   const fl = new Float32Array(data);
   const u = new Uint32Array(data);
@@ -83,13 +86,15 @@ export function packView(
   // Copies of the grid around a periodic lattice show at this brightness (ADR 0026); 1 shows them as they are.
   const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
   fl.set([settings.bloom, black, copies, trailLevel(view.scale)], 32);
+  // The pattern of the grains starts again after STREAM.period steps.
+  fl.set(stream === undefined ? [0, 0, 0, 0] : [1, (stream % STREAM.period) / STREAM.period, 0, 0], 36);
   // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
   // sensors of its line, their half spread and the hold of a strand (scentSensors()).
   const level = settings.showScent ? scentLevel(view.scale) : 0;
-  fl.set([level, settings.model === 'extended' ? 1 : 0, 0, 0], 36);
+  fl.set([level, settings.model === 'extended' ? 1 : 0, 0, 0], 40);
   const sensors = scentSensors(settings, strand);
-  fl.set(sensors.half, 40);
-  fl.set(sensors.holds, 44);
+  fl.set(sensors.half, 44);
+  fl.set(sensors.holds, 48);
 }
 
 /** How much of the scene the copies around a periodic lattice show (packView). */
@@ -219,6 +224,7 @@ export class Renderer {
         { binding: 9, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 10, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 12, visibility: F, texture: { sampleType: 'unfilterable-float' } },
       ],
     });
     this.downLayout = device.createBindGroupLayout({
@@ -301,6 +307,8 @@ export class Renderer {
     // Collision mode keeps the occupancy up to date (WebGPU allocates it with every simulation).
     const occupancy = f.settings.collisions;
     const { exposure, black, strand } = f;
+    // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
+    const stream = sim.streamTexture;
     packView(
       this.data,
       width,
@@ -313,6 +321,7 @@ export class Renderer {
       this.overlays,
       occupancy,
       strand,
+      stream ? sim.step : undefined,
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
@@ -357,6 +366,8 @@ export class Renderer {
           { binding: 9, resource: scentView },
           { binding: 10, resource: this.coarse?.view ?? this.noCoarse.createView() },
           { binding: 11, resource: this.trailCoarse?.view ?? this.noCoarse.createView() },
+          // The stream belongs to the picture of the tubes, which is the trail here: one texture for each trail.
+          { binding: 12, resource: (stream ?? this.noCoarse).createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({

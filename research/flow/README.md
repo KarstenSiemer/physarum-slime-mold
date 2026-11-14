@@ -895,7 +895,7 @@ test passed: it writes its lines to `research/flow/out/engine/picture.jsonl`. Th
 VITE_NAME=picture npx vitest run --config research/vitest.config.ts research/flow/engine/picture.gpu.test.ts
 ```
 
-The tests of the picture: you must see 14 tests pass, and 45 with 1 skipped. The test of the switch
+The tests of the picture: you must see 19 tests pass, and 56 with 2 skipped. The test of the switch
 in the built app is one of the tests of `tests/e2e/flow.spec.ts` (part 7).
 
 ```bash

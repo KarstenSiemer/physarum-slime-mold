@@ -365,7 +365,7 @@ export const flowHelp = {
 /** Help for the switch "Draw the tubes by their flow" below Flow in the tubes (ADR 0034); Learn → Controls lists it. */
 export const tubeViewHelp = {
   label: 'Draw the tubes by their flow',
-  help: 'Changes only the picture, not the simulation. Each tube is as wide and as bright as its flow memory says. The flow memory is the conductivity of a tube: it grows where much flow runs, and it falls where little flow runs. So a tube that keeps much flow stays thick, and a tube with little flow gets thin and faint. A new tube starts with a middle value: it is thick at first, until its flow memory follows its flow. For the flow of a liquid in a round tube the conductivity grows with the fourth power of the radius (Poiseuille’s law), so the picture draws a radius that grows with the fourth root of the conductivity. A tube with the largest value is 3 cells wider on each side. Plasmodium without a tube stays in the picture at a quarter of its brightness. A wall stops a tube: no tube is drawn across it. Without the switch the picture shows the trail alone, as it does without the flow.',
+  help: 'Changes only the picture, not the simulation. Each tube is as wide and as bright as its flow memory says. The flow memory is the conductivity of a tube: it grows where much flow runs, and it falls where little flow runs. So a tube that keeps much flow stays thick, and a tube with little flow gets thin and faint. A new tube starts with a middle value: it is thick at first, until its flow memory follows its flow. For the flow of a liquid in a round tube the conductivity grows with the fourth power of the radius (Poiseuille’s law), so the picture draws a radius that grows with the fourth root of the conductivity. A tube with the largest value is 3 cells wider on each side. Plasmodium without a tube stays in the picture at a quarter of its brightness. A wall stops a tube: no tube is drawn across it. Small grains move in each tube with the flow of the plasm, and they move faster where the flow is faster. Without the switch the picture shows the trail alone, as it does without the flow.',
 } as const;
 
 /** Help for the view switch "Scent" (ADR 0009, amendments of 2026-11-11 and 2026-11-12); Learn → Controls lists it. */
@@ -438,8 +438,8 @@ export interface Settings extends Record<GlobalKey, number> {
   /** The view draws the food scent and the light repellent over the picture (scentViewHelp). Display only. */
   showScent: boolean;
   /**
-   * While the flow in the tubes is on, the view draws every tube as wide and as bright as its flow memory says
-   * (tubeViewHelp, ADR 0034). Display only.
+   * While the flow in the tubes is on, the view draws every tube as wide and as bright as its flow memory says, and
+   * grains that move with the flow (tubeViewHelp, ADR 0034). Display only.
    */
   showTubes: boolean;
   strains: Strain[];

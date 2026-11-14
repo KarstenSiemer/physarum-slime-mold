@@ -366,8 +366,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'V7 wgsl: a disc on a cell without a tube',
     TUBES_WGSL,
-    'if (textureLoad(memory, p, s, 0).y < BODY_LOW) { continue; }',
-    'if (textureLoad(memory, p, s, 0).y < -1.0) { continue; }',
+    'if (textureLoad(memory, p, s, 0).y < BODY_LOW) { continue; }\n      if (!found) {',
+    'if (textureLoad(memory, p, s, 0).y < -1.0) { continue; }\n      if (!found) {',
     GPU,
     TUBES_SPEC,
   ],
@@ -825,7 +825,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'V67 webgl2: the first target of the picture stays when the second cannot be made',
     'src/engine/gl/sim.ts',
-    '        destroyTarget(gl, roots);\n        throw error;',
+    '        for (const t of made) destroyTarget(gl, t);\n        throw error;',
     '        throw error;',
     GL,
     TUBES_SPEC,

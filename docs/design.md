@@ -114,7 +114,7 @@ strains (one `vec4` lane each).
 | growth (while on)  | storage per cell and agent (WebGL2: targets)     | 34 B × W × H     | window counts, births, sums; 6 B per agent (ADR 0025) |
 | view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 | flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
-| tubes (with flow)  | `rgba32float` textures: radius factors, picture  | 32 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
+| tubes (with flow)  | `rgba32float` textures: radius, picture, stream  | 48 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
 
 `occ[2]` and `claims` are allocated with the simulation, even with collisions off (WebGL2: only
 with float blending). N is the capacity: the most agents the simulation holds, alive and dead
@@ -268,9 +268,12 @@ the arrows.
   cell of a wall and no cell of a wall lies on the line between the two cells (`shape` says which cells are walls),
   so no tube is drawn across a wall. The render pass, the height field, the
   glow, the auto levels, the coarse map of the trail and PNG read the picture in place of the trail; the strand of
-  the scent view stays a level of the trail of the model; the agents style has no picture of the tubes. The fit of the
-  grid to the memory of the GPU counts the two textures while the flow is on, with the switch on or off, so the
-  switch never changes the grid. The simulation never reads the picture.
+  the scent view stays a level of the trail of the model; the agents style has no picture of the tubes. A third pass
+  writes the stream of the plasm per cell: the direction of the flux of the lane with the largest flux, times its
+  speed, which is the flux over the root of the conductivity of the cell, over 2 and at most 1. The render pass
+  draws grains that move along the stream, 0.625 cells per step where the speed is 1 (ADR 0034, amendment
+  2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
+  switch on or off, so the switch never changes the grid. The simulation never reads the picture.
 - Palettes in OKLCH (even lightness and chroma), plus Fogleman's palettes.
 - Dither before 8-bit output against banding. HDR canvas (`rgba16float`, extended tone
   mapping) when the browser and display support it.

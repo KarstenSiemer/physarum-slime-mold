@@ -62,6 +62,9 @@ export class CpuSim implements Sim {
   writeFlow() {
     // nothing to write
   }
+  writePressure() {
+    // nothing to write
+  }
   destroy() {
     this.calls.push('destroy');
   }
@@ -87,6 +90,9 @@ export class CpuSim implements Sim {
     return Promise.resolve(new Float32Array(0));
   }
   readTubeRoots() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  readStream() {
     return Promise.resolve(new Float32Array(0));
   }
   readScent() {

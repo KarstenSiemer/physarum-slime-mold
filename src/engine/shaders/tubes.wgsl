@@ -2,16 +2,18 @@
 // common.wgsl. Display only: no pass of the simulation reads what these passes write. tubes.ts states the rule and
 // holds the numbers; sim.ts sets them as the constants of the pipelines.
 //
-// `roots` runs first and `picture` after it, once for each state that a frame draws:
+// `roots` runs first, then `picture` and `stream`, once for each state that a frame draws:
 // - `roots`: per cell and strain the fourth root of the strength across the tube, the factor of the radius and of the
 //   brightness of the tube that the cell holds; 0 on a cell without a tube of the strain and on a cell of a wall.
 // - `picture`: per cell and strain the trail that the view draws.
+// - `stream`: per cell the direction of the flow of the plasm times its speed, for the grains of the view.
 
 override RADIUS: f32 = 3.5;    // TUBES.radius
 override EDGE: f32 = 1.0;      // TUBES.edge
 override SHEET: f32 = 0.25;    // TUBES.sheet
 override SPAN: f32 = 3.0;      // TUBES.span
 override BODY_LOW: f32 = 0.05; // FLOW.bodyLow: below it a cell holds no tube
+override FAST: f32 = 2.0;      // STREAM.fast
 
 @group(0) @binding(1) var trail: texture_2d<f32>;                 // the trail that the view draws without the tubes
 @group(0) @binding(2) var<storage, read> shape: array<u32>;       // the wall byte of each cell (paint.wgsl `outline`)
@@ -19,6 +21,8 @@ override BODY_LOW: f32 = 0.05; // FLOW.bodyLow: below it a cell holds no tube
 @group(0) @binding(4) var rootsOut: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(5) var rootsIn: texture_2d<f32>;
 @group(0) @binding(6) var pictureOut: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(7) var pressure: texture_2d_array<f32>;        // the pressure of the 4 lanes, a layer per strain
+@group(0) @binding(8) var streamOut: texture_storage_2d<rgba32float, write>;
 
 @compute @workgroup_size(8, 8)
 fn roots(@builtin(global_invocation_id) gid: vec3u) {
@@ -136,4 +140,53 @@ fn picture(@builtin(global_invocation_id) gid: vec3u) {
   // three are 0.
   let tube = top * lit / max(sum, vec4f(1e-20));
   textureStore(pictureOut, p, max(SHEET * textureLoad(trail, p, 0), tube));
+}
+
+// The stream of the plasm of strain s through the cell p (cellXY). xy: the direction of the flux of the lane with the
+// largest flux. z: its speed, the flux over the root of the conductivity of the cell. The flux of a lane is that of
+// `update` in flow.wgsl, from the pressure and the conductivities that the memory holds (z). A wall and a cell outside
+// the arena conduct nothing.
+fn streamOf(p: vec2i, s: u32) -> vec3f {
+  let g = textureLoad(memory, p, s, 0).z;
+  if (g <= 0.0) { return vec3f(0.0); }
+  let own = textureLoad(pressure, p, s, 0);
+  var flux = vec4f(0.0);
+  var x = vec4f(0.0);
+  var y = vec4f(0.0);
+  for (var k = 0; k < 4; k++) {
+    let o = vec2i((1 - k) * (1 - (k & 1)), (2 - k) * (k & 1)); // east, south, west, north
+    let n = cellXY(p + o);
+    if (n.x < 0) { continue; }
+    let gn = textureLoad(memory, n, s, 0).z;
+    if (gn <= 0.0) { continue; }
+    // What leaves the cell over this edge, per lane: the conductance of the edge is the harmonic mean (flow.wgsl).
+    let leaves = 2.0 * g * gn / (g + gn) * (own - textureLoad(pressure, n, s, 0));
+    flux += abs(leaves);
+    x += f32(o.x) * leaves;
+    y += f32(o.y) * leaves;
+  }
+  var lane = 0;
+  for (var k = 1; k < 4; k++) { if (flux[k] > flux[lane]) { lane = k; } }
+  let along = vec2f(x[lane], y[lane]);
+  let l = length(along);
+  if (l <= 0.0) { return vec3f(0.0); }
+  // Half the sum over the edges is the flux through the cell.
+  return vec3f(along / l, 0.5 * flux[lane] / sqrt(g));
+}
+
+@compute @workgroup_size(8, 8)
+fn stream(@builtin(global_invocation_id) gid: vec3u) {
+  let p = vec2i(gid.xy);
+  if (p.x >= i32(W()) || p.y >= i32(H())) { return; }
+  var fastest = vec3f(0.0);
+  if (cellXY(p).x >= 0) {
+    let strains = min(textureNumLayers(memory), 4u);
+    for (var s = 0u; s < strains; s++) {
+      if (textureLoad(memory, p, s, 0).y < BODY_LOW) { continue; }
+      let v = streamOf(p, s);
+      if (v.z > fastest.z) { fastest = v; }
+    }
+  }
+  // The speed over FAST, at most 1.
+  textureStore(streamOut, p, vec4f(fastest.xy * min(fastest.z / FAST, 1.0), 0.0, 0.0));
 }

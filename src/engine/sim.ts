@@ -26,7 +26,7 @@ import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlan, viewTrailOn, type Diffuse } from './sizing';
-import { TUBES, tubesShown } from './tubes';
+import { STREAM, TUBES, tubesShown } from './tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
@@ -79,6 +79,8 @@ interface FlowState {
   /** Per strain: its layer of each memory texture, for the passes of the flow. */
   memoryViews: Pair<GPUTextureView>[];
   pressure: GPUTexture[];
+  /** Every layer of each pressure texture, for the stream of the picture of the tubes (tubes.wgsl). */
+  pressureArrays: GPUTextureView[];
   /** Per strain: its layer of each pressure texture. */
   pressureViews: GPUTextureView[][];
   /** Per strain: the uniform block of its passes (flow.ts packFlow()). */
@@ -86,13 +88,15 @@ interface FlowState {
 }
 /**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
- * strain the factor of the radius of its tube, and the trail that the view draws.
+ * strain the factor of the radius of its tube, and the trail that the view draws; per cell the stream of the plasm.
  */
 interface TubeState {
   roots: GPUTexture;
   rootsView: GPUTextureView;
   picture: GPUTexture;
   pictureView: GPUTextureView;
+  stream: GPUTexture;
+  streamView: GPUTextureView;
 }
 /** A trail and a scent texture with their views: the view's pairs (viewTextures). */
 interface ViewPair {
@@ -387,7 +391,17 @@ export class Simulation implements Sim {
     return this.tubes.picture;
   }
 
-  /** The passes of pictureTexture: the factor of the radius of every tube, then the picture. */
+  /**
+   * The stream of the plasm of the state that pictureTexture draws (tubes.ts, point 6): per cell the direction of the
+   * flow times its speed. Undefined while the view draws no picture of the tubes.
+   */
+  get streamTexture(): GPUTexture | undefined {
+    if (!tubesShown(this.settings) || !this.flow) return undefined;
+    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).stream;
+    return this.tubes.stream;
+  }
+
+  /** The passes of pictureTexture: the factor of the radius of every tube, the picture, and the stream. */
   private encodeTubes(flow: FlowState): TubeState {
     this.syncShape();
     // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
@@ -427,6 +441,22 @@ export class Simulation implements Sim {
       ]),
     );
     pass.dispatchWorkgroups(...groups);
+    pass.setPipeline(k.stream);
+    pass.setBindGroup(
+      0,
+      this.bind(`tubeStream${this.flowM}${String(this.flowP)}`, k.stream, [
+        this.params,
+        null,
+        null,
+        flow.memoryArrays[this.flowM],
+        null,
+        null,
+        null,
+        at(flow.pressureArrays, this.flowP),
+        tubes.streamView,
+      ]),
+    );
+    pass.dispatchWorkgroups(...groups);
     pass.end();
     this.device.queue.submit([enc.finish()]);
     this.tubesStale = false;
@@ -438,8 +468,15 @@ export class Simulation implements Sim {
     if (!this.tubes) {
       const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
       const make = () => this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
-      const [roots, picture] = [make(), make()];
-      this.tubes = { roots, rootsView: roots.createView(), picture, pictureView: picture.createView() };
+      const [roots, picture, stream] = [make(), make(), make()];
+      this.tubes = {
+        roots,
+        rootsView: roots.createView(),
+        picture,
+        pictureView: picture.createView(),
+        stream,
+        streamView: stream.createView(),
+      };
     }
     return this.tubes;
   }
@@ -448,6 +485,7 @@ export class Simulation implements Sim {
   private dropTubes() {
     this.tubes?.roots.destroy();
     this.tubes?.picture.destroy();
+    this.tubes?.stream.destroy();
     this.tubes = undefined;
     this.forgetTubes();
   }
@@ -461,6 +499,12 @@ export class Simulation implements Sim {
   /** For tests: the trail that the picture draws (pictureTexture), 4 lanes per cell. */
   readPicture(): Promise<Float32Array> {
     return readTexture(this.device, this.pictureTexture, 4);
+  }
+
+  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty without the picture of the tubes. */
+  async readStream(): Promise<Float32Array> {
+    const stream = this.streamTexture;
+    return stream ? readTexture(this.device, stream, 4) : new Float32Array(0);
   }
 
   /** For tests: the factor of the radius of the tube of every cell and strain, 4 values per cell; empty without it. */
@@ -693,6 +737,7 @@ export class Simulation implements Sim {
         memoryArrays: [whole(memory[0]), whole(memory[1])],
         memoryViews: each((strain): Pair<GPUTextureView> => [layer(memory[0], strain), layer(memory[1], strain)]),
         pressure,
+        pressureArrays: pressure.map(whole),
         pressureViews: each((strain) => pressure.map((t) => layer(t, strain))),
         uniforms: each(() =>
           this.device.createBuffer({ size: FLOW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
@@ -751,6 +796,17 @@ export class Simulation implements Sim {
     const size = [this.width, this.height];
     this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
     // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.
+    this.changed();
+    this.revision++;
+  }
+
+  /** For tests: replaces the pressure of the flow of a strain, as writeFlow() replaces its memory. */
+  writePressure(data: Float32Array, strain = 0) {
+    if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
+    const texture = at(this.ensureFlow().pressure, this.flowP);
+    const size = [this.width, this.height];
+    this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
+    // The picture of the tubes shows the stream of the plasm (ADR 0034).
     this.changed();
     this.revision++;
   }
@@ -1564,6 +1620,7 @@ interface FlowKernels {
 interface TubeKernels {
   roots: GPUComputePipeline;
   picture: GPUComputePipeline;
+  stream: GPUComputePipeline;
 }
 
 /** The pipelines for an environment that may hold walls (Kernels.walled()). */
@@ -1664,6 +1721,7 @@ class Kernels {
         SHEET: TUBES.sheet,
         SPAN: TUBES.span,
         BODY_LOW: FLOW.bodyLow,
+        FAST: STREAM.fast,
       };
       // A pipeline takes only the constants that its entry point uses.
       const pipeline = (entryPoint: string, names: (keyof typeof constants)[]) =>
@@ -1674,6 +1732,7 @@ class Kernels {
       this.tubePipelines = {
         roots: pipeline('roots', ['SPAN', 'BODY_LOW']),
         picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET']),
+        stream: pipeline('stream', ['BODY_LOW', 'FAST']),
       };
     }
     return this.tubePipelines;

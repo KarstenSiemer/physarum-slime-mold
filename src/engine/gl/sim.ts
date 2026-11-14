@@ -236,7 +236,7 @@ export class GlSim implements Sim {
    * strain the factor of the radius of its tube, and the trail that the view draws. `tubesStale`: a change of the state
    * since made the picture stale.
    */
-  private tubes: { roots: Target; picture: Target } | undefined;
+  private tubes: { roots: Target; picture: Target; stream: Target } | undefined;
   private tubesStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
@@ -417,7 +417,14 @@ export class GlSim implements Sim {
     return this.tubes.picture;
   }
 
-  /** The passes of pictureTarget(): the factor of the radius of every tube, then the picture. */
+  /** The stream of the plasm of the state that pictureTarget() draws (../sim.ts streamTexture); undefined without it. */
+  streamTarget(): Target | undefined {
+    if (!tubesShown(this.settings) || !this.flow) return undefined;
+    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).stream;
+    return this.tubes.stream;
+  }
+
+  /** The passes of pictureTarget(): the factor of the radius of every tube, the picture, and the stream. */
   private encodeTubes(flow: NonNullable<GlSim['flow']>) {
     this.syncShape();
     // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
@@ -428,6 +435,8 @@ export class GlSim implements Sim {
     const shape = this.shape.texture;
     this.pass(k.roots, tubes.roots, { ...this.flowMemories(flow), shape }, { strains: flow.memory.length });
     this.pass(k.picture, tubes.picture, { trail, shape, roots: tubes.roots.texture }, {});
+    const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
+    this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
     this.tubesStale = false;
     return tubes;
   }
@@ -436,14 +445,15 @@ export class GlSim implements Sim {
   private ensureTubes() {
     if (!this.tubes) {
       const gl = this.gl;
-      const roots = target(gl, this.width, this.height, gl.RGBA32F);
+      const made: Target[] = [];
       try {
-        this.tubes = { roots, picture: target(gl, this.width, this.height, gl.RGBA32F) };
+        for (let i = 0; i < 3; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
       } catch (error) {
-        // The second target did not fit: the first must not stay behind.
-        destroyTarget(gl, roots);
+        // A target did not fit: those before it must not stay behind.
+        for (const t of made) destroyTarget(gl, t);
         throw error;
       }
+      this.tubes = { roots: at(made, 0), picture: at(made, 1), stream: at(made, 2) };
     }
     return this.tubes;
   }
@@ -453,6 +463,7 @@ export class GlSim implements Sim {
     if (!this.tubes) return;
     destroyTarget(this.gl, this.tubes.roots);
     destroyTarget(this.gl, this.tubes.picture);
+    destroyTarget(this.gl, this.tubes.stream);
     this.tubes = undefined;
     this.tubesStale = true;
   }
@@ -460,6 +471,12 @@ export class GlSim implements Sim {
   /** For tests: the trail that the picture draws (pictureTarget()), 4 lanes per cell. */
   readPicture(): Promise<Float32Array> {
     return Promise.resolve(readTarget(this.gl, this.pictureTarget()) as Float32Array);
+  }
+
+  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty without the picture of the tubes. */
+  readStream(): Promise<Float32Array> {
+    const stream = this.streamTarget();
+    return Promise.resolve(stream ? (readTarget(this.gl, stream) as Float32Array) : new Float32Array(0));
   }
 
   /** For tests: the factor of the radius of the tube of every cell and strain, 4 values per cell; empty without it. */
@@ -604,6 +621,12 @@ export class GlSim implements Sim {
     return { flowMemory: of(0), flowMemory1: of(1), flowMemory2: of(2), flowMemory3: of(3) };
   }
 
+  /** The pressure of the flow of every strain for the stream (tubes.frag): the samplers as flowMemories() names them. */
+  private flowPressures(flow: NonNullable<GlSim['flow']>): Record<string, WebGLTexture> {
+    const of = (strain: number) => at(flow.pressure[strain] ?? at(flow.pressure, 0), this.flowP).texture;
+    return { flowPressure: of(0), flowPressure1: of(1), flowPressure2: of(2), flowPressure3: of(3) };
+  }
+
   /** Empty for a strain that the settings do not hold, and until the next step for a strain that is new (../sim.ts). */
   readFlow(strain = 0): Promise<Float32Array> {
     const memory = strain < flowStrains(this.settings) ? this.flow?.memory[strain] : undefined;
@@ -621,6 +644,15 @@ export class GlSim implements Sim {
     if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
     writeTarget(this.gl, at(this.ensureFlow().memory, strain)[this.flowM], 0, 0, this.width, this.height, data);
     // The picture of the tubes shows the memory (ADR 0034): a picture or a map made from the old one is old.
+    this.changed();
+    this.revision++;
+  }
+
+  writePressure(data: Float32Array, strain = 0) {
+    if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
+    const pressure = at(at(this.ensureFlow().pressure, strain), this.flowP);
+    writeTarget(this.gl, pressure, 0, 0, this.width, this.height, data);
+    // The picture of the tubes shows the stream of the plasm (ADR 0034).
     this.changed();
     this.revision++;
   }

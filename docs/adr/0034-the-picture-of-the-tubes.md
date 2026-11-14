@@ -337,3 +337,92 @@ of CI has at once: the test now holds them back itself.
 
 [`research/flow/README.md`](../../research/flow/README.md), part 10, has a command for each number
 and each picture of this record. The logs are in `research/flow/logs.tar.gz`, in `logs/view/`.
+
+## Amendment 2026-11-14: the stream of the plasm
+
+### Context
+
+The owner asked for a flow that is more visible (2026-11-13). On 2026-11-14 he chose a moving view:
+grains that move in each tube in the direction of the flux, faster where the flux is larger.
+
+The picture of the tubes shows the flow memory. It follows the flux over hundreds of steps, so
+nothing in the picture moved with the flux.
+
+### Decision
+
+Under the owner's delegation of 2026-11-12, except for the choice of a moving view, which is the
+owner's.
+
+1. **A third pass, `stream`** (`tubes.wgsl`, `tubes.frag`), writes per cell the direction of the
+   flow of the plasm times its speed. It reads the pressure of the four lanes and the conductivity
+   that the memory of the flow holds, and it computes the flux of each lane as the pass `update`
+   of the flow does (`docs/model.md`, 8.4). It runs with the two passes of the picture.
+2. **The speed is the flux over the root of the conductivity of the cell**, over 2 (`STREAM.fast`)
+   and at most 1. The conductivity of a round tube grows with the fourth power of its radius
+   (decision 2), so its root grows as the area that the flux passes: the flux over that area is the
+   speed of the plasm. Measured on the cells with a tube at step 12,000 (seed 1), this ratio has a
+   median of 0.40, 1.18 and 0.50 and a 90th percentile of 1.35, 2.75 and 1.43 on the Tokyo rail
+   network, in the Maze and on the Food ring. So most tubes get a speed between 0.1 and 1, and the
+   one thick tube of the Maze is at the limit.
+3. **The lane with the largest flux gives the direction.** The four lanes are four flows at the same
+   time. Their sum is no flow of the model, and it is zero in a tube that two lanes use in opposite
+   directions.
+4. **Of the strains with a tube in a cell, the one with the fastest flow counts.** The speed
+   before the cut at 1 decides, so two strains at the limit give one answer on every GPU.
+5. **The render pass draws grains** (`streaming` in `render.wgsl` and `render.frag`): a pattern
+   of points 2.2 cells apart, shifted along the stream. Where the speed is 1 a grain moves 20 cells
+   in a period of 32 steps, 0.625 cells per step. A shift that grows without end would tear the
+   pattern where the stream turns, so two copies of the pattern take turns: each one starts again
+   while the other one shows. A grain is the root of the speed times the pattern above its middle
+   values (`smoothstep(0.45, 0.8)`). In the glow and on paper a grain shows up to 1.5 times more
+   trail. In the gel it is up to 0.3 darker. From 1 cell per pixel on the grains fade, and from
+   1.5 cells per pixel on there are none: a grain is then smaller than a pixel.
+6. **The pattern follows the step of the state**, not the time. A paused simulation shows grains
+   that stand still, and a frame of one state is always the same, also in a PNG.
+7. **No switch of its own.** The grains are a part of the picture of the tubes, with the switch
+   "Draw the tubes by their flow". Nobody asked for a second switch. It can come when a picture of
+   the tubes without grains is needed.
+8. **Built, looked at and rejected**:
+   - A tube whose width pulses: the factor of the radius times a pattern that moves. The picture
+     takes the largest disc at a cell, which fills a short neck again. With a pattern coarse and
+     deep enough to show, the tubes look broken.
+   - Bands of equal pressure that move: their speed is the inverse of the fall of the pressure, so
+     a fast tube looks slow, and a dead end blinks as a whole.
+   - The speed from f, the value that the flow memory follows: it is below 0.03 on three quarters
+     of the cells with a tube on the Tokyo scene and on the Food ring, so nothing moved there.
+
+### Consequences
+
+- A scene with the flow shows grains that move in its tubes. They move from the foods that give
+  to the foods that take, in the lane with the largest flux through a cell. A tube without a flux
+  shows none. No result of a simulation changes.
+- The grains show the mean flow of the model. They do not move back and forth, as the plasm of
+  the organism does (`docs/fidelity.md`, 17).
+- The picture needs 16 B per cell more while the flow is on, 48 B in all (`TUBES_BYTES_PER_CELL`).
+- The cost: with the picture on, a frame takes 0 to 0.2 ms more on WebGPU and 0 to 0.35 ms more on
+  WebGL2. The time of one step with one drawn picture on 1280 × 800 pixels, in ms (M3 Pro; the
+  median of 21 samples of 50 frames; `research/flow/engine/picture.gpu.test.ts` on this commit and
+  on the one before it):
+
+  | Scene               | Strains | WebGPU, before | WebGPU, now | WebGL2, before | WebGL2, now |
+  | ------------------- | ------- | -------------- | ----------- | -------------- | ----------- |
+  | Maze                | 1       | 3.27           | 3.36        | 5.49           | 5.68        |
+  | Tokyo rail network  | 1       | 4.44           | 4.54        | 6.87           | 7.10        |
+  | Food ring           | 1       | 2.55           | 2.60        | 4.84           | 4.88        |
+  | Rival networks      | 2       | 3.87           | 3.86        | 6.15           | 6.28        |
+  | Tokyo, two networks | 2       | 7.37           | 7.55        | 9.30           | 9.64        |
+
+  With the picture off the two runs differ by up to 0.11 ms: that is the spread of the measurement.
+
+- The pictures of the Maze and of the Tokyo scene in `README.md` are made again with
+  `tests/pictures/readme.spec.ts`.
+- Tests:
+  - `tubes.test.ts`: the rule on the CPU in plain cases with numbers: from high to low pressure, the
+    speed, the lane with the largest flux, the strain with the fastest flow, the periodic grid.
+  - `tubes.gpu.test.ts`, on both backends: the pass against the CPU copy on a box, on the periodic
+    grid and in a dish with four strains; the plain cases; and a drawn frame, in which the grains
+    of two steps lie 10 pixels apart along the stream, to the east and with the pressure the other
+    way to the west, and in which nothing moves without a fall of the pressure.
+  - `sim.gpu.test.ts`, on both backends: a frame with grains against the CPU copy of the styles,
+    within 3 of 255, in the glow, the gel and on paper, zoomed in, across the wrap seam and zoomed
+    out.

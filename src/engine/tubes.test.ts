@@ -3,8 +3,8 @@
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, tubeViewHelp, type Settings } from '../model/params';
 import { FLOW } from './flow';
-import { TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { arenaCell, tubePicture, tubeRoots, wallByte, wallOnLine, type TubeGrid } from './tubes-reference';
+import { STREAM, TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
+import { arenaCell, tubePicture, tubeRoots, tubeStream, wallByte, wallOnLine, type TubeGrid } from './tubes-reference';
 import { SHAPE_RANGE } from './types';
 
 /** A grid without walls: every byte of `shape` is 0. */
@@ -62,6 +62,7 @@ describe('the picture of the tubes', () => {
     expect(TUBES.sheet).toBe(0.25);
     expect(tubeViewHelp.help).toContain('a quarter of its brightness');
     expect(tubeViewHelp.help).toContain('fourth root');
+    expect(tubeViewHelp.help).toContain('grains move in each tube with the flow');
   });
 
   it('takes the strength across a tube from the 3 × 3 cells around a cell with a tube, and its fourth root', () => {
@@ -430,5 +431,86 @@ describe('the picture of the tubes', () => {
     ] as const)
       lower.shape[(wy * 32 + wx) * 4] = 128;
     expect(pair(lower, [x, y + 1], [x + 1, y + 2])).toBeCloseTo(weak, 6);
+  });
+
+  // The stream of the plasm (tubes.ts, point 6).
+  describe('the stream of the plasm', () => {
+    const [W, H] = [24, 12];
+    /** A memory with a tube of the conductivity that `of` gives for a cell (body 1), and none where it gives 0. */
+    const conducting = (of: (x: number, y: number) => number) => {
+      const m = new Float32Array(W * H * 4);
+      for (let c = 0; c < W * H; c++) {
+        const g = of(c % W, Math.floor(c / W));
+        m.set(g > 0 ? [FLOW.fresh, 1, g, 0] : [FLOW.fresh, 0, 0, 0], c * 4);
+      }
+      return m;
+    };
+    /** A pressure with what `of` gives for a cell in each of the 4 lanes. */
+    const pressing = (of: (x: number, y: number) => [number, number, number, number]) => {
+      const p = new Float32Array(W * H * 4);
+      for (let c = 0; c < W * H; c++) p.set(of(c % W, Math.floor(c / W)), c * 4);
+      return p;
+    };
+    const at = (stream: Float32Array, x: number, y: number) => [stream[(y * W + x) * 4], stream[(y * W + x) * 4 + 1]];
+    /** A tube along a row, from x = 4 to x = 19, with a conductivity of 0.25. */
+    const row = conducting((x, y) => (y === 6 && x >= 4 && x <= 19 ? 0.25 : 0));
+
+    it('runs from high to low pressure, as fast as the flux over the root of the conductivity', () => {
+      expect(STREAM.fast).toBe(2);
+      // The pressure of one lane falls by 2 per cell to the east. An edge has the conductance 0.25, so 0.5 leaves a
+      // cell to the east and 0.5 comes from the west: the flux is 0.5. Over the root of 0.25 and over 2: a speed of 0.5.
+      const east = tubeStream(open(W, H), [row], [pressing((x) => [0, 0, -2 * x, 0])]);
+      expect(at(east, 10, 6)).toEqual([0.5, 0]);
+      // A cell at an end of the tube has one edge, so half the flux.
+      expect(at(east, 4, 6)).toEqual([0.25, 0]);
+      expect(at(east, 19, 6)).toEqual([0.25, 0]);
+      // No stream beside the tube, and the two unused values stay 0.
+      expect(at(east, 10, 5)).toEqual([0, 0]);
+      expect(at(east, 3, 6)).toEqual([0, 0]);
+      expect([east[(6 * W + 10) * 4 + 2], east[(6 * W + 10) * 4 + 3]]).toEqual([0, 0]);
+      // The other way round.
+      const west = tubeStream(open(W, H), [row], [pressing((x) => [0, 0, 2 * x, 0])]);
+      expect(at(west, 10, 6)).toEqual([-0.5, 0]);
+      // A tube with 4 times the conductivity and the same fall of the pressure: 4 times the flux, and twice the speed.
+      const wide = conducting((x, y) => (y === 6 && x >= 4 && x <= 19 ? 1 : 0));
+      expect(at(tubeStream(open(W, H), [wide], [pressing((x) => [0, 0, -x, 0])]), 10, 6)).toEqual([0.5, 0]);
+      expect(at(tubeStream(open(W, H), [row], [pressing((x) => [0, 0, -x, 0])]), 10, 6)).toEqual([0.25, 0]);
+      // Without a fall of the pressure nothing moves.
+      expect(at(tubeStream(open(W, H), [row], [pressing(() => [3, 3, 3, 3])]), 10, 6)).toEqual([0, 0]);
+    });
+
+    it('follows a tube down the grid, where y grows', () => {
+      const column = conducting((x, y) => (x === 12 && y >= 2 && y <= 9 ? 0.25 : 0));
+      const south = tubeStream(open(W, H), [column], [pressing((_, y) => [-2 * y, 0, 0, 0])]);
+      expect(at(south, 12, 5)).toEqual([0, 0.5]);
+    });
+
+    it('takes the lane with the largest flux, and no speed above 1', () => {
+      // One lane to the east with a flux of 0.5, one to the west with a flux of 1.25: the second one counts. Its speed
+      // of 1.25 is cut to 1.
+      const both = tubeStream(open(W, H), [row], [pressing((x) => [5 * x, 0, -2 * x, 0])]);
+      expect(at(both, 10, 6)).toEqual([-1, 0]);
+    });
+
+    it('takes the strain with the fastest flow, and no strain without a tube', () => {
+      const pressures = [pressing((x) => [-x, 0, 0, 0]), pressing((x) => [2 * x, 0, 0, 0])];
+      // Strain A flows to the east at 0.25, strain B to the west at 0.5.
+      expect(at(tubeStream(open(W, H), [row, row], pressures), 10, 6)).toEqual([-0.5, 0]);
+      // A body below the least one is no tube, also with a conductivity.
+      const thin = row.slice();
+      for (let c = 0; c < W * H; c++) thin[c * 4 + 1] = 0.9 * FLOW.bodyLow;
+      expect(at(tubeStream(open(W, H), [row, thin], pressures), 10, 6)).toEqual([0.25, 0]);
+    });
+
+    it('wraps on the periodic grid, and ends at the edge of a box', () => {
+      const whole = conducting((_, y) => (y === 6 ? 0.25 : 0));
+      // The pressure falls by 2 per cell to the east, with a step back at the seam.
+      const fall = pressing((x) => [-2 * x, 0, 0, 0]);
+      // In a box the cell at the edge has one edge.
+      expect(at(tubeStream(open(W, H), [whole], [fall]), 0, 6)).toEqual([0.25, 0]);
+      // On the periodic grid it has the cell across the seam too, where the pressure is 46 lower: the flux of that
+      // edge is 0.25 × 46, to the west, and the speed is cut to 1.
+      expect(at(tubeStream(open(W, H, 'wrap'), [whole], [fall]), 0, 6)).toEqual([-1, 0]);
+    });
   });
 });

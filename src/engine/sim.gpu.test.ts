@@ -175,10 +175,15 @@ type Vec3 = [number, number, number];
  * level that trailLevel() gives (ADR 0028; before, four bilinear taps). The gel is that of ADR 0009, amendment
  * 2026-11-14. Its lighting runs a trail filter for every height lookup, as before its height pre-pass: zoomed out the
  * four taps, which the height field still takes. The box edge and the dish rim fade over one pixel into the outside
- * colour, as render.wgsl draws them now. Returns sRGB bytes without the dither.
+ * colour, as render.wgsl draws them now. `stream`: the stream of the plasm of the state, 4 values per cell, and the
+ * phase of the pattern of its grains (ADR 0034, amendment 2026-11-14). Returns sRGB bytes without the dither.
  */
 function styleReference(
-  { trail, counts }: { trail: Float32Array; counts?: Float32Array },
+  {
+    trail,
+    counts,
+    stream,
+  }: { trail: Float32Array; counts?: Float32Array; stream?: { field: Float32Array; phase: number } },
   [w, h]: [number, number],
   settings: Settings,
   view: View,
@@ -311,6 +316,43 @@ function styleReference(
       return (bg[k] ?? 0) * (1 - cover) + lit * cover + spec * body;
     });
   };
+  // The grains of the stream (streaming() in render.wgsl): a pattern of points 2.2 cells apart, shifted along the
+  // stream by up to 20 cells in a period, in two copies that take turns.
+  const grainAt = (i: number, j: number) => {
+    let x = (Math.imul(i, 1664525) + Math.imul(j, 1013904223)) >>> 0;
+    x = Math.imul(x ^ (x >>> 16), 0x7feb352d) >>> 0;
+    x = Math.imul(x ^ (x >>> 15), 0x846ca68b) >>> 0;
+    return ((x ^ (x >>> 16)) >>> 8) / 16777216;
+  };
+  const grains = (gx: number, gy: number) => {
+    const [i0, j0] = [Math.floor(gx), Math.floor(gy)];
+    const [ux, uy] = [gx - i0, gy - j0].map((f) => f * f * (3 - 2 * f));
+    const row = (j: number) => grainAt(i0, j0 + j) * (1 - (ux ?? 0)) + grainAt(i0 + 1, j0 + j) * (ux ?? 0);
+    return row(0) * (1 - (uy ?? 0)) + row(1) * (uy ?? 0);
+  };
+  const streaming = (px: number, py: number) => {
+    if (!stream) return 0;
+    const [qx, qy] = [px - 0.5, py - 0.5];
+    const [x0, y0] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - x0, qy - y0];
+    const at = (x: number, y: number, k: number) => {
+      const i = cellOf(x, y);
+      return i < 0 ? 0 : (stream.field[i * 4 + k] ?? 0);
+    };
+    const [vx = 0, vy = 0] = [0, 1].map(
+      (k) =>
+        (at(x0, y0, k) * (1 - fx) + at(x0 + 1, y0, k) * fx) * (1 - fy) +
+        (at(x0, y0 + 1, k) * (1 - fx) + at(x0 + 1, y0 + 1, k) * fx) * fy,
+    );
+    const speed = Math.hypot(vx, vy);
+    if (speed <= 0) return 0;
+    const t = stream.phase;
+    const copy = (phase: number, shift: number) =>
+      grains((px - vx * 20 * (phase - 0.5)) / 2.2 + shift * 37, (py - vy * 20 * (phase - 0.5)) / 2.2 + shift * 17);
+    const first = 1 - Math.abs(2 * t - 1);
+    const n = copy((t + 0.5) % 1, 1) * (1 - first) + copy(t, 0) * first;
+    return Math.sqrt(speed) * smoothstep(0.45, 0.8, n) * Math.min(1, Math.max(0, 3 - 2 * view.scale));
+  };
   const srgb = (c: number) => {
     const x = Math.min(1, Math.max(0, c));
     return x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
@@ -337,8 +379,15 @@ function styleReference(
           const i = cellOf(Math.floor(px), Math.floor(py));
           lit = glow([0, 1, 2, 3].map((s) => (i < 0 ? 0 : (counts?.[i * 4 + s] ?? 0))));
         } else {
-          const v = levels(filtered(px, py));
-          lit = style === 'glow' ? glow(v) : style === 'paper' ? paper(v) : gel(px, py, v);
+          // A grain is more plasm: more trail in the glow and on paper, a darker gel.
+          const grain = streaming(px, py);
+          const v = levels(filtered(px, py)).map((x) => x * (1 + 1.5 * grain));
+          lit =
+            style === 'glow'
+              ? glow(v)
+              : style === 'paper'
+                ? paper(v)
+                : gel(px, py, v).map((x) => x * (1 - 0.3 * grain));
         }
         c = inside >= 1 ? lit : lit.map((l, k) => (outside[k] ?? 0) * (1 - inside) + l * inside);
       }
@@ -5427,6 +5476,86 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(max).toBeLessThanOrEqual(3);
       expect(sum / ((ref.length / 4) * 3)).toBeLessThan(0.75);
     });
+  });
+
+  // The grains of the stream of the plasm (render.wgsl `streaming`, gl/glsl/render.frag; ADR 0034, amendment
+  // 2026-11-14): the colours of a frame against the CPU reference above. A band of tubes with a pressure that falls
+  // across the grid in two lanes, so the stream has every direction and speeds below 1 and at 1.
+  describe('the stream of the plasm', () => {
+    const SIZE = 192;
+
+    it.each([
+      ['box', 30, 22, 1 / 4, 5],
+      ['wrap', 0, 0, 1 / 8, 21],
+      ['wrap', 32, 24, 1.25, 12],
+    ] as const)(
+      'draws the grains of the reference (%s, centre %i, %i, scale %f, step %i)',
+      async (boundary, cx, cy, scale, step) => {
+        const [w, h] = [64, 48];
+        const base: Settings = {
+          ...defaultSettings(),
+          model: 'extended',
+          flow: true,
+          boundary,
+          layout: 'empty',
+          strains: [defaultStrain(0), defaultStrain(1)],
+          exposure: 1,
+          bloom: 0,
+        };
+        const sim = await make(base, w, h, 1);
+        const trail = new Float32Array(w * h * 4);
+        const memory = new Float32Array(w * h * 4);
+        const pressure = new Float32Array(w * h * 4);
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            const c = y * w + x;
+            const tube = Math.abs(y - 24 - 6 * Math.sin(x / 7)) < 5 || Math.abs(x - 2) < 3;
+            trail[c * 4] = tube ? 20 : 1;
+            trail[c * 4 + 1] = Math.hypot(x - 44, y - 12) < 6 ? 14 : 0;
+            memory.set(tube ? [1, 1, 0.3, 0] : [0.2, 0, 0, 0], c * 4);
+            pressure.set([-0.4 * x - 0.2 * y, 1.5 * Math.sin(y / 3), 0, 0], c * 4);
+          }
+        sim.writeTrail(trail);
+        sim.writeFlow(memory);
+        sim.writePressure(pressure);
+        (sim as unknown as { step: number }).step = step;
+        const field = await sim.readStream();
+        const speeds = Array.from({ length: w * h }, (_, c) => Math.hypot(field[c * 4] ?? 0, field[c * 4 + 1] ?? 0));
+        expect(speeds.filter((v) => v > 0.05 && v < 0.95).length).toBeGreaterThan(100);
+        const view = { center: [cx, cy] as [number, number], scale };
+        for (const style of ['glow', 'gel', 'paper'] as const) {
+          const settings: Settings = { ...base, style };
+          sim.update(settings);
+          const levels = await backend.settle(sim);
+          const img = await backend.capture(sim, settings, view, SIZE, SIZE);
+          const exposure = levels.gain * 2 ** settings.exposure;
+          const stream = { field, phase: (step % 32) / 32 };
+          const drawn = { trail: await sim.readPicture(), stream };
+          const sizes: [number, number] = [SIZE, SIZE];
+          const ref = styleReference(drawn, [w, h], settings, view, { exposure, black: levels.black }, sizes);
+          let [max, sum] = [0, 0];
+          for (let i = 0; i < ref.length; i++) {
+            if (i % 4 === 3) continue;
+            const d = Math.abs((img.data[i] ?? 0) - (ref[i] ?? 0));
+            [max, sum] = [Math.max(max, d), sum + d];
+          }
+          expect(max, style).toBeLessThanOrEqual(3);
+          expect(sum / ((ref.length / 4) * 3), style).toBeLessThan(0.75);
+          // The grains are in the frame: without them the reference is another picture.
+          const plain = styleReference(
+            { trail: drawn.trail },
+            [w, h],
+            settings,
+            view,
+            { exposure, black: levels.black },
+            sizes,
+          );
+          let apart = 0;
+          for (let i = 0; i < ref.length; i++) if (Math.abs((plain[i] ?? 0) - (ref[i] ?? 0)) > 12) apart++;
+          expect(apart, style).toBeGreaterThan(scale > 1 ? 20 : 100);
+        }
+      },
+    );
   });
 
   // The scent view (ADR 0009, amendment 2026-11-11): display only, on a fixed scale, in every style and at every zoom.

@@ -17,6 +17,7 @@ struct View {
   background: vec4f,  // linear RGB
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
   fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), level of the trail's map (0 to 4)
+  streamFx: vec4f,    // the stream of the plasm: drawn (1) or not (0), the phase of its pattern (0 to 1), unused, unused
   scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
@@ -35,6 +36,7 @@ const DISH_FILL = 0.945;
 @group(0) @binding(7) var heightSampler: sampler;   // bilinear, clamped
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
+@group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed (tubes.wgsl)
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
@@ -337,6 +339,56 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   // The gel ends at a line, as a drop does.
   let body = smoothstep(0.02, 0.14, here);
   return mix(base, lit, body * mix(GEL_FILM, 1.0, full)) + spec * body;
+}
+
+// ---- The stream of the plasm (ADR 0034, amendment 2026-11-14) -----------------------------------------------------------
+// Grains that move along the flow in each tube, faster where the flow is faster. Display only.
+const STREAM_GRAIN = 2.2;  // cells between two points of the pattern of the grains
+const STREAM_REACH = 20.0; // cells that a grain moves in one period of the pattern where the speed is 1
+const STREAM_GAIN = 1.5;   // how much more trail a grain shows where the speed is 1
+const STREAM_DARK = 0.3;   // how much darker a grain makes the gel there
+
+// The stream of the cell c, and nothing outside the arena.
+fn streamCell(c: vec2i) -> vec2f {
+  let q = cellXY(c);
+  if (q.x < 0) { return vec2f(0.0); }
+  return textureLoad(stream, q, 0).xy;
+}
+
+// A number from 0 to 1 for the point i of the pattern: the same in every frame.
+fn grainAt(i: vec2i) -> f32 {
+  var x = u32(i.x) * 1664525u + u32(i.y) * 1013904223u;
+  x = (x ^ (x >> 16u)) * 0x7feb352du;
+  x = (x ^ (x >> 15u)) * 0x846ca68bu;
+  return f32((x ^ (x >> 16u)) >> 8u) * (1.0 / 16777216.0);
+}
+
+// The pattern at x, in units of STREAM_GRAIN: smooth between its points.
+fn grains(x: vec2f) -> f32 {
+  let i = vec2i(floor(x));
+  let f = x - floor(x);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(grainAt(i), grainAt(i + vec2i(1, 0)), u.x),
+             mix(grainAt(i + vec2i(0, 1)), grainAt(i + vec2i(1, 1)), u.x), u.y);
+}
+
+// How much of a grain lies at p, 0 to 1. The pattern is shifted along the stream by the phase, so a grain moves with
+// the flow. A shift that grows without end would tear the pattern where the stream turns, so two copies of the
+// pattern take turns: each starts again while the other one shows.
+fn streaming(p: vec2f) -> f32 {
+  let q = p - 0.5;
+  let c = vec2i(floor(q));
+  let f = q - floor(q);
+  let v = mix(mix(streamCell(c), streamCell(c + vec2i(1, 0)), f.x),
+              mix(streamCell(c + vec2i(0, 1)), streamCell(c + vec2i(1, 1)), f.x), f.y);
+  let speed = length(v);
+  if (speed <= 0.0) { return 0.0; }
+  let t = V.streamFx.y;
+  let first = grains((p - v * STREAM_REACH * (t - 0.5)) / STREAM_GRAIN);
+  let second = grains((p - v * STREAM_REACH * (fract(t + 0.5) - 0.5)) / STREAM_GRAIN + vec2f(37.0, 17.0));
+  let n = mix(second, first, 1.0 - abs(2.0 * t - 1.0));
+  // A grain is smaller than a pixel from 1.5 cells per pixel on: it fades out before.
+  return sqrt(speed) * smoothstep(0.45, 0.8, n) * clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
 }
 
 // Agents in the cell under p, per strain. `counts` holds the agents that moved this step. In collision
@@ -671,6 +723,10 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
     raw = trailFiltered(p);
   }
   var v = levels(raw);
+  var grain = 0.0;
+  if (V.streamFx.x != 0.0) { grain = streaming(p); }
+  // A grain is more plasm: more trail in the glow and on paper, a darker gel.
+  v *= 1.0 + STREAM_GAIN * grain;
   let halo = textureSampleLevel(bloom, bloomSampler, p / s, 0.0);
   var base = V.background.rgb;
   var e: Env;
@@ -683,7 +739,7 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   }
   var c: vec3f;
   switch V.style {
-    case 1u: { c = gel(p, v, base, f); }
+    case 1u: { c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain); }
     case 2u: { c = paper(v, base); }
     case 3u: { c = glow(agentsAt(p), vec4f(0.0), base); }
     default: { c = glow(v, halo, base); }
