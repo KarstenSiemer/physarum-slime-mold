@@ -507,6 +507,17 @@ export class Engine {
     return [(px - this.canvas.width / 2) * scale + center[0], (py - this.canvas.height / 2) * scale + center[1]];
   }
 
+  /** The canvas pixel over a grid position (cells): the inverse of toGrid(). */
+  toCanvas(x: number, y: number): [number, number] {
+    const { center, scale } = this.view;
+    return [(x - center[0]) / scale + this.canvas.width / 2, (y - center[1]) / scale + this.canvas.height / 2];
+  }
+
+  /** The grid the view shows (width, height): toGrid() gives its cells. Undefined before the first simulation. */
+  get gridOnScreen(): readonly [number, number] | undefined {
+    return this.viewGrid;
+  }
+
   zoomAt(px: number, py: number, factor: number) {
     const before = this.toGrid(px, py);
     this.view.scale = Math.min(8, Math.max(0.02, this.view.scale / factor));
