@@ -4,6 +4,7 @@
     coveredFoodHelp,
     flowHelp,
     globalSpec,
+    scentReachSpec,
     growthHelp,
     modelHelp,
     stepOrderHelp,
@@ -45,6 +46,7 @@
     ...Object.entries(globalSpec)
       .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength')
       .map(([, v]) => v),
+    scentReachSpec(),
     collisionsHelp,
     modelHelp,
     stepOrderHelp,

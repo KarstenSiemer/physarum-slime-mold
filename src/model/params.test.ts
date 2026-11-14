@@ -3,6 +3,7 @@ import {
   attractionSpec,
   capacityOf,
   constrain,
+  decayForReach,
   defaultSettings,
   defaultStrain,
   fieldText,
@@ -11,6 +12,8 @@ import {
   MAX_STRAINS,
   runsAsJones,
   sanitize,
+  scentReach,
+  scentReachSpec,
   snap,
   STEP_ORDERS,
   strainLike,
@@ -658,5 +661,36 @@ describe('snap and fieldText (sliders and their number fields)', () => {
         expect(snap(snap(v, spec), spec), `${p.id} ${spec.label}`).toBe(snap(v, spec));
       }
     }
+  });
+});
+
+describe('the reach of the scent (ADR 0036)', () => {
+  // ln(10) / κ beside a line of food, as measured on both backends (research/scent/README.md).
+  it('gives the cells over which the scent beside a long food falls to a tenth', () => {
+    expect(scentReach(0.1, 1)).toBeCloseTo(4.04, 2);
+    expect(scentReach(0.003, 1)).toBeCloseTo(24.2, 1);
+    expect(scentReach(0.01, 2)).toBeCloseTo(18.7, 1);
+    expect(scentReach(0.001, 4)).toBeCloseTo(84.1, 1);
+  });
+
+  it('is 0 without diffusion, and longer with more passes and a lower decay', () => {
+    expect(scentReach(0.1, 0)).toBe(0);
+    expect(scentReach(0.1, 2)).toBeGreaterThan(scentReach(0.1, 1));
+    expect(scentReach(0.01, 1)).toBeGreaterThan(scentReach(0.1, 1));
+  });
+
+  it('turns back into the decay that gave it', () => {
+    for (const passes of [1, 2, 3, 4])
+      for (const decay of [0.9, 0.3, 0.1, 0.01, 0.001, 0.0001])
+        expect(decayForReach(scentReach(decay, passes), passes) / decay).toBeCloseTo(1, 9);
+  });
+
+  it('spans the range of Scent decay', () => {
+    for (const passes of [1, 4]) {
+      const spec = scentReachSpec(passes);
+      expect(decayForReach(spec.min, passes)).toBeCloseTo(globalSpec.scentDecay.max, 9);
+      expect(decayForReach(spec.max, passes)).toBeCloseTo(globalSpec.scentDecay.min, 9);
+    }
+    expect(scentReachSpec(1).max).toBeCloseTo(133, 0);
   });
 });
