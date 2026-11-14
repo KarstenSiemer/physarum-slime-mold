@@ -26,7 +26,7 @@ import tubesFrag from './glsl/tubes.frag?raw';
 import viewGlsl from './glsl/view.glsl?raw';
 import wallsFrag from './glsl/walls.frag?raw';
 import { FLOW } from '../flow';
-import { TUBES } from '../tubes';
+import { STREAM, TUBES } from '../tubes';
 import { bindBlock, program, startProgram, type GL } from './gl';
 
 /** Uniform block binding points. */
@@ -47,7 +47,7 @@ const literal = (v: number) => (Number.isInteger(v) ? `${String(v)}.0` : String(
 /** The numbers of the picture of the tubes (tubes.ts) for tubes.frag, as sim.ts sets them for tubes.wgsl. */
 const TUBE_DEFINES =
   `#define RADIUS ${literal(TUBES.radius)}\n#define EDGE ${literal(TUBES.edge)}\n#define SHEET ${literal(TUBES.sheet)}\n` +
-  `#define SPAN ${literal(TUBES.span)}\n#define BODY_LOW ${literal(FLOW.bodyLow)}\n`;
+  `#define SPAN ${literal(TUBES.span)}\n#define BODY_LOW ${literal(FLOW.bodyLow)}\n#define FAST ${literal(STREAM.fast)}\n`;
 
 export interface Program {
   program: WebGLProgram;
@@ -107,6 +107,8 @@ export interface TubePrograms {
   roots: Program;
   /** PASS 1: the trail that the view draws. */
   picture: Program;
+  /** PASS 2: per cell the stream of the plasm. */
+  stream: Program;
 }
 
 /** The programs of growth and shrinkage (growth.frag, growth.vert, ADR 0025). */
@@ -293,6 +295,7 @@ export function compile(gl: GL): Programs {
       (tubes ??= {
         roots: sim(`#define PASS 0\n${TUBE_DEFINES}${tubesFrag}`),
         picture: sim(`#define PASS 1\n${TUBE_DEFINES}${tubesFrag}`),
+        stream: sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`),
       }),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;

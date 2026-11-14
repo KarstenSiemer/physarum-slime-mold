@@ -4,6 +4,7 @@
 uniform sampler2D counts;
 uniform sampler2D bloom;
 uniform sampler2D heights; // gel style: written by height.frag each frame
+uniform sampler2D stream;  // the direction of the flow of the plasm times its speed (tubes.frag PASS 2)
 uniform sampler2D trailLevels; // the trail on a coarser map (trail-down.frag), zoomed out
 
 // On the periodic grid one wrap serves the 4 cells (see bilinear in render.wgsl).
@@ -175,6 +176,48 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
   vec3 lit = mix(albedo, vec3(1.0), GEL_PALE * (1.0 - full)) * (0.3 + 0.8 * diffuse);
   float body = smoothstep(0.02, 0.14, here);
   return mix(base, lit, body * mix(GEL_FILM, 1.0, full)) + spec * body;
+}
+
+// ---- The stream of the plasm (see render.wgsl) ----
+const float STREAM_GRAIN = 2.2;  // cells between two points of the pattern of the grains
+const float STREAM_REACH = 20.0; // cells that a grain moves in one period of the pattern where the speed is 1
+const float STREAM_GAIN = 1.5;   // how much more trail a grain shows where the speed is 1
+const float STREAM_DARK = 0.3;   // how much darker a grain makes the gel there
+
+vec2 streamCell(ivec2 c) {
+  ivec2 q = cellXY(c);
+  return q.x < 0 ? vec2(0.0) : texelFetch(stream, q, 0).xy;
+}
+
+float grainAt(ivec2 i) {
+  uint x = uint(i.x) * 1664525u + uint(i.y) * 1013904223u;
+  x = (x ^ (x >> 16u)) * 0x7feb352du;
+  x = (x ^ (x >> 15u)) * 0x846ca68bu;
+  return float((x ^ (x >> 16u)) >> 8u) * (1.0 / 16777216.0);
+}
+
+float grains(vec2 x) {
+  ivec2 i = ivec2(floor(x));
+  vec2 f = x - floor(x);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(grainAt(i), grainAt(i + ivec2(1, 0)), u.x),
+             mix(grainAt(i + ivec2(0, 1)), grainAt(i + ivec2(1, 1)), u.x), u.y);
+}
+
+// How much of a grain lies at p, 0 to 1 (streaming in render.wgsl).
+float streaming(vec2 p) {
+  vec2 q = p - 0.5;
+  ivec2 c = ivec2(floor(q));
+  vec2 f = q - floor(q);
+  vec2 v = mix(mix(streamCell(c), streamCell(c + ivec2(1, 0)), f.x),
+               mix(streamCell(c + ivec2(0, 1)), streamCell(c + ivec2(1, 1)), f.x), f.y);
+  float speed = length(v);
+  if (speed <= 0.0) return 0.0;
+  float t = V.streamFx.y;
+  float first = grains((p - v * STREAM_REACH * (t - 0.5)) / STREAM_GRAIN);
+  float second = grains((p - v * STREAM_REACH * (fract(t + 0.5) - 0.5)) / STREAM_GRAIN + vec2(37.0, 17.0));
+  float n = mix(second, first, 1.0 - abs(2.0 * t - 1.0));
+  return sqrt(speed) * smoothstep(0.45, 0.8, n) * clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
 }
 
 // Agents in the cell, per strain; in collision mode also those that stayed put (see render.wgsl).
@@ -636,6 +679,8 @@ vec3 scene(vec2 p, vec2 s) {
   vec4 raw = trailFiltered(p);
 #endif
   vec4 v = levels(raw);
+  float grain = V.streamFx.x != 0.0 ? streaming(p) : 0.0;
+  v *= 1.0 + STREAM_GAIN * grain;
   vec4 halo = texture(bloom, p / s);
   vec3 base = V.background.rgb;
   Flake f = Flake(vec3(0.0), vec3(0.0), 0.0, 0.0);
@@ -649,7 +694,7 @@ vec3 scene(vec2 p, vec2 s) {
   }
 #endif
   vec3 c;
-  if (V.style == 1u) c = gel(p, v, base, f);
+  if (V.style == 1u) c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain);
   else if (V.style == 2u) c = paper(v, base);
   else if (V.style == 3u) c = glow(agentsAt(p), vec4(0.0), base);
   else c = glow(v, halo, base);

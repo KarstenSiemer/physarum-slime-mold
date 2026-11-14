@@ -230,6 +230,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Model**: none. The flow is a mean over the period, as in Tero et al. 2007 (Sec. 6). The roles of the foods change
   every 300 steps, 10 min. Jones' Fig. 7 shows one tracer agent that moves back and forth; Jones gives random differences in the
   strength of the path and collisions between agents as the cause (p. 137), not a period. The app has no tracer (`TODO.md`, Later).
+  The picture of the tubes draws grains that move with the mean flow (ADR 0034, amendment 2026-11-14): they show
+  its direction and its speed, and they do not move back and forth.
 
 ### 18. Food is eaten
 

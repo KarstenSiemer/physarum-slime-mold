@@ -139,9 +139,10 @@ describe('the flow in the tubes', () => {
   // memory counts them with the flow, whatever the switch says: the switch must not change the grid that fits.
   it('counts the picture of the tubes while the flow is on, with its switch on or off', () => {
     const on = { ...defaultSettings(), model: 'extended' as const, flow: true };
-    expect(tubesBytesPerCell(on)).toBe(32);
+    // Three textures of 16 B per cell: the factors of the radius, the picture and the stream of the plasm.
+    expect(tubesBytesPerCell(on)).toBe(48);
     const off = { ...on, showTubes: false };
-    expect(tubesBytesPerCell(off)).toBe(32);
+    expect(tubesBytesPerCell(off)).toBe(48);
     expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
     expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
   });

@@ -101,9 +101,10 @@ export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>
 
 /**
  * More bytes per cell for the picture of the tubes (tubes.ts, ADR 0034): per cell and strain the factor of the radius
- * of its tube, and the picture, 16 B per cell each (sim.ts TubeState, gl/sim.ts `tubes`). Both backends hold the same.
+ * of its tube, the picture, and per cell the stream of the plasm, 16 B per cell each (sim.ts TubeState, gl/sim.ts
+ * `tubes`). Both backends hold the same.
  */
-export const TUBES_BYTES_PER_CELL = 32;
+export const TUBES_BYTES_PER_CELL = 48;
 
 /**
  * The bytes per cell of the picture of the tubes: counted while the flow is on, with the picture or without it. The

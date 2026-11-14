@@ -113,6 +113,13 @@ export interface Sim {
   readPressure(strain?: number): Promise<Float32Array>;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
+  /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */
+  writePressure(data: Float32Array, strain?: number): void;
+  /**
+   * For tests: the stream of the plasm in the picture of the tubes, 4 values per cell (x, y, 0, 0); empty without
+   * that picture (tubes.ts, point 6).
+   */
+  readStream(): Promise<Float32Array>;
   /** Wall, food, light, unused per cell (0–255). */
   readEnv(): Promise<Uint8Array>;
   /**

@@ -309,7 +309,23 @@ export class WebGl2Backend implements Backend<GlSim> {
     const bloom = this.runBloom(sim, s, exposure, black, trail);
     // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
     const occ = s.collisions ? sim.occupancyTexture : undefined;
-    packView(this.viewData, width, height, view, exposure, black, s, this.frame, true, occ !== undefined, l.strand);
+    // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
+    const stream = sim.streamTarget()?.texture;
+    const streamStep = stream ? sim.step : undefined;
+    packView(
+      this.viewData,
+      width,
+      height,
+      view,
+      exposure,
+      black,
+      s,
+      this.frame,
+      true,
+      occ !== undefined,
+      l.strand,
+      streamStep,
+    );
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
     const heights = this.heightsFor(sim);
@@ -377,7 +393,15 @@ export class WebGl2Backend implements Backend<GlSim> {
     gl.useProgram(p.program);
     // A sampler that the frame does not read still needs a texture: the trail stands in for its coarse map.
     const trailLevels = trailCoarse?.texture ?? trail;
-    const all = { ...cells, counts: sim.countsTexture, bloom: bloom.texture, heights: heights.texture, trailLevels };
+    const all = {
+      ...cells,
+      counts: sim.countsTexture,
+      bloom: bloom.texture,
+      heights: heights.texture,
+      trailLevels,
+      // Without the picture of the tubes no frame reads the stream: the trail stands in.
+      stream: stream ?? trail,
+    };
     const scentLevels = coarse?.texture ?? viewScent;
     textures(gl, p.program, scent ? { ...all, scent: viewScent, scentLevels } : all);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

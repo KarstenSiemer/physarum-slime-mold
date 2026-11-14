@@ -1,6 +1,7 @@
 // The picture of the tubes (ADR 0034), after common.glsl. Mirrors ../../shaders/tubes.wgsl, where the passes are
 // described: PASS 0 is `roots` (per cell and strain the factor of the radius of its tube), PASS 1 is `picture` (the
-// trail that the view draws). programs.ts defines RADIUS, EDGE, SHEET, SPAN and BODY_LOW from ../../tubes.ts.
+// trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed).
+// programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW and FAST from ../../tubes.ts.
 
 out vec4 result;
 
@@ -23,14 +24,17 @@ bool wallOnLine(ivec2 p, ivec2 o) {
   return false;
 }
 
-#if PASS == 0
-// The memory of the flow of each strain: x flow memory, y tube body (gl/sim.ts flowMemories()).
+#if PASS != 1
+// The memory of the flow of each strain: x flow memory, y tube body, z conductivity (gl/sim.ts flowMemories()).
 uniform sampler2D flowMemory;
 uniform sampler2D flowMemory1;
 uniform sampler2D flowMemory2;
 uniform sampler2D flowMemory3;
 // The strains that the state of the flow holds: a sampler beyond them holds the memory of the first strain.
 uniform int strains;
+#endif
+
+#if PASS == 0
 
 // Whether the cell at q (not wrapped) is a cell of a wall. A cell outside the arena is none.
 bool wallAt(ivec2 q) {
@@ -85,7 +89,7 @@ void main() {
   result = sqrt(sqrt(a));
 }
 
-#else
+#elif PASS == 1
 uniform sampler2D trail; // the trail that the view draws without the tubes
 uniform sampler2D roots; // PASS 0
 
@@ -127,5 +131,60 @@ void main() {
   // three are 0.
   vec4 tube = top * lit / max(sum, vec4(1e-20));
   result = max(SHEET * texelFetch(trail, p, 0), tube);
+}
+
+#else
+// The pressure of the 4 lanes of the flow of each strain (gl/sim.ts flowPressures()).
+uniform sampler2D flowPressure;
+uniform sampler2D flowPressure1;
+uniform sampler2D flowPressure2;
+uniform sampler2D flowPressure3;
+
+// The stream of the plasm of one strain through the cell p: xy its direction, z its speed (streamOf in tubes.wgsl).
+vec3 streamOf(sampler2D memory, sampler2D pressure, ivec2 p) {
+  float g = texelFetch(memory, p, 0).z;
+  if (g <= 0.0) return vec3(0.0);
+  vec4 own = texelFetch(pressure, p, 0);
+  vec4 flux = vec4(0.0);
+  vec4 x = vec4(0.0);
+  vec4 y = vec4(0.0);
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2((1 - k) * (1 - (k & 1)), (2 - k) * (k & 1)); // east, south, west, north
+    ivec2 n = cellXY(p + o);
+    if (n.x < 0) continue;
+    float gn = texelFetch(memory, n, 0).z;
+    if (gn <= 0.0) continue;
+    vec4 leaves = 2.0 * g * gn / (g + gn) * (own - texelFetch(pressure, n, 0));
+    flux += abs(leaves);
+    x += float(o.x) * leaves;
+    y += float(o.y) * leaves;
+  }
+  int lane = 0;
+  for (int k = 1; k < 4; k++) {
+    if (flux[k] > flux[lane]) lane = k;
+  }
+  vec2 along = vec2(x[lane], y[lane]);
+  float l = length(along);
+  if (l <= 0.0) return vec3(0.0);
+  return vec3(along / l, 0.5 * flux[lane] / sqrt(g));
+}
+
+// The stream of one strain if the cell holds a tube of it and its flow is faster than `fastest`, else `fastest`.
+vec3 faster(vec3 fastest, sampler2D memory, sampler2D pressure, ivec2 p) {
+  if (texelFetch(memory, p, 0).y < BODY_LOW) return fastest;
+  vec3 v = streamOf(memory, pressure, p);
+  return v.z > fastest.z ? v : fastest;
+}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 fastest = vec3(0.0);
+  if (cellXY(p).x >= 0) {
+    fastest = faster(fastest, flowMemory, flowPressure, p);
+    if (strains > 1) fastest = faster(fastest, flowMemory1, flowPressure1, p);
+    if (strains > 2) fastest = faster(fastest, flowMemory2, flowPressure2, p);
+    if (strains > 3) fastest = faster(fastest, flowMemory3, flowPressure3, p);
+  }
+  result = vec4(fastest.xy * min(fastest.z / FAST, 1.0), 0.0, 0.0);
 }
 #endif
