@@ -13,6 +13,8 @@
 // Usage: node --import ./research/flow/register.mjs research/flow/solvers.ts [steps=1000] [plain=1000] [i0=8]
 // `steps`: the steps of each local run (16 iterations each). `plain`: the steps of the run without the momentum.
 // `network=1000`: the steps of the agent model that make the network (the test of this folder uses fewer).
+// `radii=0.9999,0.999999`: the other spectral radii that the momentum is tuned for, after the radius of the app (ADR
+// 0029, decisions 3 and 18).
 import { FLOW, FLOW_ITERATIONS, FLOW_SITES, packFlow } from '../../src/engine/flow.ts';
 import { flowPressure, type FlowGrid } from '../../src/engine/flow-reference.ts';
 import { flowSites } from '../../src/engine/sites.ts';
@@ -26,6 +28,7 @@ const STEPS = Number(args.steps ?? 1000);
 const PLAIN = Number(args.plain ?? 1000);
 const I0 = Number(args.i0 ?? 8);
 const NETWORK = Number(args.network ?? 1000);
+const RADII = (args.radii ?? '0.9999,0.999999').split(',').map(Number);
 
 // --- The network -----------------------------------------------------------------------------------------------
 const world = mazeWorld();
@@ -287,6 +290,5 @@ for (let c = 0; c < n; c++) {
 }
 const omegaOf = (radius: number) => Math.fround(2 / (1 + Math.sqrt(1 - radius * radius)));
 local(`local, as the app runs it: radius ${FLOW.radius}`, u[7]!, STEPS);
-local('local, tuned for the radius 0.9999', omegaOf(0.9999), STEPS);
-local('local, tuned for the radius 0.999999', omegaOf(0.999999), STEPS);
+for (const radius of RADII) local(`local, tuned for the radius ${radius}`, omegaOf(radius), STEPS);
 local('local without the momentum', 1, PLAIN);

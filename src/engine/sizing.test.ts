@@ -13,6 +13,7 @@ import {
   SITE_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
+  TUBE_MAP_BYTES_PER_CELL_GL,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
@@ -138,7 +139,7 @@ describe('the flow in the tubes', () => {
     expect(flowBytesPerCell({ ...on, model: 'jones', strains: strains(1) })).toBe(0);
   });
 
-  // ADR 0034: the picture of the tubes has two textures of 16 B per cell. Its switch changes only the view, so the
+  // ADR 0034: the picture of the tubes has three textures of 16 B per cell. Its switch changes only the view, so the
   // memory counts them with the flow, whatever the switch says: the switch must not change the grid that fits.
   it('counts the picture of the tubes while the flow is on, with its switch on or off', () => {
     const on = { ...defaultSettings(), model: 'extended' as const, flow: true };
@@ -146,6 +147,11 @@ describe('the flow in the tubes', () => {
     expect(tubesBytesPerCell(on)).toBe(48);
     const off = { ...on, showTubes: false };
     expect(tubesBytesPerCell(off)).toBe(48);
+    // WebGL2 holds the map of the tiles too, 4 B per tile of 8 × 8 cells, and its rows, 4 B per 8 cells (amendment of
+    // 2026-11-15): its backend adds them, only while the flow is on.
+    expect(TUBE_MAP_BYTES_PER_CELL_GL).toBe(0.5625);
+    expect(tubesBytesPerCell(on, TUBE_MAP_BYTES_PER_CELL_GL)).toBe(48.5625);
+    expect(tubesBytesPerCell({ ...on, flow: false }, TUBE_MAP_BYTES_PER_CELL_GL)).toBe(0);
     expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
     expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
   });

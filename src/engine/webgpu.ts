@@ -18,6 +18,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   readonly bytesPerCell = BYTES_PER_CELL;
   readonly bytesPerAgent = BYTES_PER_AGENT;
   readonly coveredBytesPerCell = 0; // covered food counts into the collision buffers
+  readonly tubeMapBytesPerCell = 0; // the picture of the tubes holds its map in the memory of a workgroup
 
   readonly description: string;
   readonly lost: Promise<string>;

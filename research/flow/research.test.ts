@@ -72,16 +72,18 @@ describe('the research code of ADR 0029', () => {
   let solvers = '';
   let isolated = '';
   let grow = '';
+  let mesh = '';
 
   beforeAll(async () => {
     const full = FULL
       ? [
           script('solvers.ts', ['network=300', 'steps=1', 'plain=1']),
           script('bounded.ts', ['scene=grow', 'steps=50']),
+          script('bounded.ts', ['scene=mesh', 'steps=100', 'radii=0.99999']),
           ...RUNS.map(([, file, args]) => script(file, args)),
         ]
       : [];
-    [ring, tokyo, isolated, solvers = '', grow = ''] = await Promise.all([
+    [ring, tokyo, isolated, solvers = '', grow = '', mesh = ''] = await Promise.all([
       script('prototype/ring.ts'),
       script('prototype/check-tokyo.ts'),
       script('bounded.ts', ['scene=isolated', 'steps=60']),
@@ -140,6 +142,11 @@ describe('the research code of ADR 0029', () => {
     expect(grow).toMatch(/^as built +\d+/m);
     expect(grow).toMatch(/^the first version: all four rules off +\d+/m);
   });
+
+  it.runIf(FULL)('runs the growing mesh of the unit test with the radius of the app, as the record has it', () => {
+    // The largest pressure in the steps 1 to 50 and 51 to 100 (ADR 0029, amendment 2026-11-15, section 2).
+    expect(mesh).toMatch(/^radius 0\.99999 +204 +435$/m);
+  });
 });
 
 describe('the research code of ADR 0034', () => {
@@ -157,16 +164,16 @@ describe('the archive of the logs', () => {
     return digest.digest('hex');
   };
 
-  it('holds the 182 logs of the record, unchanged', () => {
+  it('holds the 195 logs of the record, unchanged', () => {
     const files = readArchive();
-    expect(files).toHaveLength(182);
+    expect(files).toHaveLength(195);
     // A new campaign changes the record: pack the archive again (`logs.ts pack`) and put the new number here.
-    expect(digestOf(files)).toBe('7caa8b90e9e8a6b376e3f6ae8dd8025186bae00c69e02912380284dd8b2f1b38');
+    expect(digestOf(files)).toBe('55526b90759bb879182e7b157c84051687e95671ed00646ac71b345c28be67ea');
   });
 
   it('packs a folder so that unpacking gives the same files', () => {
     const again = join(record, 'again.tar.gz');
-    expect(packLogs(record, again)).toBe(182);
+    expect(packLogs(record, again)).toBe(195);
     expect(digestOf(readArchive(again))).toBe(digestOf(readArchive()));
   });
 
@@ -243,6 +250,22 @@ describe.concurrent('the campaigns, and the comparison of a rerun with the recor
       expect(sites.text).toContain('dead ends below 10% of the route: 10 of 10 runs; step 2125 (2000 to 2250, n 10)');
       expect(tokyo.text).toContain('step   2000 alive  3947 | 33: 33 joined, 49 links, TL 1.60 MD 0.83 FT 0.88');
       expect(tokyo.text.match(/33: 1 joined/g)).toHaveLength(21);
+    },
+    TOOL_LIMIT,
+  );
+
+  it(
+    'prints the table of the local flux of the radii of decision 18 from the record',
+    async () => {
+      const { code, text } = await ended('summary.ts', ['exact-flux', logs('engine/radius/exact-flux.txt')]);
+      expect(code).toBe(0);
+      const block = (run: string) => text.split('== ').find((part) => part.startsWith(`${run}\n`)) ?? '';
+      expect(block('g18-tk-i1.4-r0.99999')).toMatch(
+        /step {3}250: 5 seeds .* tube cells with a flow memory above 0\.5 0\.0 % \(0\.0 to 0\.1\)/,
+      );
+      expect(block('g18-tk-i1.4-r0.999999')).toMatch(
+        /step {3}500: 5 seeds .* tube cells with a flow memory above 0\.5 46\.7 % \(39\.5 to 50\.6\)/,
+      );
     },
     TOOL_LIMIT,
   );

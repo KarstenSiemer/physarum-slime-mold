@@ -9,6 +9,9 @@
 // - VITE_NAME: the name of the files; without it `<scene>-<kind>-<flow or base>-s<seed>`.
 // - VITE_PATCH and VITE_STRAIN: settings and strain settings as JSON, on top of the scene's.
 // - VITE_DUMP_P: 1 also writes the environment, the whole flow memory and the pressure (exact-flux.ts reads them).
+// - VITE_RADIUS: the spectral radius that the momentum of the pressure iteration is tuned for (FLOW.radius in
+//   src/engine/flow.ts), in place of the app's, for the measurement of decision 18 of ADR 0029. Each line of the log
+//   names the radius of the run.
 // - VITE_RECOVER: the share by which the flow memory of ground without a tube grows per step (FLOW.recover in
 //   src/engine/flow.ts), in place of the app's, for the measurement of decision 19 of ADR 0029. Each line of the log
 //   names the share of the run.
@@ -48,6 +51,9 @@ const STEPS = (env.VITE_STEPS ?? '500,1000,2000,3000,4000,6000').split(',').map(
 const NAME = env.VITE_NAME ?? `${SCENE}-${KIND}-${FLOW ? 'flow' : 'base'}-s${String(SEED)}`;
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Record<string, unknown>;
 const STRAIN = JSON.parse(env.VITE_STRAIN ?? '{}') as Record<string, unknown>;
+// packFlow() reads the radius at every upload of the uniform block, so a radius set before the engine starts holds for
+// the whole run.
+if (env.VITE_RADIUS !== undefined) (RULE as { radius: number }).radius = Number(env.VITE_RADIUS);
 // packFlow() reads the share at every upload of the uniform block, so a share set before the engine starts holds for
 // the whole run.
 if (env.VITE_RECOVER !== undefined) (RULE as { recover: number }).recover = Number(env.VITE_RECOVER);
@@ -174,6 +180,7 @@ it('dumps a run of a scene', async () => {
         boundary: settings.boundary,
         agents: sim.agents,
         alive,
+        radius: RULE.radius,
         recover: RULE.recover,
         ms: Math.round(performance.now() - t0),
       }),

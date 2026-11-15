@@ -434,7 +434,8 @@ the flux field has to settle. The app gives and takes the fixed flux I0 (decisio
 height of the pressure has to build up too, 2,494 units between the two foods here, and it builds
 up at the pace of the smoothest mode ("Why the local solver is not exact"). The radius 0.99999 of
 decision 3 was chosen with the first rule. With the rule of the app the radius 0.999999 is about
-three times as fast on this network (decision 3, and an open point in the Consequences).
+three times as fast on this network (decision 3). The amendment 2026-11-15 measured it in the app:
+the app keeps 0.99999.
 
 On the moving network the exact flux changes by 0.35 % per step (`prototype/vary.ts`). The
 prototype's local solver with 16 iterations per step follows it within about 2 % (7 % at 300 steps
@@ -558,8 +559,9 @@ not help it: on the fixed network it had not carried the flux to the sink after 
    flux, gives another order: on the fixed Maze network the radius 0.999999 reaches 5 % in a third
    of the iterations. The app keeps 0.99999. Reason: every result of this record is measured with
    it, and a larger ω lets a pressure swing three times as long (a factor e in 707 iterations in
-   place of 224), which the rules of decision 6 would have to hold while the colony grows. Open
-   point in the Consequences. The pressure of a step starts
+   place of 224), which the rules of decision 6 would have to hold while the colony grows. Measured
+   on 2026-11-15 (the amendment at the end of this record): while the colony grows they do not, and
+   the app keeps 0.99999. The pressure of a step starts
    from the pressure of the step before, and keeps the pressure of the iteration before as momentum.
    Only a cell that conducts takes the momentum (ω); a cell without a tube takes the plain damped
    iteration (decision 6).
@@ -840,7 +842,8 @@ not help it: on the fixed network it had not carried the flux to the sink after 
       compiler that the repository has. Rejected: a build step or a new package.
     - The logs are in the repository as one archive, `research/flow/logs.tar.gz` (owner,
       2026-11-13): 126 files and 1.8 MB of text in 0.4 MB (146 files since ADR 0031, 157 since
-      ADR 0032, 160 since ADR 0034). `research/flow/logs.ts` unpacks it to
+      ADR 0032, 160 since ADR 0034, 182 since decision 17 and 194 since decision 18, in 0.5 MB).
+      `research/flow/logs.ts` unpacks it to
       `research/flow/logs/`, which git ignores; a path `research/flow/logs/…` in this record is a
       path in that folder. Reason for the logs: the tables come from them in a second
       (`summary.ts`), and the runs behind them take hours. Reason for the archive: the first form
@@ -880,7 +883,8 @@ not help it: on the fixed network it had not carried the flux to the sink after 
 ## Results in the app
 
 The amendment 2026-11-14 (2) at the end of this record measures the Maze and the Tokyo scene again with the food sites
-of decision 17, its numbers beside those of this section.
+of decision 17, its numbers beside those of this section. The amendment 2026-11-15 measures them with another radius of
+the solver, and the Tokyo scene with the fluxes 1 and 2 and the sites of decision 17.
 
 All numbers are from the real engine (M3 Pro, Chromium with Metal, 2026-11-13), measured on dumps of
 the trail with the scripts of the prototype. A seed is the setting Seed of the scene: the same seed
@@ -1082,12 +1086,12 @@ A second reader went through the change before the merge. Each finding was check
   result. The texts of the scenes and of the help say so.
 - The flux per cell depends on the width of a tube in cells. So "Flow strength" has this app's
   unit, and a value of the paper (I0 = 2) does not carry over.
-- Open: the radius of the momentum. It was tuned with the fixed pressures of the prototype
-  (decision 3). With the fixed flux of the app, the radius 0.999999 brings the error on the fixed
-  Maze network below 5 % after 5,568 iterations, where the radius of the app, 0.99999, is at 44 %
-  after 4,160 iterations and at 6.7 % after 16,000. A larger radius also lets a pressure swing
-  longer. A change needs the tests of decision 6 and every measurement of the results again
-  (`TODO.md`).
+- Closed on 2026-11-15 (the amendment of that day): the radius of the momentum. It was tuned with
+  the fixed pressures of the prototype (decision 3). With the fixed flux of the app, the radius
+  0.999999 brings the error on the fixed Maze network below 5 % after 5,568 iterations, where the
+  radius of the app, 0.99999, is at 44 % after 4,160 iterations and at 6.7 % after 16,000. A larger
+  radius also lets a pressure swing longer. A change needed the tests of decision 6 and every
+  measurement of the results again (`TODO.md`). They were made, and the app keeps 0.99999.
 - A fault, fixed in ADR 0031 (the owner saw it on 2026-11-13): the flow brought dead agents of
   every strain to life. In a scene with several strains, a strain without a living agent appeared
   on the tubes of another strain as soon as a flux ran (the Foraging maze with the flow and a
@@ -1553,6 +1557,279 @@ of its cells now.
   decision 12), the Maze with the fluxes 2, 4 and 16, the table of decision 6 (the local flux against the exact one),
   the Foraging maze with the flow, and the Tokyo scene without the flow (which keeps its bytes). Decision 18 runs the
   Tokyo scene with the fluxes 1, 1.4 and 2 again in any case.
+
+## Amendment 2026-11-15: the radius of the solver, measured
+
+Decision 18 as measured. The plan is the coordinator's, under the owner's delegation of 2026-11-12. The points marked
+"own choice" came up while it was measured; they are the builder's choices, each with its reason. The code is `main` at
+`3f579ff` (decision 17). The runs are on an M3 Pro, Chromium with Metal, on WebGPU unless a line names WebGL2. The
+commands are part 12 of `research/flow/README.md`, and the logs are `research/flow/logs/engine/radius/`.
+
+### The result
+
+The app keeps the radius 0.99999 (ω = 1.9911). Every larger radius lowers the error of the local solver on a network
+that holds still, and raises it while the colony grows. With 0.999993, the growth of the Tokyo scene gives about 190 to
+560 tube cells a flow memory above 0.5, where dead agents come to life (decision 8), in 4 of 5 seeds; with 0.99999 at
+most 10. From 0.999995 on, this is 3 to 34 % of the tube cells in every seed. With the candidate 0.999999 it is 40 to 51
+% at step 500, the pressure reaches 1.1 · 10⁵ in one seed (19 times the pressure limit of a site), and a GPU test and a
+unit test of decision 6 fail. So no radius above 0.99999 both keeps the pressure as bounded as 0.99999 does and lowers
+the error, and the radius stays; 0.999993 is the case at the border, and the own choices below say why it does not
+pass. The Maze with 0.999999 empties its dead ends no sooner than with 0.99999: there
+the faster solver does not reach what the agents build. The Tokyo scene keeps its flux of 1.4: with the sites of
+decision 17 the flux 1 is a little nearer to the organism, but not by more than two sets of ten seeds differ.
+
+Why the two sides differ. The momentum makes every pattern of the error fall by the factor √(ω − 1) per iteration,
+unless the pattern is smoother than the radius ("Solver 2" above): by a factor e in 224 iterations (14 steps) with
+0.99999, and in 707 iterations (44 steps) with 0.999999. A larger radius lets the smoothest patterns fall faster, the
+ones that carry the flux between far foods, and every other pattern more slowly. On a fixed network only the smooth
+patterns are left after some steps, so the larger radius wins. While the colony grows, cells join the network in every
+step with a pressure that does not fit, and cells at its margin switch the momentum on and off; each change brings new
+rough patterns, and with the larger radius they live three times as long and add up. Not measured: how much of this
+comes from the cells that join and how much from the cells that switch.
+
+### 1. Fixed networks
+
+The Maze network of "The pressure on a fixed network" (seed 1, step 1,000 of the prototype, flux 8), with the rule of
+the app, from a pressure of 0 (`solvers.ts` with `radii=`). The rows of 0.99999 and 0.999999 are those of the table
+there.
+
+| Radius                   | ω       | Error at step 260 | At step 500 | At step 1,000 | First step below 5 % |
+| ------------------------ | ------- | ----------------- | ----------- | ------------- | -------------------- |
+| 0.9999                   | 1.97211 | 67.6 %            | 55.6 %      | 37.2 %        | after 1,000          |
+| 0.99999 (the app)        | 1.99110 | 43.7 %            | 23.9 %      | 6.7 %         | after 1,000          |
+| 0.999993                 | 1.99254 | 38.7 %            | 18.8 %      | 4.1 %         | 937                  |
+| 0.999995                 | 1.99370 | 33.7 %            | 14.3 %      | 2.4 %         | 794                  |
+| 0.999997                 | 1.99511 | 26.0 %            | 8.5 %       | 0.8 %         | 616                  |
+| 0.999998                 | 1.99601 | 19.9 %            | 5.0 %       | 0.3 %         | 502                  |
+| 0.999999 (the candidate) | 1.99718 | 10.4 %            | 1.4 %       | 0.0 %         | 348                  |
+
+A network of the Tokyo scene: the dump of seed 1 at step 8,000 (flux 1.4, radius 0.99999), with its 42 covered sites and
+their roles. `research/flow/engine/radius.ts` runs the iteration of the app on that fixed network with the omega of each
+radius, and compares each field with an exact solution. It checks first that its loop gives the bits of `flowPressure()`
+of the CPU copy. "Cold": from a pressure of 0, with the roles of the dump. "Draw": from the exact pressure of the roles
+of the dump, the roles of 300 steps later in every field: a new draw on a warm network. Before the draw, the flux of the
+old roles is 57 to 80 % off that of the new ones. The table gives the steps at which the error of the four fields is
+first below 5 % and below 1 %, looked at every 50 steps.
+
+- Own choice: a new script, and not `solvers.ts` with a dump. `solvers.ts` builds its network with the prototype's
+  agents on the Maze, and it has one field and two sites; a dump has four fields, 42 sites and the roles of a draw.
+
+| Radius   | Cold: below 5 % | Cold: below 1 % | Draw: below 5 % | Draw: below 1 %  | Largest pressure on a tube, draw |
+| -------- | --------------- | --------------- | --------------- | ---------------- | -------------------------------- |
+| 0.99999  | 250 to 350      | 400 to 600      | 250 to 450      | 400 to above 600 | 1,088                            |
+| 0.999993 | 200 to 300      | 350 to 500      | 200 to 400      | 350 to 550       | 1,098                            |
+| 0.999995 | 150 to 250      | 300 to 400      | 150 to 300      | 300 to 500       | 1,103                            |
+| 0.999999 | 150             | 200             | 100 to 150      | 200 to 250       | 1,127                            |
+
+So on the fixed Tokyo network the candidate takes about half the steps after a draw, and on the Maze network it reaches
+5 % in a third of the iterations. The roles of a field hold 300 steps (`FLOW_HOLD`): with 0.99999 a field is below 5 %
+only in the last part of its hold.
+
+### 2. The bounded pressure (decision 6)
+
+The three tests of decision 6 that hold the pressure, with each radius. "Grow": the scene of `bounded.ts scene=grow` as
+built, the largest pressure on a tube at the steps of its table from step 150 on. "Mesh": the growing mesh of the unit
+test "stays bounded while a mesh of tubes grows over the foods and flickers" (`flow.test.ts`), to step 600: the largest
+pressure on the grid in the first 200 and in all 600 steps (`bounded.ts scene=mesh`, a new scene with the numbers of the
+test). Its disc of tubes fills the grid at about step 100; from then on only the flicker changes the network. "GPU": the
+test "stops a food at its pressure limit when no tube joins it to the other food, so both tubes starve" of
+`flow.gpu.test.ts` on WebGPU, which asks for a flow memory below 0.06 on the two pieces of tube at step 600.
+
+| Radius   | Grow | Mesh, 200 steps | Mesh, 600 steps | GPU test                       |
+| -------- | ---- | --------------- | --------------- | ------------------------------ |
+| 0.99999  | 43   | 435             | 435             | passes                         |
+| 0.999993 | 42   | 462             | 462             | passes                         |
+| 0.999995 | 48   | 555             | 555             | passes                         |
+| 0.999997 | 71   | 728             | 728             | fails: a flow memory of 0.0625 |
+| 0.999998 | 92   | 1,987           | 2,702           | fails: 0.0639                  |
+| 0.999999 | 131  | 4,706           | 4,706           | fails: 0.0872                  |
+
+The pressure limit of a site is 4,096 in the scenes grow and mesh (flux 1). With 0.999999 the mesh passes it between
+steps 151 and 200, after its disc has filled the grid, and its pressure is below 500 again only after step 300. In the
+GPU test the two pieces of tube starve later with 0.999997 and above. Probable cause, not measured: the pressure swings
+longer before it rests at the limit, and while it swings a flux passes the pieces of tube. The other 34 tests of the
+flow on WebGPU pass with every radius. On WebGL2 the 36 tests of the flow give the same: 0.999993 and 0.999995 pass all
+of them, and 0.999997 and 0.999999 fail the same test with the same flow memory, 0.0625 and 0.0872.
+
+### 3. The local flux against the exact one while the colony grows
+
+The Tokyo scene, flux 1.4, seeds 1 to 5: dumps at steps 250, 500, 1,000 and 2,000 with each radius, and `exact-flux.ts`
+on all four fields (`summary.ts exact-flux`, a new table). "Error per cell" is the median error per cell over the cells
+whose exact flux is above 5 % of I0, as in decision 6. "Share above 0.5" is the share of the tube cells whose flow
+memory is above 0.5. Each entry is the median over the five seeds of the median over the four fields (the largest
+pressure: of the largest over the fields), and in brackets the least and the most over the seeds.
+
+| Radius   | Step 250: largest pressure | Share above 0.5       | Error per cell              | Step 500: share above 0.5 | Error per cell             | Step 2,000: error per cell |
+| -------- | -------------------------- | --------------------- | --------------------------- | ------------------------- | -------------------------- | -------------------------- |
+| 0.99999  | 267 (172 to 588)           | 0.0 % (0 to 0.1)      | 193 % (23 to 860)           | 0.0 % (0 to 0.1)          | 24 % (15 to 61)            | 19 % (16 to 30)            |
+| 0.999993 | 282 (182 to 717)           | 1.4 % (0 to 5.8)      | 224 % (91 to 1,331)         | 0.3 % (0 to 6.8)          | 45 % (7 to 76)             | 15 % (12 to 24)            |
+| 0.999995 | 569 (259 to 1,721)         | 8.6 % (3.2 to 11.1)   | 390 % (318 to 2,446)        | 7.1 % (3.3 to 15.6)       | 41 % (25 to 199)           | 11 % (8 to 20)             |
+| 0.999997 | 1,952 (838 to 3,130)       | 13.7 % (7.6 to 19.5)  | 2,061 % (1,537 to 13,692)   | 16.5 % (10.7 to 33.9)     | 355 % (23 to 804)          | 9 % (3 to 11)              |
+| 0.999999 | 10,506 (1,834 to 69,989)   | 21.3 % (12.1 to 30.9) | 45,792 % (14,976 to 57,681) | 46.7 % (39.5 to 50.6)     | 7,521 % (6,511 to 246,460) | 4 % (4 to 6)               |
+
+The tube cells with a flow memory above 0.5, in field 0 of seeds 1 to 5: with 0.99999 0, 0, 0, 1 and 6 at step 250, and
+10, 0, 0, 0 and 0 at step 500; with 0.999993 14, 0, 39, 203 and 189, and 407, 0, 564, 23 and 29. A network that has
+settled holds 0.2 to 1.1 % of its tube cells above 0.5 with every radius (steps 4,000 to 12,000 of seed 1): its strong
+tubes. With 0.999999, seed 4 has a pressure of 1.1 · 10⁵ on a tube at step 500, and at step 1,000 the flux of the local
+solver is up to 1,800 times the exact flux in sum. With 0.99999 the sum is 7.8 (2.0 to 32) times the exact one at step
+250 and 3.0 (1.2 to 4.5) times at step 500: the error of the growth that decision 6 describes. After the growth every
+radius settles, and at step 2,000 the error per cell falls with the radius, from 19 % to 4 %.
+
+What the colony does with it, the agents alive at step 1,000 (seeds 1 to 5, median and range): 6,870 (5,272 to 7,431)
+with 0.99999, 6,355 (5,256 to 7,044) with 0.999993, 6,178 (5,864 to 6,650) with 0.999995, 6,344 (5,321 to 6,918) with
+0.999997, and 9,072 (7,893 to 10,189) with 0.999999. So with 0.999999 a third more agents live: dead agents came to life
+on the cells with a high flow memory, the sheet of decision 6 in part. With 0.999993 and 0.999995 the cells above 0.5 of
+steps 250 and 500 have gone by step 1,000 (0.0 to 0.2 % of the tube cells), with 0.999997 most of them (0.2 to 4.5 %),
+and none of the three leaves more agents than 0.99999 does.
+
+The flux 2 (seed 1) gives the same order: the share above 0.5 at step 500 is 1.8 % with 0.99999, 5.5 % with 0.999993,
+8.3 % with 0.999995, 21.9 % with 0.999997, 25.9 % with 0.999998 and 42.4 % with 0.999999, and the largest pressure on a
+tube is 473, 425, 1,033, 752, 1,313 and 8,918.
+
+### 4. The table of decision 6, again
+
+The table of decision 6 came from the sites of before decision 17 (commit `92a63e7`). Here it is again with the sites of
+decision 17 and both radii: the Tokyo scene, seed 1, all four fields. The steps since the last draw of the fields 0 to 3
+are 200, 275, 50 and 125 at steps 500, 2,000 and 8,000, and 100, 175, 250 and 25 at step 4,000. Each radius is a run of
+its own, so the networks differ too.
+
+| Flux | Step  | 0.99999: sum, fields 0 and 1 | Error per cell, fields 0 to 3 | 0.999999: sum, fields 0 and 1 | Error per cell, fields 0 to 3      |
+| ---- | ----- | ---------------------------- | ----------------------------- | ----------------------------- | ---------------------------------- |
+| 1.4  | 500   | 221 % and 245 %              | 30, 17, 26 and 15 %           | 24,662 % and 15,950 %         | 9,991, 5,720, 3,520 and 7,301 %    |
+| 1.4  | 2,000 | 97 % and 96 %                | 8, 10, 54 and 21 %            | 100 % and 101 %               | 3, 3, 24 and 6 %                   |
+| 1.4  | 4,000 | 95 % and 90 %                | 31, 19, 15 and 56 %           | 103 % and 102 %               | 8, 3, 2 and 46 %                   |
+| 1.4  | 8,000 | 100 % and 97 %               | 5, 5, 52 and 30 %             | 102 % and 99 %                | 2, 2, 44 and 6 %                   |
+| 2    | 500   | 203 % and 289 %              | 20, 32, 39 and 26 %           | 58,040 % and 24,198 %         | 27,048, 10,242, 5,418 and 22,726 % |
+| 2    | 2,000 | 100 % and 97 %               | 5, 7, 53 and 16 %             | 98 % and 99 %                 | 3, 2, 14 and 3 %                   |
+| 2    | 4,000 | 95 % and 97 %                | 21, 10, 6 and 54 %            | 106 % and 100 %               | 9, 2, 2 and 46 %                   |
+| 2    | 8,000 | 101 % and 100 %              | 4, 2, 51 and 26 %             | 101 % and 101 %               | 2, 1, 27 and 7 %                   |
+
+With the radius of the app and the sites of decision 17, the fields 200 and 275 steps after their draw are 2 to 5 % off
+at step 8,000 (3 to 7 % in the record) and 5 to 10 % at step 2,000. The fields 100 and 175 steps after their draw are 10
+to 31 % off (9 to 25 % in the record). The record had the fields 0 and 1 only; the fields 2 and 3 add what it did not
+show: a field 25 to 50 steps after its draw is 51 to 56 % off, and 125 steps after it 16 to 30 %. With 0.999999 a field
+is 1 to 9 % off from 100 steps after its draw on, and 14 to 46 % in the first 50 steps.
+
+### 5. The campaigns
+
+**The Maze** (its flux of 8, 10 seeds; "dead ends over route" as in "The Maze (flux 8)"). The ten runs with 0.99999 give
+the lines of the record of the amendment 2026-11-14 (2) (`logs/engine/maze-webgpu-flux8-sites.txt`) bit for bit, but for
+the time.
+
+| Step                               | 0.99999                  | 0.999999                  |
+| ---------------------------------- | ------------------------ | ------------------------- |
+| Dead ends over route at 1,000      | 0.53 (0.48 to 0.59)      | 0.57 (0.52 to 0.65)       |
+| at 1,500                           | 0.083 (0.052 to 0.138)   | 0.104 (0.080 to 0.134)    |
+| at 2,000                           | 0.020 (0.015 to 0.045)   | 0.029 (0.019 to 0.054)    |
+| at 3,000                           | 0.006 (0.000 to 0.035)   | 0.009 (0.000 to 0.038)    |
+| at 5,000                           | 0.000 (0.000 to 0.011)   | 0.000 (0.000 to 0.001)    |
+| First measured step below 10 %     | 1,500 (1,500 to 2,000)   | 2,000 (1,500 to 2,000)    |
+| First measured step below 2 %      | 2,250 (2,000 to 4,000)   | 2,500 (2,000 to 4,000)    |
+| Agents alive at 1,000              | 10,039 (9,840 to 10,400) | 11,647 (10,959 to 12,172) |
+| Tube over shortest route at 15,000 | 1.10 (1.09 to 1.13)      | 1.11 (1.08 to 1.14)       |
+| Agents alive at 15,000             | 4,114 (3,967 to 4,426)   | 4,122 (3,964 to 4,424)    |
+
+The Maze has no growth, but its first sheet of agents thins to a network in its first 2,000 steps. With 0.999999 more
+agents live in that time (16 % more at step 1,000), and the dead ends empty a little later; from step 5,000 on the two
+radii give the same network. So the faster solver of a fixed network does not bring the result of the Maze sooner.
+
+**The Tokyo scene** (10 seeds; measured as in "The Tokyo rail network", on the 33 food sources of Fig. 2, with the sites
+of decision 17). The radius of the app with the fluxes 1, 1.4 and 2, where 1.4 is the record of the amendment 2026-11-14
+(2), and the candidate with the flux 1.4 of the scene. Mean and standard deviation at step 48,000 and over the 50
+samples from step 16,000 on; "all 36 joined" over the 80 samples from step 4,000 on, and the longest run of samples
+without all 36 in one seed.
+
+| Flux and radius | TL at 48,000 | MD          | FT                         | TL from 16,000 | MD   | FT   | All 36 joined | Longest gap |
+| --------------- | ------------ | ----------- | -------------------------- | -------------- | ---- | ---- | ------------- | ----------- |
+| 1, 0.99999      | 1.69 ± 0.08  | 0.82 ± 0.01 | 0.87 ± 0.05                | 1.71 ± 0.13    | 0.84 | 0.87 | 71 of 80      | 4 samples   |
+| 1.4, 0.99999    | 1.89 ± 0.13  | 0.84 ± 0.05 | 0.91 ± 0.04                | 1.84 ± 0.13    | 0.83 | 0.91 | 78 of 80      | 1 sample    |
+| 2, 0.99999      | 1.98 ± 0.09  | 0.81 ± 0.00 | 0.93 ± 0.03                | 1.95 ± 0.12    | 0.81 | 0.93 | 73 of 80      | 1 sample    |
+| 1.4, 0.999999   | 1.90 ± 0.14  | 0.82 ± 0.02 | 0.92 ± 0.03                | 1.90 ± 0.14    | 0.82 | 0.92 | 75 of 80      | 1 sample    |
+| The organism    | 1.75 ± 0.30  | 0.85 ± 0.04 | 0.80 ± 0.13 or 0.86 ± 0.04 |                |      |      | all           |             |
+
+The check of the specification (TL from 1.45 to 2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) at
+step 48,000: 10 of 10 with the flux 1, 9 of 10 with 1.4, 8 of 10 with 2, 8 of 10 with 1.4 and 0.999999; FT holds in
+every seed of every run. With the sites of decision 17, more flux still gives a longer network with more loops, as with
+the sites of before (decision 12: TL 1.71, 1.77 and 1.88 at step 48,000): now 1.69, 1.89 and 1.98. With 0.999999 the
+colony has 29 % more agents at step 1,000 (8,519 against 6,608, median), and its network stays longer while it thins: TL
+2.24 against 2.09 at step 8,000 and 2.05 against 1.83 at step 12,000 (medians). From step 24,000 on the two radii lie
+within the spread of the seeds of each other: at step 48,000 TL 1.90 against 1.89 (means). So the candidate leaves the
+end of the experiment as it is; what the measures show of it is the larger colony of the growth and the longer mesh
+while it thins.
+
+**The flux of the Tokyo scene** stays 1.4. Every measure of 1 and of 1.4 lies within one standard deviation of the
+organism's, at step 48,000 and from step 16,000 on. The flux 1 is nearer to the organism's TL (1.69 and 1.71 against
+1.89 and 1.84; the organism 1.75) and FT (0.87 against 0.91; the organism 0.80, or 0.86 with light), a little nearer in
+MD from step 16,000 on (0.84 against 0.83; the organism 0.85), but farther at step 48,000 (0.82 against 0.84). It leaves a
+food source without a tube above the level of the measure in 9 of 80 samples, once in 4 samples in a row, where 1.4 does
+in 2, never in 2 in a row. The flux 2 is farther in all three measures.
+
+- Own choice: a flux fits clearly better if it is nearer to the organism's TL than 1.4 by more than 0.07, the most that
+  two sets of ten seeds differed by in the mean TL (decision 12), both at step 48,000 and from step 16,000 on, and if it
+  is not farther in MD and FT. The flux 1 is nearer in TL by 0.08 at step 48,000 (0.06 against 0.14 from 1.75) and by
+  0.05 from step 16,000 on (0.04 against 0.09), and farther in MD at step 48,000. So it does not fit clearly better, and
+  the scene keeps its flux. The organism's spread of TL, 0.30, is four to six times these differences.
+
+### Decision 18, as measured
+
+The app keeps r = 0.99999. Reason: the measurements above. 0.999999 does not keep the pressure bounded: while the Tokyo
+colony grows, its pressure and its flux run far off, about half of the tube cells get a flow memory above 0.5 (the sheet
+of decision 6, in part), and a GPU test and a unit test of decision 6 fail. The radii between trade in the same way, and
+the share of the tube cells above 0.5 while the colony grows rises from the first radius of the scan on.
+
+- Own choice: radii between 0.99999 and 0.999999. Decision 18 named 0.999999 only; the brief allowed a value between, if
+  measured. The scan has 0.999993, 0.999995, 0.999997 and 0.999998.
+- Own choice: what "keeps the pressure bounded" means here. The growth of the Tokyo scene as with the radius of the app:
+  the largest pressure on a tube, the sum of the local flux over the exact flux, and the share of the tube cells with a
+  flow memory above 0.5, each within the range of the five seeds of 0.99999 at steps 250 and 500; and the three tests of
+  section 2. Reason: decision 6 names as the fault a pressure that grows while the colony grows, with its sign in the
+  model: the flow memory near 1 on the whole colony, and dead agents that come to life everywhere.
+- 0.999993 is the case at the border, and it does not pass. It passes the three tests, and the medians of its largest
+  pressure and of its sum are near those of 0.99999 (282 against 267, 9.8 against 7.8 times the exact flux at step 250),
+  with one seed above the range of 0.99999 in each. But it gives about 190 to 560 tube cells a flow memory above 0.5 in
+  4 of 5 seeds (up to 6.8 % of them), where 0.99999 gives at most 10 in the ten samples of steps 250 and 500 (field 0),
+  and its error per cell while the colony grows is higher (45 % against 24 % at step 500). Its gain after the growth, 15
+  % against 19 % at step 2,000, lies within the spread of the seeds (12 to 24 % against 16 to 30 %), and it leaves as
+  many agents alive. So "lowers the error" holds for it on the fixed networks of section 1, and not beyond the spread of
+  the seeds in the app. The Maze shows that even 0.999999 does not change what the agents build there. To take 0.999993
+  after all would need its own campaigns of the Maze and of the Tokyo scene, which did not run.
+- Own choice: the candidate's campaign on the Tokyo scene only with the scene's flux of 1.4, and the Maze only with its
+  flux of 8. The fluxes 1, 1.4 and 2 of decision 18 are those of decision 12, the choice of the flux of the scene, which
+  runs with the radius that is taken. 0.999999 fails on the measures of the solver, and its campaign at the flux of the
+  scene shows what that does to the network.
+- Own choice: the ten Tokyo runs with 0.99999 and the flux 1.4 are those of the record of the amendment 2026-11-14 (2)
+  (`logs/engine/tokyo-flux1.4-sites.txt`, made with the code of PR #71 before its merge). `main` gives their lines bit
+  for bit: seed 1 to step 48,000, and the ten Maze runs above.
+- Own choice: on WebGL2 the GPU tests of the flow with each radius, the wrong rule M4, and the growth of the Tokyo scene
+  with 0.99999 and 0.999999 (seed 1, flux 1.4), after the WebGPU runs and with no other run of this work on the GPU. The
+  growth gives the picture of WebGPU: with 0.99999 no tube cell above 0.5 at steps 250 to 1,000; with 0.999999 13, 58
+  and 74 % of them, and a pressure of up to 17,727 on a tube. No campaign ran on WebGL2: the radius stays, and the
+  campaigns of the record on WebGL2 are those of the amendment 2026-11-14 (2).
+
+### The tests and the wrong rules
+
+The unit test of the growing mesh now runs 200 steps in place of 150, and it asks for a pressure below a quarter of the
+pressure limit of a site, where it asked for a pressure below the limit. With 0.99999 the pressure is 435 of 1,024. The
+text of the test gave 433, and 1.3 · 10⁹ with the momentum on every cell, numbers of 2026-11-13 from before the sites of
+decision 17; with them the run gives 435, and 1.9 · 10⁹ by step 150 (`flowPressure()` with `const om = omega;` for a
+moment, `bounded.ts scene=mesh`; the record is `logs/engine/radius/bounded.txt`). The text now has these numbers. With
+0.999998 and 0.999999 the test fails (1,987 and 4,706). `mutate.ts` has four new wrong rules: the momentum tuned for
+0.999999 and for 0.999998 (M1, M2), which the unit test catches, and for 0.999997 with the tests of each backend (M3,
+M4), which the GPU test of the pressure limit catches (`logs/engine/radius/mutations.txt`). No test catches 0.999995 or
+0.999993: they pass the tests of decision 6, and what rules them out is the growth of the Tokyo scene, which no test
+runs.
+
+### Consequences
+
+- The open point of the Consequences, "the radius of the momentum", is closed: the radius stays (`TODO.md`). The words
+  of decision 3 and of "The pressure on a fixed network" stay true: 0.999999 is faster on a fixed network.
+- The table of decision 6 is now measured with the sites of decision 17 too (section 4).
+- The local solver stays about half off in a field for the first 50 steps after its draw, and 10 to 31 % off 100 to 175
+  steps after it. A larger radius would cut that, if the growth of a colony did not bring its errors. An option, not
+  built and not measured: a cell that joins the network, or whose tube body crosses its limit, takes the momentum only
+  some steps later (`TODO.md`).
+- The Tokyo scene keeps its flux of 1.4 (section 5). With the sites of decision 17 its TL at step 48,000, 1.89, is 0.5
+  standard deviations of the paper above the organism's; with the flux 1 it would be 0.2 below.
 
 ## Amendment 2026-11-15 (2): the time until starved ground is fresh again, measured
 

@@ -357,9 +357,12 @@ describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', ()
   // The case in which the first version of the app let the pressure run away. A mesh of tubes grows out from a food
   // as a disc and reaches three more foods, and its cells flicker: in each step a cell of the disc changes between
   // tube and no tube with a chance of 5 %, so cells cross the level of the tube body again and again, the centre
-  // cells of the foods too. With the momentum of the iteration on every cell this run reaches a pressure of 1.3 · 10⁹
-  // (measured 2026-11-13). With the rule that only a cell that conducts takes the momentum, the largest pressure is
-  // 433, below the pressure limit of a site (4,096 for a flux of 1).
+  // cells of the foods too. With the momentum of the iteration on every cell this run reaches a pressure of 1.9 · 10⁹
+  // by step 150 and 3.2 · 10¹² by step 200 (2026-11-15; 1.3 · 10⁹ by step 150 on 2026-11-13, with the food sites of
+  // before decision 17). With the rule that only a cell that conducts takes the momentum, the largest pressure in 200
+  // steps is 435, about a ninth of the pressure limit of a site (4,096 for a flux of 1). The momentum tuned for a larger
+  // spectral radius lets the pressure swing longer: with 0.999998 and 0.999999 it reaches 1,987 and 4,706 by step 200,
+  // more than a quarter of the limit (ADR 0029, decision 18; research/flow/bounded.ts scene=mesh).
   // flow.gpu.test.ts holds both backends to this copy, on cells with a tube and on cells without one.
   it('stays bounded while a mesh of tubes grows over the foods and flickers', () => {
     const n = 40;
@@ -388,8 +391,9 @@ describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', ()
     let rng = 12345;
     let top = 0;
     let most = 0;
-    for (let step = 0; step < 150; step++) {
-      // The disc grows by a quarter of a cell per step; its tubes lie 6 cells apart.
+    for (let step = 0; step < 200; step++) {
+      // The disc grows by a quarter of a cell per step; its tubes lie 6 cells apart. It fills the grid at about step
+      // 100; from then on only the flicker changes the network.
       const radius = 3 + step * 0.25;
       const trail = new Float32Array(n * n * 4);
       for (let y = 0; y < n; y++)
@@ -407,6 +411,6 @@ describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', ()
     // All four foods gave or took in some step, and a pressure built up: the run is the case above.
     expect(most).toBe(4);
     expect(top).toBeGreaterThan(5);
-    expect(top).toBeLessThan(FLOW.head * settings.flowStrength);
+    expect(top).toBeLessThan((FLOW.head * settings.flowStrength) / 4);
   }, 60_000);
 });
