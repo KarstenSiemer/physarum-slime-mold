@@ -675,7 +675,7 @@ You must see 27, 47 and 5 tests pass.
 
 A test is worth what it catches. This script puts 41 wrong rules of the flow into the code of the
 app, one at a time, and runs the GPU tests of the flow for each one (5 minutes). Without a name it
-also runs the 73 wrong rules of the picture of the tubes (part 10):
+also runs the 85 wrong rules of the picture of the tubes (part 10):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -895,7 +895,66 @@ test passed: it writes its lines to `research/flow/out/engine/picture.jsonl`. Th
 VITE_NAME=picture npx vitest run --config research/vitest.config.ts research/flow/engine/picture.gpu.test.ts
 ```
 
-The tests of the picture: you must see 19 tests pass, and 56 with 2 skipped. The test of the switch
+The cost on a large grid (amendment of 2026-11-15; 6 minutes): the passes of the picture alone, in
+the start scene (three strains on 1,536 × 960 cells, which a canvas of 2560 × 1600 pixels picks)
+and on the Tokyo rail network, after 1,500 steps with the flow on. The simulation rests, and the
+passes run 50 times per sample on its last state. A line has the median of 11 samples (`median`,
+ms per picture), the share of the cells with a disc (`discs`), the tiles of 8 × 8 cells, and
+`window`: how many tiles have no disc in their window, and how many have one whose disc reaches
+0, 1, 2 or 3 cells. `read` is a digest of what the passes read, so that two checkouts compare the
+same state. `VITE_DUMP=1` writes the picture, the factors and the stream of the last state beside
+the lines, and `VITE_AGAINST=<name>` compares them with those of a run of another checkout:
+
+```bash
+VITE_NAME=passes npx vitest run --config research/vitest.config.ts research/flow/engine/picture-passes.gpu.test.ts
+```
+
+The parts of the passes in the Context of the amendment came from this command with one change at
+a time in `1cd1c56`, the code before the change, on WebGPU (`VITE_KINDS=webgpu
+VITE_SCENES=three-strains`): `picture` that stores a quarter of the trail and returns at once;
+`wallOnLine(...)` in `picture` as `false && wallOnLine(...)`; then also `openCells(p)` in `roots`
+as `511u`; then also `stream` that stores 0 and returns at once; and `encodeTubes` in `sim.ts`
+with one pass only. The choice of `roots` on each backend (decision 4) came from the same command
+on the GLSL and on the WGSL of this change, with and without the change of `roots`, twice each in
+turns (`VITE_WARM=1000`). The lines of these runs are at the head of the record below.
+
+The old passes against the new ones in one page, on one state, in turns of one sample each (8
+minutes): the load of other sessions then falls on both alike. `VITE_OLD` is a folder with the
+`tubes.wgsl` and the `tubes.frag` of the old checkout; the code around them is this checkout's. A
+line has the medians of both (`old`, `new`, ms per picture) and the values of the picture, the
+factors and the stream that differ between them (`differ`):
+
+```bash
+mkdir -p research/flow/out/old && git show 1cd1c56:src/engine/shaders/tubes.wgsl > research/flow/out/old/tubes.wgsl && git show 1cd1c56:src/engine/gl/glsl/tubes.frag > research/flow/out/old/tubes.frag
+```
+
+```bash
+VITE_OLD=research/flow/out/old VITE_NAME=ab npx vitest run --config research/vitest.config.ts research/flow/engine/picture-ab.gpu.test.ts
+```
+
+With `VITE_FRAME=1` it times a whole frame in place of the passes alone: one step and one drawn
+picture with the picture of the tubes on, as `picture.gpu.test.ts` does (12 minutes).
+
+The map of WebGL2 in two passes (decision 3) came from this command with `VITE_KINDS=webgl2` on four
+builds of this change: the map in one pass of 14 × 14 reads per tile or in two passes, each with the
+`roots` of `1cd1c56` and with the new one. Its lines are in the record too.
+
+A whole frame on the same canvas, as the check of ADR 0028 of 2026-11-14 measured it (8 minutes):
+
+```bash
+VITE_SIZE=2560,1600 VITE_WARM=1500 VITE_BATCHES=11 VITE_SCENES=three-strains,tokyo VITE_NAME=frame npx vitest run --config research/vitest.config.ts research/flow/engine/picture.gpu.test.ts
+```
+
+Other sessions used the GPU at the same time, so the old build and the new build ran in turns: the
+checkout of `main` before the change (`1cd1c56`, in a worktree of its own, with
+`picture-passes.gpu.test.ts` copied into it) and then this one, four rounds of the passes alone and
+four of a frame. The first round of the old build ran with `VITE_DUMP=1`, the first of the new
+build with `VITE_AGAINST`. The WebGPU rounds of the passes ran with `97a7078`, whose WGSL is that
+of this change; the WebGL2 rounds ran again after the map of WebGL2 went to two passes (`18c28e6`).
+The record is `logs/view/cost-2026-11-15.txt`: each run with its start, its end and the load of the
+machine (`uptime`), then its lines.
+
+The tests of the picture: you must see 19 tests pass, and 64 with 4 skipped. The test of the switch
 in the built app is one of the tests of `tests/e2e/flow.spec.ts` (part 7).
 
 ```bash
@@ -917,13 +976,13 @@ npx vitest run --project unit src/engine/engine.test.ts -t "a measurement of the
 npx vitest run --project gpu src/engine/engine.gpu.test.ts -t "a PNG while"
 ```
 
-The 73 wrong rules of the picture (3 minutes): every block must name at least one test that fails,
+The 85 wrong rules of the picture (8 minutes): every block must name at least one test that fails,
 marked `×`, and no block may say `NO TEST FAILS`. The script changes files below `src/` while it
 runs, and it writes each one back as it was: do not change those files while it runs. The record
 is `logs/view/mutations.txt`.
 
 ```bash
-node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 73)
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 85)
 ```
 
 Result: the picture draws a tube with a large flow memory thick, and a tube with a small one thin
@@ -951,7 +1010,7 @@ asks for the new digest.
 | `logs/engine/mutations-0031.txt`                     | the same for 39 wrong rules, with the tests of ADR 0031                                                                                                                                                                         | 2026-11-13, the code of ADR 0031                      |
 | `logs/engine/strains-*.jsonl`                        | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
 | `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0032                                                                                       | 2026-11-13, M3 Pro                                    |
-| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, and its 73 wrong rules                                                    | 2026-11-13, M3 Pro                                    |
+| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, its 85 wrong rules, and its cost on a large grid                          | 2026-11-13 and 2026-11-15, M3 Pro                     |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -997,11 +1056,11 @@ Notes on the record:
 | `data/tokyo_scene.json`   | the map of the prototype: stations from Wikidata (CC0), coast © OpenStreetMap contributors (ODbL) |
 | `solvers.ts`              | the solvers on one network with the rule of the app (2026-11-13)                                  |
 | `rules.ts`, `bounded.ts`  | the passes with single rules as switches, and two scenes for them (2026-11-13)                    |
-| `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step and of a frame, digests, the strains           |
+| `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step, a frame and the picture, digests, strains     |
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 114 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
+| `engine/mutate.ts`        | 126 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

@@ -567,3 +567,22 @@ with the flow: three strains on 1,536 × 960 cells, about a fifth of its frame. 
 records that cost, and `TODO.md` has it. In the gel style the frame of the Transport network took 2.08 and 2.09 ms
 against 1.24 and 1.77 ms before; the gel relief of ADR 0009 (amendment of 2026-11-14) measured 0.2 to 0.3 ms on its
 own, and the runs of the commit before differ too much here to say more.
+
+## Check of 2026-11-15: the picture of the tubes tile by tile
+
+ADR 0034, amendment of 2026-11-15, made the picture of the tubes cheaper without changing a value of it: a tile of 8 × 8
+cells whose window holds no disc keeps the trail alone, and one whose window holds no cell of a wall skips the wall
+test. The frame of the check above (`picture.gpu.test.ts`, 2560 × 1600 pixels, 1,500 steps, 11 samples of 50 frames),
+the picture on less off, in ms per frame, in the round that ran while no other session used the GPU (load 3.6 to 4.2;
+the amendment has the other round and the passes alone in one page):
+
+| Backend | Scene                     | `1cd1c56` | This change |
+| ------- | ------------------------- | --------- | ----------- |
+| WebGPU  | Three strains, 1536 × 960 | 9.48      | 5.31        |
+| WebGPU  | Tokyo, 512²               | 0.72      | 0.42        |
+| WebGL2  | Three strains, 1536 × 960 | 18.02     | 8.23        |
+| WebGL2  | Tokyo, 512²               | 0.81      | 0.58        |
+
+The check of 2026-11-14 measured 14.5 to 15 and 20 to 21 ms in the start scene under the load of other sessions. With
+the picture off the frame of the start scene took 60.7 and 55.0 ms on WebGPU and 68.0 and 65.8 ms on WebGL2 in this
+round: the picture does not run then, and the check above found two runs of one commit up to 16 ms apart.
