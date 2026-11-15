@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { dishRadius } from '../engine/brush';
+import { dishRadius, segmentDistance } from '../engine/brush';
 import { fromShape, strokeOn } from '../engine/environment';
 import { paintReference } from '../engine/paint-reference';
-import { presetById } from './presets';
+import { presetById, type EnvShape } from './presets';
 import {
+  elevationCell,
   TOKYO_CITIES,
   TOKYO_DABS,
+  TOKYO_ELEVATION_GRID,
   TOKYO_FOOD_RADIUS,
   TOKYO_KM_PER_UNIT,
+  TOKYO_LAKES,
+  TOKYO_LIGHT_BRUSH,
   TOKYO_MAP,
   TOKYO_MEASURED,
+  TOKYO_MOUNTAINS,
   TOKYO_SCALE,
   TOKYO_WALL_RADIUS,
+  tokyoLight,
   tokyoShapes,
 } from './tokyo';
 
@@ -176,6 +182,122 @@ describe('the map of the Tokyo experiment (Tero et al. 2010)', () => {
       const map = (east - west) * (south - north) * (TOKYO_SCALE * short) ** 2;
       expect(cells / map).toBeGreaterThan(0.45);
       expect(cells / map).toBeLessThan(0.7);
+    });
+  });
+});
+
+// The second Tokyo scene, with light on the mountains and the lakes as in the runs of Fig. 2B (ADR 0029, decision 20).
+describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', () => {
+  const k = TOKYO_SCALE;
+  const light = tokyoLight();
+  // Every food dab of the scene in the map frame, Tokyo's seven included.
+  const foods = TOKYO_CITIES.flatMap(([name, x, y]) =>
+    (name === 'Tokyo' ? TOKYO_DABS : [[0, 0] as const]).map(([dx, dy]) => [name, x + dx, y + dy] as const),
+  );
+  /** How far a point of the map frame lies outside a shape of the dish frame, in the map frame. */
+  const outside = (x: number, y: number, s: EnvShape) =>
+    segmentDistance(x * k, y * k, s.at, s.to ?? s.at) / k - s.r / k;
+
+  it('is the Tokyo scene with light added: its food, walls and settings, and a light strength', () => {
+    const lit = presetById('tokyo-light');
+    const dark = presetById('tokyo');
+    if (!lit || !dark) throw new Error('no Tokyo scene');
+    expect(lit.env).toEqual([...tokyoShapes(), ...light]);
+    expect(lit.env?.slice(0, tokyoShapes().length)).toEqual(dark.env);
+    expect(light.every((s) => s.kind === 'light')).toBe(true);
+    // The same settings but the light: the scene of today stays the protocol without light.
+    const [a, b] = [lit.settings(), dark.settings()];
+    expect({ ...a, seed: 0, lightStrength: 0 }).toEqual({ ...b, seed: 0, lightStrength: 0 });
+    expect(a.lightStrength).toBeGreaterThan(0);
+    expect(a.strains[0]?.light).toBe(1);
+  });
+
+  it('lights 53 cells of the grid of elevations, none under a city, and the three parts of Lake Kasumigaura', () => {
+    expect(TOKYO_ELEVATION_GRID).toBe(20);
+    expect(TOKYO_MOUNTAINS).toHaveLength(53);
+    expect(new Set(TOKYO_MOUNTAINS.map(([c, r]) => r * 20 + c)).size).toBe(53);
+    for (const [c, r] of TOKYO_MOUNTAINS) {
+      expect(Number.isInteger(c) && c >= 0 && c < 20, `column ${String(c)}`).toBe(true);
+      expect(Number.isInteger(r) && r >= 0 && r < 20, `row ${String(r)}`).toBe(true);
+    }
+    // A cell is 9.1 km × 10.3 km, and the grid covers the map.
+    const [west, north, east, south] = elevationCell(0, 0);
+    expect((east - west) * TOKYO_KM_PER_UNIT).toBeCloseTo(9.1, 1);
+    expect((south - north) * TOKYO_KM_PER_UNIT).toBeCloseTo(10.3, 1);
+    expect([west, north]).toEqual([TOKYO_MAP[0], TOKYO_MAP[1]]);
+    expect(elevationCell(19, 19)[2]).toBeCloseTo(TOKYO_MAP[2], 12);
+    expect(elevationCell(19, 19)[3]).toBeCloseTo(TOKYO_MAP[3], 12);
+    // No lit cell holds a city: the cities lie on low ground.
+    for (const [c, r] of TOKYO_MOUNTAINS) {
+      const [x0, y0, x1, y1] = elevationCell(c, r);
+      for (const [name, x, y] of TOKYO_CITIES) expect(x > x0 && x < x1 && y > y0 && y < y1, name).toBe(false);
+    }
+    expect(TOKYO_LAKES.map((l) => l.name)).toEqual(['Nishiura', 'Takahamairi', 'Kitaura']);
+    // 24 runs of lit cells in the rows, each filled by 11 strokes; then one stroke per piece of the lines of the lakes.
+    expect(light).toHaveLength(24 * 11 + 4 + 2 + 4);
+    for (const s of light.slice(0, 264)) expect(s.r).toBeCloseTo(TOKYO_LIGHT_BRUSH * k, 12);
+  });
+
+  it('keeps every food source outside every light shape, with Tsuchiura on the shore of Nishiura', () => {
+    let least = Infinity;
+    for (const [name, x, y] of foods)
+      for (const s of light) {
+        const gap = outside(x, y, s) - TOKYO_FOOD_RADIUS;
+        expect(gap, name).toBeGreaterThan(0);
+        least = Math.min(least, gap);
+      }
+    // The line of Nishiura starts 0.021 from Tsuchiura: its light ends 0.0016 outside the food (the specification).
+    const nishiura = light[264];
+    const tsuchiura = TOKYO_CITIES.find(([name]) => name === 'Tsuchiura');
+    if (!nishiura || !tsuchiura) throw new Error('no Nishiura or Tsuchiura');
+    expect(outside(tsuchiura[1], tsuchiura[2], nishiura) - TOKYO_FOOD_RADIUS).toBeCloseTo(0.0016, 4);
+    expect(least).toBeCloseTo(0.0016, 4);
+    // The light of the mountains ends at least 0.0044 (1.3 km) from a food source.
+    for (const [name, x, y] of foods)
+      for (const s of light.slice(0, 264)) expect(outside(x, y, s) - TOKYO_FOOD_RADIUS, name).toBeGreaterThan(0.0044);
+  });
+
+  // The scene on its lattice and on two other grids, painted as the simulation paints it (paint-reference.ts).
+  describe.each([
+    [512, 512],
+    [256, 256],
+    [512, 320],
+  ])('on a grid of %i × %i cells', (w, h) => {
+    const env = new Uint8Array(w * h * 4);
+    for (const shape of [...tokyoShapes(), ...light]) {
+      const stroke = strokeOn(fromShape(shape, 'dish'), w, h);
+      if (!stroke) throw new Error('a shape of the scene is not on the grid');
+      paintReference(env, w, h, stroke, 'dish');
+    }
+    const short = Math.min(w, h);
+    /** The centre of a cell of the simulation in the map frame. */
+    const toMap = (x: number, y: number) => [(x + 0.5 - w / 2) / (k * short), (y + 0.5 - h / 2) / (k * short)] as const;
+
+    it('has no cell with food and light', () => {
+      for (let c = 0; c < w * h; c++)
+        if ((env[c * 4 + 1] ?? 0) > 0) expect(env[c * 4 + 2], `cell ${String(c)}`).toBe(0);
+    });
+
+    it('gives the cells inside a lit cell of the grid of elevations the full light byte: light of one strength', () => {
+      let [inside, full] = [0, 0];
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const [mx, my] = toMap(x, y);
+          const lit = TOKYO_MOUNTAINS.some(([c, r]) => {
+            const [x0, y0, x1, y1] = elevationCell(c, r);
+            return mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
+          });
+          if (!lit || (env[(y * w + x) * 4] ?? 0) >= 128) continue;
+          inside++;
+          const byte = env[(y * w + x) * 4 + 2] ?? 0;
+          if (byte === 255) full++;
+          // The full bands of a row of strokes end in half circles: the corners of a run of cells get a little less.
+          expect(byte, `cell ${String(x)}, ${String(y)}`).toBeGreaterThanOrEqual(240);
+        }
+      // 53 cells of 0.03201 × 0.0362 units, less the walls on the west and north edges of the map, which take about
+      // 6 % of them.
+      expect(inside / (53 * 0.03201 * 0.0362 * (k * short) ** 2)).toBeGreaterThan(0.9);
+      expect(full / inside).toBeGreaterThan(0.99);
     });
   });
 });

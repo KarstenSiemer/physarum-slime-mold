@@ -208,7 +208,7 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
 
   it('keeps growth off in every scene but the foraging scenes, and in a link without it', () => {
     // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031).
-    const grows = ['foraging-maze', 'tokyo', 'food-ring', 'rival-networks', 'tokyo-rivals'];
+    const grows = ['foraging-maze', 'tokyo', 'tokyo-light', 'food-ring', 'rival-networks', 'tokyo-rivals'];
     for (const p of PRESETS) {
       const s = p.settings();
       expect(s.growth, p.id).toBe(grows.includes(p.id));
@@ -328,8 +328,8 @@ describe('flow in the tubes (ADR 0029)', () => {
     expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
   });
 
-  it('is on in the Maze, in the Tokyo rail network and in the scenes made for it (ADR 0032)', () => {
-    const flowing = ['maze', 'tokyo', 'food-ring', 'rival-networks', 'tokyo-rivals'];
+  it('is on in the Maze, in the two Tokyo scenes and in the scenes made for it (ADR 0032)', () => {
+    const flowing = ['maze', 'tokyo', 'tokyo-light', 'food-ring', 'rival-networks', 'tokyo-rivals'];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
   });

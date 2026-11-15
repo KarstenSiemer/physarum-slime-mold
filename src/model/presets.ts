@@ -807,8 +807,12 @@ export function sourceText(p: Preset): string {
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';
     case 'nakagaki':
       return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app. The flow in the tubes is built from the model of Tero, Kobayashi and Nakagaki (2007), on the cells of the grid.';
-    case 'tero':
-      return 'Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds the experiment of Fig. 1. The flow in the tubes is built from the model of the paper, on the grid’s cells; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.';
+    case 'tero': {
+      // "Fig. 1": the runs without light; "Fig. 2B": the runs with light on the mountains and the lakes.
+      const figure = p.source.slice('Tero et al. 2010, '.length);
+      const runs = figure === 'Fig. 1' ? `the experiment of ${figure}` : `the runs with light of ${figure}`;
+      return `Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds ${runs}. The flow in the tubes is built from the model of the paper, on the grid’s cells; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.`;
+    }
     case 'later':
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'app':

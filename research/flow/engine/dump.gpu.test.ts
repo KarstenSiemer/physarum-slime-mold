@@ -12,6 +12,8 @@
 // - VITE_RADIUS: the spectral radius that the momentum of the pressure iteration is tuned for (FLOW.radius in
 //   src/engine/flow.ts), in place of the app's, for the measurement of decision 18 of ADR 0029. Each line of the log
 //   names the radius of the run.
+// - VITE_SHAPES=dabs: the shapes of light-dabs.ts in place of the scene's: the light on the mountains as the
+//   specification of 2026-11-11 drew it (ADR 0029, amendment 2026-11-15 (3)).
 //
 // The trail, the flow memory and the pressure are those of the first strain: the measure scripts read a scene with
 // one strain. strains.gpu.test.ts counts the strains of a scene with several (ADR 0031).
@@ -24,6 +26,7 @@ import type { Backend } from '../../../src/engine/types';
 import { WebGpuBackend } from '../../../src/engine/webgpu';
 import { constrain } from '../../../src/model/params';
 import { presetById } from '../../../src/model/presets';
+import { dabShapes } from './light-dabs';
 
 const OUT = 'research/flow/out/engine/';
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
@@ -70,7 +73,10 @@ it('dumps a run of a scene', async () => {
     if (gpuErrors.length < 5) gpuErrors.push(e.error.message.slice(0, 300));
   });
   const engine = await Engine.create(canvas, settings, undefined, backend);
-  await engine.load(settings, preset.env ?? []);
+  // An empty VITE_SHAPES is none, as a shell gives it.
+  const shapes = env.VITE_SHAPES === 'dabs' ? dabShapes() : (preset.env ?? []);
+  if (env.VITE_SHAPES && env.VITE_SHAPES !== 'dabs') throw new Error(`no shapes ${env.VITE_SHAPES}`);
+  await engine.load(settings, shapes);
   const sim = engine.sim;
   const log: string[] = [];
   let done = 0;

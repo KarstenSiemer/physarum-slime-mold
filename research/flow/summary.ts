@@ -221,12 +221,15 @@ interface TokyoRow {
   ft: number;
   j36: number;
   ms: number;
+  /** With LIT (measure-tokyo.ts): the shares of the network on lit cells and on cells with half the light or more. */
+  lit?: number;
+  bright?: number;
 }
 /** The lines of measure-tokyo.ts: by run name without the seed, by seed, by step. */
 function tokyoRows(files: string[]): Map<string, Map<number, Map<number, TokyoRow>>> {
   const rows = new Map<string, Map<number, Map<number, TokyoRow>>>();
   const pattern =
-    /^(\S+)-s(\d+)\s+(\d+) alive\s+(\d+) \| 33: (\d+) joined (\d+) links TL (\S+) MD (\S+) FT (\S+) \| 36: (\d+) joined TL (\S+) MD (\S+) FT (\S+) \| sea (\d+) \| (\S+) ms/;
+    /^(\S+)-s(\d+)\s+(\d+) alive\s+(\d+) \| 33: (\d+) joined (\d+) links TL (\S+) MD (\S+) FT (\S+) \| 36: (\d+) joined TL (\S+) MD (\S+) FT (\S+) \| sea (\d+) \| (\S+) ms(?: \| lit (\S+) % bright (\S+) %)?/;
   for (const line of files.flatMap((f) => textOf(f).split('\n'))) {
     const m = pattern.exec(line);
     if (!m) continue;
@@ -243,6 +246,7 @@ function tokyoRows(files: string[]): Map<string, Map<number, Map<number, TokyoRo
       ft: Number(m[9]),
       j36: Number(m[10]),
       ms: Number(m[15]),
+      ...(m[16] === undefined ? {} : { lit: Number(m[16]), bright: Number(m[17]) }),
     });
   }
   return rows;
@@ -267,10 +271,19 @@ function engineTokyo(files: string[]) {
         )} | alive ${range(
           d.map((x) => x.alive),
           0,
-        )}`,
+        )}${litOf(d)}`,
       );
     }
   }
+}
+
+/** The shares of the network under the light, in per cent, when the lines have them (LIT in measure-tokyo.ts). */
+function litOf(d: TokyoRow[]): string {
+  const lit = d.map((x) => x.lit).filter((x) => x !== undefined);
+  if (lit.length === 0) return '';
+  return ` | lit ${range(lit)} %, below 5 % in ${lit.filter((x) => x < 5).length} of ${lit.length} | bright ${range(
+    d.map((x) => x.bright),
+  )} %`;
 }
 
 function engineTokyoEnd(files: string[]) {
@@ -309,7 +322,10 @@ function engineTokyoEnd(files: string[]) {
           1,
         )} | all 36 joined: ${d.filter((x) => x.j36 === 36).length} | check of TL and MD: ${ok} of ${d.length}, FT at least 0.66: ${
           d.filter((x) => x.ft >= 0.66).length
-        }`,
+        }${
+          // The check of the specification for the runs with light: FT at least 0.78 (ADR 0029, amendment 2026-11-15 (3)).
+          d.some((x) => x.lit !== undefined) ? `, FT at least 0.78: ${d.filter((x) => x.ft >= 0.78).length}` : ''
+        }${litOf(d)}`,
       );
     }
     // The network as a whole late in the run: every sample from step 16,000 on, so that one step weighs less
@@ -322,7 +338,7 @@ function engineTokyoEnd(files: string[]) {
       console.log(
         `   steps 16000 to 48000: ${late.length} samples | TL ${mean(of('tl')).toFixed(2)} ± ${deviation(
           of('tl'),
-        ).toFixed(2)} | MD ${mean(of('md')).toFixed(2)} | FT ${mean(of('ft')).toFixed(2)}`,
+        ).toFixed(2)} | MD ${mean(of('md')).toFixed(2)} | FT ${mean(of('ft')).toFixed(2)}${litOf(late)}`,
       );
     }
   }

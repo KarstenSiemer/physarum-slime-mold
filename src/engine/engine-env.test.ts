@@ -851,6 +851,17 @@ describe('the food sites of the flow in the tubes', () => {
     expect(firstCells(sim())[0]).toEqual(cellAt(fromFrame(station?.at ?? [0, 0], [512, 512], 'dish')));
     coversFood(sim());
   });
+
+  it('of the Tokyo scene with light are those of the scene without it: light makes no site (ADR 0029, decision 20)', async () => {
+    const { engine, sim } = await engineWith(maze.settings());
+    const [dark, lit] = [presetById('tokyo'), presetById('tokyo-light')];
+    if (!dark?.env || !lit?.env) throw new Error('no Tokyo scene');
+    await engine.load(dark.settings(), dark.env);
+    const sites = structuredClone(sim().sites);
+    await engine.load(lit.settings(), lit.env);
+    expect(sim().sites.list.length).toBe(42);
+    expect(sim().sites).toEqual(sites);
+  });
 });
 
 // The start layout Food puts each strain on a food stroke of its own (ADR 0032), a dab or a whole drag, as a site of
