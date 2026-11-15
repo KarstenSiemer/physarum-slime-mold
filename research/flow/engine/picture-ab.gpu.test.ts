@@ -7,7 +7,8 @@
 // them is this checkout's. It writes one line per scene and backend to research/flow/out/engine/<name>.jsonl: the
 // medians of the old and of the new passes, and the values of the picture, the factors and the stream that differ.
 // Environment variables as picture-passes.gpu.test.ts: VITE_KINDS, VITE_SCENES, VITE_WARM, VITE_BATCH, VITE_BATCHES,
-// VITE_NAME, VITE_PATCH, VITE_SIZE; and VITE_OLD.
+// VITE_NAME, VITE_PATCH, VITE_SIZE; and VITE_OLD, and VITE_FRAME (1: a whole frame in place of the passes alone, one
+// step and one drawn picture as in picture.gpu.test.ts, with the picture of the tubes on).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
@@ -34,6 +35,7 @@ const NAME = env.VITE_NAME ?? 'picture-ab';
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Record<string, unknown>;
 const [WIDTH = 2560, HEIGHT = 1600] = (env.VITE_SIZE ?? '').split(',').filter(Boolean).map(Number);
 const OLD = env.VITE_OLD ?? 'research/flow/out/old';
+const FRAME = env.VITE_FRAME === '1';
 
 /** The numbers of tubes.ts as the old GLSL takes them; a number that it does not use does no harm. */
 const literal = (v: number) => (Number.isInteger(v) ? `${String(v)}.0` : String(v));
@@ -136,6 +138,17 @@ it('measures the passes of the picture of an old checkout against these, in turn
         pictures.tubesStale = true;
         return kind === 'webgpu' ? pictures.pictureTexture : pictures.pictureTarget?.();
       };
+      /** `count` pictures, or frames with VITE_FRAME, and the wait for the GPU. */
+      const run = async (count: number) => {
+        for (let i = 0; i < count; i++) {
+          if (!FRAME) draw();
+          else {
+            engine.frame(performance.now(), 1);
+            await sim.finish();
+          }
+        }
+        await sim.finish();
+      };
       const fields = async () => ({
         picture: await sim.readPicture(),
         roots: await sim.readTubeRoots(),
@@ -151,11 +164,9 @@ it('measures the passes of the picture of an old checkout against these, in turn
         for (const [name, passes] of b % 2 === 0 ? both : [...both].reverse()) {
           use(passes);
           // The first pictures after a change build what the passes need: not in the sample.
-          for (let i = 0; i < 3; i++) draw();
-          await sim.finish();
+          await run(3);
           const t0 = performance.now();
-          for (let i = 0; i < BATCH; i++) draw();
-          await sim.finish();
+          await run(BATCH);
           times[name].push((performance.now() - t0) / BATCH);
         }
       use(old);
@@ -170,6 +181,7 @@ it('measures the passes of the picture of an old checkout against these, in turn
           w: sim.width,
           h: sim.height,
           step: sim.step,
+          frame: FRAME,
           old: median(times.old),
           new: median(times.new),
           oldAll: times.old.map((t) => +t.toFixed(3)),

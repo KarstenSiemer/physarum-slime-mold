@@ -467,8 +467,13 @@ export class GlSim implements Sim {
         for (const t of made) destroyTarget(gl, t);
         throw error;
       }
-      const [roots, picture, stream, rows, tiles] = [0, 1, 2, 3, 4].map((i) => at(made, i));
-      this.tubes = { roots, picture, stream, rows, tiles };
+      this.tubes = {
+        roots: at(made, 0),
+        picture: at(made, 1),
+        stream: at(made, 2),
+        rows: at(made, 3),
+        tiles: at(made, 4),
+      };
     }
     return this.tubes;
   }
