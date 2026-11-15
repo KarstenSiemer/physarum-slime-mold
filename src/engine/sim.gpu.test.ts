@@ -39,7 +39,7 @@ import {
   type Walled,
 } from './gl/programs';
 import { GlSim } from './gl/sim';
-import { grid, growthStep, occupancy } from './growth-reference';
+import { grid, growthStep, occupancy, rngSeed, stream } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
@@ -1322,13 +1322,15 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(a.y).toBeCloseTo(32.5 + Math.sin((RA * Math.PI) / 180), 3);
     });
 
+    // The wall holds the cells (33, 31), (32, 32) to (34, 32) and (33, 33). Before ADR 0038 the agent stood in the wall
+    // cell (32, 32); now an agent there is placed off the wall, so it stands in the open cell west of it.
     it('is blocked by a wall: no move, no deposit, new random heading', async () => {
       const sim = await make({ layout: 'empty' }, 64, 64, 1);
       sim.paint([{ kind: 'wall', from: [33.5, 32.5], to: [33.5, 32.5], radius: 1.2 }]);
-      sim.writeAgent(0, { x: 32.5, y: 32.5, heading: 0, bits: 4 });
+      sim.writeAgent(0, { x: 31.5, y: 32.5, heading: 0, bits: 4 });
       sim.run(1);
       const [a] = await sim.readAgents();
-      expect(a?.x).toBe(32.5);
+      expect(a?.x).toBe(31.5);
       expect(a?.y).toBe(32.5);
       expect(a?.heading).not.toBe(0);
       expect(total(await sim.readCounts())).toBe(0);
@@ -4099,6 +4101,171 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
       // Agents keep walking in, and each step moves them out again.
       expect(left).toBeLessThan(inside / 4);
+    });
+
+    // An alive agent whose cell is a wall at the start of its step, because a wall was painted onto it, is placed as the
+    // cut places its agents, also with no tool held (ADR 0038): at the first of 8 random points whose cell is open,
+    // drawn from the stream of the tools. On a 64 × 64 grid the points are exact in float32, so the test draws them on
+    // the CPU.
+    describe('agents under a painted wall (ADR 0038)', () => {
+      const [w, h] = [64, 64];
+      const TOOL = 1; // the stream of the tools in agents.wgsl and tools.glsl
+      const BLOCK = 3; // the stream of the heading of a blocked move
+      const cellOf = (a: { x: number; y: number }) => Math.floor(a.y) * w + Math.floor(a.x);
+      /** The spot of agent `id` in step `step`: the first of its 8 points whose cell is open (placement()). */
+      const spotOf = (id: number, step: number, seed: number, open: (c: number) => boolean) => {
+        const draw = stream(rngSeed(id, TOOL, step, seed));
+        for (let k = 0; k < 8; k++) {
+          const [x, y] = [Math.fround(draw() * w), Math.fround(draw() * h)];
+          if (open(Math.floor(y) * w + Math.floor(x))) return { x, y };
+        }
+        return undefined;
+      };
+
+      // A wall 17 cells thick over a fifth of the grid, painted onto a running population: about 800 agents stand
+      // under it at a density of 1, and about 80 at 0.1 with one agent per cell. With one agent per cell a placement
+      // claims its cell like a move, and the loser stays where it was (model.md 7.6); it draws again in the next step.
+      it.each([false, true])(
+        'places every agent under the wall off it at once, with its heading (collisions %s)',
+        async (collisions) => {
+          if (collisions && !backend.supportsCollisions) return; // WebGL2 without float blending has no collision mode
+          const [seed, density] = [9, collisions ? 0.1 : 1];
+          const sim = await make({ layout: 'mixed', collisions, density, seed }, w, h, Math.round(density * w * h));
+          sim.run(4);
+          sim.paint([{ kind: 'wall', from: [16, 32], to: [48, 32], radius: 8.5 }]);
+          const env = await sim.readEnv();
+          const wall = (c: number) => (env[c * 4] ?? 0) >= 128;
+          const before = await census(sim, env);
+          const under = before.alive.filter((a) => wall(cellOf(a)));
+          expect(under.length).toBeGreaterThan(collisions ? 50 : 600);
+          // With the rule the cell of a spot must also be empty at the start of the step (openCell()).
+          const taken = new Set(before.alive.map(cellOf));
+          const open = (c: number) => !wall(c) && !(collisions && taken.has(c));
+          const step = sim.step;
+          sim.run(1);
+          const after = await census(sim, env);
+          expect(after.alive.length).toBe(before.alive.length);
+          let lost = 0;
+          for (const a of under) {
+            const b = after.agents[a.id];
+            const spot = spotOf(a.id, step, seed, open);
+            expect(spot, `agent ${a.id}`).toBeDefined();
+            expect(b?.heading, `agent ${a.id}`).toBe(a.heading);
+            if (collisions && b?.x === a.x && b.y === a.y) lost++;
+            else expect([b?.x, b?.y], `agent ${a.id}`).toEqual([spot?.x, spot?.y]);
+          }
+          expect(after.walled).toBe(lost);
+          if (!collisions) return;
+          expect(after.most).toBe(1);
+          expect(lost).toBeLessThan(under.length / 4);
+          sim.run(3);
+          const later = await census(sim, env);
+          expect(later.walled).toBe(0);
+          expect(later.alive.length).toBe(before.alive.length);
+          expect(later.most).toBe(1);
+        },
+      );
+
+      // While the cut is held, an agent under the wall lands outside the wound too, as the cut's own agents do. The wound
+      // (radius 14 at (32, 4), across the edge of the torus) does not touch the wall. A point within 0.001 of its rim is
+      // skipped: float32 and the CPU can put it on either side.
+      it('places an agent under the wall outside the wound of a held cut', async () => {
+        const seed = 11;
+        const sim = await make({ layout: 'mixed', seed }, w, h, w * h);
+        sim.run(4);
+        sim.paint([{ kind: 'wall', from: [16, 32], to: [48, 32], radius: 8.5 }]);
+        const env = await sim.readEnv();
+        const wall = (c: number) => (env[c * 4] ?? 0) >= 128;
+        const [cx, cy, r] = [32, 4, 14];
+        const near = (d: number, n: number) => d - n * Math.round(d / n);
+        const rim = (x: number, y: number) => Math.hypot(near(x - cx, w), near(y - cy, h)) - r;
+        const before = await census(sim, env);
+        const under = before.alive.filter((a) => wall(cellOf(a)));
+        expect(under.length).toBeGreaterThan(600);
+        const step = sim.step;
+        sim.run(1, cut(cx, cy, r));
+        const after = await census(sim, env);
+        expect(after.walled).toBe(0);
+        let [checked, wounded] = [0, 0];
+        for (const a of under) {
+          const draw = stream(rngSeed(a.id, TOOL, step, seed));
+          let spot: { x: number; y: number } | undefined;
+          let [unsure, first] = [false, true];
+          for (let k = 0; k < 8 && !spot; k++) {
+            const [x, y] = [Math.fround(draw() * w), Math.fround(draw() * h)];
+            if (wall(Math.floor(y) * w + Math.floor(x))) continue;
+            unsure ||= Math.abs(rim(x, y)) < 1e-3;
+            if (rim(x, y) >= 0) spot = { x, y };
+            else if (first) wounded++; // the first open point lies in the wound
+            first = false;
+          }
+          if (unsure || !spot) continue;
+          checked++;
+          const b = after.agents[a.id];
+          expect([b?.x, b?.y, b?.heading], `agent ${a.id}`).toEqual([spot.x, spot.y, a.heading]);
+        }
+        expect(checked).toBeGreaterThan(under.length - 10);
+        // Without the wound, these agents would land elsewhere.
+        expect(wounded).toBeGreaterThan(50);
+      });
+
+      // An agent beside the wall keeps its step: the rule reads its own cell, not the cells around it. Each agent stands
+      // in an open cell beside the wall; with sensor angle 0 its three sensors read the same and it keeps its heading.
+      // Toward the wall the move is blocked: it stays and takes the heading of the stream of a blocked move. Away
+      // from the wall it moves one cell.
+      it.each([false, true])('leaves an agent beside the wall to its move (collisions %s)', async (collisions) => {
+        if (collisions && !backend.supportsCollisions) return; // WebGL2 without float blending has no collision mode
+        const seed = 3;
+        const strains = [{ ...defaultStrain(0), sensorAngle: 0, sensorOffset: 1 }];
+        const settings = { ...defaultSettings(), layout: 'empty' as const, strains, seed };
+        const tau = Math.fround(6.28318530717959);
+        /** One step of four agents beside a wall of radius 4.5 cells, each heading into the wall or away from it. */
+        const besides = async (away: boolean) => {
+          const sim = await make(settings, w, h, 4);
+          sim.paint([{ kind: 'wall', from: [32, 32], to: [32, 32], radius: 4.5 }]);
+          const env = await sim.readEnv();
+          const wall = (x: number, y: number) => (env[(y * w + x) * 4] ?? 0) >= 128;
+          // The open cells west, east, north and south of the wall (cells 28 to 35 of its middle row and column), with
+          // the heading into the wall.
+          const cells: [number, number, number][] = [
+            [27, 32, 0],
+            [36, 32, Math.PI],
+            [32, 27, Math.PI / 2],
+            [32, 36, (3 * Math.PI) / 2],
+          ];
+          const agents = cells.map(([x, y, into]) => {
+            const [dx, dy] = [Math.round(Math.cos(into)), Math.round(Math.sin(into))];
+            expect(wall(x, y), `cell ${x}, ${y}`).toBe(false);
+            expect(wall(x + dx, y + dy), `the wall beside ${x}, ${y}`).toBe(true);
+            return { x: x + 0.5, y: y + 0.5, heading: Math.fround(away ? (into + Math.PI) % (2 * Math.PI) : into) };
+          });
+          agents.forEach((a, i) => {
+            sim.writeAgent(i, { ...a, bits: 4 });
+          });
+          // The occupancy is built from the agents written above when the rule is switched on.
+          if (collisions) sim.update({ ...settings, collisions: true });
+          const step = sim.step;
+          sim.run(1);
+          return { agents, step, out: await sim.readAgents(), counts: total(await sim.readCounts()) };
+        };
+        // Into the wall: blocked, so no move, no deposit, and the heading of the stream of a blocked move.
+        const into = await besides(false);
+        into.out.forEach((a, i) => {
+          expect([a.x, a.y], `agent ${i}`).toEqual([into.agents[i]?.x, into.agents[i]?.y]);
+          expect(a.heading, `agent ${i}`).toBe(Math.fround(stream(rngSeed(i, BLOCK, into.step, seed))() * tau));
+        });
+        expect(into.counts).toBe(0);
+        // Away from the wall: one cell along the heading, and a deposit each.
+        const away = await besides(true);
+        away.out.forEach((a, i) => {
+          const start = away.agents[i];
+          if (!start) throw new Error('no agent');
+          expect(a.x, `agent ${i}`).toBeCloseTo(start.x + Math.cos(start.heading), 4);
+          expect(a.y, `agent ${i}`).toBeCloseTo(start.y + Math.sin(start.heading), 4);
+          expect(a.heading, `agent ${i}`).toBe(start.heading);
+        });
+        expect(away.counts).toBe(4);
+      });
     });
   });
 

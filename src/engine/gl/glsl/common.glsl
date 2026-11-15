@@ -21,7 +21,7 @@ layout(std140) uniform Params {
   vec4 tool;           // x, y, radius, kind (0 none, 1 inoculate, 2 cut)
   vec4 tool2;          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   uvec4 strainEnd;
-  uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round
+  uvec4 extra;         // layout, walls (1 if the environment may hold walls), start claim round, 1 if a wall may lie over an alive agent (ADR 0038)
   vec4 model;          // trail saturation K (0 off), covered food factor (1 off), 1 if walls diffuse (Jones), 1 if a step senses first (ADR 0022, 0027)
   uvec4 growth;        // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   uvec4 shrinkage;     // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)

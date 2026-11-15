@@ -17,7 +17,7 @@ struct Params {
   tool: vec4f,           // x, y (cells), radius, kind (0 none, 1 inoculate, 2 cut)
   tool2: vec4f,          // strain, chance per step to place a dead agent (inoculate), 1 if a cut keeps the chemicals, unused
   strainEnd: vec4u,      // exclusive end index of each strain's agents (initial layout)
-  extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, unused
+  extra: vec4u,          // layout, walls (1 if the environment may hold walls), start claim round, 1 if a wall may lie over an alive agent (ADR 0038)
   model: vec4f,          // trail saturation K (0 off), covered food factor (1 off), 1 if walls diffuse (Jones), 1 if a step senses first (ADR 0022, 0027)
   growth: vec4u,         // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   shrinkage: vec4u,      // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)

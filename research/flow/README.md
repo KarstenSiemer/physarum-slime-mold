@@ -708,8 +708,10 @@ You must see 24, 71 and 5 tests pass (27 and 47 before the food sites of part 11
 
 A test is worth what it catches. This script puts 87 wrong rules of the flow, of its food sites and
 of its radius into the code of the app, one at a time, and runs the tests of the flow for each one
-(about 50 minutes; the 42 of the food sites are part 11, the 4 of the radius part 12). Without a name it also runs the 73 wrong rules of the picture
-of the tubes (part 10):
+(about 50 minutes; the 42 of the food sites are part 11, the 4 of the radius part 12). Without a
+name it also runs the 73 wrong rules of the picture of the tubes (part 10), and the 8 wrong rules of
+an agent under a painted wall (ADR 0038, `U1` to `U8`) against the tests of the agents in
+`sim.gpu.test.ts`:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -1288,7 +1290,7 @@ Notes on the record:
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
-| `engine/mutate.ts`        | 160 wrong rules, one at a time, against the tests of the flow and of the picture of the tubes     |
+| `engine/mutate.ts`        | 168 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
