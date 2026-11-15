@@ -14,7 +14,7 @@ import {
   type AgentTool,
 } from '../pack';
 import { diffusePlan, viewTrailOn } from '../sizing';
-import { tubesShown } from '../tubes';
+import { TUBE_TILE, tubesShown } from '../tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
   allOrNothing,
@@ -234,10 +234,11 @@ export class GlSim implements Sim {
   private viewStale = true;
   /**
    * The targets of the picture of the tubes (tubes.frag, ADR 0034), allocated while the settings show it: per cell and
-   * strain the factor of the radius of its tube, and the trail that the view draws. `tubesStale`: a change of the state
-   * since made the picture stale.
+   * strain the factor of the radius of its tube, the trail that the view draws, and the stream; per tile of the
+   * picture (tubes.ts TUBE_TILE) what its window holds. `tubesStale`: a change of the state since made the picture
+   * stale.
    */
-  private tubes: { roots: Target; picture: Target; stream: Target } | undefined;
+  private tubes: { roots: Target; picture: Target; stream: Target; tiles: Target } | undefined;
   private tubesStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
@@ -427,7 +428,10 @@ export class GlSim implements Sim {
     return this.tubes.stream;
   }
 
-  /** The passes of pictureTarget(): the factor of the radius of every tube, the picture, and the stream. */
+  /**
+   * The passes of pictureTarget(): the factor of the radius of every tube, the map of the tiles of the picture, the
+   * picture, and the stream.
+   */
   private encodeTubes(flow: NonNullable<GlSim['flow']>) {
     this.syncShape();
     // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
@@ -436,8 +440,10 @@ export class GlSim implements Sim {
     const tubes = this.ensureTubes();
     const k = this.prog.tubes();
     const shape = this.shape.texture;
+    const roots = tubes.roots.texture;
     this.pass(k.roots, tubes.roots, { ...this.flowMemories(flow), shape }, { strains: flow.memory.length });
-    this.pass(k.picture, tubes.picture, { trail, shape, roots: tubes.roots.texture }, {});
+    this.pass(k.tiles, tubes.tiles, { shape, roots }, {});
+    this.pass(k.picture, tubes.picture, { trail, shape, roots, tiles: tubes.tiles.texture }, {});
     const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
     this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
     this.tubesStale = false;
@@ -451,12 +457,15 @@ export class GlSim implements Sim {
       const made: Target[] = [];
       try {
         for (let i = 0; i < 3; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
+        // The map of the tiles holds 0 or 1 per value.
+        const [w, h] = [Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE)];
+        made.push(target(gl, w, h, gl.RGBA8));
       } catch (error) {
         // A target did not fit: those before it must not stay behind.
         for (const t of made) destroyTarget(gl, t);
         throw error;
       }
-      this.tubes = { roots: at(made, 0), picture: at(made, 1), stream: at(made, 2) };
+      this.tubes = { roots: at(made, 0), picture: at(made, 1), stream: at(made, 2), tiles: at(made, 3) };
     }
     return this.tubes;
   }
@@ -467,6 +476,7 @@ export class GlSim implements Sim {
     destroyTarget(this.gl, this.tubes.roots);
     destroyTarget(this.gl, this.tubes.picture);
     destroyTarget(this.gl, this.tubes.stream);
+    destroyTarget(this.gl, this.tubes.tiles);
     this.tubes = undefined;
     this.tubesStale = true;
   }

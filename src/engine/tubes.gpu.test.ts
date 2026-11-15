@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
-import { STREAM, TUBE_REACH, TUBE_WINDOW, TUBES } from './tubes';
+import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES } from './tubes';
 import { arenaCell, tubePicture, tubeRoots, tubeStream, wallOnLine, type TubeGrid } from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -81,6 +81,67 @@ function stoppedDiscs(grid: TubeGrid, roots: Float32Array): number {
         }
     }
   return pairs;
+}
+
+/**
+ * What a scene holds for the tiles of the picture (tubes.ts TUBE_TILE), from the factors of the reference. `beside`:
+ * the discs that reach a cell from another tile, where the tile of the cell holds no disc of its own. `stopped`: the
+ * discs that a wall cell on their line stops, where the tile of the cell holds no wall cell of its own. `across`: the
+ * discs that reach a cell across the edge of the grid, where the window of the tile of the cell (the tile and
+ * TUBE_WINDOW cells around it) holds no disc inside the grid. `empty`: the tiles whose window holds no disc. A rule of
+ * the tiles that leaves out the cells around a tile, or that does not wrap, gives a wrong picture in the first three;
+ * the last are the tiles that the passes skip.
+ */
+function tileCases(grid: TubeGrid, roots: Float32Array) {
+  const { width: w, height: h } = grid;
+  const across = Math.ceil(w / TUBE_TILE);
+  const tileOf = (x: number, y: number) => Math.floor(y / TUBE_TILE) * across + Math.floor(x / TUBE_TILE);
+  const count = across * Math.ceil(h / TUBE_TILE);
+  const disc = (c: number) => [0, 1, 2, 3].some((s) => (roots[c * 4 + s] ?? 0) > 0);
+  const [discs, walls] = [new Uint8Array(count), new Uint8Array(count)];
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const c = arenaCell(grid, x, y);
+      if (c < 0) continue;
+      if (disc(c)) discs[tileOf(x, y)] = 1;
+      if ((grid.shape[c * 4] ?? 0) >= 128) walls[tileOf(x, y)] = 1;
+    }
+  // Per tile whether its window holds a disc, with the cells across the edge of the grid and without them.
+  const [any, inside] = [new Uint8Array(count), new Uint8Array(count)];
+  for (let ty = 0; ty < h; ty += TUBE_TILE)
+    for (let tx = 0; tx < w; tx += TUBE_TILE)
+      for (let y = ty - TUBE_WINDOW; y < ty + TUBE_TILE + TUBE_WINDOW; y++)
+        for (let x = tx - TUBE_WINDOW; x < tx + TUBE_TILE + TUBE_WINDOW; x++) {
+          const c = arenaCell(grid, x, y);
+          if (c < 0 || !disc(c)) continue;
+          any[tileOf(tx, ty)] = 1;
+          if (x >= 0 && y >= 0 && x < w && y < h) inside[tileOf(tx, ty)] = 1;
+        }
+  const cases = { beside: 0, stopped: 0, across: 0, empty: any.filter((a) => a === 0).length };
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = arenaCell(grid, x, y);
+      if (p < 0 || (grid.shape[p * 4] ?? 0) >= 128) continue;
+      const t = tileOf(x, y);
+      for (let dy = -TUBE_WINDOW; dy <= TUBE_WINDOW; dy++)
+        for (let dx = -TUBE_WINDOW; dx <= TUBE_WINDOW; dx++) {
+          const d = Math.hypot(dx, dy);
+          const q = arenaCell(grid, x + dx, y + dy);
+          if (d >= TUBE_REACH || q < 0) continue;
+          const reaches = [0, 1, 2, 3].some((s) => {
+            const root = roots[q * 4 + s] ?? 0;
+            return root > 0 && TUBES.radius * root + TUBES.edge / 2 > d;
+          });
+          if (!reaches) continue;
+          if (wallOnLine(grid, x, y, dx, dy)) {
+            if (!walls[t]) cases.stopped++;
+            continue;
+          }
+          if ((x + dx < 0 || y + dy < 0 || x + dx >= w || y + dy >= h) && !inside[t]) cases.across++;
+          if (!discs[t]) cases.beside++;
+        }
+    }
+  return cases;
 }
 
 function worst(got: Float32Array, want: Float32Array, least = 1e-6): number {
@@ -181,6 +242,56 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       expect(stoppedDiscs(grid, want.roots)).toBeGreaterThan(100);
     },
     120_000,
+  );
+
+  it.each(['box', 'wrap', 'dish'] as const)(
+    'follows the CPU reference tile by tile on a %s grid: discs and walls around a tile, and tiles without a disc',
+    async (boundary) => {
+      // A grid of no whole number of tiles, with a few short tubes: many tiles hold no disc in their window, and many
+      // cells take a tube only from a disc of another tile, also across the edge of the periodic grid, or lose it at
+      // a wall of another tile.
+      const [w, h] = [45, 37];
+      const sim = await make(flowing({ boundary, strains: [0, 1].map((i) => defaultStrain(i)) }), w, h);
+      // Walls one cell thick: along column 16 and along row 24, each the first of a tile.
+      sim.paint([
+        { kind: 'wall', from: [16.5, 3], to: [16.5, 20], radius: 0.6 },
+        { kind: 'wall', from: [26, 24.5], to: [40, 24.5], radius: 0.6 },
+      ]);
+      const trail = new Float32Array(w * h * 4);
+      for (let i = 0; i < trail.length; i++) trail[i] = 20 * noise(i, 3);
+      sim.writeTrail(trail);
+      // Per strain its tubes along a row: the first cell, the row, the cells, and the flow memory.
+      const tubes = [
+        [
+          [17, 10, 3, 1],
+          [4, 1, 3, 1],
+          [35, 12, 1, 0.3],
+          [13, 28, 2, 0.6],
+        ],
+        [
+          [42, 33, 3, 0.5],
+          [29, 26, 3, 1],
+          [7, 20, 1, 0.8],
+          [22, 4, 3, 0.05],
+        ],
+      ];
+      tubes.forEach((list, s) => {
+        const memory = memoryOf(w, h, (x, y) => {
+          const tube = list.find(([x0 = 0, y0, n = 0]) => y === y0 && x >= x0 && x < x0 + n);
+          return tube ? [tube[3] ?? 0, 1] : undefined;
+        });
+        sim.writeFlow(memory, s);
+      });
+      const want = await reference(sim, boundary, 2);
+      expect(worst(await sim.readTubeRoots(), want.roots), 'the factors of the radius').toBeLessThan(1e-5);
+      expect(worst(await sim.readPicture(), want.picture, 1), 'the picture').toBeLessThan(1e-5);
+      // The case is not empty.
+      const cases = tileCases({ width: w, height: h, boundary, shape: await sim.readShape() }, want.roots);
+      expect(cases.beside, 'discs from another tile into a tile without a disc').toBeGreaterThan(20);
+      expect(cases.stopped, 'discs stopped by a wall of another tile').toBeGreaterThan(5);
+      expect(cases.empty, 'tiles without a disc in their window').toBeGreaterThan(3);
+      if (boundary === 'wrap') expect(cases.across, 'discs across the edge into a tile without one').toBeGreaterThan(5);
+    },
   );
 
   it('draws a tube as wide and as bright as the fourth root of its strength says', async () => {

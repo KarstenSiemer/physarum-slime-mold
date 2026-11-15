@@ -1,7 +1,9 @@
 // The picture of the tubes (ADR 0034), after common.glsl. Mirrors ../../shaders/tubes.wgsl, where the passes are
 // described: PASS 0 is `roots` (per cell and strain the factor of the radius of its tube), PASS 1 is `picture` (the
 // trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed).
-// programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW and FAST from ../../tubes.ts.
+// PASS 3, the map of the tiles, runs between PASS 0 and PASS 1: per tile of TILE × TILE cells what the window of the
+// tile holds, which a workgroup of `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
+// programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW, FAST, TILE and WINDOW from ../../tubes.ts.
 
 out vec4 result;
 
@@ -24,7 +26,7 @@ bool wallOnLine(ivec2 p, ivec2 o) {
   return false;
 }
 
-#if PASS != 1
+#if PASS == 0 || PASS == 2
 // The memory of the flow of each strain: x flow memory, y tube body, z conductivity (gl/sim.ts flowMemories()).
 uniform sampler2D flowMemory;
 uniform sampler2D flowMemory1;
@@ -36,32 +38,32 @@ uniform int strains;
 
 #if PASS == 0
 
-// Whether the cell at q (not wrapped) is a cell of a wall. A cell outside the arena is none.
-bool wallAt(ivec2 q) {
-  ivec2 c = cellXY(q);
-  return c.x >= 0 && isWall(texelFetch(shape, c, 0));
-}
-
 // The cells of the 3 × 3 cells around p whose strength adds to the strength across a tube at p, as bits
-// (openCells in tubes.wgsl).
-int openCells(ivec2 p) {
+// (openCells in tubes.wgsl). `near`: cellXY() of each of the 3 × 3 cells, near[3 (dy + 1) + dx + 1].
+int openCells(ivec2 near[9]) {
+  // The cells of a wall among them. A cell outside the arena is none.
+  int walls = 0;
+  for (int k = 0; k < 9; k++) {
+    if (near[k].x >= 0 && isWall(texelFetch(shape, near[k], 0))) walls |= 1 << k;
+  }
   int open = 0;
   for (int k = 0; k < 9; k++) {
     ivec2 o = ivec2(k % 3 - 1, k / 3 - 1);
-    ivec2 q = cellXY(p + o);
-    if (q.x < 0 || isWall(texelFetch(shape, q, 0))) continue;
-    if (o.x != 0 && o.y != 0 && wallAt(p + ivec2(o.x, 0)) && wallAt(p + ivec2(0, o.y))) continue;
+    if (near[k].x < 0 || (walls & (1 << k)) != 0) continue;
+    // The cells beside the corner: near[4 + o.x] and near[4 + 3 o.y].
+    int beside = (1 << (4 + o.x)) | (1 << (4 + 3 * o.y));
+    if (o.x != 0 && o.y != 0 && (walls & beside) == beside) continue;
     open |= 1 << k;
   }
   return open;
 }
 
-// The strength across the tube that the cell at p (cellXY) holds in one memory, summed over the cells of `open`.
-float across(sampler2D memory, ivec2 p, int open) {
+// The strength across the tube that the cell at p holds in one memory, summed over the cells of `open`.
+float across(sampler2D memory, ivec2 near[9], int open) {
   float sum = 0.0;
   for (int k = 0; k < 9; k++) {
     if ((open & (1 << k)) == 0) continue;
-    vec4 m = texelFetch(memory, cellXY(p + ivec2(k % 3 - 1, k / 3 - 1)), 0);
+    vec4 m = texelFetch(memory, near[k], 0);
     if (m.y >= BODY_LOW) sum += m.x * m.y;
   }
   return min(sum / SPAN, 1.0);
@@ -80,18 +82,44 @@ void main() {
     strains > 3 && texelFetch(flowMemory3, p, 0).y >= BODY_LOW
   );
   if (!any(tube)) return;
-  int open = openCells(p);
+  // The 3 × 3 cells and their walls once for every strain. On WebGL2 that took 1 ms less in the start scene than a
+  // look per strain; on WebGPU it took more, so tubes.wgsl looks per strain (ADR 0034, amendment of 2026-11-15).
+  ivec2 near[9];
+  for (int k = 0; k < 9; k++) near[k] = cellXY(p + ivec2(k % 3 - 1, k / 3 - 1));
+  int open = openCells(near);
   vec4 a = vec4(0.0);
-  if (tube.x) a.x = across(flowMemory, p, open);
-  if (tube.y) a.y = across(flowMemory1, p, open);
-  if (tube.z) a.z = across(flowMemory2, p, open);
-  if (tube.w) a.w = across(flowMemory3, p, open);
+  if (tube.x) a.x = across(flowMemory, near, open);
+  if (tube.y) a.y = across(flowMemory1, near, open);
+  if (tube.z) a.z = across(flowMemory2, near, open);
+  if (tube.w) a.w = across(flowMemory3, near, open);
   result = sqrt(sqrt(a));
+}
+
+#elif PASS == 3
+uniform sampler2D roots; // PASS 0
+
+// Per tile of TILE × TILE cells, of the window of the tile: the tile and the WINDOW cells on each side of it, wrapped
+// as cellXY() wraps (tileRoots in tubes.wgsl). x: 1 if a cell of the window holds a disc of a strain. y: 1 if a cell
+// of the window is a cell of a wall. A cell outside the arena is neither.
+void main() {
+  ivec2 corner = ivec2(gl_FragCoord.xy) * TILE - WINDOW;
+  bool discs = false;
+  bool walled = false;
+  for (int j = 0; j < TILE + 2 * WINDOW; j++) {
+    for (int i = 0; i < TILE + 2 * WINDOW; i++) {
+      ivec2 q = cellXY(corner + ivec2(i, j));
+      if (q.x < 0) continue;
+      discs = discs || texelFetch(roots, q, 0) != vec4(0.0);
+      walled = walled || isWall(texelFetch(shape, q, 0));
+    }
+  }
+  result = vec4(discs ? 1.0 : 0.0, walled ? 1.0 : 0.0, 0.0, 0.0);
 }
 
 #elif PASS == 1
 uniform sampler2D trail; // the trail that the view draws without the tubes
 uniform sampler2D roots; // PASS 0
+uniform sampler2D tiles; // PASS 3: per tile, whether its window holds a disc (x) and a cell of a wall (y)
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -100,16 +128,18 @@ void main() {
     return;
   }
   float reach = RADIUS + 0.5 * EDGE;
-  int window = int(ceil(reach)) - 1;
   vec4 here = texelFetch(shape, p, 0);
+  vec2 tile = texelFetch(tiles, p / TILE, 0).xy;
+  // Without a cell of a wall in the window of the tile no line between two of its cells meets one.
+  bool walls = tile.y != 0.0;
   // Of the discs that reach the cell: the largest weight, the sum of the weights, and the sum of the trails by weight.
   vec4 top = vec4(0.0);
   vec4 sum = vec4(0.0);
   vec4 lit = vec4(0.0);
-  // No disc reaches a cell of a wall.
-  if (!isWall(here)) {
-    for (int dy = -window; dy <= window; dy++) {
-      for (int dx = -window; dx <= window; dx++) {
+  // No disc reaches a cell of a wall. A window without a disc adds nothing: the tiles away from the tubes.
+  if (!isWall(here) && tile.x != 0.0) {
+    for (int dy = -WINDOW; dy <= WINDOW; dy++) {
+      for (int dx = -WINDOW; dx <= WINDOW; dx++) {
         float d = length(vec2(float(dx), float(dy)));
         if (d >= reach) continue;
         ivec2 q = cellXY(p + ivec2(dx, dy));
@@ -120,7 +150,7 @@ void main() {
         if (weight == vec4(0.0)) continue;
         // The disc of the cell itself reaches it. The disc of another cell: not across a cell of a wall. A cell
         // of a wall is no disc (PASS 0).
-        if (wallOnLine(p, ivec2(dx, dy))) continue;
+        if (walls && wallOnLine(p, ivec2(dx, dy))) continue;
         top = max(top, weight);
         sum += weight;
         lit += texelFetch(trail, q, 0) * weight;
