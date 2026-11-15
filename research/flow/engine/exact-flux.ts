@@ -8,7 +8,8 @@
 // conductivity, edges as harmonic means, and the flux of the sites by their roles. The solver is the method of
 // conjugate gradients with the diagonal as preconditioner, from the pressure of the local solver, to a residual of
 // 10⁻⁸ of the right-hand side. A site at its pressure limit (flow.wgsl headroom) gives less than I0 in the app; this
-// script gives every site its full I0.
+// script gives every site its full I0. Each line also gives the range of the local pressure on the cells with a tube,
+// and how many of these cells have a flow memory above 0.5, where dead agents come to life (decision 18).
 import { readFileSync } from 'node:fs';
 import { FLOW } from '../../../src/engine/flow.ts';
 import { outDir } from '../prototype/out.ts';
@@ -142,10 +143,15 @@ for (const step of process.argv.slice(6).map(Number)) {
     const exact = flux((c) => x[c]!);
     const local = flux((c) => p[c * 4 + lane]!);
     let [sumE, sumL, sumD, cells] = [0, 0, 0, 0];
+    let [low, high, fed] = [Infinity, -Infinity, 0];
     const rel: number[] = [];
     for (let c = 0; c < n; c++) {
       if (m[c * 4 + 2]! <= 0) continue;
       cells++;
+      low = Math.min(low, p[c * 4 + lane]!);
+      high = Math.max(high, p[c * 4 + lane]!);
+      // A cell on which dead agents come to life (decision 8): the flow memory above 0.5.
+      if (m[c * 4]! > 0.5) fed++;
       sumE += exact[c]!;
       sumL += local[c]!;
       sumD += Math.abs(exact[c]! - local[c]!);
@@ -154,7 +160,7 @@ for (const step of process.argv.slice(6).map(Number)) {
     rel.sort((a, b) => a - b);
     const pct = (f: number) => (100 * (rel[Math.floor(f * (rel.length - 1))] ?? 0)).toFixed(0);
     console.log(
-      `${name} step ${step} lane ${lane}: ${sites} sites, ${cells} tube cells, CG ${its} its | sum of flux: exact ${sumE.toFixed(1)}, local ${sumL.toFixed(1)} (${((100 * sumL) / sumE).toFixed(0)} %) | sum of |difference| ${((100 * sumD) / sumE).toFixed(0)} % | cells with exact flux above 5 % of I0: ${rel.length}, error median ${pct(0.5)} %, 90th percentile ${pct(0.9)} %`,
+      `${name} step ${step} lane ${lane}: ${sites} sites, ${cells} tube cells, CG ${its} its | sum of flux: exact ${sumE.toFixed(1)}, local ${sumL.toFixed(1)} (${((100 * sumL) / sumE).toFixed(0)} %) | sum of |difference| ${((100 * sumD) / sumE).toFixed(0)} % | cells with exact flux above 5 % of I0: ${rel.length}, error median ${pct(0.5)} %, 90th percentile ${pct(0.9)} % | local pressure on the tubes from ${low.toFixed(0)} to ${high.toFixed(0)} | tube cells with a flow memory above 0.5: ${fed}`,
     );
   }
 }
