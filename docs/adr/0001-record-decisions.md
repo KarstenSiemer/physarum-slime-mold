@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-11-08
+- Changed by [ADR 0040](0040-one-decision-one-short-adr.md) (2026-11-15): a new decision gets a new short ADR, also
+  when it extends an earlier one; the amendment of 2026-11-14 below holds for the ADRs written before.
 
 ## Context
 
