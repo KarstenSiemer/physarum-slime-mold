@@ -190,7 +190,7 @@ export const globalSpec = {
   // keeps it (ADR 0022, decision 26).
   scentDecay: {
     label: 'Scent decay',
-    help: 'Only the extended model has this setting: in the Jones model the scent decays with the strain’s Decay. It is the fraction of the food and light scent that disappears every step. Lower values spread the scent farther. At 0.1 the scent falls to a third within 2 cells of a food, and at 0.003 within about 9 cells. Food and light release less at a lower decay. So the scent on a large food stays as strong as at 0.1, and the scent on a small food gets weaker.',
+    help: 'Only the extended model has this setting: in the Jones model the scent decays with the strain’s Decay. It is the fraction of the food and light scent that disappears every step. Lower values spread the scent farther. With one diffusion pass, the scent beside a long food falls to a tenth within 4 cells at 0.1 and within 24 cells at 0.003: Scent reach shows it in cells. Food and light release less at a lower decay. So the scent on a large food stays as strong as at 0.1, and the scent on a small food gets weaker.',
     min: 0.0001,
     max: 0.9,
     step: 0.0001,
@@ -336,6 +336,41 @@ export const globalSpec = {
 } as const satisfies Record<string, Spec>;
 
 export type GlobalKey = keyof typeof globalSpec;
+
+/**
+ * The reach of the food scent and the light repellent in the extended model (ADR 0036): the cells over which the scent
+ * beside a long food falls to a tenth, ln(10) / κ. A 3 × 3 mean filter scales the mode e^(−κ x), the same along y, by
+ * (1 + 2 cosh κ) / 3; once the scent no longer changes, the decay d and p passes leave the mode as it is:
+ * (1 − d) ((1 + 2 cosh κ) / 3)^p = 1. Both backends measure this κ to four digits beside a line of food
+ * (research/scent/README.md). Around a small dab the scent falls faster, as it spreads in two directions. 0 without
+ * diffusion: the scent then stays on the food.
+ */
+export function scentReach(decay: number, passes: number): number {
+  if (passes <= 0) return 0;
+  return Math.LN10 / Math.acosh((3 * (1 - decay) ** (-1 / passes) - 1) / 2);
+}
+
+/** The scent decay whose reach is `reach` cells with `passes` diffusion passes: the inverse of scentReach(). */
+export function decayForReach(reach: number, passes: number): number {
+  return 1 - ((1 + 2 * Math.cosh(Math.LN10 / reach)) / 3) ** -passes;
+}
+
+/**
+ * Scent reach, a second way to set Scent decay (ADR 0036): no setting of its own, so a link and a scene hold only the
+ * decay. Its range follows from the range of Scent decay and the diffusion passes (scentReachSpec()); the range here is
+ * that of one pass, for Learn.
+ */
+export function scentReachSpec(passes = 1): Spec {
+  return {
+    label: 'Scent reach',
+    help: 'Only the extended model has this setting. It sets Scent decay in another way: as the number of cells over which the scent beside a long food falls to a tenth. Around a small dab the scent falls faster, because it spreads in all directions. More diffusion passes give a longer reach at the same decay, and the repellent of light has the same reach. A longer reach widens the scent, but it hardly steers agents from farther away: in the measurements, food steered agents only up to about 12 to 14 cells from it, at every decay. A higher Trail saturation lets food steer agents from farther away.',
+    min: scentReach(globalSpec.scentDecay.max, passes),
+    max: scentReach(globalSpec.scentDecay.min, passes),
+    step: 0.1,
+    unit: 'cells',
+    log: true,
+  };
+}
 
 /** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
 export const modelHelp = {

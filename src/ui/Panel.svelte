@@ -5,6 +5,7 @@
     capacityOf,
     collisionsHelp,
     coveredFoodHelp,
+    decayForReach,
     flowHelp,
     globalSpec,
     growthHelp,
@@ -14,6 +15,9 @@
     MODELS,
     RESOLUTIONS,
     sameLattice,
+    scentReach,
+    scentReachSpec,
+    snap,
     STEP_ORDERS,
     stepOrderHelp,
     GEL_COLORS,
@@ -309,6 +313,17 @@
     {#if extended}
       <!-- The extended model's own settings, where the choice of the model is. -->
       <Slider spec={globalSpec.scentDecay} bind:value={s.scentDecay} id="scent" />
+      <!-- Scent decay in cells (ADR 0036): no setting of its own. Without diffusion the scent does not spread. -->
+      {#if s.diffusion > 0}
+        <Slider
+          spec={scentReachSpec(s.diffusion)}
+          bind:value={
+            () => scentReach(s.scentDecay, s.diffusion),
+            (reach: number) => (s.scentDecay = snap(decayForReach(reach, s.diffusion), globalSpec.scentDecay))
+          }
+          id="scent-reach"
+        />
+      {/if}
       <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
     {:else if lit}
       <p class="helptext" id="jones-light">{JONES_LIGHT}</p>

@@ -194,7 +194,7 @@ periodic grid over all its cells.
 | Area                | Controls                                                                                                                                     |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Playback            | play/pause, single step, reset (toolbar)                                                                                                     |
-| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model, step order; extended: scent decay, K                              |
+| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model, step order; extended: scent decay and its reach in cells, K       |
 | Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight                                   |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)                                             |
 | Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                                                    |
