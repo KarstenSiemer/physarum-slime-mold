@@ -43,7 +43,19 @@ const BOUNDARIES = ['dish', 'box', 'wrap'] as const;
  */
 function strokeNear(rand: () => number, spots: [number, number][], w: number, h: number, arena: Boundary): Stroke {
   const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
-  const kind = pick<EnvTool>(['food', 'food', 'food', 'light', 'wall', 'wall', 'erase', 'erase', 'erase', 'erase']);
+  const kind = pick<EnvTool>([
+    'food',
+    'food',
+    'cathode',
+    'anode',
+    'light',
+    'wall',
+    'wall',
+    'erase',
+    'erase',
+    'erase',
+    'erase',
+  ]);
   const [u, v] = pick(spots);
   const copy = arena === 'wrap' && rand() < 0.15 ? [pick([-1, 1]) * w, pick([-1, 0, 1]) * h] : [0, 0];
   const from: [number, number] = [

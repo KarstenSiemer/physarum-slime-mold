@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { agentCount } from '../engine/sizing';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
 import {
   BAUMGARTEN_PDF,
+  ELECTROTAXIS,
   GROUPS,
   JONES_PDF,
   latticeLostNotice,
@@ -15,6 +17,7 @@ import {
   sourceText,
   START,
   stepOrderOf,
+  TSUDA_PDF,
   usesRule,
   type Preset,
 } from './presets';
@@ -50,12 +53,15 @@ describe('presets', () => {
       const jones = fromJones.includes(p.id);
       expect(p.source.startsWith('Jones'), p.id).toBe(jones);
       // The Coarsening network is the Jones model of Baumgarten, Jones and Hauser 2015 (ADR 0045).
-      const jonesModel = jones || p.id === 'coarsening';
+      // So is Electrotaxis, the Jones model of Tsuda, Jones et al. 2011 (ADR 0047).
+      const jonesModel = jones || p.id === 'coarsening' || p.id === 'electrotaxis';
       expect(s.model, p.id).toBe(jonesModel ? 'jones' : 'extended');
       if (jonesModel) expect(jonesFits(s), p.id).toBe(true);
       // No scene of Jones paints light: his papers have no light that releases a repellent.
       if (jones) expect(p.env?.some((e) => e.kind === 'light') ?? false, p.id).toBe(false);
-      expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, 0.1]);
+      // Electrotaxis has the decay of its field, which the Jones model also gives the scent (ADR 0047).
+      const decay = p.id === 'electrotaxis' ? 0.01 : 0.1;
+      expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, decay]);
     }
     expect(defaultSettings().model).toBe('extended');
   });
@@ -99,6 +105,7 @@ describe('presets', () => {
       'maze',
       'foraging-maze',
       'coarsening',
+      'electrotaxis',
       'tokyo',
       'tokyo-light',
       'food-ring',
@@ -138,6 +145,39 @@ describe('presets', () => {
     for (const id of ['network', 'hexagons', 'spots', 'stripes', 'wound']) expect(settingsOf(id).boundary).toBe('wrap');
   });
 
+  // ADR 0047: the values of the model of Tsuda, Jones et al. 2011 (p. 10 and 11). The lattice, the places of the
+  // electrodes and the decay are this app's choice: the paper gives none of them.
+  it('keep the model of Tsuda, Jones et al. 2011 (p. 10 and 11; ADR 0047)', () => {
+    const s = settingsOf('electrotaxis');
+    const a = s.strains[0];
+    expect([s.model, s.collisions, s.boundary, s.stepOrder, s.layout]).toEqual([
+      'jones',
+      true,
+      'box',
+      'sense-first',
+      'line',
+    ]);
+    expect([s.meanWindow, s.electrodeStrength, s.growth, s.shrink]).toEqual([15, 1, false, 0]);
+    // The picture shows the agents, as Fig. 11 does: the trail of this scene is one wide hill.
+    expect(s.style).toBe('agents');
+    expect([a?.sensorAngle, a?.rotationAngle, a?.sensorOffset, a?.deposit, a?.stepSize]).toEqual([22.5, 45, 5, 5, 1]);
+    expect([a?.decay, s.scentDecay]).toEqual([0.01, 0.01]);
+    // 1,500 agents (p. 11), on the lattice of the scene.
+    const [w, h] = s.lattice ?? [0, 0];
+    expect([w, h]).toEqual([...ELECTROTAXIS.lattice]);
+    expect(agentCount(s, w, h)).toBe(1500);
+    // Five current sinks left of the line of agents and five current sources right of it, the sources nearer (Fig. 11).
+    const env = preset('electrotaxis').env ?? [];
+    const cells = (kind: string) =>
+      env.filter((e) => e.kind === kind).map((e) => [(e.at[0] / 1.6) * w, e.at[1] * h, e.r * h]);
+    const [cathodes, anodes] = [cells('cathode'), cells('anode')];
+    expect([env.length, cathodes.length, anodes.length]).toEqual([10, 5, 5]);
+    for (const [x, , r] of cathodes) expect([Math.round(x ?? 0), r]).toEqual([-100, 1.5]);
+    for (const [x, , r] of anodes) expect([Math.round(x ?? 0), r]).toEqual([20, 1.5]);
+    expect(cathodes.map(([, y]) => Math.round(y ?? 0))).toEqual([-62, -31, 0, 31, 62]);
+    expect(anodes.map(([, y]) => y)).toEqual(cathodes.map(([, y]) => y));
+  });
+
   it('keep the model of Baumgarten, Jones and Hauser 2015 (p. 1204 to 1206; ADR 0045)', () => {
     const s = settingsOf('coarsening');
     const a = s.strains[0];
@@ -170,6 +210,7 @@ describe('presets', () => {
       tokyo: [512, 512], // this app's choice (ADR 0029)
       'tokyo-light': [512, 512], // the map of the Tokyo scene
       coarsening: [400, 400], // Baumgarten, Jones and Hauser 2015, p. 1204 (ADR 0045)
+      electrotaxis: [250, 240], // this app's choice: the paper gives no lattice (ADR 0047)
       'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
       'rival-networks': [384, 384],
       'tokyo-rivals': [512, 512], // the map of the Tokyo scene
@@ -414,9 +455,19 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
     });
   });
 
+  it('opens the free PDF of Tsuda, Jones et al. 2011 at the page of Fig. 11 (ADR 0047)', () => {
+    expect(TSUDA_PDF).toBe('https://arxiv.org/pdf/1204.1752');
+    expect(preset('electrotaxis').figure).toEqual({
+      href: `${TSUDA_PDF}#page=11`,
+      label: 'Fig. 11',
+      note: 'page 11 of the free PDF',
+    });
+    expect(sourceKind(preset('electrotaxis'))).toBe('tsuda');
+  });
+
   it('is absent where no figure shows the result of the scene', () => {
     const linked = PRESETS.filter((p) => p.figure).map((p) => p.id);
-    expect(linked).toHaveLength(12);
+    expect(linked).toHaveLength(13);
     for (const p of PRESETS)
       if (sourceKind(p) === 'app' || sourceKind(p) === 'fogleman' || p.source.startsWith('After'))
         expect(p.figure, p.id).toBeUndefined();

@@ -27,8 +27,8 @@
     setScene,
     showNotice,
     startScene,
+    strokeKind,
     toolsFor,
-    type Tool,
   } from './ui/state.svelte';
   import Toolbar from './ui/Toolbar.svelte';
   import { BrushDrag, StraightLine } from './ui/drag';
@@ -218,15 +218,17 @@
   }
 
   const brushCells = (e: Engine) => app.brush * (canvas.width / canvas.clientWidth) * e.view.scale;
-  const painting = (t: Tool) => t === 'food' || t === 'light' || t === 'wall' || t === 'erase';
+  /** The kind of stroke of the selected tool; the Electrode tool paints the selected pole (ADR 0047). */
+  const strokeOf = () => strokeKind(app.tool, app.pole);
 
   function paintTo(e: Engine, p: [number, number]) {
-    if (painting(app.tool)) drag.to(e, p, app.tool, Math.max(MIN_RADIUS, brushCells(e)));
+    const kind = strokeOf();
+    if (kind) drag.to(e, p, kind, Math.max(MIN_RADIUS, brushCells(e)));
   }
 
   /** The line from the waiting start to the pointer, or to the start itself while the pointer is off the canvas. */
   function showPreview(e: Engine | undefined) {
-    const start = e && painting(app.tool) ? line.startOn(e) : undefined;
+    const start = e && strokeOf() ? line.startOn(e) : undefined;
     if (!e || !start) {
       preview = undefined;
       return;
@@ -257,9 +259,10 @@
     }
     if (ev.button !== 0 || app.tool === 'pan') return;
     drag.end();
-    if (ev.shiftKey && painting(app.tool)) {
+    const kind = strokeOf();
+    if (ev.shiftKey && kind) {
       straightPress = true;
-      line.click(e, p, app.tool, Math.max(MIN_RADIUS, brushCells(e)));
+      line.click(e, p, kind, Math.max(MIN_RADIUS, brushCells(e)));
       showPreview(e);
       return;
     }
@@ -302,10 +305,11 @@
     hover = undefined;
   }
 
-  // A straight line belongs to one tool: another tool ends its start (ADR 0035).
-  // The effect reads only the tool: the preview also reads the brush, and a new brush size keeps the start.
+  // A straight line belongs to one tool: another tool ends its start (ADR 0035), and so does the other pole of the
+  // Electrode tool. The effect reads only these: the preview also reads the brush, and a new brush size keeps the start.
   $effect(() => {
     const _tool = app.tool;
+    const _pole = app.pole;
     untrack(endLine);
   });
 
@@ -405,7 +409,7 @@
   <canvas
     bind:this={canvas}
     class="tool-{app.tool}"
-    aria-label="Physarum simulation. Use the toolbar to place food, light, walls or agents."
+    aria-label="Physarum simulation. Use the toolbar to place food, light, walls, electrodes or agents."
     {onpointerdown}
     {onpointermove}
     {onpointerup}

@@ -237,7 +237,7 @@ describe('paintsCell', () => {
   });
 
   it('records every stroke of at least MIN_RADIUS on a periodic grid: every point lies within 0.71 cells of a centre', () => {
-    for (const kind of ['food', 'light', 'wall', 'erase'] as const)
+    for (const kind of ['food', 'light', 'wall', 'erase', 'anode', 'cathode'] as const)
       for (const at of [
         [0, 0],
         [63.5, 39.5],
@@ -263,7 +263,7 @@ describe('paintsCell', () => {
       [37, 61],
       [40, 64],
     ] as const;
-    const kinds = ['food', 'light', 'wall', 'erase'] as const;
+    const kinds = ['food', 'light', 'wall', 'erase', 'anode', 'cathode'] as const;
     const counts = { recorded: 0, dropped: 0 };
     for (let k = 0; k < 4000; k++) {
       const [w, h] = grids[Math.floor(rand() * grids.length)] ?? [64, 40];
@@ -415,7 +415,7 @@ function* edgeStrokes(n: number, seed: number) {
   for (let k = 0; k < n; k++) {
     const [w, h] = pick(grids);
     const under = pick(['box', 'dish', 'wrap'] as const);
-    const kind = pick(['food', 'light', 'wall', 'erase'] as const);
+    const kind = pick(['food', 'light', 'wall', 'erase', 'anode', 'cathode'] as const);
     const R0 = dishRadius(w, h);
     const q = rand();
     let at: [number, number];

@@ -4,6 +4,7 @@
   2026-11-15
 - Date: 2026-11-15
 - Extends ADR 0022 (the Jones and the extended model) and ADR 0027 (the mean at edges and walls).
+- Extended by ADR 0047 (the scene Electrotaxis is the first scene with a window above 3 × 3).
 
 ## Context
 

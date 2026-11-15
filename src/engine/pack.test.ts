@@ -35,7 +35,7 @@ describe('Params layout', () => {
     const body = /struct Params \{([\s\S]*?)\n\}/.exec(wgsl)?.[1] ?? '';
     const types = [...body.matchAll(/:\s*([\w<>, ]+?),\s*(?:\/\/|$)/gm)].map((m) => m[1]);
     expect(types.every((t) => /^vec4[uf]$|^array<vec4f, 4>$/.test(t ?? ''))).toBe(true);
-    expect(PARAMS_BYTES).toBe(24 * 16);
+    expect(PARAMS_BYTES).toBe(25 * 16);
   });
 
   it('packs grid, config and strain lanes at the right offsets', () => {
@@ -71,6 +71,10 @@ describe('Params layout', () => {
     expect(extra({})).toEqual([4, 0, 0, 0]);
     expect(extra({ walls: true, round: 7 })).toEqual([4, 1, 7, 0]);
     expect(extra({ walls: true, wallOverAgents: true })).toEqual([4, 1, 0, 1]);
+    // The start layout Vertical line is LINE = 8 in init.wgsl and init.frag (ADR 0047); Food packs as Empty.
+    const layout = (name: Settings['layout']) =>
+      new Uint32Array(packParams({ ...s, layout: name }, { width: 8, height: 8, agents: 1, step: 0 }))[19 * 4];
+    expect([layout('line'), layout('food'), layout('empty')]).toEqual([8, 6, 6]);
   });
 });
 
@@ -214,6 +218,24 @@ describe('model slot and sources', () => {
       scentDecay: 0.001,
     });
     expect(scent(low).slice(0, 3)).toEqual([255 * 0.05, 255 * 0.2, 0.999].map((v) => Math.fround(v)));
+  });
+
+  // ADR 0047: a cell of an electrode releases 255 · Electrode strength, with the source factor of the food and the
+  // light: 1 in the Jones model, so a strength of 1 is the ±255 of Tsuda, Jones et al. 2011.
+  it('packs the source of an electrode: 255 · Electrode strength, scaled as the food and the light', () => {
+    const electrode = (s: Settings) => [...floats(s).slice(24 * 4, 25 * 4)];
+    expect(electrode(jones())).toEqual([255, 0, 0, 0]);
+    expect(defaultSettings().electrodeStrength).toBe(1);
+    const low = jones({ electrodeStrength: 0.4, strains: [{ ...defaultStrain(0), decay: 0.01 }], scentDecay: 0.01 });
+    expect(electrode(low)).toEqual([Math.fround(255 * 0.4), 0, 0, 0]);
+    // The strengths of the food and of the repellent do not change it.
+    expect(electrode({ ...low, foodStrength: 0.5, lightStrength: 0.5 })).toEqual(electrode(low));
+    for (const stepOrder of ['move-first', 'sense-first'] as const) {
+      const ext = { ...defaultSettings(), electrodeStrength: 0.4, stepOrder };
+      expect(electrode(ext)[0]).toBe(Math.fround(255 * 0.4));
+      expect(electrode({ ...ext, scentDecay: 0.02 })[0]).toBe(Math.fround(255 * 0.4 * emissionScale(0.02, stepOrder)));
+    }
+    expect(electrode({ ...defaultSettings(), electrodeStrength: 0 })[0]).toBe(0);
   });
 
   // Moving first, the agents sense the map after the step's sources, before its diffusion (ADR 0027).

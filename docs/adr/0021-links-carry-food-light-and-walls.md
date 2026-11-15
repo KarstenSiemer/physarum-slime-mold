@@ -5,6 +5,7 @@
 - Date: 2026-11-10
 - Changed by [ADR 0042](0042-a-second-tokyo-scene-with-light.md) (2026-11-15): a link of version 3 writes the number
   of the scene's shapes as a varint. Links of versions 1 and 2 open as before.
+- Extended by ADR 0047 (2026-11-15): a link of version 4 holds the strokes of the Electrode tool.
 
 ## Context
 

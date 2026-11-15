@@ -19,6 +19,10 @@ const uint COLONIES = 3u;
 const uint RING = 4u;
 const uint CENTER = 5u;
 const uint EMPTY = 6u;
+// A vertical strip through the middle of the grid, as LINE in init.wgsl (ADR 0047).
+const uint LINE = 8u;
+const float LINE_HEIGHT = 0.75;
+const float LINE_FILL = 0.75;
 
 // Draws after the first without the rule, as ROUNDS in init.wgsl.
 const uint ROUNDS = 32u;
@@ -89,6 +93,12 @@ vec3 start(uint i, uint s, uint round) {
     heading = a;
   } else if (layout_ == CENTER) {
     p = disc(center, 0.08 * m, rng);
+  } else if (layout_ == LINE) {
+    float rows = LINE_HEIGHT * size.y;
+    float half_ = 0.5 * min(size.x, max(1.0, ceil(float(P.grid.z) / (LINE_FILL * rows))));
+    float dx = (2.0 * rand(rng) - 1.0) * half_;
+    float dy = (rand(rng) - 0.5) * rows;
+    p = center + vec2(dx, dy);
   } else if (round == 0u && P.cfg.w != 0u && P.grid.z <= P.grid.x * P.grid.y) {
     uint c = uniqueCell(i, P.grid.x * P.grid.y);
     p = inCell(cellCoord(int(c)), vec2(rand(rng), rand(rng)));

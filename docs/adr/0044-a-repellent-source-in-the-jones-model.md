@@ -5,6 +5,7 @@
 - Date: 2026-11-15
 - Extends [ADR 0022](0022-jones-and-extended-model.md) (the Jones and the extended model): it replaces decision 8 and
   the list item "Light that releases a repellent scent" of "Not Jones".
+- Extended by ADR 0047 (the Electrode tool: a source above and one below 0 at ±255).
 
 ## Context
 

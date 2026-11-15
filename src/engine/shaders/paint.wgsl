@@ -1,11 +1,11 @@
-// Brush strokes on the environment (walls, food, light). Prepended with common.wgsl.
+// Brush strokes on the environment (walls, food, light, electrodes). Prepended with common.wgsl.
 
 struct Brush {
   a: vec2f,      // segment start (cells), inside the grid on the periodic grid (brush.ts paintSegments)
   b: vec2f,      // segment end (cells)
   origin: vec2i, // first cell of the paint box (brush.ts paintBox; on the periodic grid it wraps)
   radius: f32,
-  kind: u32,     // 0 erase, 1 wall, 2 food, 3 light
+  kind: u32,     // 0 erase, 1 wall, 2 food, 3 light, 4 anode, 5 cathode
   reach: vec2i,  // first cell of the outline box: the paint box grown by SHAPE_RANGE (sim.ts paint())
   extent: vec2u, // the size of the outline box in cells
 }
@@ -74,6 +74,10 @@ fn paint(@builtin(global_invocation_id) gid: vec3u) {
     case 0u: { e = vec4f(0.0); }
     case 1u: { e = vec4f(1.0, 0.0, 0.0, 0.0); }
     case 2u: { e.y = 1.0; }
+    // The poles of the Electrode tool (ADR 0047) share the fourth byte: 128 the anode, 255 the cathode (POLE_BYTE in
+    // types.ts). A pole replaces the other pole of the cell, and leaves its food and light.
+    case 4u: { e.w = 128.0 / 255.0; }
+    case 5u: { e.w = 1.0; }
     // Soft edge, so the repellent has a gradient from the start.
     default: { e.z = max(e.z, lightEdge(d, B.radius)); }
   }

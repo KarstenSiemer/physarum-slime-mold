@@ -1363,7 +1363,7 @@ describe('a shared link', () => {
 
   it("paints the sender's bytes on the sender's grid and the sender's list on other grids", async () => {
     const r = random(11);
-    const kinds = ['food', 'light', 'wall', 'erase'] as const;
+    const kinds = ['food', 'light', 'wall', 'erase', 'anode', 'cathode'] as const;
     for (let trial = 0; trial < 4; trial++) {
       const c = canvas();
       const sender = await engineWith(maze.settings(), mazeEnv, c);

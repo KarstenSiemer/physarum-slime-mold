@@ -5,7 +5,7 @@ import type { AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { NO_SITES, type FlowSites } from './sites';
 import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
-import type { Backend, Sim, Stroke } from './types';
+import { isPole, type Backend, type Sim, type Stroke } from './types';
 
 export class CpuSim implements Sim {
   step = 0;
@@ -13,6 +13,7 @@ export class CpuSim implements Sim {
   readonly env: Uint8Array;
   /** As on both GPU backends: false until something other than the eraser is painted after the last clear. */
   hasEnvironment = false;
+  hasElectrodes = false;
   /** Calls in order, to check that the environment is painted before the agents are placed. */
   readonly calls: string[] = [];
 
@@ -44,6 +45,7 @@ export class CpuSim implements Sim {
     for (const s of strokes) {
       this.calls.push('paint');
       if (s.kind !== 'erase') this.hasEnvironment = true;
+      if (isPole(s.kind)) this.hasElectrodes = true;
       paintReference(this.env, this.width, this.height, s, this.settings.boundary);
     }
   }
@@ -52,6 +54,7 @@ export class CpuSim implements Sim {
     this.calls.push('clear');
     this.env.fill(0);
     this.hasEnvironment = false;
+    this.hasElectrodes = false;
   }
   /** The food sites of the last call, for the tests of the engine (ADR 0029, decision 17). */
   sites: FlowSites = NO_SITES;
@@ -137,7 +140,8 @@ export class CpuSim implements Sim {
   writeEnv(data: Uint8Array) {
     this.revision++;
     this.env.set(data);
-    this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
+    this.hasEnvironment = data.some((v) => v > 0);
+    this.hasElectrodes = data.some((v, i) => i % 4 === 3 && v > 0);
   }
 }
 

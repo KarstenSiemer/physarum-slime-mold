@@ -338,6 +338,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       occ !== undefined,
       l.strand,
       streamStep,
+      sim.hasElectrodes,
     );
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
@@ -414,6 +415,8 @@ export class WebGl2Backend implements Backend<GlSim> {
       trailLevels,
       // Without the picture of the tubes no frame reads the stream: the trail stands in.
       stream: stream ?? trail,
+      // The cells of the simulation, for the electrodes (ADR 0047): only the program with ENV reads them.
+      env: sim.envTexture,
     };
     const scentLevels = coarse?.texture ?? viewScent;
     textures(gl, p.program, scent ? { ...all, scent: viewScent, scentLevels } : all);

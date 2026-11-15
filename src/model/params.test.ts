@@ -706,9 +706,9 @@ describe('the reach of the scent (ADR 0036)', () => {
 describe('the mean window (ADR 0046)', () => {
   const network = () => presetById('network')?.settings() ?? defaultSettings();
 
-  it('is 3 × 3 by default and in every scene', () => {
+  it('is 3 × 3 by default and in every scene but Electrotaxis, which has the 15 × 15 of its paper (ADR 0047)', () => {
     expect(defaultSettings().meanWindow).toBe(MEAN_WINDOW);
-    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(3);
+    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(p.id === 'electrotaxis' ? 15 : 3);
   });
 
   it('is 3 × 3 for a link from before the setting, and an odd side from 3 to 15 otherwise', () => {
