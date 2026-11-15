@@ -13,11 +13,12 @@ import { maskOfText, veins } from './measure.ts';
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const label = process.argv[2] ?? 'coarsen-webgpu';
 const dir = process.argv[3] ?? join(HERE, 'out', 'masks');
-const name = new RegExp(`^${label}-so(\\d+)-s(\\d+)-(\\d+)\\.b64$`);
+// A fixed pattern, and the label compared as text: the label comes from the command line.
+const name = /^(.+)-so(\d+)-s(\d+)-(\d+)\.b64$/;
 const files = readdirSync(dir)
   .map((f) => ({ f, m: name.exec(f) }))
-  .filter((x) => x.m)
-  .map(({ f, m }) => ({ f, so: Number(m?.[1]), seed: Number(m?.[2]), step: Number(m?.[3]) }))
+  .filter((x) => x.m?.[1] === label)
+  .map(({ f, m }) => ({ f, so: Number(m?.[2]), seed: Number(m?.[3]), step: Number(m?.[4]) }))
   .sort((a, b) => a.so - b.so || a.seed - b.seed || a.step - b.step);
 const round = (v: number) => Math.round(v * 100) / 100;
 const lines: string[] = [];
