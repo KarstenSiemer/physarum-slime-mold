@@ -1,12 +1,18 @@
-// What each rule of ADR 0029 does for the pressure: two small scenes on the CPU copy of the passes, with single rules
-// switched off (rules.ts).
+// What each rule of ADR 0029 does for the pressure: small scenes on the CPU copy of the passes, with single rules
+// switched off (rules.ts), and the radius of the momentum (decision 18).
 //
 // - scene=grow (decision 6): a mesh of tubes grows from one food over three more foods, as the colony of the Tokyo
 //   scene does, and its margin flickers. Prints the largest pressure on the cells with a tube.
 // - scene=isolated (decision 3): four foods with tubes, one of them not joined to the others, and a first food of the
 //   list that no tube covers. Prints the mean pressure of the network and the flux against the run as built.
+// - scene=mesh (decision 18): the growing mesh of the unit test "stays bounded while a mesh of tubes grows over the
+//   foods and flickers" (src/engine/flow.test.ts), as built, for several radii and to step 600. Prints the largest
+//   pressure on the grid in every 50 steps.
 //
 // Usage: node --import ./research/flow/register.mjs research/flow/bounded.ts [scene=grow] [steps=600] [i0=1]
+// `radius=0.999999`: the momentum of the pressure iteration tuned for this spectral radius, in place of the app's
+// (FLOW.radius; ADR 0029, decision 18). The check against the app's copy of the passes holds for any radius: both read
+// it from the uniform block. `radii=0.99999,0.999999`: the radii of the scene mesh.
 import { FLOW, packFlow } from '../../src/engine/flow.ts';
 import { flowFlux, flowStart, flowStep, type FlowFields, type FlowGrid } from '../../src/engine/flow-reference.ts';
 import { flowSites } from '../../src/engine/sites.ts';
@@ -16,6 +22,14 @@ import { AS_BUILT, step as ruleStep, type Rules } from './rules.ts';
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
 const scene = args.scene ?? 'grow';
 const SEED = 1;
+const RADIUS = Number(args.radius ?? FLOW.radius);
+
+/** The uniform block of the passes (flow.ts packFlow()), with the omega of a radius as a 32-bit float. */
+function block(radius: number, ...a: Parameters<typeof packFlow>): Float32Array {
+  const u = new Float32Array(packFlow(...a));
+  u[7] = 2 / (1 + Math.sqrt(1 - radius * radius));
+  return u;
+}
 
 /**
  * The food sites of the record: the cell at each centre, a site of one cell. rules.ts has the rule of the record, in
@@ -57,7 +71,7 @@ if (scene === 'grow') {
   const grid: FlowGrid = { width: n, height: n, boundary: 'box', env };
   const settings = { ...defaultSettings(), flowStrength: i0, seed: SEED };
   const sites = cellSites(foods, n, n);
-  const u = new Float32Array(packFlow(settings, sites));
+  const u = block(RADIUS, settings, sites);
   /** The trail of each step: a disc that grows by a tenth of a cell per step, with tubes 6 cells apart; 5 % of its
    *  cells flip in each step. The same for every run. */
   const trails = (() => {
@@ -90,7 +104,9 @@ if (scene === 'grow') {
     ],
   ];
   const SHOW = [50, 100, 150, 200, 300, 400, 500, 600];
-  console.log(`scene grow: ${n} × ${n} cells, 4 foods, flux ${i0}; the largest pressure on the cells with a tube`);
+  console.log(
+    `scene grow: ${n} × ${n} cells, 4 foods, flux ${i0}, radius ${RADIUS}; the largest pressure on the cells with a tube`,
+  );
   console.log(
     `${'rule'.padEnd(48)}${SHOW.filter((s) => s <= steps)
       .map((s) => `step ${s}`.padStart(11))
@@ -154,7 +170,7 @@ if (scene === 'grow') {
   const settings = { ...defaultSettings(), flowStrength: i0, seed: SEED };
   const centres = [X!, A!, B!, C!, D!].map(([x, y]): [number, number] => [x + 0.5, y + 0.5]);
   const sites = cellSites(centres, w, h);
-  const u = new Float32Array(packFlow(settings, sites));
+  const u = block(RADIUS, settings, sites);
   const trail = new Float32Array(w * h * 4);
   for (let c = 0; c < w * h; c++) trail[c * 4] = tube[c] ? 5 : 0;
   const start = () => {
@@ -164,7 +180,9 @@ if (scene === 'grow') {
   };
   const old: Rules = { ...AS_BUILT, referenceGivesOrTakes: false };
   let [built, first, reference] = [start(), start(), start()];
-  console.log(`scene isolated: ${w} × ${h} cells, flux ${i0}; the first food of the list lies under a wall`);
+  console.log(
+    `scene isolated: ${w} × ${h} cells, flux ${i0}, radius ${RADIUS}; the first food of the list lies under a wall`,
+  );
   for (let s = 0; s < steps; s++) {
     built = ruleStep(grid, u, built, trail, s, SEED, AS_BUILT);
     first = ruleStep(grid, u, first, trail, s, SEED, old);
@@ -191,7 +209,62 @@ if (scene === 'grow') {
     });
     console.log(`step ${String(s + 1).padStart(5)}: ${line2.join(' | ')}`);
   }
+} else if (scene === 'mesh') {
+  // The case of the unit test, with its numbers: a disc of tubes 6 cells apart grows by a quarter of a cell per step
+  // from the first of four foods of 3 × 3 cells over the others, and 5 % of its cells flip in each step. It fills the
+  // grid at about step 100; from then on only the flicker changes the network.
+  const n = 40;
+  const steps = Number(args.steps ?? 600);
+  const i0 = Number(args.i0 ?? 1);
+  const radii = (args.radii ?? `${FLOW.radius},0.999999`).split(',').map(Number);
+  const env = new Uint8Array(n * n * 4);
+  const foods: [number, number][] = [
+    [20.5, 20.5],
+    [5.5, 20.5],
+    [32.5, 29.5],
+    [23.5, 2.5],
+  ];
+  for (const [x, y] of foods)
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) env[((Math.floor(y) + dy) * n + Math.floor(x) + dx) * 4 + 1] = 255;
+  const grid: FlowGrid = { width: n, height: n, boundary: 'box', env };
+  const settings = { ...defaultSettings(), flowStrength: i0, seed: SEED };
+  const sites = flowSites(
+    foods.map((at) => [{ kind: 'food' as const, from: at, to: at, radius: 1.5 }]),
+    n,
+    n,
+    'box',
+  );
+  console.log(
+    `scene mesh: ${n} × ${n} cells, 4 foods, flux ${i0}, as built; the largest pressure on the grid in each 50 steps`,
+  );
+  for (const radius of radii) {
+    const u = block(radius, settings, sites);
+    let fields = flowStart(grid, FLOW.fresh);
+    let rng = 12345;
+    let top = 0;
+    const row: string[] = [];
+    for (let s = 0; s < steps; s++) {
+      const r = 3 + s * 0.25;
+      const trail = new Float32Array(n * n * 4);
+      for (let y = 0; y < n; y++)
+        for (let x = 0; x < n; x++) {
+          if (Math.hypot(x - 20, y - 20) > r) continue;
+          let tube = x % 6 === 2 || y % 6 === 2;
+          rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0;
+          if (rng / 2 ** 32 < 0.05) tube = !tube;
+          if (tube) trail[(y * n + x) * 4] = 10;
+        }
+      fields = flowStep(grid, u, fields, trail, s, SEED, sites.cells);
+      top = fields.pressure.reduce((a, v) => Math.max(a, Math.abs(v)), top);
+      if ((s + 1) % 50 !== 0) continue;
+      row.push((top < 1e5 ? top.toFixed(0) : top.toExponential(1)).padStart(8));
+      top = 0;
+    }
+    console.log(`radius ${String(radius).padEnd(9)}${row.join('')}`);
+  }
+  console.log(`the pressure limit of a site is ${FLOW.head * i0}`);
 } else {
-  console.error('Scenes: grow, isolated');
+  console.error('Scenes: grow, isolated, mesh');
   process.exit(1);
 }

@@ -77,8 +77,12 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   at step 24,000: TL 1.93, 2.04 and 1.77, MD 0.83, 0.83 and 0.91 (2 seeds before: TL 1.72 and 1.91, MD 0.82 and 0.83).
 - **Limits**:
   - The flow strength was chosen from 1, 1.4 and 2 because 1.4 gives the organism's TL (ADR 0029, decision 12). So
-    TL is fitted. MD and FT were not fitted. The choice was made with the food sites before decision 17; with them TL
-    is 1.89 at step 48,000, still within the organism's spread, and decision 18 measures the strengths again.
+    TL is fitted. MD and FT were not fitted. The choice was made with the food sites before decision 17. Measured again
+    with them (ADR 0029, amendment 2026-11-15, 10 seeds each): at step 48,000 the flux 1 gives TL 1.69, MD 0.82 and FT
+    0.87, and 1.4 gives 1.89, 0.84 and 0.91, both within one standard deviation of the organism in every measure. 1 is
+    a little nearer in TL, but not by more than two sets of ten seeds differ, and it leaves a food source without a tube
+    in 9 of 80 samples (1.4: 2). The scene keeps 1.4. The radius of the pressure solver was measured on the same day
+    and stays.
   - The positions of the cities are fitted to the figures (ADR 0024). The network is the trail above 1.5, thinned to
     lines. That threshold is this app's, and nobody measured how the numbers depend on it.
   - Only the protocol without light is built. The second protocol of the paper (a sheet first, then all foods) ran
@@ -280,7 +284,10 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   covers give or take at once, in the flow of that strain, where Tero et al. 2010 draw one pair per step. So the flow
   is this app's rule, built from Tero's model, and its strength has this app's unit (ADR 0029, Consequences).
 - The local pressure solver is off the exact flux: 3 to 7 % per cell in a settled network, 9 to 25 % after a new draw
-  of roles, and far off while the colony grows fast (ADR 0029, decision 6).
+  of roles, and far off while the colony grows fast (ADR 0029, decision 6). With the food sites of decision 17: 2 to
+  10 % from 200 steps after a draw on, 10 to 31 % 100 to 175 steps after it, and about half in the first 50 steps
+  (amendment 2026-11-15). A larger radius of its momentum settles a fixed network sooner, but lets the errors of a
+  growing colony run off, so the radius stays (same amendment).
 - The front of the growth is not a fan of fine veins (row 6).
 - Light is this app's repellent, not the light of Jones' papers (row 13). Dryness is not modelled.
 - Two strains never fuse: no flux passes between strains (row 20; [ADR 0031](adr/0031-a-flow-for-every-strain.md),

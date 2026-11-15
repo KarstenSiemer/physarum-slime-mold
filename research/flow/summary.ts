@@ -8,6 +8,9 @@
 // - engine-tokyo-end <file>...           the same lines: the samples with all food sources joined, mean and deviation
 // - compare <folder> <folder>            the logs of the same name in two folders, row by row: a rerun against the record
 // - digests <file> <file>                the lines of engine/digest.gpu.test.ts of two checkouts, scene by scene
+// - exact-flux <file>...                 the lines of engine/exact-flux.ts: per run without the seed and per step, the
+//                                        median over the seeds of the median over the fields, with the least and
+//                                        the most of the seeds
 import { readdirSync, readFileSync } from 'node:fs';
 
 const [table = '', ...rest] = process.argv.slice(2);
@@ -325,6 +328,64 @@ function engineTokyoEnd(files: string[]) {
   }
 }
 
+/**
+ * The lines of exact-flux.ts (ADR 0029, decisions 6 and 18): by run and step, over seeds and fields. A run is the name
+ * of a dump without its seed; the radius of the dumps of decision 18 is in their name, `r5` for 0.99999 and `r6` for
+ * 0.999999, and a dump made for the table of decision 18 alone has `-p` or `-g` before its seed.
+ */
+function exactFlux(files: string[]) {
+  interface Field {
+    sum: number;
+    error: number;
+    top: number;
+    tubes: number;
+    fed: number;
+  }
+  const pattern =
+    /^(\S+) step (\d+) lane \d: \d+ sites, (\d+) tube cells, .*\((\d+) %\) \| sum of \|difference\| \d+ % \| cells with exact flux above 5 % of I0: \d+, error median (\d+) %, 90th percentile \d+ %(?: \| local pressure on the tubes from (\S+) to (\S+))?(?: \| tube cells with a flow memory above 0\.5: (\d+))?/;
+  const rows = new Map<string, Map<number, Map<string, Field[]>>>();
+  for (const line of files.flatMap((f) => textOf(f).split('\n'))) {
+    const m = pattern.exec(line);
+    if (!m) continue;
+    const name = m[1]!;
+    const run = name
+      .replace(/-(?:[pg]-)?s\d+$/, '')
+      .replace(/-r5$/, '-r0.99999')
+      .replace(/-r6$/, '-r0.999999');
+    const steps = rows.get(run) ?? new Map<number, Map<string, Field[]>>();
+    rows.set(run, steps);
+    const seeds = steps.get(Number(m[2])) ?? new Map<string, Field[]>();
+    steps.set(Number(m[2]), seeds);
+    const fields = seeds.get(name) ?? [];
+    seeds.set(name, fields);
+    fields.push({
+      tubes: Number(m[3]),
+      sum: Number(m[4]),
+      error: Number(m[5]),
+      top: m[6] === undefined ? NaN : Math.max(Math.abs(Number(m[6])), Math.abs(Number(m[7]))),
+      fed: m[8] === undefined ? NaN : Number(m[8]),
+    });
+  }
+  for (const [run, steps] of [...rows].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    console.log(`== ${run}`);
+    for (const [step, seeds] of [...steps].sort(([a], [b]) => a - b)) {
+      const all = [...seeds.values()];
+      const per = (key: keyof Field, of: (v: number[]) => number) => all.map((fields) => of(fields.map((f) => f[key])));
+      const spread = (key: keyof Field, of: (v: number[]) => number, digits: number) => {
+        const v = per(key, of).filter((x) => !Number.isNaN(x));
+        return v.length === 0
+          ? '-'
+          : `${median(v).toFixed(digits)} (${Math.min(...v).toFixed(digits)} to ${Math.max(...v).toFixed(digits)})`;
+      };
+      const share = per('fed', (v) => v[0] ?? NaN).map((fed, i) => fed / (all[i]?.[0]?.tubes ?? NaN));
+      const shares = share.filter((x) => !Number.isNaN(x));
+      console.log(
+        `  step ${String(step).padStart(5)}: ${all.length} seeds | sum of the flux, local over exact ${spread('sum', median, 0)} % | error per cell, median ${spread('error', median, 0)} % | largest pressure on a tube ${spread('top', (v) => Math.max(...v), 0)} | tube cells with a flow memory above 0.5 ${shares.length === 0 ? '-' : `${(100 * median(shares)).toFixed(1)} % (${(100 * Math.min(...shares)).toFixed(1)} to ${(100 * Math.max(...shares)).toFixed(1)})`}`,
+      );
+    }
+  }
+}
+
 /** The rows of a log without what differs from run to run: the run time `s`. */
 const rowsOf = (file: string) =>
   jsonl(file)
@@ -390,6 +451,7 @@ const USAGE: Record<string, [least: number, what: string]> = {
   'engine-tokyo-end': [1, '<file>...'],
   compare: [2, '<folder of the rerun> <folder of the record>'],
   digests: [2, '<file> <file>'],
+  'exact-flux': [1, '<file>...'],
 };
 const usage = USAGE[table];
 if (!usage) {
@@ -406,4 +468,5 @@ else if (table === 'engine-maze') engineMaze(rest);
 else if (table === 'engine-tokyo') engineTokyo(rest);
 else if (table === 'engine-tokyo-end') engineTokyoEnd(rest);
 else if (table === 'compare') compare(rest[0] ?? '', rest[1] ?? '');
+else if (table === 'exact-flux') exactFlux(rest);
 else digests(rest[0] ?? '', rest[1] ?? '');

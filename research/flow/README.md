@@ -67,7 +67,7 @@ code. Most numbers held bit for bit. Five things did not, and the ADR now says s
 
 - The local solver has one tuning number, the radius. It was tuned for a form of the rule that
   the app does not use. With the form of the app another value is about three times as fast on a
-  fixed network. The app keeps its value for now: this is an open point.
+  fixed network. The app kept its value as an open point; part 12 measured it (below).
 - One table held numbers from states of the prototype that no file kept. It is measured again.
 - In one campaign, 7 of 60 runs had used an older state of the code. The campaign ran again, and
   one entry of one table changed.
@@ -119,17 +119,32 @@ cell of the flux looked at the cells of a site one after the other: a large food
 covers cost 128 ms per step. Now the pass looks at blocks of 64 cells side by side, and its cost
 is below the noise of the measurement. With the flow off, every scene keeps its bytes.
 
+**The radius of the solver** ([ADR 0029](../../docs/adr/0029-flow-in-the-tubes.md), amendment
+2026-11-15, part 12). The local solver has one number to tune, the radius of its momentum. A larger
+radius lets the smooth patterns of the pressure settle sooner, those that carry the flux between far
+foods, and lets every other pattern swing longer. On a network that holds still, the candidate
+0.999999 settles two to three times as fast as 0.99999. But while the colony of the Tokyo scene
+grows, cells join its network in every step, and their errors then swing three times as long and add
+up: the flux of the solver ran to hundreds of times the right one, and about half of the tubes got a
+flow memory at which dead agents come to life: in part the fault of step 4. Radii between gave less
+of both, and already the smallest of them, 0.999993, raised the flow memory of hundreds of tube
+cells in four of five seeds, where 0.99999 raised almost none. In the Maze even 0.999999 did not
+empty the dead ends sooner. So the app keeps 0.99999. The flux of the Tokyo scene had been chosen
+with this radius and the sites of before: measured again with the sites of decision 17, a flux of 1
+gives a network a little nearer to the organism's length, but not by more than two sets of seeds
+differ, and it leaves a food source without a tube more often. The scene keeps its flux of 1.4.
+
 ## What is in this folder, and what you need to read
 
 | Part                                               | Size        | Read it?                                                |
 | -------------------------------------------------- | ----------- | ------------------------------------------------------- |
 | This page, up to here                              | 1 page      | yes: it is the whole story                              |
 | The ADR, section "The solvers and the mathematics" | 300 lines   | if you want the formulas                                |
-| The rest of this page                              | 600 lines   | only to run a step again: it is a list of commands      |
+| The rest of this page                              | 1,150 lines | only to run a step again: it is a list of commands      |
 | `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
-| `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 1,400 lines | no: the scripts that made the other numbers of the ADR  |
-| `logs.tar.gz`                                      | 0.4 MB      | never: the raw output of the runs, which a script reads |
-| `summary.ts`                                       | 400 lines   | no: it makes the tables of the ADR from the logs        |
+| `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 3,200 lines | no: the scripts that made the other numbers of the ADR  |
+| `logs.tar.gz`                                      | 0.5 MB      | never: the raw output of the runs, which a script reads |
+| `summary.ts`                                       | 470 lines   | no: it makes the tables of the ADR from the logs        |
 | `research.test.ts`                                 | 300 lines   | no: it checks that the scripts still give the same rows |
 
 The app does not load this folder, and the build does not hold it.
@@ -364,8 +379,9 @@ The two rules for the foods differ much. With fixed pressures at the two foods (
 the shape of the flux field has to settle. With a fixed flux, the rule of the app (`solvers.ts`),
 the height of the pressure has to build up too, and that takes longer. The radius 0.99999 of the
 app was chosen with fixed pressures. With a fixed flux the radius 0.999999 is about three times
-as fast on this network. The app keeps 0.99999, because every result is measured with it. This is
-an open point of the ADR (decision 3 and the Consequences).
+as fast on this network. The app kept 0.99999, because every result was measured with it, and
+the ADR had it as an open point (decision 3 and the Consequences). Part 12 measured it on
+2026-11-15: the app keeps 0.99999.
 
 ### 4. Does the solver change what the agents build? [(a) The Maze, (b) A layout like Tokyo]
 
@@ -690,11 +706,12 @@ You must see 24, 71 and 5 tests pass (27 and 47 before the food sites of part 11
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
-A test is worth what it catches. This script puts 83 wrong rules of the flow and of its food sites
-into the code of the app, one at a time, and runs the tests of the flow for each one (45 minutes;
-the 42 of the food sites are part 11). Without a name it also runs the 73 wrong rules of the picture
-of the tubes (part 10), and the 8 wrong rules of an agent under a painted wall (ADR 0038, `U1` to
-`U8`) against the tests of the agents in `sim.gpu.test.ts`:
+A test is worth what it catches. This script puts 87 wrong rules of the flow, of its food sites and
+of its radius into the code of the app, one at a time, and runs the tests of the flow for each one
+(about 50 minutes; the 42 of the food sites are part 11, the 4 of the radius part 12). Without a
+name it also runs the 73 wrong rules of the picture of the tubes (part 10), and the 8 wrong rules of
+an agent under a painted wall (ADR 0038, `U1` to `U8`) against the tests of the agents in
+`sim.gpu.test.ts`:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -703,7 +720,8 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
 It changes files below `src/` while it runs and writes each one back as it was. You must see a
 test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
 `logs/engine/mutations-0031.txt` for 39 of them, and `logs/engine/scenes-mutations.txt` for the
-two of ADR 0032, and `logs/engine/sites-mutations*.txt` for all 83 with the food sites (part 11);
+two of ADR 0032, `logs/engine/sites-mutations*.txt` for all 83 with the food sites (part 11), and
+`logs/engine/radius/mutations.txt` for the 4 of the radius (part 12);
 `logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests of ADR 0029. ADR
 0029 and ADR 0031 have their rules as a table.
 
@@ -1069,9 +1087,137 @@ On the Tokyo map the network keeps the measures of the organism, a little longer
 and all 36 food sources are joined in 78 of 80 samples. The passes of the ports cost less than
 the noise of the bench, also for a food of 250,000 cells that no tube covers.
 
+### 12. Which radius for the momentum? [ADR 0029, amendment 2026-11-15]
+
+The radius on fixed networks. The Maze network of part 3 with the rule of the app, for seven radii
+(3 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/solvers.ts radii=0.9999,0.999993,0.999995,0.999997,0.999998,0.999999 plain=1
+```
+
+You must see the error at step 1,000 fall from 6.7 % (0.99999, the app) to 4.1, 2.4, 0.8, 0.3 and
+0.0 %, and 37.2 % for 0.9999. The record is `logs/engine/radius/solvers.txt`.
+
+The real engine takes another radius from `VITE_RADIUS`, in `engine/dump.gpu.test.ts`; each line of
+the log of a dump names it. Names: `r5` is 0.99999 and `r6` is 0.999999; the other runs name their
+radius in full. The dumps of seed 1 with the pressure, for the flux 1.4 and 2 (1 minute each):
+
+```bash
+for i0 in 1.4 2; do for t in 5:0.99999 6:0.999999; do VITE_SCENE=tokyo VITE_I0=$i0 VITE_SEED=1 VITE_RADIUS=${t#*:} VITE_STEPS=250,500,1000,2000,4000,8000,12000 VITE_DUMP_P=1 VITE_NAME=g18-tk-i$i0-r${t%%:*}-p-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+```bash
+for i0 in 1.4 2; do for r in 0.999993 0.999995 0.999997 0.999998; do VITE_SCENE=tokyo VITE_I0=$i0 VITE_SEED=1 VITE_RADIUS=$r VITE_STEPS=250,500,1000,2000,4000,8000 VITE_DUMP_P=1 VITE_NAME=g18-tk-i$i0-r$r-p-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+The growth of the Tokyo scene with seeds 2 to 5 (30 s each):
+
+```bash
+for seed in 2 3 4 5; do for r in 0.99999 0.999993 0.999995 0.999997 0.999999; do VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_RADIUS=$r VITE_STEPS=250,500,1000,2000 VITE_DUMP_P=1 VITE_NAME=g18-tk-i1.4-r$r-g-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+The local flux against the exact one on each dump (2 to 4 minutes each; four can run at once).
+`exact-flux.ts` now also prints the range of the pressure on the tubes and the count of the tube
+cells with a flow memory above 0.5. For a dump of seed 1:
+
+```bash
+LANES=0,1,2,3 node --import ./research/flow/register.mjs research/flow/engine/exact-flux.ts g18-tk-i1.4-r5-p-s1 512 512 1.4 250 500 1000 2000 4000 8000 12000 >> research/flow/out/radius-exact-flux.txt
+```
+
+and the same for every other dump, with its flux and its steps. The table of all dumps:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts exact-flux research/flow/logs/engine/radius/exact-flux.txt
+```
+
+It prints one block per flux and radius, and one line per step: the median over the seeds of the
+median over the four fields, with the least and the most of the seeds. You must see, for
+`g18-tk-i1.4-r0.99999` at step 250, `tube cells with a flow memory above 0.5 0.0 % (0.0 to 0.1)`,
+and for `g18-tk-i1.4-r0.999999` at step 500 `46.7 % (39.5 to 50.6)`.
+
+The iteration on the fixed network of the dump of step 8,000, from a pressure of 0 and after a new
+draw of the roles, for four radii (40 minutes; the record is `logs/engine/radius/tokyo-8000.txt`):
+
+```bash
+RADII=0.99999,0.999993,0.999995,0.999999 node --import ./research/flow/register.mjs research/flow/engine/radius.ts g18-tk-i1.4-r5-p-s1 8000 1.4 1
+```
+
+The tests of the bounded pressure (decision 6) with each radius, on the CPU copy of the passes (2
+minutes each; the record is `logs/engine/radius/bounded.txt`):
+
+```bash
+for r in 0.99999 0.999993 0.999995 0.999997 0.999998 0.999999; do node --import ./research/flow/register.mjs research/flow/bounded.ts scene=grow radius=$r; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/bounded.ts scene=mesh radii=0.99999,0.999993,0.999995,0.999997,0.999998,0.999999
+```
+
+`scene=mesh` is the growing mesh of the unit test in `src/engine/flow.test.ts`, to step 600. The GPU
+tests with another radius: write it into `FLOW.radius` in `src/engine/flow.ts`, run
+`npx vitest run --project gpu src/engine/flow.gpu.test.ts`, and put the file back. The wrong rules
+M1 to M4 of `mutate.ts` do this for 0.999999, 0.999998 and 0.999997:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts M1 M2 M3 M4
+```
+
+You must see a test that fails for each of them: the unit test of the mesh for M1 and M2, and the GPU
+test of the pressure limit for M3 and M4. The record is `logs/engine/radius/mutations.txt`.
+
+The campaigns of part 6 with the radius in the name. The Maze, 10 seeds, both radii (about 1 minute
+each):
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do for t in 5:0.99999 6:0.999999; do VITE_KIND=webgpu VITE_SCENE=maze VITE_FLOW=1 VITE_I0=8 VITE_SEED=$seed VITE_RADIUS=${t#*:} VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000 VITE_NAME=g18-mz-webgpu-i8-r${t%%:*}-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g18-mz-webgpu-i8-r${t%%:*}-s$seed >> research/flow/out/maze-webgpu-flux8-r${t%%:*}.txt; done; done
+```
+
+The Tokyo scene, 10 seeds: the radius of the app with the fluxes 1 and 2, and 0.999999 with the
+flux 1.4 (4 to 6 minutes each; two can run at a time):
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do for i0 in 1 2; do VITE_SCENE=tokyo VITE_I0=$i0 VITE_SEED=$seed VITE_RADIUS=0.99999 VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g18-tk-i$i0-r5-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g18-tk-i$i0-r5-s$seed 1.5 99999 >> research/flow/out/tokyo-flux$i0-r5.txt; done; done
+```
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_RADIUS=0.999999 VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g18-tk-i1.4-r6-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g18-tk-i1.4-r6-s$seed 1.5 99999 >> research/flow/out/tokyo-flux1.4-r6.txt; done
+```
+
+The runs with 0.99999 and the flux 1.4 are those of part 11 (`logs/engine/tokyo-flux1.4-sites.txt`):
+`main` gives their lines again, seed 1 to step 48,000 is
+`logs/engine/radius/tokyo-flux1.4-r5-s1.txt`. The tables:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/logs/engine/radius/maze-webgpu-flux8-r5.txt research/flow/logs/engine/radius/maze-webgpu-flux8-r6.txt
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo-end research/flow/logs/engine/radius/tokyo-flux1-r5.txt research/flow/logs/engine/tokyo-flux1.4-sites.txt research/flow/logs/engine/radius/tokyo-flux2-r5.txt research/flow/logs/engine/radius/tokyo-flux1.4-r6.txt
+```
+
+On WebGL2, with no WebGPU run on the GPU: the GPU tests as above, and the growth of seed 1 with both
+radii (2 minutes each), then `exact-flux.ts` on both dumps as above:
+
+```bash
+for t in 5:0.99999 6:0.999999; do VITE_KIND=webgl2 VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=1 VITE_RADIUS=${t#*:} VITE_STEPS=250,500,1000,2000 VITE_DUMP_P=1 VITE_NAME=g18-tkgl-i1.4-r${t%%:*}-g-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done
+```
+
+The record of the GPU tests with each radius is `logs/engine/radius/gpu-tests.txt`; the lines of
+`exact-flux.ts` on the WebGL2 dumps are in `logs/engine/radius/exact-flux.txt`, under the names
+`g18-tkgl-…`.
+
+Result: a larger radius settles a network that holds still sooner, and lets the errors of a growing
+colony swing longer. Every radius above 0.99999 gives the growing Tokyo colony tube cells with a
+flow memory at which dead agents come to life, where 0.99999 gives almost none, and 0.999999 lets
+the pressure run far off and fails two tests of decision 6. The Maze does not get its result sooner
+with 0.999999. So the app keeps 0.99999. The Tokyo scene keeps its flux of 1.4: with the sites of
+decision 17 the flux 1 is a little shorter and nearer to the organism, within the spread of two sets
+of seeds, and it loses a food source more often.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 182 files, 2.0 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 194 files, 2.4 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1092,6 +1238,7 @@ asks for the new digest.
 | `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0032                                                                                       | 2026-11-13, M3 Pro                                    |
 | `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, and its 73 wrong rules                                                    | 2026-11-13, M3 Pro                                    |
 | `logs/engine/*sites*`, `*-main*`                     | the runs of part 11: the campaigns, the scenes of ADR 0032, the time of a step and of the passes of the ports, the digests, the wrong rules, and the same runs of `main` on the same evening                                    | 2026-11-14, M3 Pro, `main` at `5195079`               |
+| `logs/engine/radius/`                                | the runs of part 12: the radii on fixed networks, the tests of the bounded pressure, the local flux against the exact one on the dumps, the campaigns, the GPU tests and the wrong rules of the radius                          | 2026-11-15, M3 Pro, `main` at `3f579ff`               |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1136,13 +1283,14 @@ Notes on the record:
 | `prototype/*.ts` (others) | one script per measurement; each says at its top what it measures                                 |
 | `data/tokyo_scene.json`   | the map of the prototype: stations from Wikidata (CC0), coast © OpenStreetMap contributors (ODbL) |
 | `solvers.ts`              | the solvers on one network with the rule of the app (2026-11-13)                                  |
-| `rules.ts`, `bounded.ts`  | the passes with single rules as switches, and two scenes for them (2026-11-13)                    |
+| `rules.ts`, `bounded.ts`  | the passes with single rules as switches, and three scenes for them (2026-11-13, 2026-11-15)      |
 | `sites.ts`                | the food sites of the scenes, and the time of the sites on the CPU (2026-11-14)                   |
 | `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step and of a frame, digests, the strains           |
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 164 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
+| `engine/mutate.ts`        | 168 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |
