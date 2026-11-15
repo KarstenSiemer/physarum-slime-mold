@@ -305,6 +305,14 @@
               {#if details[p.id]}
                 <div class="details" id="details-{p.id}">
                   {#if p.watch}<p><strong>What to watch:</strong> {p.watch}</p>{/if}
+                  {#if p.figure}
+                    <p>
+                      <strong>The result in the paper:</strong>
+                      <a href={p.figure.href} target="_blank" rel="noreferrer"
+                        >{p.figure.label}<span class="sr-only"> (opens in a new tab)</span></a
+                      >, {p.figure.note}.
+                    </p>
+                  {/if}
                   <p>{p.about}</p>
                   <ul class="strains" aria-label="Strains">
                     {#each sceneStrains.get(p.id) ?? [] as st, i (i)}

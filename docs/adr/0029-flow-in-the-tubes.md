@@ -11,6 +11,9 @@
 - Changed by [ADR 0031](0031-a-flow-for-every-strain.md) (2026-11-13): every strain has a flow of
   its own. This record is written for one strain. In a scene with several strains, each line of
   it holds for one strain: its trail, its tubes, its foods, its agents.
+- Changed by the amendment 2026-11-14 (2) at the end of this record: a food site is a painted stroke, a dab or every
+  segment of one drag, with every cell that it paints, and its flux enters at the covered cell nearest the start of
+  the stroke (decision 17). Decision 5 holds with the port of a site in place of the cell of a site.
 - Changed by [ADR 0032](0032-scenes-for-the-flow.md) (2026-11-13): the levels of the trail of
   decision 4, 0.2 and 1 deposits, hold at Jones' decay of 0.1 and follow the decay of the strain.
 
@@ -874,6 +877,9 @@ not help it: on the fixed network it had not carried the flux to the sink after 
 
 ## Results in the app
 
+The amendment 2026-11-14 (2) at the end of this record measures the Maze and the Tokyo scene again with the food sites
+of decision 17, its numbers beside those of this section.
+
 All numbers are from the real engine (M3 Pro, Chromium with Metal, 2026-11-13), measured on dumps of
 the trail with the scripts of the prototype. A seed is the setting Seed of the scene: the same seed
 gives the same run on the same backend and GPU (`research/flow/engine/`; the lines of every run are
@@ -1275,3 +1281,271 @@ built and measured in a pull request of its own, which records its numbers here.
 
 - The order of the work: decision 17 first, as it also ends the fault; then 18, 19 and 20.
 - `TODO.md` names this amendment in the four items and has an item for the fault.
+
+## Amendment 2026-11-14 (2): a site is a stroke, as built
+
+Decision 17 as built and measured. The design is the coordinator's, under the owner's delegation of 2026-11-12. The
+points marked "own choice" came up while it was built; they are the builder's choices, each with its reason.
+
+### The rule
+
+1. **A site is one stroke.** In the edit list a food edit goes on with the stroke of the edit just before it when that
+   edit is food too, both have the same radius, grid and arena, and the new edit starts exactly where that edit ends
+   (`continues()` and `foodStrokes()` in `src/engine/sites.ts`). `BrushDrag` makes such chains: its first call is a
+   dab, and every later segment starts at the end of the one before. The rule reads only the geometry of the list.
+   Decision 17 said that the edit list must learn which segments form one drag; it need not, and the link format
+   stays as it is. A link holds every position in whole steps of 1/16 cell, so it holds the end of a segment and the
+   start of the next exactly, and a link made before this amendment gives the same sites as a new one (ADR 0021).
+   - Own choice: on a periodic grid the new edit may also start one or more whole periods of its grid away from the
+     end of the edit before. The list moves an edit that starts on a copy of the grid into the grid (`fromStroke()`),
+     so each segment of a drag over the edge of the grid starts a period away from the end of the one before. Without
+     this a drag over the edge would split into two sites, on the arena of the default settings.
+   - Where the rule differs from the drag. A drag splits where the view moves or zooms during it (`BrushDrag` maps its
+     last pixel onto the view of now), where the grid changes during it (the edit names its grid), where the brush
+     radius changes, where a segment paints no cell of a closed arena and is not recorded, and where the sweep deletes
+     a segment in the middle because later erases cleared all of it. A new dab exactly at the end of a drag, with the
+     same radius on the same grid, joins the drag; so does a dab exactly on another dab of the same radius.
+2. **The cells of a site** are the cells that its segments paint with food on the grid of the simulation, by the rule
+   of the paint passes (`someCell()` in `brush.ts` without slack; `paintReference()` and both paint passes have the
+   same rule). Float32 on the GPU can judge a cell at the very edge of a brush the other way; such a cell then holds
+   no food and never covers its site. The engine maps every segment onto the grid as it paints it (`strokeOn()`), so
+   a site follows its stroke onto every grid. The **centre** of a site is the start of its first segment on that
+   grid: for a dab, its centre.
+   - Own choice: a cell that two strokes paint belongs to the one whose centre is nearer, on a tie to the one earlier in
+     the list, among all strokes of the list, and a stroke left without a cell is no site. So no cell is in two sites,
+     and no two sites can share a port. A shared port would hold the roles of two sites in one cell, and the balance of
+     decision 6, as many give as take, would break. It also bounds the list by the grid: one index of 4 B per cell at
+     most, which the memory fit now counts once for all strains (`SITE_BYTES_PER_CELL` in `sizing.ts`). Two dabs that
+     touch or overlap stay two sites, each with the cells nearer its own centre: the seven dabs of Tokyo stay seven
+     sites, and the map has 42 sites as before. Rejected: the cell to the later stroke, as the order of painting would
+     give it; and the cell in both sites, with the second port given to the first site, so that the second loses its
+     role for no reason that it can see.
+   - Then, with more than 64 strokes that keep a cell, 64 of them spread evenly over those take part, the first one
+     always, as before. The first build picked the 64 among all strokes that paint a cell and gave out the shared cells
+     among those 64 only, so a picked stroke that lost every cell left its place empty: 70 dabs, the second a smaller
+     twin at the centre of the first, gave 63 sites while 6 strokes that were not picked kept cells. A review found it
+     on 2026-11-15; `sites.test.ts` holds the case, and the wrong rule C7 of `mutate.ts` puts it back.
+3. **Covered, and the port.** A strain covers a site while one of the cells of the site is open and holds food and a
+   tube of the strain (B ≥ 0.05 in the memory before the step). Its **port** is the covered cell nearest the centre,
+   on a tie the one with the lower index y · W + x; on a periodic grid the distance is to the nearest copy of the
+   centre. The engine sorts the cells of a site in this order on the CPU, in float64, so the port is the first covered
+   entry of the list of the site, the same on both backends and in the CPU copy. The flux of the strain enters and
+   leaves the site at its port. The roles, the pressure limit (P̄ is the mean at the ports) and the zero point read the
+   ports. Every strain keeps the whole I0: no share.
+   - Own choice: a cell under a wall does not cover. Food painted over a wall stays under it, and a wall painted over a
+     tube keeps its tube body for one step: a food painted in the same frame would make that closed cell a port. A
+     closed cell takes no role in `update`, so the roles would no longer balance.
+   - Own choice: "at least two sites had a role in the step before" (decision 5, `fed`) reads the roles at the ports of
+     the step before, where `update` wrote them: the pass keeps them beside the ports of the step. At the ports of the
+     step it would miss the role of a site whose port moved.
+   - Own choice: while no site gives or takes, the zero point is the first cell of the first site, where it was the
+     cell of the first site.
+   - A consequence of the tie rule: a dab whose centre lies on the edge between two cells, as both foods of the Maze on
+     512 × 320 cells do (y = 32 and y = 288), has its port in the upper cell while both cells are covered; the cell of
+     the site was the lower one.
+4. **The passes of the ports** run once per step, before the update of the first strain. A pass that looks at the
+   cells of a site one after the other is too slow: a dab of 250,000 cells that no tube covers took 128 ms more per
+   step on WebGPU, about 0.5 µs per cell (`research/flow/engine/sites-bench.gpu.test.ts`, a first build). So the list
+   is cut into blocks of 64 entries: each run of a site starts at a block and ends with "no cell" up to the next block,
+   so a block holds one site (`SITE_BLOCK` and `NO_CELL` in `sites.ts`). The first pass finds in every block and for
+   every strain the first entry that covers its site (`blocks` in `flow.wgsl`, PASS 2 of `flow.frag`). The second
+   looks at the blocks of each site in 64 lanes, each lane every 64th block from its own, up to its first block with a
+   hit, and takes the least hit of the lanes (`sites` in `flow.wgsl`, a workgroup per site and strain; PASS 3 and 4 of
+   `flow.frag`, a texel per site, strain and lane, then a texel per site and strain). The port of the step before stays
+   beside the port of the step, for `fed`. The cells and the hits are a storage buffer each on WebGPU and a target of
+   R32F each, as wide as the grid, on WebGL2; they are made again only when the list outgrows them. The uniform block
+   keeps its size: a site holds its first cell, the start of its run and its count, and the block holds the number of
+   blocks, all whole numbers below 2^24 and so exact in float32. The CPU copy finds the same port by looking at the
+   list in order (`flowPorts()` in `flow-reference.ts`).
+5. With the flow off no pass runs, nothing is allocated, and the engine does not map the sites.
+
+The start layout Food (ADR 0032) put strain B on the second food edit of the list, so after a drag on the second
+segment of that drag. Own choice: it now takes the strokes of decision 17, strain A at the start of the first food
+stroke and strain B at the start of the second (`seedAtFood()`). Every scene has dabs only, so no scene changes.
+
+The research scripts of decisions 3 and 6 (`bounded.ts`, `solvers.ts`) keep the sites of their record: each food is
+a site of one cell, a dab of radius 0.5 at the centre of a cell. With one cell, a site of decision 17 is covered while
+that cell is, and that cell is its port: `bounded.ts` still finds `rules.ts`, which has the rule of the record, equal
+to the CPU copy bit for bit, and `research.test.ts` (`RESEARCH=full`) passes.
+
+### Cost
+
+On the GPU, per step, from `research/flow/engine/bench.gpu.test.ts` (table (c)): two runs of `main` and two of this
+build, one after the other on the same evening with no other run on the GPU (M3 Pro; the medians of 21 samples of 50
+steps after 3,000 steps).
+
+| Scene and backend | `main`, ms per step | This build, ms per step |
+| ----------------- | ------------------- | ----------------------- |
+| Maze, WebGPU      | 2.31 and 2.36       | 2.27 and 2.30           |
+| Tokyo, WebGPU     | 3.71 and 3.59       | 3.58 and 3.57           |
+| Maze, WebGL2      | 2.76 and 2.85       | 2.75 and 2.73           |
+| Tokyo, WebGL2     | 4.19 and 4.26       | 4.29 and 4.23           |
+
+So the passes of the ports cost less than the spread of the bench, about 0.1 ms: two dispatches per step on WebGPU and
+three draws on WebGL2, on lists of 212 cells (the Maze) and 2,613 cells (Tokyo, 42 sites of 59 to 65 cells,
+`research/flow/sites.ts`). These runs of the bench are slower than table (c) of 2026-11-13 on both sides; the machine
+ran other programs that evening, and the cause is not known. A large site that no tube covers costs no time above the
+noise either (`sites-bench.gpu.test.ts`; the default grid of 1,536 × 960 cells, where a step with the flow takes 22.5
+ms): 23.0, 23.2 and 23.0 ms per step with a dab of 10,029, 100,121 and 249,773 cells on WebGPU, 22.4, 22.3 and 22.7 ms
+on WebGL2. The first build looked at the cells of a site one after the other: there the same three dabs took 27.9, 73.6
+and 150.7 ms per step on WebGPU, which is why the passes work in blocks.
+
+On the CPU, after a paint, the engine keeps the cells of each stroke between calls (`SiteCells`), so a drag costs its
+new segment and one pass over the cells of the other strokes (`research/flow/sites.ts`, Node 26, M3 Pro): on the default
+grid, beside 40 dabs, a drag with a brush of 6, 30 and 90 cells costs 0.12, 0.50 and 4.1 ms per segment (35,000, 82,000
+and 238,000 cells in the end), a call with nothing new 0.05 to 0.08 ms, and a new grid 13, 31 and 87 ms
+(`logs/engine/sites-cpu.jsonl`). The memory: at most 4 B per cell for the cells and 4 B per 64 cells and strain for the
+hits of the blocks.
+
+### The tests and the wrong rules
+
+New unit tests in Node: `src/engine/sites.test.ts` (the strokes of a list: a drag, what `BrushDrag` records, dabs that
+touch, another radius, grid, arena or kind, a drag over the edge of a periodic grid, a dab at the end of a drag, an old
+link, a row of straight lines with Shift as `StraightLine` makes them (ADR 0035); the cells: the paint rule in every
+arena, the order, a shared cell, a shared cell of two dabs whose cells meet in one column, a stroke without a cell, the
+spread over more than 64 strokes, the shared cells given out before the 64 are taken, the cells kept between calls,
+another grid, the blocks of the list) and in `src/engine/engine-env.test.ts` (the sites of the engine are its strokes
+with every food cell, a drag of the brush is one site, a link gives the sites of its list, and the start layout Food
+puts each strain on a stroke of its own).
+
+New GPU tests on both backends (`src/engine/flow.gpu.test.ts`): a dragged line of eleven segments, held in a link, is
+one site with its port at the covered cell nearest its start and the flux I0; a strain covers a dab from a cell two
+cells from its centre, and the port moves to the centre when the tube grows there; two strains on the same two dabs,
+each from its own side, each carry I0; two dabs that overlap stay two sites; the CPU copy while a port moves; the port
+of a dab of about 11,300 cells that a tube covers only from 38 to 60 cells from its centre, with hits in lanes before
+and after the lane of the port; two strains on that site from its two sides, each in the rows of the hits of its own
+strain on WebGL2; a change of the sites during a run; the CPU copy while the list of sites gets shorter; 64 sites of 65
+strokes, all covered, against the CPU copy; a cell that an erase cleared holds no port; and the pressure limit with
+ports off the centre. The test of the CPU copy holds a food under a wall, a food half under a wall, a food painted over
+the wall, and a food at the edge of a block without a tube.
+
+`research/flow/engine/mutate.ts` has 34 new wrong rules, and runs the unit tests of their file for a rule on the CPU.
+All 75 wrong rules of the flow ran (`logs/engine/sites-mutations.txt`): two survived, the mean pressure of the pressure
+limit at the first cells of the sites in place of their ports (P9, Q9), because every site of the test of the limit had
+its port at its first cell. The test of the limit with ports off the centre catches them. The 38 rules of the passes of
+the ports ran again with the passes in blocks and every test (`logs/engine/sites-mutations-blocks.txt`): 37 of the 38
+failed a test. The port at the hit of any lane in place of the least (P11) did not on WebGPU: in the test of the large
+site every farther hit lay in a later lane than the port, and the store of the earliest lane won on this GPU. That test
+now covers cells of the site in lanes before and after the lane of the port, and P1, P11, Q1 and Q11 ran once more (at
+the end of the same log). A review on 2026-11-15 asked for four more tests: the shared cells given out before the 64
+sites are taken, two strains on a large site, a list of sites that gets shorter, and 64 sites. With them come 8 more
+wrong rules: C7, C8 and C3 to C6 again on `sites.ts`, and P13, P14, Q13 to Q15 and R1 on the passes and the CPU copy
+(`logs/engine/sites-mutations-review.txt`). Every one fails a test, so all 83 wrong rules of the flow do.
+
+| Wrong rule                                                                   | In            | A test that fails                                    |
+| ---------------------------------------------------------------------------- | ------------- | ---------------------------------------------------- |
+| Every food cell counts as covered (W5, F5, in the new pass)                  | WGSL, GLSL    | follows the CPU reference, and 11 more               |
+| Only the first block of a site covers it (P1, Q1)                            | WGSL, GLSL    | finds the port of a large site                       |
+| The hit of a block at its last covered entry (P2, Q2)                        | WGSL, GLSL    | follows the CPU reference                            |
+| A cell without food covers its site (P3, Q3)                                 | WGSL, GLSL    | lets no cell of a site that an erase cleared hold it |
+| A cell under a wall covers its site (P4, Q4)                                 | WGSL, GLSL    | follows the CPU reference                            |
+| The roles of the step before read at the ports of this step (P5, Q5)         | WGSL, GLSL    | follows the CPU reference while a port moves         |
+| The port of the step before not kept (P6, Q6)                                | WGSL, GLSL    | follows the CPU reference while a port moves         |
+| The roles at the first cell of a site (P7, Q7)                               | WGSL, GLSL    | makes one food site of a dragged line                |
+| The pressure recentred by the first cell of a site (P8, Q8)                  | WGSL, GLSL    | follows the CPU reference                            |
+| The mean pressure of the limit at the first cells (P9, Q9)                   | WGSL, GLSL    | stops a food at its pressure limit, off the centre   |
+| The ports of every strain from the memory of the first strain (P10, Q10)     | WGSL, GLSL    | gives each of two strains its whole flux             |
+| The port at the hit of any lane, not the least (P11, Q11)                    | WGSL, GLSL    | finds the port of a large site                       |
+| The hits of every strain from those of the first strain (P12, Q12)           | WGSL, GLSL    | gives each of two strains its whole flux             |
+| The cells not taken to the GPU after a change of the sites (S4, L4)          | both backends | follows a change of the food sites during a run      |
+| A site for every segment; a drag over the edge splits (C1, C2)               | `sites.ts`    | the strokes of a drag over the edge of the grid      |
+| A shared cell to the later site on a tie; sites share cells (C3, C4)         | `sites.ts`    | a shared cell to the nearer centre                   |
+| The cells in the order of their index; the centre at the end (C5, C6)        | `sites.ts`    | the order of the cells                               |
+| A site for every food edit; the second colony on the second segment (E1, E2) | `engine.ts`   | a drag is one site; the start layout Food            |
+| A stroke left without a cell takes one of the 64 places (C7)                 | `sites.ts`    | the shared cells first, then the 64                  |
+| Two boxes that meet in one column of cells do not meet (C8)                  | `sites.ts`    | a shared cell of dabs that meet in one column        |
+| `fed` reads the ports of the sites of now only (P13, Q14, R1)                | all three     | the CPU copy while the list of sites gets shorter    |
+| No port for the 64th site (P14, Q15)                                         | WGSL, GLSL    | 64 sites of 65 strokes                               |
+| The hits of strain s from row s, not from row s · hitRows (Q13)              | GLSL          | two strains on a large site                          |
+
+### The measurements again
+
+The campaigns of "Results in the app", with the commands of `research/flow/README.md` (part 11), from commit
+`ad84ee7` of this pull request, on 2026-11-14 (M3 Pro, Chromium with Metal). The record of before is that of
+`92a63e7`; `main` at `5195079` still gives its lines bit for bit (the Maze with seed 1 to step 15,000 and the Tokyo
+scene with seed 1 to step 8,000, checked the same evening). Median and range over the seeds.
+
+**The Maze** (flux 8; dead ends over route as in "The Maze (flux 8)"):
+
+| Step                               | WebGPU, 10 seeds, before | WebGPU, 10 seeds, now  | WebGL2, 3 seeds, before | WebGL2, 3 seeds, now   |
+| ---------------------------------- | ------------------------ | ---------------------- | ----------------------- | ---------------------- |
+| Dead ends over route at 1,000      | 0.54 (0.50 to 0.59)      | 0.53 (0.48 to 0.59)    | 0.54 (0.51 to 0.55)     | 0.54 (0.47 to 0.56)    |
+| at 1,500                           | 0.089 (0.064 to 0.127)   | 0.083 (0.052 to 0.138) | 0.104 (0.088 to 0.105)  | 0.090 (0.066 to 0.101) |
+| at 2,000                           | 0.025 (0.003 to 0.070)   | 0.020 (0.015 to 0.045) | 0.020 (0.008 to 0.032)  | 0.020 (0.010 to 0.020) |
+| at 3,000                           | 0.012 (0.000 to 0.045)   | 0.006 (0.000 to 0.035) | 0.004 (0.004 to 0.006)  | 0.006 (0.001 to 0.017) |
+| at 5,000                           | 0.000 (0.000 to 0.006)   | 0.000 (0.000 to 0.011) | 0.000 (0.000 to 0.000)  | 0.000 (0.000 to 0.000) |
+| at 15,000                          | 0.000 (0.000 to 0.000)   | 0.000 (0.000 to 0.000) | 0.000 (0.000 to 0.003)  | 0.000 (0.000 to 0.000) |
+| First measured step below 10 %     | 1,500 (1,500 to 2,000)   | 1,500 (1,500 to 2,000) | 2,000 (1,500 to 2,000)  | 1,500 (1,500 to 2,000) |
+| First measured step below 2 %      | 2,500 (2,000 to 4,000)   | 2,250 (2,000 to 4,000) | 2,500 (2,000 to 2,500)  | 2,000 (2,000 to 2,000) |
+| Foods joined from step 1,000 on    | 10 of 10                 | 10 of 10               | 3 of 3                  | 3 of 3                 |
+| Tube over shortest route at 15,000 | 1.10 (1.09 to 1.14)      | 1.10 (1.09 to 1.13)    | 1.11 (1.10 to 1.13)     | 1.11 (1.09 to 1.13)    |
+| Agents alive at 15,000             | 4,187 (3,991 to 4,480)   | 4,114 (3,967 to 4,426) | 4,137 (4,074 to 4,154)  | 4,158 (4,025 to 4,225) |
+
+The Maze has two dabs of 106 cells each. Its runs differ from step 500 on (17,018 agents alive at step 500 against
+16,923 on WebGPU, median), and every row lies within the spread of the seeds of before; 9 of 10 seeds join the foods
+at step 500, as before. The dead ends empty a little sooner in the median (below 2 % at step 2,250 against 2,500 on
+WebGPU, 2,000 against 2,500 on WebGL2), within the range of the seeds.
+
+**The Tokyo scene** (flux 1.4; measured as in "The Tokyo rail network", on the 33 food sources of Fig. 2), 10 seeds
+on WebGPU, median and range over the seeds:
+
+| Step   | All 36 joined, before | now      | TL before           | TL now              | MD now              | FT now              |
+| ------ | --------------------- | -------- | ------------------- | ------------------- | ------------------- | ------------------- |
+| 1,000  | 0 of 10               | 2 of 10  | 2.12 (1.72 to 2.32) | 2.12 (1.88 to 2.54) | 0.84 (0.82 to 1.00) | 0.94 (0.87 to 0.98) |
+| 2,000  | 10 of 10              | 9 of 10  | 2.73 (2.56 to 2.85) | 2.75 (2.59 to 2.96) | 0.82 (0.81 to 0.83) | 0.98 (0.97 to 0.99) |
+| 4,000  | 10 of 10              | 10 of 10 | 2.46 (2.15 to 2.59) | 2.38 (2.16 to 2.54) | 0.83 (0.81 to 0.92) | 0.96 (0.92 to 0.97) |
+| 8,000  | 10 of 10              | 9 of 10  | 2.05 (1.87 to 2.28) | 2.09 (1.90 to 2.18) | 0.82 (0.81 to 0.84) | 0.94 (0.89 to 0.97) |
+| 12,000 | 9 of 10               | 10 of 10 | 1.90 (1.58 to 2.05) | 1.83 (1.69 to 2.01) | 0.82 (0.81 to 0.84) | 0.91 (0.84 to 0.94) |
+| 16,000 | 9 of 10               | 10 of 10 | 1.88 (1.67 to 2.02) | 1.85 (1.60 to 2.10) | 0.82 (0.81 to 0.84) | 0.92 (0.87 to 0.95) |
+| 24,000 | 9 of 10               | 10 of 10 | 1.77 (1.63 to 1.99) | 1.79 (1.62 to 1.94) | 0.82 (0.81 to 0.84) | 0.93 (0.88 to 0.94) |
+| 32,000 | 10 of 10              | 9 of 10  | 1.81 (1.45 to 2.00) | 1.87 (1.54 to 1.98) | 0.82 (0.81 to 0.91) | 0.89 (0.80 to 0.93) |
+| 40,000 | 8 of 10               | 10 of 10 | 1.84 (1.53 to 1.91) | 1.77 (1.64 to 2.07) | 0.83 (0.81 to 0.85) | 0.91 (0.81 to 0.94) |
+| 48,000 | 8 of 10               | 10 of 10 | 1.77 (1.51 to 1.98) | 1.94 (1.64 to 2.03) | 0.82 (0.80 to 0.94) | 0.93 (0.83 to 0.95) |
+
+At step 48,000, mean and standard deviation: TL 1.89 ± 0.13, MD 0.84 ± 0.05 and FT 0.91 ± 0.04, where it was TL 1.77 ±
+0.15, MD 0.84 ± 0.03 and FT 0.90 ± 0.05. At step 24,000: TL 1.81 ± 0.10, MD 0.82 ± 0.01 and FT 0.92 ± 0.02 (1.80 ± 0.11,
+0.83 ± 0.01 and 0.91 ± 0.04). TL at step 48,000 is 0.12 higher; over all 50 samples from step 16,000 to 48,000 the mean
+TL is 1.84 ± 0.13 against 1.80 ± 0.13 before, MD 0.83 and FT 0.91 on both sides (`summary.ts engine-tokyo-end`, which
+now prints this line). So the step 48,000 alone moved more than the network as a whole; the ADR saw two sets of ten
+seeds differ by up to 0.07 in the mean TL at that step. Against the organism (TL 1.75 ± 0.30, MD 0.85 ± 0.04, FT 0.80 ±
+0.13 without light or 0.86 ± 0.04 with light on the mountains), TL is 0.5 standard deviations above the mean, MD 0.3
+below, and FT 0.8 above without light and 1.3 with light (before: 0.1, 0.3, 0.8 and 1.0). The check of the specification
+(TL from 1.45 to 2.05 and MD from 0.77 to 0.93 in 7 of 10 seeds, FT at least 0.66) holds: 10 of 10 at step 24,000, 9 of
+10 at step 48,000 (one seed with MD 0.94), and FT in 10 of 10. All 36 food sources are joined in 78 of the 80 samples
+from step 4,000 on (73 before), all 33 in 80 of 80 (79), and no gap lasts two samples. The flux 1.4 was chosen for its
+TL with the sites of before (decision 12); decision 18 measures the fluxes 1, 1.4 and 2 again.
+
+On WebGL2, now with 3 seeds (1 to 3) where the record had 2, at step 24,000: TL 1.93, 2.04 and 1.77, MD 0.83, 0.83 and
+0.91, FT 0.94, 0.93 and 0.92; all 33 joined in every sample, all 36 in 16 of the 18 samples from step 2,000 on. The
+record had TL 1.72 and 1.91, MD 0.82 and 0.83, FT 0.90 and 0.92. The TL of 2.04 lies above the ten WebGPU seeds at step
+24,000 (1.62 to 1.94) and within their samples from step 16,000 on (1.54 to 2.10).
+
+**With the flow off** every scene keeps its bytes: the default settings and the 20 scenes, 500 steps from seed 12345,
+WebGPU and WebGL2, flow switched off in each; the SHA-256 digests of the agents, the trail, the scent and the
+environment equal those of `main` at `5195079` in 42 of 42 runs (`logs/engine/digest-sites-flow-off.jsonl` against
+`digest-main-flow-off.jsonl`, made on the same machine that evening). With the flow as each scene has it, the four
+scenes with the flow on change on both backends at step 500: Tokyo, Food ring, Rival networks and Tokyo, two
+networks. The Maze with seed 12345 is still equal at step 500; the runs of its campaign above differ from step 500 on.
+The digests of the build with the passes in blocks equal those of the first build, whose pass looked at the cells one
+after the other, in 42 of 42 runs.
+
+**The scenes of ADR 0032** (seed 1, WebGPU, `research/flow/engine/strains.gpu.test.ts`, the commands of part 9 of the
+guide): Food ring keeps all 9 sites from step 2,001 on, with 3,003 agents at step 12,001 (3,162 before). In Rival
+networks each strain holds all ten sites from step 4,002 on, as before, with 3,749 and 2,994 agents at step 12,002
+(2,993 and 2,730). On the Tokyo map with two networks each strain holds 40 to 42 of the 42 sites in every sample from
+step 2,002 on, and both hold all 42 at step 14,002 (38 to 42, and 38 and 41, before): a strain covers a food from any
+of its cells now.
+
+### Consequences
+
+- A dragged line of food is one site with the flux I0, as a dab is; the fault of the amendment before is closed. A
+  long line no longer pulls more flux than a dab, and its segments no longer fill the 64 places of the sites.
+- A strain covers a food from any of its cells, so two strains on one food each cover it where their own tube is
+  (ADR 0031): the open point of `TODO.md` and of `docs/model.md`, section 14, is closed.
+- A link keeps its sites: the rule needs nothing in the link that the list does not hold.
+- The memory fit counts 4 B per cell more while the flow is on, once for all strains. On a device near its budget a
+  scene with the flow can get a smaller grid than before.
+- Not measured again, and so from the sites of before: the Tokyo scene with the fluxes 1 and 2 ("Three flow strengths",
+  decision 12), the Maze with the fluxes 2, 4 and 16, the table of decision 6 (the local flux against the exact one),
+  the Foraging maze with the flow, and the Tokyo scene without the flow (which keeps its bytes). Decision 18 runs the
+  Tokyo scene with the fluxes 1, 1.4 and 2 again in any case.

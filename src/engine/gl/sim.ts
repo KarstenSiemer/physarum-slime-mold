@@ -1,7 +1,8 @@
 import type { Boundary, Settings } from '../../model/params';
 import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, flowStrains, packFlow } from '../flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from '../flow';
+import { NO_CELL, NO_SITES, SITE_BLOCK, type FlowSites } from '../sites';
 import {
   CLEAR_TILE,
   growthOn,
@@ -198,15 +199,30 @@ export class GlSim implements Sim {
   private growth?: GlGrowth | undefined;
   /**
    * The state of the flow in the tubes, while it is on (flow.frag, ADR 0029; `FlowState` in ../sim.ts): per strain the
-   * memory of each cell in two targets and the pressure of the four lanes in three (ADR 0031), and the uniform block
-   * of the passes, which holds the block of one strain at a time.
+   * memory of each cell in two targets and the pressure of the four lanes in three (ADR 0031), the uniform block of
+   * the passes, which holds the block of one strain at a time, and the ports of the sites (decision 17): two targets
+   * of FLOW_SITES × strains texels that the passes of the ports write in turn, `port` the one of the last step, and the
+   * target of the lanes of PASS 3. The cells of the sites and the hits of their blocks are targets of their own, made
+   * again when the list outgrows them (siteCells()).
    */
-  private flow?: { memory: Pair<Target>[]; pressure: Target[][]; ubo: WebGLBuffer } | undefined;
+  private flow?:
+    | {
+        memory: Pair<Target>[];
+        pressure: Target[][];
+        ubo: WebGLBuffer;
+        ports: Pair<Target>;
+        port: Bit;
+        lanes: Target;
+        cells: Target | undefined;
+        hits: Target | undefined;
+        cellsCurrent: boolean;
+      }
+    | undefined;
   /** Which memory target is current, and which pressure target holds the pressure in work. */
   private flowM: Bit = 0;
   private flowP = 0;
-  /** The food sites that give and take the flux (foodSites()). */
-  private sites: [number, number][] = [];
+  /** The food sites that give and take the flux, with their cells (foodSites()). */
+  private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
   /**
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
@@ -551,8 +567,39 @@ export class GlSim implements Sim {
     if (!tubesShown(settings)) this.dropTubes();
   }
 
-  foodSites(centres: readonly (readonly [number, number])[]) {
-    this.sites = flowSites(centres, this.width, this.height);
+  foodSites(sites: FlowSites) {
+    this.sites = sites;
+    if (this.flow) this.flow.cellsCurrent = false;
+  }
+
+  /**
+   * The cells of the sites on the GPU (`cells` in flow.frag): one float per cell index, −1 for no cell, W of them per
+   * row, in a target that holds them; and the target of the hits of their blocks (`hits`), `hitRows` rows per strain.
+   * Cell indices and block counts stay below 2^24, so floats hold them exactly.
+   */
+  private siteCells(flow: NonNullable<GlSim['flow']>) {
+    const gl = this.gl;
+    const { cells } = this.sites;
+    const w = this.width;
+    const [rows, blocks] = [Math.max(1, Math.ceil(cells.length / w)), cells.length / SITE_BLOCK];
+    const hitRows = Math.max(1, Math.ceil(blocks / w));
+    const strains = flow.memory.length;
+    if (!flow.cells || !flow.hits || !flow.cellsCurrent) {
+      if (!flow.cells || !flow.hits || flow.cells.height < rows || flow.hits.height < hitRows * strains) {
+        for (const t of [flow.cells, flow.hits]) if (t) destroyTarget(gl, t);
+        [flow.cells, flow.hits] = [undefined, undefined];
+        flow.cells = target(gl, w, rows, gl.R32F);
+        flow.hits = target(gl, w, hitRows * strains, gl.R32F);
+      }
+      const data = new Float32Array(w * rows).fill(-1);
+      cells.forEach((c, i) => {
+        if (c !== NO_CELL) data[i] = c;
+      });
+      writeTarget(gl, flow.cells, 0, 0, w, rows, data);
+      flow.cellsCurrent = true;
+    }
+    // The hits of a strain start at a multiple of hitRows: the rows of the target as made, divided by the strains.
+    return { cells: flow.cells, hits: flow.hits, hitRows: flow.hits.height / strains };
   }
 
   /**
@@ -574,7 +621,25 @@ export class GlSim implements Sim {
       try {
         const memory = each((): Pair<Target> => [make(), make()]);
         const pressure = each(() => [make(), make(), make()]);
-        this.flow = { memory, pressure, ubo: uniformBlock(gl, FLOW_BYTES, FLOW_BINDING) };
+        const port = () => {
+          const t = target(gl, FLOW_SITES, strains, gl.RGBA32F);
+          made.push(t);
+          return t;
+        };
+        const ports: Pair<Target> = [port(), port()];
+        const lanes = target(gl, FLOW_SITES, 64 * strains, gl.RGBA32F);
+        made.push(lanes);
+        this.flow = {
+          memory,
+          pressure,
+          ubo: uniformBlock(gl, FLOW_BYTES, FLOW_BINDING),
+          ports,
+          port: 0,
+          lanes,
+          cells: undefined,
+          hits: undefined,
+          cellsCurrent: false,
+        };
       } catch (err) {
         for (const t of made) destroyTarget(gl, t);
         throw err;
@@ -595,13 +660,22 @@ export class GlSim implements Sim {
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     for (const t of this.flow.pressure.flat()) clear(gl, t);
+    // No site has a port yet, nor had one in a step before.
+    for (const t of this.flow.ports) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.viewport(0, 0, t.width, t.height);
+      gl.clearColor(-1, -1, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
     this.flowM = 0;
     this.flowP = 0;
   }
 
   private dropFlow() {
     if (!this.flow) return;
-    for (const t of [...this.flow.memory.flat(), ...this.flow.pressure.flat()]) destroyTarget(this.gl, t);
+    const { memory, pressure, ports, lanes, cells, hits } = this.flow;
+    for (const t of [...memory.flat(), ...pressure.flat(), ...ports, lanes, cells, hits])
+      if (t) destroyTarget(this.gl, t);
     this.gl.deleteBuffer(this.flow.ubo);
     this.flow = undefined;
   }
@@ -1279,6 +1353,19 @@ export class GlSim implements Sim {
     const env = this.env.texture;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
+    // The port of every site and strain, from the memory before the step (PASS 2 to 4 of flow.frag): the hits of the
+    // blocks of the list of cells, the lanes of each site, and the least of them. The block of the first strain has the
+    // sites of all.
+    this.flowBlock(flow, 0);
+    const { cells, hits, hitRows } = this.siteCells(flow);
+    const before = flow.ports[flow.port];
+    flow.port = flip(flow.port);
+    const ports = flow.ports[flow.port];
+    const memoryOf = (strain: number) => (flow.memory[strain] ?? at(flow.memory, 0))[m].texture;
+    const memories = { memory: memoryOf(0), memory1: memoryOf(1), memory2: memoryOf(2), memory3: memoryOf(3) };
+    this.pass(programs.blocks, hits, { env, ...memories, cells: cells.texture }, { hitRows });
+    this.pass(programs.lanes, flow.lanes, { hits: hits.texture }, { hitRows });
+    this.pass(programs.sites, ports, { cells: cells.texture, lanes: flow.lanes.texture, portsIn: before.texture }, {});
     flow.memory.forEach((memories, strain) => {
       const pressure = at(flow.pressure, strain);
       this.flowBlock(flow, strain);
@@ -1291,16 +1378,23 @@ export class GlSim implements Sim {
           memory: memories[m].texture,
           pressureIn: at(pressure, p).texture,
           trail: this.trail[this.p].texture,
+          ports: ports.texture,
         },
         {},
       );
       const memory = memories[next].texture;
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
-        const [before, out] = [(p + 2) % 3, (p + 1) % 3];
+        const [behind, out] = [(p + 2) % 3, (p + 1) % 3];
         this.pass(
           programs.pressure,
           at(pressure, out),
-          { env, memory, pressureIn: at(pressure, p).texture, pressureBefore: at(pressure, before).texture },
+          {
+            env,
+            memory,
+            pressureIn: at(pressure, p).texture,
+            pressureBefore: at(pressure, behind).texture,
+            ports: ports.texture,
+          },
           // The first two iterations take the pressure of the reference cell off (RECENTRE in flow.wgsl).
           { recentre: i < 2 ? i + 1 : 0 },
         );

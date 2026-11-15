@@ -13,8 +13,9 @@
 // Usage: node --import ./research/flow/register.mjs research/flow/solvers.ts [steps=1000] [plain=1000] [i0=8]
 // `steps`: the steps of each local run (16 iterations each). `plain`: the steps of the run without the momentum.
 // `network=1000`: the steps of the agent model that make the network (the test of this folder uses fewer).
-import { FLOW, FLOW_ITERATIONS, packFlow } from '../../src/engine/flow.ts';
+import { FLOW, FLOW_ITERATIONS, FLOW_SITES, packFlow } from '../../src/engine/flow.ts';
 import { flowPressure, type FlowGrid } from '../../src/engine/flow-reference.ts';
+import { flowSites } from '../../src/engine/sites.ts';
 import { defaultSettings } from '../../src/model/params.ts';
 import { Jones, mazeParams } from './prototype/jones.ts';
 import { mazeWorld } from './prototype/maze.ts';
@@ -50,8 +51,21 @@ for (let c = 0; c < n; c++) {
   grid.env[c * 4 + 1] = world.food[c] ? 255 : 0;
 }
 const sites = world.sites.map((s): [number, number] => [Math.floor(s.x), Math.floor(s.y)]);
-/** The uniform block of the passes (flow.ts packFlow()): the constants as 32-bit floats, as the GPU has them. */
-const u = new Float32Array(packFlow(settings, sites));
+/**
+ * The uniform block of the passes (flow.ts packFlow()): the constants as 32-bit floats, as the GPU has them. Each food
+ * is a site of one cell, at its centre.
+ */
+const u = new Float32Array(
+  packFlow(
+    settings,
+    flowSites(
+      sites.map(([x, y]) => [{ kind: 'food' as const, from: [x + 0.5, y + 0.5], to: [x + 0.5, y + 0.5], radius: 0.5 }]),
+      w,
+      h,
+      'box',
+    ),
+  ),
+);
 const [ghost, weight, limit, limitScale] = [u[6]!, u[8]!, u[25]!, u[26]!];
 // The memory of each cell as the pass `update` leaves it: flow memory, tube body, conductivity, roles.
 const memory = new Float32Array(n * 4);
@@ -64,6 +78,9 @@ for (let c = 0; c < n; c++) {
 }
 const cellOf = (k: number) => (sites[k]?.[1] ?? 0) * w + (sites[k]?.[0] ?? 0);
 const [source, sink] = [cellOf(0), cellOf(1)];
+/** The ports of the two sites (flow-reference.ts flowPorts()): each its one cell, which the tube covers. */
+const ports = new Int32Array(FLOW_SITES * 2).fill(-1);
+ports.set([source, source, sink, sink]);
 // The roles of two covered sites (flowRoles() in flow.ts): the first gives in all four fields, the other takes.
 memory[source * 4 + 3] = 1 + 3 + 9 + 27;
 memory[sink * 4 + 3] = 2 * (1 + 3 + 9 + 27);
@@ -214,7 +231,7 @@ const recentreOf = (i: number): 0 | 1 | 2 => (i === 0 ? 1 : i === 1 ? 2 : 0);
   let differ = 0;
   for (let i = 0; i < 2 * FLOW_ITERATIONS; i++) {
     const r = recentreOf(i % FLOW_ITERATIONS);
-    [b4, p4] = [p4, flowPressure(grid, u, memory, p4, b4, r)];
+    [b4, p4] = [p4, flowPressure(grid, u, memory, p4, b4, r, ports)];
     [b1, p1] = [p1, iterate(p1, b1, u[7]!, r)];
     for (let c = 0; c < n; c++) if (!Object.is(p1[c], p4[c * 4])) differ++;
   }

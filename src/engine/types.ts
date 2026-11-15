@@ -1,5 +1,6 @@
 import type { Boundary, Settings } from '../model/params';
 import type { AgentTool } from './pack';
+import type { FlowSites } from './sites';
 
 export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3 } as const;
 export type EnvTool = keyof typeof EnvKind;
@@ -64,10 +65,10 @@ export interface Sim {
   paint(strokes: readonly Stroke[]): void;
   clearEnvironment(): void;
   /**
-   * The centres of the food strokes on this grid, in cells and in the order of the strokes: the food sites that give and
-   * take the flux of the flow in the tubes (ADR 0029, flow.ts flowSites()). The engine sets them after each paint.
+   * The food sites on this grid, each one a food stroke with its cells: the sites that give and take the flux of the
+   * flow in the tubes (ADR 0029, decision 17; sites.ts). The engine sets them after each paint.
    */
-  foodSites(centres: readonly (readonly [number, number])[]): void;
+  foodSites(sites: FlowSites): void;
   destroy(): void;
   /** Resolves when all submitted GPU work is done. */
   finish(): Promise<void>;

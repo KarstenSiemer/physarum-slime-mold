@@ -80,6 +80,15 @@
     {#if scene.watch}
       <p class="watch"><strong>What to watch:</strong> {scene.watch}</p>
     {/if}
+    {#if scene.figure}
+      <!-- A link only: no figure has a licence that lets the app show it (ADR 0037). -->
+      <p class="figure">
+        The result in the paper:
+        <a href={scene.figure.href} target="_blank" rel="noreferrer"
+          >{scene.figure.label}<span class="sr-only"> (opens in a new tab)</span></a
+        >, {scene.figure.note}.
+      </p>
+    {/if}
     {#if changed}
       <p class="changed">
         <span>{byLink ? 'This link changes the scene.' : 'You changed the scene.'}</span>
@@ -177,12 +186,17 @@
     margin: 0 0 4px;
   }
   .summary,
-  .watch {
+  .watch,
+  .figure {
     margin: 6px 0;
   }
   .watch,
+  .figure,
   details {
     color: var(--muted);
+  }
+  .figure a {
+    color: var(--accent);
   }
   .changed {
     display: flex;

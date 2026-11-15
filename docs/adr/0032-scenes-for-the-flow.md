@@ -3,6 +3,10 @@
 - Status: accepted. The owner asked for the scenes on 2026-11-13. Every decision here is the
   coordinator's choice under the owner's delegation of 2026-11-12, with its date and reason.
 - Date: 2026-11-13
+- Changed by [ADR 0029](0029-flow-in-the-tubes.md), amendment 2026-11-14 (2): the start layout on food takes the food
+  strokes of the list, a dab or a whole drag, so strain B starts on the second stroke and not on the second segment of
+  a drag. Every scene has dabs only, so no scene changes; the three scenes with the flow change their runs through the
+  sites of that amendment, which it measures again.
 - In short: three new scenes show the flow in the tubes (ADR 0029), two of them with rival strains
   that each build a network of their own (ADR 0031). For them, each strain starts on a food of its
   own. And the level of the trail from which a cell holds a tube now follows the decay of the

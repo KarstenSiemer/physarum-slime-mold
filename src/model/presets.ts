@@ -51,6 +51,11 @@ export interface Preset {
   strainRoles: string[];
   /** Why these settings. */
   why: string;
+  /**
+   * The figure of the paper that shows what the scene should reach (ADR 0037). Only a link: no figure has a licence
+   * that lets this app show it. Absent where no figure shows the result of the scene.
+   */
+  figure?: Figure;
   settings: () => Settings;
   /** The scene's food, light and walls: its newest revision (shapeRevision()). */
   env?: EnvShape[];
@@ -60,6 +65,27 @@ export interface Preset {
    * the scene's shapes change (ADR 0027).
    */
   envHistory?: EnvShape[][];
+}
+
+/** A link to a figure of a paper: the figure's name, and where and how a reader sees it. */
+export interface Figure {
+  href: string;
+  /** "Fig. 4", "Fig. 16, top row". */
+  label: string;
+  /** "page 9 of the free PDF". */
+  note: string;
+}
+
+/**
+ * Jones 2010 in the repository of his university, open access: the publisher's PDF, whose page 1 is page 127 of the
+ * journal (ADR 0037).
+ */
+export const JONES_PDF = 'https://uwe-repository.worktribe.com/980579/1/artl.2010.16.2.pdf';
+
+/** A figure of Jones 2010 on page `journalPage` of the journal: the link opens the free PDF at that page. */
+function jonesFigure(label: string, journalPage: number): Figure {
+  const page = journalPage - 126;
+  return { href: `${JONES_PDF}#page=${page}`, label, note: `page ${page} of the free PDF` };
 }
 
 /** The revision of a scene's shapes that the scene loads now: the number of its earlier shape lists. */
@@ -253,6 +279,7 @@ export const PRESETS: Preset[] = [
       'Jones’ default setting (p. 134–135). Within a few hundred steps, randomly placed agents form a mesh of trails. Small loops shrink and vanish, bigger holes grow, and now and then a new branch sprouts across a hole, so the network never settles (Fig. 4 shows steps 2 to 4,151). The trails look grainy, as in Jones’ figures: in every step most agents are blocked and turn at random.',
     strainRoles: ['Jones’ standard agent'],
     why: 'Jones’ defaults: Table 1 (p. 134) with one blur pass and wrapping edges, 15 % of cells holding an agent (Fig. 4) and his rule of one agent per cell (p. 133). A rotation angle above the sensor angle keeps the network changing (p. 135). Blocked agents turn at random and start new branches; without the rule the network contracts into a few lines. Jones used 200 × 200 cells. Without glow the holes stay dark.',
+    figure: jonesFigure('Fig. 4', 135),
     settings: () => jones2010({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, network()),
   },
   {
@@ -265,6 +292,7 @@ export const PRESETS: Preset[] = [
       'Jones’ model with the sensor angle raised to 45°, equal to the rotation angle. New branches do not last: small loops close, the other holes grow, and the network contracts like a soap film. On Jones’ lattice of 200 × 200 cells it ends after about 31,000 steps as a simple network with one or two holes. Its copies, side by side, approximate a hexagonal tiling (Fig. 5).',
     strainRoles: ['Jones’ agent with equal angles'],
     why: 'Only the sensor angle differs from Jones’ defaults. With equal angles an agent turns exactly toward where its side sensor was, so its sensors stay on the trail and new branches do not last (p. 135). The rest is as for Fig. 5: 15 % of cells hold an agent (p. 136), one blur pass (Table 1), one agent per cell (p. 133) and 200 × 200 cells. Without glow the holes stay dark.',
+    figure: jonesFigure('Fig. 5', 136),
     settings: () => jones2010({ sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 }, network()),
   },
   {
@@ -277,6 +305,7 @@ export const PRESETS: Preset[] = [
       'Here agents are repelled by the trail they lay (chemorepulsion). They gather in tight circular flows that push each other apart. Slowly they form a regular array, like a Turing pattern on an animal coat (p. 143). On Jones’ lattice it settles as about 20 spots.',
     strainRoles: ['Jones’ repelled agent'],
     why: 'Jones’ values for Fig. 16, top row (p. 144): 20 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 40, one agent per cell, 200 × 200 cells. The long sensor distance sets the wide spacing between the spots.',
+    figure: jonesFigure('Fig. 16, top row', 144),
     settings: () =>
       jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 40, attraction: [-1, 0, 0, 0] },
@@ -293,6 +322,7 @@ export const PRESETS: Preset[] = [
       'Again agents flee their own trail, but the side sensors point far to the sides and agents turn further. Stripes first appear in many directions. Then one direction wins, turns the neighbouring stripes to its orientation and finally covers the grid (p. 143–144).',
     strainRoles: ['Jones’ repelled agent with wide-set sensors'],
     why: 'Jones’ values for Fig. 16, bottom row (p. 144): 20 % of cells hold an agent, one agent per cell, sensor distance 13, 200 × 200 cells. The sensor distance sets the spacing between the stripes.',
+    figure: jonesFigure('Fig. 16, bottom row', 144),
     settings: () =>
       jones2010(
         { sensorAngle: 112.5, rotationAngle: 67.5, sensorOffset: 13, attraction: [-1, 0, 0, 0] },
@@ -315,6 +345,7 @@ PRESETS.push(
       'Several hundred agents in a round dish with two food sources. Food releases a scent that spreads and fades like the trail, so the network snags on both foods. Then it contracts like a soap film until one band joins them. The band stays many cells wide, because only one agent fits in a cell.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 18 (p. 145): as many agents as 2 % of the square around the dish, sensor and rotation angle 45°, one agent per cell, a closed dish, food weight 0.01. Equal angles let the network contract, and weak food lets its loops close (p. 146), so it can shrink to a single path. Dish and foods are as in Fig. 18, on 200 × 200 cells.',
+    figure: jonesFigure('Fig. 18', 145),
     settings: () =>
       jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
@@ -338,6 +369,7 @@ PRESETS.push(
       'The same setup with four food sources at the corners of a square. The network shrinks until it joins all four with little material, close to a Steiner tree: the shortest network that connects a set of points, with extra junctions where three paths meet (p. 144). Different runs take different routes but end in similar trees.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 19 (p. 146): as many agents as 2 % of the square around the dish, which is about 2.5 % of the dish, sensor and rotation angle 45°, one agent per cell, food weight 0.01, 200 × 200 cells. The foods lie as in Fig. 19: a square of 60 cells, each food 2.7 cells in radius.',
+    figure: jonesFigure('Fig. 19', 146),
     settings: () =>
       jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
@@ -364,6 +396,7 @@ PRESETS.push(
       'The dish starts packed with agents, which soon form a solid sheet. In every step each agent dies with a small chance, so the sheet thins out and shrinks onto the food sources, as a real plasmodium does after it has covered the dish (p. 147). In the paper, three runs ended in the same network (Fig. 21).',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ values for Fig. 21 (p. 147): as many agents as 50 % of the square around the dish, so they start as a solid sheet, a removal chance of 0.00025 per agent and step, sensor and rotation angle 45°, one agent per cell. Slow removal lets the sheet adapt; faster removal tears holes into it (p. 148). Jones used 300 × 300 cells and the 19 foods of Fig. 21. Food weight 0.05 and the food radius are this app’s choice.',
+    figure: jonesFigure('Fig. 21', 147),
     settings: () =>
       jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 9 },
@@ -420,6 +453,7 @@ PRESETS.push(
       'A regular spot pattern made by chemorepulsion, like Turing spots with a shorter sensor distance. Jones cut a square hole into it. The agents flowed back in, and the undamaged pattern around the wound guided the regrowth until it matched the old one (p. 148). A network made by attraction also heals, but into a different pattern (Fig. 23).',
     strainRoles: ['Jones’ repelled agent'],
     why: 'Jones’ values for Fig. 22 (p. 148): 10 % of cells hold an agent, sensor and rotation angle 45°, sensor distance 27, one agent per cell, 300 × 300 cells. The Cut tool differs from his method in one point: Jones kept agents out of the wound until all were placed elsewhere, while here they flow back as soon as you release the tool. As in his method, the wound keeps its trail.',
+    figure: jonesFigure('Fig. 22', 148),
     settings: () =>
       jones2010(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 27, attraction: [-1, 0, 0, 0] },
@@ -455,6 +489,11 @@ PRESETS.push(
       'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends, with one route between them. The flow in the tubes does what the flow in the real one does: the tube that carries it stays and gets wider, and the dead ends starve.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Flow in the tubes is on: each food gives or takes a flux of 8, after the model of Tero et al. Walls block movement and sensing, so no agent follows a trail behind a wall.',
+    figure: {
+      href: 'https://www.nature.com/articles/35035159/figures/1',
+      label: 'Fig. 1',
+      note: 'free to view at Nature',
+    },
     settings: () =>
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },
@@ -520,6 +559,11 @@ PRESETS.push(
       'In 2010, Atsushi Tero and colleagues put oat flakes on a plate where the cities around Tokyo lie, with the coast as its edge. A slime mold grew out from Tokyo and joined all flakes within 26 hours. Its network was about as short, as fast and as robust as the real railway. Here, Jones’ agents grow from Tokyo, and the flow in the tubes decides which tubes stay.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
     why: 'Growth and shrinkage with Jones’ values of 2011 let the colony grow from Tokyo. Flow in the tubes is on with a strength of 1.4: the network is then as long as the organism’s. Tokyo is seven foods, as in the model of the paper. The map has 512 × 512 cells on every screen, so north stays up. Sensor distance 7 and food weight 0.03 are the Maze’s. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
+    figure: {
+      href: 'https://doi.org/10.1126/science.1177894',
+      label: 'Fig. 1',
+      note: 'at Science, free to read after a free registration',
+    },
     settings: () =>
       jones(
         { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
