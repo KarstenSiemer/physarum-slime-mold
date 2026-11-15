@@ -123,8 +123,9 @@ the bytes.
   "Matches the model only": the docs hold no number of the organism.
 - `docs/model.md` says that the mean window is 5 in this scene, and what a dab of 2.5 cells releases. No rule
   changed.
-- Every other scene keeps its bytes: no pass and no setting of another scene changed (the digests of every scene on
-  both backends after 500 steps, this branch against `main`).
+- Every other scene keeps its bytes: no pass and no setting of another scene changed. The digests of
+  `research/flow/engine/digest.gpu.test.ts` (every scene and the default settings, 500 steps, both backends) are equal
+  to those of `main` at `6d8d23a`, made on the same machine in the same hour: 46 of 46.
 - `presets.test.ts` pins the paper's values, the ring, the dots and the page of the figure. Tests that listed the
   scenes with growth, with the Jones model or with a mean window of 3 name the new scene.
 - The scene starts with a random seed like every scene. About one run in five on WebGPU, and three in ten on
