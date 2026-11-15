@@ -52,10 +52,11 @@ delegation of 2026-11-12, each with its reason.
 
 1. **A line ends where the next one starts.** While Shift is held, the end of a line is the start of the next one, so
    clicks in a row draw a line with corners, such as the walls of a maze. A single straight line needs no more clicks
-   than before: let go of Shift after the second click. On the same grid the next line starts exactly at the end of
-   the last one, with the same radius if the brush did not change. So painted food in a row of clicks is one
-   connected food. If decision 17 of ADR 0029 is built, it is one food site, because that decision joins a food
-   stroke to the last one when it starts at its end.
+   than before: let go of Shift after the second click. On the same grid the next line starts exactly at the end of the
+   last one, with the same radius if the brush did not change. So painted food in a row of clicks is one connected food,
+   and one food site of the flow (ADR 0029, decision 17, as built in its amendment 2026-11-14 (2)): a food stroke that
+   starts at the end of the last one with the same radius joins it (`sites.test.ts` holds a row of lines as
+   `StraightLine` makes them).
 2. **What ends a start that waits:** Escape, letting go of Shift, a click without Shift, another tool, and the page
    losing the focus. The line exists only while Shift is held, so letting go of Shift is the plain way to stop. A page
    that loses the focus can miss the key going up, and a start the user cannot see would then wait for a later click.

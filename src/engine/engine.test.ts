@@ -4,7 +4,15 @@ import { presetById } from '../model/presets';
 import { CpuBackend, hold } from './cpu-backend';
 import { Engine, MAX_IN_FLIGHT, SETTLE_FRAMES, type HeldTool } from './engine';
 import { AgentToolKind, stepChance } from './pack';
-import { diffusePlan, equilibrium, FLOW_BYTES_PER_CELL, gridSize, memoryBudget, TUBES_BYTES_PER_CELL } from './sizing';
+import {
+  diffusePlan,
+  equilibrium,
+  FLOW_BYTES_PER_CELL,
+  gridSize,
+  memoryBudget,
+  SITE_BYTES_PER_CELL,
+  TUBES_BYTES_PER_CELL,
+} from './sizing';
 import type { Levels } from './types';
 
 describe('gridSize', () => {
@@ -322,7 +330,7 @@ describe('the picture of the tubes', () => {
     const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
     const base: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true, density: 0.001 };
     const engine = await Engine.create(canvas, base, undefined, backend);
-    const perCell = backend.bytesPerCell + FLOW_BYTES_PER_CELL + TUBES_BYTES_PER_CELL;
+    const perCell = backend.bytesPerCell + FLOW_BYTES_PER_CELL + SITE_BYTES_PER_CELL + TUBES_BYTES_PER_CELL;
     // The largest square lattice that would fit with 16 B less per cell, and the largest that fits with 16 B more.
     const [tooLarge, small] = [-16, 16].map((more) => Math.floor(Math.sqrt(memoryBudget() / (perCell + more))));
     for (const showTubes of [true, false]) {

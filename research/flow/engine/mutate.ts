@@ -1,10 +1,12 @@
-// Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules") and of the picture of
-// the tubes (ADR 0034). The script puts one wrong rule at a time into a source file of the app, runs the GPU tests of
-// the flow or of the picture on the backend of that file, and puts the file back. Every wrong rule must fail at least
-// one test.
+// Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
+// tubes (ADR 0034) and of an agent under a painted wall (ADR 0038). The script puts one wrong rule at a time into a
+// source file of the app, runs the GPU tests of the flow, of the picture or of the agents on the backend of that file,
+// and puts the file back. A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its
+// file. Every wrong rule must fail at least one test.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/mutate.ts [W1 F3 ...]
 // It changes files below src/ while it runs, and it writes each one back as it was. It stops if a file has changed
-// since the mutations were written: then the text of a mutation no longer fits.
+// since the mutations were written: then the text of a mutation no longer fits. With the argument `check` it only
+// checks that the text of every right rule is once in its file, and changes no file.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,12 +19,22 @@ const TUBES_WGSL = 'src/engine/shaders/tubes.wgsl';
 const TUBES_FRAG = 'src/engine/gl/glsl/tubes.frag';
 const TUBES_SPEC = 'src/engine/tubes.gpu.test.ts';
 const FLOW_SPEC = 'src/engine/flow.gpu.test.ts';
+/** The unit tests of the food sites (ADR 0029, decision 17), and those of the engine that feeds them. */
+const SITES_SPEC = 'src/engine/sites.test.ts';
+const ENGINE_SPEC = 'src/engine/engine-env.test.ts';
+const SITES = 'src/engine/sites.ts';
 /** The tests of one backend: a part of the test names. */
 const [GPU, GL] = ['webgpu', 'webgl2|WebGL2'];
+/** The rule for an agent under a painted wall (ADR 0038), and the tests of it on each backend. */
+const AGENTS_WGSL = 'src/engine/shaders/agents.wgsl';
+const TOOLS_GLSL = 'src/engine/gl/glsl/tools.glsl';
+const SIM_SPEC = 'src/engine/sim.gpu.test.ts';
+const [UNDER_WALL_GPU, UNDER_WALL_GL] = ['webgpu .*under a painted wall', 'webgl2 .*under a painted wall'];
 
 /**
- * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run, and their
- * file (without one: the tests of the flow).
+ * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
+ * names; '' for all tests of the file), and their file (without one: the GPU tests of the flow). A file of unit tests
+ * runs in the project `unit`.
  */
 const MUTATIONS: [name: string, file: string, right: string, wrong: string, tests: string, spec?: string][] = [
   [
@@ -56,8 +68,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'W5 wgsl: every food counts as covered',
     WGSL,
-    '.y > 0.0 && textureLoad(memory, s, 0).y >= U.c.z;',
-    '.y > 0.0 && textureLoad(memory, s, 0).y >= -1.0;',
+    'textureLoad(memories, cellCoord(c), gid.y, 0).y >= U.c.z) {',
+    'textureLoad(memories, cellCoord(c), gid.y, 0).y >= -1.0) {',
     GPU,
   ],
   [
@@ -209,13 +221,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'if (fed() || true) d = max(U.d.x, d + U.a.z * (mean - d));',
     GL,
   ],
-  [
-    'F5 glsl: every food counts as covered',
-    FRAG,
-    '.g > 0.0 && texelFetch(memory, s, 0).y >= U.c.z;',
-    '.g > 0.0 && texelFetch(memory, s, 0).y >= -1.0;',
-    GL,
-  ],
+  ['F5 glsl: every food counts as covered', FRAG, 'memoryOf(s, q).y >= U.c.z) {', 'memoryOf(s, q).y >= -1.0) {', GL],
   [
     'F6 glsl: no starvation',
     'src/engine/gl/glsl/agents.frag',
@@ -313,6 +319,300 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'float memory = flowMemoryOf(bits & 3u, q).x;',
     'float memory = flowMemoryOf(0u, q).x;',
     GL,
+  ],
+  // A food site is a stroke with the cells that it paints (ADR 0029, decision 17): the pass of the ports, the passes
+  // that read the ports, the backends that hold the cells, and the sites on the CPU.
+  [
+    'P1 wgsl: a site covered only by the first block of its list',
+    WGSL,
+    'for (var b = first + lane; b < end; b += 64u) {',
+    'for (var b = first + lane; b < min(end, first + 1u); b += 64u) {',
+    GPU,
+  ],
+  [
+    'P2 wgsl: the hit of a block at its last covered entry, not its first',
+    WGSL,
+    '      hit = i32(o);\n      break;',
+    '      hit = i32(o);',
+    GPU,
+  ],
+  [
+    'P3 wgsl: a cell without food covers its site',
+    WGSL,
+    'if (!isWall(e) && envOf(e).y > 0.0 && textureLoad(memories',
+    'if (!isWall(e) && textureLoad(memories',
+    GPU,
+  ],
+  [
+    'P4 wgsl: a cell under a wall covers its site',
+    WGSL,
+    'if (!isWall(e) && envOf(e).y > 0.0',
+    'if (envOf(e).y > 0.0',
+    GPU,
+  ],
+  [
+    'P5 wgsl: the roles of the step before read at the ports of this step',
+    WGSL,
+    'let c = ports[i32(U.f.z) * 64 + i].y;',
+    'let c = ports[i32(U.f.z) * 64 + i].x;',
+    GPU,
+  ],
+  [
+    'P6 wgsl: the port of the step before not kept',
+    WGSL,
+    'ports[k] = vec2i(found, ports[k].x);',
+    'ports[k] = vec2i(found, found);',
+    GPU,
+  ],
+  [
+    'P7 wgsl: the roles at the first cell of a site, not at its port',
+    WGSL,
+    'if (port(i) == c) { mine = i; }',
+    'if (all(vec2i(U.sites[i].xy) == p)) { mine = i; }',
+    GPU,
+  ],
+  [
+    'P8 wgsl: the pressure recentred by the first cell of a site, not by its port',
+    WGSL,
+    '    let s = cellCoord(u32(c));\n    if (textureLoad(memory, s, 0).w != 0.0) { return s; }',
+    '    let s = vec2i(U.sites[i].xy);\n    if (textureLoad(memory, s, 0).w != 0.0) { return s; }',
+    GPU,
+  ],
+  [
+    'P9 wgsl: the mean pressure of the sites at their first cells, not at their ports',
+    WGSL,
+    '    let s = cellCoord(u32(c));\n    if (textureLoad(memory, s, 0).w != 0.0) {\n      level',
+    '    let s = vec2i(U.sites[i].xy);\n    if (textureLoad(memory, s, 0).w != 0.0) {\n      level',
+    GPU,
+  ],
+  [
+    'P10 wgsl: the ports of every strain from the memory of the first strain',
+    WGSL,
+    'textureLoad(memories, cellCoord(c), gid.y, 0).y',
+    'textureLoad(memories, cellCoord(c), 0u, 0).y',
+    GPU,
+  ],
+  [
+    'P11 wgsl: the port at the hit of any lane, not the least',
+    WGSL,
+    'atomicMin(&least, b * SITE_BLOCK + u32(hit));',
+    'atomicStore(&least, b * SITE_BLOCK + u32(hit));',
+    GPU,
+  ],
+  [
+    'P12 wgsl: the hits of the blocks of every strain from those of the first strain',
+    WGSL,
+    'let hit = blockHits[wg.y * n + b];',
+    'let hit = blockHits[b];',
+    GPU,
+  ],
+  [
+    'P13 wgsl: the roles of the step before read at the ports of the sites of now only',
+    WGSL,
+    'for (var i = 0; i < 64; i++) {',
+    'for (var i = 0; i < i32(U.d.w); i++) {',
+    GPU,
+  ],
+  ['P14 wgsl: no port for the 64th site', WGSL, 'if (i < u32(U.d.w)) {', 'if (i < min(u32(U.d.w), 63u)) {', GPU],
+  [
+    'S4 webgpu: the cells of the sites not taken to the GPU after a change of the sites',
+    'src/engine/sim.ts',
+    '    this.sites = sites;\n    if (this.flow) this.flow.cellsCurrent = false;',
+    '    this.sites = sites;',
+    GPU,
+  ],
+  [
+    'Q1 glsl: a site covered only by the first block of its list',
+    FRAG,
+    'for (int b = first + lane; b < end; b += 64) {',
+    'for (int b = first + lane; b < min(end, first + 1); b += 64) {',
+    GL,
+  ],
+  [
+    'Q2 glsl: the hit of a block at its last covered entry, not its first',
+    FRAG,
+    '        hit = float(o);\n        break;',
+    '        hit = float(o);',
+    GL,
+  ],
+  [
+    'Q3 glsl: a cell without food covers its site',
+    FRAG,
+    'if (!isWall(e) && e.g > 0.0 && memoryOf',
+    'if (!isWall(e) && memoryOf',
+    GL,
+  ],
+  ['Q4 glsl: a cell under a wall covers its site', FRAG, 'if (!isWall(e) && e.g > 0.0', 'if (e.g > 0.0', GL],
+  [
+    'Q5 glsl: the roles of the step before read at the ports of this step',
+    FRAG,
+    'int c = int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).y);',
+    'int c = int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).x);',
+    GL,
+  ],
+  [
+    'Q6 glsl: the port of the step before not kept',
+    FRAG,
+    'result = vec4(found, texelFetch(portsIn, at, 0).x, 0.0, 0.0);',
+    'result = vec4(found, found, 0.0, 0.0);',
+    GL,
+  ],
+  [
+    'Q7 glsl: the roles at the first cell of a site, not at its port',
+    FRAG,
+    'if (port(i) == c) mine = i;',
+    'if (ivec2(U.sites[i].xy) == p) mine = i;',
+    GL,
+  ],
+  [
+    'Q8 glsl: the pressure recentred by the first cell of a site, not by its port',
+    FRAG,
+    '    ivec2 s = cellCoord(c);\n    if (texelFetch(memory, s, 0).w != 0.0) return s;',
+    '    ivec2 s = ivec2(U.sites[i].xy);\n    if (texelFetch(memory, s, 0).w != 0.0) return s;',
+    GL,
+  ],
+  [
+    'Q9 glsl: the mean pressure of the sites at their first cells, not at their ports',
+    FRAG,
+    '    ivec2 s = cellCoord(c);\n    if (texelFetch(memory, s, 0).w != 0.0) {\n      level',
+    '    ivec2 s = ivec2(U.sites[i].xy);\n    if (texelFetch(memory, s, 0).w != 0.0) {\n      level',
+    GL,
+  ],
+  [
+    'Q10 glsl: the ports of every strain from the memory of the first strain',
+    FRAG,
+    'memoryOf(s, q).y >= U.c.z) {',
+    'memoryOf(0, q).y >= U.c.z) {',
+    GL,
+  ],
+  [
+    'Q11 glsl: the port at the hit of the last lane, not the least',
+    FRAG,
+    'if (least < 0 || j < least) least = j;',
+    'least = j;',
+    GL,
+  ],
+  [
+    'Q12 glsl: the hits of the blocks of every strain from those of the first strain',
+    FRAG,
+    'float hit = texelFetch(hits, ivec2(b % w, s * hitRows + b / w), 0).x;',
+    'float hit = texelFetch(hits, ivec2(b % w, b / w), 0).x;',
+    GL,
+  ],
+  [
+    'Q13 glsl: the hits of strain s from row s, not from row s · hitRows',
+    FRAG,
+    'float hit = texelFetch(hits, ivec2(b % w, s * hitRows + b / w), 0).x;',
+    'float hit = texelFetch(hits, ivec2(b % w, s + b / w), 0).x;',
+    GL,
+  ],
+  [
+    'Q14 glsl: the roles of the step before read at the ports of the sites of now only',
+    FRAG,
+    '  for (int i = 0; i < 64; i++) {\n    int c = int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).y);',
+    '  for (int i = 0; i < int(U.d.w); i++) {\n    int c = int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).y);',
+    GL,
+  ],
+  [
+    'Q15 glsl: no port for the 64th site',
+    FRAG,
+    '  if (i < int(U.d.w)) {\n    int first = int(U.sites[i].z) / 64;',
+    '  if (i < min(int(U.d.w), 63)) {\n    int first = int(U.sites[i].z) / 64;',
+    GL,
+  ],
+  [
+    'R1 reference: the roles of the step before read at the ports of the sites of now only',
+    'src/engine/flow-reference.ts',
+    '  for (let i = 0; i < FLOW_SITES; i++) {\n    const c = ports[i * 2 + 1] ?? -1;',
+    '  for (let i = 0; i < (u[15] ?? 0); i++) {\n    const c = ports[i * 2 + 1] ?? -1;',
+    GPU,
+  ],
+  [
+    'L4 webgl2: the cells of the sites not taken to the GPU after a change of the sites',
+    'src/engine/gl/sim.ts',
+    '    this.sites = sites;\n    if (this.flow) this.flow.cellsCurrent = false;',
+    '    this.sites = sites;',
+    GL,
+  ],
+  [
+    'C1 sites: no edit continues another, a site for every segment of a drag',
+    SITES,
+    'return along(next.from[0] - prev.to[0], next.grid?.[0]) && along(next.from[1] - prev.to[1], next.grid?.[1]);',
+    'return false;',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C2 sites: a drag over the edge of a periodic grid splits into two sites',
+    SITES,
+    "d === 0 || (next.boundary === 'wrap' && n !== undefined && Number.isInteger(d / n));",
+    "d === 0 || (next.boundary === 'wrap' && n !== undefined && Number.isInteger(d / n) && false);",
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C3 sites: a cell of two sites to the later one on a tie',
+    SITES,
+    'if (!other || distance(c, p) < distance(c, other)) owners[c] = base + i;',
+    'if (!other || distance(c, p) <= distance(c, other)) owners[c] = base + i;',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C4 sites: two sites share the cells where they overlap',
+    SITES,
+    'const shares = meetOthers(all.map(({ p }) => p));',
+    'const shares = meetOthers(all.map(({ p }) => p)).map(() => false);',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C7 sites: a stroke left without a cell still takes one of the 64 places',
+    SITES,
+    'return own.length > 0 ? [{ own, stroke }] : [];',
+    'return [{ own, stroke }];',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C8 sites: two boxes that meet in one column of cells do not meet',
+    SITES,
+    'if (!b || b[0] > a[1]) break;',
+    'if (!b || b[0] >= a[1]) break;',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C5 sites: the cells of a site in the order of their index, not of their distance to the centre',
+    SITES,
+    '(a, b) => (near[a] ?? 0) - (near[b] ?? 0) || (added[a] ?? 0) - (added[b] ?? 0),',
+    '(a, b) => 0 * ((near[a] ?? 0) - (near[b] ?? 0)) || (added[a] ?? 0) - (added[b] ?? 0),',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'C6 sites: the centre of a stroke at its end',
+    SITES,
+    'const centre: Point = kept?.centre ?? [first?.from[0] ?? 0, first?.from[1] ?? 0];',
+    'const centre: Point = kept?.centre ?? [stroke.at(-1)?.to[0] ?? 0, stroke.at(-1)?.to[1] ?? 0];',
+    '',
+    SITES_SPEC,
+  ],
+  [
+    'E1 engine: a site for every food edit of the list',
+    'src/engine/engine.ts',
+    'const strokes = foodStrokes(this.edits.slice(0, this.painted)).map((stroke) =>',
+    "const strokes = this.edits.slice(0, this.painted).filter((e) => e.kind === 'food').map((e) => [e]).map((stroke) =>",
+    'food sites',
+    ENGINE_SPEC,
+  ],
+  [
+    'E2 engine: the colony of the second strain on the second segment of a drag',
+    'src/engine/engine.ts',
+    'const foods = foodStrokes(this.edits).map((stroke) => stroke[0]);',
+    "const foods = this.edits.filter((e) => e.kind === 'food');",
+    'start layout Food',
+    ENGINE_SPEC,
   ],
   // The picture of the tubes (ADR 0034).
   [
@@ -1032,9 +1332,81 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     GL,
     TUBES_SPEC,
   ],
+  // An agent under a painted wall (ADR 0038), against the tests of the agents in sim.gpu.test.ts.
+  [
+    'U1 wgsl: an agent under a wall stays on it',
+    AGENTS_WGSL,
+    'let walled = underWall(a);',
+    'let walled = false;',
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U2 wgsl: the rule reads the cell of the move, not the cell of the agent',
+    AGENTS_WGSL,
+    '  let c = cellOf(a.pos);\n  return c >= 0 && isWall(env[c]);',
+    '  let c = cellOf(destination(a));\n  return c >= 0 && isWall(env[c]);',
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U3 wgsl: an agent under a wall lands in the wound of a held cut',
+    AGENTS_WGSL,
+    'if (openCell(c) && (!cut || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    'if (openCell(c) && (!cut || walled || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U4 glsl: an agent under a wall stays on it',
+    TOOLS_GLSL,
+    'bool walled = underWall(a);',
+    'bool walled = false;',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
+  [
+    'U5 glsl: the rule reads the cell of the move, not the cell of the agent',
+    TOOLS_GLSL,
+    '  ivec2 q = cellXY(ivec2(floor(a.xy)));\n  return q.x >= 0 && isWall(texelFetch(env, q, 0));',
+    '  ivec2 q = cellXY(ivec2(floor(destination(a))));\n  return q.x >= 0 && isWall(texelFetch(env, q, 0));',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
+  [
+    'U6 glsl: an agent under a wall lands in the wound of a held cut',
+    TOOLS_GLSL,
+    'if (openCell(c) && (!cut || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    'if (openCell(c) && (!cut || walled || toolDistance(p, P.tool.xy) >= P.tool.z))',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
+  // The flag that a wall may lie over an alive agent (decision 8 of ADR 0038): never set by a painted wall.
+  [
+    'U7 webgpu: a painted wall never sets the flag of a wall over agents',
+    'src/engine/sim.ts',
+    "if (stroke.kind === 'wall') [this.walls, this.wallOverAgents] = [true, true];",
+    "if (stroke.kind === 'wall') [this.walls, this.wallOverAgents] = [true, false];",
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U8 webgl2: a painted wall never sets the flag of a wall over agents',
+    'src/engine/gl/sim.ts',
+    'if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, true];',
+    'if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, false];',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
 ];
 
 const only = process.argv.slice(2);
+if (only[0] === 'check') {
+  const stale = MUTATIONS.filter(([, file, right]) => readFileSync(ROOT + file, 'utf8').split(right).length !== 2);
+  for (const [name, file] of stale) console.error(`${name}: the text of the right rule is not once in ${file}`);
+  console.log(`${String(MUTATIONS.length - stale.length)} of ${String(MUTATIONS.length)} wrong rules fit their files`);
+  process.exit(stale.length > 0 ? 1 : 0);
+}
 /** The file that holds a wrong rule now, with its right text: written back on every way out of the script. */
 let open: { path: string; text: string } | undefined;
 const restore = () => {
@@ -1060,7 +1432,9 @@ for (const [name, file, right, wrong, tests, spec = FLOW_SPEC] of MUTATIONS) {
     try {
       open = { path, text };
       writeFileSync(path, text.replace(right, wrong));
-      const run = spawnSync('npx', ['vitest', 'run', '--project', 'gpu', spec, '-t', tests], {
+      const project = spec.endsWith('.gpu.test.ts') ? 'gpu' : 'unit';
+      const filter = tests === '' ? [] : ['-t', tests];
+      const run = spawnSync('npx', ['vitest', 'run', '--project', project, spec, ...filter], {
         cwd: ROOT,
         encoding: 'utf8',
         timeout: 900_000,

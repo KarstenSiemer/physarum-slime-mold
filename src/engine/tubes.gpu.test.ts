@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
+import { flowSites, type FoodStroke } from './sites';
 import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES } from './tubes';
 import { arenaCell, tubePicture, tubeRoots, tubeStream, wallOnLine, type TubeGrid } from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
@@ -457,8 +458,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       const want = await reference(sim, 'box', 1);
       expect(worst(await sim.readPicture(), want.picture, 1), what).toBeLessThan(1e-5);
     };
-    sim.paint([{ kind: 'food', from: [8.5, 12.5], to: [8.5, 12.5], radius: 2.5 }]);
-    sim.foodSites([[8.5, 12.5]]);
+    const food: FoodStroke = [{ kind: 'food', from: [8.5, 12.5], to: [8.5, 12.5], radius: 2.5 }];
+    sim.paint(food);
+    sim.foodSites(flowSites([food], w, h, 'box'));
     sim.reset();
     // Every cell holds a tube, so the picture shows the trail of the agents wider than it is.
     sim.writeFlow(memoryOf(w, h, (x) => [x < 16 ? 0.5 : 0.002, 1]));
@@ -635,8 +637,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       [true, false].map(async (showTubes) => {
         const sim = await backend.createSim(scene(showTubes), w, h, 8, 0);
         live.push(sim);
-        sim.paint([{ kind: 'food', from: [24.5, 16.5], to: [24.5, 16.5], radius: 3 }]);
-        sim.foodSites([[24.5, 16.5]]);
+        const food: FoodStroke = [{ kind: 'food', from: [24.5, 16.5], to: [24.5, 16.5], radius: 3 }];
+        sim.paint(food);
+        sim.foodSites(flowSites([food], w, h, 'box'));
         sim.reset();
         return sim;
       }),

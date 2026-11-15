@@ -71,11 +71,14 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   numbers are the plain FT: a tree has FT 0 (Fig. S1).
 - **Model**: extended model, growth (Jones 2011) and the flow with a strength of 1.4; 36 foods, measured on the 33 of
   Fig. 2.
-- **Measured** (ADR 0029, The Tokyo rail network; `92a63e7`, WebGPU, 10 seeds): at step 48,000 TL 1.77 ± 0.15, MD
-  0.84 ± 0.03, FT 0.90 ± 0.05. WebGL2, 2 seeds at step 24,000: TL 1.72 and 1.91, MD 0.82 and 0.83.
+- **Measured** (ADR 0029, amendment 2026-11-14 (2), with the food sites of decision 17; WebGPU, 10 seeds): at step
+  48,000 TL 1.89 ± 0.13, MD 0.84 ± 0.05, FT 0.91 ± 0.04, and over the samples from step 16,000 to 48,000 a mean TL of
+  1.84. With the sites before it (`92a63e7`): TL 1.77 ± 0.15, MD 0.84 ± 0.03, FT 0.90 ± 0.05, and 1.80. WebGL2, 3 seeds
+  at step 24,000: TL 1.93, 2.04 and 1.77, MD 0.83, 0.83 and 0.91 (2 seeds before: TL 1.72 and 1.91, MD 0.82 and 0.83).
 - **Limits**:
   - The flow strength was chosen from 1, 1.4 and 2 because 1.4 gives the organism's TL (ADR 0029, decision 12). So
-    TL is fitted. MD and FT were not fitted.
+    TL is fitted. MD and FT were not fitted. The choice was made with the food sites before decision 17; with them TL
+    is 1.89 at step 48,000, still within the organism's spread, and decision 18 measures the strengths again.
   - The positions of the cities are fitted to the figures (ADR 0024). The network is the trail above 1.5, thinned to
     lines. That threshold is this app's, and nobody measured how the numbers depend on it.
   - Only the protocol without light is built. The second protocol of the paper (a sheet first, then all foods) ran
@@ -89,8 +92,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   grows, and is never stable (Marbach et al. 2023).
 - **Model**: the flow (ADR 0029). A dead end carries no flux, its flow memory falls, and its agents starve.
 - **Measured** (ADR 0029, The Maze; 10 seeds on WebGPU, 3 on WebGL2, 3 without the flow): the trail in the dead ends
-  over the trail of the route falls from 0.54 at step 1,000 to 0.000 at step 5,000. Without the flow it stays at 0.60
-  to 0.91.
+  over the trail of the route falls from 0.53 at step 1,000 to 0.000 at step 5,000 (median on WebGPU, with the food
+  sites of the amendment 2026-11-14 (2); 0.54 with the sites before it). Without the flow it stays at 0.60 to 0.91.
 - **Limits**: the time of the decay is not compared with the organism. No measurement follows one dead end from the
   moment its flux stops.
 
@@ -121,7 +124,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   nobody read the paper for this project. Ma et al. 2013 (Sec. 1) [V]: in a maze of the Towers of Hanoi only the
   shortest path was left after 12 h.
 - **Model**: the Maze with the flow.
-- **Measured**: one tube remains, 1.10 times as long as the shortest route at step 15,000 (ADR 0029, The Maze).
+- **Measured**: one tube remains, 1.10 times as long as the shortest route at step 15,000 (ADR 0029, The Maze; the
+  same with the food sites of the amendment 2026-11-14 (2), 10 seeds on WebGPU).
 - **Limits**: every wall of the Maze touches the edge of the box or a wall that does (the preset `maze` in `src/model/presets.ts`).
   So the free space has one route only, and the scene shows how the dead ends die and the tube pulls tight. It does not
   show a choice between two routes.
@@ -256,9 +260,11 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Model**: each strain has a flow of its own, so no flux passes from the tubes of one strain into the tubes of another
   (ADR 0031). The strains keep apart by a negative weight on each other's trail (Fogleman 2020), which is no rule of
   the organism. The model has no fusion and no lethal reaction.
-- **Measured** (ADR 0032; seed 1, WebGPU): in Rival networks each of two strains keeps a network on all ten foods to
-  step 12,002, with 2,993 and 2,730 agents. On the Tokyo map each of two strains holds 38 and 41 of the 42 food sites
-  at step 14,002. The docs hold no number of the organism to compare with.
+- **Measured** (ADR 0032, again with the food sites of ADR 0029, amendment 2026-11-14 (2); seed 1, WebGPU): in Rival
+  networks each of two strains keeps a network on all ten foods from step 4,002 to step 12,002, with 3,749 and 2,994
+  agents at the end (2,993 and 2,730 with the sites before). On the Tokyo map each of two strains holds 40 to 42 of the
+  42 food sites in every sample from step 2,002 on, and 42 and 42 at step 14,002 (38 to 42 before): a strain now
+  covers a food from any of its cells. The docs hold no number of the organism to compare with.
 
 ## What the model does not do
 

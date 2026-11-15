@@ -203,7 +203,8 @@ every scene.
 
 ## 7. The agents
 
-ADR 0007, 0008, 0020, 0022, 0023, 0027. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`, `gl/glsl/tools.glsl`.
+ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
+`gl/glsl/tools.glsl`.
 
 The agent pass runs these parts in order for each agent.
 
@@ -216,10 +217,10 @@ The agent pass runs these parts in order for each agent.
 
 A dead agent neither moves nor deposits in this step.
 
-### 7.2 Placement by a tool or by the flow
+### 7.2 Placement by a tool, by the flow or off a wall
 
-A dead agent, and an agent that the cut reaches, may be placed instead of moving (ADR 0023). A placed agent makes no
-move and no deposit in its step.
+A dead agent, an agent that the cut reaches and an agent under a wall may be placed instead of moving (ADR 0023,
+ADR 0038). A placed agent makes no move and no deposit in its step.
 
 - **Inoculate**: a dead agent of the tool's strain is taken with a chance per step of 1 − exp(−rate · Δt), so the
   tool places the same number per second at every frame rate (`inoculateRate()` and `stepChance()` in
@@ -228,6 +229,11 @@ move and no deposit in its step.
   at the start of the step.
 - **Cut**: an alive agent whose position lies within the radius of the tool takes the first of 8 uniform random points
   of the grid whose cell is open and that lie outside the radius. It keeps its heading. If none fits, it moves as usual.
+- **Under a wall**: an alive agent whose cell is a wall at the start of its step (a wall was painted onto it) is placed
+  as the cut places its agents, with or without a tool: it takes the first of 8 uniform random points of the grid
+  whose cell is open, and while the cut is held one that also lies outside its radius. It keeps its heading. If none
+  fits, it moves as usual (7.5). The points are those of the cut (the stream tool, 7.7): an agent that the cut reaches
+  under a wall draws them once.
 - **Respawn** (flow on, for every agent that no tool places): a dead agent of strain s draws one uniform point of the
   grid. It comes to life there with the chance 0.2 · (D_s − 0.5) / 0.5 if the cell is open, holds a tube of its own
   strain (B_s ≥ 0.05) and has D_s > 0.5 (section 8.5; ADR 0031). A tube of another strain gives it no life. With one
@@ -269,8 +275,10 @@ it passes within 0.001 cells (ADR 0019, ADR 0020). On the torus p' wraps.
 - **Blocked**: the agent stays, takes a uniform random heading in place of the one it turned to, and deposits nothing
   (Jones 2010, p. 133).
 
-A move inside the agent's own cell succeeds unless that cell is a wall. The start cell is never checked on the way, so
-an agent under a wall that was painted onto it can step out of it.
+A move inside the agent's own cell succeeds unless that cell is a wall. An agent whose cell is a wall at the start of
+its step is placed off the wall instead of moving (7.2). It moves only if none of its 8 points fits, or, with one agent
+per cell, after it lost the claim of its point (7.6); then the start cell is not checked on the way, so it can step
+out of the wall.
 
 ### 7.6 One agent per cell
 
@@ -279,9 +287,9 @@ claims:
 
 1. **Claim**: each agent senses, turns and claims its target cell with `atomicMax(claims[cell], key)`. A key is unique
    in a step: a bijective hash of the id, the step and the seed. It may claim only an open cell other than its own that
-   was empty at the start of the step, with no wall on the way. A tool's placement claims its cell the same way.
+   was empty at the start of the step, with no wall on the way. A placement (7.2) claims its cell the same way.
 2. **Settle**: the agent whose key won moves and deposits. A loser is blocked (7.5). A placement that loses stays dead
-   (inoculate, respawn) or stays where it was (cut).
+   (inoculate, respawn) or stays where it was (cut, under a wall), with its heading, and draws again in the next step.
 
 A cell that an agent leaves in this step stays closed to others until the next step. Without the rule, agents share
 cells without a limit.
@@ -289,17 +297,17 @@ cells without a limit.
 ### 7.7 Random numbers
 
 Every random number comes from a PCG hash of (id, step, seed, stream): rng = pcg(id ^ pcg(step ^ pcg(seed ^ stream))),
-then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1, shrink 2, blocked heading 3,
-growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9. So a run is the same for the same seed on one backend.
-For one agent and step the streams differ by construction, because pcg is a bijection. A start round's stream can
-equal another stream at a later step: for seeds 0 to 999, start rounds 0 to 64 and steps below 10^6, this happens at
-one step in each of 134 (seed, round, stream) cases.
+then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1 (also an agent under a wall,
+7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9. So a run is the
+same for the same seed on one backend. For one agent and step the streams differ by construction, because pcg is a
+bijection. A start round's stream can equal another stream at a later step: for seeds 0 to 999, start rounds 0 to 64
+and steps below 10^6, this happens at one step in each of 134 (seed, round, stream) cases.
 
 ## 8. Flow in the tubes
 
 Extended model only, off by default (ADR 0029). Tero, Kobayashi and Nakagaki 2007 and Tero et al. 2010 on the grid
-cells in place of a graph. Code: `shaders/flow.wgsl`, `gl/glsl/flow.frag`, constants in `src/engine/flow.ts`, a CPU
-copy of both passes in `src/engine/flow-reference.ts`.
+cells in place of a graph. Code: `shaders/flow.wgsl`, `gl/glsl/flow.frag`, constants in `src/engine/flow.ts`, the
+food sites in `src/engine/sites.ts`, a CPU copy of the three passes in `src/engine/flow-reference.ts`.
 
 **Every strain has a flow of its own** ([ADR 0031](adr/0031-a-flow-for-every-strain.md)). The rules below run once per
 strain s, on the trail T_s of that strain alone, with the fields B_s, D_s, G_s and P_s,k of that strain; below, B, D, G
@@ -326,18 +334,32 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 
 ### 8.2 Food sites and their roles
 
-- A site is the cell of the start point of a painted food stroke, in the order of the list. Each cell counts once, cells
-  outside the grid are dropped, and with more than 64 the sites spread evenly over the list (`flowSites()`).
-- A site is **covered** by the strain while its cell holds food and a tube of the strain (B ≥ 0.05 in the last step).
-  Two strains can cover the same site.
+- A site is one painted **food stroke**: a dab, or every segment of one drag together (ADR 0029, decision 17). In the
+  edit list a food edit goes on with the stroke of the edit just before it when that edit is food too, with the same
+  radius, grid and arena, and the new edit starts exactly where that edit ends; on a periodic grid also where a copy
+  of the grid shows that end (`foodStrokes()`). A drag of the brush makes such chains. The rule reads only the list, so
+  a link made before it gives the same sites. A new dab exactly at the end of a drag, with the same radius, joins the
+  drag; a drag splits where the view, the grid or the radius changed during it, or where it left a closed arena.
+- The **cells** of a site are the cells that its segments paint with food, by the rule of the paint passes; its
+  **centre** is the start of its first segment, for a dab its centre. A cell that two strokes paint belongs to the one
+  whose centre is nearer, on a tie to the one earlier in the list, among all strokes of the list; so two strokes that
+  touch stay two sites, and no cell is in two sites. A stroke left without a cell is no site. With more than 64
+  strokes that keep a cell, 64 of them spread evenly over those take part, the first one always (`SiteCells`).
+- A site is **covered** by the strain while one of its cells is open and holds food and a tube of the strain (B ≥ 0.05
+  in the last step). Its **port** is the covered cell nearest its centre, on a tie the one with the lower index
+  y · W + x; on a periodic grid the distance is to the nearest copy of the centre. The flux of the strain enters and
+  leaves the site at its port, and the roles, the pressure limit and the zero point below read the port. Each step
+  finds the ports of every site and strain before the update (`blocks` and `sites` in `flow.wgsl`). Two strains can
+  cover the same site, each at a port of its own.
 - The roles of the strain in each of the 4 lanes: with fewer than 2 sites that the strain covers, none. With exactly 2,
   the first gives and the other takes. With m ≥ 3, the covered sites are shuffled by a hash, ⌊m/2⌋ give, ⌊m/2⌋ take and
   an odd one rests; lane k draws again at steps where ⌊(t + 75 k) / 300⌋ changes, so every 300 steps, the lanes 75 steps
   apart. The hash is the same for every strain, so strains that cover the same sites draw the same roles.
 - A site that gives adds I0 (the setting Flow strength), one that takes removes I0, scaled by a pressure limit h_c: full
-  while σ (P_c − P̄) ≤ 0.75 L, then falling linearly to 0 at σ (P_c − P̄) = L, with L = 4096 · I0. P̄ is the mean
-  pressure, in the lane, of every site that has a role in any lane of the flow of the strain, and σ is +1 to give and −1
-  to take. Two strains that cover the same two sites carry I0 each.
+  while σ (P_c − P̄) ≤ 0.75 L, then falling linearly to 0 at σ (P_c − P̄) = L, with L = 4096 · I0. c is the port of the
+  site, P̄ is the mean pressure, in the lane, at the port of every site that has a role in any lane of the flow of the
+  strain, and σ is +1 to give and −1 to take. Two strains that cover the same two sites carry I0 each: a site gives
+  every strain that covers it the whole flux, with no share.
 
 ### 8.3 The pressure
 
@@ -348,16 +370,16 @@ momentum, in each lane, from the pressure of the last step:
 - J = P + 0.9 (P* − P);
 - P_new = ω J + (1 − ω) P_old, with ω = 2 / (1 + √(1 − 0.99999²)) ≈ 1.991 on cells that conduct, and ω = 1 elsewhere.
 
-P_old is the input of the iteration before. The zero point is the first site with a role in the flow of the strain, or
-the first site of the list while none has one: the first two iterations of a step subtract its pressure at the start of
-the step, the first from its result and the second from its momentum term. That shifts the whole history and changes no
-difference.
+P_old is the input of the iteration before. The zero point is the port of the first site with a role in the flow of the
+strain, or the first cell of the first site of the list while none has one: the first two iterations of a step
+subtract its pressure at the start of the step, the first from its result and the second from its momentum term. That
+shifts the whole history and changes no difference.
 
 ### 8.4 Flux and adaptation
 
 - Flux of a cell: Q = ½ · Σ_{n ∈ N4} H(G_c, G_n) · |P_c − P_n|, per lane, with G and P of the last step.
 - f(Q) = Q^1.8 / (1 + Q^1.8) (Tero et al. 2010, γ = 1.8), averaged over the 4 lanes.
-- On a tube, while at least 2 sites had a role in the flow of the strain in the last step:
+- On a tube, while at least 2 sites had a role in the flow of the strain in the last step (at their ports of that step):
   D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles
   D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · 1.00023), so starved ground comes back to 0.2 in
   about 33,000 steps.
@@ -409,9 +431,9 @@ Defaults (Jones 2011): Gf 3, Gw 9, Gmin 1, Gmax 10; Sf 3, Sw 5, Smin 0, Smax 20.
 `shaders/init.wgsl`, `gl/glsl/init.frag`. Every agent draws a heading. The layouts: mixed (uniform; with one agent per
 cell a random permutation of the cells), bands (the strains side by side), sectors, colonies (one disc per strain),
 ring, center, empty (every agent dead) and food (every agent dead; for each strain one inoculate step places about 50
-agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A on
-the first food of the scene, strain B on the second, and so on, and a strain without such a food starts without
-agents; ADR 0025, ADR 0032). With one agent per cell,
+agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A at
+the start of the first food stroke of the list (a dab or a whole drag, 8.2), strain B on the second, and so on, and a
+strain without such a food starts without agents; ADR 0025, ADR 0032). With one agent per cell,
 claim rounds give each alive agent its own cell: 1 round for the mixed layout on a periodic grid or a box, without walls; else 64
 (`startRounds()` in `src/engine/pack.ts`); a loser
 of the last round starts dead. Without the rule an agent draws again up to 32 times while its cell is not open. With a
@@ -506,8 +528,10 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
+| An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
 | The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |
 | A colony for each strain (10)           | `engine.gpu.test.ts`: three strains in the Foraging maze start two colonies on the two foods                                    |
 | A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
@@ -515,22 +539,35 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 
 `flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
 route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of
-four); a change of the number of strains during a run.
+four); a change of the number of strains during a run. For the food sites (ADR 0029, decision 17) it tests on both
+backends: a dragged line, held in a link of before, is one site with its port at the covered cell nearest its start; a
+strain covers a site from any of its cells, and its port moves to the covered cell nearest the centre; two strains on
+the same strokes each carry I0 through cells of their own; two dabs that touch stay two sites; the CPU copy while a port
+moves, with food under a wall and at the edge of a tube; a large site in lanes before and after its port, also with two
+strains; a change of the sites during a run, also when the list gets shorter; 64 sites of 65 strokes; an erased cell
+holds no port. `engine-env.test.ts` holds the engine to the rule: a drag of the brush is one site, a link gives the
+sites of its list, and the start layout Food puts each strain on a stroke of its own.
 
-Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
-(a test checks only that it changes), and agents under a painted wall.
+Not tested: the random turn pCD (no test uses pCD > 0) and the rate of random shrinkage. The value of the blocked
+heading is checked only beside a wall ("leaves an agent beside the wall to its move").
 
 ## 14. Open points in the code
 
-Each one is open, not a rule. The first two were found while this file was written, the last one in ADR 0031:
+This one is open, not a rule. It was found while this file was written:
 
-- An agent under a wall that was painted onto it is not moved off the wall, and can step out (7.5).
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
-- A site is one cell (8.2). Where strains share a food dot, only the strains whose tube holds its cell cover it
-  (ADR 0031 and `TODO.md`).
+
+Closed on 2026-11-14: a site was the one cell at the start of a food stroke (8.2). So a strain covered a food dot only
+at its centre, and where strains shared a food dot only the strains whose tube held that cell had it as a site (ADR
+0031). And a dragged line of food gave a site for every segment of the drag, each with the whole flux. A site is a
+stroke with all its cells now, and its port is the covered cell nearest its centre (ADR 0029, decision 17).
 
 Closed on 2026-11-13: respawn (7.2) brought a dead agent of any strain to life, so with the flow a strain appeared that
 nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031). And the flow did
 nothing for a strain whose trail stayed below 0.2 deposits, as in the start scene Three strains with one agent per
 cell. The levels follow the decay of the strain now (8.1, ADR 0032). A child of the growth rule could land between two
 wall cells that touch at a corner, where no move can go (9); it no longer can (ADR 0025, decision 35).
+
+Closed on 2026-11-15: an agent under a wall that was painted onto it was not moved off the wall. It could step out of
+it, and deep in a thick wall it stayed there for good, alive, with every move blocked and no deposit. Such an agent is
+placed off the wall now, as the cut places its agents (7.2, ADR 0038).

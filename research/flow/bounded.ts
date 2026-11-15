@@ -7,14 +7,29 @@
 //   list that no tube covers. Prints the mean pressure of the network and the flux against the run as built.
 //
 // Usage: node --import ./research/flow/register.mjs research/flow/bounded.ts [scene=grow] [steps=600] [i0=1]
-import { FLOW, flowSites, packFlow } from '../../src/engine/flow.ts';
+import { FLOW, packFlow } from '../../src/engine/flow.ts';
 import { flowFlux, flowStart, flowStep, type FlowFields, type FlowGrid } from '../../src/engine/flow-reference.ts';
+import { flowSites } from '../../src/engine/sites.ts';
 import { defaultSettings } from '../../src/model/params.ts';
 import { AS_BUILT, step as ruleStep, type Rules } from './rules.ts';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
 const scene = args.scene ?? 'grow';
 const SEED = 1;
+
+/**
+ * The food sites of the record: the cell at each centre, a site of one cell. rules.ts has the rule of the record, in
+ * which a site was the cell at the start of its stroke. A site of one cell gives the same with the sites of decision 17
+ * (ADR 0029), in which a site is a stroke with every cell that it paints: it is covered while its one cell is, and that
+ * cell is its port.
+ */
+const cellSites = (centres: readonly [number, number][], w: number, h: number) =>
+  flowSites(
+    centres.map(([x, y]) => [{ kind: 'food' as const, from: [x, y], to: [x, y], radius: 0.5 }]),
+    w,
+    h,
+    'box',
+  );
 
 /** Stops when a run with the rules as built differs from the app's copy of the passes. */
 function same(a: FlowFields, b: FlowFields, what: string) {
@@ -41,7 +56,8 @@ if (scene === 'grow') {
       for (let dx = -1; dx <= 1; dx++) env[((Math.floor(y) + dy) * n + Math.floor(x) + dx) * 4 + 1] = 255;
   const grid: FlowGrid = { width: n, height: n, boundary: 'box', env };
   const settings = { ...defaultSettings(), flowStrength: i0, seed: SEED };
-  const u = new Float32Array(packFlow(settings, flowSites(foods, n, n)));
+  const sites = cellSites(foods, n, n);
+  const u = new Float32Array(packFlow(settings, sites));
   /** The trail of each step: a disc that grows by a tenth of a cell per step, with tubes 6 cells apart; 5 % of its
    *  cells flip in each step. The same for every run. */
   const trails = (() => {
@@ -88,7 +104,7 @@ if (scene === 'grow') {
     for (let s = 0; s < steps; s++) {
       fields = ruleStep(grid, u, fields, all[s]!, s, SEED, rules);
       if (rules === AS_BUILT) {
-        reference = flowStep(grid, u, reference, all[s]!, s, SEED);
+        reference = flowStep(grid, u, reference, all[s]!, s, SEED, sites.cells);
         same(fields, reference, `step ${s}`);
       }
       if (!SHOW.includes(s + 1)) continue;
@@ -137,7 +153,8 @@ if (scene === 'grow') {
   const grid: FlowGrid = { width: w, height: h, boundary: 'box', env };
   const settings = { ...defaultSettings(), flowStrength: i0, seed: SEED };
   const centres = [X!, A!, B!, C!, D!].map(([x, y]): [number, number] => [x + 0.5, y + 0.5]);
-  const u = new Float32Array(packFlow(settings, flowSites(centres, w, h)));
+  const sites = cellSites(centres, w, h);
+  const u = new Float32Array(packFlow(settings, sites));
   const trail = new Float32Array(w * h * 4);
   for (let c = 0; c < w * h; c++) trail[c * 4] = tube[c] ? 5 : 0;
   const start = () => {
@@ -151,7 +168,7 @@ if (scene === 'grow') {
   for (let s = 0; s < steps; s++) {
     built = ruleStep(grid, u, built, trail, s, SEED, AS_BUILT);
     first = ruleStep(grid, u, first, trail, s, SEED, old);
-    reference = flowStep(grid, u, reference, trail, s, SEED);
+    reference = flowStep(grid, u, reference, trail, s, SEED, sites.cells);
     same(built, reference, `step ${s}`);
     // Six lines per run, and always the last step (a step count that 6 does not divide printed nothing before).
     if ((s + 1) % Math.max(1, Math.round(steps / 6)) !== 0 && s + 1 !== steps) continue;

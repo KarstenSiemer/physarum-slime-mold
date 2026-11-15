@@ -11,7 +11,6 @@ import {
   FLOW_SLOTS,
   flowOn,
   flowRoles,
-  flowSites,
   heldTrail,
   JONES_DECAY,
   packFlow,
@@ -19,6 +18,7 @@ import {
   trailLevels,
 } from './flow';
 import { flowStart, flowStep, roleSigns, type FlowGrid } from './flow-reference';
+import { flowSites, NO_SITES, type FlowSites } from './sites';
 
 describe('flowOn', () => {
   it('runs the flow only with the switch on and in the extended model', () => {
@@ -67,55 +67,6 @@ describe('the time scale (ADR 0029)', () => {
     expect(FLOW.birthFrom).toBeLessThan(1);
     expect(FLOW.trailLow).toBeLessThan(FLOW.trailFull);
     expect(FLOW.ghost).toBeLessThan(FLOW.base * FLOW.bodyLow);
-  });
-});
-
-describe('flowSites', () => {
-  it('takes the cell of each centre once, in the order of the list', () => {
-    const sites = flowSites(
-      [
-        [3.5, 4.5],
-        [10.99, 0],
-        [3.2, 4.9],
-        [7, 7],
-      ],
-      16,
-      8,
-    );
-    expect(sites).toEqual([
-      [3, 4],
-      [10, 0],
-      [7, 7],
-    ]);
-  });
-
-  it('drops a centre outside the grid', () => {
-    expect(
-      flowSites(
-        [
-          [-0.5, 2],
-          [16, 2],
-          [2, 8],
-          [2, -1],
-          [15.9, 7.9],
-        ],
-        16,
-        8,
-      ),
-    ).toEqual([[15, 7]]);
-  });
-
-  it('spreads the sites evenly over a longer list, the first one always among them', () => {
-    const centres = Array.from({ length: 200 }, (_, i): [number, number] => [i, 0]);
-    const sites = flowSites(centres, 256, 4);
-    expect(sites.length).toBe(FLOW_SITES);
-    expect(sites[0]).toEqual([0, 0]);
-    const xs = sites.map((s) => s[0]);
-    expect(new Set(xs).size).toBe(FLOW_SITES);
-    for (let i = 1; i < xs.length; i++) {
-      const gap = (xs[i] ?? 0) - (xs[i - 1] ?? 0);
-      expect(gap === 3 || gap === 4, String(gap)).toBe(true);
-    }
   });
 });
 
@@ -203,11 +154,14 @@ describe('flowRoles', () => {
 
 describe('packFlow', () => {
   const settings = { ...defaultSettings(), flowStrength: 6, seed: 77 };
-  const sites: [number, number][] = [
-    [8, 9],
-    [100, 20],
-    [31, 2],
-  ];
+  const sites: FlowSites = {
+    list: [
+      { x: 8, y: 9, offset: 0, count: 5, stroke: 0 },
+      { x: 100, y: 20, offset: 64, count: 1, stroke: 1 },
+      { x: 31, y: 2, offset: 128, count: 70, stroke: 3 },
+    ],
+    cells: new Uint32Array(256),
+  };
 
   it('has the size of the uniform block of the passes', () => {
     expect(FLOW_CONSTANT_SLOTS).toBe(7);
@@ -294,25 +248,33 @@ describe('packFlow', () => {
     expect(new Float32Array(packFlow(settings, sites))[22]).toBe(0);
   });
 
-  it('writes the sites after the constants, and the first site as the cell of reference', () => {
+  it('writes the sites after the constants, and the first cell of the first site as the cell of reference', () => {
     const f = new Float32Array(packFlow(settings, sites));
-    expect([...f.subarray(20, 24)]).toEqual([8, 9, 0, 0]);
+    // The blocks of 64 entries of the list of cells (flow.wgsl `blocks`) in the last slot.
+    expect([...f.subarray(20, 24)]).toEqual([8, 9, 0, 4]);
     const at = FLOW_CONSTANT_SLOTS * 4;
-    sites.forEach(([x, y], i) => {
-      expect([...f.subarray(at + i * 4, at + i * 4 + 4)]).toEqual([x, y, 0, 0]);
+    // Per site its first cell and its run in the list of cells (flow.wgsl `sites`).
+    sites.list.forEach(({ x, y, offset, count }, i) => {
+      expect([...f.subarray(at + i * 4, at + i * 4 + 4)]).toEqual([x, y, offset, count]);
     });
     // Nothing after the last site.
-    expect(f.subarray(at + sites.length * 4).every((v) => v === 0)).toBe(true);
+    expect(f.subarray(at + sites.list.length * 4).every((v) => v === 0)).toBe(true);
+    // The runs of a grid of 4096 × 4096 cells are whole numbers in 32-bit floats: the shaders read them exactly.
+    expect(Math.fround(4096 * 4096)).toBe(4096 * 4096);
+    expect(Math.fround(4096 * 4096 - 1)).toBe(4096 * 4096 - 1);
   });
 
   it('writes at most FLOW_SITES sites, and clears a buffer that it gets', () => {
-    const many = Array.from({ length: 80 }, (_, i): [number, number] => [i, 1]);
+    const many: FlowSites = {
+      list: Array.from({ length: 80 }, (_, i) => ({ x: i, y: 1, offset: i, count: 1, stroke: i })),
+      cells: new Uint32Array(80),
+    };
     const buf = new ArrayBuffer(FLOW_BYTES);
     new Float32Array(buf).fill(9);
     const f = new Float32Array(packFlow(settings, many, buf));
     expect(f[15]).toBe(FLOW_SITES);
     expect(f.length).toBe(FLOW_SLOTS * 4);
-    const none = new Float32Array(packFlow(settings, [], buf));
+    const none = new Float32Array(packFlow(settings, NO_SITES, buf));
     expect(none[15]).toBe(0);
     expect(none.subarray(28).every((v) => v === 0)).toBe(true);
   });
@@ -347,7 +309,7 @@ describe('the levels of the trail of a tube (ADR 0032)', () => {
     // So the block of a scene with that decay holds the numbers of before: the scenes with the flow keep their bytes.
     const settings = { ...defaultSettings(), flowStrength: 8 };
     expect(settings.strains[0]?.decay).toBe(0.1);
-    const f = new Float32Array(packFlow(settings, []));
+    const f = new Float32Array(packFlow(settings, NO_SITES));
     expect(f[13]).toBe(Math.fround(FLOW.trailLow * 5));
     expect(f[14]).toBe(Math.fround(1 / (FLOW.trailFull * 5 - FLOW.trailLow * 5)));
   });
@@ -364,10 +326,10 @@ describe('the levels of the trail of a tube (ADR 0032)', () => {
     // The block of each strain has the levels of that strain; a deposit of 0 gives finite levels.
     const strains = [0.1, 0.6].map((decay, i) => ({ ...defaultStrain(i), decay }));
     const settings = { ...defaultSettings(), strains };
-    const second = new Float32Array(packFlow(settings, [], undefined, 1));
+    const second = new Float32Array(packFlow(settings, NO_SITES, undefined, 1));
     expect(second[13]).toBe(Math.fround(low));
     const none = new Float32Array(
-      packFlow({ ...settings, strains: [{ ...defaultStrain(0), deposit: 0, decay: 0.6 }] }, []),
+      packFlow({ ...settings, strains: [{ ...defaultStrain(0), deposit: 0, decay: 0.6 }] }, NO_SITES),
     );
     expect(Number.isFinite(none[14] ?? NaN)).toBe(true);
   });
@@ -384,8 +346,8 @@ describe('the flow of a strain in the CPU copy of the passes (ADR 0031)', () => 
     const trail = new Float32Array(n * n * 4);
     trail[mine * 4 + 1] = 10;
     trail[other * 4] = 10;
-    const u = new Float32Array(packFlow(settings, [], undefined, 1));
-    const fields = flowStep(grid, u, flowStart(grid, FLOW.fresh), trail, 0, settings.seed);
+    const u = new Float32Array(packFlow(settings, NO_SITES, undefined, 1));
+    const fields = flowStep(grid, u, flowStart(grid, FLOW.fresh), trail, 0, settings.seed, NO_SITES.cells);
     expect(fields.memory[mine * 4 + 1]).toBeCloseTo(FLOW.bodyRate, 6);
     expect(fields.memory[other * 4 + 1]).toBe(0);
   });
@@ -413,7 +375,15 @@ describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', ()
         for (let dx = -1; dx <= 1; dx++) env[((Math.floor(y) + dy) * n + Math.floor(x) + dx) * 4 + 1] = 255;
     const grid: FlowGrid = { width: n, height: n, boundary: 'box', env };
     const settings = { ...defaultSettings(), flowStrength: 1, seed: 1 };
-    const u = new Float32Array(packFlow(settings, flowSites(foods, n, n)));
+    // Each food is a dab that paints its 3 × 3 cells: a site of nine cells (ADR 0029, decision 17).
+    const sites = flowSites(
+      foods.map((at) => [{ kind: 'food', from: at, to: at, radius: 1.5 }]),
+      n,
+      n,
+      'box',
+    );
+    expect(sites.list.map((s) => s.count)).toEqual([9, 9, 9, 9]);
+    const u = new Float32Array(packFlow(settings, sites));
     let fields = flowStart(grid, FLOW.fresh);
     let rng = 12345;
     let top = 0;
@@ -430,7 +400,7 @@ describe('the pressure of the CPU copy of the passes (ADR 0029, decision 6)', ()
           if (rng / 2 ** 32 < 0.05) tube = !tube;
           if (tube) trail[(y * n + x) * 4] = 10;
         }
-      fields = flowStep(grid, u, fields, trail, step, settings.seed);
+      fields = flowStep(grid, u, fields, trail, step, settings.seed, sites.cells);
       top = fields.pressure.reduce((a, v) => Math.max(a, Math.abs(v)), top);
       most = Math.max(most, fields.memory.filter((v, i) => i % 4 === 3 && v !== 0).length);
     }

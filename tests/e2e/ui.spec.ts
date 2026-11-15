@@ -53,6 +53,7 @@ test('the Jones model offers only Jones’ settings, and a switch back to it dro
   await expect(model).toHaveValue('jones');
   await expect(saturation).toHaveCount(0);
   await expect(page.getByLabel('Scent decay', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Scent reach', { exact: true })).toHaveCount(0);
   await expect(light).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add strain' })).toHaveCount(0);
   await expect(rule).toBeChecked();
@@ -63,6 +64,7 @@ test('the Jones model offers only Jones’ settings, and a switch back to it dro
   await model.selectOption('extended');
   await expect(saturation).toBeVisible();
   await expect(page.getByLabel('Scent decay', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Scent reach', { exact: true })).toBeVisible();
   await expect(light).toBeVisible();
   await expect(rule).toBeEnabled();
   await page.getByLabel('Trail saturation value').fill('30');
@@ -89,6 +91,26 @@ test('the Jones model offers only Jones’ settings, and a switch back to it dro
   await expect(changed).toBeHidden();
   await expect.poll(link).toEqual(['jones', 0, false]);
   expect(errors).toEqual([]);
+});
+
+// ADR 0036: Scent reach is Scent decay in cells, and no setting of its own.
+test('Scent reach sets Scent decay, and follows it', async ({ page }) => {
+  const reach = page.getByLabel('Scent reach value');
+  const decay = page.getByLabel('Scent decay value');
+  // 24.2 cells is a decay of 0.003007, which the field keeps to three digits (0.003 itself gives 24.24 cells).
+  await reach.fill('24.2');
+  await reach.press('Enter');
+  await expect.poll(() => page.evaluate(() => globalThis.physarum?.settings.scentDecay)).toBe(0.00301);
+  await expect(decay).toHaveValue('0.00301');
+  await expect(reach).toHaveValue('24.2');
+  await decay.fill('0.1');
+  await decay.press('Enter');
+  await expect(reach).toHaveValue('4.04');
+  // Without diffusion the scent stays on the food: no reach to set.
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await page.getByLabel('Diffusion passes value').fill('0');
+  await page.getByLabel('Diffusion passes value').press('Enter');
+  await expect(page.getByLabel('Scent reach', { exact: true })).toHaveCount(0);
 });
 
 test('a switch to Jones keeps strain A and says what went', async ({ page }) => {

@@ -104,6 +104,21 @@ model gives it a middle value. This changes the picture only, and a switch turns
 was chosen with pictures of saved states, made on the CPU. Four other rules were drawn and
 rejected, and the script can still draw them.
 
+**A food site is a stroke** ([ADR 0029](../../docs/adr/0029-flow-in-the-tubes.md), amendment
+2026-11-14 (2), part 11). The flux of a food entered at one cell: the start of its stroke. A
+dragged line of food is many strokes, one for each half radius of the drag, so it was many
+sites, each with the whole flux, and a strain covered a dab only at its centre. Now a site is a
+dab or a whole drag, with every cell that it paints. A strain covers it from any of these cells,
+and the flux enters at the covered cell nearest the start of the stroke. The engine finds the
+strokes in the list of edits by their geometry: a segment of a drag starts where the one before
+ends. So a link of before gives the same sites. The Maze and the Tokyo scene give the numbers of before within
+the spread of the seeds. On the Tokyo map the network at step 48,000 is a little longer (TL 1.89
+against 1.77; over the samples from step 16,000 on 1.84 against 1.80), and all 36 food sources
+are joined in more samples (78 of 80 against 73). The first build of the pass that finds the
+cell of the flux looked at the cells of a site one after the other: a large food that no tube
+covers cost 128 ms per step. Now the pass looks at blocks of 64 cells side by side, and its cost
+is below the noise of the measurement. With the flow off, every scene keeps its bytes.
+
 ## What is in this folder, and what you need to read
 
 | Part                                               | Size        | Read it?                                                |
@@ -181,9 +196,11 @@ mathematics". In short:
   to 2 % per step: it starves. A dead agent comes to life on a cell with a flow memory above 0.5.
   So the agents leave the tubes without a flux and fill the tubes that carry one.
 - **Food source** and **food site**: a food source is one food of a scene, for example a city of
-  the Tokyo scene. A site is the cell where a flux enters or leaves the network: the cell at the
-  start of a food stroke, which is the centre of a food dot. The Tokyo scene has 36 food sources and 42 sites, because Tokyo is seven
-  sites.
+  the Tokyo scene. A site is one painted food stroke, a dab or a whole drag, with every cell that
+  it paints (part 11; before 2026-11-14 the one cell at the start of the stroke). The **port** of a
+  site is the cell where the flux of a strain enters or leaves the network: the covered cell
+  nearest the start of the stroke. The Tokyo scene has 36 food sources and 42 sites, because
+  Tokyo is seven sites.
 - **Solver**: the code that computes the pressures from the foods and the conductivities.
 - **Exact solver**, `exact`: the method of conjugate gradients. It takes Kirchhoff's law of all
   cells as one system of equations, and it iterates until the law holds in every cell within a
@@ -662,7 +679,7 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 npm run build && npx playwright test --project=e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 27, 47 and 5 tests pass.
+You must see 24, 71 and 5 tests pass (27 and 47 before the food sites of part 11).
 
 - `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
   scale, and the growing mesh of part 5 with all rules on.
@@ -673,9 +690,11 @@ You must see 27, 47 and 5 tests pass.
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
-A test is worth what it catches. This script puts 41 wrong rules of the flow into the code of the
-app, one at a time, and runs the GPU tests of the flow for each one (5 minutes). Without a name it
-also runs the 85 wrong rules of the picture of the tubes (part 10):
+A test is worth what it catches. This script puts 83 wrong rules of the flow and of its food sites
+into the code of the app, one at a time, and runs the tests of the flow for each one (45 minutes;
+the 42 of the food sites are part 11). Without a name it also runs the 90 wrong rules of the picture
+of the tubes (part 10), and the 8 wrong rules of an agent under a painted wall (ADR 0038, `U1` to
+`U8`) against the tests of the agents in `sim.gpu.test.ts`:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -684,8 +703,9 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
 It changes files below `src/` while it runs and writes each one back as it was. You must see a
 test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
 `logs/engine/mutations-0031.txt` for 39 of them, and `logs/engine/scenes-mutations.txt` for the
-two of ADR 0032; `logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests
-of ADR 0029. ADR 0029 and ADR 0031 have their rules as a table.
+two of ADR 0032, and `logs/engine/sites-mutations*.txt` for all 83 with the food sites (part 11);
+`logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests of ADR 0029. ADR
+0029 and ADR 0031 have their rules as a table.
 
 Result: parts 2 to 6 are measurements that were made once. These tests run on every change. They
 hold the rule that the app got: a change that breaks Kirchhoff's law, the adaptation, the two
@@ -976,22 +996,141 @@ npx vitest run --project unit src/engine/engine.test.ts -t "a measurement of the
 npx vitest run --project gpu src/engine/engine.gpu.test.ts -t "a PNG while"
 ```
 
-The 85 wrong rules of the picture (8 minutes): every block must name at least one test that fails,
+The 90 wrong rules of the picture (10 minutes): every block must name at least one test that fails,
 marked `×`, and no block may say `NO TEST FAILS`. The script changes files below `src/` while it
 runs, and it writes each one back as it was: do not change those files while it runs. The record
 is `logs/view/mutations.txt`.
 
 ```bash
-node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 85)
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f "V%g" 1 90)
 ```
 
 Result: the picture draws a tube with a large flow memory thick, and a tube with a small one thin
 and faint, on both backends as the rule on the CPU says. A new tube is thick until its flow memory
 follows its flux. No result of a simulation changes.
 
+### 11. Is a food site one stroke? [ADR 0029, amendment 2026-11-14 (2)]
+
+The sites of the scenes, and the time that the engine spends on the sites after a paint, on the
+CPU (10 s):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/sites.ts
+```
+
+You must see 2 sites of 106 cells each for the Maze and 42 sites of 59 to 65 cells for the Tokyo
+scene; `entries` counts the list with the ends of its blocks. The last three lines are a drag across the default grid of 1,536 × 960 cells with a brush
+of 6, 30 and 90 cells: `msPerSegment` is the time of one call while the drag goes on,
+`msNothingNew` that of a call after a paint of another kind, and `msNewGrid` that of a call on a
+new grid. The times are those of the machine; the record is `logs/engine/sites-cpu.jsonl`.
+
+The tests of the rule (2 s and 1 minute):
+
+```bash
+npx vitest run --project unit src/engine/sites.test.ts src/engine/engine-env.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/flow.gpu.test.ts
+```
+
+The time of the passes of the ports for a large food stroke (5 minutes): the default grid of
+1,536 × 960 cells, a tube between two small dabs, and a third dab of about 10,000, 100,000 and
+250,000 cells that no tube covers, or covers at its centre. The record is
+`logs/engine/sites-bench.jsonl`; every line must have about the time of the line without the
+large dab (`"cells":0`).
+
+```bash
+VITE_NAME=sites-bench npx vitest run --config research/vitest.config.ts research/flow/engine/sites-bench.gpu.test.ts
+```
+
+The time of a step of the Maze and of the Tokyo scene is the command of table (c) in part 6; the
+records of this part are `logs/engine/bench-sites-1.jsonl` and `bench-sites-2.jsonl`, and the
+same two runs with `main` on the same evening `logs/engine/bench-main-1.jsonl` and
+`bench-main-2.jsonl`.
+
+The bytes with the flow off: the two commands of part 6 with the digests of `main` made on the
+same machine (`logs/engine/digest-main-flow-off.jsonl`). They must print that all 42 runs are
+equal. With the flow as each scene has it (`logs/engine/digest-sites.jsonl` against
+`digest-main.jsonl`), the four scenes with the flow on differ on both backends: Tokyo, Food ring,
+Rival networks and Tokyo, two networks. The Maze is still equal at step 500.
+
+```bash
+VITE_NAME=digest-flow-off VITE_PATCH='{"flow":false}' npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/digest-flow-off.jsonl research/flow/logs/engine/digest-main-flow-off.jsonl
+```
+
+The campaigns of part 6 again: the Maze with 10 seeds on WebGPU and 3 on WebGL2, the Tokyo scene
+with 10 seeds on WebGPU and 3 on WebGL2. The names start with `g17-`. Two WebGPU runs can run at
+a time; run the WebGL2 runs when no other run uses the GPU, as they are about eight times as slow
+beside a Tokyo run. A Maze run takes about 1 minute, a Tokyo run 4 to 6 minutes on WebGPU.
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_KIND=webgpu VITE_SCENE=maze VITE_FLOW=1 VITE_I0=8 VITE_SEED=$seed VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000 VITE_NAME=g17-mz-webgpu-i8-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g17-mz-webgpu-i8-s$seed >> research/flow/out/maze-webgpu-flux8-sites.txt; done
+```
+
+```bash
+for seed in 1 2 3; do VITE_KIND=webgl2 VITE_SCENE=maze VITE_FLOW=1 VITE_I0=8 VITE_SEED=$seed VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000 VITE_NAME=g17-mz-webgl2-i8-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g17-mz-webgl2-i8-s$seed >> research/flow/out/maze-webgl2-flux8-sites.txt; done
+```
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g17-tk-i1.4-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g17-tk-i1.4-s$seed 1.5 99999 >> research/flow/out/tokyo-flux1.4-sites.txt; done
+```
+
+```bash
+for seed in 1 2 3; do VITE_KIND=webgl2 VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_STEPS=2000,4000,8000,12000,16000,24000 VITE_NAME=g17-tkgl-i1.4-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g17-tkgl-i1.4-s$seed 1.5 99999 >> research/flow/out/tokyo-webgl2-flux1.4-sites.txt; done
+```
+
+The tables of the amendment, the new runs beside the record (each command a second):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/logs/engine/maze-webgpu-flux8.txt research/flow/logs/engine/maze-webgpu-flux8-sites.txt research/flow/logs/engine/maze-webgl2-flux8.txt research/flow/logs/engine/maze-webgl2-flux8-sites.txt
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo research/flow/logs/engine/tokyo-flux1.4.txt research/flow/logs/engine/tokyo-flux1.4-sites.txt research/flow/logs/engine/tokyo-webgl2-flux1.4.txt research/flow/logs/engine/tokyo-webgl2-flux1.4-sites.txt
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo-end research/flow/logs/engine/tokyo-flux1.4.txt research/flow/logs/engine/tokyo-flux1.4-sites.txt
+```
+
+The scenes of ADR 0032 with the sites of the amendment (3 minutes): the commands of part 9 with
+the names `sites-scenes-food-ring`, `sites-scenes-rival-networks` and
+`sites-scenes-tokyo-rivals`; the records are `logs/engine/sites-scenes-*.jsonl`.
+
+The wrong rules of the flow, with the 42 new ones of the food sites. The script changes files below
+`src/` while it runs: start no other run and change no file while it runs. The records are
+`logs/engine/sites-mutations.txt`, a run of the 41 rules of the flow and the first 30 of the sites
+with the first build, in which two rules were not caught until a test came for them, and
+`logs/engine/sites-mutations-blocks.txt`, the 38 rules of the food sites and of the passes of the
+ports with the passes in blocks and every test of this part (25 minutes), and
+`logs/engine/sites-mutations-review.txt`, the rules of the tests that a review asked for (10
+minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts W5 W9 F5 F9 P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11 P12 S4 Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10 Q11 Q12 L4 C1 C2 C3 C4 C5 C6 E1 E2
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts C1 C2 C3 C4 C5 C6 C7 C8 P13 P14 R1 Q13 Q14 Q15
+```
+
+Every block must name a test that fails, marked `×`, and no block may say `NO TEST FAILS`.
+`mutate.ts check` checks in a second that the text of every wrong rule still fits its file.
+
+Result: a dragged line of food is one site, and a strain covers a site from any of its cells.
+In the Maze the dead ends empty and one tube remains as before, within the spread of the seeds.
+On the Tokyo map the network keeps the measures of the organism, a little longer at step 48,000,
+and all 36 food sources are joined in 78 of 80 samples. The passes of the ports cost less than
+the noise of the bench, also for a food of 250,000 cells that no tube covers.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 161 files, 1.9 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 182 files, 2.0 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1010,7 +1149,8 @@ asks for the new digest.
 | `logs/engine/mutations-0031.txt`                     | the same for 39 wrong rules, with the tests of ADR 0031                                                                                                                                                                         | 2026-11-13, the code of ADR 0031                      |
 | `logs/engine/strains-*.jsonl`                        | the runs of part 8: the strains of the Foraging maze (`-before` with `main` at `7d3a5ee`), of Three strains with two foods and of the Maze; the digests of 18 runs with one strain at `7d3a5ee`; the time of a step (`-bench-`) | 2026-11-13, M3 Pro                                    |
 | `logs/engine/scenes-*.jsonl`, `scenes-mutations.txt` | the runs of part 9: the strains of the new scenes and of the owner's second case, the time of a step, and the two wrong rules of ADR 0032                                                                                       | 2026-11-13, M3 Pro                                    |
-| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, its 85 wrong rules, and its cost on a large grid                          | 2026-11-13 and 2026-11-15, M3 Pro                     |
+| `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, its 90 wrong rules, and its cost on a large grid                          | 2026-11-13 and 2026-11-15, M3 Pro                     |
+| `logs/engine/*sites*`, `*-main*`                     | the runs of part 11: the campaigns, the scenes of ADR 0032, the time of a step and of the passes of the ports, the digests, the wrong rules, and the same runs of `main` on the same evening                                    | 2026-11-14, M3 Pro, `main` at `5195079`               |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1056,11 +1196,12 @@ Notes on the record:
 | `data/tokyo_scene.json`   | the map of the prototype: stations from Wikidata (CC0), coast © OpenStreetMap contributors (ODbL) |
 | `solvers.ts`              | the solvers on one network with the rule of the app (2026-11-13)                                  |
 | `rules.ts`, `bounded.ts`  | the passes with single rules as switches, and two scenes for them (2026-11-13)                    |
+| `sites.ts`                | the food sites of the scenes, and the time of the sites on the CPU (2026-11-14)                   |
 | `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step, a frame and the picture, digests, strains     |
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
-| `engine/mutate.ts`        | 126 wrong rules, one at a time, against the GPU tests of the flow and of the picture of the tubes |
+| `engine/mutate.ts`        | 181 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

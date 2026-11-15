@@ -5,17 +5,20 @@
 // passes from the tubes of one strain into the tubes of another.
 //
 // The network: every open cell (inside the arena, no wall) is a node with a conductivity g, and two cells that share a
-// side are joined by an edge whose conductance is the harmonic mean of their conductivities. A food site that the
-// plasmodium covers gives or takes the flux I0 at its cell: the start of the food stroke, which is the centre of a
-// food dot (flowSites() in flow.ts). The pressure p follows Kirchhoff's law (Tero, Kobayashi and Nakagaki 2007, Eq. 1
-// to 3 and 6; several sources and sinks at once). Four pressure fields run side by side, one per lane of the
+// side are joined by an edge whose conductance is the harmonic mean of their conductivities. A food site is one
+// painted food stroke, with the cells that it paints (ADR 0029, decision 17; sites.ts). A site that the plasmodium of
+// the strain covers gives or takes the flux I0 at its port: the covered cell nearest the centre of the stroke, which
+// the pass `sites` finds in every step. The pressure p follows Kirchhoff's law (Tero, Kobayashi and Nakagaki 2007,
+// Eq. 1 to 3 and 6; several sources and sinks at once). Four pressure fields run side by side, one per lane of the
 // textures: each has its own draw of which sites give and which take.
 //
 // `memory` holds per cell, for the strain of the pass: x the flow memory D (Tero's conductivity of a tube, 0.0001 to
 // 1), y the tube body (the trail of the strain smoothed over time, 0 to 1), z the conductivity g, w the roles of a
-// site's cell while the site gives or takes in at least one lane, else 0.
+// site at its port while the site gives or takes in at least one lane, else 0.
 //
-// A step runs `update` once and then `pressure` FLOW_ITERATIONS times:
+// A step runs `blocks` and `sites` once for all strains, then for each strain `update` once and `pressure`
+// FLOW_ITERATIONS times:
+// - `blocks` and `sites`: for every site and strain its port, from the memory and the food of the step before.
 // - `update`: the flux of every lane through the cell, from the pressure and the conductivities of the step before;
 //   Tero's adaptation dD/dt = f(Q) − D with f(Q) = Q^gamma / (1 + Q^gamma) (2007, Eq. 5; 2010), as a mean over the
 //   lanes; then the body from the trail, the new conductivity, and for a food site its roles.
@@ -32,9 +35,9 @@ struct Flow {
   c: vec4f, // weight, body rate, body low, fresh memory
   d: vec4f, // memory floor, trail low, 1 / (trail full − trail low), site count
   e: vec4f, // death, half², birth, birth from (agents.wgsl)
-  f: vec4f, // the first site's cell x, y (referenceCell()), the strain of the pass, unused
+  f: vec4f, // the first cell of the first site x, y (referenceCell()), the strain of the pass, blocks of `siteCells`
   g: vec4f, // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
-  sites: array<vec4f, 64>, // cell x, cell y, unused, unused
+  sites: array<vec4f, 64>, // its first cell x, y; its cells in `siteCells`: from z, w of them (sites.ts FlowSites)
 }
 
 // Kirchhoff's law fixes a pressure field only up to a constant, and the field moves as a whole when the sites do not
@@ -52,6 +55,21 @@ override RECENTRE: u32 = 0u;
 @group(0) @binding(6) var pressureIn: texture_2d<f32>;
 @group(0) @binding(7) var pressureBefore: texture_2d<f32>;
 @group(0) @binding(8) var pressureOut: texture_storage_2d<rgba32float, write>;
+// The cells of every site, as indices y · W + x, the run of each site sorted by the distance to its centre. A run starts
+// at a multiple of SITE_BLOCK and ends with NO_CELL up to the next one, so no block of SITE_BLOCK entries holds the
+// cells of two sites (sites.ts FlowSites).
+@group(0) @binding(9) var<storage, read> siteCells: array<u32>;
+// Per strain and site (64 per strain): x the port of the site in this step, y its port in the step before; −1 for
+// none. `sites` writes them; `update` and `pressure` read them.
+@group(0) @binding(10) var<storage, read_write> ports: array<vec2i>;
+// Every layer of the memory before the step, for `blocks`.
+@group(0) @binding(11) var memories: texture_2d_array<f32>;
+// Per strain and block of `siteCells` (U.f.w blocks per strain): the first entry of the block whose cell covers its
+// site, counted in the block, or −1. `blocks` writes it, `sites` reads it.
+@group(0) @binding(12) var<storage, read_write> blockHits: array<i32>;
+
+const SITE_BLOCK = 64u;
+const NO_CELL = 0xffffffffu;
 
 // The cell at c as coordinates inside the grid if it is open: inside the arena and no wall. Else (−1, −1).
 fn openXY(c: vec2i) -> vec2i {
@@ -79,14 +97,21 @@ fn ghostEdge(a: f32, q: vec2i) -> f32 {
   return edge(a + U.b.z, textureLoad(memory, q, 0).z + U.b.z);
 }
 
-// Whether a flux runs between foods: at least two food sites give or take (their roles are in the memory). Without it
-// no cell adapts: the flow memory keeps its values, so no cell becomes a starved cell. The agents still follow the
-// memory that they find (agents.wgsl starved()): on fresh ground one of 20,000 starves per step.
+// The port of site i for the strain of the pass in this step, or −1: the first cell of its list that held food and a
+// tube of the strain in the step before (`sites`).
+fn port(i: i32) -> i32 {
+  return ports[i32(U.f.z) * 64 + i].x;
+}
+
+// Whether a flux runs between foods: at least two food sites gave or took in the step before (their roles are in the
+// memory at their ports of that step). Without it no cell adapts: the flow memory keeps its values, so no cell becomes
+// a starved cell. The agents still follow the memory that they find (agents.wgsl starved()): on fresh ground one of
+// 20,000 starves per step.
 fn fed() -> bool {
-  let n = i32(U.d.w);
   var found = 0;
-  for (var i = 0; i < n; i++) {
-    if (textureLoad(memory, vec2i(U.sites[i].xy), 0).w != 0.0) {
+  for (var i = 0; i < 64; i++) {
+    let c = ports[i32(U.f.z) * 64 + i].y;
+    if (c >= 0 && textureLoad(memory, cellCoord(u32(c)), 0).w != 0.0) {
       found++;
       if (found == 2) { return true; }
     }
@@ -101,14 +126,13 @@ fn roleSigns(code: f32) -> vec4f {
   return vec4f(d == vec4u(1u)) - vec4f(d == vec4u(2u));
 }
 
-// Whether the plasmodium of the strain covers site i: its cell held food and a tube of the strain in the step before.
-// Every cell reads the same memory, so all sites see the same covered sites.
+// Whether the plasmodium of the strain covers site i: a cell of the site held food and a tube of the strain in the
+// step before. Every cell reads the same ports, so all cells see the same covered sites.
 fn covered(i: i32) -> bool {
-  let s = vec2i(U.sites[i].xy);
-  return envOf(env[s.y * i32(W()) + s.x]).y > 0.0 && textureLoad(memory, s, 0).y >= U.c.z;
+  return port(i) >= 0;
 }
 
-// The roles of the food site whose cell is p, as a number whose digit k in base 3 is its role in lane k: 1
+// The roles of the food site whose port is p, as a number whose digit k in base 3 is its role in lane k: 1
 // gives, 2 takes, 0 neither (flowRoles() in flow.ts has the rule and the reasons). Only covered sites get a role, and
 // only two or more of them. Two sites: the first gives and the other takes. More: a hash orders the covered sites
 // anew every U.g.x steps, each lane at another time; the first half gives, the second half takes, and with an odd
@@ -119,12 +143,13 @@ fn roleCode(p: vec2i) -> f32 {
   var count = 0;
   var first = -1;
   var mine = -1;
+  let c = p.y * i32(W()) + p.x;
   for (var i = 0; i < n; i++) {
     cover[i] = covered(i);
     if (cover[i]) {
       count++;
       if (first < 0) { first = i; }
-      if (all(vec2i(U.sites[i].xy) == p)) { mine = i; }
+      if (port(i) == c) { mine = i; }
     }
   }
   if (mine < 0 || count < 2) { return 0.0; }
@@ -154,7 +179,7 @@ fn roleCode(p: vec2i) -> f32 {
   return code;
 }
 
-// The share of its flux that the site at this cell gives or takes, per lane: all of it while its pressure lies within
+// The share of its flux that the site at this port gives or takes, per lane: all of it while its pressure lies within
 // the limit U.g.y of the mean pressure of the sites, on the side it pushes to, and none beyond. The mean of a lane
 // runs over every site that gives or takes in at least one lane, also over a site that rests in this lane. So a
 // site that no tube joins to the others stops, and its part of the network does not run away from the rest.
@@ -163,7 +188,9 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
   var level = vec4f(0.0);
   var count = 0.0;
   for (var i = 0; i < n; i++) {
-    let s = vec2i(U.sites[i].xy);
+    let c = port(i);
+    if (c < 0) { continue; }
+    let s = cellCoord(u32(c));
     if (textureLoad(memory, s, 0).w != 0.0) {
       level += textureLoad(pressureIn, s, 0);
       count += 1.0;
@@ -173,17 +200,80 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4f(0.0), vec4f(1.0));
 }
 
-// The cell whose pressure the first two iterations of a step take off (RECENTRE): the cell of the first site that
-// gives or takes, so a cell of the network. A site without a role can lie outside the network or under a wall, and a
-// closed cell holds no pressure: with its pressure nothing would be taken off, and the field would move away from
-// zero. Without a site that gives or takes, no flux runs: then the cell of the uniform block, the first site.
+// The cell whose pressure the first two iterations of a step take off (RECENTRE): the port of the first site that
+// gives or takes, so a cell of the network. A cell of a site without a role can lie outside the network or under a
+// wall, and a closed cell holds no pressure: with its pressure nothing would be taken off, and the field would move
+// away from zero. Without a site that gives or takes, no flux runs: then the cell of the uniform block, the first cell
+// of the first site.
 fn referenceCell() -> vec2i {
   let n = i32(U.d.w);
   for (var i = 0; i < n; i++) {
-    let s = vec2i(U.sites[i].xy);
+    let c = port(i);
+    if (c < 0) { continue; }
+    let s = cellCoord(u32(c));
     if (textureLoad(memory, s, 0).w != 0.0) { return s; }
   }
   return vec2i(U.f.xy);
+}
+
+// The port of every site for every strain (ADR 0029, decision 17) is the first entry of the site's list whose cell is
+// open and holds food and a tube of the strain in the memory before the step, so the covered cell nearest the centre
+// of the stroke; −1 if the strain covers no cell of the site. Food painted over a wall stays under it: such a cell is
+// closed, holds no tube after a step, and takes no role in `update`. Both passes run with the block of the first
+// strain: every strain has the same sites and the same level of the tube body. One invocation alone would look at the
+// cells of a large site that no tube covers one after the other, in every step; so the list is cut into blocks.
+//
+// `blocks`: one invocation per block of SITE_BLOCK entries and strain, the strain in gid.y. It finds the first entry of
+// the block that covers its site.
+@compute @workgroup_size(64)
+fn blocks(@builtin(global_invocation_id) gid: vec3u) {
+  let b = gid.x;
+  let n = u32(U.f.w);
+  if (b >= n) { return; }
+  var hit = -1;
+  for (var o = 0u; o < SITE_BLOCK; o++) {
+    let c = siteCells[b * SITE_BLOCK + o];
+    if (c == NO_CELL) { break; }
+    let e = env[c];
+    if (!isWall(e) && envOf(e).y > 0.0 && textureLoad(memories, cellCoord(c), gid.y, 0).y >= U.c.z) {
+      hit = i32(o);
+      break;
+    }
+  }
+  blockHits[gid.y * n + b] = hit;
+}
+
+// The first entry of the site of the workgroup that covers it: its index in the list, or NO_CELL.
+var<workgroup> least: atomic<u32>;
+
+// `sites`: one workgroup of 64 invocations per site and strain, the site in the workgroup's x and the strain in its y.
+// Each invocation looks at every 64th block of the site, from its own, up to the first block with a hit; the least
+// entry of these hits is the port. The port of the step before moves to y: `fed` reads the roles there.
+@compute @workgroup_size(64)
+fn sites(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) lane: u32) {
+  if (lane == 0u) { atomicStore(&least, NO_CELL); }
+  workgroupBarrier();
+  let i = wg.x;
+  let n = u32(U.f.w);
+  if (i < u32(U.d.w)) {
+    let first = u32(U.sites[i].z) / SITE_BLOCK;
+    let end = (u32(U.sites[i].z) + u32(U.sites[i].w) + SITE_BLOCK - 1u) / SITE_BLOCK;
+    for (var b = first + lane; b < end; b += 64u) {
+      let hit = blockHits[wg.y * n + b];
+      if (hit >= 0) {
+        atomicMin(&least, b * SITE_BLOCK + u32(hit));
+        break;
+      }
+    }
+  }
+  workgroupBarrier();
+  if (lane == 0u) {
+    let k = wg.y * 64u + i;
+    let j = atomicLoad(&least);
+    var found = -1;
+    if (j != NO_CELL) { found = i32(siteCells[j]); }
+    ports[k] = vec2i(found, ports[k].x);
+  }
 }
 
 @compute @workgroup_size(8, 8)
@@ -233,7 +323,7 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   let food = envOf(env[p.y * i32(W()) + p.x]).y > 0.0;
   var g = 0.0;
   if (body >= U.c.z) { g = body * select(U.b.x + d, U.b.y, food); }
-  // The roles, if this cell is the cell of a food site that the plasmodium covers (roleCode()).
+  // The roles, if this cell is the port of a food site that the plasmodium covers (roleCode()).
   var code = 0.0;
   if (food && m.y >= U.c.z) { code = roleCode(p); }
   textureStore(memoryOut, p, vec4f(d, body, g, code));

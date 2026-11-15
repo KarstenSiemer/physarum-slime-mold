@@ -105,6 +105,11 @@ export interface Runtime {
   tool?: AgentTool | undefined;
   /** The environment may hold walls: moves and sensors then check every cell they cross (agents.wgsl `clearPath`). */
   walls?: boolean;
+  /**
+   * An alive agent may stand on a wall cell: a wall was painted after the agents were placed (ADR 0038, decision 8).
+   * Only then does the agent pass read the wall byte of each agent's cell (agents.wgsl `underWall`).
+   */
+  wallOverAgents?: boolean;
   /** The claim round of the start placement with one agent per cell (init.wgsl). */
   round?: number;
   /**
@@ -232,7 +237,7 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   u.set(strainEnds(strains, rt.agents), slot('strainEnd'));
   // The start layout 'food' starts every agent dead, as 'empty' does; the engine then places the colony (ADR 0025).
   const layout = LAYOUTS.indexOf(s.layout === 'food' ? 'empty' : s.layout);
-  u.set([layout, rt.walls ? 1 : 0, rt.round ?? 0], slot('extra'));
+  u.set([layout, rt.walls ? 1 : 0, rt.round ?? 0, rt.wallOverAgents ? 1 : 0], slot('extra'));
   // model.z: walls diffuse as part of Jones' lattice in the Jones model, and are sinks in the extended model; model.w:
   // 1 if a step senses first, in either model (ADR 0027).
   const senseFirst = s.stepOrder === 'sense-first' ? 1 : 0;
