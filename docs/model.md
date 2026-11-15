@@ -28,7 +28,7 @@ same pull request.
 
 ## 2. The two models
 
-The setting Model picks the rule set (ADR 0022). `jonesFits()`, `asJones()` and `constrain()` in
+The setting Model picks the rule set (ADR 0022, ADR 0044). `jonesFits()`, `asJones()` and `constrain()` in
 `src/model/params.ts` and `packParams()` in `src/engine/pack.ts` hold the differences.
 
 | Rule                     | Jones                                            | Extended                                               |
@@ -36,7 +36,7 @@ The setting Model picks the rule set (ADR 0022). `jonesFits()`, `asJones()` and 
 | Strains                  | 1                                                | 1 to 4, each with a share of the population            |
 | Weight of the trails     | own trail +1 (attraction) or −1 (chemorepulsion) | a table A[s][l] from −2 to +2                          |
 | Weight of the food scent | the weight of the own trail                      | w_F per strain                                         |
-| Light                    | none                                             | lit cells release a repellent; weight w_L per strain   |
+| Light                    | a repellent source, weighed as the own trail     | lit cells release a repellent; weight w_L per strain   |
 | Scent decay              | the strain's decay                               | a setting of its own                                   |
 | Source scale g           | 1                                                | keeps the plateau of a food at every scent decay (6.4) |
 | Trail saturation K       | off                                              | optional, K ≥ 1                                        |
@@ -54,7 +54,8 @@ them becomes extended (`jonesFits()`). The other values of the Jones column are 
 (`asJones()`), and `packParams()` packs Jones' values whatever the settings hold. The mean window is bound the other
 way: the extended model resets it to 3 (`asExtended()`), and `meanWindowOf()` gives 3 there whatever the settings
 hold. Walls, light and the cut change no
-model. In the Jones model the trail plus the food scent is Jones' one trail map (section 6.4). In both models the cut
+model. In the Jones model the trail plus the food scent minus the repellent is Jones' one trail map, and drawn light
+is a repellent source of it (section 6.4). In both models the cut
 moves the agents of its wound only while growth does not run; while growth runs it kills them (7.1, ADR 0039).
 
 ## 3. Units and scales
@@ -154,7 +155,7 @@ The sources of step k, on open cells only:
 
 - deposit: E_l^k(x) = 1_O(x) · depT_l · n_l^k(x);
 - food: F^k(x) = 1_O(x) · f(x) · 255 · wProj · g · κ^k(x), with κ for covered food (section 6.5);
-- light: L(x) = 1_O(x) · λ(x) · 255 · wLight · g, in the extended model only.
+- light: L(x) = 1_O(x) · λ(x) · 255 · wLight · g. In the Jones model it is the source of a repellent (section 6.4).
 
 With the cut mask Z^k (0 in a wound of the extended model, 1 elsewhere, section 6.6):
 
@@ -191,9 +192,19 @@ depT · Σ n^k) sensing first. Closed edges and walls of the extended model take
 - Scent decay: d_C is the setting Scent decay in the extended model, and the decay of the strain in the Jones model.
 - **Jones' one map.** In the Jones model the trail and the food scent have the same mean, the same sites, the same
   decay and the same pass for their sources, and the agent weighs both with its own weight ±1. The update is linear, so
-  T_0 + C_F follows Jones' update of one trail map with the sources depT · n + f · 255 · wProj. Light has weight 0 and
-  source 0. A GPU test steps a float64 map of Jones' rule beside the GPU and finds trail plus scent within a relative error of 1e-5 of it
-  (`sim.gpu.test.ts`, "keep trail + scent equal to Jones' one trail map").
+  T_0 + C_F follows Jones' update of one trail map with the sources depT · n + f · 255 · wProj.
+- **A repellent in Jones' one map** (ADR 0044). Jones' papers project a repellent, such as salt or a current source,
+  as a source below 0 onto the same lattice (Jones and Adamatzky 2015, Sec. 4.1; Tsuda et al. 2012, p. 10). In the
+  Jones model a lit cell is such a source. The app keeps the repellent above 0 in its own field C_L, with the mean, the
+  sites, the decay and the pass of the trail, and the sensors subtract it with the own weight (7.3). So
+  J = T_0 + C_F − C_L follows Jones' update of one map with the sources depT · n + f · 255 · wProj − λ · 255 · wLight,
+  and a sensor reads A[0][0] · J. J falls below 0 near a repellent: no field is clamped. The panel calls wLight
+  Repellent strength in the Jones model. Jones' own rule for light is another one (Jones and Adamatzky 2012, p. 7: a
+  lit agent's sensors read less), and the app does not have it.
+- A GPU test steps a float64 map of Jones' rule beside the GPU and finds J within a relative error of 1e-5 of it
+  (`sim.gpu.test.ts`, "keep trail + scent − repellent equal to Jones' one trail map"). With Jones' values (scent decay
+  0.1, w_F = w_L = the own weight) the extended model gives the same bytes as the Jones model with a repellent ("run a
+  repellent in the Jones model as the extended model with Jones' values does").
 
 ### 6.5 Covered food
 
@@ -283,7 +294,8 @@ The agent senses only if the step senses: always sensing first; moving first in 
 - It reads **blocked** (−1e30) if its cell is outside Ω or a wall, and in the extended model with walls also if a wall
   lies on the line from the agent to the sensor (ADR 0020).
 - Otherwise it reads V = Σ_l A[s][l] · σ_K(T_l) + w_F[s] · C_F − w_L[s] · C_L, with σ_K(t) = t without saturation
-  (section 6.8).
+  (section 6.8). In the Jones model w_F = w_L = A[0][0], the own weight +1 or −1 (section 6.4). So a strain that
+  follows its trail turns away from a repellent, and a strain that flees its trail turns toward it.
 
 ### 7.4 Turning
 
@@ -500,7 +512,7 @@ checks that this table names every key.
 | `diffusion`         | N        | passes, 0 to 4                                                       | 1                 | extended | 6.2     |
 | `meanWindow`        | w        | cells a side, 3 to 15, odd                                           | 3                 | jones    | 6.1     |
 | `foodStrength`      | wProj    | 0 to 0.5                                                             | 0.05              | both     | 6.4     |
-| `lightStrength`     | wLight   | 0 to 0.5                                                             | 0.05              | extended | 6.4     |
+| `lightStrength`     | wLight   | 0 to 0.5; Jones: the strength of the repellent                       | 0.05              | both     | 6.4     |
 | `scentDecay`        | d_C      | fraction lost per step, 0.0001 to 0.9                                | 0.1               | extended | 6.4     |
 | `coveredFoodFactor` | φ        | 0.0001 to 1                                                          | 0.001             | both     | 6.5     |
 | `trailSaturation`   | K        | trail units, 0 to 1000; 0 is off                                     | 0                 | extended | 6.8     |
@@ -527,10 +539,11 @@ checks that this table names every key.
 | `lattice`           | W × H    | a grid of fixed size in place of `resolution` (ADR 0026)             | none              | both     | 1, 3    |
 
 "Model: both" means the parameter acts in both models with every value of its range. The Jones model requires one
-strain, one agent per cell, one diffusion pass and the own weight ±1 (`jonesFits()`), and binds the food weight to the
-own weight, the scent decay to the strain's decay, the share to 1, light and K to off, and the flow to off
+strain, one agent per cell, one diffusion pass and the own weight ±1 (`jonesFits()`), and binds the food weight and the
+light weight to the own weight, the scent decay to the strain's decay, the share to 1, and K and the flow to off
 (`asJones()`). "Model: jones" means only the Jones model has the parameter: the extended model binds it to its default
-(`asExtended()`). `speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent` and `showTubes` change only the view and
+(`asExtended()`). A Jones link made before ADR 0044 that holds drawn light opens with `lightStrength` 0: until then drawn
+light had no effect in the Jones model (`sanitize()`, the mark `rules` of a link). `speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent` and `showTubes` change only the view and
 the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
 and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
 
@@ -562,7 +575,8 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The mean window above 3 × 3 (6.1)       | "the mean window (ADR 0046)": windows 3, 5, 15 in wrap, box and dish with walls; `diffuse-reference.test.ts`                    |
 | Mass balance (6.2)                      | "balance mass with deposits"                                                                                                    |
 | Edges and walls in each model (6.3)     | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                |
-| Jones' one map (6.4)                    | "keep trail + scent equal to Jones' one trail map"                                                                              |
+| Jones' one map (6.4)                    | "keep trail + scent − repellent equal to Jones' one trail map"                                                                  |
+| A repellent in the Jones model (6.4)    | "run a repellent in the Jones model as the extended model …"; "move the agents of the Jones model off a repellent source"       |
 | Scent plateau and g (6.4)               | the plateau tests in each order; the scent against a CPU reference                                                              |
 | Covered food (6.5)                      | the covered food tests, also WebGL2 without float blending                                                                      |
 | Cut in the fields (6.6)                 | the cut clears the chemicals in the extended model only                                                                         |

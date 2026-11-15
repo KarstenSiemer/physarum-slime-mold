@@ -424,8 +424,9 @@ describe('the Jones model', () => {
       strains: one({ decay: 0.05, food: 0.4, light: 2, attraction: [-1, 0, 0, 0] }),
     });
     expect(s.model).toBe('jones');
-    expect([s.trailSaturation, s.lightStrength, s.scentDecay]).toEqual([0, defaultSettings().lightStrength, 0.05]);
-    expect([s.strains[0]?.food, s.strains[0]?.light]).toEqual([-1, defaultStrain(0).light]);
+    // The strength of the repellent stays the user's, and the strain weighs it as its own trail (ADR 0044).
+    expect([s.trailSaturation, s.lightStrength, s.scentDecay]).toEqual([0, 0.3, 0.05]);
+    expect([s.strains[0]?.food, s.strains[0]?.light]).toEqual([-1, -1]);
     // The extended model keeps them.
     const e = sanitize({ ...s, model: 'extended', trailSaturation: 30, scentDecay: 0.01 });
     expect([e.trailSaturation, e.scentDecay]).toEqual([30, 0.01]);
@@ -533,13 +534,8 @@ describe('the Jones model', () => {
       if (s.model !== 'jones') continue;
       const st = s.strains[0];
       expect(jonesFits(s)).toBe(true);
-      expect([s.scentDecay, s.lightStrength, s.trailSaturation, s.density <= 1]).toEqual([
-        st?.decay,
-        defaultSettings().lightStrength,
-        0,
-        true,
-      ]);
-      expect([st?.food, st?.light, st?.share]).toEqual([st?.attraction[0], defaultStrain(0).light, 1]);
+      expect([s.scentDecay, s.trailSaturation, s.density <= 1]).toEqual([st?.decay, 0, true]);
+      expect([st?.food, st?.light, st?.share]).toEqual([st?.attraction[0], st?.attraction[0], 1]);
       expect(toJones(s)).toEqual(s);
     }
   });

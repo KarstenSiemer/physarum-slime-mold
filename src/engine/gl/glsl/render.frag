@@ -652,12 +652,12 @@ float scentSensorLine(vec2 p, Scent s, int k) {
   return scentLine(best, change * n);
 }
 
-// The view of the scent s at p over colour c: the glow of the food scent, its line, then the glow of the repellent,
-// only in the extended model (see scentView in render.wgsl).
+// The view of the scent s at p over colour c: the glow of the food scent, its line, then the glow of the repellent
+// (see scentView in render.wgsl).
 vec3 scentView(vec2 p, Scent s, vec3 c, int k) {
   bool paperStyle = V.style == 2u;
   float fill = paperStyle ? SCENT_PAPER_FILL : 1.0;
-  float repellent = V.scentFx.y > 0.5 ? scentGlow(s.v.y) : 0.0;
+  float repellent = scentGlow(s.v.y);
   vec3 o = mix(c, paperStyle ? vec3(0.0207, 0.2429, 0.033) : vec3(0.1383, 0.7091, 0.1623), scentGlow(s.v.x) * fill);
   o = mix(o, paperStyle ? vec3(0.0063, 0.1096, 0.0124) : vec3(0.3553, 0.9273, 0.3684),
           scentSensorLine(p, s, k));

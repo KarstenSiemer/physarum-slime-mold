@@ -98,10 +98,10 @@ export function packView(
   const phases = (step: number) => [(step % STREAM.period) / STREAM.period, (step % STREAM.swing) / STREAM.swing];
   fl.set(stream === undefined ? [0, 0, 0, 0] : [1, ...phases(stream), 0], 36);
   fl.set([...GEL_FX[settings.gelColor], 0, 0], 40);
-  // The scent view: the map it reads (scentLevel()), the repellent, which only the extended model reads, and the
-  // sensors of its line, their half spread and the hold of a strand (scentSensors()).
+  // The scent view: the map it reads (scentLevel()), and the sensors of its line, their half spread and the hold of a
+  // strand (scentSensors()). It draws the repellent in both models: both read it (ADR 0044).
   const level = settings.showScent ? scentLevel(view.scale) : 0;
-  fl.set([level, settings.model === 'extended' ? 1 : 0, 0, 0], 44);
+  fl.set([level, 0, 0, 0], 44);
   const sensors = scentSensors(settings, strand);
   fl.set(sensors.half, 48);
   fl.set(sensors.holds, 52);

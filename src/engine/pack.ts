@@ -198,8 +198,11 @@ export const sourceScale = (s: Pick<Settings, 'model' | 'scentDecay' | 'stepOrde
 
 /**
  * Packs the settings for the GPU. In the Jones model the GPU runs Jones' one trail map whatever the settings hold
- * (ADR 0022): the scent decays with the strain's decay, the strain weighs food as its own trail, light has no source
- * and no weight, and the cut tool leaves the chemicals in the wound (Jones 2010, p. 148).
+ * (ADR 0022): the scent decays with the strain's decay, the strain weighs food as its own trail, and the cut tool
+ * leaves the chemicals in the wound (Jones 2010, p. 148). Drawn light is a repellent source of that map (ADR 0044;
+ * Jones and Adamatzky 2015, Sec. 4.1): its source has the factor 1, as the food has, and the strain weighs it as its
+ * own trail. The sensors subtract the repellent, so trail + food scent − repellent is Jones' one map with a source
+ * below 0.
  */
 export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAMS_BYTES)): ArrayBuffer {
   const jones = s.model === 'jones';
@@ -220,14 +223,13 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   lanes('keep', (st) => 1 - st.decay);
   lanes('randomTurn', (st) => st.randomTurn);
   lanes('food', (st, i) => (jones ? (st.attraction[i] ?? 0) : st.food));
-  lanes('light', (st) => (jones ? 0 : st.light));
+  lanes('light', (st, i) => (jones ? (st.attraction[i] ?? 0) : st.light));
   strains.forEach((st, r) => {
     st.attraction.slice(0, strains.length).forEach((v, c) => (f[slot('attraction') + r * 4 + c] = v));
   });
   const g = sourceScale(s);
-  const light = jones ? 0 : 255 * s.lightStrength * g;
   const scentDecay = jones ? (strains[0]?.decay ?? s.scentDecay) : s.scentDecay;
-  f.set([255 * s.foodStrength * g, light, 1 - scentDecay, s.shrink], slot('scent'));
+  f.set([255 * s.foodStrength * g, 255 * s.lightStrength * g, 1 - scentDecay, s.shrink], slot('scent'));
   const t = rt.tool;
   if (t) {
     f.set([t.x, t.y, t.radius, t.kind], slot('tool'));

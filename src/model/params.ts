@@ -93,7 +93,7 @@ export const strainSpec = {
   },
   light: {
     label: 'Light avoidance',
-    help: 'How strongly the strain flees light. Physarum avoids light. Only the extended model has light.',
+    help: 'How strongly the strain flees light. Physarum avoids light. Only the extended model has this setting: in the Jones model a strain weighs the repellent as it weighs its own trail, with the opposite sign.',
     min: -2,
     max: 2,
     step: 0.05,
@@ -191,7 +191,7 @@ export const globalSpec = {
   },
   lightStrength: {
     label: 'Light strength',
-    help: 'Only the extended model has light. Each lit cell releases a repellent per step: 255 × this value, scaled with Scent decay. It spreads and fades like the food scent, with the same Scent decay. Jones’ papers have no light that releases a repellent.',
+    help: 'Each lit cell releases a repellent per step: 255 × this value, scaled with Scent decay. It spreads and fades like the food scent, with the same Scent decay. The rule is the repellent source of Jones’ papers. To treat light as such a repellent is this app’s choice: Jones’ own light rule of 2012 makes the sensors of a lit agent weaker, and this app does not have it.',
     min: 0,
     max: 0.5,
     step: 0.005,
@@ -382,11 +382,24 @@ export function scentReachSpec(passes = 1): Spec {
   };
 }
 
+/**
+ * The setting `lightStrength` as the Jones model shows it (ADR 0044): the strength of a repellent source. Jones'
+ * papers project a repellent as a value below 0 onto the lattice that also holds the trail and the food (Jones and
+ * Adamatzky 2015, Sec. 4.1; Tsuda et al. 2012, p. 10). The same key and range as Light strength, so a link and a
+ * switch of the model keep the value.
+ */
+export const repellentSpec = {
+  ...globalSpec.lightStrength,
+  label: 'Repellent strength',
+  help: 'A repellent source, such as salt or a current source. Each of its cells puts a value below 0 into Jones’ trail map per step: −255 × this value. It spreads and decays like the trail and the food, and agents turn away from it. A strain that flees its own trail turns toward it. Paint a source with the Repellent tool.',
+  ref: 'Jones and Adamatzky 2015, Sec. 4.1',
+} as const;
+
 /** Help for the model choice (ADR 0022); Learn → Controls lists it with the sliders. */
 export const modelHelp = {
   label: 'Model',
-  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, walls that take in the trail, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1, a strain decay of 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or light or use the Cut tool. Every scene of Jones has a decay of 0.1. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
-  ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014',
+  help: 'Jones has only the rules that Jeff Jones published: one strain, one agent per cell, and food and repellents in the trail map. Extended adds this app’s rules: several strains, agents that share a cell, a weight of its own for food and for light, no diffusion or more diffusion passes, a scent decay of its own, sensors that walls block, walls that take in the trail, a Cut that also removes the trail, and Trail saturation. With Scent decay 0.1, a strain decay of 0.1 and Trail saturation 0, Extended runs a scene of Jones exactly as Jones does, until you paint a wall or use the Cut tool. Every scene of Jones has a decay of 0.1. The scenes from Jones’ papers start with Jones, and all other scenes with Extended.',
+  ref: 'Jones 2010; Adamatzky and Jones 2010; Jones and Adamatzky 2014; Jones and Adamatzky 2015',
 } as const;
 
 /** Help for the choice "Step order" (ADR 0027); Learn → Controls lists it with the sliders. */
@@ -419,7 +432,7 @@ export const tubeViewHelp = {
 /** Help for the view switch "Scent" (ADR 0009, amendments of 2026-11-11 and 2026-11-12); Learn → Controls lists it. */
 export const scentViewHelp = {
   label: 'Scent',
-  help: 'Shows the scent of food as a green glow and the repellent of light as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where food steers an agent as strongly as a strand of trail holds it: inside the line, food steers it more. The simulation does not change.',
+  help: 'Shows the scent of food as a green glow and the repellent as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where food steers an agent as strongly as a strand of trail holds it: inside the line, food steers it more. The simulation does not change.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
@@ -618,10 +631,17 @@ const GROWTH_COUNTS = ['growthEvery', 'growthMin', 'growthMax', 'shrinkEvery', '
 export type Drawn = ReadonlySet<EnvTool>;
 
 /**
+ * The mark `rules` that a shared link holds beside its settings (encodeSettings() in url.ts): the number of the
+ * newest ADR that changed what the settings of a link mean. A link without the mark was made before ADR 0044, when
+ * drawn light had no effect in the Jones model (sanitize()).
+ */
+export const LINK_RULES = 44;
+
+/**
  * Builds valid Settings from untrusted input (the URL). Only known keys are read,
  * numbers are clamped to their spec, everything else falls back to the default. `drawn`: what the link's drawing
- * holds, which decides the model of a link made before the model switch (runsAsJones()). `order`: the step order of a
- * link that names none, the one of its scene (stepOrderOf()).
+ * holds, which decides the model of a link made before the model switch (runsAsJones()), and the repellent of a Jones
+ * link made before ADR 0044. `order`: the step order of a link that names none, the one of its scene (stepOrderOf()).
  */
 export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOrder = 'sense-first'): Settings {
   const raw = obj(input);
@@ -677,6 +697,11 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
     return st;
   });
   if (old && runsAsJones(out, drawn)) out.model = 'jones';
+  // A Jones link made before ADR 0044 ran its drawn light without an effect (ADR 0022, decision 8). The Jones model
+  // now reads drawn light as a repellent source, so such a link opens with a repellent strength of 0 and runs as it
+  // was made. A link made since holds the mark `rules`.
+  const before44 = !(typeof raw.rules === 'number' && raw.rules >= LINK_RULES);
+  if (out.model === 'jones' && before44 && drawn.has('light')) out.lightStrength = 0;
   return constrain(out);
 }
 
@@ -698,7 +723,8 @@ export const sameLattice = (a: Lattice | null, b: Lattice | null) => a?.[0] === 
  * a source factor of 1 does. The link must fit Jones' model (jonesFits()), and what Jones' model binds or leaves out
  * must have had no effect: food weighed as the strain's own trail with the strain's decay, no light with an effect,
  * no trail saturation, no flow in the tubes, which only the extended model has (ADR 0029), and no walls, because only
- * the extended model's sensors check walls on their way.
+ * the extended model's sensors check walls on their way. A link whose light had an effect stays extended, as before
+ * ADR 0044: there its light keeps the weight and the scent decay that the link holds.
  */
 export function runsAsJones(s: Settings, drawn: Drawn = new Set()): boolean {
   const st = s.strains[0];
@@ -782,30 +808,30 @@ export function jonesFits(s: Settings): boolean {
 
 /**
  * The Jones model's values of the settings that are not Jones' own (ADR 0022). Food goes into his one trail map
- * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. Jones'
- * papers have neither light that releases a repellent nor trail saturation nor a flow in the tubes, so their values
- * return to the defaults, and a link holds none of them. Returns `s` itself when it holds these values already.
+ * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. A
+ * repellent source goes into the same map with a value below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the
+ * strain weighs it as its own trail too, and its strength stays the user's. Jones' papers have neither trail
+ * saturation nor a flow in the tubes, so their values return to the defaults, and a link holds none of them. Returns
+ * `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
   const d = defaultSettings();
   const st = s.strains[0];
   if (!st) return s;
   const self = st.attraction[0] ?? 1;
-  const light = defaultStrain(0).light;
   // One population: a share means nothing for one strain, and the panel offers none in the Jones model.
-  const strainOk = st.food === self && st.light === light && st.share === 1;
-  const bound = s.scentDecay === st.decay && s.lightStrength === d.lightStrength && s.trailSaturation === 0;
+  const strainOk = st.food === self && st.light === self && st.share === 1;
+  const bound = s.scentDecay === st.decay && s.trailSaturation === 0;
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
   const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength;
   if (ok) return s;
   return {
     ...s,
     scentDecay: st.decay,
-    lightStrength: d.lightStrength,
     trailSaturation: 0,
     flow: false,
     flowStrength: d.flowStrength,
-    strains: strainOk ? s.strains : [{ ...st, food: self, light, share: 1 }],
+    strains: strainOk ? s.strains : [{ ...st, food: self, light: self, share: 1 }],
   };
 }
 

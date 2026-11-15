@@ -4,6 +4,7 @@
     coveredFoodHelp,
     flowHelp,
     globalSpec,
+    repellentSpec,
     scentReachSpec,
     growthHelp,
     modelHelp,
@@ -46,6 +47,8 @@
     ...Object.entries(globalSpec)
       .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength')
       .map(([, v]) => v),
+    // Light strength under the name that the Jones model gives it (ADR 0044).
+    repellentSpec,
     scentReachSpec(),
     collisionsHelp,
     modelHelp,
@@ -203,9 +206,11 @@
       <p>
         In the Jones model, one strain follows its own trail, or flees it as in Jones’ Turing patterns. One agent fits
         in a cell, and one 3 × 3 average spreads the trail in each step. Food goes into the trail map, so its scent
-        spreads and fades with the trail. Walls mark where agents cannot go, and the trail spreads through them as
-        through any cell. Agents can die off, as in Shrinking plasmodium. In later papers Jones lets food release almost
-        no scent while agents cover it: the switch Covered food releases less.
+        spreads and fades with the trail. A repellent source, such as salt or a current source, goes into the same map
+        with a value below 0, and agents turn away from it (Jones and Adamatzky 2015). Walls mark where agents cannot
+        go, and the trail spreads through them as through any cell. Agents can die off, as in Shrinking plasmodium. In
+        later papers Jones lets food release almost no scent while agents cover it: the switch Covered food releases
+        less.
       </p>
       <p>
         From 2011 on, Jones also lets the population grow and shrink (Nat. Comput. 10: 1345). Every few steps, an agent
@@ -220,9 +225,10 @@
       <p>
         The extended model adds what Jones did not publish. Several strains can share the dish, each with its own trail.
         A table sets how strongly each strain follows or flees the trails of the others, an idea from Michael Fogleman’s
-        version. Light releases a repellent that spreads like the food scent. The food scent has a decay of its own, and
-        a strain has its own weight for food and light. Agents can share cells, the trail can spread in more passes, and
-        walls also block what the sensors read. Walls take in the trail and the scents, so nothing spreads through them.
+        version. Light releases a repellent that spreads like the food scent: the rule of Jones’ repellent sources, used
+        for light. The scent has a decay of its own, and a strain has its own weight for food and light. Agents can
+        share cells, the trail can spread in more passes, and walls also block what the sensors read. Walls take in the
+        trail and the scents, so nothing spreads through them.
       </p>
       <p>
         With Scent decay 0.1 the scent fades within a few cells, so an agent notices food only when a sensor comes
@@ -234,16 +240,16 @@
         In the extended model, a lower Scent decay spreads the food scent farther. Food then releases less scent, so the
         scent reaches farther, but it does not become stronger. Trail saturation makes a dense trail count less, so a
         weak scent can still turn an agent on it. With Scent decay 0.1, a strain decay of 0.1 and Trail saturation 0,
-        the extended model runs a scene of Jones as Jones does, until you paint a wall or light or use the Cut tool.
+        the extended model runs a scene of Jones as Jones does, until you paint a wall or use the Cut tool.
       </p>
       <p>
         To see the scent, select Scent in the toolbar or press S. A green glow shows the scent of food, and a pink glow
-        the repellent of light. The glow fades out as the scent gets weaker, down to 0.01 per cell. The scale is the
-        same in every scene and in both models. An agent steers by the difference between its left and right sensors. A
-        thin green line shows where food steers an agent as strongly as a strand of trail holds it. Inside the line,
-        food steers it more. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the glow
-        reaches much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does
-        not steer from farther away. The view changes only the picture, not the simulation.
+        the repellent. The glow fades out as the scent gets weaker, down to 0.01 per cell. The scale is the same in
+        every scene and in both models. An agent steers by the difference between its left and right sensors. A thin
+        green line shows where food steers an agent as strongly as a strand of trail holds it. Inside the line, food
+        steers it more. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the glow reaches
+        much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does not steer
+        from farther away. The view changes only the picture, not the simulation.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>
