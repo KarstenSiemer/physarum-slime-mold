@@ -167,8 +167,10 @@ describe('the drawing of a link', () => {
     const four =
       packDrawing({ scene: 'maze', revision: 0, origins: [0, -1, 0, -1], shapes, strokes: [] }) ?? new Uint8Array();
     expect(unpackDrawing(four)?.origins).toEqual([0, -1, 0, -1]);
-    for (const version of [0, 3, 255])
+    for (const version of [0, 4, 255])
       expect(unpackDrawing(Uint8Array.from(four, (v, i) => (i === 0 ? version : v))), `${version}`).toBeUndefined();
+    // The Maze has fewer than 128 shapes: their number is one byte in version 2 and in version 3 alike.
+    expect(unpackDrawing(Uint8Array.from(four, (v, i) => (i === 0 ? 2 : v)))).toEqual(unpackDrawing(four));
     // The version, the id's length and 'maze', at index 6 the revision of its shapes, then the number of strains, each
     // one's origin plus 1, and after them the shapes and the number of strokes.
     const strains = (n: number) =>
@@ -234,7 +236,7 @@ describe('the drawing of a link', () => {
       [1, now],
     ] as const) {
       const bytes = packDrawing(of(revision, shapes)) ?? new Uint8Array();
-      expect(bytes[0]).toBe(2);
+      expect(bytes[0]).toBe(3);
       expect(bytes[1 + 1 + 'shrinking'.length]).toBe(revision); // after the id
       expect(unpackDrawing(bytes)).toEqual(of(revision, shapes));
     }
@@ -246,15 +248,15 @@ describe('the drawing of a link', () => {
     expect(unpackDrawing(Uint8Array.from(two, (v, i) => (i === at ? 2 : v)))).toBeUndefined();
     expect(unpackDrawing(Uint8Array.from(two, (v, i) => (i === at ? 0 : v)))).toBeUndefined();
     // Version 1: the same bytes without the revision, read as revision 0 with its 8 shapes.
-    const v2old = packDrawing(of(0, old)) ?? new Uint8Array();
-    const v1 = Uint8Array.from([1, ...v2old.slice(1, at), ...v2old.slice(at + 1)]);
+    const oldBytes = packDrawing(of(0, old)) ?? new Uint8Array();
+    const v1 = Uint8Array.from([1, ...oldBytes.slice(1, at), ...oldBytes.slice(at + 1)]);
     expect(unpackDrawing(v1)).toEqual(of(0, old));
     // A version 1 link with the 19 shapes of revision 1 counts the wrong number of shapes for revision 0.
     const v1now = Uint8Array.from([1, ...two.slice(1, at), ...two.slice(at + 1)]);
     expect(unpackDrawing(v1now)).toBeUndefined();
-    // Without a scene there is no revision: the bytes of version 1 and 2 differ only in the version.
+    // Without a scene there is no revision: the bytes of versions 1 to 3 differ only in the version.
     const plain = packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes: [] }) ?? new Uint8Array();
-    expect(Array.from(plain)).toEqual([2, 0, 0]);
+    expect(Array.from(plain)).toEqual([3, 0, 0]);
     expect(unpackDrawing(Uint8Array.from([1, 0, 0]))).toEqual({
       scene: '',
       revision: 0,
@@ -262,6 +264,33 @@ describe('the drawing of a link', () => {
       shapes: [],
       strokes: [],
     });
+  });
+
+  // Version 3 (ADR 0042): Tokyo with light has more than 255 shapes, so their number is a varint.
+  it('counts the shapes of a scene as a varint, and reads the one byte of a link of version 2', () => {
+    const of = (scene: string) => {
+      const env = presetById(scene)?.env ?? [];
+      return { scene, revision: 0, origins: [0], shapes: env.map((_, i) => i % 3 !== 1), strokes: [] };
+    };
+    const lit = of('tokyo-light');
+    expect(lit.shapes.length).toBeGreaterThan(255);
+    const bytes = packDrawing(lit) ?? new Uint8Array();
+    expect(unpackDrawing(bytes)).toEqual(lit);
+    // After the version, the id and the revision: one strain and its origin, then the varint of the shapes.
+    const at = 1 + 1 + 'tokyo-light'.length + 1 + 2;
+    const n = lit.shapes.length;
+    expect([bytes[at], bytes[at + 1]]).toEqual([(n % 128) | 128, Math.floor(n / 128)]);
+    // The Tokyo scene has 227 shapes: one byte in version 2, two in version 3. Both open.
+    const dark = of('tokyo');
+    expect(dark.shapes.length).toBe(227);
+    const now = packDrawing(dark) ?? new Uint8Array();
+    const at2 = 1 + 1 + 'tokyo'.length + 1 + 2;
+    expect([now[at2], now[at2 + 1]]).toEqual([(227 % 128) | 128, 1]);
+    const v2 = Uint8Array.from([2, ...now.slice(1, at2), 227, ...now.slice(at2 + 2)]);
+    expect(unpackDrawing(v2)).toEqual(dark);
+    // The first byte of the varint of 227 is 227 itself: version 2 reads it as the count, takes the second byte as the
+    // first bits, and the bytes end in the wrong place. A link of version 3 read as version 2 is refused.
+    expect(unpackDrawing(Uint8Array.from(now, (v, i) => (i === 0 ? 2 : v)))).toBeUndefined();
   });
 
   // kindsOf() reads the shapes of the drawing's revision: a scene whose wall became food (a scene of this test only).

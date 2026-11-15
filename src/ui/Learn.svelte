@@ -120,16 +120,17 @@
         tubes with little flow fade. In experiments it found the shortest way through a maze (Nakagaki 2000) and built a
         network like the Tokyo rail system (Tero 2010). Jones’ model has no flow. The extended model of this app can add
         one: with Flow in the tubes, a tube that carries flow between foods stays, and the others starve. The scenes
-        Maze, Tokyo rail network and Food ring use it. In Rival networks and Tokyo, two networks, two strains each have
-        a flow of their own.
+        Maze, Tokyo rail network, Tokyo with light and Food ring use it. In Rival networks and Tokyo, two networks, two
+        strains each have a flow of their own.
       </p>
       <p>
-        It moves toward food by chemotaxis: it follows chemical gradients. It avoids bright light (Tero et al. 2010).
-        Dry or lit, it can turn into a dormant form, the sclerotium (Jones 2010, p. 142). After it has covered an area,
-        it shrinks to a network of tubes between the food sources (Jones 2010, p. 147). In the simulation food never
-        runs out. With Random shrinkage turned on, agents die off and a full sheet shrinks onto the food, as in the
-        scene Shrinking plasmodium. A network with few agents contracts between the food sources even without it, as in
-        Shortest path and Steiner tree.
+        It moves toward food by chemotaxis: it follows chemical gradients. It avoids bright light: Tero and colleagues
+        lit the mountains and lakes of their map, and it grew on the low ground (scene Tokyo with light). Dry or lit, it
+        can turn into a dormant form, the sclerotium (Jones 2010, p. 142). After it has covered an area, it shrinks to a
+        network of tubes between the food sources (Jones 2010, p. 147). In the simulation food never runs out. With
+        Random shrinkage turned on, agents die off and a full sheet shrinks onto the food, as in the scene Shrinking
+        plasmodium. A network with few agents contracts between the food sources even without it, as in Shortest path
+        and Steiner tree.
       </p>
       <p>
         A real plasmodium also grows: from one oat flake it spreads over the agar until it finds more food. Agents do
@@ -273,8 +274,8 @@
       <p>
         Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
         figure in his paper, on the grid of that figure. Fogleman 2020 scenes are his saved settings, and the others
-        were made for this app. These scenes use a grid shaped like your screen. Tokyo rail network has a square grid on
-        every screen, so north stays up on its map.
+        were made for this app. These scenes use a grid shaped like your screen. The three Tokyo scenes, Food ring and
+        Rival networks have a square grid on every screen, so north stays up on the map of Tokyo.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>
@@ -351,9 +352,9 @@
         Flow in the tubes: after A. Tero, R. Kobayashi and T. Nakagaki, “A mathematical model for adaptive transport
         network in path finding by true slime mold”, <em>Journal of Theoretical Biology</em> 244: 553–564, 2007, and A.
         Tero and colleagues, “Rules for biologically inspired adaptive network design”, <em>Science</em> 327: 439–442,
-        2010. The map of the scene Tokyo rail network: coastline ©
+        2010. The map of the Tokyo scenes: coastline and Lake Kasumigaura ©
         <a href="https://www.openstreetmap.org/copyright" rel="noreferrer">OpenStreetMap</a> contributors (Open Database License),
-        station positions from Wikidata (CC0).
+        station positions from Wikidata (CC0), elevations of the light on the mountains from SRTM (NASA and USGS, public domain).
       </p>
       <p>
         This page runs fully in your browser on your graphics card with WebGPU. It sends no data anywhere and uses no

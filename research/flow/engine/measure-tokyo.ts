@@ -2,10 +2,18 @@
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts <name> [level] [steps]
 // `level`: the trail above which a cell is part of the network (1.5). `steps`: the steps that get a picture (all).
 // The lines of several runs go to summary.ts.
+//
+// LIT=<scene id> or LIT=dabs (the shapes of light-dabs.ts): the line also says how much of the network lies under the light of that scene (ADR 0042): `lit` is the share of the cells of the network mask (the cells on land with a trail above `level`,
+// and the food) whose light byte is above 0, the cells that a light shape of the scene paints; `bright` the share
+// whose light byte is 128 or more. With LIT=tokyo-light on a run of the scene without light, the shares say how much
+// of that network lies where the light would be. The light is painted on the CPU as the engine paints it
+// (paint-reference.ts, through buildWorld()).
 import { readdirSync, readFileSync } from 'node:fs';
+import { presetById } from '../../../src/model/presets.ts';
 import { outDir } from '../prototype/out.ts';
 import { measures, network, networkMask, tokyoWorld } from '../prototype/tokyo.ts';
-import { picture, writePng } from '../prototype/world.ts';
+import { buildWorld, picture, writePng } from '../prototype/world.ts';
+import { dabShapes } from './light-dabs.ts';
 
 const DIR = process.env.DIR ?? outDir('engine/');
 const name = process.argv[2] ?? 'tokyo-webgpu-flow-s1';
@@ -39,6 +47,24 @@ const steps = readdirSync(DIR)
   .sort((a, b) => a - b);
 const set33 = t.cities.map((c, i) => (c.stat ? i : -1)).filter((i) => i >= 0);
 const set36 = t.cities.map((_, i) => i);
+// The light byte of every cell of the scene LIT, on the grid of the run.
+const litShapes =
+  process.env.LIT === 'dabs' ? dabShapes() : process.env.LIT ? presetById(process.env.LIT)?.env : undefined;
+if (process.env.LIT && !litShapes) throw new Error(`no scene ${process.env.LIT}`);
+const light = litShapes ? buildWorld(world.w, world.h, 'dish', litShapes).light : undefined;
+/** The shares of the network mask on land under the light, as the end of a line; empty without LIT. */
+function lit(mask: Uint8Array): string {
+  if (!light) return '';
+  let [cells, any, bright] = [0, 0, 0];
+  for (let c = 0; c < mask.length; c++) {
+    if (!mask[c] || !t.land[c]) continue;
+    cells++;
+    if (light[c]! > 0) any++;
+    if (light[c]! >= 128) bright++;
+  }
+  const pct = (v: number) => ((100 * v) / Math.max(1, cells)).toFixed(2);
+  return ` | lit ${pct(any)} % bright ${pct(bright)} % of ${cells} cells`;
+}
 for (const step of steps) {
   const trail = read(`${name}-trail-${step}.f32.b64`);
   const mask = networkMask(world, trail, level);
@@ -50,7 +76,7 @@ for (const step of steps) {
   let sea = 0;
   for (let c = 0; c < world.w * world.h; c++) if (world.open[c] && !t.land[c] && trail[c]! > level) sea++;
   console.log(
-    `${name} ${String(step).padStart(6)} alive ${String(row?.alive?.[0] ?? 0).padStart(6)} | 33: ${a.joined} joined ${a.links} links TL ${a.tl.toFixed(2)} MD ${a.md.toFixed(2)} FT ${a.ft.toFixed(2)} | 36: ${b.joined} joined TL ${b.tl.toFixed(2)} MD ${b.md.toFixed(2)} FT ${b.ft.toFixed(2)} | sea ${sea} | ${String(row?.ms)} ms`,
+    `${name} ${String(step).padStart(6)} alive ${String(row?.alive?.[0] ?? 0).padStart(6)} | 33: ${a.joined} joined ${a.links} links TL ${a.tl.toFixed(2)} MD ${a.md.toFixed(2)} FT ${a.ft.toFixed(2)} | 36: ${b.joined} joined TL ${b.tl.toFixed(2)} MD ${b.md.toFixed(2)} FT ${b.ft.toFixed(2)} | sea ${sea} | ${String(row?.ms)} ms${lit(mask)}`,
   );
   if (pics.length === 0 || pics.includes(step)) {
     writePng(`${DIR}${name}-trail-${step}.png`, world.w, world.h, picture(world, trail, 12), 1);

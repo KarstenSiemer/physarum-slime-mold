@@ -150,6 +150,18 @@ What stays closed is the ground between the tubes, where no tube is needed. The 
 was no help for this test: it threw the agents of its wound to random points of the whole dish,
 also into the sea, where they grew into colonies. Since ADR 0039 it kills them while growth runs,
 and the same run keeps the sea empty.
+**Light on the mountains** ([ADR 0042](../../docs/adr/0042-a-second-tokyo-scene-with-light.md),
+part 14). Tero and colleagues also ran their experiment with light on the mountains and the lakes,
+because the slime mould avoids bright light. A second scene, Tokyo with light, has this light: 53
+cells of 9 × 10 km that lie 200 m or more above the sea, and Lake Kasumigaura, every lit cell
+equally bright. Ten seeds ran beside the ten of the scene without light. The colony first grows
+over the lit ground as over dark ground: the light of this app turns an agent only at the edge of
+a lit area, and growth does not read it. Then the tubes on lit ground go first. From step 16,000
+on the network holds 4.6 % of its cells on lit ground, which is a quarter of the land; the network
+without light holds 9.1 % there. Its length, its directness and its fault tolerance do not change
+by more than two sets of seeds differ. No light strength from 0.02 to 0.5 kept the network off the
+lit ground better. The scene made the list of a scene's shapes longer than one byte counts, so a
+link now writes that number in a new way, and old links still open.
 
 ## What is in this folder, and what you need to read
 
@@ -1404,9 +1416,57 @@ Result: every time shorter than 18 h brings back the mesh between the tubes of t
 h also the dead ends of the Maze. With 18 h the colony grows back into a region that it lost within
 half an hour of model time. The app keeps its factor.
 
+### 14. Does light on the mountains change the network? [ADR 0042]
+
+The scene Tokyo with light (`tokyo-light`) on WebGPU, seeds 1 to 10, to step 48,000. A run alone on
+the GPU took under 3 minutes. `LIT=tokyo-light` lets `measure-tokyo.ts` add the share of the
+network on lit ground to each line (`lit`: light byte above 0; `bright`: 128 or more):
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=tokyo-light VITE_SEED=$seed VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g42-tl-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && LIT=tokyo-light node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g42-tl-s$seed 1.5 99999 >> research/flow/out/tokyo-light.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo-end research/flow/out/tokyo-light.txt
+```
+
+The other runs use the same two commands with these changes; the records are in
+`logs/engine/light/`:
+
+| Record                         | Runs                                                             | Change of the command                                              |
+| ------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `tokyo-light.txt`              | the scene, seeds 1 to 10                                         | none                                                               |
+| `tokyo-dark.txt`               | the scene without light, seeds 1 to 3: where the light would be  | `VITE_SCENE=tokyo`, the name `g42-tk`                              |
+| `tokyo-light-strength<s>.txt`  | Light strength 0.02, 0.2 and 0.5, seeds 1 and 2                  | `VITE_PATCH='{"lightStrength":0.5}'`, the name `g42-tl-L0.5`       |
+| `tokyo-light-dabs.txt`         | one disc per lit cell (`engine/light-dabs.ts`), seeds 1 and 2    | `VITE_SHAPES=dabs`, `LIT=dabs`, the name `g42-td`                  |
+| `tokyo-light-webgl2.txt`       | the scene on WebGL2, seeds 1 to 3, to step 24,000                | `VITE_KIND=webgl2`, the steps 2,000 to 24,000, the name `g42-tlgl` |
+| `check-merged.txt`             | seed 1 again on both backends after the last merge of `main`     | the steps to 4,000                                                 |
+| `digest-branch.jsonl`, `-main` | the digests of every scene after 500 steps, branch and `main`    | part 6, with `VITE_FLOW=1`                                         |
+| `srtm-centres.json`            | the SRTM 90 m samples at the centres of the 400 cells of the map | column, row, metres (Open Topo Data, read 2026-11-15)              |
+
+From step 16,000 on (the 50 samples of steps 16,000 to 48,000; for 2 or 3 seeds, 10 or 15):
+
+| Runs                             | TL          | MD   | FT   | Links | Agents | On lit ground       |
+| -------------------------------- | ----------- | ---- | ---- | ----- | ------ | ------------------- |
+| With light, 0.05 (10 seeds)      | 1.77 ± 0.13 | 0.83 | 0.88 | 54.2  | 4,077  | 4.6 % (1.3 to 8.7)  |
+| Without light (ADR 0029)         | 1.84 ± 0.13 | 0.83 | 0.91 | 53.9  | 4,010  |                     |
+| Without light, seeds 1 to 3      | 1.81 ± 0.13 | 0.83 | 0.90 | 51.8  | 3,981  | 9.1 % (6.2 to 16.2) |
+| Light strength 0.02              | 1.81 ± 0.15 | 0.83 | 0.90 | 52.0  | 4,056  | 4.5 % (2.0 to 7.6)  |
+| Light strength 0.2               | 1.79 ± 0.16 | 0.83 | 0.87 | 53.9  | 4,156  | 3.8 % (2.4 to 8.4)  |
+| Light strength 0.5               | 1.87 ± 0.15 | 0.83 | 0.91 | 55.8  | 4,276  | 5.1 % (2.5 to 12.1) |
+| One disc per cell                | 1.66 ± 0.13 | 0.85 | 0.86 | 54.3  | 3,867  | 3.3 % (2.6 to 5.3)  |
+| WebGL2 (steps 16,000 and 24,000) | 1.76 ± 0.11 | 0.82 | 0.89 | 52.0  | 4,129  | 4.5 % (3.4 to 6.4)  |
+
+The share of the runs with one disc per cell counts the cells that the discs light, 24.0 % of the
+land; the scene lights 23.9 %. The runs of the scene without light of seeds 1 and 2, and those
+with the strengths 0.02 and 0.2, ran on 2026-11-15 before `main` was merged (their dumps were named
+`g20-`). They hold for the merged code: the scene without light gives the lines of the record of
+part 11 (`g17-tk-i1.4-s1`, equal in every number), and seeds 1 and 2 of the scene with light gave
+the same lines before and after the merge.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 230 files, 3.4 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 241 files, 3.4 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1433,6 +1493,7 @@ asks for the new digest.
 | `logs/engine/wall-cost/`                             | the time of a step before and after the rule for an agent under a painted wall, with its flag clear and set, and of its first build (ADR 0038, check of 2026-11-15)                                                             | 2026-11-15, M3 Pro, a free GPU                        |
 | `logs/engine/cut-cost/`                              | the time of a step before and after the rule of ADR 0039, with the flag of ADR 0038 clear and set (check of 2026-11-15)                                                                                                         | 2026-11-15, M3 Pro, a free GPU                        |
 | `logs/engine/respawn-wound/`                         | the runs of ADR 0041: the digests of every scene on the branch and on `main`, and its wrong rules N1 to N10                                                                                                                     | 2026-11-15, M3 Pro, `main` at `b93584e`               |
+| `logs/engine/light/`                                 | the runs of part 14 (ADR 0042): the scene Tokyo with light and the runs beside it, the digests of every scene on the branch and on `main`, and the SRTM samples                                                                 |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1483,6 +1544,7 @@ Notes on the record:
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/strands.ts`       | the tubes that the flux has left, and the ground that their starvation marks, on a dump           |
+| `engine/light-dabs.ts`    | the light of Tokyo with light as one disc per lit cell, which the scene does not use (ADR 0042)   |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |

@@ -127,9 +127,10 @@ GitHub Actions builds, tests and deploys to GitHub Pages from `main`
   transport network in path finding by true slime mold_, J. Theor. Biol. 244: 553–564, 2007;
   A. Tero et al., _Rules for biologically inspired adaptive network design_, Science 327:
   439–442, 2010.
-- Map of the scene Tokyo rail network (`src/model/tokyo.ts`): coastline ©
+- Map of the Tokyo scenes (`src/model/tokyo.ts`): coastline and Lake Kasumigaura ©
   [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, Open Database License;
-  station positions from Wikidata (CC0).
+  station positions from Wikidata (CC0); the elevations behind the light on the mountains from
+  SRTM (NASA and USGS, public domain).
 
 ## License
 
