@@ -83,10 +83,10 @@ Spot respawn(vec4 a, uint i) {
 }
 #endif
 
-// An alive agent whose cell is a wall: a wall was painted onto it (underWall in agents.wgsl, ADR 0038). Only while the
-// environment may hold walls.
+// An alive agent whose cell is a wall: a wall was painted onto it (underWall in agents.wgsl, ADR 0038). Only while a
+// wall may lie over an alive agent (P.extra.w, decision 8; gl/sim.ts wallOverAgents).
 bool underWall(vec4 a) {
-  if (P.extra.y == 0u || (bitsOf(a) & ALIVE) == 0u) return false;
+  if (P.extra.w == 0u || (bitsOf(a) & ALIVE) == 0u) return false;
   ivec2 q = cellXY(ivec2(floor(a.xy)));
   return q.x >= 0 && isWall(texelFetch(env, q, 0));
 }

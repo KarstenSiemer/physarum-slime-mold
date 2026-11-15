@@ -260,6 +260,12 @@ export class GlSim implements Sim {
    * clearPath, ADR 0020).
    */
   private walls = false;
+  /**
+   * An alive agent may stand on a wall cell: a wall was painted, or bytes or an agent were written, since the agents
+   * were last placed on open cells (reset()) or the environment was cleared. Only then does the agent pass read the
+   * wall byte of each agent's cell (tools.glsl underWall, ADR 0038, decision 8).
+   */
+  private wallOverAgents = false;
   /** Per clearance tile: whether it holds a wall cell, and how far the nearest wall lies at least (walls.frag). */
   private readonly walled: Target;
   private readonly clearance: Target;
@@ -738,6 +744,8 @@ export class GlSim implements Sim {
     this.revision++;
     const gl = this.gl;
     this.changed();
+    // init.frag starts every alive agent on an open cell, after the walls (ADR 0038, decision 8).
+    this.wallOverAgents = false;
     // The scent targets are cleared below, and without a food or a light no step adds scent.
     this.scentless = !this.sources;
     this.step = 0;
@@ -919,7 +927,7 @@ export class GlSim implements Sim {
       const wrap = b === 'wrap';
       const k = EnvKind[stroke.kind];
       if (b !== this.settings.boundary) foreign = true;
-      if (k === EnvKind.wall) this.walls = true;
+      if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, true];
       if (k === EnvKind.food || k === EnvKind.light) [this.sources, this.scentless] = [true, false];
       if (k !== EnvKind.erase) {
         this.hasEnvironment = true;
@@ -986,7 +994,7 @@ export class GlSim implements Sim {
     this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
-    this.walls = false;
+    [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
     // The scent that the targets hold stays until the next reset.
     this.sources = false;
@@ -1095,6 +1103,8 @@ export class GlSim implements Sim {
     if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
     const x = index % this.agentWidth;
     const y = Math.floor(index / this.agentWidth);
+    // A test can put an agent anywhere, also on a wall.
+    if (this.walls) this.wallOverAgents = true;
     writeTarget(this.gl, this.agentsTex[this.a], x, y, 1, 1, new Float32Array([a.x, a.y, a.heading, a.bits & 7]));
   }
 
@@ -1123,6 +1133,7 @@ export class GlSim implements Sim {
     clear(this.gl, this.shape);
     const any = (channel: number) => data.some((v, i) => i % 4 === channel && v > 0);
     this.walls = any(0);
+    this.wallOverAgents = this.walls;
     [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
     this.hasEnvironment = this.layers.some(Boolean);
     this.sources = any(1) || any(2);
@@ -1222,6 +1233,7 @@ export class GlSim implements Sim {
       step: this.step,
       tool,
       walls: this.walls,
+      wallOverAgents: this.wallOverAgents,
       round,
       start: this.start,
     };

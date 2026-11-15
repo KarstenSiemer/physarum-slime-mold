@@ -248,10 +248,11 @@ fn respawn(a: Agent, id: u32) -> Spot {
 }
 
 //#endif
-// An alive agent whose cell is a wall: a wall was painted onto it (ADR 0038). Only while the environment may hold
-// walls, so a step without walls reads nothing more.
+// An alive agent whose cell is a wall: a wall was painted onto it (ADR 0038). Only while a wall may lie over an alive
+// agent (P.extra.w, decision 8): a wall painted, or bytes or an agent written, since the agents were placed on open
+// cells (sim.ts reset()). So a scene with its own walls reads nothing more.
 fn underWall(a: Agent) -> bool {
-  if (P.extra.y == 0u || (a.bits & ALIVE) == 0u) { return false; }
+  if (P.extra.w == 0u || (a.bits & ALIVE) == 0u) { return false; }
   let c = cellOf(a.pos);
   return c >= 0 && isWall(env[c]);
 }

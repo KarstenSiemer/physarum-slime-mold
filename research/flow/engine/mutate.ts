@@ -1227,6 +1227,23 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     UNDER_WALL_GL,
     SIM_SPEC,
   ],
+  // The flag that a wall may lie over an alive agent (decision 8 of ADR 0038): never set by a painted wall.
+  [
+    'U7 webgpu: a painted wall never sets the flag of a wall over agents',
+    'src/engine/sim.ts',
+    "if (stroke.kind === 'wall') [this.walls, this.wallOverAgents] = [true, true];",
+    "if (stroke.kind === 'wall') [this.walls, this.wallOverAgents] = [true, false];",
+    UNDER_WALL_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'U8 webgl2: a painted wall never sets the flag of a wall over agents',
+    'src/engine/gl/sim.ts',
+    'if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, true];',
+    'if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, false];',
+    UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
 ];
 
 const only = process.argv.slice(2);
