@@ -166,7 +166,7 @@ My own choices, under the same delegation:
 
 - Cost: `removed()` reads one uniform for each alive agent in the passes that call `shrinkage()` (`advance` and
   `claim` on WebGPU, modes 0 and 1 on WebGL2), and only while growth runs the tool, and the wall byte while the flag
-  of ADR 0038 is set. Not measured: other GPU campaigns ran on the machine on 2026-11-15.
+  of ADR 0038 is set. Measured after the merge on a free GPU (the check below): no cost that the runs show.
 - Found on the way, not changed: respawn (flow on) draws its point anywhere on the grid, also in the wound of a held
   cut, and the cut does not clear the flow memory or the tube body there (`respawn()` in `agents.wgsl`; in the fields the
   cut clears only the chemicals, `diffuse.wgsl:79`–`83`). So while the cut is held over a tube, a dead agent can come to life
@@ -178,3 +178,30 @@ My own choices, under the same delegation:
   wrong rules on that code (`mutations.txt`), and the Tokyo case (`tokyo-cut.txt`, the lines of `measure-tokyo.ts`;
   `tokyo-cut.jsonl`, the log of the run). The commands: `research/flow/README.md`, part 6 for the digests, part 7 for
   the wrong rules, part 13 for the Tokyo case.
+
+## Check of 2026-11-15: the cost on a free GPU
+
+The coordinator measured the step after the merge, on a free GPU: 24 runs from 10:02 to 10:08, M3 Pro, and in each of
+the 24 checks before a run no other Vitest ran (load 3.7 to 5.0). `research/flow/engine/turns.sh` ran
+`bench.gpu.test.ts` in a checkout of `281d69e` (`main` just before this ADR) and of `9c0c405` (this ADR, merged), and
+of `9c0c405` with `VITE_WALL=1`, which sets the flag of ADR 0038, 8 rounds in turns. A run is the Maze, the Foraging
+maze and the Tokyo rail network with the flow off, seed 1, a canvas of 1280 × 800, 3,000 steps, then the median of 21
+batches of 50 steps. Growth runs in the Foraging maze and in the Tokyo scene, so there `removed()` also reads the tool,
+and with the flag the wall byte.
+
+ms per step, the median over the rounds (least to most), and per round the time of a build over the time of `281d69e`
+in the same round, the median (least to most):
+
+| Scene         | Backend | `281d69e`           | `9c0c405`           | flag set            | after / before      | flag set / before   |
+| ------------- | ------- | ------------------- | ------------------- | ------------------- | ------------------- | ------------------- |
+| Maze          | WebGPU  | 0.188 (0.186–0.198) | 0.188 (0.182–0.198) | 0.188 (0.184–0.198) | 1.000 (0.968–1.032) | 1.000 (0.939–1.021) |
+| Foraging maze | WebGPU  | 0.344 (0.338–0.366) | 0.346 (0.336–0.368) | 0.346 (0.342–0.370) | 1.008 (0.934–1.030) | 1.006 (0.956–1.024) |
+| Tokyo         | WebGPU  | 0.466 (0.450–0.494) | 0.464 (0.452–0.480) | 0.457 (0.450–0.462) | 0.996 (0.951–1.027) | 0.983 (0.919–1.013) |
+| Maze          | WebGL2  | 0.396 (0.378–0.428) | 0.394 (0.388–0.422) | 0.394 (0.394–0.398) | 0.990 (0.934–1.048) | 0.997 (0.930–1.042) |
+| Foraging maze | WebGL2  | 0.651 (0.634–0.680) | 0.631 (0.628–0.656) | 0.652 (0.630–0.674) | 0.968 (0.957–1.028) | 1.008 (0.935–1.037) |
+| Tokyo         | WebGL2  | 0.715 (0.708–0.808) | 0.711 (0.704–0.810) | 0.713 (0.710–0.732) | 0.994 (0.983–1.014) | 1.000 (0.899–1.011) |
+
+In every run all builds ended with the same number of alive agents (13,130, 17,840 and 7,491 on WebGPU; 13,130, 17,230
+and 7,978 on WebGL2). The rule costs no time that these runs show, with growth and without it, with the flag clear or
+set: every median lies within 4 % of 1, and on both sides of it. Not measured: another GPU. The 144 lines of the runs
+and the log of each check are `logs/engine/cut-cost/` in the archive.

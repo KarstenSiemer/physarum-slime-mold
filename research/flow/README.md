@@ -1404,7 +1404,7 @@ half an hour of model time. The app keeps its factor.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 218 files, 3.4 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 225 files, 3.4 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1428,6 +1428,8 @@ asks for the new digest.
 | `logs/engine/radius/`                                | the runs of part 12: the radii on fixed networks, the tests of the bounded pressure, the local flux against the exact one on the dumps, the campaigns, the GPU tests and the wrong rules of the radius                          | 2026-11-15, M3 Pro, `main` at `3f579ff`               |
 | `logs/engine/recover/`                               | the runs of part 13: the campaigns with each time until starved ground is fresh again, the regrowth and the Cut tool on WebGPU and WebGL2, and the wrong rules D1 to D6 with and without the new test                           | 2026-11-15, M3 Pro, `main` at `623fb36`, `71b0161`    |
 | `logs/engine/cut-growth/`                            | the runs of ADR 0039: the digests of every scene on the branch and on `main`, its wrong rules K1 to K10 with U1 to U8, and the Tokyo case of the Cut tool                                                                       | 2026-11-15, M3 Pro, `main` at `71b0161` and `281d69e` |
+| `logs/engine/wall-cost/`                             | the time of a step before and after the rule for an agent under a painted wall, with its flag clear and set, and of its first build (ADR 0038, check of 2026-11-15)                                                             | 2026-11-15, M3 Pro, a free GPU                        |
+| `logs/engine/cut-cost/`                              | the time of a step before and after the rule of ADR 0039, with the flag of ADR 0038 clear and set (check of 2026-11-15)                                                                                                         | 2026-11-15, M3 Pro, a free GPU                        |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1480,6 +1482,7 @@ Notes on the record:
 | `engine/strands.ts`       | the tubes that the flux has left, and the ground that their starvation marks, on a dump           |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
+| `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
 | `engine/mutate.ts`        | 194 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |

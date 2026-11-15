@@ -104,8 +104,9 @@ The coordinator's decision of 2026-11-15, after the review of the pull request:
   each scene has it.
 - A wall painted over a colony sends the agents under it to random open cells of the whole grid in the next step, as
   the cut does. A thick wall no longer holds living agents that never deposit.
-- Cost: as first built, the Maze without the flow took about 0.02 ms more per step (decision 8). With decision 8 the
-  cost is not measured to that precision: other GPU work ran the whole time (below). Open until then.
+- Cost: none that a free GPU shows (check of 2026-11-15, below). With the rule a step of the Maze and of the Foraging
+  maze, the flow off, takes what it took before the rule, within 1 % on WebGPU and within 4 % on WebGL2, and also
+  while its flag is set. The 0.02 ms of the first build (decision 8) did not come again in 8 rounds in turns.
 - Tests (`sim.gpu.test.ts`, "agents under a painted wall", both backends): every agent under a thick wall is at its
   first open point after one step, with its heading, and the count of alive agents stays, without and with one agent
   per cell; while the cut is held such an agent lands outside the wound; an agent beside the wall keeps its blocked
@@ -151,3 +152,56 @@ VITE_SCENES=maze,foraging-maze VITE_FLOWS=off VITE_NAME=bench-main npx vitest ru
 
 and on the branch the same with `VITE_NAME=bench-branch`, and with `VITE_WALL=1 VITE_NAME=bench-wall` for the rule
 while its flag is set.
+
+### Check of 2026-11-15: the cost on a free GPU
+
+The coordinator measured the step on a free GPU, after the campaigns of the other sessions had ended: 52 runs from
+08:32 to 08:41, M3 Pro, and in each of the 52 checks before a run no other Vitest ran (load 3.4 to 4.4 in the 36 runs that logged it).
+`research/flow/engine/turns.sh` ran `bench.gpu.test.ts` of `3d27e3b` in a checkout of each commit, the builds in turns
+and the order reversed in every second round. A run is the Maze and the Foraging maze with the flow off, seed 1, a
+canvas of 1280 × 800, 3,000 steps, then the median of 21 batches of 50 steps.
+
+- **Before against after the rule**: `3f579ff` (`main` just before this ADR) against `3d27e3b` (this ADR, merged), and
+  `3d27e3b` with `VITE_WALL=1`, where a wall stroke sets the flag and the rule reads the wall byte under every agent in
+  every step. 12 rounds.
+- **The first build**: `1cf6375` against `b8ecde5`, the pair of decision 8, whose rule read the wall byte while any wall
+  existed. 8 rounds.
+
+ms per step, the median over the rounds (least to most), and per round the time of a build over the time of the build
+before the rule in the same round, the median (least to most):
+
+| Scene         | Backend | `3f579ff`           | `3d27e3b`           | flag set            | after / before      | flag set / before   |
+| ------------- | ------- | ------------------- | ------------------- | ------------------- | ------------------- | ------------------- |
+| Maze          | WebGPU  | 0.204 (0.198–0.206) | 0.204 (0.194–0.208) | 0.202 (0.198–0.208) | 1.000 (0.951–1.030) | 1.000 (0.961–1.020) |
+| Foraging maze | WebGPU  | 0.366 (0.348–0.370) | 0.367 (0.362–0.372) | 0.366 (0.358–0.406) | 1.011 (0.984–1.052) | 1.005 (0.978–1.103) |
+| Maze          | WebGL2  | 0.422 (0.398–0.436) | 0.434 (0.420–0.448) | 0.423 (0.418–0.442) | 1.042 (0.968–1.062) | 1.002 (0.986–1.095) |
+| Foraging maze | WebGL2  | 0.671 (0.648–0.688) | 0.668 (0.656–0.680) | 0.673 (0.656–0.682) | 0.994 (0.956–1.040) | 0.994 (0.979–1.027) |
+
+| Scene         | Backend | `1cf6375`           | `b8ecde5`           | first build / before |
+| ------------- | ------- | ------------------- | ------------------- | -------------------- |
+| Maze          | WebGPU  | 0.200 (0.198–0.204) | 0.199 (0.198–0.204) | 1.000 (0.971–1.020)  |
+| Foraging maze | WebGPU  | 0.368 (0.364–0.396) | 0.365 (0.358–0.374) | 0.984 (0.939–1.027)  |
+| Maze          | WebGL2  | 0.428 (0.426–0.500) | 0.431 (0.424–0.448) | 0.998 (0.896–1.014)  |
+| Foraging maze | WebGL2  | 0.664 (0.662–0.686) | 0.666 (0.662–0.674) | 1.000 (0.974–1.015)  |
+
+In every run all builds ended with the same number of alive agents: 13,130 in the Maze, 17,840 in the Foraging maze
+on WebGPU and 17,230 on WebGL2. A check before the runs read the flag after the wall stroke and 100 steps: it was set
+on both backends in both scenes.
+
+What the numbers say:
+
+- The rule costs no time that these runs show, with its flag clear or set. The largest median, 1.042 on WebGL2 in the
+  Maze, is a run with the flag clear; the same build with the flag set does more work and took 1.002. So 4 % lies in
+  the spread of the order of the runs, and the rule costs less than that.
+- The first build did not cost 0.02 ms either: its ratios are 0.98 to 1.00. The three runs of each build of decision 8
+  measured 0.195 against 0.213 ms on WebGPU; here both took 0.199 to 0.200. Why those runs differed is not found.
+- Decision 8 stays. Reason: it costs nothing either, its paths are tested (U7, U8), and to take it out would be a
+  change of the engine that gains nothing measurable. Not measured: another GPU than the M3 Pro.
+
+The 208 lines of the runs, with the build, the commit and the round, and the log of each check are
+`research/flow/logs/engine/wall-cost/` in the archive. To measure again, in a checkout of each commit with
+`node_modules` and the `bench.gpu.test.ts` of `3d27e3b`:
+
+```bash
+VITE_SCENES=maze,foraging-maze VITE_FLOWS=off research/flow/engine/turns.sh 12 before=<checkout of 3f579ff> after=<checkout of 3d27e3b> wall=<checkout of 3d27e3b>:wall
+```
