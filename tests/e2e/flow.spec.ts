@@ -9,6 +9,55 @@ async function open(page: Page, url: string) {
   await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 150_000 });
 }
 
+// The steps of a wait, measured on 2026-11-15 on WebGPU and WebGL2, on the GPU of an M3 Pro and on SwiftShader in the
+// image of CI. The runs differ a little, so each wait has a margin.
+// TUBES: the Maze draws more than 100 cells above their trail from step 16 to 19 on (6 runs: 16, 17, 17, 17, 19,
+// 16), and 1,500 to 2,900 cells at step 27 to 32.
+const TUBES = 30;
+// GROWN: from a first count at step 2 to 7 (60 runs on the M3 Pro), the colony of the Tokyo scene has 20 to 44 agents
+// more after 10 steps, which is too few, and 50 to 133 more after 30. Each colony of Rival networks has 76 or more
+// agents more after 30 steps.
+const GROWN = 30;
+// The limit of a wait for steps. In the image of CI on 4 cores of an M3 Pro, the first 30 steps took 27 s in the Maze
+// and in Rival networks and 34 s on the Tokyo scene, and GitHub is about 3 times slower (ADR 0010).
+const WAIT = 300_000;
+// The limit of a test with such a wait: two starts of the app and the wait.
+const LIMIT = 480_000;
+
+// A result of the simulation comes with its steps, not with the seconds: a test waits for a step and then reads once.
+// A wait of seconds for a result failed on GitHub, where a slow runner made too few steps (TODO.md, 2026-11-15).
+// The limit of the wait is only a guard against a simulation that stands still.
+const steps = (page: Page, n: number) =>
+  page.waitForFunction((n) => (globalThis.physarum?.sim.step ?? 0) >= n, n, { timeout: WAIT });
+// The agents alive of each strain, and a step that the simulation had reached at most when it counted them.
+const alive = (page: Page) =>
+  page.evaluate(async () => {
+    const sim = globalThis.physarum?.sim;
+    const alive = [...((await sim?.alive()) ?? [])];
+    return { alive, step: sim?.step ?? 0 };
+  });
+// Waits for a scene with the flow on a grid of this width, and lets it rest at once, in the frame that sees it: the
+// first count is then of step 2 to 7. Only a young colony grows by 20 agents for sure: a first count many steps late,
+// as on a fast machine under load, found colonies of 200 to 270 agents that grew no more in 30 steps, and a rival
+// that had lost agents (3 of 30 runs, 2026-11-15). grow() lets the scene run again.
+const colonyScene = (page: Page, width: number) =>
+  page.waitForFunction(
+    (width) => {
+      const engine = globalThis.physarum;
+      if (!engine?.settings.flow || engine.sim.width !== width) return false;
+      engine.paused = true;
+      return true;
+    },
+    width,
+    { timeout: 150_000 },
+  );
+const grow = async (page: Page, to: number) => {
+  await page.evaluate(() => {
+    if (globalThis.physarum) globalThis.physarum.paused = false;
+  });
+  await steps(page, to);
+};
+
 const linked = async (page: Page) => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.settings;
 const memory = (page: Page) => page.evaluate(async () => (await globalThis.physarum?.sim.readFlow())?.length ?? -1);
 
@@ -62,6 +111,7 @@ for (const viewport of [
   { width: 375, height: 812 },
 ]) {
   test(`Tokyo rail network grows from Tokyo on its square lattice (${String(viewport.width)} px)`, async ({ page }) => {
+    test.setTimeout(LIMIT);
     const errors = watchErrors(page);
     await page.setViewportSize(viewport);
     await open(page, await smallScene({ resolution: 256 }));
@@ -69,11 +119,7 @@ for (const viewport of [
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     if (await settings.isVisible()) await settings.click();
     await page.getByRole('combobox', { name: 'Preset' }).selectOption('tokyo');
-    await page.waitForFunction(
-      () => globalThis.physarum?.settings.flow === true && globalThis.physarum.sim.width === 512,
-      undefined,
-      { timeout: 150_000 },
-    );
+    await colonyScene(page, 512);
     const state = await page.evaluate(() => {
       const e = globalThis.physarum;
       return e && { size: [e.sim.width, e.sim.height], lattice: e.settings.lattice, flux: e.settings.flowStrength };
@@ -86,13 +132,12 @@ for (const viewport of [
       await expect(card.getByText(chip, { exact: true })).toBeVisible();
     await expect(card.getByText('changed', { exact: true })).toHaveCount(0);
     // The colony of about 50 agents at Tokyo grows: more agents live some steps later.
-    const alive = () =>
-      page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.reduce((a, b) => a + b, 0) ?? 0);
-    await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) >= 3, undefined, { timeout: 120_000 });
-    const first = await alive();
-    expect(first).toBeGreaterThan(20);
-    expect(first).toBeLessThan(2000);
-    await expect.poll(alive, { timeout: 120_000 }).toBeGreaterThan(first + 20);
+    const first = await alive(page);
+    const colony = first.alive.reduce((a, b) => a + b, 0);
+    expect(colony).toBeGreaterThan(20);
+    expect(colony).toBeLessThan(2000);
+    await grow(page, first.step + GROWN);
+    expect((await alive(page)).alive.reduce((a, b) => a + b, 0)).toBeGreaterThan(colony + 20);
     // The simulation holds the memory of the flow, and Tokyo's food sites lie in the middle part of the lattice.
     expect(await memory(page)).toBe(512 * 512 * 4);
     expect(errors).toEqual([]);
@@ -101,14 +146,11 @@ for (const viewport of [
 
 // Rival networks (ADR 0031, 0031): two strains, each with a colony on a food of its own and a flow of its own.
 test('Rival networks starts a colony of each strain, and each strain has a flow of its own', async ({ page }) => {
+  test.setTimeout(LIMIT);
   const errors = watchErrors(page);
   await open(page, await smallScene({ resolution: 256 }));
   await page.getByRole('combobox', { name: 'Preset' }).selectOption('rival-networks');
-  await page.waitForFunction(
-    () => globalThis.physarum?.settings.flow === true && globalThis.physarum.sim.width === 384,
-    undefined,
-    { timeout: 150_000 },
-  );
+  await colonyScene(page, 384);
   const state = await page.evaluate(() => {
     const e = globalThis.physarum;
     return e && { size: [e.sim.width, e.sim.height], strains: e.settings.strains.length, layout: e.settings.layout };
@@ -121,16 +163,15 @@ test('Rival networks starts a colony of each strain, and each strain has a flow 
   await expect(card.getByText('changed', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Start layout')).toHaveValue('food');
   // Each strain starts as a colony of about 50 agents on its own food, and both colonies grow.
-  const alive = () => page.evaluate(async () => (await globalThis.physarum?.sim.alive())?.slice(0, 2) ?? []);
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) >= 4, undefined, { timeout: 120_000 });
-  const first = await alive();
-  for (const n of first) {
+  const first = await alive(page);
+  expect(first.alive.length).toBeGreaterThanOrEqual(2);
+  for (const n of first.alive.slice(0, 2)) {
     expect(n).toBeGreaterThan(20);
     expect(n).toBeLessThan(2000);
   }
-  await expect
-    .poll(async () => (await alive()).map((n, i) => n > (first[i] ?? 0) + 20), { timeout: 120_000 })
-    .toEqual([true, true]);
+  await grow(page, first.step + GROWN);
+  const later = (await alive(page)).alive;
+  for (const [i, n] of first.alive.slice(0, 2).entries()) expect(later[i]).toBeGreaterThan(n + 20);
   // The simulation holds the memory of a flow for each of the two strains, and for no third one.
   const memories = await page.evaluate(async () => {
     const sim = globalThis.physarum?.sim;
@@ -145,10 +186,16 @@ test('Rival networks starts a colony of each strain, and each strain has a flow 
 test('the switch below the flow strength draws the tubes by their flow, and changes the view only', async ({
   page,
 }) => {
+  test.setTimeout(LIMIT);
   const errors = watchErrors(page);
   await open(page, await smallScene({ resolution: 256 }));
   await page.getByRole('combobox', { name: 'Preset' }).selectOption('maze');
-  await page.waitForFunction(() => globalThis.physarum?.settings.flow === true, undefined, { timeout: 150_000 });
+  // The Maze runs on a grid 512 cells wide. The scene before ran on a smaller grid, and its steps do not count.
+  await page.waitForFunction(
+    () => globalThis.physarum?.settings.flow === true && globalThis.physarum.sim.width === 512,
+    undefined,
+    { timeout: 150_000 },
+  );
   await page.locator('summary', { hasText: 'Flow' }).click();
   const tubes = page.getByRole('checkbox', { name: 'Draw the tubes by their flow', exact: true });
   await expect(tubes).toBeChecked();
@@ -177,8 +224,11 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
       }
     });
   // The colony holds tubes after some steps: their discs then draw many cells with more than their trail.
-  await expect.poll(async () => (await differs()).more, { timeout: 120_000 }).toBeGreaterThan(100);
-  const before = (await differs()).step;
+  await steps(page, TUBES);
+  const on = await differs();
+  expect(on.step).toBeGreaterThanOrEqual(TUBES);
+  expect(on.more).toBeGreaterThan(100);
+  const before = on.step;
   await tubes.uncheck();
   await page.waitForFunction(() => globalThis.physarum?.settings.showTubes === false);
   // The same simulation goes on, and the picture is the trail of the view again.
@@ -192,8 +242,10 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
   // The help states the rule and its numbers.
   await page.getByRole('button', { name: 'About Draw the tubes by their flow', exact: true }).click();
   await expect(page.getByText(/grows with the fourth root of the conductivity/)).toBeVisible();
+  // The switch needs no step: the simulation kept the memory of the flow, and the next read draws the tubes from it.
   await tubes.check();
-  await expect.poll(async () => (await differs()).more, { timeout: 60_000 }).toBeGreaterThan(100);
+  await page.waitForFunction(() => globalThis.physarum?.settings.showTubes === true);
+  expect((await differs()).more).toBeGreaterThan(100);
   // Without the flow there is no switch: the picture is the trail.
   await page.getByRole('checkbox', { name: 'Flow in the tubes', exact: true }).uncheck();
   await expect(tubes).toHaveCount(0);

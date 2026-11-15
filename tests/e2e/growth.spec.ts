@@ -53,8 +53,13 @@ test('the Growth section offers growth with the rule, and the scene card and the
   expect(errors).toEqual([]);
 });
 
+// The steps of the wait below (2026-11-15, WebGPU and WebGL2, an M3 Pro and SwiftShader in the image of CI): the
+// agents alive are twice the start from step 6 to 13 on, and 14 times the start or more at step 15.
+const DOUBLED = 20;
+
 // With every agent alive, growth has no room: the section says so and offers a Capacity that makes room.
 test('growth without a dead agent says so, and the offered Capacity makes room', async ({ page }) => {
+  test.setTimeout(480_000); // two starts of the app and the wait for the steps below
   const errors = watchErrors(page);
   await open(page, await smallScene({ collisions: true, density: 0.01, growth: true, layout: 'mixed' }));
   await page.locator('summary', { hasText: 'Growth' }).click();
@@ -72,7 +77,17 @@ test('growth without a dead agent says so, and the offered Capacity makes room',
   await expect
     .poll(() => page.evaluate(() => globalThis.physarum?.sim.agents ?? 0), { timeout: 120_000 })
     .toBeGreaterThan(50 * agents);
-  await expect.poll(() => alive(page), { timeout: 60_000 }).toBeGreaterThan(2 * start);
+  // The colony grows with the steps, not with the seconds (the note at the Foraging maze below): DOUBLED steps
+  // of the new simulation, then one count.
+  await page.waitForFunction(
+    ([most, n]) => {
+      const sim = globalThis.physarum?.sim;
+      return !!sim && sim.agents > most && sim.step >= n;
+    },
+    [50 * agents, DOUBLED] as const,
+    { timeout: 300_000 },
+  );
+  expect(await alive(page)).toBeGreaterThan(2 * start);
   await expect(page.getByText(/Growth has no room/)).toHaveCount(0);
   expect(errors).toEqual([]);
 });

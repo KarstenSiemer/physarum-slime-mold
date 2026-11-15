@@ -69,7 +69,8 @@ are in the ADRs it names.
 
 - CI runs the GPU tests on SwiftShader in the Playwright image of `.github/workflows/ci.yml`. A test that fails only
   there: reproduce it in that image before a fix.
-- `tests/e2e/flow.spec.ts:145` fails at times in CI: it waits a time, not a number of steps (`TODO.md`).
+- An e2e test waits for a number of steps, not for a time, before it reads a result of the simulation: a slow runner
+  of CI makes few steps per second (`tests/e2e/flow.spec.ts`).
 - Never start a server on the ports 4173, 5173 or 5001. Use another port and do not commit a change of
   `.claude/launch.json`.
 - One heavy GPU campaign at a time. WebGL2 runs slow down about 8 times beside heavy WebGPU runs. Never measure the
