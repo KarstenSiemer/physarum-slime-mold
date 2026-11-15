@@ -91,10 +91,18 @@ bool underWall(vec4 a) {
   return q.x >= 0 && isWall(texelFetch(env, q, 0));
 }
 
+// While growth runs (P.growth.x: Gf, 0 without growth or without its test), an alive agent in the wound of a held cut
+// or under a wall dies (removed in agents.wgsl, ADR 0039); without growth, placement() puts it elsewhere.
+bool removed(vec4 a) {
+  if (P.growth.x == 0u) return false;
+  return (P.tool.w == 2.0 && toolDistance(a.xy, P.tool.xy) < P.tool.z) || underWall(a);
+}
+
 // Inoculate takes a dead agent of the tool's strain to a random point of the brush, never a living one; cut takes a
 // living agent in the wound to the first of 8 random points outside it whose cell is open. An agent under a wall goes
-// the cut's way, with or without a tool, and outside the wound while the cut is held (ADR 0038). A pure function of
-// the agent after shrinkage, so the claim pass, the claim points and the settle pass find the same spot.
+// the cut's way, with or without a tool, and outside the wound while the cut is held (ADR 0038). While growth runs,
+// such an agent is dead already (removed(), ADR 0039). A pure function of the agent after shrinkage, so the claim
+// pass, the claim points and the settle pass find the same spot.
 Spot placement(vec4 a, uint i) {
   bool walled = underWall(a);
 #if FLOW

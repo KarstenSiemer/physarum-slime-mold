@@ -4267,6 +4267,190 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(away.counts).toBe(4);
       });
     });
+
+    // While growth runs (the rule, growth on and Gf > 0), the cut and a painted wall take the plasm away (ADR 0039): an
+    // alive agent in the wound of a held cut or under a wall dies, as an agent that shrinkage kills, and growth fills
+    // the wound from its margin. Without growth both place the agent elsewhere (the tests above). The colony runs in a
+    // box with a closed room in its corner, where only a placement can put an agent.
+    describe('the cut and a painted wall while growth runs (ADR 0039)', () => {
+      const [w, h] = [64, 48];
+      const cellOf = (a: { x: number; y: number }) => Math.floor(a.y) * w + Math.floor(a.x);
+      /**
+       * Growth every 5 steps with Gmax 40, so that the colony divides wherever a neighbour is free, and shrinkage tests
+       * that kill no agent (Smax 225): between the growth steps only the cut and the wall change the population.
+       */
+      const GROWS: Partial<Settings> = {
+        layout: 'mixed',
+        boundary: 'box',
+        collisions: true,
+        model: 'extended',
+        growth: true,
+        growthEvery: 5,
+        growthMax: 40,
+        shrinkEvery: 3,
+        shrinkMax: 225,
+        density: 0.3,
+        seed: 23,
+      };
+      /** The wall of the room: 19 × 19 open cells in the corner of the box, behind a wall 3 cells thick. */
+      const ROOM: Stroke[] = [
+        { kind: 'wall', from: [20.5, -2], to: [20.5, 20.5], radius: 1 },
+        { kind: 'wall', from: [-2, 20.5], to: [20.5, 20.5], radius: 1 },
+      ];
+      /** The wound: a point within 0.001 of its rim counts as unsure, as float32 and the CPU can put it on either side. */
+      const [cx, cy, r] = [44.37, 27.61, 8.13];
+      const rim = (a: { x: number; y: number }) => Math.hypot(a.x - cx, a.y - cy) - r;
+      const inWound = (a: { x: number; y: number }) => rim(a) < -1e-3;
+      const outside = (a: { x: number; y: number }) => rim(a) > 1e-3;
+      const supported = () => backend.supportsCollisions; // WebGL2 without float blending has no rule, so no growth
+
+      // The passes of growth and of walls, built here under a long timeout, as in the tests of growth below.
+      beforeAll(async () => {
+        if (!supported()) return;
+        const sim = await backend.createSim({ ...defaultSettings(), ...GROWS, density: 0.05 }, 32, 32, 51);
+        sim.paint([{ kind: 'wall', from: [2, 2], to: [8, 2], radius: 1 }]);
+        sim.run(2, cut(16, 16, 4));
+        await sim.finish();
+        sim.destroy();
+      }, 180_000);
+
+      /**
+       * A colony in the box after one step, with the settings `patch` from then on: half of its agents alive, so that
+       * growth has dead agents to take (a capacity of twice the density). The agents that the start put into the room
+       * or under its wall are written dead, and the step gives the occupancy of the others.
+       */
+      async function colony(patch: Partial<Settings>) {
+        const s: Settings = { ...defaultSettings(), ...GROWS, ...patch };
+        const n = Math.round(s.density * w * h);
+        const sim = await backend.createSim({ ...s, growth: false }, w, h, 2 * n, n);
+        live.push(sim);
+        sim.paint(ROOM);
+        const env = await sim.readEnv();
+        const open = (c: number) => (env[c * 4] ?? 0) < 128;
+        // The room: the open cells that cell (0, 0) reaches through its 8 neighbours. A move reaches no more.
+        const room = new Set([0]);
+        for (const c of room)
+          for (const [dx, dy] of [-1, 0, 1].flatMap((dx) => [-1, 0, 1].map((dy) => [dx, dy] as const))) {
+            const [x, y] = [(c % w) + dx, Math.floor(c / w) + dy];
+            if (x >= 0 && y >= 0 && x < w && y < h && open(y * w + x)) room.add(y * w + x);
+          }
+        expect(room.size).toBeGreaterThan(300);
+        expect(room.size).toBeLessThan(450);
+        (await sim.readAgents()).forEach((a, id) => {
+          if (a.bits & 4 && (room.has(cellOf(a)) || !open(cellOf(a)))) sim.writeAgent(id, { ...a, bits: a.bits & 3 });
+        });
+        sim.run(1);
+        sim.update(s);
+        const start = await census(sim, env);
+        expect(start.alive.filter((a) => room.has(cellOf(a)))).toEqual([]);
+        expect(start.walled).toBe(0);
+        return { sim, env, room, start };
+      }
+
+      it('kills the alive agents in the wound of a held cut: none lands elsewhere, and growth takes them again', async () => {
+        if (!supported()) return;
+        const { sim, env, room, start } = await colony({});
+        const wounded = start.alive.filter(inWound);
+        expect(wounded.length).toBeGreaterThan(40);
+        // The first step of the cut runs no growth test: only the cut changes the population.
+        expect(sim.step % 5).not.toBe(0);
+        sim.run(1, cut(cx, cy, r));
+        const first = await census(sim, env);
+        // Each agent of the wound is dead where it was, as shrinkage leaves an agent: its strain, position and heading.
+        for (const a of wounded) expect(first.agents[a.id], `agent ${a.id}`).toEqual({ ...a, bits: a.bits & 3 });
+        const died = start.alive.filter((a) => !((first.agents[a.id]?.bits ?? 0) & 4));
+        expect(died.filter(outside)).toEqual([]);
+        expect(died.length).toBeLessThanOrEqual(start.alive.filter((a) => !outside(a)).length);
+        expect(first.alive.length).toBe(start.alive.length - died.length);
+        expect(total(await sim.alive())).toBe(first.alive.length);
+        const killed = new Set(died.map((a) => a.id));
+        let before = first;
+        for (let k = 0; k < 40; k++) {
+          const step = sim.step;
+          sim.run(1, cut(cx, cy, r));
+          const c = await census(sim, env);
+          expect(
+            c.alive.filter((a) => room.has(cellOf(a))),
+            `step ${step}`,
+          ).toEqual([]);
+          expect(c.most, `step ${step}`).toBe(1);
+          expect(c.walled, `step ${step}`).toBe(0);
+          // An agent alive in the wound at the start of the step dies. A growth step can take it again as a child of
+          // a neighbour: then it lies elsewhere.
+          for (const a of before.alive.filter(inWound)) {
+            killed.add(a.id);
+            const b = c.agents[a.id];
+            if (step % 5 !== 0) expect(b, `agent ${a.id}, step ${step}`).toEqual({ ...a, bits: a.bits & 3 });
+            else expect(!((b?.bits ?? 0) & 4) || b?.x !== a.x || b.y !== a.y, `agent ${a.id}, step ${step}`).toBe(true);
+          }
+          if (step % 5 !== 0) {
+            const gone = before.alive.filter(inWound).length;
+            const unsure = before.alive.filter((a) => !inWound(a) && !outside(a)).length;
+            expect(c.alive.length, `step ${step}`).toBeLessThanOrEqual(before.alive.length - gone);
+            expect(c.alive.length, `step ${step}`).toBeGreaterThanOrEqual(before.alive.length - gone - unsure);
+          }
+          before = c;
+        }
+        expect(total(await sim.alive())).toBe(before.alive.length);
+        // Released, the colony closes the wound: growth brings the dead agents of the cut back to life beside the
+        // colony, and still none in the room.
+        sim.run(60);
+        const end = await census(sim, env);
+        expect(end.alive.filter((a) => room.has(cellOf(a)))).toEqual([]);
+        expect(end.alive.filter((a) => killed.has(a.id)).length).toBeGreaterThan(killed.size / 4);
+        expect(end.alive.filter(inWound).length).toBeGreaterThan(wounded.length / 4);
+      });
+
+      // Without growth the cut places the agents of its wound at random open points outside it (ADR 0023), also into
+      // the room: the population stays. So does the switch Growth and shrinkage with no growth test (Gf 0): nothing
+      // would bring the agents back.
+      it.each([
+        ['growth off', { growth: false }],
+        ['the growth test off (Gf 0)', { growthEvery: 0 }],
+      ] as const)('places the agents of the wound elsewhere with %s', async (_, patch) => {
+        if (!supported()) return;
+        const { sim, env, room, start } = await colony(patch);
+        expect(start.alive.filter(inWound).length).toBeGreaterThan(40);
+        let placed = 0;
+        for (let k = 0; k < 10; k++) {
+          sim.run(1, cut(cx, cy, r));
+          const c = await census(sim, env);
+          expect(c.alive.length, `step ${k}`).toBe(start.alive.length);
+          expect(c.most, `step ${k}`).toBe(1);
+          placed = Math.max(placed, c.alive.filter((a) => room.has(cellOf(a))).length);
+        }
+        expect(total(await sim.alive())).toBe(start.alive.length);
+        expect(placed).toBeGreaterThan(5);
+      });
+
+      // A wall painted over the colony while growth runs: every alive agent under it dies at the next step, where it
+      // is, with or without the cut, in the Jones model too. With the cut held over a part of the wall, the agents of
+      // the wound die as well, and an agent under the wall in the wound dies once.
+      it.each([false, true])('kills an alive agent under a painted wall (the cut held: %s)', async (held) => {
+        if (!supported()) return;
+        const { sim } = await colony({ model: 'jones' });
+        sim.paint([{ kind: 'wall', from: [30, 30], to: [58, 30], radius: 4.5 }]);
+        const env = await sim.readEnv();
+        const wall = (a: { x: number; y: number }) => (env[cellOf(a) * 4] ?? 0) >= 128;
+        const before = await census(sim, env);
+        const under = before.alive.filter(wall);
+        expect(under.length).toBeGreaterThan(40);
+        expect(under.filter(inWound).length).toBeGreaterThan(10);
+        const wounded = held ? before.alive.filter((a) => inWound(a) && !wall(a)) : [];
+        if (held) expect(wounded.length).toBeGreaterThan(10);
+        expect(sim.step % 5).not.toBe(0);
+        sim.run(1, held ? cut(cx, cy, r) : undefined);
+        const after = await census(sim, env);
+        for (const a of [...under, ...wounded])
+          expect(after.agents[a.id], `agent ${a.id}`).toEqual({ ...a, bits: a.bits & 3 });
+        expect(after.walled).toBe(0);
+        const died = before.alive.filter((a) => !((after.agents[a.id]?.bits ?? 0) & 4));
+        const unsure = held ? before.alive.filter((a) => !wall(a) && !inWound(a) && !outside(a)).length : 0;
+        expect(died.length).toBeGreaterThanOrEqual(under.length + wounded.length);
+        expect(died.length).toBeLessThanOrEqual(under.length + wounded.length + unsure);
+        expect(total(await sim.alive())).toBe(before.alive.length - died.length);
+      });
+    });
   });
 
   describe('growth and shrinkage (ADR 0025)', () => {

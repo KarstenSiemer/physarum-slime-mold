@@ -147,8 +147,9 @@ they empty. So the app keeps 18 h. And the colony does grow back into a region t
 the network around four cities is taken off, it joins them again within 7 to 13 minutes of model
 time, and where their foods are taken away for 100 minutes and come back, within 10 to 33 minutes.
 What stays closed is the ground between the tubes, where no tube is needed. The Cut tool of the app
-was no help for this test: it throws the agents of its wound to random points of the whole dish,
-also into the sea, where they grow into colonies.
+was no help for this test: it threw the agents of its wound to random points of the whole dish,
+also into the sea, where they grew into colonies. Since ADR 0039 it kills them while growth runs,
+and the same run keeps the sea empty.
 
 ## What is in this folder, and what you need to read
 
@@ -728,8 +729,8 @@ its radius and of starved ground into the code of the app, one at a time, and ru
 flow for each one (about 55 minutes; the 42 of the food sites are part 11, the 4 of the radius part
 12, the 6 of starved ground part 13). Without a
 name it also runs the 93 wrong rules of the picture of the tubes (part 10), and the 8 wrong rules of
-an agent under a painted wall (ADR 0038, `U1` to `U8`) against the tests of the agents in
-`sim.gpu.test.ts`:
+an agent under a painted wall (ADR 0038, `U1` to `U8`) and the 10 of the cut and a wall while
+growth runs (ADR 0039, `K1` to `K10`) against the tests of the agents in `sim.gpu.test.ts`:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -1356,6 +1357,14 @@ for seed in 1 2 3; do for t in 18:0.00023 6:0.0007 3:0.0014 1:0.0042; do VITE_SC
 VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=1 VITE_GROUND=1 VITE_CUT=$CUT VITE_STEPS=16000,24000,24100,24300,24600,25000,26000,27000,28000,30000,32000,36000,40000,44000,48000 VITE_NAME=g19-cut-r18-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g19-cut-r18-s1 1.5 99999 >> research/flow/out/recover-cut.txt
 ```
 
+The same run with the code of ADR 0039, in which the cut kills the agents of its wound while growth
+runs (without `VITE_GROUND`; the record is `logs/engine/cut-growth/tokyo-cut.txt` and its log
+`tokyo-cut.jsonl`, both 2026-11-15 on WebGPU):
+
+```bash
+VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=1 VITE_CUT=$CUT VITE_STEPS=16000,24000,24100,24300,24600,25000,26000,27000,28000,30000,32000,36000,40000,44000,48000 VITE_NAME=g39-cut-r18-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g39-cut-r18-s1 1.5 99999
+```
+
 ```bash
 node --import ./research/flow/register.mjs research/flow/summary.ts regrowth research/flow/logs/engine/recover/remove.txt research/flow/logs/engine/recover/remove-strands.jsonl 24001
 ```
@@ -1395,7 +1404,7 @@ half an hour of model time. The app keeps its factor.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 215 files, 3.4 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 225 files, 3.4 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1418,7 +1427,9 @@ asks for the new digest.
 | `logs/engine/*sites*`, `*-main*`                     | the runs of part 11: the campaigns, the scenes of ADR 0032, the time of a step and of the passes of the ports, the digests, the wrong rules, and the same runs of `main` on the same evening                                    | 2026-11-14, M3 Pro, `main` at `5195079`               |
 | `logs/engine/radius/`                                | the runs of part 12: the radii on fixed networks, the tests of the bounded pressure, the local flux against the exact one on the dumps, the campaigns, the GPU tests and the wrong rules of the radius                          | 2026-11-15, M3 Pro, `main` at `3f579ff`               |
 | `logs/engine/recover/`                               | the runs of part 13: the campaigns with each time until starved ground is fresh again, the regrowth and the Cut tool on WebGPU and WebGL2, and the wrong rules D1 to D6 with and without the new test                           | 2026-11-15, M3 Pro, `main` at `623fb36`, `71b0161`    |
+| `logs/engine/cut-growth/`                            | the runs of ADR 0039: the digests of every scene on the branch and on `main`, its wrong rules K1 to K10 with U1 to U8, and the Tokyo case of the Cut tool                                                                       | 2026-11-15, M3 Pro, `main` at `71b0161` and `281d69e` |
 | `logs/engine/wall-cost/`                             | the time of a step before and after the rule for an agent under a painted wall, with its flag clear and set, and of its first build (ADR 0038, check of 2026-11-15)                                                             | 2026-11-15, M3 Pro, a free GPU                        |
+| `logs/engine/cut-cost/`                              | the time of a step before and after the rule of ADR 0039, with the flag of ADR 0038 clear and set (check of 2026-11-15)                                                                                                         | 2026-11-15, M3 Pro, a free GPU                        |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
