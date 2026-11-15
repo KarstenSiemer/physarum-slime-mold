@@ -244,11 +244,15 @@ fn openCell(c: i32) -> bool { return habitable(c) && (P.cfg.w == 0u || occ[c] ==
 // birth · (D − from) / (1 − from), D the flow memory of the cell for that strain (ADR 0031: before, any tube gave
 // life to the agents of every strain). A pure function of the agent, the parameters, `env`, `occ` and the flow memory,
 // as placement() must be; with the rule the agent claims the cell like a move.
+// While the cut is held, a point in its wound is no respawn point, with and without growth (ADR 0041): the wound holds
+// no plasm, as the placement of the cut skips it (ADR 0038). The test draws no number. It reads the point that the
+// agent will hold: wrapPos() changes no point of this draw, which lies inside the grid.
 fn respawn(a: Agent, id: u32) -> Spot {
   let none = Spot(a.pos, a.heading, -1);
   if ((a.bits & ALIVE) != 0u) { return none; }
   var rng = rngSeed(id, RESPAWN);
   let p = vec2f(rand(&rng) * f32(W()), rand(&rng) * f32(H()));
+  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }
   let q = cellXY(vec2i(floor(p)));
   let c = indexOf(q);
   if (!openCell(c)) { return none; }

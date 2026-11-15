@@ -1,8 +1,9 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
-// tubes (ADR 0034), of an agent under a painted wall (ADR 0038) and of the cut and a wall while growth runs
-// (ADR 0039). The script puts one wrong rule at a time into a source file of the app, runs the GPU tests of the flow,
-// of the picture or of the agents on the backend of that file, and puts the file back. A wrong rule of the food sites
-// on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule must fail at least one test.
+// tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
+// of respawn while the cut is held (ADR 0041). The script puts one wrong rule at a time into a source file of the app,
+// runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
+// A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
+// must fail at least one test.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/mutate.ts [W1 F3 ...]
 // It changes files below src/ while it runs, and it writes each one back as it was. It stops if a file has changed
 // since the mutations were written: then the text of a mutation no longer fits. With the argument `check` it only
@@ -32,6 +33,8 @@ const SIM_SPEC = 'src/engine/sim.gpu.test.ts';
 const [UNDER_WALL_GPU, UNDER_WALL_GL] = ['webgpu .*under a painted wall', 'webgl2 .*under a painted wall'];
 /** The tests of the agent tools on each backend, with those of the cut and a wall while growth runs (ADR 0039). */
 const [TOOLS_GPU, TOOLS_GL] = ['webgpu .*agent tools', 'webgl2 .*agent tools'];
+/** The tests of respawn while the cut is held (ADR 0041), with the other tests of respawn under a tool. */
+const [RESPAWN_GPU, RESPAWN_GL] = ['webgpu .*(the cut|a tool) is held', 'webgl2 .*(the cut|a tool) is held'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -1579,6 +1582,78 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '',
     TOOLS_GL,
     SIM_SPEC,
+  ],
+  // Respawn while the cut is held (ADR 0041): a point in the wound is no respawn point, with and without growth. Against
+  // the GPU tests of the flow.
+  [
+    'N1 wgsl: respawn in the wound of a held cut on WebGPU, not on WebGL2',
+    AGENTS_WGSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    '',
+    RESPAWN_GPU,
+  ],
+  [
+    'N2 wgsl: respawn skips the disc of every tool, not only the wound of the cut',
+    AGENTS_WGSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    '  if (toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    RESPAWN_GPU,
+  ],
+  [
+    'N3 wgsl: the test reads where the dead agent lies, not the point that it draws',
+    AGENTS_WGSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    '  if (P.tool.w == 2.0 && toolDistance(a.pos, P.tool.xy) < P.tool.z) { return none; }\n',
+    RESPAWN_GPU,
+  ],
+  [
+    'N4 wgsl: respawn skips the wound only while growth runs',
+    AGENTS_WGSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    '  if (P.growth.x != 0u && P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    RESPAWN_GPU,
+  ],
+  [
+    'N5 wgsl: respawn skips the wound only without growth',
+    AGENTS_WGSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    '  if (P.growth.x == 0u && P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) { return none; }\n',
+    RESPAWN_GPU,
+  ],
+  [
+    'N6 glsl: respawn in the wound of a held cut on WebGL2, not on WebGPU',
+    TOOLS_GLSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    '',
+    RESPAWN_GL,
+  ],
+  [
+    'N7 glsl: respawn skips the disc of every tool, not only the wound of the cut',
+    TOOLS_GLSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    '  if (toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    RESPAWN_GL,
+  ],
+  [
+    'N8 glsl: the test reads where the dead agent lies, not the point that it draws',
+    TOOLS_GLSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    '  if (P.tool.w == 2.0 && toolDistance(a.xy, P.tool.xy) < P.tool.z) return none;\n',
+    RESPAWN_GL,
+  ],
+  [
+    'N9 glsl: respawn skips the wound only while growth runs',
+    TOOLS_GLSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    '  if (P.growth.x != 0u && P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    RESPAWN_GL,
+  ],
+  [
+    'N10 glsl: respawn skips the wound only without growth',
+    TOOLS_GLSL,
+    '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    '  if (P.growth.x == 0u && P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
+    RESPAWN_GL,
   ],
 ];
 
