@@ -693,6 +693,9 @@ PRESETS.push(
           // The Jones model binds the scent decay to the decay of the strain (asJones()).
           scentDecay: 0.01,
           electrodeStrength: 1,
+          // The style Agents: Fig. 11 draws the agents. The trail of this scene is a wide smooth hill, because the map
+          // spreads over 15 × 15 cells and decays slowly.
+          style: 'agents',
           bloom: 0,
         },
       ),

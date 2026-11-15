@@ -75,10 +75,10 @@ with `?backend=webgl2`.
 
 ## Keyboard
 
-Space play/pause · `.` single step · R reset · 1–7 tools · `[` `]` brush size · F fit view ·
+Space play/pause · `.` single step · R reset · 1–8 tools · `[` `]` brush size · F fit view ·
 S scent view · H hide panels · L learn
 
-Shift and two clicks paint a straight line with Food, Light, Wall or Erase. While Shift is held, each further click
+Shift and two clicks paint a straight line with Food, Light, Wall, Erase or Electrode. While Shift is held, each further click
 adds a line from the last end. Escape or letting go of Shift stops the line.
 
 ## Development

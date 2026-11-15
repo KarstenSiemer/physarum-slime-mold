@@ -102,6 +102,8 @@ Option 4. The choices are mine, under the owner's delegation.
       against 3.123 at one point, less at the others), which fits the paper's 400 steps. With 0.1, Jones' usual
       value, it has settled at step 100, and the colony moves 14 cells in 800 steps. With 0.003 it still changes by
       5 to 40 % between step 400 and 800.
+    - the style Agents. Fig. 11 draws the agents, and the trail of this scene is one wide smooth hill, because the
+      map spreads over 15 × 15 cells and decays slowly: in the other styles the line of agents does not show.
 11. **The figure link** (ADR 0037): Fig. 11, page 11 of `https://arxiv.org/pdf/1204.1752`. arXiv gives no licence to
     show it, so the app links it.
 
@@ -153,11 +155,19 @@ between a source and a sink; the source factor of the extended model; covered fo
 strain in both models; the line; the poles in the picture in three styles. Unit tests: the parameters, the link of
 version 4, the settings of a link, the scene, the tool, the food sites.
 
-**Wrong rules** `EL1` to `EL21` of `research/flow/engine/mutate.ts`: MUTATIONS.
+**Wrong rules** `EL1` to `EL21` of `research/flow/engine/mutate.ts` (every pole as a cathode; the poles in the wrong
+lanes; no source; the anode with the cathode's byte; a cathode that clears its cell; the line as high as the grid is
+wide, and at one agent per cell; the anode in the cathode's colour; the strength of the food; no source factor; the
+poles never drawn; a pole that does not mark the scent as fed; in WGSL and in GLSL where the rule is in both): each
+fails tests, 3 to 38 of them.
 
-**Every other scene keeps its bytes**: DIGESTS.
+**Every other scene keeps its bytes.** The digests of the default settings and of the 22 scenes of `main` after 500
+steps (`research/flow/engine/digest.gpu.test.ts`) on both backends: 46 of 46 runs equal to those of `main` at
+`6d8d23a`, made on the same machine in the same hour. The source of a pole is a branch of its own in `sources()`, so
+the sum for a cell without a pole is the code of before.
 
-**Checks**: CHECKS.
+**Checks**: `npm run lint`, `npm run check`, `npm test`, `npm run test:gpu`, `npm run build` and the e2e tests pass on
+the code of the pull request; its description has the counts.
 
 ## Consequences
 

@@ -215,6 +215,88 @@ test('the food tool paints food into the environment', async ({ page }) => {
   expect(foodCells).toBeGreaterThan(50);
 });
 
+// ADR 0047: the Electrode tool paints the pole that the toolbar selects into a byte of its own, in both models, and the
+// page address holds the strokes and the strength.
+test('the Electrode tool paints a cathode and an anode, and the link holds them', async ({ page }) => {
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await page.keyboard.press('8');
+  await expect(page.getByRole('radio', { name: 'Electrode' })).toHaveAttribute('aria-checked', 'true');
+  const cathode = page.getByRole('radio', { name: 'Cathode −' });
+  const anode = page.getByRole('radio', { name: 'Anode +' });
+  await expect(cathode).toHaveAttribute('aria-checked', 'true');
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  const drag = async (y: number) => {
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * y, { steps: 5 });
+    await page.mouse.up();
+  };
+  await drag(0.4);
+  await anode.click();
+  await expect(anode).toHaveAttribute('aria-checked', 'true');
+  await drag(0.6);
+  const cells = await page.evaluate(async () => {
+    const env = await globalThis.physarum?.sim.readEnv();
+    if (!env) throw new Error('no engine');
+    const n = { cathode: 0, anode: 0, other: 0, food: 0 };
+    for (let i = 0; i < env.length; i += 4) {
+      const pole = env[i + 3] ?? 0;
+      if (pole === 255) n.cathode++;
+      else if (pole === 128) n.anode++;
+      else if (pole !== 0) n.other++;
+      if ((env[i + 1] ?? 0) > 0) n.food++;
+    }
+    return n;
+  });
+  expect(cells.cathode).toBeGreaterThan(50);
+  expect(cells.anode).toBeGreaterThan(50);
+  expect([cells.other, cells.food]).toEqual([0, 0]);
+  expect(await page.evaluate(() => globalThis.physarum?.sim.hasElectrodes)).toBe(true);
+  const kinds = async () => {
+    await expect
+      .poll(
+        async () => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.drawing?.strokes.length ?? 0,
+      )
+      .toBeGreaterThan(1);
+    const link = await decodeLink(await page.evaluate(() => location.hash.slice(1)));
+    return [...new Set(link?.drawing?.strokes.map((e) => e.kind))].sort();
+  };
+  expect(await kinds()).toEqual(['anode', 'cathode']);
+  // The strength is a setting of both models, and the link holds it once it is not 1.
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await expect(page.getByLabel('Electrode strength', { exact: true })).toBeVisible();
+  const strength = page.getByLabel('Electrode strength value');
+  await strength.fill('0.5');
+  await strength.press('Enter');
+  await expect
+    .poll(async () => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.settings.electrodeStrength)
+    .toBe(0.5);
+  // The link opens with the poles: the scent of the cathode and the repellent of the anode build up.
+  await page.goto('about:blank');
+  await page.goBack();
+  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 120_000 });
+  const scent = await page.evaluate(async () => {
+    const sim = globalThis.physarum?.sim;
+    if (!sim) throw new Error('no engine');
+    const [s, env] = [await sim.readScent(), await sim.readEnv()];
+    let [attract, repel, poles] = [0, 0, 0];
+    for (let c = 0; c < s.length / 2; c++) {
+      attract = Math.max(attract, s[c * 2] ?? 0);
+      repel = Math.max(repel, s[c * 2 + 1] ?? 0);
+      if ((env[c * 4 + 3] ?? 0) > 0) poles++;
+    }
+    return { attract, repel, poles };
+  });
+  expect(scent.poles).toBe(cells.cathode + cells.anode);
+  expect(scent.attract).toBeGreaterThan(10);
+  expect(scent.repel).toBeGreaterThan(10);
+  // Clear takes the poles away.
+  await page.locator('summary', { hasText: 'Environment' }).click();
+  await page.getByRole('button', { name: 'Clear food, light, walls and electrodes' }).click();
+  expect(await page.evaluate(() => globalThis.physarum?.sim.hasElectrodes)).toBe(false);
+});
+
 // Every new grid paints all recorded strokes again (ADR 0019): a slow drag must not record one per pointer event.
 test('a slow drag records a segment only once the pointer moved half a brush radius', async ({ page }) => {
   // Paused, a frame only draws: on SwiftShader in CI a pointer move can wait for a frame.
@@ -292,7 +374,7 @@ const near = (a: number[] | undefined, b: number[]) => {
 };
 
 // ADR 0035: with Shift, a click sets the start and the next click paints the line from it as one stroke.
-for (const tool of ['Food', 'Light', 'Wall', 'Erase'] as const)
+for (const tool of ['Food', 'Light', 'Wall', 'Erase', 'Electrode'] as const)
   test(`Shift and two clicks paint a straight line with ${tool} as one stroke`, async ({ page }) => {
     // Paused, a frame only draws: on SwiftShader in CI a pointer move can wait for a frame.
     await page.getByRole('button', { name: 'Pause' }).click();
@@ -321,7 +403,8 @@ for (const tool of ['Food', 'Light', 'Wall', 'Erase'] as const)
     await expect(page.locator('.line-preview')).toHaveCount(0);
     const list = await strokes();
     expect(list).toHaveLength(1);
-    expect(list[0]?.kind).toBe(tool.toLowerCase());
+    // The Electrode tool paints its pole: the cathode, until the toolbar selects the anode (ADR 0047).
+    expect(list[0]?.kind).toBe(tool === 'Electrode' ? 'cathode' : tool.toLowerCase());
     near(list[0]?.from, await gridAt(page, a));
     near(list[0]?.to, await gridAt(page, b));
     // The sweep deletes an erase that clears nothing (Engine.paint()): only the others stay in the edit list.

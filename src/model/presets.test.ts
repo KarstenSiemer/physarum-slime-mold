@@ -158,6 +158,8 @@ describe('presets', () => {
       'line',
     ]);
     expect([s.meanWindow, s.electrodeStrength, s.growth, s.shrink]).toEqual([15, 1, false, 0]);
+    // The picture shows the agents, as Fig. 11 does: the trail of this scene is one wide hill.
+    expect(s.style).toBe('agents');
     expect([a?.sensorAngle, a?.rotationAngle, a?.sensorOffset, a?.deposit, a?.stepSize]).toEqual([22.5, 45, 5, 5, 1]);
     expect([a?.decay, s.scentDecay]).toEqual([0.01, 0.01]);
     // 1,500 agents (p. 11), on the lattice of the scene.
