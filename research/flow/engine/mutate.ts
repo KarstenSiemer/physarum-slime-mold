@@ -193,6 +193,37 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'return [FLOW.trailLow * deposit, FLOW.trailFull * deposit];',
     GL,
   ],
+  // The radius of the momentum (ADR 0029, decision 18): the larger radii that the measurements of 2026-11-15 rejected.
+  [
+    'M1 block: the momentum tuned for the radius 0.999999 (the unit test of the growing mesh)',
+    'src/engine/flow.ts',
+    '  radius: 0.99999,',
+    '  radius: 0.999999,',
+    'stays bounded',
+    'src/engine/flow.test.ts',
+  ],
+  [
+    'M2 block: the momentum tuned for the radius 0.999998 (the unit test of the growing mesh)',
+    'src/engine/flow.ts',
+    '  radius: 0.99999,',
+    '  radius: 0.999998,',
+    'stays bounded',
+    'src/engine/flow.test.ts',
+  ],
+  [
+    'M3 block: the momentum tuned for the radius 0.999997 (the WebGPU tests)',
+    'src/engine/flow.ts',
+    '  radius: 0.99999,',
+    '  radius: 0.999997,',
+    GPU,
+  ],
+  [
+    'M4 block: the momentum tuned for the radius 0.999997 (the WebGL2 tests)',
+    'src/engine/flow.ts',
+    '  radius: 0.99999,',
+    '  radius: 0.999997,',
+    GL,
+  ],
   [
     'F1 glsl: the momentum on every cell',
     FRAG,
@@ -1331,6 +1362,30 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
       '    this.tilesMade = true;\n',
     GL,
     TUBES_SPEC,
+  ],
+  [
+    'V91 webgl2: the map of the tiles not counted in the memory of WebGL2',
+    'src/engine/gl/backend.ts',
+    'readonly tubeMapBytesPerCell = TUBE_MAP_BYTES_PER_CELL_GL;',
+    'readonly tubeMapBytesPerCell = 0;',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V92 webgpu: WebGPU counts a map of the tiles that it does not hold',
+    'src/engine/webgpu.ts',
+    'readonly tubeMapBytesPerCell = 0;',
+    'readonly tubeMapBytesPerCell = 0.5625;',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V93 engine: the fit of the grid without the map of the tiles of the backend',
+    'src/engine/engine.ts',
+    'tubesBytesPerCell(s, tubeMapBytesPerCell) +',
+    'tubesBytesPerCell(s) +',
+    'counts the memory of the picture',
+    'src/engine/engine.test.ts',
   ],
   // An agent under a painted wall (ADR 0038), against the tests of the agents in sim.gpu.test.ts.
   [

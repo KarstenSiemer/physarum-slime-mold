@@ -112,17 +112,24 @@ export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>
 /**
  * More bytes per cell for the picture of the tubes (tubes.ts, ADR 0034): per cell and strain the factor of the radius
  * of its tube, the picture, and per cell the stream of the plasm, 16 B per cell each (sim.ts TubeState, gl/sim.ts
- * `tubes`); on WebGL2 also the map of the tiles of the picture, 4 B per tile of TUBE_TILE × TUBE_TILE cells, and its
- * rows, 4 B per TUBE_TILE cells of a row. WebGPU holds what it needs of them in the memory of a workgroup. Both
- * backends count them.
+ * `tubes`). Both backends hold the same.
  */
-export const TUBES_BYTES_PER_CELL = 48 + 4 / TUBE_TILE + 4 / TUBE_TILE ** 2;
+export const TUBES_BYTES_PER_CELL = 48;
+
+/**
+ * More bytes per cell for the picture of the tubes on WebGL2 (Backend.tubeMapBytesPerCell): the map of the tiles of the
+ * picture, 4 B per tile of TUBE_TILE × TUBE_TILE cells, and its rows, 4 B per TUBE_TILE cells of a row (gl/sim.ts
+ * `tubes`; ADR 0034, amendment of 2026-11-15). WebGPU holds what it needs of them in the memory of a workgroup.
+ */
+export const TUBE_MAP_BYTES_PER_CELL_GL = 4 / TUBE_TILE + 4 / TUBE_TILE ** 2;
 
 /**
  * The bytes per cell of the picture of the tubes: counted while the flow is on, with the picture or without it. The
- * switch of the picture changes only the view, so it must not change the grid that fits the memory.
+ * switch of the picture changes only the view, so it must not change the grid that fits the memory. `map`: the bytes
+ * per cell of the map of the tiles of the backend (Backend.tubeMapBytesPerCell).
  */
-export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>) => (flowOn(s) ? TUBES_BYTES_PER_CELL : 0);
+export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>, map = 0) =>
+  flowOn(s) ? TUBES_BYTES_PER_CELL + map : 0;
 
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>

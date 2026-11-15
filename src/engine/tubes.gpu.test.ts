@@ -5,6 +5,7 @@ import { defaultSettings, defaultStrain, type Boundary, type Settings } from '..
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
 import { flowSites, type FoodStroke } from './sites';
+import { TUBE_MAP_BYTES_PER_CELL_GL } from './sizing';
 import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES } from './tubes';
 import { arenaCell, tubePicture, tubeRoots, tubeStream, wallOnLine, type TubeGrid } from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
@@ -294,6 +295,12 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       if (boundary === 'wrap') expect(cases.across, 'discs across the edge into a tile without one').toBeGreaterThan(5);
     },
   );
+
+  it('counts the memory of a map of the tiles only on the backend that holds one', () => {
+    // WebGL2 holds the map of the tiles and its rows in targets (gl/sim.ts `tubes`); WebGPU holds the window of a tile
+    // in the memory of a workgroup.
+    expect(backend.tubeMapBytesPerCell).toBe(kind === 'webgl2' ? TUBE_MAP_BYTES_PER_CELL_GL : 0);
+  });
 
   it('draws a tube as wide and as bright as the fourth root of its strength says', async () => {
     const [w, h] = [48, 40];

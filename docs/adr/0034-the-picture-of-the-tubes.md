@@ -546,8 +546,12 @@ Under the owner's delegation of 2026-11-12, by the coordinator's choice of 2026-
      pressure too, 71 MB more. At the 150 GB/s of the M3 Pro that alone takes 0.6 and 1.1 ms with what they write,
      a third to a half of their time, and a workgroup memory does not make it less.
    - A picture every few frames: not needed.
-6. **The memory**: on WebGL2 the map of the tiles needs 4 B per 64 cells and its rows 4 B per 8 cells, and the fit of
-   the grid counts them on both backends: `TUBES_BYTES_PER_CELL` is 48.5625 (`sizing.ts`).
+6. **The memory**: on WebGL2 the map of the tiles needs 4 B per 64 cells and its rows 4 B per 8 cells, 0.5625 B per
+   cell. The WebGL2 backend counts them while the flow is on (`Backend.tubeMapBytesPerCell`,
+   `TUBE_MAP_BYTES_PER_CELL_GL` in `sizing.ts`); WebGPU and the CPU backend of the tests count none, as WebGPU holds
+   the window of a tile in the memory of a workgroup. `TUBES_BYTES_PER_CELL` stays 48, the three textures of both
+   backends. The first version counted the 0.5625 B on every backend; the review of 2026-11-15 asked for the count of
+   what each backend holds, as `coveredBytesPerCell` counts the target of covered food only where it is made.
 
 ### Results
 
@@ -555,9 +559,9 @@ All numbers on the M3 Pro. The old build is `main` at `1cd1c56`, the new build t
 four runs of other sessions used the GPU at the same time, and they slowed both builds by up to two times; the load
 average beside a run shows only a part of that. So the old build and the new one ran in turns, and the ratio of the two
 in one page (`picture-ab.gpu.test.ts`) is the number that holds best. `logs/view/cost-2026-11-15.txt` has every run.
-The runs came before `main` went into this branch with three pull requests (#71, #73, #74: the food sites of ADR
-0029, the reach of the scent of ADR 0036, an agent under a painted wall of ADR 0038); none of them changes the passes
-of the picture, and the tests and the wrong rules below ran again after it.
+The runs came before `main` went into this branch with four pull requests (#71, #73, #74, #75: the food sites and the
+radius of the solver of ADR 0029, the reach of the scent of ADR 0036, an agent under a painted wall of ADR 0038); none
+of them changes the passes of the picture, and the tests and the wrong rules below ran again after them.
 
 **The same picture.** The picture, the factors and the stream of the new build equal those of the old build in every
 value, on both backends: 0 of 5,898,240 values of a field differ in the start scene, and 0 of 1,048,576 on the Tokyo
@@ -624,19 +628,22 @@ a frame here; the passes alone in one page above are the better measure of what 
   into a tile without a disc of its own, 32 discs stop at a wall of another tile, 6 to 16 tiles have no disc in their
   window, and on the periodic grid 56 discs reach a cell across the edge into a tile whose window holds no disc
   inside the grid.
-- `research/flow/engine/mutate.ts` has 17 more wrong rules (V74 to V90), and ten wrong rules got the text of the new
-  code (V13, V15, V18, V27, V31 to V35, V37). Each of the 90 wrong rules of the picture fails at least one test
+- `research/flow/engine/mutate.ts` has 20 more wrong rules (V74 to V93), and ten wrong rules got the text of the new
+  code (V13, V15, V18, V27, V31 to V35, V37). Each of the 93 wrong rules of the picture fails at least one test
   (`logs/view/mutations.txt`). The new ones on WebGPU: a tile that has a disc only if one of its own cells holds one,
   or a cell of a wall only if one of its own cells is one; a window that is not wrapped but held inside the grid; a
   window from the corner of the tile, not 3 cells before it; and no trail of the discs in the window. On WebGL2: the
   same for the rows of the map (PASS 3, along a row) and for the map (PASS 4, along a column); a cell that reads the
   map at the tile beside its own; a map and rows without the last tile of a row and of a column that is not whole;
-  rows only as many as the rows of tiles; and rows or a map that are not made again for a new state. Only the test
-  above catches the map without its last tiles, and the map that is not wrapped from row to row.
+  rows only as many as the rows of tiles; and rows or a map that are not made again for a new state. For the memory:
+  WebGL2 that counts no map, WebGPU that counts one, and a fit of the grid without the map of the backend. Only the
+  test above catches the map without its last tiles, and the map that is not wrapped from row to row.
 - The test on WebGL2 in which a target of the picture cannot be made, and the simulation must free the targets made
   before it, now also lets the fourth and the fifth target fail: the rows of the map and the map.
-- `src/engine/engine-env.test.ts`: a test of the fit of the grid gives the backend 1 B per cell less (1,319 in place
-  of 1,320), so that with the 0.5625 B of the map one strain with the flow still fits 768 × 480 cells and two do not.
+- The memory (decision 6): `sizing.test.ts` holds the 48 B of both backends and the 0.5625 B of WebGL2;
+  `engine.test.ts` fits a lattice with a backend whose map takes 0 and 64 B per cell, so that a lattice that fits
+  without the map does not fit with it, and fits again without the flow; and `tubes.gpu.test.ts` checks that WebGL2
+  counts its map and WebGPU none.
 - A test cannot see a skip: a picture is the same with it and without it. The time shows it (the tables above).
 
 ### Consequences
@@ -649,7 +656,8 @@ a frame here; the passes alone in one page above are the better measure of what 
 - Most of what is left on WebGPU is `roots` and `stream`, which read the memory of the flow of each strain. So the
   cost still grows with the cells and the strains. One pass for both would read that memory once; it is not built
   and not measured.
-- On WebGL2 the picture has two passes more and two textures more, 0.5625 B per cell, which the fit of the grid counts.
+- On WebGL2 the picture has two passes more and two textures more, 0.5625 B per cell, which the fit of the grid counts
+  there.
 - A tighter window and a picture only every few frames are not built; neither is needed now.
 - A scene with walls in most tiles keeps the wall test, as before: the skip of the wall test helps only where a tile
   and its window hold no wall. The measured scenes are the start scene, which has no wall, and the Tokyo rail network,

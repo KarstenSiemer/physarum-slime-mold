@@ -325,22 +325,28 @@ describe('the picture of the tubes', () => {
     expect(engine.sim.step).toBe(6);
   });
 
-  it('counts the memory of the picture with the flow, whatever the switch says', async () => {
-    const backend = new CpuBackend();
-    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
-    const base: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true, density: 0.001 };
-    const engine = await Engine.create(canvas, base, undefined, backend);
-    const perCell = backend.bytesPerCell + FLOW_BYTES_PER_CELL + SITE_BYTES_PER_CELL + TUBES_BYTES_PER_CELL;
-    // The largest square lattice that would fit with 16 B less per cell, and the largest that fits with 16 B more.
-    const [tooLarge, small] = [-16, 16].map((more) => Math.floor(Math.sqrt(memoryBudget() / (perCell + more))));
-    for (const showTubes of [true, false]) {
-      const fit = (side = 0) => engine.fit({ ...base, showTubes, lattice: [side, side] }).lattice;
-      expect(fit(tooLarge), `the picture ${showTubes ? 'on' : 'off'}`).toBeNull();
-      expect(fit(small), `the picture ${showTubes ? 'on' : 'off'}`).toEqual([small, small]);
-    }
-    // Without the flow the same lattice fits: the picture has no textures then.
-    expect(engine.fit({ ...base, flow: false, lattice: [tooLarge ?? 0, tooLarge ?? 0] }).lattice).not.toBeNull();
-  });
+  // The map of the tiles of the picture is counted on the backend that holds one (ADR 0034, amendment of 2026-11-15):
+  // 0.5625 B per cell on WebGL2, and here a backend with 64 B, so that a lattice that fits without them does not.
+  it.each([0, 64])(
+    'counts the memory of the picture with the flow, whatever the switch says, with a map of %i B per cell',
+    async (map) => {
+      const backend = new CpuBackend();
+      backend.tubeMapBytesPerCell = map;
+      const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+      const base: Settings = { ...defaultSettings(), resolution: 256, model: 'extended', flow: true, density: 0.001 };
+      const engine = await Engine.create(canvas, base, undefined, backend);
+      const perCell = backend.bytesPerCell + FLOW_BYTES_PER_CELL + SITE_BYTES_PER_CELL + TUBES_BYTES_PER_CELL + map;
+      // The largest square lattice that would fit with 16 B less per cell, and the largest that fits with 16 B more.
+      const [tooLarge, small] = [-16, 16].map((more) => Math.floor(Math.sqrt(memoryBudget() / (perCell + more))));
+      for (const showTubes of [true, false]) {
+        const fit = (side = 0) => engine.fit({ ...base, showTubes, lattice: [side, side] }).lattice;
+        expect(fit(tooLarge), `the picture ${showTubes ? 'on' : 'off'}`).toBeNull();
+        expect(fit(small), `the picture ${showTubes ? 'on' : 'off'}`).toEqual([small, small]);
+      }
+      // Without the flow the same lattice fits: the picture has no textures then.
+      expect(engine.fit({ ...base, flow: false, lattice: [tooLarge ?? 0, tooLarge ?? 0] }).lattice).not.toBeNull();
+    },
+  );
 });
 
 // ADR 0026: beside a closed lattice nothing may happen. A tool there reaches no cell of the arena, so it is idle, and a

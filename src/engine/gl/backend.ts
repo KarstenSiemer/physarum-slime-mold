@@ -10,6 +10,7 @@ import {
   BYTES_PER_CELL_HALF_FLOAT,
   COVERED_BYTES_PER_CELL_HALF_FLOAT,
   equilibrium,
+  TUBE_MAP_BYTES_PER_CELL_GL,
 } from '../sizing';
 import type { Backend, Levels, View } from '../types';
 import {
@@ -42,6 +43,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly bytesPerCell: number;
   readonly bytesPerAgent = BYTES_PER_AGENT_GL;
   readonly coveredBytesPerCell: number;
+  /** The map of the tiles of the picture of the tubes and its rows (gl/sim.ts `tubes`), while the flow is on. */
+  readonly tubeMapBytesPerCell = TUBE_MAP_BYTES_PER_CELL_GL;
   private readonly prog: Programs;
   /** For tests: the render programs of another version of render.frag that draw every frame (renderFrom()). */
   private fixed: [Program, Program] | undefined;

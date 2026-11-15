@@ -220,10 +220,9 @@ describe('food, light and walls on a new simulation', () => {
 
   // ADR 0031: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
   it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
-    // 1319 B per cell and 84 for the flow of one strain fit 768 × 480; with 164 for two strains, only 512 × 320 fits.
-    // The picture of the tubes counts 48.5625 B per cell with the flow (sizing.ts TUBES_BYTES_PER_CELL).
+    // 1320 B per cell and 80 for the flow of one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
     const backend = new CpuBackend();
-    backend.bytesPerCell = 1319;
+    backend.bytesPerCell = 1320;
     const one = { ...maze.settings(), resolution: 768 };
     expect(one.flow).toBe(true);
     const { engine, sim } = await engineWith(one, mazeEnv, canvas(), backend);
