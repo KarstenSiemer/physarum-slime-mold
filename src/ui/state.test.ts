@@ -649,7 +649,8 @@ describe('growth and shrinkage (ADR 0025)', () => {
 
   it('a link from before them opens every scene unchanged', async () => {
     const gone = (k: string) => /^(growth|shrink[A-Z])/.test(k) || k === 'capacity';
-    for (const p of PRESETS) {
+    // The Coarsening network came after them (ADR 0045): no link to it is older, and without them it is another scene.
+    for (const p of PRESETS.filter((x) => x.id !== 'coarsening')) {
       const { app, openLink, sceneChanged } = await fresh();
       const old = Object.fromEntries(Object.entries(p.settings()).filter(([k]) => !gone(k)));
       const drawing = {

@@ -2,6 +2,7 @@
 
 - Status: accepted (2026-11-14), built
 - Date: 2026-11-14
+- Extended by ADR 0045 (2026-11-15): the scene Coarsening network.
 
 ## Context
 

@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-11
+- Extended by ADR 0045 (2026-11-15): the scene Coarsening network.
 
 ## Context
 
