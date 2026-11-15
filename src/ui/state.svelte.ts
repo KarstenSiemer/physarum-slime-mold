@@ -7,6 +7,7 @@ import {
   defaultSettings,
   globalSpec,
   MAX_STRAINS,
+  MEAN_WINDOW,
   RESOLUTIONS,
   sameLattice,
   strainLike,
@@ -376,6 +377,12 @@ export function setModel(model: Model) {
   if (model === s.model) return;
   if (model === 'extended') {
     app.settings.model = 'extended';
+    // Only the Jones model has a mean window above 3 × 3 (ADR 0046): constrain() sets it back, and a notice says so.
+    if (s.meanWindow !== MEAN_WINDOW) {
+      app.settings.meanWindow = MEAN_WINDOW;
+      const side = String(s.meanWindow);
+      showNotice(`The extended model has only the 3 × 3 mean. It changed Mean window from ${side} to 3.`);
+    }
     return;
   }
   if (!app.canCollide) {

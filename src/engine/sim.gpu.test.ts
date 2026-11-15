@@ -19,6 +19,7 @@ import {
 import { presetById } from '../model/presets';
 import { at } from './at';
 import { dishRadius, outlineBox, paintBox, paintsCell, paintSegments, type Rect } from './brush';
+import { CellKind, meanGrid, meanStep } from './diffuse-reference';
 import { WebGl2Backend } from './gl/backend';
 import { destroyTarget, program, readTarget, target, textures, uniformBlock, writeTarget } from './gl/gl';
 import agentsFrag from './gl/glsl/agents.frag?raw';
@@ -1276,6 +1277,242 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(await run(true)).toEqual(await run(false));
       },
     );
+  });
+
+  // ADR 0046: the Jones model takes the mean of its one map over a window of 3 to 15 cells a side, as Jones' later
+  // papers do (5 × 5 as a rule; 15 × 15 in Tsuda, Jones et al. 2011). The window has the rules of the 3 × 3 mean
+  // (ADR 0027): a cell outside a closed arena counts 0 and holds 0, a wall of the Jones model is a site of the lattice,
+  // and the divisor is the number of cells of the window. The CPU reference (diffuse-reference.ts) sums the window
+  // as the papers state it; the passes sum its rows and then its columns.
+  describe('the mean window (ADR 0046)', () => {
+    const WINDOWS = [3, 5, 15] as const;
+    const relError = (gpu: Float32Array, cpu: Float64Array) => {
+      const scale = Math.max(...Array.from(cpu, Math.abs), 1e-30);
+      return Math.max(...Array.from(cpu, (v, i) => Math.abs((gpu[i] ?? 0) - v))) / scale;
+    };
+    const laneOf = (data: Float32Array, stride: number, l: number) =>
+      Float32Array.from({ length: data.length / stride }, (_, c) => data[c * stride + l] ?? 0);
+    const jones = (patch: Partial<Settings>): Settings => ({
+      ...defaultSettings(),
+      model: 'jones',
+      collisions: true,
+      foodStrength: 0.05,
+      strains: [defaultStrain(0)],
+      ...patch,
+    });
+    /** Runs `body` and expects no validation error of the device: a pipeline of the window is built at its first use. */
+    async function valid<T>(body: () => Promise<T>): Promise<T> {
+      if (kind !== 'webgpu') return body();
+      const { device } = (backend as WebGpuBackend).gpu;
+      device.pushErrorScope('validation');
+      const out = await body();
+      expect((await device.popErrorScope())?.message).toBeUndefined();
+      return out;
+    }
+    const state = async (sim: Sim) => ({
+      agents: await sim.readAgents(),
+      trail: Array.from(await sim.readTrail()),
+      scent: Array.from(await sim.readScent()),
+    });
+    const bits = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+    /** Food along and across the edges and beside the walls, and walls across the middle and at the bottom edge. */
+    const SCENE: Stroke[] = [
+      { kind: 'food', from: [1, 4], to: [1, 36], radius: 2.5 },
+      { kind: 'food', from: [46, 30], to: [50, 33], radius: 3 },
+      { kind: 'food', from: [20, 10], to: [20, 10], radius: 3 },
+      { kind: 'light', from: [30, 1], to: [40, 2], radius: 3 },
+      { kind: 'wall', from: [24, 5], to: [24, 30], radius: 1 },
+      { kind: 'wall', from: [10, 39], to: [16, 39], radius: 1.5 },
+    ];
+
+    // A random trail, food and walls, 6 steps without agents against the float64 reference, for the windows 3, 5 and
+    // 15 in every arena and each order of a step. The reference of another window is far off.
+    it.each(
+      WINDOWS.flatMap((window) =>
+        BOUNDARIES.flatMap((boundary) => STEP_ORDERS.map((stepOrder) => [window, boundary, stepOrder] as const)),
+      ),
+    )(
+      'takes the mean of trail and scent over the window as the CPU reference does (%i cells, %s, %s)',
+      async (window, boundary, stepOrder) => {
+        const [w, h] = [48, 40];
+        const settings = jones({ layout: 'empty', boundary, stepOrder, meanWindow: window, lightStrength: 0.2 });
+        const steps = 6;
+        const [gpuTrail, gpuScent, env, trail] = await valid(async () => {
+          const sim = await make(settings, w, h, 1);
+          sim.paint(SCENE);
+          let r = 5;
+          const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+          const start = Float32Array.from({ length: w * h * 4 }, () => Math.fround(100 * rnd()));
+          sim.writeTrail(start);
+          sim.run(steps);
+          return [await sim.readTrail(), await sim.readScent(), await sim.readEnv(), start] as const;
+        });
+        const g = meanGrid(env, w, h, boundary, true);
+        const food = (c: number) => ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05;
+        const none = () => 0;
+        const run = (lane: Float64Array, source: (c: number) => number, side: number, grid = g) => {
+          let v = lane;
+          for (let k = 0; k < steps; k++) v = meanStep(v, grid, side, 0.9, source, stepOrder);
+          return v;
+        };
+        const lane0 = Float64Array.from({ length: w * h }, (_, c) => trail[c * 4] ?? 0);
+        const zero = new Float64Array(w * h);
+        const [gpuLane, gpuFood] = [laneOf(gpuTrail, 4, 0), laneOf(gpuScent, 2, 0)];
+        expect(relError(gpuLane, run(lane0, none, window)), 'trail').toBeLessThan(1e-5);
+        expect(relError(gpuFood, run(zero, food, window)), 'food').toBeLessThan(1e-5);
+        // The Jones model has no light.
+        expect(Math.max(...laneOf(gpuScent, 2, 1))).toBe(0);
+        for (const other of WINDOWS.filter((o) => o !== window)) {
+          expect(relError(gpuLane, run(lane0, none, other)), `trail, ${other}`).toBeGreaterThan(1e-3);
+          expect(relError(gpuFood, run(zero, food, other)), `food, ${other}`).toBeGreaterThan(1e-3);
+        }
+        // Walls as sinks, the rule of the extended model, are far off: the window of the Jones model reads its walls.
+        expect(relError(gpuLane, run(lane0, none, window, meanGrid(env, w, h, boundary, false)))).toBeGreaterThan(1e-3);
+        // A wall holds trail, and a cell outside the dish holds none.
+        const kinds = Array.from(g.kinds);
+        const held = (kindOf: number) =>
+          kinds.reduce((sum, k, c) => sum + (k === kindOf ? (gpuTrail[c * 4] ?? 0) : 0), 0);
+        expect(held(CellKind.wall)).toBeGreaterThan(0);
+        expect(held(CellKind.sink)).toBe(0);
+        expect(kinds.includes(CellKind.sink)).toBe(boundary === 'dish');
+      },
+      120_000,
+    );
+
+    // The sources of a step enter the mean over the window as they enter the 3 × 3 mean: after the decay moving first,
+    // before the mean sensing first, and food with the covered-food factor where an agent covers it.
+    it.each(WINDOWS.slice(1).flatMap((window) => STEP_ORDERS.map((stepOrder) => [window, stepOrder] as const)))(
+      'adds the deposits and the covered food of a step to the mean over the window (%i cells, %s)',
+      async (window, stepOrder) => {
+        const [w, h] = [64, 48];
+        const settings = jones({
+          seed: 5,
+          density: 0.08,
+          stepOrder,
+          meanWindow: window,
+          coveredFood: true,
+          coveredFoodFactor: 0.001,
+        });
+        const [before, after, env, counts, agents] = await valid(async () => {
+          const sim = await make(settings, w, h, Math.round(0.08 * w * h));
+          sim.paint([
+            { kind: 'food', from: [6, 6], to: [58, 40], radius: 3 },
+            { kind: 'food', from: [0.5, 4], to: [0.5, 44], radius: 2.5 }, // across the x seam
+          ]);
+          sim.reset();
+          sim.run(20);
+          const start = { trail: await sim.readTrail(), scent: await sim.readScent() };
+          sim.run(1);
+          const end = { trail: await sim.readTrail(), scent: await sim.readScent() };
+          return [start, end, await sim.readEnv(), await sim.readCounts(), await sim.readAgents()] as const;
+        });
+        const g = meanGrid(env, w, h, 'wrap', true);
+        const alive = new Uint8Array(w * h);
+        for (const a of agents) if ((a.bits & 4) !== 0) alive[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
+        const coveredAt = (c: number) => {
+          const [x, y] = [c % w, Math.floor(c / w)];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) if (alive[((y + dy + h) % h) * w + ((x + dx + w) % w)] === 1) return true;
+          return false;
+        };
+        const food = (factor: number) => (c: number) =>
+          ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 * (coveredAt(c) ? factor : 1);
+        const deposit = (c: number) => (counts[c * 4] ?? 0) * 5;
+        const lane = (data: Float32Array, stride: number) => Float64Array.from(laneOf(data, stride, 0));
+        const step = (map: Float64Array, source: (c: number) => number) =>
+          meanStep(map, g, window, 0.9, source, stepOrder);
+        const [trail, scent] = [laneOf(after.trail, 4, 0), laneOf(after.scent, 2, 0)];
+        expect(relError(trail, step(lane(before.trail, 4), deposit)), 'trail').toBeLessThan(1e-5);
+        expect(relError(scent, step(lane(before.scent, 2), food(0.001))), 'scent').toBeLessThan(1e-4);
+        // Agents moved and cover some food: the references without the deposits and without covered food are far off.
+        expect(counts.reduce((n, c) => n + c, 0)).toBeGreaterThan(100);
+        expect(
+          relError(
+            trail,
+            step(lane(before.trail, 4), () => 0),
+          ),
+        ).toBeGreaterThan(1e-3);
+        expect(relError(scent, step(lane(before.scent, 2), food(1)))).toBeGreaterThan(1e-3);
+      },
+      120_000,
+    );
+
+    // The extended model always runs the 3 × 3 mean (meanWindowOf()): a window that reached its settings past
+    // constrain() changes nothing, with one pass and with two. In the Jones model the window changes the run.
+    it('runs the 3 × 3 mean in the extended model whatever the window says', async () => {
+      const [w, h] = [48, 40];
+      const run = async (patch: Partial<Settings>) => {
+        const settings = { ...jones({ seed: 3, density: 0.2, boundary: 'box' }), ...patch };
+        const sim = await make(settings, w, h, Math.round(0.2 * w * h));
+        sim.paint(SCENE);
+        sim.reset();
+        sim.run(12);
+        return state(sim);
+      };
+      for (const diffusion of [1, 2]) {
+        const three = await run({ model: 'extended', diffusion });
+        expect(await run({ model: 'extended', diffusion, meanWindow: 5 }), `${diffusion}`).toEqual(three);
+      }
+      expect(await valid(() => run({ meanWindow: 5 }))).not.toEqual(await run({}));
+    }, 120_000);
+
+    // ADR 0027: moving first the view draws the map after the step's diffusion. With a window above 3 × 3 the view runs
+    // the two dispatches of the window into the free pair and the third pair: without agents it is the trail after the
+    // next step, bit for bit, and the scent after the next step without the source of the food. The map that the agents
+    // sense stays as it is.
+    it.each(WINDOWS.slice(1))(
+      "draws the trail and scent after the step's mean over the window, moving first (%i cells)",
+      async (window) => {
+        const [w, h] = [48, 40];
+        const settings = jones({ layout: 'empty', boundary: 'dish', stepOrder: 'move-first', meanWindow: window });
+        await valid(async () => {
+          const sim = await make(settings, w, h, 1);
+          sim.paint(SCENE);
+          const env = await sim.readEnv();
+          const food = (i: number) => ((env[(i >> 1) * 4 + 1] ?? 0) / 255) * 255 * 0.05 * (1 - (i % 2));
+          let r = 3;
+          const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+          sim.writeTrail(Float32Array.from({ length: w * h * 4 }, () => Math.fround(100 * rnd())));
+          sim.writeScent(Float32Array.from({ length: w * h * 2 }, () => Math.fround(100 * rnd())));
+          for (let k = 0; k < 3; k++) {
+            const [raw, rawScent] = [await sim.readTrail(), await sim.readScent()];
+            const [view, viewScent] = [await sim.readView(), await sim.readViewScent()];
+            expect(bits(await sim.readTrail(), raw), 'the trail stays').toBe(true);
+            expect(bits(await sim.readScent(), rawScent), 'the scent stays').toBe(true);
+            expect(bits(view, raw)).toBe(false);
+            sim.run(1);
+            expect(bits(await sim.readTrail(), view), `trail, step ${k}`).toBe(true);
+            const nextScent = await sim.readScent();
+            let fed = 0;
+            for (let i = 0; i < nextScent.length; i++) {
+              const [next, drawn] = [nextScent[i] ?? 0, viewScent[i] ?? 0];
+              if (food(i) === 0) expect(Object.is(next, drawn), `scent ${i}, step ${k}`).toBe(true);
+              else expect(Math.abs(next - food(i) - drawn), `food ${i}, step ${k}`).toBeLessThan(1e-3);
+              if (food(i) > 0) fed++;
+            }
+            expect(fed).toBeGreaterThan(20);
+          }
+        });
+      },
+      120_000,
+    );
+
+    // The view's dispatches change nothing that the simulation reads, with agents, food and walls.
+    it('leaves the simulation as it runs without the view, moving first with a window of 5 cells', async () => {
+      const [w, h] = [48, 40];
+      const settings = jones({ seed: 9, density: 0.2, boundary: 'box', stepOrder: 'move-first', meanWindow: 5 });
+      const run = async (view: boolean) => {
+        const sim = await make(settings, w, h, Math.round(0.2 * w * h));
+        sim.paint(SCENE);
+        sim.reset();
+        for (let k = 0; k < 12; k++) {
+          sim.run(1);
+          if (view) await sim.readView();
+        }
+        return state(sim);
+      };
+      expect(await valid(() => run(true))).toEqual(await run(false));
+    }, 120_000);
   });
 
   describe('agent rule (Jones 2010, Fig. 3)', () => {

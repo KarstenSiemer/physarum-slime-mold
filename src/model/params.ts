@@ -171,6 +171,16 @@ export const globalSpec = {
     step: 1,
     ref: 'Jones 2010, p. 132',
   },
+  // The mean window of Jones' later papers (ADR 0046): the Jones model only (meanWindowOf()).
+  meanWindow: {
+    label: 'Mean window',
+    unit: 'cells wide',
+    help: 'Only the Jones model has this setting. It is the side of the square over which the trail map spreads in each step: 3 is the mean of 3 × 3 cells, as in Jones 2010. A wider window spreads the trail and the food scent farther in one step, so a food pulls from farther away and the network gets coarser and smoother. Jones’ later papers use 5 × 5 as their usual window, and 15 × 15 for a field between electrodes. The window reaches through walls, as every mean of the Jones model does. With Move first and a window above 3, the view needs more memory. The extended model always uses 3 × 3; it has Diffusion passes instead.',
+    min: 3,
+    max: 15,
+    step: 2,
+    ref: 'Jones and Adamatzky 2015, arXiv:1503.06973, p. 7; Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10',
+  },
   foodStrength: {
     label: 'Food strength',
     help: 'Scent that each food cell releases per step (wProj): 255 × this value. In the Jones model the scent spreads and decays like the trail, as food in Jones’ trail map does. In the extended model, Scent decay scales it. With a decay of 0.1 the scent fades within a few cells, so agents find food only when a sensor comes close. In a dense network, food becomes a hub with paths that lead in, and the rest goes on as before. With few agents, higher values pull the network tighter onto the food.',
@@ -541,6 +551,7 @@ export function defaultSettings(): Settings {
     showTubes: true,
     density: 1,
     diffusion: 1,
+    meanWindow: 3,
     foodStrength: 0.05,
     lightStrength: 0.05,
     scentDecay: 0.1,
@@ -618,6 +629,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   const out = { ...d };
   for (const k of Object.keys(globalSpec) as GlobalKey[]) out[k] = num(raw[k], d[k], globalSpec[k]);
   out.diffusion = Math.round(out.diffusion);
+  // A link from before the mean window holds none: it keeps the 3 × 3 mean (ADR 0046). The side is odd.
+  out.meanWindow = snap(out.meanWindow, globalSpec.meanWindow);
   out.seed = typeof raw.seed === 'number' && Number.isInteger(raw.seed) ? raw.seed >>> 0 : d.seed;
   out.resolution = RESOLUTIONS.includes(raw.resolution as never) ? (raw.resolution as number) : d.resolution;
   // A link made before lattices holds none: it opens on the grid shaped like the screen that it was made on (ADR 0026).
@@ -708,8 +721,30 @@ export function constrain(s: Settings): Settings {
   const limits = growthLimits(s);
   const same = density === s.density && strains === s.strains && growth === s.growth && limits === undefined;
   const out = same ? s : { ...s, density, strains, growth, ...limits };
-  if (out.model !== 'jones') return out;
-  return jonesFits(out) ? asJones(out) : { ...out, model: 'extended' };
+  if (out.model !== 'jones') return asExtended(out);
+  return jonesFits(out) ? asJones(out) : asExtended({ ...out, model: 'extended' });
+}
+
+/** The 3 × 3 mean window: the window of Jones 2010, and the only one of the extended model (ADR 0046). */
+export const MEAN_WINDOW = 3;
+
+/**
+ * The side of the mean window that a step runs (ADR 0046): the setting in the Jones model, 3 in the extended model,
+ * whatever the settings hold. Odd, from 3 to the largest side of the setting.
+ */
+export function meanWindowOf(s: Pick<Settings, 'model' | 'meanWindow'>): number {
+  if (s.model !== 'jones') return MEAN_WINDOW;
+  const { min, max } = globalSpec.meanWindow;
+  const side = Math.min(max, Math.max(min, Math.round(s.meanWindow)));
+  return side % 2 === 1 ? side : side - 1;
+}
+
+/**
+ * The extended model's value of the setting that only the Jones model has (ADR 0046): the mean window returns to
+ * 3 × 3, and a link holds none of it. Returns `s` itself when it holds that value already.
+ */
+function asExtended(s: Settings): Settings {
+  return s.meanWindow === MEAN_WINDOW ? s : { ...s, meanWindow: MEAN_WINDOW };
 }
 
 /**
@@ -736,8 +771,9 @@ export const capacityOf = (s: Pick<Settings, 'capacity' | 'density' | 'collision
 
 /**
  * Whether the settings fit Jones' model (owner decision 2026-11-11, ADR 0022): one strain that follows (+1) or flees
- * (−1) its own trail (Jones 2010, Sec. 3.5), one agent per cell (p. 133) and one 3 × 3 mean per step (Table 1). Jones
- * has no other value for these settings, so the panel offers none in the Jones model.
+ * (−1) its own trail (Jones 2010, Sec. 3.5), one agent per cell (p. 133) and one mean per step (Table 1). Jones
+ * has no other value for these settings, so the panel offers none in the Jones model. The window of that mean is a
+ * setting of the Jones model (Mean window, ADR 0046).
  */
 export function jonesFits(s: Settings): boolean {
   const self = s.strains[0]?.attraction[0];
@@ -775,7 +811,7 @@ function asJones(s: Settings): Settings {
 
 /**
  * The settings in Jones' model: strain A alone, which follows or flees its own trail with weight 1, one agent per
- * cell, one 3 × 3 mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
+ * cell, one mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
  */
 export function toJones(s: Settings): Settings {
   const st = s.strains[0] ?? defaultStrain(0);

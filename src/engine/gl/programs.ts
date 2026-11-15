@@ -175,6 +175,11 @@ export interface Programs {
   covered: () => Program;
   /** The view's diffusion of a step that moves first (VIEW in diffuse.frag, ADR 0027), compiled at its first use. */
   view: () => Program;
+  /**
+   * The mean over a window above 3 × 3 (BOX in diffuse.frag, ADR 0046), with covered food and for the view of a step
+   * that moves first, compiled at its first use: no scene of this app has that window.
+   */
+  box: (covered: boolean, view: boolean) => Program;
   paint: Program;
   shape: Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
@@ -231,10 +236,13 @@ export function initProgram(gl: GL, frag: string, capacity: boolean): Program {
 
 /**
  * The diffusion pass from `frag` (diffuse.frag or a version of it); `covered`: with covered food (COVERED, ADR 0022);
- * `view`: the view's diffusion of a step that moves first (VIEW, ADR 0027).
+ * `view`: the view's diffusion of a step that moves first (VIEW, ADR 0027); `box`: the mean over a window above 3 × 3
+ * (BOX, ADR 0046).
  */
-export function diffuseProgram(gl: GL, frag: string, covered: boolean, view = false): Program {
-  return simProgram(gl, (covered ? '#define COVERED 1\n' : '') + (view ? '#define VIEW 1\n' : '') + frag);
+export function diffuseProgram(gl: GL, frag: string, covered: boolean, view = false, box = false): Program {
+  const defines =
+    (covered ? '#define COVERED 1\n' : '') + (view ? '#define VIEW 1\n' : '') + (box ? '#define BOX 1\n' : '');
+  return simProgram(gl, defines + frag);
 }
 
 const plainProgram = (gl: GL, frag: string) =>
@@ -257,6 +265,7 @@ export function compile(gl: GL): Programs {
   let saturated: Saturated | undefined;
   let covered: Program | undefined;
   let viewDiffuse: Program | undefined;
+  const boxes = new Map<string, Program>();
   let scentStarted: ReturnType<typeof startProgram>[] | undefined;
   let scent: ScentPrograms | undefined;
   let capacity: Program | undefined;
@@ -321,6 +330,15 @@ export function compile(gl: GL): Programs {
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
     view: () => (viewDiffuse ??= diffuseProgram(gl, diffuseFrag, false, true)),
+    box: (withCovered, forView) => {
+      const key = `${String(withCovered)}${String(forView)}`;
+      let p = boxes.get(key);
+      if (!p) {
+        p = diffuseProgram(gl, diffuseFrag, withCovered, forView, true);
+        boxes.set(key, p);
+      }
+      return p;
+    },
     paint: sim(brushGlsl + paintFrag),
     shape: sim(brushGlsl + shapeFrag),
     counts: sim(countsFrag),

@@ -14,7 +14,7 @@ import {
   trailSaturation,
   type AgentTool,
 } from '../pack';
-import { diffusePlan, viewTrailOn } from '../sizing';
+import { diffusePlanOf, viewTrailOn } from '../sizing';
 import { TUBE_TILE, tubesShown } from '../tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
@@ -372,10 +372,11 @@ export class GlSim implements Sim {
     const gl = this.gl;
     this.writeParams();
     const free = flip(this.p);
-    const d = this.prog.view();
     let input = { trail: this.trail[this.p], scent: this.scent[this.p] };
-    for (const [i, v] of diffusePlan(this.settings.diffusion).entries()) {
-      // Even passes write the free pair, odd passes the third, so no pass reads the target it writes.
+    for (const [i, v] of diffusePlanOf(this.settings).entries()) {
+      // A mean window above 3 × 3 has a program of its own (ADR 0046).
+      const d = v.box ? this.prog.box(false, true) : this.prog.view();
+      // Even draws write the free pair, odd draws the third, so no draw reads the target it writes.
       const third = i % 2 === 1 ? this.ensureViewThird() : undefined;
       const out = third ?? { trail: this.trail[free], scent: this.scent[free] };
       gl.bindFramebuffer(gl.FRAMEBUFFER, third ? third.fbo : this.mrt[free]);
@@ -392,6 +393,10 @@ export class GlSim implements Sim {
       gl.uniform1i(d.loc('first'), Number(v.first));
       gl.uniform1i(d.loc('last'), Number(v.last));
       gl.uniform1i(d.loc('blur'), Number(v.blur));
+      if (v.box) {
+        gl.uniform1i(d.loc('radius'), v.box.radius);
+        gl.uniform1i(d.loc('columns'), Number(v.box.columns));
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       input = { trail: out.trail, scent: out.scent };
     }
@@ -1350,13 +1355,15 @@ export class GlSim implements Sim {
     // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
     const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
     const senseFirst = this.settings.stepOrder === 'sense-first';
-    for (const v of diffusePlan(this.settings.diffusion)) {
+    // A mean window above 3 × 3 runs two draws per pass (ADR 0046): the map then ends in the pair it came from.
+    for (const v of diffusePlanOf(this.settings)) {
       const out = flip(this.p);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.mrt[out]);
       gl.viewport(0, 0, this.width, this.height);
       // The pass that adds the step's sources (diffuse.frag): the last moving first, the first sensing first (ADR 0027);
       // with covered food while it is on.
-      const d = covered && (senseFirst ? v.first : v.last) ? this.prog.covered() : this.prog.diffuse;
+      const withCovered = covered && (senseFirst ? v.first : v.last);
+      const d = v.box ? this.prog.box(withCovered, false) : withCovered ? this.prog.covered() : this.prog.diffuse;
       gl.useProgram(d.program);
       textures(gl, d.program, {
         trailIn: this.trail[this.p].texture,
@@ -1368,6 +1375,10 @@ export class GlSim implements Sim {
       gl.uniform1i(d.loc('first'), Number(v.first));
       gl.uniform1i(d.loc('last'), Number(v.last));
       gl.uniform1i(d.loc('blur'), Number(v.blur));
+      if (v.box) {
+        gl.uniform1i(d.loc('radius'), v.box.radius);
+        gl.uniform1i(d.loc('columns'), Number(v.box.columns));
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.p = out;
     }

@@ -356,6 +356,9 @@
   <Section title="Environment">
     {#if extended}
       <Slider spec={globalSpec.diffusion} bind:value={s.diffusion} id="diffusion" />
+    {:else}
+      <!-- The window of the one mean of the Jones model (ADR 0046); the extended model has passes of 3 × 3. -->
+      <Slider spec={globalSpec.meanWindow} bind:value={s.meanWindow} id="mean-window" />
     {/if}
     <Slider spec={globalSpec.foodStrength} bind:value={s.foodStrength} id="food" />
     {#if extended}

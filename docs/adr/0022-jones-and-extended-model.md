@@ -3,6 +3,7 @@
 - Status: accepted (owner decisions, 2026-11-11: a model switch "Jones" and "Erweitert"; "Jones streng": the Jones model
   holds only Jones' published rules; the default changes are open)
 - Date: 2026-11-11
+- Extended by ADR 0046 (the mean window of Jones' later papers, a setting of the Jones model).
 
 ## Context
 

@@ -10,6 +10,8 @@ import {
   globalSpec,
   jonesFits,
   MAX_STRAINS,
+  MEAN_WINDOW,
+  meanWindowOf,
   runsAsJones,
   sanitize,
   scentReach,
@@ -701,5 +703,47 @@ describe('the reach of the scent (ADR 0036)', () => {
       expect(decayForReach(spec.max, passes)).toBeCloseTo(globalSpec.scentDecay.min, 9);
     }
     expect(scentReachSpec(1).max).toBeCloseTo(133, 0);
+  });
+});
+
+// ADR 0046: the side of the mean window, a setting of the Jones model for the windows of Jones' later papers.
+describe('the mean window (ADR 0046)', () => {
+  const network = () => presetById('network')?.settings() ?? defaultSettings();
+
+  it('is 3 × 3 by default and in every scene', () => {
+    expect(defaultSettings().meanWindow).toBe(MEAN_WINDOW);
+    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(3);
+  });
+
+  it('is 3 × 3 for a link from before the setting, and an odd side from 3 to 15 otherwise', () => {
+    const { meanWindow: _, ...before } = network();
+    expect(sanitize(before).meanWindow).toBe(3);
+    expect(sanitize(before).model).toBe('jones');
+    const side = (v: unknown) => sanitize({ ...network(), meanWindow: v }).meanWindow;
+    expect([3, 5, 7, 9, 11, 13, 15].map(side)).toEqual([3, 5, 7, 9, 11, 13, 15]);
+    expect([1, 4.2, 6.2, 13.6, 16, 99, -5].map(side)).toEqual([3, 5, 7, 13, 15, 15, 3]);
+    expect(['5', null, NaN, Infinity].map(side)).toEqual([3, 3, 3, 3]);
+  });
+
+  it('is a setting of the Jones model: a Jones model with a wide window stays Jones', () => {
+    const s = sanitize({ ...network(), meanWindow: 15 });
+    expect([s.model, s.meanWindow, jonesFits(s)]).toEqual(['jones', 15, true]);
+    expect(constrain(s)).toBe(s);
+    expect(toJones({ ...defaultSettings(), meanWindow: 5 }).meanWindow).toBe(5);
+  });
+
+  it('returns to 3 × 3 in the extended model, also when a Jones model becomes extended', () => {
+    expect(sanitize({ ...defaultSettings(), model: 'extended', meanWindow: 7 }).meanWindow).toBe(3);
+    // Two diffusion passes do not fit Jones' model: it becomes extended, and the window goes with it.
+    const s = constrain({ ...network(), meanWindow: 7, diffusion: 2 });
+    expect([s.model, s.meanWindow]).toEqual(['extended', 3]);
+    const ext = constrain({ ...defaultSettings(), model: 'extended' });
+    expect(constrain(ext)).toBe(ext);
+  });
+
+  it('runs 3 × 3 in the extended model whatever the settings hold, and an odd side in the Jones model', () => {
+    expect(meanWindowOf({ model: 'extended', meanWindow: 9 })).toBe(3);
+    expect([3, 5, 15].map((meanWindow) => meanWindowOf({ model: 'jones', meanWindow }))).toEqual([3, 5, 15]);
+    expect([0, 4, 6.4, 40].map((meanWindow) => meanWindowOf({ model: 'jones', meanWindow }))).toEqual([3, 3, 5, 15]);
   });
 });

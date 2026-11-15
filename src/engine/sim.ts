@@ -26,7 +26,7 @@ import sortWgsl from './shaders/sort.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { diffusePlan, viewTrailOn, type Diffuse } from './sizing';
+import { diffusePlan, diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
@@ -340,8 +340,8 @@ export class Simulation implements Sim {
       scentView: this.scentViews[b],
     });
     let input = pair(p);
-    diffusePlan(this.settings.diffusion).forEach((v, i) => {
-      // Even passes write the free pair, odd passes the third, so no pass reads what it writes.
+    diffusePlanOf(this.settings).forEach((v, i) => {
+      // Even dispatches write the free pair, odd ones the third, so no dispatch reads what it writes.
       const out = i % 2 === 1 ? this.ensureViewThird() : pair(free);
       const pipeline = this.kernels.view(v);
       const key = `view${+v.first}${+v.last}${+v.blur}${i % 2}${p}${this.occParity}${+this.scentless}`;
@@ -1321,7 +1321,8 @@ export class Simulation implements Sim {
     // The pass that adds the step's sources (diffuse.wgsl): the last moving first, the first sensing first (ADR 0027);
     // with covered food while it is on.
     const senseFirst = this.settings.stepOrder === 'sense-first';
-    for (const v of diffusePlan(this.settings.diffusion)) {
+    // A mean window above 3 × 3 runs two dispatches per pass (ADR 0046): the map then ends in the pair it came from.
+    for (const v of diffusePlanOf(this.settings)) {
       pass.setPipeline(
         covered && (senseFirst ? v.first : v.last) ? k.covered(v, senseFirst) : k.diffuse(v, senseFirst),
       );
@@ -1722,6 +1723,8 @@ class Kernels {
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
   /** The view's diffusion passes of a step that moves first (diffuse.wgsl VIEW), by variantKey(). */
   private readonly viewPipelines = new Map<string, GPUComputePipeline>();
+  /** The dispatches of the mean over a window above 3 × 3 (diffuse.wgsl `box`, ADR 0046), by their constants. */
+  private readonly boxPipelines = new Map<string, GPUComputePipeline>();
   private capacityPipelines?: Starts;
   private growthPipelines?: GrowthKernels;
   private growthFlowPipelines?: GrowthKernels;
@@ -1907,6 +1910,7 @@ class Kernels {
 
   /** A last diffusion pass with covered food (diffuse.wgsl COVERED), built at its first use. */
   covered(v: Diffuse, senseFirst: boolean): GPUComputePipeline {
+    if (v.box) return this.box(v, v.box, senseFirst, true, false);
     const key = variantKey(v, senseFirst);
     let p = this.coveredPipelines.get(key);
     if (!p) {
@@ -1938,6 +1942,7 @@ class Kernels {
 
   /** A diffusion pass of the view of a step that moves first (diffuse.wgsl VIEW), built at its first use. */
   view(v: Diffuse): GPUComputePipeline {
+    if (v.box) return this.box(v, v.box, false, false, true);
     const key = variantKey(v, false);
     let p = this.viewPipelines.get(key);
     if (!p) {
@@ -1955,7 +1960,42 @@ class Kernels {
     return p;
   }
 
+  /**
+   * A dispatch of the mean over a window above 3 × 3 (diffuse.wgsl `box`, ADR 0046), built at its first use: no scene
+   * of this app has that window. `covered`: with covered food; `view`: for the view of a step that moves first.
+   */
+  private box(
+    v: Diffuse,
+    box: NonNullable<Diffuse['box']>,
+    senseFirst: boolean,
+    covered: boolean,
+    view: boolean,
+  ): GPUComputePipeline {
+    // The constants that the entry point reads: it has no BLUR.
+    const constants = {
+      FIRST: Number(v.first),
+      LAST: Number(v.last),
+      SENSE_FIRST: Number(senseFirst),
+      COVERED: Number(covered),
+      VIEW: Number(view),
+      RADIUS: box.radius,
+      COLUMNS: Number(box.columns),
+    };
+    const key = Object.values(constants).join(',');
+    let p = this.boxPipelines.get(key);
+    if (!p) {
+      const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.diffuseLayout] });
+      p = this.device.createComputePipeline({
+        layout,
+        compute: { module: this.diffuseModule, entryPoint: 'box', constants },
+      });
+      this.boxPipelines.set(key, p);
+    }
+    return p;
+  }
+
   diffuse(v: Diffuse, senseFirst: boolean): GPUComputePipeline {
+    if (v.box) return this.box(v, v.box, senseFirst, false, false);
     const p = this.variants.get(variantKey(v, senseFirst));
     if (!p) throw new Error(`No diffusion pipeline for variant ${variantKey(v, senseFirst)}`);
     return p;
@@ -1999,7 +2039,7 @@ class Kernels {
     const layout = device.createPipelineLayout({ bindGroupLayouts: [diffuseLayout] });
     // Every pass of 0 to 4 passes, in each order of a step (diffuse.wgsl SENSE_FIRST, ADR 0027).
     const plans = [0, 1, 2, 3, 4]
-      .flatMap(diffusePlan)
+      .flatMap((passes) => diffusePlan(passes))
       .flatMap((v) => [false, true].map((senseFirst) => ({ ...v, senseFirst })));
     const unique = [...new Map(plans.map((v) => [variantKey(v, v.senseFirst), v])).values()];
     const variants = Promise.all(

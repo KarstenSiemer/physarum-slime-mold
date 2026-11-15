@@ -1,4 +1,4 @@
-import { capacityOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
+import { capacityOf, MEAN_WINDOW, meanWindowOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 import { flowOn, flowStrains } from './flow';
 import { TUBE_TILE } from './tubes';
 
@@ -50,13 +50,33 @@ export interface Diffuse {
   first: boolean;
   last: boolean;
   blur: boolean;
+  /**
+   * One half of the mean over a window above 3 × 3 (ADR 0046): the sums along the rows, or the sums of those along
+   * the columns with the mean. `radius`: the cells of the window on each side of its middle. Without it the dispatch
+   * is the 3 × 3 mean.
+   */
+  box?: { radius: number; columns: boolean };
 }
 
-/** Diffusion dispatches for one step (Jones: 1 pass, Fogleman: 2, 0 = deposit and decay only). */
-export function diffusePlan(passes: number): Diffuse[] {
+/**
+ * Diffusion dispatches for one step (Jones: 1 pass, Fogleman: 2, 0 = deposit and decay only). `window`: the side of
+ * the mean window (ADR 0046). With 3 a pass is one dispatch, the 3 × 3 mean of the code before. Above 3 a pass is
+ * two dispatches: the sums along the rows of the window, then their sums along its columns and the mean.
+ */
+export function diffusePlan(passes: number, window: number = MEAN_WINDOW): Diffuse[] {
   if (passes <= 0) return [{ first: true, last: true, blur: false }];
-  return Array.from({ length: passes }, (_, i) => ({ first: i === 0, last: i === passes - 1, blur: true }));
+  if (window <= MEAN_WINDOW)
+    return Array.from({ length: passes }, (_, i) => ({ first: i === 0, last: i === passes - 1, blur: true }));
+  const radius = (window - 1) / 2;
+  return Array.from({ length: passes }, (_, i): Diffuse[] => [
+    { first: i === 0, last: false, blur: true, box: { radius, columns: false } },
+    { first: false, last: i === passes - 1, blur: true, box: { radius, columns: true } },
+  ]).flat();
 }
+
+/** The diffusion dispatches of a step of these settings: the passes, with the mean window of the model. */
+export const diffusePlanOf = (s: Pick<Settings, 'diffusion' | 'model' | 'meanWindow'>) =>
+  diffusePlan(s.diffusion, meanWindowOf(s));
 
 /**
  * GPU bytes per grid cell: trail 32, scent 16, counts 16, environment 4, the renderer's outline
@@ -83,9 +103,11 @@ export const COVERED_BYTES_PER_CELL_HALF_FLOAT = 1;
 export const GROWTH_BYTES_PER_CELL = 34;
 export const GROWTH_BYTES_PER_AGENT = 6;
 /**
- * More bytes per cell for the view of a step that moves first with two diffusion passes or more (ADR 0027): a third
- * trail of 16 B and scent of 8 B (sim.ts viewTextures, gl/sim.ts viewTargets()). With one pass the view uses the free
- * pair, and sensing first it uses none.
+ * More bytes per cell for the view of a step that moves first with two diffusion dispatches or more (ADR 0027): a
+ * third trail of 16 B and scent of 8 B (sim.ts viewTextures, gl/sim.ts viewTargets()). With one dispatch the view uses
+ * the free pair, and sensing first it uses none. A mean window above 3 × 3 runs two dispatches per pass (ADR 0046,
+ * diffusePlan()), so its view needs the third pair with one pass too. The simulation itself needs no texture more for
+ * that window: the sums along the rows go into the free pair, and the mean goes back into the pair that held the map.
  */
 export const VIEW_BYTES_PER_CELL = 24;
 
@@ -132,8 +154,8 @@ export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>, map = 0) 
   flowOn(s) ? TUBES_BYTES_PER_CELL + map : 0;
 
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
-export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion'>) =>
-  s.stepOrder === 'move-first' && s.diffusion >= 2;
+export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion' | 'model' | 'meanWindow'>) =>
+  s.stepOrder === 'move-first' && diffusePlanOf(s).length >= 2;
 
 /** Per agent: two copies on both backends (WebGL2 ping-pongs its agent texture, WebGPU sorts into its second buffer). */
 export const BYTES_PER_AGENT = 32;

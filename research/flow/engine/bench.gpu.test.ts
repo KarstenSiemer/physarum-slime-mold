@@ -5,14 +5,16 @@
 // sample), VITE_BATCHES, VITE_NAME, VITE_STRAINS (the scene with this many strains like its first one: every strain
 // has a flow of its own, ADR 0031), VITE_FLOWS (`off`, `on` or both, the default), VITE_WALL (1: a wall stroke on one
 // wall cell of the scene before the warm-up; it changes no byte, and the rule for an agent under a wall then reads
-// the wall byte under every agent in every step, ADR 0038, decision 8).
+// the wall byte under every agent in every step, ADR 0038, decision 8), VITE_PATCH (settings as JSON, over those of the
+// scene), VITE_WINDOW (the mean window of the Jones model, ADR 0046; turns.sh sets it for a build that ends in
+// `:w<side>`).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
 import { WebGl2Backend } from '../../../src/engine/gl/backend';
 import type { Backend } from '../../../src/engine/types';
 import { WebGpuBackend } from '../../../src/engine/webgpu';
-import { constrain, strainLike } from '../../../src/model/params';
+import { constrain, strainLike, type Settings } from '../../../src/model/params';
 import { presetById } from '../../../src/model/presets';
 
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
@@ -25,6 +27,8 @@ const NAME = env.VITE_NAME ?? 'bench';
 const STRAINS = Number(env.VITE_STRAINS ?? 0);
 const FLOWS = (env.VITE_FLOWS ?? 'off,on').split(',').map((f) => f === 'on');
 const WALL = env.VITE_WALL === '1';
+const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Partial<Settings>;
+const WINDOW = Number(env.VITE_WINDOW ?? 0);
 
 it('measures the time of a step', async () => {
   const rows: string[] = [];
@@ -44,7 +48,8 @@ it('measures the time of a step', async () => {
           STRAINS > 0 && first
             ? Array.from({ length: STRAINS }, (_, i) => (i === 0 ? first : strainLike(first, i)))
             : base.strains;
-        const settings = constrain({ ...base, seed: 1, flow, strains });
+        const window = WINDOW > 0 ? { meanWindow: WINDOW } : {};
+        const settings = constrain({ ...base, seed: 1, flow, strains, ...PATCH, ...window });
         const engine = await Engine.create(canvas, settings, undefined, backend);
         await engine.load(settings, preset.env ?? []);
         const sim = engine.sim;
@@ -78,6 +83,7 @@ it('measures the time of a step', async () => {
             flow,
             ...(STRAINS > 0 ? { strains: settings.strains.length } : {}),
             ...(WALL ? { wall: true } : {}),
+            ...(WINDOW > 0 ? { model: settings.model, meanWindow: settings.meanWindow } : {}),
             w: sim.width,
             h: sim.height,
             agents: sim.agents,

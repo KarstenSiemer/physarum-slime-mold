@@ -1,5 +1,6 @@
-// 3 × 3 mean diffusion + decay, and this step's deposits and sources, in either order of a step (ADR 0027). Mirrors
-// ../../shaders/diffuse.wgsl (no tiling: one fragment reads its 3 × 3 neighbourhood).
+// Mean diffusion + decay, and this step's deposits and sources, in either order of a step (ADR 0027): the 3 × 3 mean,
+// and with BOX the mean over a larger window (ADR 0046). Mirrors ../../shaders/diffuse.wgsl (no tiling: one fragment
+// reads its 3 × 3 neighbourhood).
 
 uniform sampler2D trailIn;
 uniform sampler2D scentIn;
@@ -23,6 +24,17 @@ layout(location = 1) out vec4 outScent;
 // and decay without its sources and its cut, into targets that the simulation does not read. A program of its own.
 #ifndef VIEW
 #define VIEW 0
+#endif
+
+// The mean over a window above 3 × 3 (the entry point `box` in diffuse.wgsl, ADR 0046), a program of its own: two
+// draws, the sums along the rows of the window (`columns` false), then the sums of those along its columns and the
+// mean. `radius`: the cells of the window on each side of its middle (RADIUS in diffuse.wgsl).
+#ifndef BOX
+#define BOX 0
+#endif
+#if BOX
+uniform int radius;
+uniform bool columns;
 #endif
 
 #if COVERED
@@ -91,6 +103,66 @@ void load(ivec2 c, out vec4 t, out vec2 s, out int kind) {
 #endif
 }
 
+#if BOX
+// The cell at c inside the rectangle of the grid: wrapped on the periodic grid, (−1, −1) outside the rectangle of a
+// closed arena; it keeps a cell outside the dish (gridXY in diffuse.wgsl).
+ivec2 gridXY(ivec2 c) {
+  ivec2 size = ivec2(W(), H());
+  if (P.cfg.z == 0u) return wrapCell(c, size);
+  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) return ivec2(-1);
+  return c;
+}
+
+// The mean over a window of (2 · radius + 1)² cells with the rules of the 3 × 3 mean (`box` in diffuse.wgsl): a sink
+// counts as 0, and the divisor is the number of cells of the window at every site. The rows: every cell of the grid, a
+// sink too, gets the sum of its row of the window. The columns: the sum of those sums, the mean and the decay as one
+// factor, the sources of a step that moves first, and 0 in a sink.
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 t = vec4(0.0);
+  vec2 s = vec2(0.0);
+  if (!columns) {
+    for (int d = -radius; d <= radius; d++) {
+      vec4 tt;
+      vec2 ss;
+      int k;
+      load(p + ivec2(d, 0), tt, ss, k);
+      t += tt;
+      s += ss;
+    }
+    outTrail = t;
+    outScent = vec4(s, 0.0, 0.0);
+    return;
+  }
+  for (int d = -radius; d <= radius; d++) {
+    ivec2 q = gridXY(p + ivec2(0, d));
+    if (q.x < 0) continue;
+    t += texelFetch(trailIn, q, 0);
+    s += texelFetch(scentIn, q, 0).xy;
+  }
+  float cells = float((2 * radius + 1) * (2 * radius + 1));
+  if (last) {
+    t *= P.keep / cells;
+    s *= P.scent.z / cells;
+  } else {
+    t /= cells;
+    s /= cells;
+  }
+  int kind = SINK;
+  ivec2 q = cellXY(p);
+  if (q.x >= 0) kind = isWall(texelFetch(env, q, 0)) ? (P.model.z == 0.0 ? SINK : WALL) : OPEN;
+#if !VIEW
+  // Moving first, this step's deposits and sources, after the decay, and none in the wound of a cut that clears it.
+  if (last && !senseFirst() && kind == OPEN && !wound(p)) sources(p, t, s);
+#endif
+  if (kind == SINK) {
+    t = vec4(0.0);
+    s = vec2(0.0);
+  }
+  outTrail = t;
+  outScent = vec4(s, 0.0, 0.0);
+}
+#else
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec4 t;
@@ -148,3 +220,4 @@ void main() {
   outTrail = t;
   outScent = vec4(s, 0.0, 0.0);
 }
+#endif
