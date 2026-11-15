@@ -1,8 +1,10 @@
 // The picture of the tubes (ADR 0034), after common.glsl. Mirrors ../../shaders/tubes.wgsl, where the passes are
 // described: PASS 0 is `roots` (per cell and strain the factor of the radius of its tube), PASS 1 is `picture` (the
 // trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed).
-// PASS 3, the map of the tiles, runs between PASS 0 and PASS 1: per tile of TILE × TILE cells what the window of the
-// tile holds, which a workgroup of `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
+// PASS 3 and PASS 4, the map of the tiles, run between PASS 0 and PASS 1: per tile of TILE × TILE cells what the
+// window of the tile holds, which a workgroup of `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
+// The window is a rectangle of cells, so PASS 3 looks along the rows and PASS 4 along the columns: one pass of 14 × 14
+// reads per tile took 0.6 ms more on the Tokyo rail network than the skip saves there.
 // programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW, FAST, TILE and WINDOW from ../../tubes.ts.
 
 out vec4 result;
@@ -98,28 +100,44 @@ void main() {
 #elif PASS == 3
 uniform sampler2D roots; // PASS 0
 
-// Per tile of TILE × TILE cells, of the window of the tile: the tile and the WINDOW cells on each side of it, wrapped
-// as cellXY() wraps (tileRoots in tubes.wgsl). x: 1 if a cell of the window holds a disc of a strain. y: 1 if a cell
-// of the window is a cell of a wall. A cell outside the arena is neither.
+// The first half of the map of the tiles: per tile column and row of cells, of the cells of the row in the window of
+// the tile column (the TILE cells of the column and the WINDOW cells on each side), wrapped as cellXY() wraps. x: 1 if
+// one holds a disc of a strain. y: 1 if one is a cell of a wall. A cell outside the arena is neither.
 void main() {
-  ivec2 corner = ivec2(gl_FragCoord.xy) * TILE - WINDOW;
+  ivec2 at = ivec2(gl_FragCoord.xy);
   bool discs = false;
   bool walled = false;
-  for (int j = 0; j < TILE + 2 * WINDOW; j++) {
-    for (int i = 0; i < TILE + 2 * WINDOW; i++) {
-      ivec2 q = cellXY(corner + ivec2(i, j));
-      if (q.x < 0) continue;
-      discs = discs || texelFetch(roots, q, 0) != vec4(0.0);
-      walled = walled || isWall(texelFetch(shape, q, 0));
-    }
+  for (int i = 0; i < TILE + 2 * WINDOW; i++) {
+    ivec2 q = cellXY(ivec2(at.x * TILE - WINDOW + i, at.y));
+    if (q.x < 0) continue;
+    discs = discs || texelFetch(roots, q, 0) != vec4(0.0);
+    walled = walled || isWall(texelFetch(shape, q, 0));
   }
   result = vec4(discs ? 1.0 : 0.0, walled ? 1.0 : 0.0, 0.0, 0.0);
+}
+
+#elif PASS == 4
+uniform sampler2D rows; // PASS 3
+
+// The map of the tiles: per tile, of its window (the tile and the WINDOW cells on each side of it; tileRoots in
+// tubes.wgsl), the rows of PASS 3 in the window, wrapped on the periodic grid. x: 1 if a cell of the window holds a
+// disc of a strain. y: 1 if a cell of the window is a cell of a wall.
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  vec2 window = vec2(0.0);
+  for (int j = 0; j < TILE + 2 * WINDOW; j++) {
+    int y = t.y * TILE - WINDOW + j;
+    if (P.cfg.z == 0u) y = wrapAxis(y, H());
+    else if (y < 0 || y >= H()) continue;
+    window = max(window, texelFetch(rows, ivec2(t.x, y), 0).xy);
+  }
+  result = vec4(window, 0.0, 0.0);
 }
 
 #elif PASS == 1
 uniform sampler2D trail; // the trail that the view draws without the tubes
 uniform sampler2D roots; // PASS 0
-uniform sampler2D tiles; // PASS 3: per tile, whether its window holds a disc (x) and a cell of a wall (y)
+uniform sampler2D tiles; // PASS 4: per tile, whether its window holds a disc (x) and a cell of a wall (y)
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);

@@ -235,10 +235,10 @@ export class GlSim implements Sim {
   /**
    * The targets of the picture of the tubes (tubes.frag, ADR 0034), allocated while the settings show it: per cell and
    * strain the factor of the radius of its tube, the trail that the view draws, and the stream; per tile of the
-   * picture (tubes.ts TUBE_TILE) what its window holds. `tubesStale`: a change of the state since made the picture
-   * stale.
+   * picture (tubes.ts TUBE_TILE) what its window holds, and that per tile column and row of cells on the way.
+   * `tubesStale`: a change of the state since made the picture stale.
    */
-  private tubes: { roots: Target; picture: Target; stream: Target; tiles: Target } | undefined;
+  private tubes: { roots: Target; picture: Target; stream: Target; rows: Target; tiles: Target } | undefined;
   private tubesStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
@@ -442,7 +442,8 @@ export class GlSim implements Sim {
     const shape = this.shape.texture;
     const roots = tubes.roots.texture;
     this.pass(k.roots, tubes.roots, { ...this.flowMemories(flow), shape }, { strains: flow.memory.length });
-    this.pass(k.tiles, tubes.tiles, { shape, roots }, {});
+    this.pass(k.rows, tubes.rows, { shape, roots }, {});
+    this.pass(k.tiles, tubes.tiles, { rows: tubes.rows.texture }, {});
     this.pass(k.picture, tubes.picture, { trail, shape, roots, tiles: tubes.tiles.texture }, {});
     const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
     this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
@@ -457,15 +458,17 @@ export class GlSim implements Sim {
       const made: Target[] = [];
       try {
         for (let i = 0; i < 3; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
-        // The map of the tiles holds 0 or 1 per value.
+        // The map of the tiles and its rows hold 0 or 1 per value.
         const [w, h] = [Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE)];
+        made.push(target(gl, w, this.height, gl.RGBA8));
         made.push(target(gl, w, h, gl.RGBA8));
       } catch (error) {
         // A target did not fit: those before it must not stay behind.
         for (const t of made) destroyTarget(gl, t);
         throw error;
       }
-      this.tubes = { roots: at(made, 0), picture: at(made, 1), stream: at(made, 2), tiles: at(made, 3) };
+      const [roots, picture, stream, rows, tiles] = [0, 1, 2, 3, 4].map((i) => at(made, i));
+      this.tubes = { roots, picture, stream, rows, tiles };
     }
     return this.tubes;
   }
@@ -476,6 +479,7 @@ export class GlSim implements Sim {
     destroyTarget(this.gl, this.tubes.roots);
     destroyTarget(this.gl, this.tubes.picture);
     destroyTarget(this.gl, this.tubes.stream);
+    destroyTarget(this.gl, this.tubes.rows);
     destroyTarget(this.gl, this.tubes.tiles);
     this.tubes = undefined;
     this.tubesStale = true;

@@ -94,9 +94,9 @@ function stoppedDiscs(grid: TubeGrid, roots: Float32Array): number {
  */
 function tileCases(grid: TubeGrid, roots: Float32Array) {
   const { width: w, height: h } = grid;
-  const across = Math.ceil(w / TUBE_TILE);
-  const tileOf = (x: number, y: number) => Math.floor(y / TUBE_TILE) * across + Math.floor(x / TUBE_TILE);
-  const count = across * Math.ceil(h / TUBE_TILE);
+  const columns = Math.ceil(w / TUBE_TILE);
+  const tileOf = (x: number, y: number) => Math.floor(y / TUBE_TILE) * columns + Math.floor(x / TUBE_TILE);
+  const count = columns * Math.ceil(h / TUBE_TILE);
   const disc = (c: number) => [0, 1, 2, 3].some((s) => (roots[c * 4 + s] ?? 0) > 0);
   const [discs, walls] = [new Uint8Array(count), new Uint8Array(count)];
   for (let y = 0; y < h; y++)
@@ -1167,7 +1167,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       expect(frameDiff(await frame(4, style), await frame(8, style)), style).toBeLessThanOrEqual(2);
   });
 
-  it.runIf(kind === 'webgl2').each([2, 3])(
+  it.runIf(kind === 'webgl2').each([2, 3, 4, 5])(
     'frees the targets of the picture that are made when target %i cannot be made',
     async (failing) => {
       const [w, h] = [32, 24];
@@ -1177,8 +1177,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       sim.writeTrail(trail);
       sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
       const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
-      // The picture needs three targets. The framebuffer of one is not complete, as when the GPU is short of memory:
-      // the target frees its own texture, and the simulation must free the textures of the targets before it.
+      // The picture needs five targets: three of the cells, and the map of its tiles and the rows of that map. The
+      // framebuffer of one is not complete, as when the GPU is short of memory: the target frees its own texture, and
+      // the simulation must free the textures of the targets before it.
       const [check, drop] = [gl.checkFramebufferStatus.bind(gl), gl.deleteTexture.bind(gl)];
       let [checks, freed] = [0, 0];
       gl.checkFramebufferStatus = (target) => (++checks === failing ? gl.FRAMEBUFFER_UNSUPPORTED : check(target));

@@ -106,7 +106,9 @@ export interface FlowPrograms {
 export interface TubePrograms {
   /** PASS 0: per cell and strain the factor of the radius of its tube. */
   roots: Program;
-  /** PASS 3: per tile of the picture, whether its window holds a disc and a cell of a wall. */
+  /** PASS 3: per tile column and row of cells, whether the row holds a disc and a cell of a wall in the window. */
+  rows: Program;
+  /** PASS 4: per tile of the picture, whether its window holds a disc and a cell of a wall. */
   tiles: Program;
   /** PASS 1: the trail that the view draws. */
   picture: Program;
@@ -294,7 +296,8 @@ export function compile(gl: GL): Programs {
     tubes: () =>
       (tubes ??= {
         roots: sim(`#define PASS 0\n${TUBE_DEFINES}${tubesFrag}`),
-        tiles: sim(`#define PASS 3\n${TUBE_DEFINES}${tubesFrag}`),
+        rows: sim(`#define PASS 3\n${TUBE_DEFINES}${tubesFrag}`),
+        tiles: sim(`#define PASS 4\n${TUBE_DEFINES}${tubesFrag}`),
         picture: sim(`#define PASS 1\n${TUBE_DEFINES}${tubesFrag}`),
         stream: sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`),
       }),

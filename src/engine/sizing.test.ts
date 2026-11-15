@@ -140,10 +140,10 @@ describe('the flow in the tubes', () => {
   it('counts the picture of the tubes while the flow is on, with its switch on or off', () => {
     const on = { ...defaultSettings(), model: 'extended' as const, flow: true };
     // Three textures of 16 B per cell: the factors of the radius, the picture and the stream of the plasm; and the
-    // map of the tiles of WebGL2, 4 B per tile of 8 × 8 cells (amendment of 2026-11-15).
-    expect(tubesBytesPerCell(on)).toBe(48.0625);
+    // map of the tiles of WebGL2, 4 B per tile of 8 × 8 cells, and its rows, 4 B per 8 cells (amendment of 2026-11-15).
+    expect(tubesBytesPerCell(on)).toBe(48.5625);
     const off = { ...on, showTubes: false };
-    expect(tubesBytesPerCell(off)).toBe(48.0625);
+    expect(tubesBytesPerCell(off)).toBe(48.5625);
     expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
     expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
   });
