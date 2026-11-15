@@ -2018,7 +2018,8 @@ the measure, where every run of the scene has none. The colony in the sea shrink
 7,681 at step 30,000, and 6,475 at step 48,000. On the land the network joins the four cities again by step 25,000,
 as after the network was taken off. So a test with the Cut tool would measure the colonies that it starts, and the
 regrowth above takes the network off by itself. Not changed here: where a cut agent goes is the rule of ADR 0023,
-which ADR 0038 also uses for an agent under a painted wall.
+which ADR 0038 also uses for an agent under a painted wall. ADR 0039 changed it later on 2026-11-15: while growth runs,
+the cut kills the agents of its wound, and the same run then has no trail in the sea.
 
 ### The tests and the wrong rules
 
@@ -2063,4 +2064,6 @@ scene longer by more than two sets of seeds differ.
 - Found on the way, not changed: the Cut tool moves the agents of its wound to random open points of the whole grid
   (ADR 0023), and the rule for an agent under a painted wall does the same (ADR 0038). On the Tokyo map these points lie
   also in the sea beyond the coast and on starved land, and with growth they become colonies there ("The Cut tool on the
-  Tokyo map" above). Where a cut agent goes is an owner decision (`TODO.md`).
+  Tokyo map" above). Where a cut agent goes is an owner decision (`TODO.md`). Decided on 2026-11-15 under the
+  owner's delegation and built in ADR 0039: while growth runs, the cut and the rule for a wall kill these agents, and
+  the colony grows back from the margin of the wound; without growth they are placed as before.

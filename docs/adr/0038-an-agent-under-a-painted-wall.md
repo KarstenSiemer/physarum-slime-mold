@@ -3,6 +3,8 @@
 - Status: accepted (decision of the coordinator, 2026-11-15, under the owner's delegation of 2026-11-12), built
   2026-11-15
 - Date: 2026-11-15
+- Extended by ADR 0039 (2026-11-15): while growth runs, an alive agent under a painted wall dies instead of being
+  placed; without growth it is placed as decided here.
 
 ## Context
 

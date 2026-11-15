@@ -57,7 +57,7 @@ export const TOOLS = [
     id: 'cut',
     key: '7',
     label: 'Cut',
-    help: 'Wound the network: moves the agents in an area away. In the extended model the area also loses its trail.',
+    help: 'Wound the network: moves the agents in an area away. With Growth and shrinkage, they die instead, and the colony grows back from the edge. In the extended model the area also loses its trail.',
   },
 ] as const;
 
