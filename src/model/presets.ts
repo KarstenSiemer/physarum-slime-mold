@@ -8,7 +8,7 @@ import {
   type StepOrder,
   type Strain,
 } from './params';
-import { tokyoShapes } from './tokyo';
+import { tokyoLight, tokyoShapes } from './tokyo';
 
 /**
  * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
@@ -231,6 +231,31 @@ const ring = (count: number, radius: number, r: number): EnvShape[] =>
     const at = (v: number) => Math.round(radius * v * 1e4) / 1e4;
     return food(at(Math.cos(angle)), at(Math.sin(angle)), r);
   });
+
+/**
+ * The settings of the scene Tokyo rail network (ADR 0024, 0029), with `extra` on top: the scene with light adds the
+ * strength of its light (ADR 0042).
+ */
+const tokyo = (extra: Partial<Settings> = {}) =>
+  jones(
+    { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
+    {
+      model: 'extended',
+      lattice: [512, 512],
+      density: 0.01,
+      capacity: 0.25,
+      layout: 'food',
+      boundary: 'dish',
+      foodStrength: 0.03,
+      growth: true,
+      flow: true,
+      // Measured with 1, 1.4 and 2 over ten seeds each, twice (ADR 0029): with 1.4 the total length of the
+      // network is that of the organism (1.77 against 1.75 times the minimum spanning tree). The I0 = 2 of the
+      // model of Tero et al. 2010 (Fig. 4) has another unit.
+      flowStrength: 1.4,
+      ...extra,
+    },
+  );
 
 const FOGLEMAN_WHY =
   'Not derived from biology. Fogleman’s program draws random settings and prints them, and he saved this set under its name. The values are copied exactly: radians turned into degrees, his kept fraction into decay = 1 − kept, and his repulsion factor into a negative weight on the other strains’ trails.';
@@ -617,27 +642,30 @@ PRESETS.push(
       label: 'Fig. 1',
       note: 'at Science, free to read after a free registration',
     },
-    settings: () =>
-      jones(
-        { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
-        {
-          model: 'extended',
-          lattice: [512, 512],
-          density: 0.01,
-          capacity: 0.25,
-          layout: 'food',
-          boundary: 'dish',
-          foodStrength: 0.03,
-          growth: true,
-          flow: true,
-          // Measured with 1, 1.4 and 2 over ten seeds each, twice (ADR 0029): with 1.4 the total length of the
-          // network is that of the organism (1.77 against 1.75 times the minimum spanning tree). The I0 = 2 of the
-          // model of Tero et al. 2010 (Fig. 4) has another unit.
-          flowStrength: 1.4,
-        },
-      ),
+    settings: () => tokyo(),
     // The start layout 'food' places the colony on the first food: the station of Tokyo.
     env: tokyoShapes(),
+  },
+  {
+    id: 'tokyo-light',
+    name: 'Tokyo with light',
+    group: 'experiments',
+    source: 'Tero et al. 2010, Fig. 2B',
+    summary: 'The Tokyo map with light on the mountains and the lakes: the colony keeps to low ground.',
+    watch:
+      'The colony grows from Tokyo over the whole land, the lit mountains too: light turns an agent away only at its edge. Then the tubes on lit ground starve first. From step 4,000 on about a twentieth of the network lies on lit ground, which is a quarter of the land. Without light it is about a tenth.',
+    about:
+      'The slime mold avoids bright light. So Tero and colleagues lit the mountains and the lakes of their map, and its network kept to the low ground, more like the railway. Here the light lies on 53 squares of 9 × 10 km that are 200 m or more above the sea, and on Lake Kasumigaura. Every lit cell is equally bright; the mask of the paper has shades.',
+    strainRoles: ['Jones’ foraging agent, drawn to food, flees light'],
+    why: 'The settings of the scene Tokyo rail network, with the app’s Light strength of 0.05: strengths from 0.02 to 0.5 kept as much of the network off the lit ground. The light is this app’s repellent, not a rule of the paper. Elevations: SRTM (NASA and USGS). Lake Kasumigaura and coast: © OpenStreetMap contributors. Stations: Wikidata.',
+    figure: {
+      href: 'https://doi.org/10.1126/science.1177894',
+      label: 'Fig. 2B',
+      note: 'at Science, free to read after a free registration',
+    },
+    settings: () => tokyo({ lightStrength: 0.05 }),
+    // The light comes after the food and the walls: the start layout 'food' places the colony on the first food.
+    env: [...tokyoShapes(), ...tokyoLight()],
   },
   {
     id: 'food-ring',
@@ -835,8 +863,12 @@ export function sourceText(p: Preset): string {
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';
     case 'nakagaki':
       return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app. The flow in the tubes is built from the model of Tero, Kobayashi and Nakagaki (2007), on the cells of the grid.';
-    case 'tero':
-      return 'Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds the experiment of Fig. 1. The flow in the tubes is built from the model of the paper, on the grid’s cells; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.';
+    case 'tero': {
+      // "Fig. 1": the runs without light; "Fig. 2B": the runs with light on the mountains and the lakes.
+      const figure = p.source.slice('Tero et al. 2010, '.length);
+      const runs = figure === 'Fig. 1' ? `the experiment of ${figure}` : `the runs with light of ${figure}`;
+      return `Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds ${runs}. The flow in the tubes is built from the model of the paper, on the grid’s cells; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.`;
+    }
     case 'later':
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'coarsening':

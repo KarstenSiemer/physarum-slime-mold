@@ -100,6 +100,7 @@ describe('presets', () => {
       'foraging-maze',
       'coarsening',
       'tokyo',
+      'tokyo-light',
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
@@ -167,6 +168,7 @@ describe('presets', () => {
   it('run each scene of Jones on the lattice of its figure, and the app’s scenes on a grid shaped like the screen', () => {
     const lattices: Record<string, [number, number]> = {
       tokyo: [512, 512], // this app's choice (ADR 0029)
+      'tokyo-light': [512, 512], // the map of the Tokyo scene
       coarsening: [400, 400], // Baumgarten, Jones and Hauser 2015, p. 1204 (ADR 0045)
       'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
       'rival-networks': [384, 384],
@@ -364,6 +366,8 @@ describe('presets', () => {
   it('name the figure of the paper in the Jones source text', () => {
     expect(sourceText(preset('network'))).toContain('Fig. 4 of the paper');
     expect(sourceText(preset('spots'))).toContain('Fig. 16 (top) of the paper');
+    expect(sourceText(preset('tokyo'))).toContain('This scene rebuilds the experiment of Fig. 1.');
+    expect(sourceText(preset('tokyo-light'))).toContain('This scene rebuilds the runs with light of Fig. 2B.');
     expect(sourceKind(preset('maze'))).toBe('nakagaki');
     expect(sourceKind(preset('light'))).toBe('app');
     expect(sourceKind(preset('dunes'))).toBe('fogleman');
@@ -393,9 +397,12 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
     }
   });
 
-  it('links the maze and Tokyo to Fig. 1 of their papers', () => {
+  it('links the maze and Tokyo to Fig. 1 of their papers, and Tokyo with light to Fig. 2B', () => {
     expect(preset('maze').figure?.href).toBe('https://www.nature.com/articles/35035159/figures/1');
     expect(preset('tokyo').figure?.href).toBe('https://doi.org/10.1126/science.1177894');
+    // Fig. 2B shows the network under the mask of light (Tero et al. 2010, p. 440): the scene's chip names it.
+    expect(preset('tokyo-light').figure).toEqual({ ...preset('tokyo').figure, label: 'Fig. 2B' });
+    expect(preset('tokyo-light').source).toBe('Tero et al. 2010, Fig. 2B');
   });
 
   it('opens the free PDF of Baumgarten, Jones and Hauser 2015 at the page of Fig. 2 (ADR 0045)', () => {
@@ -409,7 +416,7 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
 
   it('is absent where no figure shows the result of the scene', () => {
     const linked = PRESETS.filter((p) => p.figure).map((p) => p.id);
-    expect(linked).toHaveLength(11);
+    expect(linked).toHaveLength(12);
     for (const p of PRESETS)
       if (sourceKind(p) === 'app' || sourceKind(p) === 'fogleman' || p.source.startsWith('After'))
         expect(p.figure, p.id).toBeUndefined();

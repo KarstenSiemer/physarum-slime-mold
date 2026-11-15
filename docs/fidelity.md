@@ -47,7 +47,7 @@ page; **none** the docs hold no source.
 | 10  | The sheet shrinks onto the food                  | Matches the model only                  | Shrinking plasmodium                  |
 | 11  | Wound healing                                    | Partly, against the model only          | Wound healing                         |
 | 12  | Chemotaxis toward food                           | Looks similar                           | every scene with food                 |
-| 13  | Avoidance of light                               | Looks similar                           | Fleeing light                         |
+| 13  | Avoidance of light                               | Partly: late, and not while it grows    | Fleeing light, Tokyo with light       |
 | 14  | Answer to new food within about 15 min           | Not measured                            | none                                  |
 | 15  | Memory in the tube network                       | Not measured                            | none                                  |
 | 16  | Tubes break and form again within hours          | Partly: they form again on one map only | every scene with the flow             |
@@ -85,8 +85,14 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
     and stays.
   - The positions of the cities are fitted to the figures (ADR 0024). The network is the trail above 1.5, thinned to
     lines. That threshold is this app's, and nobody measured how the numbers depend on it.
-  - Only the protocol without light is built. The second protocol of the paper (a sheet first, then all foods) ran
-    only in a CPU prototype with 2 seeds (ADR 0029, prototype (b)).
+  - The protocol with light is the scene Tokyo with light (ADR 0042; WebGPU, 10 seeds): at step 48,000 TL 1.78 ± 0.07,
+    MD 0.83 ± 0.01 and FT 0.88 ± 0.04, and over the samples from step 16,000 on TL 1.77 and FT 0.88 against 1.84 and
+    0.91 without light. The differences are about two standard errors and no larger than two sets of seeds of one
+    rule differ, so the runs do not show that light changes the measures. The paper gives no TL or MD of its own for
+    the runs with light; its FT with light is 0.86 ± 0.04. The light of the scene has one strength, the mask of the
+    paper has shades, and the large food source outside the map is not built. Row 13 has the avoidance.
+  - The second protocol of the paper (a sheet first, then all foods) ran only in a CPU prototype with 2 seeds
+    (ADR 0029, prototype (b)).
   - Nobody compared the network with the lines of the rail map. The paper calls the organism's network comparable
     to the railway; its FT is 0.80 to 0.86 against 0.96.
 
@@ -231,7 +237,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 ### 13. Avoidance of light
 
 - **Organism**: Tero et al. 2010 (p. 440) state that the plasmodium avoids bright light, and used light of graded
-  intensity for mountains and lakes [V, read 2026-11-13]. Jones 2010, p. 142 names light as a trigger of the
+  intensity for mountains and lakes [V, read 2026-11-13]. The mask kept the growth to the more shaded areas (caption
+  of Fig. 2) [V, read 2026-11-15]; the paper gives no number for it. Jones 2010, p. 142 names light as a trigger of the
   sclerotium [J]. White light repels the plasmodium, and so do sodium chloride, sugar in a high concentration and
   removed substrate (Tsuda et al. 2012, p. 1 and 2 [V]). In an electric field 13 of 16 pieces had grown more toward
   the cathode after 6 h (p. 4 [V]). The docs hold no measurement of how far or how fast the plasmodium leaves light.
@@ -241,9 +248,15 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   source ([ADR 0044](adr/0044-a-repellent-source-in-the-jones-model.md)). To use this rule for light is this app's
   choice (ADR 0007). Jones' own light rule is another one: an agent in a lit region has its sensor values multiplied
   by a factor below 1 (Jones and Adamatzky 2012, p. 7 [V]). It is not built.
-- **Measured against the model only**: in the Jones model the agents leave the disc of a repellent source, and the
-  field follows Jones' one map with a source below 0 (GPU tests, ADR 0044). No ADR has a number for Fleeing light,
-  and none compares with the organism.
+- **Measured** (ADR 0042, the scene Tokyo with light, WebGPU, 10 seeds): the light covers 23.9 % of the land. At step
+  2,000 the network holds 15.9 % of its cells on lit ground (13 to 18), against 21 to 25 % where the light would be in
+  the scene without light (3 seeds): the colony grows over lit ground almost as over dark ground. From step 16,000 on
+  it holds 4.6 % there (1.3 to 8.7) against 9.1 % (6.2 to 16.2). Light strengths of 0.02, 0.2 and 0.5 give 4.5, 3.8
+  and 5.1 % (2 seeds each). In the Jones model the agents leave the disc of a repellent source, and the field follows
+  Jones' one map with a source below 0 (GPU tests, ADR 0044). No ADR has a number for Fleeing light.
+- **Limits**: in a filled lit area the repellent is the same in every cell, so by the rule the light turns an agent
+  only at the edge of the area (read in the rule, not measured), and growth does not read light. In the paper the
+  mask kept the growth of the organism to the shaded areas.
 
 ### 14. Answer to new food within about 15 min
 
@@ -355,10 +368,8 @@ The organism has a number in the docs, and the model was never measured:
 - the answer to a new food, its time and its width (row 14; Kramar and Alim 2021);
 - the life of one tube after its flux stops, and the delay of its answer (row 4; Marbach et al. 2023);
 - the longer of two tubes between two foods disappears (row 3; Tero et al. 2007);
-- the coverage of the land over time against the panels of Fig. 1, the second protocol and the protocol with light
-  (row 1 and 6; Tero et al. 2010);
-- the coarsening of a network: the number of veins over time, the coverage, and the exponent of the mean vein length
-  (row 8; Baumgarten et al. 2015).
+- the coverage of the land over time against the panels of Fig. 1, and the second protocol (row 1 and 6; Tero et al.
+  2010).
 
 The model has a number, and the docs hold none of the organism:
 

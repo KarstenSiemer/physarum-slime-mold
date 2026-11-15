@@ -3,6 +3,8 @@
 - Status: accepted (that a link carries the drawing is owner decision D8 of 2026-11-09; the
   behaviour of a drawing too large for a link and the caps are the owner's decisions of 2026-11-10)
 - Date: 2026-11-10
+- Changed by [ADR 0042](0042-a-second-tokyo-scene-with-light.md) (2026-11-15): a link of version 3 writes the number
+  of the scene's shapes as a varint. Links of versions 1 and 2 open as before.
 
 ## Context
 

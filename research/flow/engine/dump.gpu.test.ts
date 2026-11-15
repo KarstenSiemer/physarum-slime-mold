@@ -12,6 +12,8 @@
 // - VITE_RADIUS: the spectral radius that the momentum of the pressure iteration is tuned for (FLOW.radius in
 //   src/engine/flow.ts), in place of the app's, for the measurement of decision 18 of ADR 0029. Each line of the log
 //   names the radius of the run.
+// - VITE_SHAPES=dabs: the shapes of light-dabs.ts in place of the scene's: the light on the mountains as the
+//   specification of 2026-11-11 drew it (ADR 0042).
 // - VITE_RECOVER: the share by which the flow memory of ground without a tube grows per step (FLOW.recover in
 //   src/engine/flow.ts), in place of the app's, for the measurement of decision 19 of ADR 0029. Each line of the log
 //   names the share of the run.
@@ -40,6 +42,7 @@ import type { Backend, EnvTool } from '../../../src/engine/types';
 import { WebGpuBackend } from '../../../src/engine/webgpu';
 import { constrain } from '../../../src/model/params';
 import { presetById } from '../../../src/model/presets';
+import { dabShapes } from './light-dabs';
 
 const OUT = 'research/flow/out/engine/';
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
@@ -92,7 +95,10 @@ it('dumps a run of a scene', async () => {
     if (gpuErrors.length < 5) gpuErrors.push(e.error.message.slice(0, 300));
   });
   const engine = await Engine.create(canvas, settings, undefined, backend);
-  await engine.load(settings, preset.env ?? []);
+  // An empty VITE_SHAPES is none, as a shell gives it.
+  const shapes = env.VITE_SHAPES === 'dabs' ? dabShapes() : (preset.env ?? []);
+  if (env.VITE_SHAPES && env.VITE_SHAPES !== 'dabs') throw new Error(`no shapes ${env.VITE_SHAPES}`);
+  await engine.load(settings, shapes);
   const sim = engine.sim;
   // A disc in the frame of the scene's shapes, on the grid of the simulation: its centre and its radius in cells. The
   // kind of the shape does not change where it lies.

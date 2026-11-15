@@ -32,9 +32,10 @@ export const MAX_WORK = 64;
 
 /**
  * Version 2 writes the revision of the scene's shapes after the scene's id (ADR 0027). A link of version 1 names
- * revision 0, the shapes of 2026-11-10.
+ * revision 0, the shapes of 2026-11-10. Version 3 writes the number of the scene's shapes as a varint, where versions 1
+ * and 2 write one byte: the scene Tokyo with light has more than 255 shapes (ADR 0042).
  */
-const VERSION = 2;
+const VERSION = 3;
 /** Grid sides that gridSize() (engine/sizing.ts) gives. */
 const [SIDE_MIN, SIDE_MAX] = [16, 4096];
 /** Largest distance of a position from the grid's origin, in cells. A drag on screen stays below 2^17. */
@@ -182,7 +183,7 @@ class Reader {
 
 /**
  * The drawing as bytes (docs/adr/0021): a version, the scene's id, for a scene the revision of its shapes (ADR 0027),
- * its strains' origins and which of those shapes the list holds, then the strokes. Each stroke has a head byte (kind, arena, and which of grid, start, end and radius
+ * its strains' origins, the number of its shapes (a varint) and which of them the list holds, then the strokes. Each stroke has a head byte (kind, arena, and which of grid, start, end and radius
  * follow), then those that follow: its grid when it differs from the stroke before, its start from the end of the
  * stroke before unless it starts there (a drag), its end from its start unless it is a dab, and its radius unless it
  * is the one before. Positions and radii count whole steps of 1/16 cell (STEP), exactly as the engine records them.
@@ -205,7 +206,7 @@ export function packDrawing(d: Drawing): Uint8Array<ArrayBuffer> | undefined {
     if (d.shapes.length !== shapes.length) return undefined;
     out.byte(d.origins.length);
     for (const o of d.origins) out.byte(o + 1);
-    out.byte(d.shapes.length);
+    out.varint(d.shapes.length);
     for (let j = 0; j < d.shapes.length; j += 8) {
       let bits = 0;
       for (let k = 0; k < 8; k++) if (d.shapes[j + k]) bits |= 1 << k;
@@ -265,7 +266,7 @@ export function unpackDrawing(data: Uint8Array): Drawing | undefined {
 
 function unpack(input: Reader): Drawing | undefined {
   const version = input.byte();
-  if (version !== 1 && version !== VERSION) return undefined;
+  if (version !== 1 && version !== 2 && version !== VERSION) return undefined;
   const length = input.byte();
   const scene = String.fromCharCode(...Array.from({ length }, () => input.byte()));
   const d: Drawing = { scene, revision: 0, origins: [], shapes: [], strokes: [] };
@@ -280,7 +281,8 @@ function unpack(input: Reader): Drawing | undefined {
     if (n < 1 || n > MAX_STRAINS) return undefined;
     d.origins = Array.from({ length: n }, () => input.byte() - 1);
     if (d.origins.some((o) => o >= strains)) return undefined;
-    const shapes = input.byte();
+    // One byte before version 3: no scene had more than 255 shapes.
+    const shapes = version === VERSION ? input.varint() : input.byte();
     if (shapes !== env.length) return undefined;
     for (let j = 0; j < shapes; j += 8) {
       const bits = input.byte();
