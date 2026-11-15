@@ -1360,8 +1360,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const [gpuLane, gpuFood] = [laneOf(gpuTrail, 4, 0), laneOf(gpuScent, 2, 0)];
         expect(relError(gpuLane, run(lane0, none, window)), 'trail').toBeLessThan(1e-5);
         expect(relError(gpuFood, run(zero, food, window)), 'food').toBeLessThan(1e-5);
-        // The Jones model has no light.
-        expect(Math.max(...laneOf(gpuScent, 2, 1))).toBe(0);
+        // The repellent of the Jones model (ADR 0044) takes the same window: drawn light is its source.
+        const light = (c: number) => ((env[c * 4 + 2] ?? 0) / 255) * 255 * 0.2;
+        const gpuLight = laneOf(gpuScent, 2, 1);
+        expect(Math.max(...gpuLight), 'repellent').toBeGreaterThan(0);
+        expect(relError(gpuLight, run(zero, light, window)), 'repellent').toBeLessThan(1e-5);
         for (const other of WINDOWS.filter((o) => o !== window)) {
           expect(relError(gpuLane, run(lane0, none, other)), `trail, ${other}`).toBeGreaterThan(1e-3);
           expect(relError(gpuFood, run(zero, food, other)), `food, ${other}`).toBeGreaterThan(1e-3);
@@ -1469,7 +1472,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const sim = await make(settings, w, h, 1);
           sim.paint(SCENE);
           const env = await sim.readEnv();
-          const food = (i: number) => ((env[(i >> 1) * 4 + 1] ?? 0) / 255) * 255 * 0.05 * (1 - (i % 2));
+          // The source of each lane: food in lane 0, and in lane 1 the repellent of drawn light (ADR 0044).
+          const food = (i: number) =>
+            i % 2 === 0
+              ? ((env[(i >> 1) * 4 + 1] ?? 0) / 255) * 255 * 0.05
+              : ((env[(i >> 1) * 4 + 2] ?? 0) / 255) * 255 * settings.lightStrength;
           let r = 3;
           const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
           sim.writeTrail(Float32Array.from({ length: w * h * 4 }, () => Math.fround(100 * rnd())));
@@ -1487,7 +1494,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             for (let i = 0; i < nextScent.length; i++) {
               const [next, drawn] = [nextScent[i] ?? 0, viewScent[i] ?? 0];
               if (food(i) === 0) expect(Object.is(next, drawn), `scent ${i}, step ${k}`).toBe(true);
-              else expect(Math.abs(next - food(i) - drawn), `food ${i}, step ${k}`).toBeLessThan(1e-3);
+              else expect(Math.abs(next - food(i) - drawn), `source ${i}, step ${k}`).toBeLessThan(1e-3);
               if (food(i) > 0) fed++;
             }
             expect(fed).toBeGreaterThan(20);
