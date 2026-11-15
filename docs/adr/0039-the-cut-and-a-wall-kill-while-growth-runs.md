@@ -108,7 +108,8 @@ My own choices, under the same delegation:
 
 - No scene changes a byte. The digests of `research/flow/README.md` part 6 (`digest.gpu.test.ts`: the default
   settings and the 20 scenes, 500 steps, WebGPU and WebGL2, M3 Pro, 2026-11-15) of this branch against `main` at
-  `71b0161`, both made on the same machine: 42 of 42 equal with the flow off (`VITE_PATCH='{"flow":false}'`), and
+  `71b0161`, both made on the same machine, once before and once after the merge of `main` at `281d69e` (PR #77
+  changed no file of the app but a test): 42 of 42 equal with the flow off (`VITE_PATCH='{"flow":false}'`), and
   42 of 42 equal with the flow as each scene has it, with the digests of the memory and the pressure of the flow
   (`VITE_FLOW=1`). The files of both sides are equal byte for byte. The five scenes with growth (`foraging-maze`,
   `tokyo`, `food-ring`, `rival-networks`, `tokyo-rivals`) run the new test in every step and find no agent to kill:
@@ -149,8 +150,8 @@ My own choices, under the same delegation:
     model: every agent under the wall, and every agent of the wound, is dead where it was, no agent is left in a wall,
     and the count falls by them.
   - The tests of ADR 0023 and ADR 0038 run without growth and hold as before.
-- `research/flow/engine/mutate.ts` holds the wrong rules K1 to K10. Each one fails at least one test (run of
-  2026-11-15 on the branch, before the merge of `main`):
+- `research/flow/engine/mutate.ts` holds the wrong rules K1 to K10. Each one fails at least one test (runs of
+  2026-11-15 on the branch before and after the merge of `main` at `281d69e`, with the same results):
 
   | Rule                                                             | Fails                                                                      |
   | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -172,3 +173,8 @@ My own choices, under the same delegation:
   in the wound. While growth runs it dies at the start of the next step without a move or a deposit; without growth
   the cut moves it to a random point of the grid in the next step. How often this happens is not measured
   (`TODO.md`).
+- The logs are in `research/flow/logs.tar.gz`, folder `logs/engine/cut-growth/`: the digests of `main` at `71b0161`
+  (`digest-main*.jsonl`) and of the branch merged with `main` at `281d69e` (`digest-branch*.jsonl`), the run of the
+  wrong rules on that code (`mutations.txt`), and the Tokyo case (`tokyo-cut.txt`, the lines of `measure-tokyo.ts`;
+  `tokyo-cut.jsonl`, the log of the run). The commands: `research/flow/README.md`, part 6 for the digests, part 7 for
+  the wrong rules, part 13 for the Tokyo case.
