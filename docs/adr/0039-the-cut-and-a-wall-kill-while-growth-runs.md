@@ -69,7 +69,7 @@ My own choices, under the same delegation:
 
 4. **Growth runs while `P.growth.x > 0`: growth on, one agent per cell, and Gf > 0.** Reason: with Gf = 0 no child is
    ever born, so the reason of decision 1 (the colony grows back) does not hold and that of decision 2 does: nothing
-   would bring the agents back but inoculate. `growthOn()` alone would kill also with Gf = 0. The rule is the same in
+   would bring the agents back but inoculate and, with the flow, respawn. `growthOn()` alone would kill also with Gf = 0. The rule is the same in
    both models: it asks for growth, not for the model, as decisions 1 and 2 do. A Jones model with growth switched on
    kills too; no scene of Jones has growth (`src/model/presets.ts`).
 5. **The death is a part of `shrinkage()`**, after random shrinkage and starvation (`removed()`, `agents.wgsl:209` and
@@ -127,8 +127,8 @@ My own choices, under the same delegation:
   | 27,000 | 7,399          | 4,000               | 18,155                              | 0                     | 33                                |
   | 48,000 | 4,933          | 4,170               | 6,475                               | 0                     | 33                                |
 
-  The sea holds no trail at any of the 15 dumped steps up to 48,000. The cut killed the agents of its wound (3,997 to
-  3,594 alive after the hold), and the network joins all 33 stations again by step 24,600, 500 steps (17 min of model
+  The sea holds no trail at any of the 15 dumped steps up to 48,000. After the hold 3,594 agents live, 403 fewer than
+  before it, and the network joins all 33 stations again by step 24,600, 500 steps (17 min of model
   time) after the start of the cut; PR #77 found them joined by step 25,000. The log is in `research/flow/logs.tar.gz`
   (Consequences, last item).
 
@@ -167,8 +167,8 @@ My own choices, under the same delegation:
   `claim` on WebGPU, modes 0 and 1 on WebGL2), and only while growth runs the tool, and the wall byte while the flag
   of ADR 0038 is set. Not measured: other GPU campaigns ran on the machine on 2026-11-15.
 - Found on the way, not changed: respawn (flow on) draws its point anywhere on the grid, also in the wound of a held
-  cut, and the cut does not clear the flow memory or the tube body there (`respawn()` in `agents.wgsl`; the cut acts
-  on the chemicals only, `diffuse.wgsl:79`–`83`). So while the cut is held over a tube, a dead agent can come to life
+  cut, and the cut does not clear the flow memory or the tube body there (`respawn()` in `agents.wgsl`; in the fields the
+  cut clears only the chemicals, `diffuse.wgsl:79`–`83`). So while the cut is held over a tube, a dead agent can come to life
   in the wound. While growth runs it dies at the start of the next step without a move or a deposit; without growth
   the cut moves it to a random point of the grid in the next step. How often this happens is not measured
   (`TODO.md`).
