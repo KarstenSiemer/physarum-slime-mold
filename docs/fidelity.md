@@ -42,7 +42,7 @@ page; **none** the docs hold no source.
 | 5   | Shortest path through a maze                     | Partly (one route only)                 | Maze                                  |
 | 6   | Growth front and its speed                       | Partly: about ten times too fast        | Tokyo rail network, Foraging maze     |
 | 7   | Speed of the flow                                | Fitted with the time scale              | Tokyo rail network                    |
-| 8   | Network formation and minimisation               | Matches the model only                  | Transport network, Minimizing network |
+| 8   | Network formation and coarsening                 | Partly: coverage, degree, β; not widths | Coarsening network, Transport network |
 | 9   | Shortest path and Steiner tree between foods     | Matches the model only                  | Shortest path, Steiner tree           |
 | 10  | The sheet shrinks onto the food                  | Matches the model only                  | Shrinking plasmodium                  |
 | 11  | Wound healing                                    | Partly, against the model only          | Wound healing                         |
@@ -160,11 +160,25 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   It also compares the speed of an agent with the speed of the flow, and a blocked agent moves less than one cell per
   step.
 
-### 8. Network formation and minimisation
+### 8. Network formation and coarsening
 
 - **Organism** [J]: the plasmodium grows in a reticulated way and keeps veins between food sources (Jones 2010, p.
-  130). Tero et al. 2010, Fig. 1 shows a sheet that thins to a network [V]. The docs hold no time series of numbers.
-- **Model**: Jones' agents, one agent per cell.
+  130). Tero et al. 2010, Fig. 1 shows a sheet that thins to a network [V].
+- **Organism, the coarsening** [V] (Baumgarten, Jones and Hauser 2015, Acta Phys. Pol. B 46: 1201; a plasmodium on
+  agar without food, filmed from 16 h to 20 h): the share of the network's circle that veins cover falls to about 0.2
+  and stays (p. 1209); the junctions join three veins (p. 1208); the number of veins falls at one rate, 7.69 per tmax
+  (Fig. 6, p. 1212); the mean length grows with the number of veins to the power −0.35 (p. 1214); the widths and the
+  lengths of the veins are log-normal, and the mean width stays the same (p. 1208, 1212, 1214).
+- **Model**: Jones' agents, one agent per cell; in the Coarsening network with his growth and shrinkage.
+- **Measured against the organism and the paper's model** (ADR 0045, `research/coarsening/README.md`; the scene's
+  settings at sensor distances 3 to 15, WebGPU, seeds 1 to 3, `b93584e` plus the branch of ADR 0045): the lowest
+  coverage is 0.14 to 0.22, by the level of the vein mask (organism and paper's model: about 0.2); 99 % of the
+  junctions join three veins; the power is −0.38 (paper's model −0.41). The veins fall at two rates, 22.2 and then 5.4
+  per tmax (paper's model 31.25 and 6.25). The coarsening time follows the paper's law in 1 / SO², but the app takes
+  1.6 to 1.7 times as long at sensor distances 3 to 7 (11,400 ± 2,066 steps at 5 against 6,850).
+- **Not reproduced**: the log-normal widths (every vein of the model has one width, in the paper's model too); the one
+  rate of the organism; the end (the model's last ring closes to a spot, the plasmodium walks away).
+- **Not measured**: the distributions of the lengths and widths, WebGL2, and the extended model with the flow.
 - **Measured against Jones** (ADR 0027, The scenes of Jones against their figures): the lacunae of the Transport
   network at steps 99, 512, 1,740 and 4,151 are 50.4, 24.5, 12.0 and 6.7 (Fig. 4: 56, 23, 12, 8). The Minimizing
   network ends with 1.6 to 2.0 lacunae at step 31,190 (Fig. 5: 1). The scale grows with SO (Fig. 10), a GPU test in
@@ -333,7 +347,7 @@ The organism has a number in the docs, and the model was never measured:
 
 The model has a number, and the docs hold none of the organism:
 
-- the scenes of Jones (rows 8 to 11), the reach of the food scent (row 12), the times of the Foraging maze, and the
+- the scenes of Jones 2010 (rows 8 to 11; row 8 has the organism's numbers for the Coarsening network only), the reach of the food scent (row 12), the times of the Foraging maze, and the
   Maze, until someone reads Nakagaki et al. 2000 (row 5).
 
 Neither side is measured, not even against Jones: Plateau's angles, Jones' Fig. 6, 9, 11 to 14, 20 and 23, the time

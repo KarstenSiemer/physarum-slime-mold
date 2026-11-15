@@ -206,9 +206,18 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
     expect([d.shrinkEvery, d.shrinkWindow, d.shrinkMin, d.shrinkMax]).toEqual([3, 5, 0, 20]);
   });
 
-  it('keeps growth off in every scene but the foraging scenes, and in a link without it', () => {
-    // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031).
-    const grows = ['foraging-maze', 'tokyo', 'tokyo-light', 'food-ring', 'rival-networks', 'tokyo-rivals'];
+  it('keeps growth off in every scene but the foraging scenes and the Coarsening network, and in a link without it', () => {
+    // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031). The Coarsening network
+    // has the growth and shrinkage of its paper (ADR 0045).
+    const grows = [
+      'foraging-maze',
+      'coarsening',
+      'tokyo',
+      'tokyo-light',
+      'food-ring',
+      'rival-networks',
+      'tokyo-rivals',
+    ];
     for (const p of PRESETS) {
       const s = p.settings();
       expect(s.growth, p.id).toBe(grows.includes(p.id));
