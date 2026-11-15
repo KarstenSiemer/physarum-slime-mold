@@ -204,7 +204,7 @@ every scene.
 
 ## 7. The agents
 
-ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038, 0039. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
+ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038, 0039, 0041. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
 `gl/glsl/tools.glsl`.
 
 The agent pass runs these parts in order for each agent.
@@ -247,7 +247,9 @@ no move and no deposit in its step.
   grid. It comes to life there with the chance 0.2 · (D_s − 0.5) / 0.5 if the cell is open, holds a tube of its own
   strain (B_s ≥ 0.05) and has D_s > 0.5 (section 8.5; ADR 0031). A tube of another strain gives it no life. With one
   agent per cell the cell must also be empty at the start of the step, whatever the strain of the agent in it, and the
-  agent claims it like a move (7.6).
+  agent claims it like a move (7.6). While the cut is held, a point within its radius (the wound) is no respawn point,
+  with and without growth: the agent stays dead and draws again in the next step (ADR 0041). This test draws no random
+  number, so every other draw of the stream respawn (7.7) stays as it is.
 
 ### 7.3 Sensing
 
@@ -400,7 +402,8 @@ An agent follows the flow of its own strain: D and B below are those of the agen
 
 - **Starvation** (7.1): the chance 0.02 · h² / (D² + h²) per step, h = 0.01: 2 % at D = 0, 1 % at D = 0.01, 0.005 % at
   D = 0.2.
-- **Respawn** (7.2): never for D ≤ 0.5, 20 % per step and dead agent at D = 1 on the cell it draws.
+- **Respawn** (7.2): never for D ≤ 0.5, 20 % per step and dead agent at D = 1 on the cell it draws; never in the wound
+  of a held cut.
 - **Growth**: an agent does not divide on a cell with D < 0.01 (section 9).
 - The agent and growth passes of step k read D of step k − 1.
 - A strain that covers fewer than 2 sites has no flux, and none of its cells adapts (8.4): its agents follow the memory
@@ -543,6 +546,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |
 | The cut and a wall with growth (7.1)    | "the cut and a painted wall while growth runs": the agents die, none lands in a closed room; placed with Gf 0 or growth off     |
+| Respawn and the cut (7.2)               | `flow.gpu.test.ts`, "respawn while the cut is held": no birth in the wound, with and without growth; outside it as before       |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
@@ -588,4 +592,5 @@ placed off the wall now, as the cut places its agents (7.2, ADR 0038). And the c
 at random open points of the whole grid also while growth ran. On the Tokyo map these points lay also in the sea
 beyond the coast and on starved land, and growth made colonies of them there (ADR 0029, amendment 2026-11-15 (2)).
 While growth runs, both kill these agents now, and the colony grows back from the margin of the wound (7.1, 9;
-ADR 0039).
+ADR 0039). And respawn drew its point anywhere on the grid, so a dead agent could come to life in the wound of a held
+cut. A point in the wound is no respawn point now (7.2, ADR 0041).

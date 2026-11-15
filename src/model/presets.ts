@@ -77,10 +77,12 @@ export interface Figure {
 }
 
 /**
- * Jones 2010 in the repository of his university, open access: the publisher's PDF, whose page 1 is page 127 of the
- * journal (ADR 0037).
+ * Jones 2010, the publisher's PDF that the repository of his university holds as open access, in the copy of the
+ * Wayback Machine: the repository itself shows a bot check and then loses the path (ADR 0043). Page 1 of the PDF is
+ * page 127 of the journal (ADR 0037).
  */
-export const JONES_PDF = 'https://uwe-repository.worktribe.com/980579/1/artl.2010.16.2.pdf';
+export const JONES_PDF =
+  'https://web.archive.org/web/20260923011704/https://uwe-repository.worktribe.com/preview/980585/artl.2010.16.2.pdf';
 
 /** A figure of Jones 2010 on page `journalPage` of the journal: the link opens the free PDF at that page. */
 function jonesFigure(label: string, journalPage: number): Figure {
