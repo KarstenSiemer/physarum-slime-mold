@@ -2,6 +2,8 @@
 
 - Status: accepted (2026-11-14), built
 - Date: 2026-11-14
+- Changed by [ADR 0043](0043-free-links-to-the-papers.md) (2026-11-15): the link to Jones 2010 goes to the copy of
+  the same PDF in the Wayback Machine; the repository loses the path after its bot check.
 
 ## Context
 

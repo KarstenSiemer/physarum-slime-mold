@@ -9,8 +9,9 @@ blob-report/
 .DS_Store
 CLAUDE-SECURITY-*/
 
-# Copyrighted paper (MIT Press); cite by DOI instead.
+# Copyrighted papers; cite by DOI and link a free copy instead (ADR 0043).
 artl.2010.16.2.pdf
+papers/
 
 .vitest/
 
