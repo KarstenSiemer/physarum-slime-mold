@@ -4,6 +4,7 @@
   2026-11-15
 - Date: 2026-11-15
 - Extends ADR 0023 (the Cut tool) and ADR 0038 (an agent under a painted wall).
+- Extended by ADR 0041 (respawn skips the wound of a held cut), 2026-11-15.
 
 ## Context
 

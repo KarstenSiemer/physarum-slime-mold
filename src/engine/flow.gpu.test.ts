@@ -9,7 +9,7 @@ import { at } from './at';
 import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowFields, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { compile } from './gl/programs';
-import { AgentToolKind } from './pack';
+import { AgentToolKind, type AgentTool } from './pack';
 import { GlSim } from './gl/sim';
 import { flowSites, foodStrokes, type FlowSites, type FoodStroke } from './sites';
 import type { AgentState, Backend, Sim, Stroke } from './types';
@@ -1115,6 +1115,112 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const byTool = dead * revive;
     expect(Math.abs(inside - byTool - byFlow * disc)).toBeLessThan(6 * Math.sqrt(byTool * (1 - revive)));
   }, 120_000);
+
+  describe('respawn while the cut is held (ADR 0041)', () => {
+    const [w, h] = [64, 64];
+    // The wound lies across two edges of the periodic grid and covers 62 % of it, so most draws of a respawn fall into
+    // it. A point within 0.001 cells of its rim counts as unsure: float32 and the CPU can put it on either side.
+    const [cx, cy, r] = [20.3, 40.7, 28.4];
+    const across = (d: number, size: number) => d - size * Math.round(d / size);
+    const rim = (a: AgentState) => Math.hypot(across(a.x - cx, w), across(a.y - cy, h)) - r;
+    const inWound = (a: AgentState) => rim(a) < -1e-3;
+    const outside = (a: AgentState) => rim(a) > 1e-3;
+    const alive = (a: AgentState) => (a.bits & ALIVE) !== 0;
+    const cut: AgentTool = { kind: AgentToolKind.cut, x: cx, y: cy, radius: r, strain: 0, revive: 0 };
+    /** A fed tube of the first strain on every cell. */
+    const fed = () => {
+      const memory = new Float32Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) memory.set([0.9, 1, 0.9, 0], c * 4);
+      return memory;
+    };
+
+    it('brings no dead agent to life in the wound, and every other one as without the cut', async () => {
+      // No food: the memory that the test writes stays. Without the rule every draw can place, and no agent changes
+      // what another one does: a run with a tool held differs from a run without one only by the tool.
+      const settings = flowing({ boundary: 'wrap', collisions: false, seed: 11 });
+      const step = async (tool?: AgentTool) => {
+        const sim = await make(settings, w, h, 40_000, 20_000);
+        sim.writeFlow(fed());
+        const before = await sim.readAgents();
+        sim.run(1, tool);
+        return { before, after: await sim.readAgents() };
+      };
+      const free = await step();
+      const held = await step(cut);
+      // Inoculate on the same disc, with the chance 0 to place an agent: only the cut makes a wound.
+      const other = await step({ ...cut, kind: AgentToolKind.inoculate });
+      expect(held.before).toEqual(free.before);
+      expect(other.before).toEqual(free.before);
+      let [dead, inside, kept, unsure] = [0, 0, 0, 0];
+      const wrong: string[] = [];
+      free.before.forEach((a, i) => {
+        const [b, c, d] = [free.after[i], held.after[i], other.after[i]];
+        if (!b || !c || !d) throw new Error('agent missing');
+        if (alive(a)) return;
+        dead++;
+        // The same draws: under Inoculate every dead agent does what it does without a tool.
+        if (JSON.stringify(d) !== JSON.stringify(b)) wrong.push(`${String(i)}: Inoculate changed the agent`);
+        if (alive(c) && inWound(c)) wrong.push(`${String(i)}: alive in the wound, ${String(rim(c))} from its rim`);
+        if (!alive(b) || inWound(b)) {
+          // No birth without the cut, or one in the wound: with the cut the agent stays dead where it was.
+          if (alive(b)) inside++;
+          if (JSON.stringify(c) !== JSON.stringify(a)) wrong.push(`${String(i)}: not dead where it was`);
+        } else if (outside(b)) {
+          // A birth outside the wound: the same point and heading with the cut.
+          kept++;
+          if (JSON.stringify(c) !== JSON.stringify(b)) wrong.push(`${String(i)}: another birth with the cut`);
+        } else unsure++;
+      });
+      expect(wrong.slice(0, 5)).toEqual([]);
+      expect(dead).toBe(20_000);
+      // Without the cut a dead agent comes to life with birth · (D − from) / (1 − from), and the wound holds its share
+      // of these births: the fault would show at more than a thousand agents in one step.
+      const q = (FLOW.birth * (0.9 - FLOW.birthFrom)) / (1 - FLOW.birthFrom);
+      const disc = (Math.PI * r * r) / (w * h);
+      expect(Math.abs(inside - dead * q * disc)).toBeLessThan(6 * Math.sqrt(dead * q * disc));
+      expect(Math.abs(kept - dead * q * (1 - disc))).toBeLessThan(6 * Math.sqrt(dead * q * (1 - disc)));
+      expect(inside).toBeGreaterThan(1500);
+      expect(kept).toBeGreaterThan(1000);
+      expect(unsure).toBeLessThanOrEqual(2);
+    }, 120_000);
+
+    it('brings no dead agent to life in the wound while growth runs, in every step of the hold', async () => {
+      // Growth runs (one agent per cell, a growth test every 50 steps), and no shrinkage test: step 0 is the only
+      // growth step here, so in the steps of the hold only respawn brings an agent to life. 1,000 of 6,000 agents live
+      // at the start.
+      const settings = flowing({ boundary: 'wrap', seed: 11, growth: true, growthEvery: 50, shrinkEvery: 0 });
+      const sim = await make(settings, w, h, 6000, 1000);
+      sim.writeFlow(fed());
+      sim.run(1);
+      let [born, removed] = [0, 0];
+      const wrong: string[] = [];
+      for (let k = 0; k < 6; k++) {
+        // The memory again before every step: without food the update keeps the flow memory, but the body follows the
+        // trail.
+        sim.writeFlow(fed());
+        const before = await sim.readAgents();
+        sim.run(1, cut);
+        const after = await sim.readAgents();
+        expect((sim.step - 1) % settings.growthEvery, 'no growth step').not.toBe(0);
+        before.forEach((a, i) => {
+          const b = after[i];
+          if (!b) throw new Error('agent missing');
+          // The cut kills the alive agents of its wound (ADR 0039), also one that walked into it in the step before.
+          // Such an agent is a dead agent like any other in this step: it can come to life again, outside the wound.
+          if (alive(a) && !inWound(a)) return;
+          if (alive(a)) removed++;
+          if (!alive(b)) return;
+          if (!alive(a)) born++;
+          if (inWound(b)) wrong.push(`step ${String(k)}, agent ${String(i)}: alive ${String(rim(b))} from the rim`);
+        });
+      }
+      expect(wrong.slice(0, 5)).toEqual([]);
+      // Outside the wound the flow brings agents to life: 635 on WebGPU and 639 on WebGL2 in the 6 steps (M3 Pro,
+      // 2026-11-15), and the cut killed 925 and 913.
+      expect(born).toBeGreaterThan(300);
+      expect(removed).toBeGreaterThan(300);
+    }, 120_000);
+  });
 
   it('keeps one agent per cell when the flow brings agents to life with the rule', async () => {
     const [w, h] = [48, 48];
