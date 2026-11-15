@@ -133,6 +133,22 @@ empty the dead ends sooner. So the app keeps 0.99999. The flux of the Tokyo scen
 with this radius and the sites of before: measured again with the sites of decision 17, a flux of 1
 gives a network a little nearer to the organism's length, but not by more than two sets of seeds
 differ, and it leaves a food source without a tube more often. The scene keeps its flux of 1.4.
+**How long starved ground stays closed** ([ADR 0029](../../docs/adr/0029-flow-in-the-tubes.md),
+amendment 2026-11-15 (2), part 13). Where a tube starved, its ground keeps a low flow memory: agents
+die there and do not divide there, until the memory has grown back to that of fresh ground, 18 h of
+model time after the deepest starvation. The record said that faint strands lived for ever when the
+ground was fresh again at once, but no run had shown it. Now the Tokyo scene ran with 18, 12, 6, 3
+and 1 h and the Maze with 18, 6, 3 and 1 h, ten seeds each. With every shorter time the ground
+between the tubes of the Tokyo map opens again, the growth rule of the agents fills it with a mesh
+that no flux feeds, and the mesh stays: from step 16,000 on the network is 1.95 times as long as the
+shortest tree with 12 h and 2.3 to 2.6 times with 6, 3 and 1 h, where it is 1.84 with 18 h and 1.75
+for the organism. In the Maze, which has no growth, only 1 h lets the dead ends fill again while
+they empty. So the app keeps 18 h. And the colony does grow back into a region that it lost: where
+the network around four cities is taken off, it joins them again within 7 to 13 minutes of model
+time, and where their foods are taken away for 100 minutes and come back, within 10 to 33 minutes.
+What stays closed is the ground between the tubes, where no tube is needed. The Cut tool of the app
+was no help for this test: it throws the agents of its wound to random points of the whole dish,
+also into the sea, where they grow into colonies.
 
 ## What is in this folder, and what you need to read
 
@@ -695,7 +711,8 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 npm run build && npx playwright test --project=e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 24, 71 and 5 tests pass (27 and 47 before the food sites of part 11).
+You must see 24, 73 and 5 tests pass (27 and 47 before the food sites of part 11, and 71 before the
+test of starved ground of part 13).
 
 - `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
   scale, and the growing mesh of part 5 with all rules on.
@@ -706,9 +723,10 @@ You must see 24, 71 and 5 tests pass (27 and 47 before the food sites of part 11
 - `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
   app.
 
-A test is worth what it catches. This script puts 87 wrong rules of the flow, of its food sites and
-of its radius into the code of the app, one at a time, and runs the tests of the flow for each one
-(about 50 minutes; the 42 of the food sites are part 11, the 4 of the radius part 12). Without a
+A test is worth what it catches. This script puts 93 wrong rules of the flow, of its food sites, of
+its radius and of starved ground into the code of the app, one at a time, and runs the tests of the
+flow for each one (about 55 minutes; the 42 of the food sites are part 11, the 4 of the radius part
+12, the 6 of starved ground part 13). Without a
 name it also runs the 93 wrong rules of the picture of the tubes (part 10), and the 8 wrong rules of
 an agent under a painted wall (ADR 0038, `U1` to `U8`) and the 10 of the cut and a wall while
 growth runs (ADR 0039, `K1` to `K10`) against the tests of the agents in `sim.gpu.test.ts`:
@@ -721,7 +739,8 @@ It changes files below `src/` while it runs and writes each one back as it was. 
 test that fails, marked `×`, for every wrong rule, and no line `NO TEST FAILS`. The record is
 `logs/engine/mutations-0031.txt` for 39 of them, and `logs/engine/scenes-mutations.txt` for the
 two of ADR 0032, `logs/engine/sites-mutations*.txt` for all 83 with the food sites (part 11), and
-`logs/engine/radius/mutations.txt` for the 4 of the radius (part 12);
+`logs/engine/radius/mutations.txt` for the 4 of the radius (part 12), and
+`logs/engine/recover/mutations.txt` for the 6 of starved ground (part 13);
 `logs/engine/mutations.txt` is the record of the first 22 rules with the 27 tests of ADR 0029. ADR
 0029 and ADR 0031 have their rules as a table.
 
@@ -1274,9 +1293,109 @@ with 0.999999. So the app keeps 0.99999. The Tokyo scene keeps its flux of 1.4: 
 decision 17 the flux 1 is a little shorter and nearer to the organism, within the spread of two sets
 of seeds, and it loses a food source more often.
 
+### 13. How long does starved ground stay closed? [ADR 0029, amendment 2026-11-15 (2)]
+
+A run with another time sets the share by which the flow memory of ground without a tube grows per
+step, `VITE_RECOVER` (`FLOW.recover`, 0.00023 in the app): 0.00023, 0.00035, 0.0007, 0.0014 and
+0.0042 take 18.4, 12.1, 6.0, 3.0 and 1.0 h of model time from the floor to fresh ground. With
+`VITE_GROUND=1` a run also writes the flow memory of every cell, which `engine/strands.ts` reads.
+The logs of the record are in `logs/engine/recover/`; their names say the time, `r18` for 18 h.
+
+The Tokyo scene with each time and the Maze with each time but 12 h, ten seeds each, to step 48,000.
+With three to five runs on the GPU at a time a Tokyo run took 7 to 10 minutes and a Maze run 4 to 6;
+the dumps of a run take about 56 and 42 MB:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do for t in 18:0.00023 12:0.00035 6:0.0007 3:0.0014 1:0.0042; do VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_RECOVER=${t#*:} VITE_GROUND=1 VITE_STEPS=1000,2000,4000,8000,12000,16000,20000,24000,28000,32000,36000,40000,44000,48000 VITE_NAME=g19-tk-r${t%%:*}-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g19-tk-r${t%%:*}-s$seed 1.5 99999 >> research/flow/out/recover-tokyo.txt && node --import ./research/flow/register.mjs research/flow/engine/strands.ts g19-tk-r${t%%:*}-s$seed tokyo >> research/flow/out/recover-tokyo-strands.jsonl; done; done
+```
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do for t in 18:0.00023 6:0.0007 3:0.0014 1:0.0042; do VITE_SCENE=maze VITE_I0=8 VITE_SEED=$seed VITE_RECOVER=${t#*:} VITE_GROUND=1 VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000,20000,24000,32000,40000,48000 VITE_NAME=g19-mz-r${t%%:*}-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g19-mz-r${t%%:*}-s$seed >> research/flow/out/recover-maze.txt && node --import ./research/flow/register.mjs research/flow/engine/strands.ts g19-mz-r${t%%:*}-s$seed maze >> research/flow/out/recover-maze-strands.jsonl; done; done
+```
+
+The tables of the amendment (each command a second):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo-end research/flow/logs/engine/recover/tokyo.txt
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/logs/engine/recover/maze.txt
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts strands research/flow/logs/engine/recover/tokyo-strands.jsonl research/flow/logs/engine/recover/maze-strands.jsonl
+```
+
+`engine-tokyo-end` prints per time TL, MD and FT at step 48,000 and the mean over the samples from
+step 16,000 on; `engine-tokyo` (same file) prints every step. `strands` prints per time and step the
+cells of the land with a tube, of them those whose flow memory is below 0.01 (`faint`), the ground
+without a tube below 0.01 (`closed`: no agent divides there) and below 0.2 (`marked`), and for the
+Maze the dead ends over the route and whether they fill again from step 5,000 on.
+
+The regrowth (part of the amendment): seeds 1 to 3 with each time, the network taken off a disc
+around four cities at step 24,000 (`VITE_REMOVE`), and the foods of the same four cities erased at
+step 24,000 and painted again at step 27,000 (`VITE_EDITS`). One run holds the Cut tool over the
+same disc for 100 steps (`VITE_CUT`). `REMOVE`, `EDITS` and `CUT` are the JSON of the record:
+
+```bash
+REMOVE='[-0.229790625,-0.22624425,0.085,24000]'
+EDITS='[[24000,"erase",-0.2743495,-0.234109,0.0107],[24000,"erase",-0.292781,-0.211335,0.0107],[24000,"erase",-0.1948335,-0.2446275,0.0107],[24000,"erase",-0.1571985,-0.2149055,0.0107],[27000,"food",-0.2743495,-0.234109,0.008685],[27000,"food",-0.292781,-0.211335,0.008685],[27000,"food",-0.1948335,-0.2446275,0.008685],[27000,"food",-0.1571985,-0.2149055,0.008685]]'
+CUT='[-0.229790625,-0.22624425,0.085,24000,24100]'
+```
+
+```bash
+for seed in 1 2 3; do for t in 18:0.00023 6:0.0007 3:0.0014 1:0.0042; do VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_RECOVER=${t#*:} VITE_GROUND=1 VITE_REMOVE=$REMOVE VITE_STEPS=16000,24000,24001,24050,24100,24200,24400,24700,25000,26000,27000,28000,30000,32000,36000,40000,44000,48000 VITE_NAME=g19-remove-r${t%%:*}-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g19-remove-r${t%%:*}-s$seed 1.5 99999 >> research/flow/out/recover-remove.txt && node --import ./research/flow/register.mjs research/flow/engine/strands.ts g19-remove-r${t%%:*}-s$seed tokyo 138.3472,140.1629,43.52 >> research/flow/out/recover-remove-strands.jsonl; done; done
+```
+
+```bash
+for seed in 1 2 3; do for t in 18:0.00023 6:0.0007 3:0.0014 1:0.0042; do VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=$seed VITE_RECOVER=${t#*:} VITE_GROUND=1 VITE_EDITS=$EDITS VITE_STEPS=16000,24000,25000,26000,27000,27300,27600,28000,29000,30000,32000,36000,40000,44000,48000 VITE_NAME=g19-starve-r${t%%:*}-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g19-starve-r${t%%:*}-s$seed 1.5 99999 >> research/flow/out/recover-starve.txt && node --import ./research/flow/register.mjs research/flow/engine/strands.ts g19-starve-r${t%%:*}-s$seed tokyo 138.3472,140.1629,43.52 >> research/flow/out/recover-starve-strands.jsonl; done; done
+```
+
+```bash
+VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=1 VITE_GROUND=1 VITE_CUT=$CUT VITE_STEPS=16000,24000,24100,24300,24600,25000,26000,27000,28000,30000,32000,36000,40000,44000,48000 VITE_NAME=g19-cut-r18-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g19-cut-r18-s1 1.5 99999 >> research/flow/out/recover-cut.txt
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts regrowth research/flow/logs/engine/recover/remove.txt research/flow/logs/engine/recover/remove-strands.jsonl 24001
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts regrowth research/flow/logs/engine/recover/starve.txt research/flow/logs/engine/recover/starve-strands.jsonl 27000
+```
+
+`regrowth` prints per time the first measured step from the step of its last argument on at which
+all 33 and all 36 food sources are joined: from step 24,001 for the network taken off, and from step
+27,000, when the foods are painted again, for the foods taken away. Then per step the cells of the
+network and of the tubes in the disc over those of step 24,000.
+
+The test of the rule, on both backends (10 s), and its wrong rules (D1 to D6, 10 minutes; the record
+is `logs/engine/recover/mutations.txt`; `mutations-before.txt` is the same run with the new test
+skipped, in which D1, D2, D4 and D5 pass every test):
+
+```bash
+npx vitest run --project gpu src/engine/flow.gpu.test.ts -t "starved ground"
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts D1 D2 D3 D4 D5 D6
+```
+
+You must see, in `engine-tokyo-end`, `TL 1.84 ± 0.13` from step 16,000 on with `g19-tk-r18`, `1.95`
+with `r12`, `2.29` with `r6`, `2.45` with `r3` and `2.55` with `r1`; in `engine-maze` the dead ends
+below 2 % of the route first at step `2250 (2000 to 4000)` with `g19-mz-r18` and `6250 (4000 to
+10000)` with `r1`; and in `regrowth` the four cities joined again from step `24400 (24200 to 24400)`
+with `g19-remove-r18` and from `27600 (27300 to 28000)` with `g19-starve-r18`. The runs with 18 h
+give the lines of the record of part 11 (`logs/engine/maze-webgpu-flux8-sites.txt` and
+`tokyo-flux1.4-sites.txt`) at its steps.
+
+Result: every time shorter than 18 h brings back the mesh between the tubes of the Tokyo map, and 1
+h also the dead ends of the Maze. With 18 h the colony grows back into a region that it lost within
+half an hour of model time. The app keeps its factor.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 195 files, 2.4 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 211 files, 3.3 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1298,6 +1417,7 @@ asks for the new digest.
 | `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, its 93 wrong rules, and its cost on a large grid                          | 2026-11-13 and 2026-11-15, M3 Pro                     |
 | `logs/engine/*sites*`, `*-main*`                     | the runs of part 11: the campaigns, the scenes of ADR 0032, the time of a step and of the passes of the ports, the digests, the wrong rules, and the same runs of `main` on the same evening                                    | 2026-11-14, M3 Pro, `main` at `5195079`               |
 | `logs/engine/radius/`                                | the runs of part 12: the radii on fixed networks, the tests of the bounded pressure, the local flux against the exact one on the dumps, the campaigns, the GPU tests and the wrong rules of the radius                          | 2026-11-15, M3 Pro, `main` at `3f579ff`               |
+| `logs/engine/recover/`                               | the runs of part 13: the campaigns with each time until starved ground is fresh again, the regrowth and the Cut tool on WebGPU and WebGL2, and the wrong rules D1 to D6 with and without the new test                           | 2026-11-15, M3 Pro, `main` at `623fb36`, `71b0161`    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1347,9 +1467,10 @@ Notes on the record:
 | `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step, a frame and the picture, digests, strains     |
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
+| `engine/strands.ts`       | the tubes that the flux has left, and the ground that their starvation marks, on a dump           |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
-| `engine/mutate.ts`        | 188 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/mutate.ts`        | 194 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

@@ -11,6 +11,10 @@
 // - exact-flux <file>...                 the lines of engine/exact-flux.ts: per run without the seed and per step, the
 //                                        median over the seeds of the median over the fields, with the least and
 //                                        the most of the seeds
+// - strands <file>...                    the lines of engine/strands.ts: per run without the seed and per step, the
+//                                        tubes that the flux has left and the ground that their starvation marks
+// - regrowth <lines> <strands> [from]    the lines of measure-tokyo.ts and of strands.ts of the runs that take a part
+//                                        of the colony off at step 24,000: when the network joins its foods again
 import { readdirSync, readFileSync } from 'node:fs';
 
 const [table = '', ...rest] = process.argv.slice(2);
@@ -318,11 +322,13 @@ function engineTokyoEnd(files: string[]) {
       [16000, 24000, 32000, 40000, 48000].map((t) => s.get(t)).filter((x) => x !== undefined),
     );
     if (late.length > 1) {
-      const of = (key: 'tl' | 'md' | 'ft') => late.map((x) => x[key]);
+      const of = (key: 'tl' | 'md' | 'ft' | 'links' | 'alive') => late.map((x) => x[key]);
       console.log(
         `   steps 16000 to 48000: ${late.length} samples | TL ${mean(of('tl')).toFixed(2)} ± ${deviation(
           of('tl'),
-        ).toFixed(2)} | MD ${mean(of('md')).toFixed(2)} | FT ${mean(of('ft')).toFixed(2)}`,
+        ).toFixed(2)} | MD ${mean(of('md')).toFixed(2)} | FT ${mean(of('ft')).toFixed(2)} | links ${mean(
+          of('links'),
+        ).toFixed(1)} ± ${deviation(of('links')).toFixed(1)} | alive ${mean(of('alive')).toFixed(0)}`,
       );
     }
   }
@@ -442,6 +448,155 @@ function digests(a: string, b: string) {
   if (differ.length > 0 || both.length === 0) process.exitCode = 1;
 }
 
+interface Strands {
+  name: string;
+  step: number;
+  alive: number;
+  tubes: number;
+  faint: number;
+  closed: number;
+  marked: number;
+  net: number;
+  ratio?: number;
+  dead?: { tubes: number; faint: number; closed: number };
+  disc?: { tubes: number; net: number; faint: number; closed: number; marked: number };
+}
+/** The lines of strands.ts by run name without the seed, by seed, by step. */
+function strandRows(files: string[]): Map<string, Map<number, Map<number, Strands>>> {
+  const rows = new Map<string, Map<number, Map<number, Strands>>>();
+  for (const line of files.flatMap((f) => textOf(f).split('\n'))) {
+    if (!line.startsWith('{')) continue;
+    const r = JSON.parse(line) as Strands;
+    const m = /^(\S+)-s(\d+)$/.exec(r.name);
+    if (!m) continue;
+    const seeds = rows.get(m[1]!) ?? new Map<number, Map<number, Strands>>();
+    rows.set(m[1]!, seeds);
+    const steps = seeds.get(Number(m[2])) ?? new Map<number, Strands>();
+    seeds.set(Number(m[2]), steps);
+    steps.set(r.step, r);
+  }
+  return rows;
+}
+/** The samples of a settled network: those of engine-tokyo-end from step 16,000 on (ADR 0029, amendment 2026-11-14 (2)). */
+const LATE = [16000, 24000, 32000, 40000, 48000];
+/** The share of the route's trail above which the dead ends of the Maze count as filled again (table (a)). */
+const DEAD_ENDS = 0.02;
+
+/**
+ * The tubes that the flux has left and the ground that their starvation marks (ADR 0029, decision 19). Per step, the
+ * median and the range over the seeds; then the late samples of each seed.
+ */
+function strands(files: string[]) {
+  for (const [name, seeds] of strandRows(files)) {
+    console.log(`== ${name}: ${seeds.size} seeds`);
+    const steps = [...new Set([...seeds.values()].flatMap((s) => [...s.keys()]))].sort((a, b) => a - b);
+    const maze = [...seeds.values()].some((s) => [...s.values()].some((r) => r.ratio !== undefined));
+    for (const step of steps) {
+      const d = [...seeds.values()].map((s) => s.get(step)).filter((x) => x !== undefined);
+      const of = (f: (r: Strands) => number, digits = 0) => range(d.map(f), digits);
+      console.log(
+        `  step ${String(step).padStart(6)} (${String(d.length).padStart(2)} seeds): faint tubes ${of((r) => r.faint)} of ${of((r) => r.tubes)} | closed ground ${of((r) => r.closed)} | marked ${of((r) => r.marked)} | alive ${of((r) => r.alive)}${
+          maze
+            ? ` | dead ends over route ${of((r) => r.ratio ?? NaN, 4)} | tubes in the dead ends ${of((r) => r.dead?.tubes ?? NaN)}`
+            : ` | network cells ${of((r) => r.net)}`
+        }`,
+      );
+    }
+    const late = [...seeds.values()].flatMap((s) => [...s.values()].filter((r) => LATE.includes(r.step)));
+    if (late.length < 2) continue;
+    const stat = (f: (r: Strands) => number, digits = 0) => {
+      const v = late.map(f);
+      return `${mean(v).toFixed(digits)} ± ${deviation(v).toFixed(digits)}`;
+    };
+    console.log(
+      `   steps ${LATE.join(', ')}: ${late.length} samples | faint tubes ${stat((r) => r.faint)}, ${stat((r) => (100 * r.faint) / r.tubes, 1)} % of the tubes | closed ground ${stat((r) => r.closed)} | marked ${stat((r) => r.marked)} | alive ${stat((r) => r.alive)}`,
+    );
+    if (maze) {
+      // The dead ends fill again: a sample from step 5,000 on, after the dead ends emptied, above 2 % of the route.
+      const filled = [...seeds.entries()].map(([seed, s]) => ({
+        seed,
+        steps: [...s.values()].filter((r) => r.step >= 5000 && (r.ratio ?? 0) > DEAD_ENDS).map((r) => r.step),
+        most: Math.max(...[...s.values()].filter((r) => r.step >= 5000).map((r) => r.ratio ?? 0)),
+      }));
+      const again = filled.filter((f) => f.steps.length > 0);
+      console.log(
+        `   dead ends above ${100 * DEAD_ENDS} % of the route at a sample from step 5000 on: ${again.length} of ${filled.length} seeds${
+          again.length > 0 ? ` (${again.map((f) => `seed ${f.seed} from step ${f.steps[0]}`).join(', ')})` : ''
+        }; the most of a seed ${range(
+          filled.map((f) => f.most),
+          4,
+        )}`,
+      );
+      // The dead ends fill again while the network thins: a sample above 10 % of the route after one below it.
+      const refill = [...seeds.entries()].flatMap(([seed, s]) => {
+        const rows = [...s.values()].sort((a, b) => a.step - b.step);
+        const below = rows.findIndex((r) => (r.ratio ?? 1) < 0.1);
+        const above = below < 0 ? undefined : rows.slice(below).find((r) => (r.ratio ?? 0) > 0.1);
+        return above ? [`seed ${seed} at step ${above.step}`] : [];
+      });
+      console.log(
+        `   dead ends above 10 % of the route again after they were below it: ${refill.length} of ${seeds.size} seeds${
+          refill.length > 0 ? ` (${refill.join(', ')})` : ''
+        }`,
+      );
+    }
+  }
+}
+
+/**
+ * The runs that take a part of the colony off at step 24,000 (ADR 0029, decision 19): per run without the seed, the
+ * first measured step from the step `from` on at which all 33 and all 36 food sources are joined (24,001: right after
+ * the network of a disc was taken off; 27,000: when the foods that were taken away are painted again), and the cells
+ * of the network and of the tubes in the disc over those of step 24,000, per step.
+ */
+function regrowth(lines: string, strandFile: string, from: number) {
+  const joined = tokyoRows([lines]);
+  const discs = strandRows([strandFile]);
+  for (const [name, seeds] of joined) {
+    console.log(`== ${name}: ${seeds.size} seeds`);
+    for (const count of [33, 36] as const) {
+      const all = (r: TokyoRow) => (count === 33 ? r.j33 === 33 : r.j36 === 36);
+      const v = [...seeds.values()].map((s) => {
+        const again = [...s.entries()]
+          .filter(([step]) => step >= from)
+          .sort(([a], [b]) => a - b)
+          .find(([, r]) => all(r));
+        return again?.[0] ?? NaN;
+      });
+      const at = [...seeds.values()].filter((s) => {
+        const r = s.get(from);
+        return r !== undefined && all(r);
+      }).length;
+      const never = v.filter((x) => Number.isNaN(x)).length;
+      console.log(
+        `  all ${count} joined: at step ${from} in ${at} of ${seeds.size} seeds; from then on first at step ${range(v, 0)}${never > 0 ? `, never by step 48000 in ${never}` : ''}`,
+      );
+    }
+    const disc = discs.get(name);
+    if (!disc) continue;
+    const steps = [...new Set([...disc.values()].flatMap((s) => [...s.keys()]))].sort((a, b) => a - b);
+    for (const step of steps.filter((t) => t >= 24000)) {
+      const ratio = (f: (r: Strands) => number) =>
+        [...disc.values()].map((s) => {
+          const [now, before] = [s.get(step), s.get(24000)];
+          return now && before ? f(now) / f(before) : NaN;
+        });
+      const d = [...disc.values()].map((s) => s.get(step)).filter((x) => x !== undefined);
+      console.log(
+        `  step ${String(step).padStart(6)}: in the disc, network cells over step 24000 ${range(ratio((r) => r.disc?.net ?? NaN))}, tubes ${range(
+          ratio((r) => r.disc?.tubes ?? NaN),
+        )}, closed ground ${range(
+          d.map((r) => r.disc?.closed ?? NaN),
+          0,
+        )}, marked ${range(
+          d.map((r) => r.disc?.marked ?? NaN),
+          0,
+        )} | all 33 joined in ${[...seeds.values()].filter((s) => s.get(step)?.j33 === 33).length} of ${seeds.size}`,
+      );
+    }
+  }
+}
+
 /** The arguments of each table: how many it needs at least, and what they are. */
 const USAGE: Record<string, [least: number, what: string]> = {
   'maze-campaign': [2, '<folder> <prefix>...'],
@@ -452,6 +607,11 @@ const USAGE: Record<string, [least: number, what: string]> = {
   compare: [2, '<folder of the rerun> <folder of the record>'],
   digests: [2, '<file> <file>'],
   'exact-flux': [1, '<file>...'],
+  strands: [1, '<file>...'],
+  regrowth: [
+    2,
+    '<lines of measure-tokyo.ts> <lines of strands.ts> [the step from which a food counts as joined again]',
+  ],
 };
 const usage = USAGE[table];
 if (!usage) {
@@ -469,4 +629,6 @@ else if (table === 'engine-tokyo') engineTokyo(rest);
 else if (table === 'engine-tokyo-end') engineTokyoEnd(rest);
 else if (table === 'compare') compare(rest[0] ?? '', rest[1] ?? '');
 else if (table === 'exact-flux') exactFlux(rest);
+else if (table === 'strands') strands(rest);
+else if (table === 'regrowth') regrowth(rest[0] ?? '', rest[1] ?? '', Number(rest[2] ?? 24001));
 else digests(rest[0] ?? '', rest[1] ?? '');
