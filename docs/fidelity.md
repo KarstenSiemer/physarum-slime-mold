@@ -229,14 +229,15 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 
 - **Organism** [V]: tubes take apart and form again within a few hours (Tero et al. 2007, Sec. 1).
 - **Model**: a tube without flux starves in about 33 min, and new tubes form on fresh ground by growth and respawn.
-  Ground where a tube starved stays closed to growth until its flow memory has grown back: up to 18 h of model time
-  from the deepest starvation (ADR 0029, decision 7). A tube that is taken off while its flow memory is above that of
-  fresh ground leaves fresh ground at once.
+  Ground where a tube starved stays closed to growth until its flow memory has grown back: up to 18 h of model time from
+  the deepest starvation (ADR 0029, decision 7). A tube that is taken off while its flow memory is above that of fresh
+  ground leaves fresh ground at once.
 - **Measured** (ADR 0029, amendment 2026-11-15 (2), the Tokyo rail network, seeds 1 to 3, WebGPU): where the network
-  around four cities is taken off at step 24,000 (13 h), the colony joins them again within 200 to 400 steps (7 to 13 min); where their foods
-  are taken away for 100 min and come back, within 300 to 1,000 steps (10 to 33 min) after they come back. So tubes break and form again within
-  an hour where a tube is needed. The ground between the tubes stays closed for hours; with a time of 12 h or less the
-  mesh of the growth rule comes back there, and the network is longer (decision 19).
+  around four cities is taken off at step 24,000 (13 h), the colony joins them again within 200 to 400 steps (7 to 13
+  min); where their foods are taken away for 100 min and come back, within 300 to 1,000 steps (10 to 33 min) after they
+  come back. So tubes break and form again within an hour where a tube is needed. The ground between the tubes stays
+  closed for hours; with a time of 12 h or less the mesh of the growth rule comes back there, and the network is longer
+  (decision 19).
 
 ### 17. Shuttle streaming
 
