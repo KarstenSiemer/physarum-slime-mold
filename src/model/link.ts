@@ -33,7 +33,7 @@ export const MAX_WORK = 64;
 /**
  * Version 2 writes the revision of the scene's shapes after the scene's id (ADR 0027). A link of version 1 names
  * revision 0, the shapes of 2026-11-10. Version 3 writes the number of the scene's shapes as a varint, where versions 1
- * and 2 write one byte: the scene Tokyo with light has more than 255 shapes (ADR 0021, amendment 2026-11-15).
+ * and 2 write one byte: the scene Tokyo with light has more than 255 shapes (ADR 0042).
  */
 const VERSION = 3;
 /** Grid sides that gridSize() (engine/sizing.ts) gives. */

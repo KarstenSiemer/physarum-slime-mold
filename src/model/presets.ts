@@ -217,7 +217,7 @@ const ring = (count: number, radius: number, r: number): EnvShape[] =>
 
 /**
  * The settings of the scene Tokyo rail network (ADR 0024, 0029), with `extra` on top: the scene with light adds the
- * strength of its light (ADR 0029, decision 20).
+ * strength of its light (ADR 0042).
  */
 const tokyo = (extra: Partial<Settings> = {}) =>
   jones(
@@ -599,10 +599,12 @@ PRESETS.push(
     group: 'experiments',
     source: 'Tero et al. 2010, Fig. 2B',
     summary: 'The Tokyo map with light on the mountains and the lakes: the colony keeps to low ground.',
-    watch: 'TODO',
-    about: 'TODO. Second sentence.',
+    watch:
+      'The colony grows from Tokyo over the whole land, the lit mountains too: light turns an agent away only at its edge. Then the tubes on lit ground starve first. From step 4,000 on about a twentieth of the network lies on lit ground, which is a quarter of the land. Without light it is about a tenth.',
+    about:
+      'The slime mold avoids bright light. So Tero and colleagues lit the mountains and the lakes of their map, and its network kept to the low ground, more like the railway. Here the light lies on 53 squares of 9 × 10 km that are 200 m or more above the sea, and on Lake Kasumigaura. Every lit cell is equally bright; the mask of the paper has shades.',
     strainRoles: ['Jones’ foraging agent, drawn to food, flees light'],
-    why: 'TODO',
+    why: 'The settings of the scene Tokyo rail network, with the app’s Light strength of 0.05: strengths from 0.02 to 0.5 kept as much of the network off the lit ground. The light is this app’s repellent, not a rule of the paper. Elevations: SRTM (NASA and USGS). Lake Kasumigaura and coast: © OpenStreetMap contributors. Stations: Wikidata.',
     figure: {
       href: 'https://doi.org/10.1126/science.1177894',
       label: 'Fig. 2B',

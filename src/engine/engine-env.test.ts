@@ -852,7 +852,7 @@ describe('the food sites of the flow in the tubes', () => {
     coversFood(sim());
   });
 
-  it('of the Tokyo scene with light are those of the scene without it: light makes no site (ADR 0029, decision 20)', async () => {
+  it('of the Tokyo scene with light are those of the scene without it: light makes no site (ADR 0042)', async () => {
     const { engine, sim } = await engineWith(maze.settings());
     const [dark, lit] = [presetById('tokyo'), presetById('tokyo-light')];
     if (!dark?.env || !lit?.env) throw new Error('no Tokyo scene');

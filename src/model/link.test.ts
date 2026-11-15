@@ -266,7 +266,7 @@ describe('the drawing of a link', () => {
     });
   });
 
-  // Version 3 (ADR 0021, amendment 2026-11-15): Tokyo with light has more than 255 shapes, so their number is a varint.
+  // Version 3 (ADR 0042): Tokyo with light has more than 255 shapes, so their number is a varint.
   it('counts the shapes of a scene as a varint, and reads the one byte of a link of version 2', () => {
     const of = (scene: string) => {
       const env = presetById(scene)?.env ?? [];

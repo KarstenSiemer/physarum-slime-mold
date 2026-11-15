@@ -3,6 +3,8 @@
 - Status: accepted (that a link carries the drawing is owner decision D8 of 2026-11-09; the
   behaviour of a drawing too large for a link and the caps are the owner's decisions of 2026-11-10)
 - Date: 2026-11-10
+- Changed by [ADR 0042](0042-a-second-tokyo-scene-with-light.md) (2026-11-15): a link of version 3 writes the number
+  of the scene's shapes as a varint. Links of versions 1 and 2 open as before.
 
 ## Context
 
@@ -216,21 +218,3 @@ decoder refuses a revision that the scene does not have and a count of shapes ot
 versions 1 and 2 only. An old revision counts as a change of the scene, and Reload scene loads the newest shapes. The
 consequence above ("a link made before paints the new shapes") no longer holds. A link still does not give its sender's
 bytes after the model changes: Jones' step order, dish and boundaries of ADR 0027 run every link, old ones too.
-
-## Amendment 2026-11-15: link version 3, the number of a scene's shapes as a varint
-
-Found while the scene Tokyo with light was built (ADR 0029, amendment 2026-11-15 (3)). Versions 1 and 2 write the
-number of the scene's shapes in one byte (`packDrawing`, `out.byte(d.shapes.length)`). `Writer.byte()` keeps the low 8
-bits, so a scene with more than 255 shapes wrote a wrong count, and the decoder refused it: the link opened with its
-settings alone (`decodeLink` sets `drawingLost`). The random round trips of `link.test.ts` found it as soon as the scene
-was in the list. No scene had more than 255 shapes: the Tokyo rail network has 227.
-Tokyo with light has 501 (42 foods, 185 walls and 274 strokes of light).
-
-The builder's choice under the owner's delegation of 2026-11-12: version 3 writes the number of the scene's shapes as a
-varint. The decoder reads versions 1 and 2 with one byte, as before, and version 3 with a varint, and refuses every
-other version. Reason: a varint holds every count, and a count below 128 keeps its one byte, so a link of version 3 of a
-scene with fewer than 128 shapes differs from version 2 only in its first byte. A link of the Tokyo rail network takes
-one byte more. Links of versions 1 and 2 open as before (unit tests: a link of version 2 of the Tokyo scene, with the
-byte 227, opens; the bytes of version 3 with the version byte 2 are refused). The writer always writes version 3: one format to write,
-as the amendment of 2026-11-11 did with version 2. A link of version 3 does not open in an app from before this
-amendment, which refuses the version, as one of version 2 did not before version 2.

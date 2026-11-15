@@ -8,7 +8,7 @@
 //   Mobara"): they have the positions of the nodes of the paper's graphs.
 // - Coastline: © OpenStreetMap contributors, Open Database License 1.0 (relation 6677259, Honshu), cut to the map and
 //   simplified to 2 km (Douglas–Peucker).
-// - The light of the scene "Tokyo with light" (ADR 0029, decision 20), TOKYO_MOUNTAINS and TOKYO_LAKES below:
+// - The light of the scene "Tokyo with light" (ADR 0042), TOKYO_MOUNTAINS and TOKYO_LAKES below:
 //   - Elevations: SRTM 90 m (NASA/USGS, public domain), one sample at the centre of each cell of a 20 × 20 grid over
 //     the map.
 //   - Lake Kasumigaura: © OpenStreetMap contributors, Open Database License 1.0 (relation 253637, Nishiura, and
@@ -360,7 +360,7 @@ export const TOKYO_MOUNTAINS = [
  * radius and fades to 0 at its radius (lightByte() in brush.ts). So the cells are filled with rows of thin strokes:
  * their full bands cover the cell, and the fading edge reaches 0.7 of this radius, 0.0042 units (2 cells of the
  * scene's grid), beyond the cell. One disc per cell, as the specification has it, lights only the middle of its cell
- * fully and leaves dim seams between the cells, where the colony built a mesh (ADR 0029, amendment 2026-11-15 (3)).
+ * fully and leaves dim seams between the cells, where the colony built a mesh (ADR 0042).
  */
 export const TOKYO_LIGHT_BRUSH = 0.006;
 
@@ -415,8 +415,7 @@ export function elevationCell(column: number, row: number): [number, number, num
  * filled with the full light byte, then the lakes, one stroke per piece of their lines. The cells of a row that touch
  * each other are filled together: rows of strokes from the west side of the first cell to the east side of the last,
  * inset by the full band, so that the full light ends at the sides of the cells. Light of one strength: the scene's
- * Light strength on every lit cell, not a shade that grows with the altitude as in the mask of the paper (ADR 0029,
- * decision 20).
+ * Light strength on every lit cell, not a shade that grows with the altitude as in the mask of the paper (ADR 0042).
  */
 export function tokyoLight(): EnvShape[] {
   const k = TOKYO_SCALE;

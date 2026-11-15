@@ -327,7 +327,7 @@ function engineTokyoEnd(files: string[]) {
         )} | all 36 joined: ${d.filter((x) => x.j36 === 36).length} | check of TL and MD: ${ok} of ${d.length}, FT at least 0.66: ${
           d.filter((x) => x.ft >= 0.66).length
         }${
-          // The check of the specification for the runs with light: FT at least 0.78 (ADR 0029, amendment 2026-11-15 (3)).
+          // The check of the specification for the runs with light: FT at least 0.78 (ADR 0042).
           d.some((x) => x.lit !== undefined) ? `, FT at least 0.78: ${d.filter((x) => x.ft >= 0.78).length}` : ''
         }${litOf(d)}`,
       );

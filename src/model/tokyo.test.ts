@@ -186,7 +186,7 @@ describe('the map of the Tokyo experiment (Tero et al. 2010)', () => {
   });
 });
 
-// The second Tokyo scene, with light on the mountains and the lakes as in the runs of Fig. 2B (ADR 0029, decision 20).
+// The second Tokyo scene, with light on the mountains and the lakes as in the runs of Fig. 2B (ADR 0042).
 describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', () => {
   const k = TOKYO_SCALE;
   const light = tokyoLight();

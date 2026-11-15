@@ -3,8 +3,7 @@
 // `level`: the trail above which a cell is part of the network (1.5). `steps`: the steps that get a picture (all).
 // The lines of several runs go to summary.ts.
 //
-// LIT=<scene id> or LIT=dabs (the shapes of light-dabs.ts): the line also says how much of the network lies under the light of that scene (ADR 0029, amendment
-// 2026-11-15 (3)): `lit` is the share of the cells of the network mask (the cells on land with a trail above `level`,
+// LIT=<scene id> or LIT=dabs (the shapes of light-dabs.ts): the line also says how much of the network lies under the light of that scene (ADR 0042): `lit` is the share of the cells of the network mask (the cells on land with a trail above `level`,
 // and the food) whose light byte is above 0, the cells that a light shape of the scene paints; `bright` the share
 // whose light byte is 128 or more. With LIT=tokyo-light on a run of the scene without light, the shares say how much
 // of that network lies where the light would be. The light is painted on the CPU as the engine paints it
