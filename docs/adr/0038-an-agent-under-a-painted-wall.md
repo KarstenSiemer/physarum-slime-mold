@@ -47,51 +47,105 @@ My own choices, under the same delegation:
    new stream is needed (model.md 7.7).
 4. **Outside the wound while the cut is held.** Reason: the cut keeps its wound free, and an agent placed into it
    would be moved again in the next step.
-5. **With and without a tool, while the environment may hold walls** (`P.extra.y`, set by the first wall stroke after
-   a clear). Without walls the rule reads nothing. With walls it reads the wall byte of the agent's own cell once per
-   alive agent and pass that calls `placement()`.
+5. **With and without a tool.** The rule reads the wall byte of the agent's own cell once per alive agent and pass
+   that calls `placement()`, and only while a wall may lie over an alive agent (decision 8; before it, while the
+   environment may hold walls, `P.extra.y`).
 6. **With one agent per cell the point is claimed like a move** (7.6). A loser stays under the wall with its heading
    and draws again in the next step.
 7. **The test "is blocked by a wall" writes its agent into the open cell (31, 32)**, west of the wall. With the agent
    in the wall cell the test fails under the rule: the agent goes to x = 35.3.
 
+The coordinator's decision of 2026-11-15, after the review of the pull request:
+
+8. **The rule costs nothing in the scenes as they ship.** Reason: only a wall painted after the population was placed
+   can put an alive agent on a wall cell (Context), so the rule needs to read the wall byte only while such a wall may
+   exist. As first built it read it while any wall existed, and the Maze without the flow took about 0.02 ms more per
+   step in every pair of runs: 0.195 against 0.213 ms on WebGPU, 0.448 against 0.474 ms on WebGL2 (`main` at
+   `1cf6375` against `b8ecde5`, three runs each, M3 Pro). Built so:
+   - Both simulations keep a flag `wallOverAgents` (`src/engine/sim.ts:200`, `src/engine/gl/sim.ts:268`), packed as
+     `extra.w` (`src/engine/pack.ts:240`; the fourth value of `extra` was unused in `common.wgsl` and
+     `common.glsl`). `underWall()` tests it in place of `P.extra.y` (`agents.wgsl:255`, `tools.glsl:89`).
+   - Set by a painted stroke of kind wall (`sim.ts:957`, `gl/sim.ts:930`), by written bytes that hold a wall
+     (`writeEnv()`, `sim.ts:1150`, `gl/sim.ts:1136`), and by a written agent while walls exist (`writeAgent()`,
+     `sim.ts:1106`, `gl/sim.ts:1107`: a test can put an agent anywhere).
+   - Cleared by `reset()` (`sim.ts:617`, `gl/sim.ts:748`), which places every alive agent on an open cell: `init`
+     starts an agent alive only on a habitable cell (`init.wgsl:136`, `init.frag:136`), and the claim rounds take only
+     free cells (`freeCell()`, `init.wgsl:152`; `points.vert:34`). Cleared by `clearEnvironment()` (`sim.ts:1037`,
+     `gl/sim.ts:997`), which leaves no wall.
+   - The scenes keep it cleared: `Engine.load()` paints the edits (`engine.ts:262`) before `this.reset()`
+     (`engine.ts:265`), and `Engine.rebuild()` paints (`engine.ts:389`) before `sim.reset()` (`engine.ts:390`).
+
+   The other paths that write `env` or place agents, and why none puts an agent under a wall without the flag:
+   - A stroke during a run, and a link's edits: the engine paints only through `flushEnv()` → `sim.paint()`
+     (`engine.ts:628`), each frame (`engine.ts:724`) and after the sweep deleted edits (`engine.ts:603`). A wall stroke
+     there sets the flag. A link's strokes come with `Engine.load()`, before the reset.
+   - A new grid, lattice, density or capacity, or a change into or out of the dish: `needsRebuild()`
+     (`engine.ts:338`–`343`), so `rebuild()` paints before it places. A new seed, layout, boundary or rule of one
+     agent per cell, or new shares: `Engine.update()` resets (`engine.ts:236`). `Sim.update()` (`engine.ts:231`)
+     moves no agent and writes no byte of `env`.
+   - The steps themselves: a move needs a habitable target (`agents.wgsl:327`, `canClaim()` at `agents.wgsl:348`);
+     inoculate, cut, respawn and a placement off a wall need an open cell (`openCell()`, `agents.wgsl:229`); a child
+     of the growth rule needs a neighbour that is no wall (`growth.wgsl:149`–`151`). The start layout Food places its
+     colonies with the inoculate tool after the reset (`seedAtFood()`, `engine.ts:391`, `engine.ts:444`).
+   - `writeEnv()` and `writeAgent()` are for tests only: the engine changes the environment only with `paint()` and
+     `clearEnvironment()` (`src/engine/types.ts:139`). Both set the flag.
+
+   The flag only skips a read: wherever it is cleared, no alive agent stands on a wall cell, so no result changes
+   (digests below). A wall stroke keeps it set until the next reset or clear, also after its agents have left.
+
 ## Consequences
 
 - No scene changes a byte. The digests of `research/flow/README.md` part 6 (`digest.gpu.test.ts`: the default
   settings and the 20 scenes, 500 steps, WebGPU and WebGL2, M3 Pro) against `main` at `1cf6375`: 42 of 42 equal with
-  the flow off, and 42 of 42 equal with the flow as each scene has it.
+  the flow off, and 42 of 42 equal with the flow as each scene has it. With decision 8, against `main` at `3f579ff`
+  (the food sites of decision 17 of ADR 0029): again 42 of 42 equal with the flow off and 42 of 42 with the flow as
+  each scene has it.
 - A wall painted over a colony sends the agents under it to random open cells of the whole grid in the next step, as
   the cut does. A thick wall no longer holds living agents that never deposit.
-- Cost: with the flow, as both scenes ship, no change beyond the spread of the runs. Without the flow the Maze takes
-  about 0.02 ms more per step on both backends, in every pair of runs (table below).
+- Cost: as first built, the Maze without the flow took about 0.02 ms more per step (decision 8). With decision 8 the
+  cost is not measured to that precision: other GPU work ran the whole time (below). Open until then.
 - Tests (`sim.gpu.test.ts`, "agents under a painted wall", both backends): every agent under a thick wall is at its
   first open point after one step, with its heading, and the count of alive agents stays, without and with one agent
   per cell; while the cut is held such an agent lands outside the wound; an agent beside the wall keeps its blocked
   step or its move. The first three fail without the rule; the one beside the wall passes without it by design and
   fails when the rule reads the cell of the move. `research/flow/engine/mutate.ts` holds these wrong rules as U1 to
-  U6, and each fails at least one test (run of 2026-11-15).
+  U6, and U7 and U8 for decision 8: a painted wall never sets the flag, on each backend. Each of the eight fails at
+  least one test (runs of 2026-11-15): U7 and U8 fail the first three tests, because the tests paint their walls with
+  `sim.paint()` over agents that are already placed.
 
 ### The cost of a step
 
-`research/flow/engine/bench.gpu.test.ts` with its defaults (seed 1, 3,000 steps to warm up, then the median of 21
-batches of 50 steps), on an M3 Pro, 2026-11-15. Other sessions ran GPU work on the same machine, which made a run up to
-three times as slow. So the runs of `main` (the shaders of `1cf6375`) and of this branch took turns, each started when
-no other test ran, and only the runs that no other GPU work overlapped count: three of each, two of `main` for WebGL2
-Tokyo. Each cell holds the medians of these runs, in ms per step.
+Before decision 8 the Maze without the flow took 0.195 against 0.213 ms per step on WebGPU and 0.448 against 0.474 ms
+on WebGL2 (decision 8). Those were runs of `main` and of the branch in turns, three of each, with no other GPU work on
+the machine.
 
-| Scene | Backend | Flow | `main`              | this branch         |
-| ----- | ------- | ---- | ------------------- | ------------------- |
-| Maze  | WebGPU  | off  | 0.188, 0.208, 0.188 | 0.210, 0.218, 0.212 |
-| Maze  | WebGPU  | on   | 2.202, 2.196, 2.208 | 2.198, 2.206, 2.202 |
-| Tokyo | WebGPU  | off  | 0.508, 0.520, 0.506 | 0.466, 0.506, 0.460 |
-| Tokyo | WebGPU  | on   | 3.478, 3.538, 3.480 | 3.524, 3.530, 3.524 |
-| Maze  | WebGL2  | off  | 0.448, 0.450, 0.446 | 0.470, 0.472, 0.480 |
-| Maze  | WebGL2  | on   | 2.666, 2.686, 2.704 | 2.674, 2.694, 2.644 |
-| Tokyo | WebGL2  | off  | 0.828, 0.834        | 0.846, 0.840, 0.862 |
-| Tokyo | WebGL2  | on   | 4.086, 4.072        | 4.084, 4.108, 4.150 |
+With decision 8, `main` at `3f579ff` against this branch, the Maze and the Foraging maze, both with walls and the flow
+off (the Foraging maze ships so), M3 Pro, 2026-11-15 from 01:35 to 02:57. Two other sessions ran GPU campaigns the
+whole time: a check every 2 s found another Vitest in 2,210 of 2,210 checks. So no run in turns was free of other GPU
+work: 0 runs count, and none is in the table. A step took 4 to 27 times as long as on a free GPU (the Maze: 0.87 to
+1.5 ms against 0.19 ms on WebGPU, up to 12 ms against 0.45 ms on WebGL2).
 
-With the flow the means differ by −0.5 % to +0.9 %, inside the spread of the runs. Without the flow, the Maze takes
-0.019 ms (WebGPU) and 0.026 ms (WebGL2) more per step: 10 % and 6 %, and every run of the branch is slower than every
-run of `main`. Tokyo without the flow is 0.03 ms faster on WebGPU and 0.02 ms slower on WebGL2. Both scenes hold walls,
-so the rule reads the wall byte of every alive agent's cell in each step. Not measured: which part of the rule costs
-the 0.02 ms of the Maze without the flow (the read, or the code that the compiler can no longer skip as a whole).
+In their place `research/flow/engine/base-agents.gpu.test.ts` ran the agent pass of `main` (its `agents.wgsl` and
+`tools.glsl`), of this branch, and of this branch after a wall stroke on one wall cell, which changes no byte but sets
+the flag, as three engines in one page. They took turns for each of 31 batches of 50 steps after 3,000 steps, so other
+work slows all three alike within a round. The table gives, for two runs, the median over the rounds of the time of a
+batch over the time of the batch of `main` in the same round. In every run the three engines ended with the same
+agents, bit for bit.
+
+| Scene         | Backend | branch / `main` | branch with the flag set / `main` |
+| ------------- | ------- | --------------- | --------------------------------- |
+| Maze          | WebGPU  | 0.95, 0.97      | 0.96, 1.02                        |
+| Foraging maze | WebGPU  | 1.16, 0.93      | 1.02, 1.00                        |
+| Maze          | WebGL2  | 1.04, 0.95      | 0.96, 0.99                        |
+| Foraging maze | WebGL2  | 1.02, 0.99      | 0.87, 0.97                        |
+
+The ratios scatter by up to 16 % around 1, with no direction. That cannot show or rule out the 6 to 10 % of before
+decision 8. Not measured, then: the step time of the scenes as they ship, and the cost of the rule while its flag is
+set. To measure both on a free GPU, run in turns, `main` first, with the seven engine files of each:
+
+```bash
+VITE_SCENES=maze,foraging-maze VITE_FLOWS=off VITE_NAME=bench-main npx vitest run --config research/vitest.config.ts research/flow/engine/bench.gpu.test.ts
+```
+
+and on the branch the same with `VITE_NAME=bench-branch`, and with `VITE_WALL=1 VITE_NAME=bench-wall` for the rule
+while its flag is set.
