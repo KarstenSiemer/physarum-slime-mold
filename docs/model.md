@@ -50,7 +50,8 @@ The setting Model picks the rule set (ADR 0022). `jonesFits()`, `asJones()` and 
 One strain, one agent per cell, one diffusion pass and an own weight of ±1 are required: a Jones model without one of
 them becomes extended (`jonesFits()`). The other values of the Jones column are bound: `constrain()` resets them
 (`asJones()`), and `packParams()` packs Jones' values whatever the settings hold. Walls, light and the cut change no
-model. In the Jones model the trail plus the food scent is Jones' one trail map (section 6.4).
+model. In the Jones model the trail plus the food scent is Jones' one trail map (section 6.4). In both models the cut
+moves the agents of its wound only while growth does not run; while growth runs it kills them (7.1, ADR 0039).
 
 ## 3. Units and scales
 
@@ -203,7 +204,7 @@ every scene.
 
 ## 7. The agents
 
-ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
+ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038, 0039. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
 `gl/glsl/tools.glsl`.
 
 The agent pass runs these parts in order for each agent.
@@ -214,26 +215,34 @@ The agent pass runs these parts in order for each agent.
    Jones 2010, Fig. 21 uses 0.00025).
 2. **Starvation** (flow on): a survivor of strain s dies if u < 0.02 · h² / (D_s² + h²), with h = 0.01 and D_s the flow
    memory of its own strain on its cell from the last step (section 8.5).
+3. **The cut and a wall** (while growth runs; ADR 0039): a survivor dies if its position lies within the radius of a
+   held cut (the wound of 7.2), or if its cell is a wall at the start of its step (a wall was painted onto it). Growth
+   runs while it is on with one agent per cell and Gf > 0 (`P.growth.x` > 0, `packParams()` in `src/engine/pack.ts`).
+   Without growth these agents are placed instead (7.2). This test draws no random number.
 
-A dead agent neither moves nor deposits in this step.
+A dead agent neither moves nor deposits in this step. Whatever killed it, it is a dead agent like any other:
+inoculate, respawn (7.2) and a birth (section 9) can bring it back to life, also in the step in which it died, and no
+count of alive agents holds it.
 
 ### 7.2 Placement by a tool, by the flow or off a wall
 
-A dead agent, an agent that the cut reaches and an agent under a wall may be placed instead of moving (ADR 0023,
-ADR 0038). A placed agent makes no move and no deposit in its step.
+A dead agent may be placed instead of moving, and so may an agent that the cut reaches and an agent under a wall
+while growth does not run (ADR 0023, ADR 0038; while growth runs these two die, 7.1, ADR 0039). A placed agent makes
+no move and no deposit in its step.
 
 - **Inoculate**: a dead agent of the tool's strain is taken with a chance per step of 1 − exp(−rate · Δt), so the
   tool places the same number per second at every frame rate (`inoculateRate()` and `stepChance()` in
   `src/engine/pack.ts`). It goes to
   a uniform point of the brush disc, with a random heading. Its cell must be open, and, with one agent per cell, empty
   at the start of the step.
-- **Cut**: an alive agent whose position lies within the radius of the tool takes the first of 8 uniform random points
-  of the grid whose cell is open and that lie outside the radius. It keeps its heading. If none fits, it moves as usual.
-- **Under a wall**: an alive agent whose cell is a wall at the start of its step (a wall was painted onto it) is placed
-  as the cut places its agents, with or without a tool: it takes the first of 8 uniform random points of the grid
-  whose cell is open, and while the cut is held one that also lies outside its radius. It keeps its heading. If none
-  fits, it moves as usual (7.5). The points are those of the cut (the stream tool, 7.7): an agent that the cut reaches
-  under a wall draws them once.
+- **Cut** (without growth): an alive agent whose position lies within the radius of the tool takes the first of 8
+  uniform random points of the grid whose cell is open and that lie outside the radius (Jones 2010, Sec. 4.3). It keeps
+  its heading. If none fits, it moves as usual.
+- **Under a wall** (without growth): an alive agent whose cell is a wall at the start of its step (a wall was painted
+  onto it) is placed as the cut places its agents, with or without a tool: it takes the first of 8 uniform random
+  points of the grid whose cell is open, and while the cut is held one that also lies outside its radius. It keeps its
+  heading. If none fits, it moves as usual (7.5). The points are those of the cut (the stream tool, 7.7): an agent that
+  the cut reaches under a wall draws them once.
 - **Respawn** (flow on, for every agent that no tool places): a dead agent of strain s draws one uniform point of the
   grid. It comes to life there with the chance 0.2 · (D_s − 0.5) / 0.5 if the cell is open, holds a tube of its own
   strain (B_s ≥ 0.05) and has D_s > 0.5 (section 8.5; ADR 0031). A tube of another strain gives it no life. With one
@@ -276,9 +285,9 @@ it passes within 0.001 cells (ADR 0019, ADR 0020). On the torus p' wraps.
   (Jones 2010, p. 133).
 
 A move inside the agent's own cell succeeds unless that cell is a wall. An agent whose cell is a wall at the start of
-its step is placed off the wall instead of moving (7.2). It moves only if none of its 8 points fits, or, with one agent
-per cell, after it lost the claim of its point (7.6); then the start cell is not checked on the way, so it can step
-out of the wall.
+its step dies while growth runs (7.1), and else is placed off the wall instead of moving (7.2). It moves only if none
+of its 8 points fits, or, with one agent per cell, after it lost the claim of its point (7.6); then the start cell is
+not checked on the way, so it can step out of the wall.
 
 ### 7.6 One agent per cell
 
@@ -298,10 +307,11 @@ cells without a limit.
 
 Every random number comes from a PCG hash of (id, step, seed, stream): rng = pcg(id ^ pcg(step ^ pcg(seed ^ stream))),
 then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1 (also an agent under a wall,
-7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9. So a run is the
-same for the same seed on one backend. For one agent and step the streams differ by construction, because pcg is a
-bijection. A start round's stream can equal another stream at a later step: for seeds 0 to 999, start rounds 0 to 64
-and steps below 10^6, this happens at one step in each of 134 (seed, round, stream) cases.
+7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9; the death in the
+wound of a cut and under a wall (7.1) draws no number. So a run is the same for the same seed on one backend. For one
+agent and step the streams differ by construction, because pcg is a bijection. A start round's stream can equal
+another stream at a later step: for seeds 0 to 999, start rounds 0 to 64 and steps below 10^6, this happens at one
+step in each of 134 (seed, round, stream) cases.
 
 ## 8. Flow in the tubes
 
@@ -423,6 +433,9 @@ copy in `src/engine/growth-reference.ts`.
 - **Births**: the winners' births are matched to dead agents of the same strain by rank, in a new random order of the
   cells each step. A birth without a dead agent is dropped. The capacity limits the population.
 - **The child**: a uniform random position in its cell, a uniform random heading, no deposit in its step.
+- **The cut and a wall**: while growth runs, an alive agent in the wound of a held cut or under a painted wall dies in
+  the agent pass (7.1; ADR 0039), and the colony grows back into the wound from its margin by this rule. Growth runs
+  while it is on and Gf > 0: with Gf = 0 no child is born, so the cut and a wall place their agents (7.2).
 
 Defaults (Jones 2011): Gf 3, Gw 9, Gmin 1, Gmax 10; Sf 3, Sw 5, Smin 0, Smax 20.
 
@@ -529,6 +542,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |
+| The cut and a wall with growth (7.1)    | "the cut and a painted wall while growth runs": the agents die, none lands in a closed room; placed with Gf 0 or growth off     |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
@@ -570,4 +584,8 @@ wall cells that touch at a corner, where no move can go (9); it no longer can (A
 
 Closed on 2026-11-15: an agent under a wall that was painted onto it was not moved off the wall. It could step out of
 it, and deep in a thick wall it stayed there for good, alive, with every move blocked and no deposit. Such an agent is
-placed off the wall now, as the cut places its agents (7.2, ADR 0038).
+placed off the wall now, as the cut places its agents (7.2, ADR 0038). And the cut and that rule placed their agents
+at random open points of the whole grid also while growth ran. On the Tokyo map these points lay also in the sea
+beyond the coast and on starved land, and growth made colonies of them there (ADR 0029, amendment 2026-11-15 (2)).
+While growth runs, both kill these agents now, and the colony grows back from the margin of the wound (7.1, 9;
+ADR 0039).

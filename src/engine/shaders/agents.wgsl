@@ -203,7 +203,16 @@ fn starved(a: Agent, id: u32) -> bool {
 }
 
 //#endif
-// Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
+// While growth runs (P.growth.x: Gf, 0 without growth or without its test), the cut and a painted wall take the plasm
+// away (ADR 0039): an alive agent in the wound of a held cut, or under a wall, dies, and the colony grows back from the
+// margin. Without growth, placement() puts it elsewhere (ADR 0023, ADR 0038). The agent as the step found it.
+fn removed(a: Agent) -> bool {
+  if (P.growth.x == 0u) { return false; }
+  return (P.tool.w == 2.0 && toolDistance(a.pos, P.tool.xy) < P.tool.z) || underWall(a);
+}
+
+// Shrinkage: an agent alive at the start of the step dies with the shrink probability, and while growth runs in the
+// wound of a cut or under a wall (removed()). Returns false if it is dead.
 fn shrinkage(a: ptr<function, Agent>, id: u32) -> bool {
   var alive = ((*a).bits & ALIVE) != 0u;
   if (alive) {
@@ -213,6 +222,7 @@ fn shrinkage(a: ptr<function, Agent>, id: u32) -> bool {
 //#if FLOW
   if (alive) { alive = !starved(*a, id); }
 //#endif
+  if (alive) { alive = !removed(*a); }
   (*a).bits = ((*a).bits & ~ALIVE) | select(0u, ALIVE, alive);
   return alive;
 }
@@ -261,6 +271,7 @@ fn underWall(a: Agent) -> bool {
 // never a living one. Cut takes a living agent in the wound to the first of 8 random points outside it whose cell
 // is open (Jones 2010, Sec. 4.3). An agent under a wall goes the cut's way, with or without a tool, and outside the
 // wound while the cut is held (ADR 0038): one loop of the stream TOOL, so an agent draws its points once in a step.
+// While growth runs, such an agent is dead here already (removed(), ADR 0039), and the loop places none.
 // After shrinkage, so a pure function of the agent as `claim` leaves it, the parameters, `env` and `occ`: `claim` and
 // `settle` find the same spot. With the rule the agent claims the cell like a move (`claim`), and only the winner goes
 // there (`settle`).

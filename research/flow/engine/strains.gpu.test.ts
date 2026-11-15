@@ -12,6 +12,8 @@
 // - VITE_PATCH: settings as JSON, on top of the scene's. VITE_NAME: the name of the file.
 // - VITE_FOODS: food dots as JSON, each [x, y, radius] in the frame of the scene's shapes (EnvShape in
 //   src/model/presets.ts), after the shapes of the scene.
+// - VITE_RECOVER: the share by which the flow memory of ground without a tube grows per step (FLOW.recover), in place
+//   of the app's (ADR 0029, decision 19).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
@@ -31,6 +33,9 @@ const STEPS = Number(env.VITE_STEPS ?? 6000);
 const EVERY = Number(env.VITE_EVERY ?? 500);
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Partial<Settings>;
 const NAME = env.VITE_NAME ?? `strains-${SCENE}-${KIND}-n${String(STRAINS)}-s${String(SEED)}`;
+// packFlow() reads the share at every upload of the uniform block, so a share set before the engine starts holds for
+// the whole run.
+if (env.VITE_RECOVER !== undefined) (FLOW as { recover: number }).recover = Number(env.VITE_RECOVER);
 const FOODS = (JSON.parse(env.VITE_FOODS ?? '[]') as [number, number, number][]).map(([x, y, r]): EnvShape => ({
   kind: 'food',
   at: [x, y],

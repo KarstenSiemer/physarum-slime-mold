@@ -216,7 +216,9 @@ growth brings dead agents to life as well (ADR 0025). While
 paused, a held tool runs 60 steps per second; inoculate runs none while every agent of its strain
 lives (ADR 0023), and no tool runs any beside a closed arena, where it reaches no cell. On a
 periodic grid the tools act on the cells under the pointer, also on a copy of the grid and across
-its edges (ADR 0026).
+its edges (ADR 0026). Cut moves the agents of its wound to open cells outside it, and a wall
+painted onto agents moves them off it (ADR 0038). While growth runs, both kill these agents
+instead, and growth fills the wound from its margin (model.md, section 7.1; ADR 0039).
 
 With Shift held, the brush tools Food, Light, Wall and Erase draw straight lines (ADR 0035): a click sets the start,
 and the next click paints the line from it as one stroke, as wide as the brush. The end of a line is the start of the

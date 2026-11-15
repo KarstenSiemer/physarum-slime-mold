@@ -1,8 +1,8 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
-// tubes (ADR 0034) and of an agent under a painted wall (ADR 0038). The script puts one wrong rule at a time into a
-// source file of the app, runs the GPU tests of the flow, of the picture or of the agents on the backend of that file,
-// and puts the file back. A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its
-// file. Every wrong rule must fail at least one test.
+// tubes (ADR 0034), of an agent under a painted wall (ADR 0038) and of the cut and a wall while growth runs
+// (ADR 0039). The script puts one wrong rule at a time into a source file of the app, runs the GPU tests of the flow,
+// of the picture or of the agents on the backend of that file, and puts the file back. A wrong rule of the food sites
+// on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule must fail at least one test.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/mutate.ts [W1 F3 ...]
 // It changes files below src/ while it runs, and it writes each one back as it was. It stops if a file has changed
 // since the mutations were written: then the text of a mutation no longer fits. With the argument `check` it only
@@ -30,6 +30,8 @@ const AGENTS_WGSL = 'src/engine/shaders/agents.wgsl';
 const TOOLS_GLSL = 'src/engine/gl/glsl/tools.glsl';
 const SIM_SPEC = 'src/engine/sim.gpu.test.ts';
 const [UNDER_WALL_GPU, UNDER_WALL_GL] = ['webgpu .*under a painted wall', 'webgl2 .*under a painted wall'];
+/** The tests of the agent tools on each backend, with those of the cut and a wall while growth runs (ADR 0039). */
+const [TOOLS_GPU, TOOLS_GL] = ['webgpu .*agent tools', 'webgl2 .*agent tools'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -253,6 +255,49 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     GL,
   ],
   ['F5 glsl: every food counts as covered', FRAG, 'memoryOf(s, q).y >= U.c.z) {', 'memoryOf(s, q).y >= -1.0) {', GL],
+  // Starved ground (ADR 0029, decisions 7 and 19): the recovery of ground without a tube.
+  [
+    'D1 wgsl: starved ground is fresh again at once',
+    WGSL,
+    'd = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));',
+    'd = U.c.w;',
+    GPU,
+  ],
+  [
+    'D2 wgsl: starved ground never recovers',
+    WGSL,
+    'd = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));',
+    'd = min(U.c.w, max(d, U.d.x));',
+    GPU,
+  ],
+  [
+    'D3 wgsl: no cap at fresh ground',
+    WGSL,
+    'd = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));',
+    'd = max(d, U.d.x) * (1.0 + U.a.w);',
+    GPU,
+  ],
+  [
+    'D4 glsl: starved ground is fresh again at once',
+    FRAG,
+    'd = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));',
+    'd = U.c.w;',
+    GL,
+  ],
+  [
+    'D5 glsl: starved ground never recovers',
+    FRAG,
+    'd = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));',
+    'd = min(U.c.w, max(d, U.d.x));',
+    GL,
+  ],
+  [
+    'D6 glsl: no cap at fresh ground',
+    FRAG,
+    'd = min(U.c.w, max(d, U.d.x) * (1.0 + U.a.w));',
+    'd = max(d, U.d.x) * (1.0 + U.a.w);',
+    GL,
+  ],
   [
     'F6 glsl: no starvation',
     'src/engine/gl/glsl/agents.frag',
@@ -1451,6 +1496,88 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, true];',
     'if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, false];',
     UNDER_WALL_GL,
+    SIM_SPEC,
+  ],
+  // The cut and a painted wall while growth runs (ADR 0039): an alive agent in the wound or under the wall dies, and
+  // without growth it is placed elsewhere. Against the tests of the agent tools in sim.gpu.test.ts.
+  [
+    'K1 wgsl: the cut and a wall kill without growth too',
+    AGENTS_WGSL,
+    'if (P.growth.x == 0u) { return false; }',
+    'if (false) { return false; }',
+    TOOLS_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'K2 wgsl: with growth the cut places the agents of its wound',
+    AGENTS_WGSL,
+    'return (P.tool.w == 2.0 && toolDistance(a.pos, P.tool.xy) < P.tool.z) || underWall(a);',
+    'return underWall(a);',
+    TOOLS_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'K3 wgsl: with growth an agent under a wall is placed',
+    AGENTS_WGSL,
+    'return (P.tool.w == 2.0 && toolDistance(a.pos, P.tool.xy) < P.tool.z) || underWall(a);',
+    'return P.tool.w == 2.0 && toolDistance(a.pos, P.tool.xy) < P.tool.z;',
+    TOOLS_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'K4 wgsl: the switch Growth and shrinkage kills also without a growth test (Gf 0)',
+    AGENTS_WGSL,
+    'if (P.growth.x == 0u) { return false; }',
+    'if (P.growth.x + P.shrinkage.x == 0u) { return false; }',
+    TOOLS_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'K5 wgsl: no kill on WebGPU, only on WebGL2',
+    AGENTS_WGSL,
+    '  if (alive) { alive = !removed(*a); }\n',
+    '',
+    TOOLS_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'K6 glsl: the cut and a wall kill without growth too',
+    TOOLS_GLSL,
+    'if (P.growth.x == 0u) return false;',
+    'if (false) return false;',
+    TOOLS_GL,
+    SIM_SPEC,
+  ],
+  [
+    'K7 glsl: with growth the cut places the agents of its wound',
+    TOOLS_GLSL,
+    'return (P.tool.w == 2.0 && toolDistance(a.xy, P.tool.xy) < P.tool.z) || underWall(a);',
+    'return underWall(a);',
+    TOOLS_GL,
+    SIM_SPEC,
+  ],
+  [
+    'K8 glsl: with growth an agent under a wall is placed',
+    TOOLS_GLSL,
+    'return (P.tool.w == 2.0 && toolDistance(a.xy, P.tool.xy) < P.tool.z) || underWall(a);',
+    'return P.tool.w == 2.0 && toolDistance(a.xy, P.tool.xy) < P.tool.z;',
+    TOOLS_GL,
+    SIM_SPEC,
+  ],
+  [
+    'K9 glsl: the switch Growth and shrinkage kills also without a growth test (Gf 0)',
+    TOOLS_GLSL,
+    'if (P.growth.x == 0u) return false;',
+    'if (P.growth.x + P.shrinkage.x == 0u) return false;',
+    TOOLS_GL,
+    SIM_SPEC,
+  ],
+  [
+    'K10 glsl: no kill on WebGL2, only on WebGPU',
+    'src/engine/gl/glsl/agents.frag',
+    '  if (alive) alive = !removed(a);\n',
+    '',
+    TOOLS_GL,
     SIM_SPEC,
   ],
 ];
