@@ -8,6 +8,11 @@
 //   Mobara"): they have the positions of the nodes of the paper's graphs.
 // - Coastline: © OpenStreetMap contributors, Open Database License 1.0 (relation 6677259, Honshu), cut to the map and
 //   simplified to 2 km (Douglas–Peucker).
+// - The light of the scene "Tokyo with light" (ADR 0029, decision 20), TOKYO_MOUNTAINS and TOKYO_LAKES below:
+//   - Elevations: SRTM 90 m (NASA/USGS, public domain), one sample at the centre of each cell of a 20 × 20 grid over
+//     the map.
+//   - Lake Kasumigaura: © OpenStreetMap contributors, Open Database License 1.0 (relation 253637, Nishiura, and
+//     relation 19725922, Kitaura), drawn as lines along the middle of the lakes.
 //
 // The map frame: x to the east and y to the south, from the point 139.97° E, 35.76° N, in units of 285 km
 // (equirectangular: x = (lon − 139.97) · 90.333 / 285, y = −(lat − 35.76) · 110.95 / 285). The map spans
@@ -283,6 +288,166 @@ const COAST: readonly (readonly [number, number])[] = [
   [0.2289, -0.3395],
   [0.239, -0.362],
 ];
+
+/** The grid of elevations over the map (TOKYO_MAP): 20 × 20 cells of 0.032 × 0.0362 units, 9.1 km × 10.3 km. */
+export const TOKYO_ELEVATION_GRID = 20;
+
+/**
+ * The lit cells of the grid of elevations, as [column, row] from the north-west corner of the map. A cell is lit when
+ * the SRTM sample at its centre is 200 m or more above the sea: 59 cells, less the 6 that a disc of half the diagonal
+ * of a cell around their centre would reach a food source with (the cities lie on low ground). From 200 m on, because
+ * at 100 or 150 m the cells under Maebashi, Takasaki, Kiryu, Ashikaga, Hachioji, Sagamihara, Odawara and Katsuura would
+ * be lit, which the mask of Fig. 2B shows dark (the specification of 2026-11-11, section 1.4, which gives the centres).
+ */
+export const TOKYO_MOUNTAINS = [
+  [0, 0],
+  [1, 0],
+  [2, 0],
+  [3, 0],
+  [4, 0],
+  [5, 0],
+  [6, 0],
+  [7, 0],
+  [8, 0],
+  [12, 0],
+  [15, 0],
+  [0, 1],
+  [1, 1],
+  [2, 1],
+  [3, 1],
+  [4, 1],
+  [5, 1],
+  [2, 2],
+  [5, 2],
+  [6, 2],
+  [11, 2],
+  [12, 2],
+  [0, 5],
+  [0, 6],
+  [0, 7],
+  [1, 7],
+  [2, 7],
+  [0, 8],
+  [1, 8],
+  [2, 8],
+  [0, 9],
+  [1, 9],
+  [2, 9],
+  [0, 10],
+  [1, 10],
+  [2, 10],
+  [0, 11],
+  [1, 11],
+  [2, 11],
+  [0, 12],
+  [1, 12],
+  [2, 12],
+  [0, 13],
+  [1, 13],
+  [2, 13],
+  [0, 14],
+  [0, 15],
+  [9, 15],
+  [11, 15],
+  [0, 16],
+  [10, 16],
+  [0, 17],
+  [0, 19],
+] as const;
+
+/**
+ * The radius of the light strokes that fill a lit cell. A light stroke paints the full byte only within 0.3 of its
+ * radius and fades to 0 at its radius (lightByte() in brush.ts). So the cells are filled with rows of thin strokes:
+ * their full bands cover the cell, and the fading edge reaches 0.7 of this radius, 0.0042 units (2 cells of the
+ * scene's grid), beyond the cell. One disc per cell, as the specification has it, lights only the middle of its cell
+ * fully and leaves dim seams between the cells, where the colony built a mesh (ADR 0029, amendment 2026-11-15 (3)).
+ */
+export const TOKYO_LIGHT_BRUSH = 0.006;
+
+/**
+ * Lake Kasumigaura as lines along the middle of its parts, each with the radius of half its width, in the map frame:
+ * Nishiura, its north arm (Takahamairi) and Kitaura. The line of Nishiura starts 0.021 from the centre of Tsuchiura,
+ * whose real shore it touches, so that its light ends 0.0016 outside the food source.
+ */
+export const TOKYO_LAKES = [
+  {
+    name: 'Nishiura',
+    r: 0.0105,
+    line: [
+      [0.094, -0.115],
+      [0.105, -0.111],
+      [0.127, -0.097],
+      [0.152, -0.083],
+      [0.168, -0.079],
+    ],
+  },
+  {
+    name: 'Takahamairi',
+    r: 0.0063,
+    line: [
+      [0.127, -0.118],
+      [0.114, -0.136],
+      [0.108, -0.155],
+    ],
+  },
+  {
+    name: 'Kitaura',
+    r: 0.0053,
+    line: [
+      [0.173, -0.146],
+      [0.178, -0.127],
+      [0.185, -0.109],
+      [0.192, -0.095],
+      [0.2, -0.079],
+    ],
+  },
+] as const;
+
+/** The sides of a cell of the grid of elevations in the map frame: west, north, east, south. */
+export function elevationCell(column: number, row: number): [number, number, number, number] {
+  const [west, north, east, south] = TOKYO_MAP;
+  const [w, h] = [(east - west) / TOKYO_ELEVATION_GRID, (south - north) / TOKYO_ELEVATION_GRID];
+  return [west + column * w, north + row * h, west + (column + 1) * w, north + (row + 1) * h];
+}
+
+/**
+ * The light of the scene "Tokyo with light" in the frame of a dish (EnvShape): the lit cells of the grid of elevations,
+ * filled with the full light byte, then the lakes, one stroke per piece of their lines. The cells of a row that touch
+ * each other are filled together: rows of strokes from the west side of the first cell to the east side of the last,
+ * inset by the full band, so that the full light ends at the sides of the cells. Light of one strength: the scene's
+ * Light strength on every lit cell, not a shade that grows with the altitude as in the mask of the paper (ADR 0029,
+ * decision 20).
+ */
+export function tokyoLight(): EnvShape[] {
+  const k = TOKYO_SCALE;
+  const at = (p: readonly [number, number]): [number, number] => [p[0] * k, p[1] * k];
+  const shapes: EnvShape[] = [];
+  // The full byte reaches 0.3 of the radius from a stroke: the strokes of a row lie at most twice that apart.
+  const band = 0.3 * TOKYO_LIGHT_BRUSH;
+  for (let row = 0; row < TOKYO_ELEVATION_GRID; row++) {
+    const columns = TOKYO_MOUNTAINS.filter(([, r]) => r === row)
+      .map(([c]) => c as number)
+      .sort((a, b) => a - b);
+    for (let first = 0; first < columns.length;) {
+      let last = first;
+      while (columns[last + 1] === (columns[last] ?? 0) + 1) last++;
+      const [west, north] = elevationCell(columns[first] ?? 0, row);
+      const [, , east, south] = elevationCell(columns[last] ?? 0, row);
+      const lines = Math.ceil((south - north - 2 * band) / (2 * band)) + 1;
+      for (let i = 0; i < lines; i++) {
+        const y = north + band + ((south - north - 2 * band) * i) / (lines - 1);
+        shapes.push({ kind: 'light', at: at([west + band, y]), to: at([east - band, y]), r: TOKYO_LIGHT_BRUSH * k });
+      }
+      first = last + 1;
+    }
+  }
+  for (const { r, line } of TOKYO_LAKES)
+    line.forEach((p, i) => {
+      const next = line[i + 1];
+      if (next) shapes.push({ kind: 'light', at: at(p), to: at(next), r: r * k });
+    });
+  return shapes;
+}
 
 /**
  * The scene's food and walls in the frame of a dish (EnvShape): Tokyo's seven food sources first, then the cities.

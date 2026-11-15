@@ -8,7 +8,7 @@ import {
   type StepOrder,
   type Strain,
 } from './params';
-import { tokyoShapes } from './tokyo';
+import { tokyoLight, tokyoShapes } from './tokyo';
 
 /**
  * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
@@ -214,6 +214,31 @@ const ring = (count: number, radius: number, r: number): EnvShape[] =>
     const at = (v: number) => Math.round(radius * v * 1e4) / 1e4;
     return food(at(Math.cos(angle)), at(Math.sin(angle)), r);
   });
+
+/**
+ * The settings of the scene Tokyo rail network (ADR 0024, 0029), with `extra` on top: the scene with light adds the
+ * strength of its light (ADR 0029, decision 20).
+ */
+const tokyo = (extra: Partial<Settings> = {}) =>
+  jones(
+    { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
+    {
+      model: 'extended',
+      lattice: [512, 512],
+      density: 0.01,
+      capacity: 0.25,
+      layout: 'food',
+      boundary: 'dish',
+      foodStrength: 0.03,
+      growth: true,
+      flow: true,
+      // Measured with 1, 1.4 and 2 over ten seeds each, twice (ADR 0029): with 1.4 the total length of the
+      // network is that of the organism (1.77 against 1.75 times the minimum spanning tree). The I0 = 2 of the
+      // model of Tero et al. 2010 (Fig. 4) has another unit.
+      flowStrength: 1.4,
+      ...extra,
+    },
+  );
 
 const FOGLEMAN_WHY =
   'Not derived from biology. Fogleman’s program draws random settings and prints them, and he saved this set under its name. The values are copied exactly: radians turned into degrees, his kept fraction into decay = 1 − kept, and his repulsion factor into a negative weight on the other strains’ trails.';
@@ -564,27 +589,28 @@ PRESETS.push(
       label: 'Fig. 1',
       note: 'at Science, free to read after a free registration',
     },
-    settings: () =>
-      jones(
-        { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
-        {
-          model: 'extended',
-          lattice: [512, 512],
-          density: 0.01,
-          capacity: 0.25,
-          layout: 'food',
-          boundary: 'dish',
-          foodStrength: 0.03,
-          growth: true,
-          flow: true,
-          // Measured with 1, 1.4 and 2 over ten seeds each, twice (ADR 0029): with 1.4 the total length of the
-          // network is that of the organism (1.77 against 1.75 times the minimum spanning tree). The I0 = 2 of the
-          // model of Tero et al. 2010 (Fig. 4) has another unit.
-          flowStrength: 1.4,
-        },
-      ),
+    settings: () => tokyo(),
     // The start layout 'food' places the colony on the first food: the station of Tokyo.
     env: tokyoShapes(),
+  },
+  {
+    id: 'tokyo-light',
+    name: 'Tokyo with light',
+    group: 'experiments',
+    source: 'Tero et al. 2010, Fig. 2B',
+    summary: 'The Tokyo map with light on the mountains and the lakes: the colony keeps to low ground.',
+    watch: 'TODO',
+    about: 'TODO. Second sentence.',
+    strainRoles: ['Jones’ foraging agent, drawn to food, flees light'],
+    why: 'TODO',
+    figure: {
+      href: 'https://doi.org/10.1126/science.1177894',
+      label: 'Fig. 2B',
+      note: 'at Science, free to read after a free registration',
+    },
+    settings: () => tokyo({ lightStrength: 0.05 }),
+    // The light comes after the food and the walls: the start layout 'food' places the colony on the first food.
+    env: [...tokyoShapes(), ...tokyoLight()],
   },
   {
     id: 'food-ring',
