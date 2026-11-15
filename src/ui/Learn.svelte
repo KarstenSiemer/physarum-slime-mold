@@ -337,6 +337,11 @@
         (<a href={JONES_PDF} rel="noreferrer">free PDF</a>).
       </p>
       <p>
+        The scene Coarsening network: W. Baumgarten, J. Jones and M. J. B. Hauser, “Network coarsening dynamics in a
+        plasmodial slime mould: modelling and experiments”, <em>Acta Physica Polonica B</em> 46(6): 1201–1218, 2015,
+        <a href="https://doi.org/10.5506/APhysPolB.46.1201" rel="noreferrer">doi:10.5506/APhysPolB.46.1201</a>.
+      </p>
+      <p>
         GPU approach and visual inspiration: Sage Jenson,
         <a href="https://cargocollective.com/sagejenson/physarum" rel="noreferrer">physarum</a> (2019). Multiple species
         and presets “Cyclones”, “Dunes”, “Dot grid”: Michael Fogleman,
