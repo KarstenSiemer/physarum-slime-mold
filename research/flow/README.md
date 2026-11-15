@@ -712,8 +712,9 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 npm run build && npx playwright test --project=e2e tests/e2e/flow.spec.ts
 ```
 
-You must see 24, 73 and 5 tests pass (27 and 47 before the food sites of part 11, and 71 before the
-test of starved ground of part 13).
+You must see 24, 77 and 5 tests pass (27 and 47 before the food sites of part 11, 71 before the
+test of starved ground of part 13, and 73 before the tests of respawn while the cut is held of
+ADR 0041).
 
 - `flow.test.ts` (Node, 1 s): the roles of the foods, the uniform block of each strain, the time
   scale, and the growing mesh of part 5 with all rules on.
@@ -730,7 +731,8 @@ flow for each one (about 55 minutes; the 42 of the food sites are part 11, the 4
 12, the 6 of starved ground part 13). Without a
 name it also runs the 93 wrong rules of the picture of the tubes (part 10), and the 8 wrong rules of
 an agent under a painted wall (ADR 0038, `U1` to `U8`) and the 10 of the cut and a wall while
-growth runs (ADR 0039, `K1` to `K10`) against the tests of the agents in `sim.gpu.test.ts`:
+growth runs (ADR 0039, `K1` to `K10`) against the tests of the agents in `sim.gpu.test.ts`, and
+the 10 of respawn while the cut is held (ADR 0041, `N1` to `N10`) against the tests of the flow:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts
@@ -1404,7 +1406,7 @@ half an hour of model time. The app keeps its factor.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 225 files, 3.4 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 230 files, 3.4 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1430,6 +1432,7 @@ asks for the new digest.
 | `logs/engine/cut-growth/`                            | the runs of ADR 0039: the digests of every scene on the branch and on `main`, its wrong rules K1 to K10 with U1 to U8, and the Tokyo case of the Cut tool                                                                       | 2026-11-15, M3 Pro, `main` at `71b0161` and `281d69e` |
 | `logs/engine/wall-cost/`                             | the time of a step before and after the rule for an agent under a painted wall, with its flag clear and set, and of its first build (ADR 0038, check of 2026-11-15)                                                             | 2026-11-15, M3 Pro, a free GPU                        |
 | `logs/engine/cut-cost/`                              | the time of a step before and after the rule of ADR 0039, with the flag of ADR 0038 clear and set (check of 2026-11-15)                                                                                                         | 2026-11-15, M3 Pro, a free GPU                        |
+| `logs/engine/respawn-wound/`                         | the runs of ADR 0041: the digests of every scene on the branch and on `main`, and its wrong rules N1 to N10                                                                                                                     | 2026-11-15, M3 Pro, `main` at `b93584e`               |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1483,7 +1486,7 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 210 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/mutate.ts`        | 220 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

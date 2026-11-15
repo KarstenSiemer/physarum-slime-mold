@@ -66,7 +66,8 @@ vec4 flowMemoryOf(uint s, ivec2 q) {
 
 // Where the flow brings a dead agent to life, or cell −1 (respawn in agents.wgsl): the agent draws one random point of
 // the grid. If its cell is open and holds a tube of the agent's strain, the agent comes to life there with the chance
-// birth · (D − from) / (1 − from), D the flow memory of the cell for that strain.
+// birth · (D − from) / (1 − from), D the flow memory of the cell for that strain. While the cut is held, a point in its
+// wound is no respawn point (ADR 0041).
 Spot respawn(vec4 a, uint i) {
   Spot none = Spot(a.xy, a.z, -1);
   if ((bitsOf(a) & ALIVE) != 0u) return none;
@@ -74,6 +75,7 @@ Spot respawn(vec4 a, uint i) {
   float rx = rand(rng);
   float ry = rand(rng);
   vec2 p = vec2(rx * float(W()), ry * float(H()));
+  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;
   ivec2 q = cellXY(ivec2(floor(p)));
   int c = indexOf(q);
   if (!openCell(c)) return none;
