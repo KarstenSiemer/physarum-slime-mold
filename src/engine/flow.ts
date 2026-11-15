@@ -3,6 +3,7 @@
 // the CPU for the tests. Every strain has a flow of its own (ADR 0031): the passes run once per strain, on the trail
 // of that strain, with a state of their own.
 import { MAX_STRAINS, type Settings, type StepOrder } from '../model/params';
+import { SITE_BLOCK, type FlowSites } from './sites';
 
 /**
  * Whether the flow runs: the switch, in the extended model only (constrain() turns it off in the Jones model; this
@@ -68,7 +69,10 @@ export const FLOW = {
 export const FLOW_ITERATIONS = 16;
 export const FLOW_LANES = 4;
 export const FLOW_HOLD = 300;
-/** The most food sites that give or take. With more foods, sites spread evenly over the list take part. */
+/**
+ * The most food sites that give or take, and the ports of a strain (flow.wgsl `ports`). With more food strokes, strokes
+ * spread evenly over the list take part (sites.ts SiteCells).
+ */
 export const FLOW_SITES = 64;
 
 /** Slots of 16 bytes in the uniform block `Flow` (flow.wgsl, flow.frag): seven of constants, then the sites. */
@@ -81,33 +85,6 @@ export function pcg(v: number): number {
   const state = (Math.imul(v, 747796405) + 2891336453) >>> 0;
   const word = Math.imul(((state >>> ((state >>> 28) + 4)) ^ state) >>> 0, 277803737) >>> 0;
   return ((word >>> 22) ^ word) >>> 0;
-}
-
-/**
- * The food sites of a simulation: the cell at the start of each food stroke, in the order of the strokes, each cell
- * once. For a food dot the start is its centre, and every food of a scene is a dot. With more than FLOW_SITES, sites
- * spread evenly over the list.
- */
-export function flowSites(
-  centres: readonly (readonly [number, number])[],
-  width: number,
-  height: number,
-): [number, number][] {
-  const seen = new Set<number>();
-  const cells: [number, number][] = [];
-  for (const [x, y] of centres) {
-    const [cx, cy] = [Math.floor(x), Math.floor(y)];
-    if (cx < 0 || cy < 0 || cx >= width || cy >= height) continue;
-    const key = cy * width + cx;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    cells.push([cx, cy]);
-  }
-  if (cells.length <= FLOW_SITES) return cells;
-  return Array.from(
-    { length: FLOW_SITES },
-    (_, i): [number, number] => cells[Math.floor((i * cells.length) / FLOW_SITES)] ?? [0, 0],
-  );
 }
 
 /**
@@ -178,15 +155,17 @@ export function trailLevels(
 }
 
 /**
- * The uniform block of the flow passes of the strain `strain` (ADR 0031): the constants, the cell of the first site
- * (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain and the
- * sites. The passes take the step and the seed from the parameters of the simulation. The levels of the trail are
- * those of the strain (trailLevels()). Every strain has the same sites and the same other constants: the agent passes
- * read the constants from the block of any strain.
+ * The uniform block of the flow passes of the strain `strain` (ADR 0031): the constants, the first cell of the first
+ * site (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain,
+ * the blocks of the list of cells, and the sites: per site its first cell and the run of its cells in the list of
+ * cells (sites.ts FlowSites). The
+ * passes take the step and the seed from the parameters of the simulation. The levels of the trail are those of the
+ * strain (trailLevels()). Every strain has the same sites and the same other constants: the agent passes read the
+ * constants from the block of any strain, and the pass of the ports reads the sites from the block of the first.
  */
 export function packFlow(
   s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder'>,
-  sites: readonly (readonly [number, number])[],
+  sites: FlowSites,
   buf = new ArrayBuffer(FLOW_BYTES),
   strain = 0,
 ): ArrayBuffer {
@@ -194,16 +173,19 @@ export function packFlow(
   f.fill(0);
   const [low, full] = trailLevels(s.strains[strain] ?? { deposit: 5, decay: JONES_DECAY }, s.stepOrder);
   const omega = 2 / (1 + Math.sqrt(1 - FLOW.radius * FLOW.radius));
-  const n = Math.min(sites.length, FLOW_SITES);
+  const n = Math.min(sites.list.length, FLOW_SITES);
   const limit = FLOW.head * s.flowStrength;
   f.set([s.flowStrength, FLOW.gamma, FLOW.rate, FLOW.recover], 0);
   f.set([FLOW.base, FLOW.food, FLOW.ghost, omega], 4);
   f.set([FLOW.weight, FLOW.bodyRate, FLOW.bodyLow, FLOW.fresh], 8);
   f.set([FLOW.floor, low, 1 / (full - low), n], 12);
   f.set([FLOW.death, FLOW.half * FLOW.half, FLOW.birth, FLOW.birthFrom], 16);
-  const ref = sites[0] ?? [0, 0];
-  f.set([ref[0], ref[1], strain, 0], 20);
+  const ref = sites.list[0];
+  f.set([ref?.x ?? 0, ref?.y ?? 0, strain, sites.cells.length / SITE_BLOCK], 20);
   f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), 0], 24);
-  for (let i = 0; i < n; i++) f.set([sites[i]?.[0] ?? 0, sites[i]?.[1] ?? 0, 0, 0], FLOW_CONSTANT_SLOTS * 4 + i * 4);
+  for (let i = 0; i < n; i++) {
+    const site = sites.list[i];
+    if (site) f.set([site.x, site.y, site.offset, site.count], FLOW_CONSTANT_SLOTS * 4 + i * 4);
+  }
   return buf;
 }

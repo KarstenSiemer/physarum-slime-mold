@@ -306,8 +306,8 @@ and steps below 10^6, this happens at one step in each of 134 (seed, round, stre
 ## 8. Flow in the tubes
 
 Extended model only, off by default (ADR 0029). Tero, Kobayashi and Nakagaki 2007 and Tero et al. 2010 on the grid
-cells in place of a graph. Code: `shaders/flow.wgsl`, `gl/glsl/flow.frag`, constants in `src/engine/flow.ts`, a CPU
-copy of both passes in `src/engine/flow-reference.ts`.
+cells in place of a graph. Code: `shaders/flow.wgsl`, `gl/glsl/flow.frag`, constants in `src/engine/flow.ts`, the
+food sites in `src/engine/sites.ts`, a CPU copy of the three passes in `src/engine/flow-reference.ts`.
 
 **Every strain has a flow of its own** ([ADR 0031](adr/0031-a-flow-for-every-strain.md)). The rules below run once per
 strain s, on the trail T_s of that strain alone, with the fields B_s, D_s, G_s and P_s,k of that strain; below, B, D, G
@@ -334,18 +334,32 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 
 ### 8.2 Food sites and their roles
 
-- A site is the cell of the start point of a painted food stroke, in the order of the list. Each cell counts once, cells
-  outside the grid are dropped, and with more than 64 the sites spread evenly over the list (`flowSites()`).
-- A site is **covered** by the strain while its cell holds food and a tube of the strain (B ≥ 0.05 in the last step).
-  Two strains can cover the same site.
+- A site is one painted **food stroke**: a dab, or every segment of one drag together (ADR 0029, decision 17). In the
+  edit list a food edit goes on with the stroke of the edit just before it when that edit is food too, with the same
+  radius, grid and arena, and the new edit starts exactly where that edit ends; on a periodic grid also where a copy
+  of the grid shows that end (`foodStrokes()`). A drag of the brush makes such chains. The rule reads only the list, so
+  a link made before it gives the same sites. A new dab exactly at the end of a drag, with the same radius, joins the
+  drag; a drag splits where the view, the grid or the radius changed during it, or where it left a closed arena.
+- The **cells** of a site are the cells that its segments paint with food, by the rule of the paint passes; its
+  **centre** is the start of its first segment, for a dab its centre. A cell that two strokes paint belongs to the one
+  whose centre is nearer, on a tie to the one earlier in the list, among all strokes of the list; so two strokes that
+  touch stay two sites, and no cell is in two sites. A stroke left without a cell is no site. With more than 64
+  strokes that keep a cell, 64 of them spread evenly over those take part, the first one always (`SiteCells`).
+- A site is **covered** by the strain while one of its cells is open and holds food and a tube of the strain (B ≥ 0.05
+  in the last step). Its **port** is the covered cell nearest its centre, on a tie the one with the lower index
+  y · W + x; on a periodic grid the distance is to the nearest copy of the centre. The flux of the strain enters and
+  leaves the site at its port, and the roles, the pressure limit and the zero point below read the port. Each step
+  finds the ports of every site and strain before the update (`blocks` and `sites` in `flow.wgsl`). Two strains can
+  cover the same site, each at a port of its own.
 - The roles of the strain in each of the 4 lanes: with fewer than 2 sites that the strain covers, none. With exactly 2,
   the first gives and the other takes. With m ≥ 3, the covered sites are shuffled by a hash, ⌊m/2⌋ give, ⌊m/2⌋ take and
   an odd one rests; lane k draws again at steps where ⌊(t + 75 k) / 300⌋ changes, so every 300 steps, the lanes 75 steps
   apart. The hash is the same for every strain, so strains that cover the same sites draw the same roles.
 - A site that gives adds I0 (the setting Flow strength), one that takes removes I0, scaled by a pressure limit h_c: full
-  while σ (P_c − P̄) ≤ 0.75 L, then falling linearly to 0 at σ (P_c − P̄) = L, with L = 4096 · I0. P̄ is the mean
-  pressure, in the lane, of every site that has a role in any lane of the flow of the strain, and σ is +1 to give and −1
-  to take. Two strains that cover the same two sites carry I0 each.
+  while σ (P_c − P̄) ≤ 0.75 L, then falling linearly to 0 at σ (P_c − P̄) = L, with L = 4096 · I0. c is the port of the
+  site, P̄ is the mean pressure, in the lane, at the port of every site that has a role in any lane of the flow of the
+  strain, and σ is +1 to give and −1 to take. Two strains that cover the same two sites carry I0 each: a site gives
+  every strain that covers it the whole flux, with no share.
 
 ### 8.3 The pressure
 
@@ -356,16 +370,16 @@ momentum, in each lane, from the pressure of the last step:
 - J = P + 0.9 (P* − P);
 - P_new = ω J + (1 − ω) P_old, with ω = 2 / (1 + √(1 − 0.99999²)) ≈ 1.991 on cells that conduct, and ω = 1 elsewhere.
 
-P_old is the input of the iteration before. The zero point is the first site with a role in the flow of the strain, or
-the first site of the list while none has one: the first two iterations of a step subtract its pressure at the start of
-the step, the first from its result and the second from its momentum term. That shifts the whole history and changes no
-difference.
+P_old is the input of the iteration before. The zero point is the port of the first site with a role in the flow of the
+strain, or the first cell of the first site of the list while none has one: the first two iterations of a step
+subtract its pressure at the start of the step, the first from its result and the second from its momentum term. That
+shifts the whole history and changes no difference.
 
 ### 8.4 Flux and adaptation
 
 - Flux of a cell: Q = ½ · Σ_{n ∈ N4} H(G_c, G_n) · |P_c − P_n|, per lane, with G and P of the last step.
 - f(Q) = Q^1.8 / (1 + Q^1.8) (Tero et al. 2010, γ = 1.8), averaged over the 4 lanes.
-- On a tube, while at least 2 sites had a role in the flow of the strain in the last step:
+- On a tube, while at least 2 sites had a role in the flow of the strain in the last step (at their ports of that step):
   D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles
   D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · 1.00023), so starved ground comes back to 0.2 in
   about 33,000 steps.
@@ -417,9 +431,9 @@ Defaults (Jones 2011): Gf 3, Gw 9, Gmin 1, Gmax 10; Sf 3, Sw 5, Smin 0, Smax 20.
 `shaders/init.wgsl`, `gl/glsl/init.frag`. Every agent draws a heading. The layouts: mixed (uniform; with one agent per
 cell a random permutation of the cells), bands (the strains side by side), sectors, colonies (one disc per strain),
 ring, center, empty (every agent dead) and food (every agent dead; for each strain one inoculate step places about 50
-agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A on
-the first food of the scene, strain B on the second, and so on, and a strain without such a food starts without
-agents; ADR 0025, ADR 0032). With one agent per cell,
+agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A at
+the start of the first food stroke of the list (a dab or a whole drag, 8.2), strain B on the second, and so on, and a
+strain without such a food starts without agents; ADR 0025, ADR 0032). With one agent per cell,
 claim rounds give each alive agent its own cell: 1 round for the mixed layout on a periodic grid or a box, without walls; else 64
 (`startRounds()` in `src/engine/pack.ts`); a loser
 of the last round starts dead. Without the rule an agent draws again up to 32 times while its cell is not open. With a
@@ -517,6 +531,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
 | The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |
 | A colony for each strain (10)           | `engine.gpu.test.ts`: three strains in the Foraging maze start two colonies on the two foods                                    |
 | A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
@@ -524,18 +539,28 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 
 `flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
 route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of
-four); a change of the number of strains during a run.
+four); a change of the number of strains during a run. For the food sites (ADR 0029, decision 17) it tests on both
+backends: a dragged line, held in a link of before, is one site with its port at the covered cell nearest its start; a
+strain covers a site from any of its cells, and its port moves to the covered cell nearest the centre; two strains on
+the same strokes each carry I0 through cells of their own; two dabs that touch stay two sites; the CPU copy while a port
+moves, with food under a wall and at the edge of a tube; a large site in lanes before and after its port, also with two
+strains; a change of the sites during a run, also when the list gets shorter; 64 sites of 65 strokes; an erased cell
+holds no port. `engine-env.test.ts` holds the engine to the rule: a drag of the brush is one site, a link gives the
+sites of its list, and the start layout Food puts each strain on a stroke of its own.
 
 Not tested: the random turn pCD (no test uses pCD > 0) and the rate of random shrinkage. The value of the blocked
 heading is checked only beside a wall ("leaves an agent beside the wall to its move").
 
 ## 14. Open points in the code
 
-Each one is open, not a rule. The first one was found while this file was written, the last one in ADR 0031:
+This one is open, not a rule. It was found while this file was written:
 
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
-- A site is one cell (8.2). Where strains share a food dot, only the strains whose tube holds its cell cover it
-  (ADR 0031 and `TODO.md`).
+
+Closed on 2026-11-14: a site was the one cell at the start of a food stroke (8.2). So a strain covered a food dot only
+at its centre, and where strains shared a food dot only the strains whose tube held that cell had it as a site (ADR
+0031). And a dragged line of food gave a site for every segment of the drag, each with the whole flux. A site is a
+stroke with all its cells now, and its port is the covered cell nearest its centre (ADR 0029, decision 17).
 
 Closed on 2026-11-13: respawn (7.2) brought a dead agent of any strain to life, so with the flow a strain appeared that
 nobody had inoculated (found by the owner). Every strain has a flow of its own now (ADR 0031). And the flow did

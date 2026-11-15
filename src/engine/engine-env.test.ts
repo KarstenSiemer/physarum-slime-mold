@@ -7,6 +7,7 @@ import { presetById, shapesAt, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
+import { NO_CELL } from './sites';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
 import { OutOfMemoryError } from './gpu';
@@ -199,9 +200,9 @@ describe('food, light and walls on a new simulation', () => {
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 
-  // ADR 0029: the flow in the tubes holds 80 B more per cell (sizing.ts FLOW_BYTES_PER_CELL), only while it runs.
+  // ADR 0029: the flow in the tubes holds 84 B more per cell (sizing.ts flowBytesPerCell()), only while it runs.
   it('count the bytes of the flow in the tubes only while it runs, and rebuild when they lower the grid', async () => {
-    // 1400 B per cell fit 768 × 480 into the 512 MiB budget; with 80 more, only 512 × 320 fits.
+    // 1400 B per cell fit 768 × 480 into the 512 MiB budget; with 84 more, only 512 × 320 fits.
     const backend = new CpuBackend();
     backend.bytesPerCell = 1400;
     const off = { ...maze.settings(), flow: false, resolution: 768 };
@@ -746,53 +747,131 @@ describe('food, light and walls after an arena switch', () => {
 
 // A long sweep pauses after a few hundred rows of work and goes on in the next frames: a deletion changes no byte on
 // screen (Engine.sweepFor()).
-// ADR 0029: the foods give and take the flux of the flow in the tubes at the start point of their strokes. The engine
-// tells the simulation these points after every change of the list of edits that the simulation holds.
+// ADR 0029, decision 17: a food site is a food stroke of the list, a dab or every segment of one drag, with the cells
+// that it paints. The engine tells the simulation the sites after every change of the list of edits that it holds.
 describe('the food sites of the flow in the tubes', () => {
   const frame = (x: number, y: number, w: number, h: number) => fromFrame([x, y], [w, h], 'box');
+  /**
+   * The cell nearest a point of the grid, x and y: on the edge between two cells the lower one, which has the lower
+   * index (sites.ts).
+   */
+  const cellAt = ([x, y]: [number, number]) => [Math.ceil(x) - 1, Math.ceil(y) - 1];
+  const firstCells = (sim: CpuSim) => sim.sites.list.map((s) => [s.x, s.y]);
+  /** Every food cell of the simulation belongs to one site, and every cell of a site holds food. */
+  const coversFood = (sim: CpuSim) => {
+    const cells = [...sim.sites.cells].filter((c) => c !== NO_CELL).sort((a, b) => a - b);
+    const food: number[] = [];
+    for (let c = 0; c < sim.width * sim.height; c++) if (sim.env[c * 4 + 1]) food.push(c);
+    expect(cells).toEqual(food);
+  };
 
-  it('are the start of each food of the list on the grid, in its order', async () => {
+  it('are the food strokes of the list on the grid, in its order, each with the cells that it paints', async () => {
     const { engine, sim } = await engineWith(maze.settings());
-    // The Maze's foods lie at (−0.64, −0.4) and (0.64, 0.4) of the frame of a box.
-    const two = [frame(-0.64, -0.4, 512, 320), frame(0.64, 0.4, 512, 320)];
-    expect(sim().sites).toEqual(two);
-    // A food stroke gives one site, at its start; a wall gives none.
-    engine.paint({ kind: 'food', from: [100, 200], to: [120, 200], radius: 3 });
+    // The Maze's foods lie at (−0.64, −0.4) and (0.64, 0.4) of the frame of a box: two dabs.
+    const two = [cellAt(frame(-0.64, -0.4, 512, 320)), cellAt(frame(0.64, 0.4, 512, 320))];
+    expect(firstCells(sim())).toEqual(two);
+    coversFood(sim());
+    // A food stroke gives one site, with its first cell at its start; a wall gives none.
+    engine.paint({ kind: 'food', from: [100.5, 200.5], to: [120, 200], radius: 3 });
     engine.paint({ kind: 'wall', from: [10, 10], to: [20, 10], radius: 2 });
     engine.frame(0, 0);
-    expect(sim().sites).toEqual([...two, [100, 200]]);
+    expect(firstCells(sim())).toEqual([...two, [100, 200]]);
+    coversFood(sim());
     // Before the frame paints a stroke, the simulation does not hold it: no site yet.
-    engine.paint({ kind: 'food', from: [300, 40], to: [300, 40], radius: 3 });
-    expect(sim().sites).toEqual([...two, [100, 200]]);
+    engine.paint({ kind: 'food', from: [300.5, 40.5], to: [300.5, 40.5], radius: 3 });
+    expect(sim().sites.list.length).toBe(3);
     engine.frame(0, 0);
-    expect(sim().sites).toEqual([...two, [100, 200], [300, 40]]);
+    expect(firstCells(sim())).toEqual([...two, [100, 200], [300, 40]]);
+    expect(sim().sites.list.map((s) => s.stroke)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('make one site of a drag of the brush, however many segments it records', async () => {
+    const { engine, sim } = await engineWith(maze.settings(), []);
+    const drag = new BrushDrag();
+    // Along canvas row 500 and down again, with a brush of 6 cells on 512 × 320 (App.svelte brushCells()).
+    for (let x = 300; x <= 900; x += 10) drag.to(engine, [x, 500 + (x % 200)], 'food', 6);
+    drag.end();
+    engine.frame(0, 0);
+    expect(edits(engine).length).toBeGreaterThan(30);
+    expect(sim().sites.list.length).toBe(1);
+    coversFood(sim());
+    // Its first cell is at the start of the drag.
+    expect(firstCells(sim())).toEqual([cellAt(engine.toGrid(300, 600))]);
+    // A second drag is a second site; a dab beside it a third.
+    for (let x = 300; x <= 600; x += 10) drag.to(engine, [x, 200], 'food', 6);
+    drag.end();
+    drag.to(engine, [1200, 800], 'food', 6);
+    drag.end();
+    engine.frame(0, 0);
+    expect(sim().sites.list.length).toBe(3);
+    coversFood(sim());
+  });
+
+  it('give a shared link the sites of its list', async () => {
+    const { engine, sim } = await engineWith(maze.settings(), []);
+    const drag = new BrushDrag();
+    for (let x = 300; x <= 900; x += 10) drag.to(engine, [x, 500], 'food', 6);
+    drag.end();
+    engine.frame(0, 0);
+    const { hash } = await encodeLink(engine.settings, drawingOf(engine.envList(), '', [], 'box', [0]));
+    const opened = await engineWith(maze.settings(), []);
+    const decoded = await decodeLink(hash);
+    if (!decoded) throw new Error('no link');
+    await opened.engine.load(decoded.settings, [], 'box', decoded.drawing?.strokes ?? []);
+    expect(opened.sim().sites).toEqual(sim().sites);
+    expect(opened.sim().sites.list.length).toBe(1);
   });
 
   it('lose a food that an erase removes from the list, and follow the foods to a new grid', async () => {
     const { engine, sim } = await engineWith(maze.settings());
     engine.paint({ kind: 'food', from: [100, 200], to: [100, 200], radius: 3 });
     engine.frame(0, 0);
-    expect(sim().sites.length).toBe(3);
+    expect(sim().sites.list.length).toBe(3);
     engine.paint({ kind: 'erase', from: [100, 200], to: [100, 200], radius: 8 });
     engine.frame(0, 0);
-    expect(sim().sites).toEqual([frame(-0.64, -0.4, 512, 320), frame(0.64, 0.4, 512, 320)]);
+    expect(firstCells(sim())).toEqual([cellAt(frame(-0.64, -0.4, 512, 320)), cellAt(frame(0.64, 0.4, 512, 320))]);
     await engine.apply({ ...engine.settings, resolution: 768 });
     expect([sim().width, sim().height]).toEqual([768, 480]);
-    expect(sim().sites).toEqual([frame(-0.64, -0.4, 768, 480), frame(0.64, 0.4, 768, 480)]);
+    expect(firstCells(sim())).toEqual([cellAt(frame(-0.64, -0.4, 768, 480)), cellAt(frame(0.64, 0.4, 768, 480))]);
+    coversFood(sim());
   });
 
   it('are none after Clear, and those of the scene after a load', async () => {
     const { engine, sim } = await engineWith(maze.settings());
     engine.clearEnvironment();
-    expect(sim().sites).toEqual([]);
+    expect(sim().sites.list).toEqual([]);
     const tokyo = presetById('tokyo');
     if (!tokyo?.env) throw new Error('no Tokyo');
     await engine.load(tokyo.settings(), tokyo.env);
-    // Tokyo's seven food sources and the 35 other cities, on the scene's lattice; the first is Tokyo station.
+    // Tokyo's seven food sources and the 35 other cities, on the scene's lattice; the first is Tokyo station. The
+    // seven dabs of Tokyo touch, and stay seven sites.
     expect([sim().width, sim().height]).toEqual([512, 512]);
-    expect(sim().sites.length).toBe(42);
+    expect(sim().sites.list.length).toBe(42);
     const station = tokyo.env[0];
-    expect(sim().sites[0]).toEqual(fromFrame(station?.at ?? [0, 0], [512, 512], 'dish'));
+    expect(firstCells(sim())[0]).toEqual(cellAt(fromFrame(station?.at ?? [0, 0], [512, 512], 'dish')));
+    coversFood(sim());
+  });
+});
+
+// The start layout Food puts each strain on a food stroke of its own (ADR 0032), a dab or a whole drag, as a site of
+// the flow is one (ADR 0029, decision 17).
+describe('the colonies of the start layout Food', () => {
+  it('start each strain on a food stroke of its own, at its start, also after a drag', async () => {
+    const strains = [defaultStrain(0), defaultStrain(1)];
+    const settings = { ...maze.settings(), layout: 'food' as const, strains };
+    const drag = [100, 110, 120, 130].map((x, i): EnvEdit => {
+      const s = { kind: 'food' as const, from: [i === 0 ? x : x - 10, 200], to: [x, 200], radius: 4 };
+      return fromStroke(s as Stroke, [512, 320], 'box');
+    });
+    const dab = fromStroke({ kind: 'food', from: [300, 100], to: [300, 100], radius: 4 }, [512, 320], 'box');
+    const engine = await Engine.create(canvas(), settings, undefined, new CpuBackend());
+    await engine.load(settings, [], 'box', [...drag, dab]);
+    const tools = (engine.sim as CpuSim).tools;
+    // Strain A at the start of the drag, strain B on the dab: not on the second segment of the drag.
+    expect(tools.map((t) => [t.strain, t.x, t.y])).toEqual([
+      [0, 100, 200],
+      [1, 300, 100],
+    ]);
   });
 });
 
@@ -800,30 +879,30 @@ describe('the food sites while the flow is off, and after a load without shapes'
   it('are not kept while the flow is off, and are those of the list when it turns on', async () => {
     const { engine, sim } = await engineWith({ ...maze.settings(), flow: false });
     // Only the flow reads the sites: a paint does not map the list of edits again (review of 2026-11-13).
-    expect(sim().sites).toEqual([]);
-    engine.paint({ kind: 'food', from: [100, 200], to: [120, 200], radius: 3 });
+    expect(sim().sites.list).toEqual([]);
+    engine.paint({ kind: 'food', from: [100.5, 200.5], to: [120, 200], radius: 3 });
     engine.frame(0, 0);
-    expect(sim().sites).toEqual([]);
+    expect(sim().sites.list).toEqual([]);
     await engine.apply({ ...engine.settings, flow: true });
-    expect(sim().sites.length).toBe(3);
-    expect(sim().sites[2]).toEqual([100, 200]);
+    expect(sim().sites.list.length).toBe(3);
+    expect([sim().sites.list[2]?.x, sim().sites.list[2]?.y]).toEqual([100, 200]);
     // Off again: the list stays, and nobody reads it. On again: the list of that moment.
     await engine.apply({ ...engine.settings, flow: false });
     engine.paint({ kind: 'food', from: [300, 40], to: [300, 40], radius: 3 });
     engine.frame(0, 0);
-    expect(sim().sites.length).toBe(3);
+    expect(sim().sites.list.length).toBe(3);
     await engine.apply({ ...engine.settings, flow: true });
-    expect(sim().sites.length).toBe(4);
+    expect(sim().sites.list.length).toBe(4);
   });
 
   it('are none after a load without shapes on the same grid', async () => {
     const { engine, sim } = await engineWith(maze.settings());
     const first = sim();
-    expect(first.sites.length).toBe(2);
+    expect(first.sites.list.length).toBe(2);
     // The same settings without the scene's shapes: the engine keeps the simulation, which held the two foods.
     await engine.load(maze.settings(), []);
     expect(sim()).toBe(first);
-    expect(sim().sites).toEqual([]);
+    expect(sim().sites.list).toEqual([]);
   });
 });
 

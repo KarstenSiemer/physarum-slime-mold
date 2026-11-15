@@ -93,6 +93,11 @@ export interface Order {
 
 /** The passes of the flow in the tubes (flow.frag, ADR 0029). */
 export interface FlowPrograms {
+  /** PASS 2 to 4: the hits of the blocks of the list of cells, the lanes of each site, and the port of every site and
+   *  strain (decision 17). */
+  blocks: Program;
+  lanes: Program;
+  sites: Program;
   /** PASS 0: the memory of each cell. */
   update: Program;
   /** PASS 1: one iteration of the pressure. */
@@ -281,6 +286,9 @@ export function compile(gl: GL): Programs {
     growthFlowing: () => (growthFlowing ??= sim(`#define PASS 2\n#define FLOW 1\n${growthGlsl}${growthFrag}`)),
     flow: () =>
       (flow ??= {
+        blocks: sim('#define PASS 2\n' + flowFrag),
+        lanes: sim('#define PASS 3\n' + flowFrag),
+        sites: sim('#define PASS 4\n' + flowFrag),
         update: sim('#define PASS 0\n' + flowFrag),
         pressure: sim('#define PASS 1\n' + flowFrag),
         points: wrap(
