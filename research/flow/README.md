@@ -147,8 +147,9 @@ they empty. So the app keeps 18 h. And the colony does grow back into a region t
 the network around four cities is taken off, it joins them again within 7 to 13 minutes of model
 time, and where their foods are taken away for 100 minutes and come back, within 10 to 33 minutes.
 What stays closed is the ground between the tubes, where no tube is needed. The Cut tool of the app
-was no help for this test: it throws the agents of its wound to random points of the whole dish,
-also into the sea, where they grow into colonies.
+was no help for this test: it threw the agents of its wound to random points of the whole dish,
+also into the sea, where they grew into colonies. Since ADR 0039 it kills them while growth runs,
+and the same run keeps the sea empty.
 
 ## What is in this folder, and what you need to read
 
@@ -1354,6 +1355,14 @@ for seed in 1 2 3; do for t in 18:0.00023 6:0.0007 3:0.0014 1:0.0042; do VITE_SC
 
 ```bash
 VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=1 VITE_GROUND=1 VITE_CUT=$CUT VITE_STEPS=16000,24000,24100,24300,24600,25000,26000,27000,28000,30000,32000,36000,40000,44000,48000 VITE_NAME=g19-cut-r18-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g19-cut-r18-s1 1.5 99999 >> research/flow/out/recover-cut.txt
+```
+
+The same run with the code of ADR 0039, in which the cut kills the agents of its wound while growth
+runs (without `VITE_GROUND`; the record is `logs/engine/cut-growth/tokyo-cut.txt` and its log
+`tokyo-cut.jsonl`, both 2026-11-15 on WebGPU):
+
+```bash
+VITE_SCENE=tokyo VITE_I0=1.4 VITE_SEED=1 VITE_CUT=$CUT VITE_STEPS=16000,24000,24100,24300,24600,25000,26000,27000,28000,30000,32000,36000,40000,44000,48000 VITE_NAME=g39-cut-r18-s1 npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g39-cut-r18-s1 1.5 99999
 ```
 
 ```bash
