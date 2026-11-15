@@ -555,6 +555,9 @@ All numbers on the M3 Pro. The old build is `main` at `1cd1c56`, the new build t
 four runs of other sessions used the GPU at the same time, and they slowed both builds by up to two times; the load
 average beside a run shows only a part of that. So the old build and the new one ran in turns, and the ratio of the two
 in one page (`picture-ab.gpu.test.ts`) is the number that holds best. `logs/view/cost-2026-11-15.txt` has every run.
+The runs came before `main` went into this branch with three pull requests (#71, #73, #74: the food sites of ADR
+0029, the reach of the scent of ADR 0036, an agent under a painted wall of ADR 0038); none of them changes the passes
+of the picture, and the tests and the wrong rules below ran again after it.
 
 **The same picture.** The picture, the factors and the stream of the new build equal those of the old build in every
 value, on both backends: 0 of 5,898,240 values of a field differ in the start scene, and 0 of 1,048,576 on the Tokyo
@@ -632,6 +635,8 @@ a frame here; the passes alone in one page above are the better measure of what 
   above catches the map without its last tiles, and the map that is not wrapped from row to row.
 - The test on WebGL2 in which a target of the picture cannot be made, and the simulation must free the targets made
   before it, now also lets the fourth and the fifth target fail: the rows of the map and the map.
+- `src/engine/engine-env.test.ts`: a test of the fit of the grid gives the backend 1 B per cell less (1,319 in place
+  of 1,320), so that with the 0.5625 B of the map one strain with the flow still fits 768 × 480 cells and two do not.
 - A test cannot see a skip: a picture is the same with it and without it. The time shows it (the tables above).
 
 ### Consequences

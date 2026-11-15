@@ -1130,7 +1130,7 @@ the noise of the bench, also for a food of 250,000 cells that no tube covers.
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 182 files, 2.0 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 183 files, 2.1 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
