@@ -1,5 +1,6 @@
-// 3×3 mean diffusion + decay for trail and scent, and this step's deposits and food/light sources. Prepended with
-// common.wgsl. The textures hold the map as the agents sense it, in either order of a step (ADR 0027):
+// Mean diffusion + decay for trail and scent, and this step's deposits and food/light sources: the 3 × 3 mean
+// (`diffuse`), and the mean over a larger window (`box`, ADR 0046). Prepended with common.wgsl. The textures hold the
+// map as the agents sense it, in either order of a step (ADR 0027):
 // - Move first (Jones 2010, p. 133): every agent moves and deposits, then every agent senses, then the map diffuses.
 //   The textures hold the map after the last diffusion with the deposits and sources of the last moves. A step's
 //   agent pass senses it and moves; then its `passes` dispatches diffuse and decay it, and LAST adds the deposits and
@@ -26,6 +27,12 @@ override SENSE_FIRST: bool = false;
 // that the textures hold, trail and scent, without its sources and its cut, into textures that the simulation does not
 // read. The view then draws the map after the step's diffusion, as a scene that senses first draws it.
 override VIEW: bool = false;
+// The mean over a window above 3 × 3 (ADR 0046): the entry point `box` runs it as two dispatches, the sums along the
+// rows of the window (COLUMNS = false), then the sums of those along its columns and the mean (COLUMNS = true).
+// RADIUS: the cells of the window on each side of its middle, 2 for 5 × 5 and 7 for 15 × 15. The entry point
+// `diffuse` reads neither: it is the 3 × 3 mean, as before.
+override RADIUS: i32 = 2;
+override COLUMNS: bool = false;
 
 @group(0) @binding(1) var trailIn: texture_2d<f32>;
 @group(0) @binding(2) var scentIn: texture_2d<f32>;
@@ -169,6 +176,73 @@ fn diffuse(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: 
     // the next step, and none in the wound of a cut that clears it.
     if (!VIEW && !senseFirst() && kind == OPEN && !wound(p)) { sources(p.y * i32(W()) + p.x, p, &t, &s); }
   }
+  if (kind == SINK) {
+    t = vec4f(0.0);
+    s = vec2f(0.0);
+  }
+  textureStore(trailOut, p, t);
+  textureStore(scentOut, p, vec4f(s, 0.0, 0.0));
+}
+
+// The cell at c inside the rectangle of the grid: wrapped on the periodic grid, (−1, −1) outside the rectangle of a
+// closed arena. Unlike cellXY() it keeps a cell outside the dish: the sums along the rows are there too (box).
+fn gridXY(c: vec2i) -> vec2i {
+  let size = vec2i(i32(W()), i32(H()));
+  if (P.cfg.z == 0u) { return wrapCell(c, size); }
+  if (any(c < vec2i(0)) || any(c >= size)) { return vec2i(-1); }
+  return c;
+}
+
+// The mean over a window of (2 · RADIUS + 1)² cells, with the rules of the 3 × 3 mean of `diffuse` (ADR 0046): a sink
+// counts as 0, the divisor is the number of cells of the window at every site, the first dispatch of a step loads the
+// map as `diffuse` loads it, and the last one takes the decay and the sources as `diffuse` does.
+// - Rows (COLUMNS = false): every cell of the grid, a sink too, gets the sum of its row of the window. A cell in
+//   the window of an open cell may be a sink, and the columns need the sum of its row.
+// - Columns (COLUMNS = true): the sum of those sums along the column of the window is the sum over the window. A row
+//   outside a closed grid holds only sinks and counts as 0.
+// Both orders of a step take the mean and the decay as one factor, keep / cells, as `diffuse` does moving first.
+@compute @workgroup_size(16, 16)
+fn box(@builtin(global_invocation_id) gid: vec3u) {
+  let p = vec2i(gid.xy);
+  if (p.x >= i32(W()) || p.y >= i32(H())) { return; }
+  var t = vec4f(0.0);
+  var s = vec2f(0.0);
+  if (!COLUMNS) {
+    for (var d = -RADIUS; d <= RADIUS; d++) {
+      let q = cellXY(p + vec2i(d, 0));
+      let c = indexOf(q);
+      let kind = kindOf(c);
+      if (kind == SINK) { continue; }
+      var tt = textureLoad(trailIn, q, 0);
+      var ss = textureLoad(scentIn, q, 0).xy;
+      if (!VIEW && FIRST && senseFirst() && kind == OPEN) { sources(c, q, &tt, &ss); }
+      // The wound is cleared before the step's diffusion, so no chemical of it spreads out.
+      if (!VIEW && FIRST && wound(q)) { continue; }
+      t += tt;
+      s += ss;
+    }
+    textureStore(trailOut, p, t);
+    textureStore(scentOut, p, vec4f(s, 0.0, 0.0));
+    return;
+  }
+  for (var d = -RADIUS; d <= RADIUS; d++) {
+    let q = gridXY(p + vec2i(0, d));
+    if (q.x < 0) { continue; }
+    t += textureLoad(trailIn, q, 0);
+    s += textureLoad(scentIn, q, 0).xy;
+  }
+  let cells = f32((2 * RADIUS + 1) * (2 * RADIUS + 1));
+  if (LAST) {
+    t *= P.keep / cells;
+    s *= P.scent.z / cells;
+  } else {
+    t /= cells;
+    s /= cells;
+  }
+  let c = cellAt(p);
+  let kind = kindOf(c);
+  // Moving first, this step's deposits and sources, after the decay, and none in the wound of a cut that clears it.
+  if (LAST && !VIEW && !senseFirst() && kind == OPEN && !wound(p)) { sources(c, p, &t, &s); }
   if (kind == SINK) {
     t = vec4f(0.0);
     s = vec2f(0.0);

@@ -301,7 +301,8 @@ export class Engine {
     const collisions = s.collisions && this.backend.supportsCollisions;
     // Covered food needs more memory only on some backends, and only while it is on; growth only while it is on.
     const growth = growthOn({ ...s, collisions });
-    // The view of a step that moves first needs a third trail texture from two diffusion passes on (ADR 0027).
+    // The view of a step that moves first needs a third trail texture from two diffusion passes on (ADR 0027), and
+    // with a mean window above 3 × 3 (ADR 0046).
     const bytesPerCell =
       this.backend.bytesPerCell +
       (s.coveredFood ? coveredBytesPerCell : 0) +

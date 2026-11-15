@@ -1,6 +1,6 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
-// of respawn while the cut is held (ADR 0041), and of the repellent source of the Jones model (ADR 0044). The script puts one wrong rule at a time into a source file of the app,
+// of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044) and of the mean over a window above 3 × 3 (ADR 0046). The script puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
 // must fail at least one test.
@@ -38,6 +38,11 @@ const PACK = 'src/engine/pack.ts';
 const REPELLENT = 'repellent|food and light';
 /** The tests of respawn while the cut is held (ADR 0041), with the other tests of respawn under a tool. */
 const [RESPAWN_GPU, RESPAWN_GL] = ['webgpu .*(the cut|a tool) is held', 'webgl2 .*(the cut|a tool) is held'];
+
+/** The mean over a window above 3 × 3 (ADR 0046), and the tests of it on each backend. */
+const DIFFUSE_WGSL = 'src/engine/shaders/diffuse.wgsl';
+const DIFFUSE_FRAG = 'src/engine/gl/glsl/diffuse.frag';
+const [WINDOW_GPU, WINDOW_GL] = ['webgpu .*mean window', 'webgl2 .*mean window'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -1708,6 +1713,214 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '  if (P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
     '  if (P.growth.x == 0u && P.tool.w == 2.0 && toolDistance(p, P.tool.xy) < P.tool.z) return none;\n',
     RESPAWN_GL,
+  ],
+  [
+    'B1 wgsl: the divisor of the 3 × 3 mean for every window',
+    DIFFUSE_WGSL,
+    'let cells = f32((2 * RADIUS + 1) * (2 * RADIUS + 1));',
+    'let cells = 9.0;',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B2 wgsl: the columns skip the sums of the rows outside the dish',
+    DIFFUSE_WGSL,
+    'let q = gridXY(p + vec2i(0, d));',
+    'let q = cellXY(p + vec2i(0, d));',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B3 wgsl: the window is one column short',
+    DIFFUSE_WGSL,
+    'for (var d = -RADIUS; d <= RADIUS; d++) {\n      let q = cellXY(p + vec2i(d, 0));',
+    'for (var d = -RADIUS; d < RADIUS; d++) {\n      let q = cellXY(p + vec2i(d, 0));',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B4 wgsl: the window is one row short',
+    DIFFUSE_WGSL,
+    'for (var d = -RADIUS; d <= RADIUS; d++) {\n    let q = gridXY(',
+    'for (var d = -RADIUS; d < RADIUS; d++) {\n    let q = gridXY(',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B5 wgsl: the trail does not decay',
+    DIFFUSE_WGSL,
+    '    t *= P.keep / cells;\n',
+    '    t /= cells;\n',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B6 wgsl: the scent does not decay',
+    DIFFUSE_WGSL,
+    '    s *= P.scent.z / cells;\n',
+    '    s /= cells;\n',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B7 wgsl: sensing first, the sources do not enter the mean',
+    DIFFUSE_WGSL,
+    '      if (!VIEW && FIRST && senseFirst() && kind == OPEN) { sources(c, q, &tt, &ss); }\n',
+    '',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B8 wgsl: a sink holds no sum of its row',
+    DIFFUSE_WGSL,
+    '      t += tt;\n      s += ss;\n    }\n    textureStore(trailOut, p, t);',
+    '      t += tt;\n      s += ss;\n    }\n    if (cellAt(p) < 0) { t = vec4f(0.0); }\n    textureStore(trailOut, p, t);',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B9 wgsl: moving first, the sources are not added after the decay',
+    DIFFUSE_WGSL,
+    'if (LAST && !VIEW && !senseFirst() && kind == OPEN && !wound(p)) { sources(c, p, &t, &s); }',
+    'if (LAST && !VIEW && senseFirst() && kind == OPEN && !wound(p)) { sources(c, p, &t, &s); }',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B10 wgsl: the window reads a wall of the Jones model as a sink',
+    DIFFUSE_WGSL,
+    '      if (kind == SINK) { continue; }\n',
+    '      if (kind != OPEN) { continue; }\n',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B11 webgpu: the extended model runs the window of the settings',
+    'src/model/params.ts',
+    "  if (s.model !== 'jones') return MEAN_WINDOW;\n  const { min, max }",
+    '  const { min, max }',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B12 webgpu: the view of the window adds the sources of the step',
+    'src/engine/sim.ts',
+    'if (v.box) return this.box(v, v.box, false, false, true);',
+    'if (v.box) return this.box(v, v.box, false, false, false);',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B13 webgpu: the window without covered food',
+    'src/engine/sim.ts',
+    'if (v.box) return this.box(v, v.box, senseFirst, true, false);',
+    'if (v.box) return this.box(v, v.box, senseFirst, false, false);',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B14 webgpu: the columns before the rows',
+    'src/engine/sizing.ts',
+    '{ first: i === 0, last: false, blur: true, box: { radius, columns: false } },\n    { first: false, last: i === passes - 1, blur: true, box: { radius, columns: true } },',
+    '{ first: i === 0, last: false, blur: true, box: { radius, columns: true } },\n    { first: false, last: i === passes - 1, blur: true, box: { radius, columns: false } },',
+    WINDOW_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'B15 glsl: the divisor of the 3 × 3 mean for every window',
+    DIFFUSE_FRAG,
+    'float cells = float((2 * radius + 1) * (2 * radius + 1));',
+    'float cells = 9.0;',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B16 glsl: the columns skip the sums of the rows outside the dish',
+    DIFFUSE_FRAG,
+    'ivec2 q = gridXY(p + ivec2(0, d));',
+    'ivec2 q = cellXY(p + ivec2(0, d));',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B17 glsl: the window is one column short',
+    DIFFUSE_FRAG,
+    'for (int d = -radius; d <= radius; d++) {\n      vec4 tt;',
+    'for (int d = -radius; d < radius; d++) {\n      vec4 tt;',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B18 glsl: the window is one row short',
+    DIFFUSE_FRAG,
+    'for (int d = -radius; d <= radius; d++) {\n    ivec2 q = gridXY(',
+    'for (int d = -radius; d < radius; d++) {\n    ivec2 q = gridXY(',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B19 glsl: the trail does not decay',
+    DIFFUSE_FRAG,
+    '    t *= P.keep / cells;\n',
+    '    t /= cells;\n',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B20 glsl: the scent does not decay',
+    DIFFUSE_FRAG,
+    '    s *= P.scent.z / cells;\n',
+    '    s /= cells;\n',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B21 glsl: a sink holds no sum of its row',
+    DIFFUSE_FRAG,
+    '      t += tt;\n      s += ss;\n    }\n    outTrail = t;',
+    '      t += tt;\n      s += ss;\n    }\n    if (cellXY(p).x < 0) t = vec4(0.0);\n    outTrail = t;',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B22 glsl: moving first, the sources are not added after the decay',
+    DIFFUSE_FRAG,
+    'if (last && !senseFirst() && kind == OPEN && !wound(p)) sources(p, t, s);',
+    'if (last && senseFirst() && kind == OPEN && !wound(p)) sources(p, t, s);',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B23 glsl: the kind of a wall of the Jones model is a sink in the columns',
+    DIFFUSE_FRAG,
+    'if (q.x >= 0) kind = isWall(texelFetch(env, q, 0)) ? (P.model.z == 0.0 ? SINK : WALL) : OPEN;',
+    'if (q.x >= 0) kind = isWall(texelFetch(env, q, 0)) ? SINK : OPEN;',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B24 webgl2: the view of the window adds the sources of the step',
+    'src/engine/gl/sim.ts',
+    'const d = v.box ? this.prog.box(false, true) : this.prog.view();',
+    'const d = v.box ? this.prog.box(false, false) : this.prog.view();',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B25 webgl2: the window without covered food',
+    'src/engine/gl/sim.ts',
+    'const d = v.box ? this.prog.box(withCovered, false) : withCovered ? this.prog.covered() : this.prog.diffuse;',
+    'const d = v.box ? this.prog.box(false, false) : withCovered ? this.prog.covered() : this.prog.diffuse;',
+    WINDOW_GL,
+    SIM_SPEC,
+  ],
+  [
+    'B26 webgl2: the draws of the window without its side',
+    'src/engine/gl/sim.ts',
+    "      if (v.box) {\n        gl.uniform1i(d.loc('radius'), v.box.radius);\n        gl.uniform1i(d.loc('columns'), Number(v.box.columns));\n      }\n      gl.drawArrays(gl.TRIANGLES, 0, 3);\n      this.p = out;",
+    "      if (v.box) {\n        gl.uniform1i(d.loc('radius'), 2);\n        gl.uniform1i(d.loc('columns'), Number(v.box.columns));\n      }\n      gl.drawArrays(gl.TRIANGLES, 0, 3);\n      this.p = out;",
+    WINDOW_GL,
+    SIM_SPEC,
   ],
 ];
 

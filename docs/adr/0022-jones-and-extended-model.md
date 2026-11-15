@@ -5,6 +5,7 @@
 - Date: 2026-11-11
 - Extended by [ADR 0044](0044-a-repellent-source-in-the-jones-model.md) (2026-11-15): the Jones model has a repellent
   source, as Jones' papers use it. It replaces decision 8 and the list item "Light that releases a repellent scent".
+- Extended by ADR 0046 (the mean window of Jones' later papers, a setting of the Jones model).
 
 ## Context
 

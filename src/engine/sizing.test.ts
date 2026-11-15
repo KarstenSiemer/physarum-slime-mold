@@ -6,6 +6,8 @@ import {
   BYTES_PER_CELL,
   BYTES_PER_CELL_HALF_FLOAT,
   capacityCount,
+  diffusePlan,
+  diffusePlanOf,
   estimateBytes,
   fitResolution,
   FLOW_BYTES_PER_CELL,
@@ -107,11 +109,53 @@ describe('capacity (ADR 0025)', () => {
 describe('the view of a step that moves first', () => {
   it('needs a third trail and scent of 24 B per cell only from two passes on', () => {
     expect(VIEW_BYTES_PER_CELL).toBe(24);
+    const extended = { model: 'extended', meanWindow: 3 } as const;
     for (const diffusion of [0, 1, 2, 3, 4]) {
-      expect(viewTrailOn({ stepOrder: 'move-first', diffusion }), `${diffusion}`).toBe(diffusion >= 2);
-      expect(viewTrailOn({ stepOrder: 'sense-first', diffusion }), `${diffusion}`).toBe(false);
+      expect(viewTrailOn({ ...extended, stepOrder: 'move-first', diffusion }), `${diffusion}`).toBe(diffusion >= 2);
+      expect(viewTrailOn({ ...extended, stepOrder: 'sense-first', diffusion }), `${diffusion}`).toBe(false);
     }
     expect(viewTrailOn(defaultSettings())).toBe(false);
+  });
+
+  // ADR 0046: a mean window above 3 × 3 runs two dispatches per pass, so its view needs the third pair with one pass.
+  it('needs them with one pass and a mean window above 3 × 3, in the Jones model only', () => {
+    const jones = { model: 'jones', diffusion: 1 } as const;
+    for (const meanWindow of [3, 5, 15]) {
+      expect(viewTrailOn({ ...jones, stepOrder: 'move-first', meanWindow }), `${meanWindow}`).toBe(meanWindow > 3);
+      expect(viewTrailOn({ ...jones, stepOrder: 'sense-first', meanWindow }), `${meanWindow}`).toBe(false);
+      const extended = { model: 'extended', diffusion: 1, stepOrder: 'move-first', meanWindow } as const;
+      expect(viewTrailOn(extended), `extended, ${meanWindow}`).toBe(false);
+    }
+  });
+});
+
+// ADR 0046: the dispatches of a step. The window of 3 keeps the plan of the code before, object for object.
+describe('diffusePlanOf', () => {
+  it('runs one dispatch per pass with the 3 × 3 mean, as before', () => {
+    for (const diffusion of [0, 1, 2, 3, 4]) {
+      const plan = diffusePlanOf({ model: 'extended', diffusion, meanWindow: 3 });
+      expect(plan, `${diffusion}`).toEqual(diffusePlan(diffusion));
+      expect(plan.some((v) => v.box)).toBe(false);
+      expect(diffusePlanOf({ model: 'extended', diffusion, meanWindow: 9 })).toEqual(plan);
+      expect(diffusePlanOf({ model: 'jones', diffusion, meanWindow: 3 })).toEqual(plan);
+    }
+    expect(diffusePlan(1)).toEqual([{ first: true, last: true, blur: true }]);
+  });
+
+  it('runs the rows and then the columns of a window above 3 × 3, the sources first and the decay last', () => {
+    expect(diffusePlanOf({ model: 'jones', diffusion: 1, meanWindow: 5 })).toEqual([
+      { first: true, last: false, blur: true, box: { radius: 2, columns: false } },
+      { first: false, last: true, blur: true, box: { radius: 2, columns: true } },
+    ]);
+    const two = diffusePlan(2, 15);
+    expect(two.map((v) => [v.first, v.last, v.box?.radius, v.box?.columns])).toEqual([
+      [true, false, 7, false],
+      [false, false, 7, true],
+      [false, false, 7, false],
+      [false, true, 7, true],
+    ]);
+    // Without diffusion there is no window.
+    expect(diffusePlan(0, 15)).toEqual(diffusePlan(0));
   });
 });
 

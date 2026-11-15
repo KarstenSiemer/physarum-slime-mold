@@ -20,7 +20,8 @@ same pull request.
   - _dish_: the cells whose centre lies within R = 0.945 · min(W, H) / 2 of the centre of the grid (`DISH_FILL`).
 - **Walls 𝒲**: cells of Ω whose wall byte is at least 128. **Open cells** O = Ω ∖ 𝒲.
 - **Sites S** of the diffusion: S = Ω in the Jones model, S = O in the extended model (section 6.3).
-- **N(x)**: the 3 × 3 block around x, wrapped on the torus.
+- **N(x)**: the 3 × 3 block around x, wrapped on the torus. **N_w(x)**: the block of w × w cells around x, for an odd
+  side w; N_3 = N.
 - **Step k**: the k-th call of the step; the counter is 0 after a reset.
 - **Strains** s = 0 … 3, with the trail lane of the same number. **u** is a uniform random number in [0, 1).
 - Angles are degrees in the panel and radians in the shaders. d(a) = (cos a, sin a) is the unit vector of a heading.
@@ -40,6 +41,7 @@ The setting Model picks the rule set (ADR 0022, ADR 0044). `jonesFits()`, `asJon
 | Source scale g           | 1                                                | keeps the plateau of a food at every scent decay (6.4) |
 | Trail saturation K       | off                                              | optional, K ≥ 1                                        |
 | Diffusion passes         | 1                                                | 0 to 4                                                 |
+| Mean window              | 3 to 15 cells a side, odd (ADR 0046)             | 3 × 3                                                  |
 | One agent per cell       | on                                               | optional                                               |
 | Walls in the diffusion   | part of the lattice: they diffuse and decay      | sinks that hold 0                                      |
 | A wall on a sensor's way | not checked                                      | the sensor reads blocked                               |
@@ -49,7 +51,9 @@ The setting Model picks the rule set (ADR 0022, ADR 0044). `jonesFits()`, `asJon
 
 One strain, one agent per cell, one diffusion pass and an own weight of ±1 are required: a Jones model without one of
 them becomes extended (`jonesFits()`). The other values of the Jones column are bound: `constrain()` resets them
-(`asJones()`), and `packParams()` packs Jones' values whatever the settings hold. Walls, light and the cut change no
+(`asJones()`), and `packParams()` packs Jones' values whatever the settings hold. The mean window is bound the other
+way: the extended model resets it to 3 (`asExtended()`), and `meanWindowOf()` gives 3 there whatever the settings
+hold. Walls, light and the cut change no
 model. In the Jones model the trail plus the food scent minus the repellent is Jones' one trail map, and drawn light
 is a repellent source of it (section 6.4). In both models the cut
 moves the agents of its wound only while growth does not run; while growth runs it kills them (7.1, ADR 0039).
@@ -112,18 +116,35 @@ The two orders differ in when the agents sense, and in where the diffusion adds 
   its start heading, as in Jones' first step.
 - **Sense first**: X^k = keep · M^N(X^(k−1) + Q^k). Every step senses, the first one too.
 
-Here X is a field, Q^k its sources in step k, M the 3 × 3 mean and N the number of passes (section 6.2).
+Here X is a field, Q^k its sources in step k, M the mean (3 × 3, or the mean window of the Jones model, section 6.1)
+and N the number of passes (section 6.2).
 
 ## 6. The fields
 
-ADR 0007, 0022, 0027. Code: `shaders/diffuse.wgsl`, `gl/glsl/diffuse.frag`, `sourceScale()` in `src/engine/pack.ts`.
+ADR 0007, 0022, 0027, 0046. Code: `shaders/diffuse.wgsl`, `gl/glsl/diffuse.frag`, `sourceScale()` in
+`src/engine/pack.ts`, `diffusePlan()` in `src/engine/sizing.ts`.
 
-### 6.1 The 3 × 3 mean
+### 6.1 The mean
 
-M f(x) = 1_S(x) · (1/9) · Σ_{y ∈ N(x)} 1_S(y) · f(y).
+M f(x) = 1_S(x) · (1/w²) · Σ_{y ∈ N_w(x)} 1_S(y) · f(y).
 
-The divisor is 9 at every site. A cell outside S counts 0 and holds 0. So trail that reaches a closed edge, a dish's
-rim, or a wall of the extended model is lost (absorbing edges, Jones 2011).
+The side w of the window is 3 in the extended model. In the Jones model it is the setting Mean window: 3, 5, 7, 9, 11,
+13 or 15, and 3 in every scene (ADR 0046). Jones 2010 uses 3 × 3; his later papers use larger windows (5 × 5 as a
+rule: Jones and Adamatzky 2015, arXiv:1503.06973, p. 7; 15 × 15: Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10).
+
+The divisor is w², the number of cells of the window, at every site. A cell outside S counts 0 and holds 0. So trail
+that reaches a closed edge, a dish's rim, or a wall of the extended model is lost (absorbing edges, Jones 2011). A
+site within (w − 1) / 2 cells of a closed edge loses trail in every step.
+
+The same mean feeds the trail and both scents, so in the Jones model the food scent spreads with the window of the
+trail (section 6.4). The window does not stop at a wall of the Jones model: the wall is a site, and so are the cells
+behind it. A window above 3 crosses a wall that is thinner than (w − 1) / 2 cells in one step.
+
+**How the code sums.** For w = 3 one dispatch sums the 9 cells (entry point `diffuse`), the code before ADR 0046.
+For w > 3 two dispatches run (entry point `box`): the first writes, at every cell of the grid's rectangle, a sink
+too, the sum of 1_S · f along the row of the window; the second sums those sums along the column of the window and
+multiplies by 1/w². A row outside a closed grid counts 0. In exact arithmetic that is the sum over N_w(x); in float32
+it rounds apart from a sum over the window cell by cell, by a few units in the last place.
 
 ### 6.2 The update of one step
 
@@ -145,7 +166,8 @@ With the cut mask Z^k (0 in a wound of the extended model, 1 elsewhere, section 
 
 Moving first, the last pass multiplies the sum by keep/9 in one factor, as Metal folds it, written out on both backends
 (ADR 0027, decision 23). Sensing first, it takes the mean and then the decay, as the code before ADR 0027 did
-(decision 28). The two orders therefore round apart in float32.
+(decision 28). The two orders therefore round apart in float32. With a mean window above 3 both orders multiply the
+sum by keep/w² in one factor (ADR 0046).
 
 **Mass.** On the torus M keeps the sum, so Σ T^k = keep · Σ T^(k−1) + depT · Σ n^k moving first, and keep · (Σ T^(k−1) +
 depT · Σ n^k) sensing first. Closed edges and walls of the extended model take mass away.
@@ -157,7 +179,7 @@ depT · Σ n^k) sensing first. Closed edges and walls of the extended model take
 - _wrap_: the mean, the sources and every window wrap.
 - _box_ and _dish_: cells outside Ω are sinks (they count 0 and hold 0).
 - **Walls, Jones model**: part of the lattice. They take the mean and the decay like any cell, but no deposit, food or
-  light. A sensor on a wall cell reads blocked.
+  light. A sensor on a wall cell reads blocked. A mean window above 3 reads the cells behind a thin wall (6.1).
 - **Walls, extended model**: sinks.
 - Food or light painted onto a wall has no effect: the wall byte wins.
 
@@ -488,6 +510,7 @@ checks that this table names every key.
 | `density`           | %p / 100 | agents per cell, 0.01 to 8 (≤ 1 with one agent per cell)             | 1                 | both     | 4, 10   |
 | `capacity`          |          | agents per cell, 0.01 to 8; 0: as density                            | 0                 | both     | 4, 9    |
 | `diffusion`         | N        | passes, 0 to 4                                                       | 1                 | extended | 6.2     |
+| `meanWindow`        | w        | cells a side, 3 to 15, odd                                           | 3                 | jones    | 6.1     |
 | `foodStrength`      | wProj    | 0 to 0.5                                                             | 0.05              | both     | 6.4     |
 | `lightStrength`     | wLight   | 0 to 0.5; Jones: the strength of the repellent                       | 0.05              | both     | 6.4     |
 | `scentDecay`        | d_C      | fraction lost per step, 0.0001 to 0.9                                | 0.1               | extended | 6.4     |
@@ -518,7 +541,8 @@ checks that this table names every key.
 "Model: both" means the parameter acts in both models with every value of its range. The Jones model requires one
 strain, one agent per cell, one diffusion pass and the own weight ±1 (`jonesFits()`), and binds the food weight and the
 light weight to the own weight, the scent decay to the strain's decay, the share to 1, and K and the flow to off
-(`asJones()`). A Jones link made before ADR 0044 that holds drawn light opens with `lightStrength` 0: until then drawn
+(`asJones()`). "Model: jones" means only the Jones model has the parameter: the extended model binds it to its default
+(`asExtended()`). A Jones link made before ADR 0044 that holds drawn light opens with `lightStrength` 0: until then drawn
 light had no effect in the Jones model (`sanitize()`, the mark `rules` of a link). `speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent` and `showTubes` change only the view and
 the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
 and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
@@ -548,6 +572,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Moving and walls (7.5)                  | blocked by a wall; a step of 3 and of 8 cells; no slip through a corner                                                         |
 | Walls block sensors (7.3)               | "walls block sensors"; sensor wall check in the extended model only                                                             |
 | The 3 × 3 mean and the decay (6.1, 6.2) | "apply a periodic 3 × 3 mean, then × (1 − decay)"; rounding per order                                                           |
+| The mean window above 3 × 3 (6.1)       | "the mean window (ADR 0046)": windows 3, 5, 15 in wrap, box and dish with walls; `diffuse-reference.test.ts`                    |
 | Mass balance (6.2)                      | "balance mass with deposits"                                                                                                    |
 | Edges and walls in each model (6.3)     | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                |
 | Jones' one map (6.4)                    | "keep trail + scent − repellent equal to Jones' one trail map"                                                                  |

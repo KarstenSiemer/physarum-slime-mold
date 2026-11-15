@@ -29,6 +29,24 @@ describe('URL settings', () => {
     expect(await decodeSettings(encoded)).toEqual(s);
   });
 
+  // ADR 0046: a link holds the mean window only when it is not 3 × 3, so a link without the larger window has the
+  // bytes of a link made before the setting.
+  it('holds the mean window only when it is not 3 × 3, and round-trips it', async () => {
+    const network = presetById('network')?.settings() ?? defaultSettings();
+    for (const s of [defaultSettings(), network]) {
+      const { meanWindow: _, ...before } = s;
+      // A link made now also holds the mark `rules` of ADR 0044.
+      expect(await encodeSettings(s)).toBe(await hashPart(JSON.stringify({ ...before, rules: LINK_RULES })));
+      expect(await decodeSettings(await encodeSettings(s))).toEqual(s);
+    }
+    const wide = { ...network, meanWindow: 15 };
+    expect(await encodeSettings(wide)).not.toBe(await encodeSettings(network));
+    expect(await decodeSettings(await encodeSettings(wide))).toEqual(wide);
+    // The extended model has no window but 3 × 3: its link holds none.
+    const extended = { ...defaultSettings(), meanWindow: 7 };
+    expect((await decodeSettings(await encodeSettings(extended)))?.meanWindow).toBe(3);
+  });
+
   // ADR 0025: growth, its values and the capacity travel with the link.
   it('round-trips growth, shrinkage and the capacity', async () => {
     const s = { ...defaultSettings(), collisions: true, density: 0.05, model: 'jones' as const, growth: true };
