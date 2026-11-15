@@ -113,6 +113,25 @@ My own choices, under the same delegation:
   (`VITE_FLOW=1`). The files of both sides are equal byte for byte. The five scenes with growth (`foraging-maze`,
   `tokyo`, `food-ring`, `rival-networks`, `tokyo-rivals`) run the new test in every step and find no agent to kill:
   no tool is held, and no wall was painted over their agents.
+- The Tokyo case of PR #77 again on this branch (2026-11-15, WebGPU, seed 1, the Cut tool over the disc around four
+  cities from step 24,000 to 24,100, `VITE_CUT` of `research/flow/engine/dump.gpu.test.ts`, the lines of
+  `measure-tokyo.ts`). Up to step 24,000 the run gives the numbers of PR #77 (3,997 agents, TL 1.78), as it must: the
+  rule acts only while the tool is held.
+
+  | Step   | Agents, PR #77 | Agents, this branch | Cells of the sea with trail, PR #77 | The same, this branch | Stations joined (33), this branch |
+  | ------ | -------------- | ------------------- | ----------------------------------- | --------------------- | --------------------------------- |
+  | 24,000 | 3,997          | 3,997               | 0                                   | 0                     | 33                                |
+  | 24,100 | 19,946         | 3,594               | 50,001                              | 0                     | 29                                |
+  | 24,300 | 21,135         | 3,898               | 49,624                              | 0                     | 31                                |
+  | 24,600 | 18,887         | 4,004               | 45,270                              | 0                     | 33                                |
+  | 27,000 | 7,399          | 4,000               | 18,155                              | 0                     | 33                                |
+  | 48,000 | 4,933          | 4,170               | 6,475                               | 0                     | 33                                |
+
+  The sea holds no trail at any of the 15 dumped steps up to 48,000. The cut killed the agents of its wound (3,997 to
+  3,594 alive after the hold), and the network joins all 33 stations again by step 24,600, 500 steps (17 min of model
+  time) after the start of the cut; PR #77 found them joined by step 25,000. The log is in `research/flow/logs.tar.gz`
+  (Consequences, last item).
+
 - While growth runs, a held cut empties its wound at every step and puts no agent elsewhere; a wall painted over a
   colony kills the agents under it in the next step. The colony grows back from the margin once the tool is released.
   Without growth, or with Gf = 0, the cut and a wall place their agents as before.
