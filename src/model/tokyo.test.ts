@@ -279,21 +279,30 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
     });
 
     it('gives the cells inside a lit cell of the grid of elevations the full light byte: light of one strength', () => {
+      // The cells of the simulation whose centre lies in a lit cell of the grid of elevations. Only the cells around
+      // each lit cell are visited, one cell wider on each side than its box, with the same test of the centre: a test
+      // of every cell against all 53 boxes took more than 5 s on a runner of CI.
+      const lit = new Set<number>();
+      for (const [c, r] of TOKYO_MOUNTAINS) {
+        const [x0, y0, x1, y1] = elevationCell(c, r);
+        const [xs, ys] = [x0 * k * short + w / 2, y0 * k * short + h / 2];
+        const [xe, ye] = [x1 * k * short + w / 2, y1 * k * short + h / 2];
+        for (let y = Math.max(0, Math.floor(ys) - 1); y <= Math.min(h - 1, Math.ceil(ye) + 1); y++)
+          for (let x = Math.max(0, Math.floor(xs) - 1); x <= Math.min(w - 1, Math.ceil(xe) + 1); x++) {
+            const [mx, my] = toMap(x, y);
+            if (mx >= x0 && mx <= x1 && my >= y0 && my <= y1) lit.add(y * w + x);
+          }
+      }
       let [inside, full] = [0, 0];
-      for (let y = 0; y < h; y++)
-        for (let x = 0; x < w; x++) {
-          const [mx, my] = toMap(x, y);
-          const lit = TOKYO_MOUNTAINS.some(([c, r]) => {
-            const [x0, y0, x1, y1] = elevationCell(c, r);
-            return mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
-          });
-          if (!lit || (env[(y * w + x) * 4] ?? 0) >= 128) continue;
-          inside++;
-          const byte = env[(y * w + x) * 4 + 2] ?? 0;
-          if (byte === 255) full++;
-          // The full bands of a row of strokes end in half circles: the corners of a run of cells get a little less.
-          expect(byte, `cell ${String(x)}, ${String(y)}`).toBeGreaterThanOrEqual(240);
-        }
+      for (const cell of lit) {
+        const [x, y] = [cell % w, Math.floor(cell / w)];
+        if ((env[cell * 4] ?? 0) >= 128) continue;
+        inside++;
+        const byte = env[(y * w + x) * 4 + 2] ?? 0;
+        if (byte === 255) full++;
+        // The full bands of a row of strokes end in half circles: the corners of a run of cells get a little less.
+        expect(byte, `cell ${String(x)}, ${String(y)}`).toBeGreaterThanOrEqual(240);
+      }
       // 53 cells of 0.03201 × 0.0362 units, less the walls on the west and north edges of the map, which take about
       // 6 % of them.
       expect(inside / (53 * 0.03201 * 0.0362 * (k * short) ** 2)).toBeGreaterThan(0.9);
