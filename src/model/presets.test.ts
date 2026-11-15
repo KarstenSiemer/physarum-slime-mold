@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { lightByte } from '../engine/brush';
+import { agentCount } from '../engine/sizing';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, meanWindowOf, sanitize, type Settings } from './params';
 import {
   BAUMGARTEN_PDF,
+  ELECTROTAXIS,
   GROUPS,
   JONES_PDF,
   latticeLostNotice,
@@ -16,6 +18,7 @@ import {
   sourceText,
   START,
   stepOrderOf,
+  TSUDA_PDF,
   usesRule,
   VORONOI_DOT_RADIUS,
   VORONOI_DOTS,
@@ -54,9 +57,9 @@ describe('presets', () => {
       const s = p.settings();
       const jones = fromJones.includes(p.id);
       expect(p.source.startsWith('Jones 2010'), p.id).toBe(jones);
-      // The Coarsening network is the Jones model of Baumgarten, Jones and Hauser 2015 (ADR 0045), the Voronoi diagram
-      // that of Jones and Adamatzky 2015 (ADR 0048).
-      const jonesModel = jones || p.id === 'coarsening' || p.id === 'voronoi';
+      // The Coarsening network is the Jones model of Baumgarten, Jones and Hauser 2015 (ADR 0045), Electrotaxis that of
+      // Tsuda, Jones et al. 2011 (ADR 0047), and the Voronoi diagram that of Jones and Adamatzky 2015 (ADR 0048).
+      const jonesModel = jones || ['coarsening', 'electrotaxis', 'voronoi'].includes(p.id);
       expect(s.model, p.id).toBe(jonesModel ? 'jones' : 'extended');
       if (jonesModel) expect(jonesFits(s), p.id).toBe(true);
       // No scene of Jones 2010 paints a repellent: that paper has none. The Voronoi diagram paints the repellent
@@ -65,7 +68,9 @@ describe('presets', () => {
       expect(p.env?.some((e) => e.kind === 'light') ?? false, p.id).toBe(
         ['light', 'tokyo-light', 'voronoi'].includes(p.id),
       );
-      expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, 0.1]);
+      // Electrotaxis has the decay of its field, which the Jones model also gives the scent (ADR 0047).
+      const decay = p.id === 'electrotaxis' ? 0.01 : 0.1;
+      expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, decay]);
     }
     expect(defaultSettings().model).toBe('extended');
   });
@@ -109,6 +114,7 @@ describe('presets', () => {
       'maze',
       'foraging-maze',
       'coarsening',
+      'electrotaxis',
       'voronoi',
       'tokyo',
       'tokyo-light',
@@ -147,6 +153,39 @@ describe('presets', () => {
     expect(settingsOf('shrinking').shrink).toBe(0.00025); // p. 147
     for (const id of ['shortest-path', 'steiner', 'shrinking']) expect(settingsOf(id).boundary).toBe('dish');
     for (const id of ['network', 'hexagons', 'spots', 'stripes', 'wound']) expect(settingsOf(id).boundary).toBe('wrap');
+  });
+
+  // ADR 0047: the values of the model of Tsuda, Jones et al. 2011 (p. 10 and 11). The lattice, the places of the
+  // electrodes and the decay are this app's choice: the paper gives none of them.
+  it('keep the model of Tsuda, Jones et al. 2011 (p. 10 and 11; ADR 0047)', () => {
+    const s = settingsOf('electrotaxis');
+    const a = s.strains[0];
+    expect([s.model, s.collisions, s.boundary, s.stepOrder, s.layout]).toEqual([
+      'jones',
+      true,
+      'box',
+      'sense-first',
+      'line',
+    ]);
+    expect([s.meanWindow, s.electrodeStrength, s.growth, s.shrink]).toEqual([15, 1, false, 0]);
+    // The picture shows the agents, as Fig. 11 does: the trail of this scene is one wide hill.
+    expect(s.style).toBe('agents');
+    expect([a?.sensorAngle, a?.rotationAngle, a?.sensorOffset, a?.deposit, a?.stepSize]).toEqual([22.5, 45, 5, 5, 1]);
+    expect([a?.decay, s.scentDecay]).toEqual([0.01, 0.01]);
+    // 1,500 agents (p. 11), on the lattice of the scene.
+    const [w, h] = s.lattice ?? [0, 0];
+    expect([w, h]).toEqual([...ELECTROTAXIS.lattice]);
+    expect(agentCount(s, w, h)).toBe(1500);
+    // Five current sinks left of the line of agents and five current sources right of it, the sources nearer (Fig. 11).
+    const env = preset('electrotaxis').env ?? [];
+    const cells = (kind: string) =>
+      env.filter((e) => e.kind === kind).map((e) => [(e.at[0] / 1.6) * w, e.at[1] * h, e.r * h]);
+    const [cathodes, anodes] = [cells('cathode'), cells('anode')];
+    expect([env.length, cathodes.length, anodes.length]).toEqual([10, 5, 5]);
+    for (const [x, , r] of cathodes) expect([Math.round(x ?? 0), r]).toEqual([-100, 1.5]);
+    for (const [x, , r] of anodes) expect([Math.round(x ?? 0), r]).toEqual([20, 1.5]);
+    expect(cathodes.map(([, y]) => Math.round(y ?? 0))).toEqual([-62, -31, 0, 31, 62]);
+    expect(anodes.map(([, y]) => y)).toEqual(cathodes.map(([, y]) => y));
   });
 
   it('keep the model of Baumgarten, Jones and Hauser 2015 (p. 1204 to 1206; ADR 0045)', () => {
@@ -244,6 +283,7 @@ describe('presets', () => {
       tokyo: [512, 512], // this app's choice (ADR 0029)
       'tokyo-light': [512, 512], // the map of the Tokyo scene
       coarsening: [400, 400], // Baumgarten, Jones and Hauser 2015, p. 1204 (ADR 0045)
+      electrotaxis: [250, 240], // this app's choice: the paper gives no lattice (ADR 0047)
       voronoi: [239, 239], // the dish of Jones and Adamatzky 2015, Fig. 6a and 10: 225 cells across (ADR 0048)
       'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
       'rival-networks': [384, 384],
@@ -489,6 +529,16 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
     });
   });
 
+  it('opens the free PDF of Tsuda, Jones et al. 2011 at the page of Fig. 11 (ADR 0047)', () => {
+    expect(TSUDA_PDF).toBe('https://arxiv.org/pdf/1204.1752');
+    expect(preset('electrotaxis').figure).toEqual({
+      href: `${TSUDA_PDF}#page=11`,
+      label: 'Fig. 11',
+      note: 'page 11 of the free PDF',
+    });
+    expect(sourceKind(preset('electrotaxis'))).toBe('tsuda');
+  });
+
   it('opens the PDF of Jones and Adamatzky 2015 at arXiv at the page of Fig. 10 (ADR 0048)', () => {
     // The PDF prints its page numbers: Fig. 10 is on page 10, the tenth page of the file.
     expect(preset('voronoi').figure).toEqual({
@@ -501,7 +551,7 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
 
   it('is absent where no figure shows the result of the scene', () => {
     const linked = PRESETS.filter((p) => p.figure).map((p) => p.id);
-    expect(linked).toHaveLength(13);
+    expect(linked).toHaveLength(14);
     for (const p of PRESETS)
       if (sourceKind(p) === 'app' || sourceKind(p) === 'fogleman' || p.source.startsWith('After'))
         expect(p.figure, p.id).toBeUndefined();

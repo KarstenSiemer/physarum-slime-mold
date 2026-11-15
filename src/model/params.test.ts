@@ -707,10 +707,12 @@ describe('the reach of the scent (ADR 0036)', () => {
 describe('the mean window (ADR 0046)', () => {
   const network = () => presetById('network')?.settings() ?? defaultSettings();
 
-  it('is 3 × 3 by default and in every scene but the Voronoi diagram', () => {
+  it('is 3 × 3 by default and in every scene but Electrotaxis and the Voronoi diagram', () => {
     expect(defaultSettings().meanWindow).toBe(MEAN_WINDOW);
-    // The Voronoi diagram has the 5 × 5 mean of its paper (Jones and Adamatzky 2015, p. 7; ADR 0048).
-    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(p.id === 'voronoi' ? 5 : 3);
+    // Electrotaxis has the 15 × 15 mean of its paper (Tsuda et al. 2011, p. 10; ADR 0047), the Voronoi diagram the
+    // 5 × 5 mean of its paper (Jones and Adamatzky 2015, p. 7; ADR 0048).
+    const wide: Record<string, number> = { electrotaxis: 15, voronoi: 5 };
+    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(wide[p.id] ?? 3);
   });
 
   it('is 3 × 3 for a link from before the setting, and an odd side from 3 to 15 otherwise', () => {

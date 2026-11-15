@@ -82,6 +82,7 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 | C_F     | food scent                                                                             | ≥ 0       |
 | C_L     | light repellent                                                                        | ≥ 0       |
 | w, f, λ | wall, food and light bytes of `env`, read as byte / 255                                | [0, 1]    |
+| ε⁺, ε⁻  | 1 where the electrode byte of `env` holds a cathode (ε⁺) or an anode (ε⁻), section 6.7 | 0 or 1    |
 | n_l     | agents of strain l whose move ended in the cell in this step                           | integers  |
 | occ     | alive agents in the cell after the moves; on a growth step after its deaths and births | integers  |
 | D_s     | flow memory of strain s (flow only, section 8)                                         | [1e-4, 1] |
@@ -129,9 +130,9 @@ ADR 0007, 0022, 0027, 0046. Code: `shaders/diffuse.wgsl`, `gl/glsl/diffuse.frag`
 M f(x) = 1_S(x) · (1/w²) · Σ_{y ∈ N_w(x)} 1_S(y) · f(y).
 
 The side w of the window is 3 in the extended model. In the Jones model it is the setting Mean window: 3, 5, 7, 9, 11,
-13 or 15. It is 5 in the scene Voronoi diagram (ADR 0048) and 3 in every other scene (ADR 0046). Jones 2010 uses
-3 × 3; his later papers use larger windows (5 × 5 as a rule: Jones and Adamatzky 2015, arXiv:1503.06973, p. 7;
-15 × 15: Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10).
+13 or 15. It is 15 in the scene Electrotaxis (ADR 0047), 5 in the scene Voronoi diagram (ADR 0048) and 3 in every
+other scene (ADR 0046). Jones 2010 uses 3 × 3; his later papers use larger windows (5 × 5 as a rule: Jones and
+Adamatzky 2015, arXiv:1503.06973, p. 7; 15 × 15: Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10).
 
 The divisor is w², the number of cells of the window, at every site. A cell outside S counts 0 and holds 0. So trail
 that reaches a closed edge, a dish's rim, or a wall of the extended model is lost (absorbing edges, Jones 2011). A
@@ -157,6 +158,9 @@ The sources of step k, on open cells only:
 - deposit: E_l^k(x) = 1_O(x) · depT_l · n_l^k(x);
 - food: F^k(x) = 1_O(x) · f(x) · 255 · wProj · g · κ^k(x), with κ for covered food (section 6.5);
 - light: L(x) = 1_O(x) · λ(x) · 255 · wLight · g. In the Jones model it is the source of a repellent (section 6.4).
+- electrodes (ADR 0047): X⁺(x) = 1_O(x) · ε⁺(x) · 255 · wElec · g for a cathode and X⁻(x) = 1_O(x) · ε⁻(x) · 255 ·
+  wElec · g for an anode. The cathode releases into the food scent and the anode into the repellent: where the
+  formulas below say (F^k, L), the code adds (F^k + X⁺, L + X⁻). Covered food does not reduce X⁺ (section 6.5).
 
 With the cut mask Z^k (0 in a wound of the extended model, 1 elsewhere, section 6.6):
 
@@ -202,6 +206,14 @@ depT · Σ n^k) sensing first. Closed edges and walls of the extended model take
   and a sensor reads A[0][0] · J. J falls below 0 near a repellent: no field is clamped. The panel calls wLight
   Repellent strength in the Jones model. Jones' own rule for light is another one (Jones and Adamatzky 2012, p. 7: a
   lit agent's sensors read less), and the app does not have it.
+- **Electrodes** (ADR 0047). Tsuda, Jones et al. 2011 (p. 10) model an electric current in the same map: a current
+  sink projects +255 and a current source −255 at every step, and the map takes the mean of 15 × 15 cells. A cathode of
+  the Electrode tool is such a sink and an anode such a source: in the Jones model J takes + ε⁺ · 255 · wElec −
+  ε⁻ · 255 · wElec, and wElec = 1 (the setting Electrode strength) gives the paper's ±255. The app keeps the cathode's
+  part in C_F and the anode's part in C_L, as it keeps food and the repellent. In the extended model that is this
+  app's reading: the two parts have the source factor g and the scent decay, and a strain weighs them with w_F and
+  w_L. An electrode is no food: it is no site of the flow (8.2), covered food does not reduce it (6.5), and the start
+  layout Food does not count it (10). An electrode on a wall cell releases nothing, as food there.
 - A GPU test steps a float64 map of Jones' rule beside the GPU and finds J within a relative error of 1e-5 of it
   (`sim.gpu.test.ts`, "keep trail + scent − repellent equal to Jones' one trail map"). With Jones' values (scent decay
   0.1, w_F = w_L = the own weight) the extended model gives the same bytes as the Jones model with a repellent ("run a
@@ -211,7 +223,7 @@ depT · Σ n^k) sensing first. Closed edges and walls of the extended model take
 
 Adamatzky and Jones 2010. While the setting is on, a food cell releases φ times its scent while any cell of its 3 × 3
 block holds an agent after the moves (on a growth step: after its deaths and births): κ(x) = φ if f(x) > 0 and occ(y) > 0 for some y ∈ N(x) ∩ Ω, else κ(x) = 1. φ is
-the setting Covered food factor (default 0.001). Light is never reduced. The factor applies in the pass that adds the
+the setting Covered food factor (default 0.001). Light and electrodes are never reduced. The factor applies in the pass that adds the
 sources. The rule is off in every scene.
 
 ### 6.6 The cut in the fields
@@ -221,7 +233,7 @@ torus). In the extended model every trail lane and both scent fields of the woun
 diffusion, and the wound takes no source, in every step while the tool is held. Neighbours then diffuse back in. In the
 Jones model the cut leaves the fields as they are (Jones 2010, p. 148).
 
-### 6.7 Painted food, light and walls
+### 6.7 Painted food, light, walls and electrodes
 
 A brush stroke paints the cells of Ω whose centre lies within its radius r of the stroke (r ≥ 0.75 cells; a stroke of the user on
 steps of 1/16 cell). Wall: the wall byte 255, food and light 0. Food: the food byte 255. Light: max(old, 255 ·
@@ -233,6 +245,11 @@ edge above its second (ADR 0007, amendment of 2026-11-13). Erase: all bytes 0 (`
 A dab of light with a radius of 2.5 cells on the centre of a cell holds bytes that sum to 2,243: 0.977 of 3 × 3 cells
 of the full byte. The scene Voronoi diagram paints its repellent dots so, in place of the hard dots of 3 × 3 cells of
 its paper (ADR 0048).
+
+An electrode (ADR 0047) has the fourth byte of the cell: an anode writes 128 and a cathode 255, with the hard edge of
+food, and leaves the other bytes. So a cell holds one pole at most, and the pole painted last. A wall and an erase set
+the byte to 0. The passes read a byte above 191 as a cathode and any other byte above 0 as an anode (`POLE_BYTE` in
+`src/engine/types.ts`; CPU reference `paint-reference.ts`).
 
 ### 6.8 Trail saturation K
 
@@ -485,7 +502,7 @@ Defaults (Jones 2011): Gf 3, Gw 9, Gmin 1, Gmax 10; Sf 3, Sw 5, Smin 0, Smax 20.
 
 `shaders/init.wgsl`, `gl/glsl/init.frag`. Every agent draws a heading. The layouts: mixed (uniform; with one agent per
 cell a random permutation of the cells), bands (the strains side by side), sectors, colonies (one disc per strain),
-ring, center, empty (every agent dead) and food (every agent dead; for each strain one inoculate step places about 50
+ring, center, line (below), empty (every agent dead) and food (every agent dead; for each strain one inoculate step places about 50
 agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A at
 the start of the first food stroke of the list (a dab or a whole drag, 8.2), strain B on the second, and so on, and a
 strain without such a food starts without agents; ADR 0025, ADR 0032). With one agent per cell,
@@ -493,6 +510,10 @@ claim rounds give each alive agent its own cell: 1 round for the mixed layout on
 (`startRounds()` in `src/engine/pack.ts`); a loser
 of the last round starts dead. Without the rule an agent draws again up to 32 times while its cell is not open. With a
 capacity above Agents per cell, only the first agents of each strain start alive.
+
+Line (ADR 0047; Tsuda, Jones et al. 2011, p. 11): a vertical strip around the middle column of the grid, 0.75 · H
+cells high, and ⌈N / (0.75 · 0.75 · H)⌉ cells wide for the N agents that the buffer holds, at least 1 cell and at most
+W. Every draw of an agent is uniform in the strip, so with one agent per cell about 0.75 of its cells hold an agent.
 
 ## 11. Parameters
 
@@ -518,6 +539,7 @@ checks that this table names every key.
 | `meanWindow`        | w        | cells a side, 3 to 15, odd                                           | 3                 | jones    | 6.1     |
 | `foodStrength`      | wProj    | 0 to 0.5                                                             | 0.05              | both     | 6.4     |
 | `lightStrength`     | wLight   | 0 to 0.5; Jones: the strength of the repellent                       | 0.05              | both     | 6.4     |
+| `electrodeStrength` | wElec    | 0 to 1; 1 is the ±255 of Tsuda, Jones et al. 2011                    | 1                 | both     | 6.4     |
 | `scentDecay`        | d_C      | fraction lost per step, 0.0001 to 0.9                                | 0.1               | extended | 6.4     |
 | `coveredFoodFactor` | φ        | 0.0001 to 1                                                          | 0.001             | both     | 6.5     |
 | `trailSaturation`   | K        | trail units, 0 to 1000; 0 is off                                     | 0                 | extended | 6.8     |
@@ -582,6 +604,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Edges and walls in each model (6.3)     | "diffuse trail, food and light at the edges and walls as the CPU reference does"                                                |
 | Jones' one map (6.4)                    | "keep trail + scent − repellent equal to Jones' one trail map"                                                                  |
 | A repellent in the Jones model (6.4)    | "run a repellent in the Jones model as the extended model …"; "move the agents of the Jones model off a repellent source"       |
+| Electrodes (6.2, 6.4, 6.7, 10)          | "the electrode tool (ADR 0047)": the bytes, both lanes against the CPU reference, Tsuda's field, covered food, the line         |
 | Scent plateau and g (6.4)               | the plateau tests in each order; the scent against a CPU reference                                                              |
 | Covered food (6.5)                      | the covered food tests, also WebGL2 without float blending                                                                      |
 | Cut in the fields (6.6)                 | the cut clears the chemicals in the extended model only                                                                         |

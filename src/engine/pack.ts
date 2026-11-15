@@ -23,6 +23,7 @@ export const PARAM_SLOTS = [
   'growth',
   'shrinkage',
   'startEnd',
+  'electrode',
 ] as const;
 export const PARAMS_BYTES = (PARAM_SLOTS.length + 3) * 16;
 
@@ -249,5 +250,9 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   u.set([on ? s.growthEvery : 0, s.growthWindow, s.growthMin, s.growthMax], slot('growth'));
   u.set([on ? s.shrinkEvery : 0, s.shrinkWindow, s.shrinkMin, s.shrinkMax], slot('shrinkage'));
   u.set(startEnds(strains, rt.agents, rt.start), slot('startEnd'));
+  // The Electrode tool (ADR 0047): each cell of a pole releases this per step, the cathode into the food scent and the
+  // anode into the repellent, with the factor of the food and light sources. In the Jones model that is ±255 times
+  // the strength in Jones' one map (Tsuda, Jones et al. 2011, p. 10).
+  f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));
   return buf;
 }

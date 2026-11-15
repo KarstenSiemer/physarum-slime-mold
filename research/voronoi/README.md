@@ -10,7 +10,8 @@ The paper: J. Jones and A. Adamatzky, "Slime mould inspired generalised Voronoi 
 ## The story in one page
 
 **The question.** The Jones model has a repellent source (ADR 0044) and a wider mean (ADR 0046). No scene used
-them, and no run compared a repellent with a figure of Jones' papers. This paper has such a figure: seven repellent
+them when this work began (the scene Electrotaxis of ADR 0047, built at the same time, uses both with its
+electrodes), and no run compared a repellent with a figure of Jones' papers. This paper has such a figure: seven repellent
 dots in a dish with a ring of attractant at its rim, and a sheet of agents that ends as the Voronoi diagram of the
 dots (Fig. 10). The Voronoi diagram is exact geometry, so the app can be measured against it.
 

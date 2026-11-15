@@ -17,7 +17,9 @@ struct View {
   background: vec4f,  // linear RGB
   frame: vec4u,       // frame counter, strain count, overlays on/off, occupancy on/off (collision mode)
   fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), level of the trail's map (0 to 4)
-  streamFx: vec4f,    // the stream of the plasm: drawn (1) or not (0), the phases of its pattern and its swing, unused
+  // The stream of the plasm: drawn (1) or not (0), the phases of its pattern and its swing. w is not of the stream:
+  // 1 while an electrode may be painted (ADR 0047).
+  streamFx: vec4f,
   gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
   scentFx: vec4f,     // scent view: map level (0 to 3), unused, unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
@@ -38,6 +40,7 @@ const DISH_FILL = 0.945;
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
+@group(0) @binding(13) var<storage, read> env: array<u32>; // the cells of the simulation; read for the electrodes only
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
@@ -755,7 +758,39 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   if (near) {
     c = walls(c, e);
   }
+  if (ENV && V.streamFx.w != 0.0 && V.frame.z != 0u) { c = electrodes(c, p); }
   return c;
+}
+
+// ---- Electrodes (ADR 0047) ----------------------------------------------------------------------------
+// The poles of the Electrode tool, on top of the picture. Display only. They lie in the fourth byte of a cell of
+// `env` (paint.wgsl): above 191 the cathode, any other byte above 0 the anode. `shape` has no byte for them.
+
+const CATHODE = vec3f(0.05, 0.32, 1.0);  // linear RGB: blue, the pole that attracts
+const ANODE = vec3f(1.0, 0.08, 0.04);    // red, the pole that repels
+const POLE_OPACITY = 0.9;
+
+// The pole of grid cell c as (cathode, anode), each 0 or 1. The cell as shapeIndex() takes it.
+fn poleOf(c: vec2i) -> vec2f {
+  let b = env[shapeIndex(c)] >> 24u;
+  return vec2f(select(0.0, 1.0, b > 191u), select(0.0, 1.0, b > 0u && b <= 191u));
+}
+
+// The picture c with the electrodes at p over it: each pole covers where the bilinear mix of its 4 cells around p
+// passes one half, so the outline of a round dab is round at every zoom.
+fn electrodes(c: vec3f, p: vec2f) -> vec3f {
+  let q = p - 0.5;
+  let i = vec2i(floor(q));
+  let f = q - floor(q);
+  var cover = vec2f(0.0);
+  for (var dy = 0; dy < 2; dy++) {
+    for (var dx = 0; dx < 2; dx++) {
+      let w = select(1.0 - f.x, f.x, dx == 1) * select(1.0 - f.y, f.y, dy == 1);
+      cover += w * poleOf(i + vec2i(dx, dy));
+    }
+  }
+  let a = POLE_OPACITY * smoothstep(vec2f(0.4), vec2f(0.6), cover);
+  return mix(mix(c, CATHODE, a.x), ANODE, a.y);
 }
 
 // ---- Scent view (SCENT) -------------------------------------------------------------------------------

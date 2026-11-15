@@ -26,7 +26,7 @@ function random(seed: number) {
   };
 }
 
-const KINDS = ['erase', 'wall', 'food', 'light'] as const;
+const KINDS = ['erase', 'wall', 'food', 'light', 'anode', 'cathode'] as const;
 /** Grids of the app: 16:10, 16:9, phones, a square, both extremes of gridSize(). */
 const GRIDS: [number, number][] = [
   [512, 320],
@@ -167,7 +167,7 @@ describe('the drawing of a link', () => {
     const four =
       packDrawing({ scene: 'maze', revision: 0, origins: [0, -1, 0, -1], shapes, strokes: [] }) ?? new Uint8Array();
     expect(unpackDrawing(four)?.origins).toEqual([0, -1, 0, -1]);
-    for (const version of [0, 4, 255])
+    for (const version of [0, 5, 255])
       expect(unpackDrawing(Uint8Array.from(four, (v, i) => (i === 0 ? version : v))), `${version}`).toBeUndefined();
     // The Maze has fewer than 128 shapes: their number is one byte in version 2 and in version 3 alike.
     expect(unpackDrawing(Uint8Array.from(four, (v, i) => (i === 0 ? 2 : v)))).toEqual(unpackDrawing(four));
@@ -236,7 +236,7 @@ describe('the drawing of a link', () => {
       [1, now],
     ] as const) {
       const bytes = packDrawing(of(revision, shapes)) ?? new Uint8Array();
-      expect(bytes[0]).toBe(3);
+      expect(bytes[0]).toBe(4);
       expect(bytes[1 + 1 + 'shrinking'.length]).toBe(revision); // after the id
       expect(unpackDrawing(bytes)).toEqual(of(revision, shapes));
     }
@@ -256,7 +256,7 @@ describe('the drawing of a link', () => {
     expect(unpackDrawing(v1now)).toBeUndefined();
     // Without a scene there is no revision: the bytes of versions 1 to 3 differ only in the version.
     const plain = packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes: [] }) ?? new Uint8Array();
-    expect(Array.from(plain)).toEqual([3, 0, 0]);
+    expect(Array.from(plain)).toEqual([4, 0, 0]);
     expect(unpackDrawing(Uint8Array.from([1, 0, 0]))).toEqual({
       scene: '',
       revision: 0,
@@ -384,12 +384,55 @@ describe('the drawing of a link', () => {
     expect(checks).toBeGreaterThan(10_000);
   });
 
+  // ADR 0047: version 4 holds the strokes of the Electrode tool. The head byte has two bits for the kind, so a pole
+  // writes 3 in the bits of the arena, its arena in the bits of the kind, and its kind in the next byte.
+  it('holds the strokes of the Electrode tool in version 4, and every other stroke as version 3 held it', () => {
+    const at = (kind: EnvEdit['kind'], boundary: EnvEdit['boundary']): EnvEdit => ({
+      kind,
+      from: [10, 12],
+      to: [10, 12],
+      radius: 2,
+      grid: [512, 320],
+      boundary,
+    });
+    const pack = (strokes: EnvEdit[]) =>
+      packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes }) ?? new Uint8Array();
+    for (const boundary of BOUNDARIES)
+      for (const kind of ['anode', 'cathode'] as const) {
+        const bytes = pack([at(kind, boundary)]);
+        // The version, no scene, one stroke; the head byte (grid, start and radius follow: 16 + 32 + 128) and the kind.
+        expect(Array.from(bytes.slice(0, 5))).toEqual([
+          4,
+          0,
+          1,
+          176 | (3 << 2) | BOUNDARIES.indexOf(boundary),
+          kind === 'anode' ? 4 : 5,
+        ]);
+        expect(unpackDrawing(bytes)?.strokes).toEqual([at(kind, boundary)]);
+        // A kind that no version has, and the same bytes as version 3, are refused.
+        expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 6 : v)))).toBeUndefined();
+        expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 2 : v)))).toBeUndefined();
+        expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 0 ? 3 : v)))).toBeUndefined();
+      }
+    // A stroke of an older kind has the bytes of version 3 after the version, and a link of version 3 still opens.
+    const food = pack([at('food', 'dish'), at('wall', 'wrap'), at('light', 'box'), at('erase', 'box')]);
+    expect(food[3]).toBe(176 | (2 << 2) | 2);
+    const old = Uint8Array.from(food, (v, i) => (i === 0 ? 3 : v));
+    expect(unpackDrawing(old)).toEqual(unpackDrawing(food));
+    expect(unpackDrawing(old)?.strokes.map((e) => e.kind)).toEqual(['food', 'wall', 'light', 'erase']);
+    // The poles keep their place between the other strokes, and the drawing names their kinds.
+    const mixed = [at('food', 'box'), at('cathode', 'box'), at('wall', 'dish'), at('anode', 'wrap')];
+    const d = unpackDrawing(pack(mixed));
+    expect(d?.strokes).toEqual(mixed);
+    expect(d && [...kindsOf(d)].sort()).toEqual(['anode', 'cathode', 'food', 'wall']);
+  });
+
   it('decodes random, truncated and changed bytes without throwing, to nothing or a valid drawing', () => {
     const r = random(4);
     let decoded = 0;
     for (let i = 0; i < 3000; i++) {
       const junk = Uint8Array.from({ length: Math.floor(r() * 64) }, () => Math.floor(r() * 256));
-      if (r() < 0.5) junk[0] = 1; // the version
+      if (r() < 0.5) junk[0] = r() < 0.5 ? 1 : 4; // the version
       const d = unpackDrawing(junk);
       if (d) {
         valid(d);

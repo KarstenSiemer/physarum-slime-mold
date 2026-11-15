@@ -723,6 +723,29 @@ describe('the model switch', () => {
     expect([lightName('jones'), lightName('extended')]).toEqual(['repellent', 'light']);
   });
 
+  // ADR 0047: the Electrode tool paints the pole that the toolbar selects; the other brush tools paint their own
+  // kind, and a tool without a brush paints none.
+  it('paints the selected pole with the Electrode tool, in both models', async () => {
+    const { TOOLS, app, strokeKind, toolsFor } = await fresh();
+    expect(app.pole).toBe('cathode');
+    expect([strokeKind('electrode', 'cathode'), strokeKind('electrode', 'anode')]).toEqual(['cathode', 'anode']);
+    expect(TOOLS.map((t) => strokeKind(t.id, 'anode'))).toEqual([
+      undefined,
+      undefined,
+      'food',
+      'light',
+      'wall',
+      'erase',
+      undefined,
+      'anode',
+    ]);
+    for (const model of ['jones', 'extended'] as const) {
+      const tool = toolsFor(model).find((t) => t.id === 'electrode');
+      expect([tool?.key, tool?.label]).toEqual(['8', 'Electrode']);
+      expect(toolsFor(model).find((t) => t.id === 'erase')?.help).toContain('electrodes');
+    }
+  });
+
   it('to Jones keeps strain A, the rule and one diffusion pass, and says what went', async () => {
     const { app, loadPreset, setModel } = await fresh();
     loadPreset('three-strains');

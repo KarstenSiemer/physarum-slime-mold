@@ -2,10 +2,10 @@
 // backends; the engine tests in Node paint with it (engine-env.test.ts).
 import type { Boundary } from '../model/params';
 import { cellIndex, lightByte, segmentDistance } from './brush';
-import { EnvKind, type Stroke } from './types';
+import { EnvKind, isPole, POLE_BYTE, type Stroke } from './types';
 
 /**
- * Paints one stroke into `env` (4 bytes per cell: wall, food, light, unused, as Sim.readEnv() returns them),
+ * Paints one stroke into `env` (4 bytes per cell: wall, food, light, electrode, as Sim.readEnv() returns them),
  * under the stroke's boundary or else `boundary`. `margin` (optional) receives the smallest |distance − radius|
  * over the cells looked at: float32 on the GPU may round a cell that close to the brush edge the other way.
  */
@@ -33,6 +33,7 @@ export function paintReference(
       if (kind === EnvKind.erase) env.fill(0, i, i + 4);
       else if (kind === EnvKind.wall) env.set([255, 0, 0, 0], i);
       else if (kind === EnvKind.food) env[i + 1] = 255;
+      else if (isPole(stroke.kind)) env[i + 3] = POLE_BYTE[stroke.kind];
       else env[i + 2] = Math.max(env[i + 2] ?? 0, lightByte(d, r));
     }
 }

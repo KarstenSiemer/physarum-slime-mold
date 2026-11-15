@@ -19,6 +19,13 @@ const COLONIES = 3u;
 const RING = 4u;
 const CENTER = 5u;
 const EMPTY = 6u;
+// A vertical strip through the middle of the grid (ADR 0047; Tsuda, Jones et al. 2011, p. 11: the agents start "in a
+// vertical line"): LINE_HEIGHT of the grid's height, and as wide as all agents need at LINE_FILL agents per cell. With
+// one agent per cell the claim rounds then give every agent a cell (pack.ts START_ROUNDS). 7 is the layout 'food' of
+// LAYOUTS in params.ts, which is packed as EMPTY.
+const LINE = 8u;
+const LINE_HEIGHT = 0.75;
+const LINE_FILL = 0.75;
 
 // Draws after the first without the rule. The claim rounds with the rule are counted apart (pack.ts START_ROUNDS).
 const ROUNDS = 32u;
@@ -99,6 +106,13 @@ fn start(id: u32, s: u32, round: u32) -> Start {
       heading = a;
     }
     case CENTER: { p = disc(center, 0.08 * m, &rng); }
+    case LINE: {
+      let rows = LINE_HEIGHT * size.y;
+      let half = 0.5 * min(size.x, max(1.0, ceil(f32(P.grid.z) / (LINE_FILL * rows))));
+      let dx = (2.0 * rand(&rng) - 1.0) * half;
+      let dy = (rand(&rng) - 0.5) * rows;
+      p = center + vec2f(dx, dy);
+    }
     default: {
       if (round == 0u && P.cfg.w != 0u && P.grid.z <= P.grid.x * P.grid.y) {
         let c = uniqueCell(id, P.grid.x * P.grid.y);

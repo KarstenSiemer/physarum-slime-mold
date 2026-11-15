@@ -28,7 +28,7 @@ import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlan, diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
+import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
 const GROUP = 256;
@@ -167,6 +167,8 @@ export class Simulation implements Sim {
    * environment.
    */
   hasEnvironment = false;
+  /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
+  hasElectrodes = false;
   /**
    * The boundary under which every byte of `shape` is held to `env`. After a change of boundary, or after strokes
    * painted under another boundary (then undefined), syncShape() holds it again before its next use.
@@ -954,7 +956,8 @@ export class Simulation implements Sim {
       const wrap = boundary === 'wrap';
       if (stroke.kind === 'wall') [this.walls, this.wallOverAgents] = [true, true];
       if (stroke.kind !== 'erase') this.hasEnvironment = true;
-      if (stroke.kind === 'food' || stroke.kind === 'light') [this.sources, this.scentless] = [true, false];
+      if (isPole(stroke.kind)) this.hasElectrodes = true;
+      if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];
       if (boundary !== this.settings.boundary) foreign = true;
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const box = paintBox(segment, this.width, this.height, wrap);
@@ -993,6 +996,8 @@ export class Simulation implements Sim {
         pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
         // Same layout: the bind group and its offsets stay. The eraser and walls load a tile of `env`; most segments
         // need no search of their own cells.
+        // An electrode changes no byte of `shape`: the renderer reads its byte from `env` (render.wgsl poleAt).
+        if (isPole(chunk[j]?.kind ?? 'erase')) return;
         pass.setPipeline(this.kernels.outline[outlineVariant(chunk[j], own[first + j] ?? true)]);
         pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
       });
@@ -1034,6 +1039,7 @@ export class Simulation implements Sim {
     this.device.queue.submit([enc.finish()]);
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
+    this.hasElectrodes = false;
     // The scent that the textures hold stays until the next reset.
     this.sources = false;
     this.shapeHeld = this.settings.boundary;
@@ -1146,8 +1152,9 @@ export class Simulation implements Sim {
     this.device.queue.submit([enc.finish()]);
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
     this.wallOverAgents = this.walls;
-    this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
-    this.sources = data.some((v, i) => (i % 4 === 1 || i % 4 === 2) && v > 0);
+    this.hasEnvironment = data.some((v) => v > 0);
+    this.hasElectrodes = data.some((v, i) => i % 4 === 3 && v > 0);
+    this.sources = data.some((v, i) => i % 4 !== 0 && v > 0);
     if (this.sources) this.scentless = false;
     this.shapeHeld = undefined;
     if (this.walls) this.updateClearance();

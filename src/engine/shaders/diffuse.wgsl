@@ -71,7 +71,7 @@ fn covered(q: vec2i) -> bool {
 // as before ADR 0027; moving first, the last pass adds them after the decay.
 fn senseFirst() -> bool { return SENSE_FIRST; }
 
-// This step's deposits and food and light at the habitable cell c (cell q), with covered food while it is on.
+// This step's deposits, food, light and electrodes at the habitable cell c (cell q), with covered food while it is on.
 fn sources(c: i32, q: vec2i, t: ptr<function, vec4f>, s: ptr<function, vec2f>) {
   *t += vec4f(counts[c]) * P.deposit;
   let e = envOf(env[c]);
@@ -81,6 +81,10 @@ fn sources(c: i32, q: vec2i, t: ptr<function, vec4f>, s: ptr<function, vec2f>) {
   } else {
     *s += vec2f(e.y * P.scent.x, e.z * P.scent.y);
   }
+  // The Electrode tool (ADR 0047; Tsuda, Jones et al. 2011, p. 10): the cathode, the current sink, releases into the
+  // food scent, and the anode, the current source, into the repellent. In the Jones model that is a source above 0 and
+  // one below 0 of Jones' one map. A branch of its own: the sum above stays as it is for a cell without an electrode.
+  if (e.w > 0.0) { *s += select(vec2f(0.0, P.electrode.x), vec2f(P.electrode.x, 0.0), e.w > 0.75); }
 }
 
 // Cut tool: in the extended model the wound also loses its chemicals, this app's choice. Jones 2010 (Sec. 4.3,

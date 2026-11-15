@@ -1522,6 +1522,455 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     }, 120_000);
   });
 
+  // ADR 0047: the Electrode tool. Tsuda, Jones et al. 2011 (p. 10) model a current in Jones' one map: a current sink
+  // (the cathode) projects +255 and a current source (the anode) −255 at every step, and the map takes the mean of
+  // 15 × 15 cells. The poles lie in the fourth byte of a cell of `env`. The cathode releases into the food scent and
+  // the anode into the repellent, so in the Jones model trail + food scent − repellent is that map.
+  describe('the electrode tool (ADR 0047)', () => {
+    const relError = (gpu: Float32Array, cpu: Float64Array) => {
+      const scale = Math.max(...Array.from(cpu, Math.abs), 1e-30);
+      return Math.max(...Array.from(cpu, (v, i) => Math.abs((gpu[i] ?? 0) - v))) / scale;
+    };
+    const laneOf = (data: Float32Array, stride: number, l: number) =>
+      Float32Array.from({ length: data.length / stride }, (_, c) => data[c * stride + l] ?? 0);
+    const jones = (patch: Partial<Settings>): Settings => ({
+      ...defaultSettings(),
+      model: 'jones',
+      collisions: true,
+      strains: [defaultStrain(0)],
+      ...patch,
+    });
+    /** 1 where cell c holds the pole: the cathode byte 255, the anode byte 128. */
+    const poleAt = (env: Uint8Array, c: number, pole: 'cathode' | 'anode') =>
+      (env[c * 4 + 3] ?? 0) === (pole === 'cathode' ? 255 : 128) ? 1 : 0;
+    /** Both poles, beside and across a wall, over food and light, at the edges and across the seam. */
+    const SCENE: Stroke[] = [
+      { kind: 'wall', from: [24, 5], to: [24, 30], radius: 1 },
+      { kind: 'food', from: [12, 10], to: [12, 10], radius: 3 },
+      { kind: 'light', from: [36, 30], to: [36, 30], radius: 4 },
+      { kind: 'cathode', from: [10, 12], to: [14, 12], radius: 2 }, // over a part of the food
+      { kind: 'cathode', from: [0.3, 30], to: [0.3, 34], radius: 2 }, // across the x seam, at the edge of the box
+      { kind: 'anode', from: [38, 28], to: [38, 28], radius: 2.5 }, // over a part of the light
+      { kind: 'anode', from: [20, 20.2], to: [28, 20.2], radius: 1.5 }, // across the wall
+      { kind: 'anode', from: [30, 38.3], to: [34, 38.3], radius: 2 }, // across the y seam
+    ];
+
+    it('paints the poles into the fourth byte as the CPU reference does, and a wall and an erase clear them', async () => {
+      const [w, h] = [48, 40];
+      const strokes: Stroke[] = [
+        ...SCENE,
+        { kind: 'anode', from: [11.37, 12.21], to: [11.37, 12.21], radius: 1.13 }, // over a cathode: the cell changes
+        { kind: 'cathode', from: [38.29, 27.63], to: [38.29, 27.63], radius: 1.21 }, // over an anode
+        { kind: 'wall', from: [0.5, 31.9], to: [3.3, 31.9], radius: 0.75 }, // over a cathode: clears it
+        { kind: 'erase', from: [32.21, 38.37], to: [32.21, 38.37], radius: 1.37 }, // clears an anode
+        { kind: 'food', from: [20.3, 20.4], to: [20.3, 20.4], radius: 1.9 }, // over an anode: both stay
+      ];
+      for (const boundary of BOUNDARIES) {
+        const ref = new Uint8Array(w * h * 4);
+        const margin = { min: Infinity };
+        for (const s of strokes) paintReference(ref, w, h, s, boundary, margin);
+        expect(margin.min).toBeGreaterThan(1e-3);
+        const one = await make({ layout: 'empty', boundary }, w, h, 1);
+        for (const s of strokes) one.paint([s]);
+        const all = await make({ layout: 'empty', boundary }, w, h, 1);
+        all.paint(strokes);
+        for (const sim of [one, all]) {
+          const env = await sim.readEnv();
+          const wrong: string[] = [];
+          for (let i = 0; i < ref.length; i++)
+            if (Math.abs((env[i] ?? 0) - (ref[i] ?? 0)) > (i % 4 === 2 ? 1 : 0))
+              wrong.push(`${boundary} cell ${Math.floor(i / 4)} byte ${i % 4}: ${env[i] ?? '-'} ≠ ${ref[i] ?? '-'}`);
+          expect(wrong).toEqual([]);
+          expect(sim.hasElectrodes).toBe(true);
+        }
+        const env = await all.readEnv();
+        const at = (x: number, y: number) => Array.from(env.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
+        const bytes = new Set(Array.from(env).filter((_, i) => i % 4 === 3));
+        expect([...bytes].sort((a, b) => a - b)).toEqual([0, 128, 255]);
+        expect(at(13, 12)).toEqual([0, 255, 0, 255]); // a cathode on food
+        expect(at(11, 12)).toEqual([0, 255, 0, 128]); // the anode painted over it
+        expect(at(38, 27)[3]).toBe(255); // a cathode painted over the anode, on light
+        expect(at(38, 27)[2]).toBeGreaterThan(0);
+        expect(at(20, 20)).toEqual([0, 255, 0, 128]); // food painted over an anode
+        expect(at(24, 20)).toEqual([255, 0, 0, 128]); // an anode painted over a wall cell
+        expect(at(27, 20)).toEqual([0, 0, 0, 128]);
+        if (boundary !== 'dish') expect(at(1, 32)).toEqual([255, 0, 0, 0]); // the wall cleared the cathode
+        if (boundary !== 'dish') expect(at(32, 38)).toEqual([0, 0, 0, 0]); // the erase cleared the anode
+      }
+    }, 120_000);
+
+    // The poles have no outline: the bytes that the renderer reads for walls, food and light stay as they are without
+    // the poles, whether the poles come in one call with the other strokes or in calls of their own.
+    it('leaves the outlines of walls, food and light as they are without the poles', async () => {
+      const [w, h] = [48, 40];
+      const without = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      without.paint(SCENE.filter((s) => s.kind !== 'cathode' && s.kind !== 'anode'));
+      const want = Array.from(await without.readShape());
+      expect(without.hasElectrodes).toBe(false);
+      const all = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      all.paint(SCENE);
+      expect(Array.from(await all.readShape())).toEqual(want);
+      const one = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
+      for (const s of SCENE) one.paint([s]);
+      expect(Array.from(await one.readShape())).toEqual(want);
+      // A clear takes the poles away, and bytes written bring them back.
+      const env = await all.readEnv();
+      all.clearEnvironment();
+      expect([all.hasElectrodes, all.hasEnvironment]).toEqual([false, false]);
+      expect((await all.readEnv()).some((v) => v > 0)).toBe(false);
+      all.writeEnv(Uint8Array.from(env, (v, i) => (i % 4 === 3 ? v : 0)));
+      expect([all.hasElectrodes, all.hasEnvironment]).toEqual([true, true]);
+    }, 120_000);
+
+    // No agents: 6 steps of the map against the float64 reference. Lane 0 of the scent takes the food and the
+    // cathodes, lane 1 the repellent of drawn light and the anodes, each pole with 255 · Electrode strength. A pole on
+    // a wall cell releases nothing: a wall of the Jones model takes no source.
+    it.each(
+      ([3, 15] as const).flatMap((window) =>
+        BOUNDARIES.flatMap((boundary) => STEP_ORDERS.map((stepOrder) => [window, boundary, stepOrder] as const)),
+      ),
+    )(
+      'releases ±255 · Electrode strength into Jones’ one map as the CPU reference does (window %i, %s, %s)',
+      async (window, boundary, stepOrder) => {
+        const [w, h] = [48, 40];
+        const strength = window === 15 ? 1 : 0.4;
+        const settings = jones({
+          layout: 'empty',
+          boundary,
+          stepOrder,
+          meanWindow: window,
+          foodStrength: 0.05,
+          lightStrength: 0.2,
+          electrodeStrength: strength,
+        });
+        const steps = 6;
+        const sim = await make(settings, w, h, 1);
+        sim.paint(SCENE);
+        sim.run(steps);
+        const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+        const g = meanGrid(env, w, h, boundary, true);
+        const run = (source: (c: number) => number, grid = g) => {
+          let v: Float64Array = new Float64Array(w * h);
+          for (let k = 0; k < steps; k++) v = meanStep(v, grid, window, 0.9, source, stepOrder);
+          return v;
+        };
+        const food = (c: number) => ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05;
+        const light = (c: number) => ((env[c * 4 + 2] ?? 0) / 255) * 255 * 0.2;
+        const pole = (kind: 'cathode' | 'anode') => (c: number) => poleAt(env, c, kind) * 255 * strength;
+        const [attract, repel] = [laneOf(scent, 2, 0), laneOf(scent, 2, 1)];
+        expect(
+          relError(
+            attract,
+            run((c) => food(c) + pole('cathode')(c)),
+          ),
+          'cathode',
+        ).toBeLessThan(1e-5);
+        expect(
+          relError(
+            repel,
+            run((c) => light(c) + pole('anode')(c)),
+          ),
+          'anode',
+        ).toBeLessThan(1e-5);
+        // Without the poles, with the poles in the other lane, and with the strength of the food, the map is far off.
+        expect(relError(attract, run(food))).toBeGreaterThan(1e-2);
+        expect(relError(repel, run(light))).toBeGreaterThan(1e-2);
+        expect(
+          relError(
+            attract,
+            run((c) => food(c) + pole('anode')(c)),
+          ),
+        ).toBeGreaterThan(1e-2);
+        expect(
+          relError(
+            repel,
+            run((c) => light(c) + pole('cathode')(c)),
+          ),
+        ).toBeGreaterThan(1e-2);
+        expect(
+          relError(
+            attract,
+            run((c) => food(c) + poleAt(env, c, 'cathode') * 255 * 0.05),
+          ),
+        ).toBeGreaterThan(1e-2);
+        // The anode across the wall holds wall cells, and they release nothing.
+        const walled = Array.from(g.kinds).filter((k, c) => k === CellKind.wall && poleAt(env, c, 'anode') === 1);
+        expect(walled.length).toBeGreaterThan(2);
+        const open = { ...g, kinds: g.kinds.map((k) => (k === CellKind.wall ? CellKind.open : k)) };
+        expect(
+          relError(
+            repel,
+            run((c) => light(c) + pole('anode')(c), open),
+          ),
+        ).toBeGreaterThan(1e-3);
+        // The trail stays 0: an electrode deposits none.
+        expect(Math.max(...Array.from(await sim.readTrail()))).toBe(0);
+      },
+      120_000,
+    );
+
+    // Tsuda's field (p. 10): every cell (1 − d) times the mean of 15 × 15 cells, −255 at a source and +255 at a sink in
+    // every step, from a field of zeros. One float64 map with both signs against food scent − repellent.
+    it.each(STEP_ORDERS)(
+      'builds the field of Tsuda et al. 2011 between a source and a sink (%s)',
+      async (stepOrder) => {
+        const [w, h] = [64, 48];
+        const d = 0.01;
+        const settings = jones({
+          layout: 'empty',
+          boundary: 'box',
+          stepOrder,
+          meanWindow: 15,
+          strains: [{ ...defaultStrain(0), decay: d }],
+          scentDecay: d,
+        });
+        const sim = await make(settings, w, h, 1);
+        sim.paint([
+          { kind: 'cathode', from: [12, 24], to: [12, 24], radius: 1.5 },
+          { kind: 'anode', from: [50, 24], to: [50, 24], radius: 1.5 },
+        ]);
+        sim.run(40);
+        const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+        const g = meanGrid(env, w, h, 'box', true);
+        const source = (c: number) => 255 * (poleAt(env, c, 'cathode') - poleAt(env, c, 'anode'));
+        let map: Float64Array = new Float64Array(w * h);
+        for (let k = 0; k < 40; k++) map = meanStep(map, g, 15, 1 - d, source, stepOrder);
+        const field = Float32Array.from({ length: w * h }, (_, c) => (scent[c * 2] ?? 0) - (scent[c * 2 + 1] ?? 0));
+        expect(relError(field, map)).toBeLessThan(1e-5);
+        // Above 0 at the sink, below 0 at the source, and falling from the one to the other along the row between.
+        const at = (x: number) => field[24 * w + x] ?? 0;
+        expect(at(12)).toBeGreaterThan(10);
+        expect(at(50)).toBeLessThan(-10);
+        for (let x = 15; x <= 47; x++) expect(at(x), `x ${x}`).toBeLessThan(at(x - 1));
+      },
+      120_000,
+    );
+
+    // The extended model (this app's reading): the same two lanes, with the source factor g of the food and the light
+    // and the scent decay, and walls as sinks. The strain weighs them with Food attraction and Light avoidance.
+    it.each(STEP_ORDERS)(
+      'releases the poles with the source factor of the extended model (%s)',
+      async (stepOrder) => {
+        const [w, h] = [48, 40];
+        const scentDecay = 0.04;
+        const settings: Settings = {
+          ...defaultSettings(),
+          layout: 'empty',
+          boundary: 'box',
+          stepOrder,
+          scentDecay,
+          foodStrength: 0.05,
+          lightStrength: 0.2,
+          electrodeStrength: 0.6,
+          // Past constrain(): the extended model runs the 3 × 3 mean whatever the window says.
+          meanWindow: 15,
+        };
+        const steps = 6;
+        const sim = await make(settings, w, h, 1);
+        sim.paint(SCENE);
+        sim.run(steps);
+        const [scent, env] = [await sim.readScent(), await sim.readEnv()];
+        const g = meanGrid(env, w, h, 'box', false);
+        const scale = emissionScale(scentDecay, stepOrder);
+        const run = (source: (c: number) => number, factor = scale) => {
+          let v: Float64Array = new Float64Array(w * h);
+          for (let k = 0; k < steps; k++) v = meanStep(v, g, 3, 1 - scentDecay, (c) => factor * source(c), stepOrder);
+          return v;
+        };
+        const cathode = (c: number) =>
+          ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 + poleAt(env, c, 'cathode') * 255 * 0.6;
+        const anode = (c: number) => ((env[c * 4 + 2] ?? 0) / 255) * 255 * 0.2 + poleAt(env, c, 'anode') * 255 * 0.6;
+        expect(Math.abs(scale - 1)).toBeGreaterThan(0.5);
+        expect(relError(laneOf(scent, 2, 0), run(cathode))).toBeLessThan(1e-5);
+        expect(relError(laneOf(scent, 2, 1), run(anode))).toBeLessThan(1e-5);
+        // The factor 1 of the Jones model is far off.
+        expect(relError(laneOf(scent, 2, 0), run(cathode, 1))).toBeGreaterThan(1e-2);
+        expect(relError(laneOf(scent, 2, 1), run(anode, 1))).toBeGreaterThan(1e-2);
+      },
+      120_000,
+    );
+
+    // Covered food (ADR 0022) reduces what a food cell releases while an agent covers it. A cathode is no food: it
+    // releases all of its source under agents too, also where it lies on food.
+    it.each(STEP_ORDERS)(
+      'releases a covered cathode in full, and reduces only the food under it (%s)',
+      async (stepOrder) => {
+        const [w, h] = [64, 48];
+        const settings = jones({
+          seed: 5,
+          density: 0.3,
+          stepOrder,
+          foodStrength: 0.05,
+          electrodeStrength: 0.5,
+          coveredFood: true,
+          coveredFoodFactor: 0.001,
+        });
+        const sim = await make(settings, w, h, Math.round(0.3 * w * h));
+        sim.paint([
+          { kind: 'food', from: [6, 6], to: [58, 40], radius: 3 },
+          { kind: 'cathode', from: [6, 40], to: [58, 6], radius: 3 }, // crosses the food
+        ]);
+        sim.reset();
+        sim.run(20);
+        const before = await sim.readScent();
+        sim.run(1);
+        const [after, env, agents] = [await sim.readScent(), await sim.readEnv(), await sim.readAgents()];
+        const g = meanGrid(env, w, h, 'wrap', true);
+        const alive = new Uint8Array(w * h);
+        for (const a of agents) if ((a.bits & 4) !== 0) alive[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
+        const coveredAt = (c: number) => {
+          const [x, y] = [c % w, Math.floor(c / w)];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) if (alive[((y + dy + h) % h) * w + ((x + dx + w) % w)] === 1) return true;
+          return false;
+        };
+        const source = (foodFactor: number, poleFactor: number) => (c: number) =>
+          ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 * (coveredAt(c) ? foodFactor : 1) +
+          poleAt(env, c, 'cathode') * 255 * 0.5 * (coveredAt(c) ? poleFactor : 1);
+        const start = Float64Array.from(laneOf(before, 2, 0));
+        const lane = laneOf(after, 2, 0);
+        const step = (s: (c: number) => number) => meanStep(start, g, 3, 0.9, s, stepOrder);
+        expect(relError(lane, step(source(0.001, 1)))).toBeLessThan(1e-4);
+        // Agents cover cells of the cathode, also on food: a cathode reduced as food, and food released in full, are
+        // off.
+        const cells = Array.from({ length: w * h }, (_, c) => c);
+        const covered = cells.filter((c) => poleAt(env, c, 'cathode') === 1 && coveredAt(c));
+        expect(covered.length).toBeGreaterThan(50);
+        expect(covered.some((c) => (env[c * 4 + 1] ?? 0) > 0)).toBe(true);
+        expect(relError(lane, step(source(0.001, 0.001)))).toBeGreaterThan(1e-2);
+        expect(relError(lane, step(source(1, 1)))).toBeGreaterThan(1e-4);
+      },
+      120_000,
+    );
+
+    // The agents: in the Jones model a strain that follows its trail moves to the cathodes and away from the anodes,
+    // and a strain that flees its trail moves the other way (one map, ADR 0044). In the extended model the strain
+    // follows a cathode with Food attraction and flees an anode with Light avoidance; with both weights 0 the poles
+    // change nothing.
+    it('moves the agents toward the cathode and away from the anode, by the weights of the strain', async () => {
+      const [w, h] = [96, 48];
+      const meanX = async (patch: Partial<Settings>, poles: boolean) => {
+        const settings = { ...jones({ seed: 4, density: 0.05, boundary: 'box', meanWindow: 15 }), ...patch };
+        const sim = await make(settings, w, h, Math.round(0.05 * w * h));
+        if (poles)
+          sim.paint([
+            { kind: 'cathode', from: [12, 6], to: [12, 42], radius: 1.5 },
+            { kind: 'anode', from: [84, 6], to: [84, 42], radius: 1.5 },
+          ]);
+        sim.reset();
+        sim.run(300);
+        const state = await sim.readAgents();
+        const alive = state.filter((a) => (a.bits & 4) !== 0);
+        return { x: alive.reduce((sum, a) => sum + a.x, 0) / alive.length, state };
+      };
+      const flee = { ...defaultStrain(0), food: -1, light: -1, attraction: [-1, 0, 0, 0] };
+      // The Jones model: the mean x starts near the middle (48) and goes to the cathodes at x = 12.
+      expect((await meanX({}, false)).x).toBeGreaterThan(40);
+      expect((await meanX({}, true)).x).toBeLessThan(30);
+      // A strain that flees its trail goes to the anodes at x = 84.
+      expect((await meanX({ strains: [flee] }, true)).x).toBeGreaterThan(60);
+      // The extended model, 3 × 3 mean: the weights of the strain decide.
+      const extended = (food: number, light: number): Partial<Settings> => ({
+        model: 'extended',
+        meanWindow: 3,
+        scentDecay: 0.01,
+        strains: [{ ...defaultStrain(0), food, light }],
+      });
+      const none = await meanX(extended(0, 0), false);
+      expect((await meanX(extended(0, 0), true)).state).toEqual(none.state);
+      expect((await meanX(extended(1, 1), true)).x).toBeLessThan(none.x - 5);
+      expect((await meanX(extended(-1, -1), true)).x).toBeGreaterThan(none.x + 5);
+      // Electrode strength 0: the poles release nothing, and the run is the run without them.
+      const off = await meanX({ ...extended(1, 1), electrodeStrength: 0 }, true);
+      expect(off.state).toEqual((await meanX(extended(1, 1), false)).state);
+    }, 240_000);
+
+    // The start layout Vertical line (init.wgsl LINE): the agents start in a strip through the middle of the grid,
+    // 0.75 of its height, as wide as all agents need at 0.75 agents per cell, each in a cell of its own.
+    it.each(BOUNDARIES)(
+      'starts the agents in a vertical line through the middle (%s)',
+      async (boundary) => {
+        const [w, h] = [250, 240];
+        const n = 1500;
+        const sim = await make(jones({ seed: 2, layout: 'line', boundary, density: n / (w * h) }), w, h, n);
+        const alive = (await sim.readAgents()).filter((a) => (a.bits & 4) !== 0);
+        expect(alive).toHaveLength(n);
+        // 180 rows, and ⌈1500 / (0.75 · 180)⌉ = 12 columns around the middle.
+        for (const a of alive) {
+          expect(a.x >= 119 && a.x < 131, `x ${a.x}`).toBe(true);
+          expect(a.y >= 30 && a.y < 210, `y ${a.y}`).toBe(true);
+        }
+        expect(new Set(alive.map((a) => Math.floor(a.y) * w + Math.floor(a.x))).size).toBe(n);
+        const xs = new Set(alive.map((a) => Math.floor(a.x)));
+        const ys = new Set(alive.map((a) => Math.floor(a.y)));
+        expect([xs.size, ys.size]).toEqual([12, 180]);
+        // Without the rule the agents share cells, in the same strip; a strip never gets wider than the grid.
+        const loose = await make(
+          { layout: 'line', boundary, density: 2, collisions: false, strains: [defaultStrain(0)] },
+          32,
+          24,
+          1536,
+        );
+        const many = (await loose.readAgents()).filter((a) => (a.bits & 4) !== 0);
+        expect(many).toHaveLength(1536);
+        for (const a of many) expect(a.x >= 0 && a.x < 32 && a.y >= 3 && a.y < 21, `${a.x}, ${a.y}`).toBe(true);
+      },
+      120_000,
+    );
+
+    // The view: a cathode is blue and an anode red, over the bare ground, in every style. A pixel on the middle of a
+    // cell deep inside a pole has the colour of the pole at its opacity, and one far from it the ground.
+    it.each(['glow', 'gel', 'paper'] as const)(
+      'draws the cathode blue and the anode red (%s)',
+      async (style) => {
+        const [w, h] = [64, 48];
+        const settings: Settings = {
+          ...defaultSettings(),
+          style,
+          layout: 'empty',
+          strains: [defaultStrain(0)],
+          bloom: 0,
+        };
+        backend.forget();
+        const sim = await make(settings, w, h, 1);
+        const view = { center: [32.4375, 24.4375] as [number, number], scale: 1 / 8 };
+        const [cw, ch] = [512, 192];
+        const bare = await backend.capture(sim, settings, view, cw, ch);
+        sim.paint([
+          { kind: 'cathode', from: [16, 24], to: [16, 24], radius: 5 },
+          { kind: 'anode', from: [48, 24], to: [48, 24], radius: 5 },
+        ]);
+        const img = await backend.capture(sim, settings, view, cw, ch);
+        // 8 pixels per cell; the pixel 8c, 8r − 96 has its centre on the centre of cell c, r.
+        const pixel = (of: ImageData, c: number, r: number) => {
+          const i = ((8 * r - 96) * cw + 8 * c) * 4;
+          return [of.data[i] ?? 0, of.data[i + 1] ?? 0, of.data[i + 2] ?? 0];
+        };
+        const near = (got: number[], want: number[]) => got.every((v, i) => Math.abs(v - (want[i] ?? 0)) <= 2);
+        // The ground of the style, from the picture without the poles: the pole lies over it with its opacity of 0.9.
+        const ground = pixel(bare, 16, 24).map((v) => fromByte(v));
+        const mix = (pole: number[]) => ground.map((b, i) => toByte(b + 0.9 * ((pole[i] ?? 0) - b)));
+        expect(near(pixel(img, 16, 24), mix([0.05, 0.32, 1])), `cathode ${String(pixel(img, 16, 24))}`).toBe(true);
+        expect(near(pixel(img, 48, 24), mix([1, 0.08, 0.04])), `anode ${String(pixel(img, 48, 24))}`).toBe(true);
+        expect(near(pixel(img, 32, 24), pixel(bare, 32, 24))).toBe(true);
+        // Blue has the most blue and red the most red.
+        const [cathode, anode] = [pixel(img, 16, 24), pixel(img, 48, 24)];
+        expect((cathode[2] ?? 0) - (cathode[0] ?? 0)).toBeGreaterThan(100);
+        expect((anode[0] ?? 0) - (anode[2] ?? 0)).toBeGreaterThan(100);
+        // Far from the poles the picture is the picture without them, but for the dither of each frame.
+        let far = 0;
+        for (let y = 0; y < ch; y++)
+          for (let x = 0; x < 64; x++)
+            for (let k = 0; k < 3; k++) {
+              const i = (y * cw + x) * 4 + k;
+              far = Math.max(far, Math.abs((img.data[i] ?? 0) - (bare.data[i] ?? 0)));
+            }
+        expect(far).toBeLessThanOrEqual(2);
+      },
+      120_000,
+    );
+  });
+
   describe('agent rule (Jones 2010, Fig. 3)', () => {
     const RA = 30;
     // Agent at the centre of a 64² grid, heading +x. SO 9, SA 45°: sensor cells F (41,32), FL (38,26), FR (38,38).

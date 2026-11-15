@@ -4,12 +4,14 @@
   asked for the scene and the measurement), built 2026-11-15
 - Date: 2026-11-15
 - Extends ADR 0026 (the scenes of Jones on their lattices), ADR 0037 (links to the figures of the papers), ADR 0044 (a
-  repellent source in the Jones model) and ADR 0046 (the mean window): the first scene that uses the last two.
+  repellent source in the Jones model) and ADR 0046 (the mean window): the first scene with light as the repellent,
+  and the second with a mean over more than 3 × 3 cells, after the scene Electrotaxis of ADR 0047.
 
 ## Context
 
 The Jones model has a repellent source (ADR 0044) and a mean over more than 3 × 3 cells (ADR 0046). No scene used
-them, and ADR 0044 says: "no run compares a repellent with a figure of Jones' papers".
+them when this work began, and ADR 0044 says: "no run compares a repellent with a figure of Jones' papers". The scene
+Electrotaxis (ADR 0047), built at the same time, uses both with its electrodes.
 
 J. Jones and A. Adamatzky, "Slime mould inspired generalised Voronoi diagrams with repulsive fields", 2015,
 arXiv:1503.06973, has such figures. I read the owner's copy (v1) on 2026-11-15. Page numbers are those printed there.
@@ -119,7 +121,7 @@ the bytes.
 ## Consequences
 
 - The app has a scene with a repellent of Jones' papers and with the 5 × 5 mean, and a number for it.
-- `docs/fidelity.md` has a new row 21, "A network around repellents draws their Voronoi diagram", with the status
+- `docs/fidelity.md` has a new row 22, "A network around repellents draws their Voronoi diagram", with the status
   "Matches the model only": the docs hold no number of the organism.
 - `docs/model.md` says that the mean window is 5 in this scene, and what a dab of 2.5 cells releases. No rule
   changed.

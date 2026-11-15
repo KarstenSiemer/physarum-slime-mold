@@ -452,6 +452,47 @@ vec3 walls(vec3 c, Env e) {
 }
 #endif
 
+#if ENV
+// ---- Electrodes (see render.wgsl, ADR 0047) ----
+uniform sampler2D env; // the cells of the simulation; read for the electrodes only
+
+const vec3 CATHODE = vec3(0.05, 0.32, 1.0);
+const vec3 ANODE = vec3(1.0, 0.08, 0.04);
+const float POLE_OPACITY = 0.9;
+
+// The pole of grid cell c as (cathode, anode), each 0 or 1 (poleOf in render.wgsl). The cell as shapeAt() takes it.
+vec2 poleOf(ivec2 c) {
+  ivec2 s = gridSize();
+  ivec2 q = clamp(c, ivec2(0), s - 1);
+  if (V.boundary == 0u) {
+    q = wrapCell(c, s);
+  } else if (V.boundary == 2u) {
+    vec2 o = 0.5 * vec2(s);
+    vec2 m = vec2(c) + 0.5 - o;
+    float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
+    if (dot(m, m) > rim * rim) q = ivec2(floor(o + m * ((rim - 0.75) * inversesqrt(dot(m, m)))));
+  }
+  float b = texelFetch(env, q, 0).a * 255.0;
+  return vec2(b > 191.5 ? 1.0 : 0.0, b > 0.5 && b <= 191.5 ? 1.0 : 0.0);
+}
+
+// The picture c with the electrodes at p over it (electrodes in render.wgsl).
+vec3 electrodes(vec3 c, vec2 p) {
+  vec2 q = p - 0.5;
+  ivec2 i = ivec2(floor(q));
+  vec2 f = q - floor(q);
+  vec2 cover = vec2(0.0);
+  for (int dy = 0; dy < 2; dy++) {
+    for (int dx = 0; dx < 2; dx++) {
+      float w = (dx == 1 ? f.x : 1.0 - f.x) * (dy == 1 ? f.y : 1.0 - f.y);
+      cover += w * poleOf(i + ivec2(dx, dy));
+    }
+  }
+  vec2 a = POLE_OPACITY * smoothstep(vec2(0.4), vec2(0.6), cover);
+  return mix(mix(c, CATHODE, a.x), ANODE, a.y);
+}
+#endif
+
 #ifdef SCENT
 // ---- Scent view (SCENT; see render.wgsl and src/engine/scent.ts) ----
 
@@ -723,6 +764,7 @@ vec3 scene(vec2 p, vec2 s) {
   if (near) {
     c = walls(c, e);
   }
+  if (V.streamFx.w != 0.0 && V.frame.z != 0u) c = electrodes(c, p);
 #endif
   return c;
 }

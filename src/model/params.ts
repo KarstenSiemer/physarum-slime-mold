@@ -120,9 +120,10 @@ export const attractionSpec = {
 /**
  * Start layouts. 'food': every agent starts dead, and the engine places about FOOD_START agents of each strain on a
  * food of its own, strain A on the first food, strain B on the second (ADR 0025, ADR 0032): a small colony to grow
- * from, as Jones starts his foraging runs at a food source.
+ * from, as Jones starts his foraging runs at a food source. 'line': a vertical strip through the middle of the grid, as
+ * Tsuda, Jones et al. 2011 (p. 11) start their agents (ADR 0047; init.wgsl LINE).
  */
-export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center', 'empty', 'food'] as const;
+export const LAYOUTS = ['mixed', 'bands', 'sectors', 'colonies', 'ring', 'center', 'empty', 'food', 'line'] as const;
 
 /** Agents of a strain that the start layout 'food' places on the food of the strain (ADR 0025). */
 export const FOOD_START = 50;
@@ -195,6 +196,16 @@ export const globalSpec = {
     min: 0,
     max: 0.5,
     step: 0.005,
+  },
+  // The Electrode tool (ADR 0047). 1 is the ±255 of Tsuda, Jones et al. 2011, which the ranges of the food and of the
+  // repellent do not reach: so the electrodes have a strength of their own.
+  electrodeStrength: {
+    label: 'Electrode strength',
+    help: 'Each cell of an electrode releases 255 × this value per step: the cathode an attractant and the anode a repellent. At 1 these are the +255 of a current sink and the −255 of a current source in the model of Tsuda, Jones and colleagues. In the Jones model both go into Jones’ trail map, above and below 0. In the extended model the field of the cathode spreads with the food scent and that of the anode with the repellent of light, Scent decay scales them, and a strain weighs them with Food attraction and Light avoidance. An electrode is no food: the flow in the tubes, Covered food and the start on food do not count it. Paint the poles with the Electrode tool.',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    ref: 'Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10',
   },
   // The range of the strain's Decay: the Jones model sets the scent decay to it, and a switch to the extended model
   // keeps it (ADR 0022, decision 26).
@@ -567,6 +578,7 @@ export function defaultSettings(): Settings {
     meanWindow: 3,
     foodStrength: 0.05,
     lightStrength: 0.05,
+    electrodeStrength: 1,
     scentDecay: 0.1,
     // Adamatzky and Jones 2010 (arXiv:0912.3967): each pixel of a food area releases 0.001 of its projection while a
     // particle lies in the 3 × 3 neighbourhood around it, as this app checks each food cell (ADR 0022).

@@ -22,6 +22,7 @@ struct Params {
   growth: vec4u,         // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   shrinkage: vec4u,      // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   startEnd: vec4u,       // exclusive end index of each strain's agents alive at the start (ADR 0025)
+  electrode: vec4f,      // the source of a cell of an electrode (ADR 0047), 3 unused
 }
 
 struct Agent {
@@ -131,7 +132,7 @@ fn cellOf(p: vec2f) -> i32 { return cellAt(vec2i(floor(p))); }
 
 fn cellCoord(i: u32) -> vec2i { return vec2i(i32(i % W()), i32(i / W())); }
 
-// Environment bytes: x wall, y food, z light (0…1).
+// Environment bytes: x wall, y food, z light (0…1), w electrode (128 / 255 the anode, 1 the cathode; ADR 0047).
 fn envOf(e: u32) -> vec4f { return unpack4x8unorm(e); }
 // A cell is a wall when its wall byte is at least 128 (0.5). isWall in common.glsl uses the same threshold.
 const WALL_BYTE = 128u;

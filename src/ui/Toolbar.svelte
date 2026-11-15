@@ -1,6 +1,13 @@
 <script lang="ts">
   import { letter } from '../model/scene';
+  import { POLES } from '../engine/types';
   import { app, getEngine, lightName, showNotice, toolsFor } from './state.svelte';
+
+  /** The poles of the Electrode tool as the toolbar shows them, in the colours of the picture (render.wgsl). */
+  const POLE = {
+    cathode: { label: 'Cathode −', color: '#3d99ff', help: 'The pole that attracts: the current sink' },
+    anode: { label: 'Anode +', color: '#ff4a36', help: 'The pole that repels: the current source' },
+  } as const;
 
   function step() {
     app.paused = true;
@@ -64,6 +71,22 @@
           aria-label="Strain {letter(i)}"
           style:--c={s.color}
           onclick={() => (app.strain = i)}>{letter(i)}</button
+        >
+      {/each}
+    </div>
+  {/if}
+
+  {#if app.tool === 'electrode'}
+    <div class="group" role="radiogroup" aria-label="Pole to place">
+      {#each POLES as pole (pole)}
+        <button
+          type="button"
+          role="radio"
+          class="swatch"
+          aria-checked={app.pole === pole}
+          title={POLE[pole].help}
+          style:--c={POLE[pole].color}
+          onclick={() => (app.pole = pole)}>{POLE[pole].label}</button
         >
       {/each}
     </div>

@@ -1,5 +1,5 @@
 import type { Engine } from '../engine/engine';
-import type { EnvTool } from '../engine/types';
+import type { EnvTool, Pole } from '../engine/types';
 import { strainAgents } from '../engine/pack';
 import { drawingOf, kindsOf, type Drawing } from '../model/link';
 import {
@@ -52,13 +52,19 @@ export const TOOLS = [
     id: 'erase',
     key: '6',
     label: 'Erase',
-    help: 'Remove food, light and walls. Hold Shift and click two points for a straight line.',
+    help: 'Remove food, light, walls and electrodes. Hold Shift and click two points for a straight line.',
   },
   {
     id: 'cut',
     key: '7',
     label: 'Cut',
     help: 'Wound the network: moves the agents in an area away. With Growth and shrinkage, they die instead, and the colony grows back from the edge. In the extended model the area also loses its trail.',
+  },
+  {
+    id: 'electrode',
+    key: '8',
+    label: 'Electrode',
+    help: 'Place the poles of an electric current. Physarum grows toward the cathode. The cathode releases an attractant and the anode a repellent, both with Electrode strength. Choose the pole beside the brush. Hold Shift and click two points for a straight line.',
   },
 ] as const;
 
@@ -75,7 +81,9 @@ const JONES_TOOLS: Partial<Record<Tool, { label?: string; help: string }>> = {
     label: 'Repellent',
     help: 'Place a repellent source, such as salt or a current source. It puts a value below 0 into Jones’ trail map, and agents turn away from it. Hold Shift and click two points for a straight line.',
   },
-  erase: { help: 'Remove food, repellent and walls. Hold Shift and click two points for a straight line.' },
+  erase: {
+    help: 'Remove food, repellent, walls and electrodes. Hold Shift and click two points for a straight line.',
+  },
 };
 
 /** The tools as a model names them: the same tools and keys in both models, with the names of JONES_TOOLS in Jones. */
@@ -83,6 +91,12 @@ export const toolsFor = (model: Model): readonly { id: Tool; key: string; label:
   model === 'jones' ? TOOLS.map((t) => ({ ...t, ...JONES_TOOLS[t.id] })) : TOOLS;
 
 /** "light" as a model names it in a sentence: Jones' repellent (ADR 0044), or this app's light. */
+/** The kind of stroke that a tool paints, or undefined for a tool that paints none: the Electrode tool paints its pole. */
+export function strokeKind(tool: Tool, pole: Pole): EnvTool | undefined {
+  if (tool === 'electrode') return pole;
+  return tool === 'food' || tool === 'light' || tool === 'wall' || tool === 'erase' ? tool : undefined;
+}
+
 export const lightName = (model: Model) => (model === 'jones' ? 'repellent' : 'light');
 
 export const LEARN_TABS = ['Physarum', 'The model', 'Controls', 'Scenes', 'About'] as const;
@@ -133,6 +147,8 @@ export interface AppState {
   brush: number;
   /** Strain placed by the inoculate tool. */
   strain: number;
+  /** The pole that the Electrode tool paints (ADR 0047). */
+  pole: Pole;
   paused: boolean;
   panel: boolean;
   learn: boolean;
@@ -174,6 +190,7 @@ export const app = $state<AppState>({
   tool: 'pan',
   brush: 18,
   strain: 0,
+  pole: 'cathode',
   paused: false,
   panel: true,
   learn: false,

@@ -18,10 +18,14 @@
     };
   });
 
-  const food = $derived(drawn('food'));
+  // The field of a cathode is in the layer of the food scent, and that of an anode in the layer of the repellent
+  // (ADR 0047).
+  const cathode = $derived(drawn('cathode'));
+  const anode = $derived(drawn('anode'));
+  const food = $derived(drawn('food') || cathode);
   // Both models read the repellent, and the view draws it in both (ADR 0044). The Jones model has no light: there
   // the source is a repellent, such as salt.
-  const light = $derived(drawn('light'));
+  const light = $derived(drawn('light') || anode);
   const jones = $derived(app.settings.model === 'jones');
   // The view draws its line once a strand is measured and a strain follows food (scentSensors()).
   const lined = $derived(scentSensors(app.settings, strand).half.some((h) => h > 0));
@@ -50,7 +54,7 @@
   <figcaption id="scent-legend-title">Scent per cell</figcaption>
   {#if !food && !light}
     <p class="empty" id="scent-legend-note">
-      This scene has no food and no {jones ? 'repellent' : 'light'}, so it has no scent to show.
+      This scene has no food, no {jones ? 'repellent' : 'light'} and no electrode, so it has no scent to show.
     </p>
   {:else}
     {#if food}
@@ -83,8 +87,14 @@
       </div>
     {/if}
     <p class="note" id="scent-legend-note">
-      {food ? 'Green glow: food scent.' : ''}
-      {light ? (jones ? 'Pink glow: the repellent.' : 'Pink glow: the repellent of light.') : ''}
+      {food ? (cathode ? 'Green glow: the scent of food and the field of a cathode.' : 'Green glow: food scent.') : ''}
+      {light
+        ? anode
+          ? 'Pink glow: the repellent, also of an anode.'
+          : jones
+            ? 'Pink glow: the repellent.'
+            : 'Pink glow: the repellent of light.'
+        : ''}
       The glow is stronger where the scent is stronger. Each number is ten times the number before it, and the glow stays
       the same from 10,000 up.
     </p>

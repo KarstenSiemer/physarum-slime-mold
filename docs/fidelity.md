@@ -55,7 +55,8 @@ page; **none** the docs hold no source.
 | 18  | Food is eaten                                    | Not modelled                            | none                                  |
 | 19  | Pattern classes after the life conditions        | Not measured                            | none                                  |
 | 20  | Two plasmodia that do not fuse stay two bodies   | Partly                                  | Rival networks, Tokyo, two networks   |
-| 21  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
+| 21  | Growth toward the cathode of a current           | Partly: the direction only              | Electrotaxis                          |
+| 22  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
 figures (ADR 0027, Measurements: stripes 15.7 cells against 16.2, 19.7 spots against 20). Several strains with a table
@@ -241,8 +242,7 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   intensity for mountains and lakes [V, read 2026-11-13]. The mask kept the growth to the more shaded areas (caption
   of Fig. 2) [V, read 2026-11-15]; the paper gives no number for it. Jones 2010, p. 142 names light as a trigger of the
   sclerotium [J]. White light repels the plasmodium, and so do sodium chloride, sugar in a high concentration and
-  removed substrate (Tsuda et al. 2012, p. 1 and 2 [V]). In an electric field 13 of 16 pieces had grown more toward
-  the cathode after 6 h (p. 4 [V]). The docs hold no measurement of how far or how fast the plasmodium leaves light.
+  removed substrate (Tsuda et al. 2012, p. 1 and 2 [V]). An electric field is row 21. The docs hold no measurement of how far or how fast the plasmodium leaves light.
 - **Model**: lit cells release a repellent that spreads like the food scent. This is the rule of the repellent sources
   in Jones' papers: a source below 0 in the lattice that holds the trail (Jones and Adamatzky 2015, Sec. 4.1, p. 7;
   Tsuda et al. 2012, p. 10 [V]). Both models have it. The Jones model calls it a repellent, as for salt or a current
@@ -333,7 +333,29 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   42 food sites in every sample from step 2,002 on, and 42 and 42 at step 14,002 (38 to 42 before): a strain now
   covers a food from any of its cells. The docs hold no number of the organism to compare with.
 
-### 21. A network around repellents draws their Voronoi diagram
+### 21. Growth toward the cathode of a current
+
+- **Organism**: in an electric field 13 of 16 pieces had grown more toward the cathode than toward the anode after
+  six hours, and no piece changed its direction (Tsuda, Jones, Adamatzky and Mills 2011, arXiv:1204.1752, p. 4 [V]).
+  The other 3 did not grow toward the anode: they grew branches downward (same page). With two more current sources
+  in the way the front split in two, the smaller front was gone after 16 hours, and the rest reached the sinks after
+  21 hours (p. 5, Fig. 6 [V]).
+- **Model**: the Electrode tool ([ADR 0047](adr/0047-an-electrode-tool-and-the-scene-electrotaxis.md)). A cathode is
+  a source above 0 and an anode one below 0 of Jones' one map, ±255 per step at Electrode strength 1, as the model of
+  the same paper has them (p. 10 [V]). The scene Electrotaxis runs that model with a mean over 15 × 15 cells. The
+  lattice, the places of the electrodes and the decay of 0.01 are this app's choice: the paper gives none.
+- **Measured** (ADR 0047, the scene Electrotaxis, 10 seeds on each backend, 2026-11-15): the colony moves toward the
+  cathodes in 10 of 10 runs and never turns. Its mean is 50 to 53 cells of the 100 to the cathodes at step 450 and 84
+  to 87 at step 800. With the poles swapped it goes the other way in 10 of 10 runs, and without the electrodes it
+  stays.
+- **Limits**: the direction of the model is fixed by the field, so it has no run like the 3 of 16 of the organism
+  that grew sideways.
+  The model of the paper lets its field settle for 400 steps first and has the oscillatory motor mode; the app has
+  neither. The split of the front at more current sources (Fig. 12 of the model) is not measured. The docs hold no
+  number of the organism for a time or a speed. In the extended model the tool is this app's reading, measured
+  against nothing.
+
+### 22. A network around repellents draws their Voronoi diagram
 
 - **Organism** [V]: a plasmodium that fills a round arena, with repellents put onto it and attractants around the
   border, adapts its network so that it avoids the repellents and stays joined to the border. The network
