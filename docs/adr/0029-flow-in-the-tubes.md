@@ -713,7 +713,9 @@ not help it: on the fixed network it had not carried the flux to the sink after 
    larger memory falls to 0.2 at once, so that ground without a tube is never better than fresh
    ground. A smaller memory stays and recovers slowly, by the factor 1.00023 per step up to 0.2.
    Reason for the slow recovery: when starved ground was fresh again at once, agents came back at
-   once, and faint strands lived for ever.
+   once, and faint strands lived for ever. Measured on 2026-11-15 with 12, 6, 3 and 1 h in place of
+   18 h (decision 19, amendment 2026-11-15 (2)): each shorter time lets the mesh grow back between the
+   tubes, and the factor stays.
 
 8. **The flux decides where agents live.** An agent on a cell with the flow memory D dies with the
    chance 0.02 · h² / (D² + h²) per step, h = 0.01. A dead agent draws one random cell per step; if
@@ -754,7 +756,7 @@ not help it: on the fixed network it had not carried the flux to the sink after 
     | A tube adapts                 | 1 / 0.003 = 333                 | 11 min     | 10 to 100 min                      |
     | A tube without flux starves   | 998 (0.2 · 0.997ⁿ ≤ 0.01)       | 33 min     | veins vanish in 15 to 40 min       |
     | The foods keep their roles    | 300                             | 10 min     | (this app's choice)                |
-    | Starved ground is fresh again | ln(2000) / ln(1.00023) = 33,050 | 18 h       | (this app's choice)                |
+    | Starved ground is fresh again | ln(2000) / ln(1.00023) = 33,050 | 18 h       | (measured, decision 19)            |
 
     The roles change five times as slowly as the shuttle flow of the organism (2 min), because the
     solver needs time after a draw: from a cold start the prototype's solver came within 5 % after
@@ -1097,7 +1099,9 @@ A second reader went through the change before the merge. Each finding was check
   The four fields and the slow adaptation (333 steps) average over this. The results in the app are
   measured with this lag.
 - Starved ground stays closed to the colony for hours of model time. A colony that lost a region
-  does not grow back into it soon.
+  does not grow back into it soon. Measured on 2026-11-15 on the Tokyo map (amendment 2026-11-15 (2)):
+  the colony grows back into a region whose network was taken off, and to foods that were taken away
+  and come back, within minutes to half an hour of model time; the ground between the tubes stays closed.
 - On the Tokyo scene the colony reaches all food sources about ten times as fast as in the
   experiment, measured against the time of the adaptation (about 1 h of model time against 11 to
   16 h): Jones' growth rule has no speed of its own to set.
@@ -1549,3 +1553,231 @@ of its cells now.
   decision 12), the Maze with the fluxes 2, 4 and 16, the table of decision 6 (the local flux against the exact one),
   the Foraging maze with the flow, and the Tokyo scene without the flow (which keeps its bytes). Decision 18 runs the
   Tokyo scene with the fluxes 1, 1.4 and 2 again in any case.
+
+## Amendment 2026-11-15 (2): the time until starved ground is fresh again, measured
+
+Decision 19 as measured. The plan is the coordinator's, under the owner's delegation of 2026-11-12. The points marked "own
+choice" came up while it was measured; they are the builder's choices, each with its reason. The code is `main` at
+`623fb36`, with the radius 0.99999 of decision 18. The runs are on an M3 Pro, Chromium with Metal, on WebGPU unless a
+line names WebGL2. The commands are part 13 of `research/flow/README.md`, and the logs are
+`research/flow/logs/engine/recover/`.
+
+### The result
+
+The app keeps the factor 1.00023: starved ground is fresh again after 18.4 h of model time, as before. Every shorter time
+that was measured brings back the faint strands of decision 7 on the Tokyo map. The ground between the tubes opens
+again, Jones' growth rule fills it with a mesh, the flux does not feed the mesh, and it starves and grows again. Over
+the samples from step 16,000 on, TL is 1.84 with 18 h, the record of the amendment 2026-11-14 (2); 1.95 with 12 h,
+2.29 with 6 h, 2.45 with 3 h and 2.55 with 1 h (the organism: 1.75 ± 0.30). With 6 h and less the network stops
+thinning by step 8,000, at a TL of 2.3 to 2.5. The Maze shows the strands with 1 h only, while its dead ends empty:
+one seed of ten fills them above 10 % of the route again, and six still hold trail there at step 5,000.
+
+The concern that led to decision 19, a colony that does not grow back into a region that it lost, does not hold on the
+Tokyo map with 18 h. Where the network of a region with four cities is taken off at step 24,000, its tubes leave ground
+with the memory of fresh ground at once (a larger memory falls to 0.2, decision 7), and the network joins the four cities
+again 200 to 400 steps later (7 to 13 min of model time). Where the foods of those cities are taken away for 3,000 steps (100 min), so that their tubes
+starve, and are then painted again, the network joins them again 300 to 1,000 steps (10 to 33 min) after they come back. What stays closed for hours is the
+ground between the tubes, where no tube is needed.
+
+### Faint strands, as a number
+
+- Own choice: the faint strands are measured by the network that the paper measures (Tero et al. 2010, p. 440, "The
+  measures of a network"): TL and the links, over the 50 samples from step 16,000 on (steps 16,000, 24,000, 32,000,
+  40,000 and 48,000 of ten seeds; `summary.ts engine-tokyo-end`), and in the Maze by the trail in the dead ends over that
+  on the route (table (a)). Reason: decision 7 names strands of agents on ground that the flux left, which live for
+  ever. Where they come back, the network holds more strands than the flux keeps: it is longer and has more links than
+  the network with 18 h, in which, by decision 7, they do not come back. A strand of agents is trail above the level of
+  the measure. In the Maze every trail in a dead end is such a strand: no flux runs there.
+- Two measures of the flow memory were tried first, and neither separates the times. The share of the tube cells with
+  a flow memory below h = 0.01 is 55 % with 18 h and 38 % with 1 h over the samples from step 16,000 on (`faint` of
+  `strands.ts`): the margins of every band of a tube hold such cells. And the lines of the thinned network with no tube of a memory of at least h
+  within 2 cells (`faintLine`) are 100 to 270 of about 2,000 line cells with both (seed 1). A mesh that grows again on
+  fresh ground starts at the memory of fresh ground, 0.2, and falls below h only after about 1,000 steps (decision 10),
+  so most of it is not faint by its memory. It is faint in the picture of the tubes (ADR 0034), which draws it thinner
+  than the tubes that carry the flux.
+- Own choice: a time passes when its mean TL from step 16,000 on is at most 0.07 above that of 18 h, the most that two
+  sets of ten seeds of one rule differed by in the mean TL (decision 12), and when no seed of the Maze fills its dead
+  ends again: once they are below 10 % of the route, no later sample above 10 %, and from step 5,000 on every sample
+  below 2 %. These criteria were set after the first seed of each time, and before the other runs.
+
+### What was measured
+
+- The shares per step 0.00023 (the app), 0.0007, 0.0014 and 0.0042: 18.4, 6.0, 3.0 and 1.0 h from the floor 10⁻⁴ to
+  fresh ground. Own choice: round shares, so that the number measured is the number that would ship. `VITE_RECOVER` of
+  `dump.gpu.test.ts` sets the share for a run (`strains.gpu.test.ts` has it too); the app keeps its constant.
+- The Tokyo scene (its flux of 1.4) and the Maze (its flux of 8), seeds 1 to 10 each, to step 48,000, 26.7 h of model
+  time. Own choice: the Maze to step 48,000 too, where its record ends at step 15,000. With 18 h, ground that starved to the
+  floor in the first 2,000 steps is fresh again only near step 35,000; a run to step 15,000 cannot show whether its dead ends
+  fill again.
+- Own choice: 12 h (the share 0.00035, 12.1 h), on the Tokyo scene with ten seeds. Decision 19 allows a time between,
+  and 6 h failed by far (seed 1 first: TL 2.31 against 1.76 with 18 h). 12 h failed on the Tokyo scene, so the Maze, where
+  6 h passes, and the regrowth did not run with it.
+- The runs with 18 h give the lines of the record of the amendment 2026-11-14 (2) bit for bit at its steps, but for
+  the time: the ten Maze runs and the ten Tokyo runs (`logs/engine/maze-webgpu-flux8-sites.txt`,
+  `tokyo-flux1.4-sites.txt`). So `main` at `623fb36` gives the record of PR #71, and the rows of 18 h below are that
+  record, with the steps that it did not have.
+
+### The Tokyo scene
+
+The flux 1.4 of the scene, seeds 1 to 10 on WebGPU, measured as in "The Tokyo rail network" on the 33 food sources of
+Fig. 2. "From 16,000": the mean and the deviation over the 50 samples of steps 16,000, 24,000, 32,000, 40,000 and
+48,000. "All 36 joined": of the 80 samples from step 4,000 on. "Closed ground": the cells of the land without a tube
+whose flow memory is below h = 0.01, where no agent divides and an agent dies with at least 1 % per step, as the mean
+over the same 50 samples (`strands.ts`; the land has 70,868 cells). Check: TL from 1.45 to 2.05 and MD from 0.77 to 0.93
+at step 48,000 (the specification of 2026-11-11).
+
+| Time (share per step)     | TL at 48,000 | MD at 48,000 | FT at 48,000               | TL from 16,000 | Links from 16,000 | Agents from 16,000 | All 36 joined | Closed ground | Check   |
+| ------------------------- | ------------ | ------------ | -------------------------- | -------------- | ----------------- | ------------------ | ------------- | ------------- | ------- |
+| 18.4 h (0.00023, the app) | 1.89 ± 0.13  | 0.84 ± 0.05  | 0.91 ± 0.04                | 1.84 ± 0.13    | 53.9              | 4,010              | 78 of 80      | 22,338        | 9 of 10 |
+| 12.1 h (0.00035)          | 1.96 ± 0.13  | 0.83 ± 0.04  | 0.91 ± 0.04                | 1.95 ± 0.15    | 58.0              | 4,259              | 72 of 80      | 18,956        | 8 of 10 |
+| 6.0 h (0.0007)            | 2.25 ± 0.14  | 0.82 ± 0.01  | 0.95 ± 0.01                | 2.29 ± 0.13    | 68.2              | 4,775              | 74 of 80      | 10,919        | 0 of 10 |
+| 3.0 h (0.0014)            | 2.45 ± 0.11  | 0.82 ± 0.01  | 0.96 ± 0.02                | 2.45 ± 0.15    | 72.3              | 5,275              | 72 of 80      | 4,580         | 0 of 10 |
+| 1.0 h (0.0042)            | 2.54 ± 0.13  | 0.84 ± 0.04  | 0.95 ± 0.03                | 2.55 ± 0.12    | 74.7              | 5,664              | 76 of 80      | 1,323         | 0 of 10 |
+| The organism              | 1.75 ± 0.30  | 0.85 ± 0.04  | 0.80 ± 0.13 or 0.86 ± 0.04 |                |                   |                    | all           |               |         |
+
+The shorter the time, the less ground stays closed, the more agents live, and the longer the network is, with more
+links and a higher fault tolerance: the mesh of the growth rule stays. While the colony grows the times do not differ
+(TL 2.70 to 2.76 at step 2,000, medians). With 18 h the network then thins to TL 1.83 at step 12,000 and stays near
+1.8 to 1.9; with 12 h it thins more slowly, to 2.02 at step 12,000 and 1.85 at step 24,000, and ends at 1.96; with 6, 3
+and 1 h it stops thinning by step 8,000, at 2.29, 2.38 and 2.48, and stays there to step 48,000 (medians). With 6 h
+and less no seed passes the check of the specification at step 48,000. The 12 h runs are within one deviation of the
+organism's TL too, but their mean TL from step 16,000 on is 0.11 above that of 18 h, more than the 0.07 by which two
+sets of ten seeds of one rule differed, and they leave a food source out in 8 of 80 samples, where 18 h leaves 2. So 12
+h, 6 h, 3 h and 1 h fail. 18 h is the reference of the criterion: its network thins to TL 1.83 by step 12,000, and
+its mean from step 16,000 on, 1.84, is no longer, so within the 26.7 h of the experiment its strands do not come back.
+
+### The Maze
+
+The flux 8 of the scene, seeds 1 to 10 on WebGPU; dead ends over route as in "The Maze (flux 8)", median and range over
+the seeds. "Fill again": a sample above 10 % of the route after one below it. "Not empty from 5,000": a sample from
+step 5,000 on above 2 %.
+
+| Step                               | 18.4 h (the app)       | 6.0 h                  | 3.0 h                  | 1.0 h                   |
+| ---------------------------------- | ---------------------- | ---------------------- | ---------------------- | ----------------------- |
+| Dead ends over route at 1,500      | 0.083 (0.052 to 0.138) | 0.093 (0.076 to 0.161) | 0.115 (0.089 to 0.169) | 0.152 (0.115 to 0.198)  |
+| at 2,000                           | 0.020 (0.015 to 0.045) | 0.032 (0.014 to 0.052) | 0.041 (0.027 to 0.051) | 0.069 (0.051 to 0.093)  |
+| at 3,000                           | 0.006 (0.000 to 0.035) | 0.017 (0.002 to 0.040) | 0.018 (0.003 to 0.042) | 0.057 (0.023 to 0.108)  |
+| at 5,000                           | 0.000 (0.000 to 0.011) | 0.000 (0.000 to 0.016) | 0.000 (0.000 to 0.014) | 0.021 (0.001 to 0.049)  |
+| First measured step below 2 %      | 2,250 (2,000 to 4,000) | 2,750 (2,000 to 4,000) | 3,500 (2,500 to 5,000) | 6,250 (4,000 to 10,000) |
+| Seeds that fill again              | 0 of 10                | 0 of 10                | 0 of 10                | 1 of 10 (at 2,500)      |
+| Seeds not empty from 5,000         | 0 of 10                | 0 of 10                | 0 of 10                | 6 of 10                 |
+| Tube over shortest route at 48,000 | 1.06 (1.05 to 1.09)    | 1.06 (1.05 to 1.08)    | 1.06 (1.05 to 1.09)    | 1.07 (1.05 to 1.10)     |
+| Agents alive at 48,000             | 3,818 (3,702 to 4,048) | 3,817 (3,735 to 3,923) | 3,849 (3,750 to 3,928) | 3,817 (3,674 to 4,004)  |
+
+With a shorter time the dead ends empty later: the ground of the tubes that starved first opens again while the network
+still thins, and agents that stray from the route live there longer. With 1 h one seed fills its dead ends above 10 %
+again, and six seeds hold more than 2 % at a sample from step 5,000 on, one of them again at step 10,000 after it was
+below. From step 15,000
+on all four times give the same network: one tube, 1.06 to 1.07 times the shortest route at step 48,000, and the same
+number of agents. The Maze has no growth: no agent divides into opened ground, and only agents that stray from the route
+reach it. That is why only 1 h fails here. So 6 h and 3 h pass the Maze, and 1 h fails it.
+
+### The regrowth
+
+The Tokyo scene, seeds 1 to 3 with each time but 12 h. The region is a disc with a radius of 43.5 cells (25 km) around the four
+cities in the north-west, Maebashi, Takasaki, Kiryu and Ashikaga, all of the 33 of Fig. 2; its centre is the mean of the
+four. At step 24,000 (13.3 h) two things are done to it, each in runs of its own:
+
+- **Taken off**: every agent in the disc dies, its trail is 0, and its cells hold no tube (tube body 0); the flow memory
+  stays, and the next step treats it as decision 7 says for ground that lost its tube (`VITE_REMOVE`).
+- **Starved**: the foods of the four cities are erased, and painted again at step 27,000, 100 min later
+  (`VITE_EDITS`). In between their tubes carry no flux and starve.
+
+- Own choice: the network is taken off by the research test and not by the Cut tool. The Cut tool moves the agents of
+  its wound to random open points of the grid, and on this map they start colonies in the sea and on the land (the next
+  section), so a run with it measures those colonies.
+- Own choice: the foods are away for 3,000 steps. That is three times the 998 steps in which a tube without flux
+  starves (decision 10), and it is the hard case for the return: ground that starved a short time ago is the most
+  closed.
+
+"Joined again": the first measured step at which all 33 food sources are joined, from step 24,001 for the network
+taken off, and from step 27,000, when the foods are back, for the starved one; the steps measured are 24,050, 24,100,
+24,200, 24,400, 24,700, 25,000 and 26,000, and 27,300, 27,600, 28,000 and 29,000. Median and range of the three seeds.
+"In the disc": the cells of the network of the measure in the disc over those at step 24,000.
+
+| Time   | Taken off: joined again   | In the disc at 25,000 | Closed in the disc at 24,000 | Starved: joined again     | In the disc at 27,000 | At 28,000           |
+| ------ | ------------------------- | --------------------- | ---------------------------- | ------------------------- | --------------------- | ------------------- |
+| 18.4 h | 24,400 (24,200 to 24,400) | 1.10 (0.71 to 1.26)   | 2,119 (2,098 to 2,394)       | 27,600 (27,300 to 28,000) | 0.53 (0.00 to 0.61)   | 1.24 (0.78 to 1.26) |
+| 6.0 h  | 24,200 (24,050 to 24,400) | 0.97 (0.65 to 1.12)   | 1,040 (932 to 1,379)         | 27,600 (27,300 to 27,600) | 1.07 (0.68 to 1.07)   | 0.83 (0.83 to 1.10) |
+| 3.0 h  | 24,050 (24,050 to 24,200) | 1.01 (0.61 to 1.52)   | 307 (136 to 323)             | 27,300 (27,300 to 27,300) | 1.13 (0.73 to 1.15)   | 1.27 (0.91 to 1.30) |
+| 1.0 h  | 24,050 (24,050 to 24,050) | 0.87 (0.82 to 1.11)   | 81 (62 to 147)               | 27,300 (27,300 to 27,300) | 0.99 (0.78 to 1.30)   | 0.92 (0.78 to 1.16) |
+
+With 18 h the network joins the four cities again 200 to 400 steps (7 to 13 min of model time) after it was taken off,
+and by step 25,000 the disc holds as much network as before. The tubes of the region carried flux, so their memory was
+above that of fresh ground, and it fell to fresh ground at once; the growth rule fills them again from the edge of the
+disc. With 1 and 3 h the network is back within 50 to 200 steps. After the foods were away for 100 min, the starved
+network in the disc is down to half (in one seed of 18 h to nothing at all); 300 to 1,000 steps after the foods come
+back (10 to 33 min), the network joins them again with every time, and with 18 h it then holds more of the disc than
+before. So the time of decision 7 slows the return by minutes, not by hours. What it keeps closed is the ground between
+the tubes: 2,100 of the 5,807 cells of the disc with 18 h before the event, 80 with 1 h.
+
+### WebGL2
+
+Seeds 1 to 3 on WebGL2, after the WebGPU runs, with no other run of this work on the GPU: the Tokyo scene with 18 h
+and with 6 h, the next shorter time of the four of decision 19, and the Maze with 18 h, each to step 48,000.
+
+| WebGL2, 3 seeds | TL at 48,000 | TL from 16,000 | Links from 16,000 | Agents from 16,000 | All 36 joined | Closed ground | Check  |
+| --------------- | ------------ | -------------- | ----------------- | ------------------ | ------------- | ------------- | ------ |
+| 18.4 h          | 1.71 ± 0.19  | 1.79 ± 0.16    | 51.7              | 3,931              | 22 of 24      | 22,217        | 3 of 3 |
+| 6.0 h           | 2.03 ± 0.04  | 2.21 ± 0.14    | 64.6              | 4,669              | 23 of 24      | 11,112        | 2 of 3 |
+
+The picture of WebGPU: with 6 h the network is longer by 0.42 from step 16,000 on (0.45 on WebGPU), with more links,
+more agents and half the closed ground. In the Maze with 18 h the dead ends are below 2 % from step 2,000 in all three
+seeds and stay there to step 48,000 (at most 0.4 % from step 5,000 on); the tube is 1.07 (1.05 to 1.07) times the shortest route and
+3,838 (3,807 to 3,851) agents live at step 48,000. The runs with 18 h give the lines of the record of the amendment
+2026-11-14 (2) on WebGL2 at its steps (`logs/engine/maze-webgl2-flux8-sites.txt` to step 15,000,
+`tokyo-webgl2-flux1.4-sites.txt` to step 24,000), bit for bit but for the time.
+
+### The Cut tool on the Tokyo map
+
+Decision 19 names a cut region. One run (seed 1, 18 h) holds the Cut tool of the app over the same disc from step
+24,000 to 24,100, as `Engine.agentTool()` takes it from the pointer (`VITE_CUT`). The tool moves every agent of its
+wound to the first of 8 random open points of the whole grid outside the wound (ADR 0023), and on the Tokyo map the
+dish around the land is open: the sea beyond the coast walls. With growth the moved agents start colonies wherever they
+land. 100 steps later 19,946 agents live where 3,997 lived, and 50,001 cells of the sea hold trail above the level of
+the measure, where every run of the scene has none. The colony in the sea shrinks slowly: 18,155 cells at step 27,000,
+7,681 at step 30,000, and 6,475 at step 48,000. On the land the network joins the four cities again by step 25,000,
+as after the network was taken off. So a test with the Cut tool would measure the colonies that it starts, and the
+regrowth above takes the network off by itself. Not changed here: where a cut agent goes is the rule of ADR 0023,
+which ADR 0038 also uses for an agent under a painted wall.
+
+### The tests and the wrong rules
+
+No test held the recovery of starved ground. The only test that compares it with the CPU copy step by step starts every
+cell at the memory of fresh ground, which the recovery leaves as it is. A new GPU test on both backends, "lets starved
+ground recover by the factor of the rule, up to the memory of fresh ground" (`flow.gpu.test.ts`), writes ten memories
+from 0 to 1 into ground without a tube and compares them after 1, 100 and 500 steps with the rule computed in float32.
+`research/flow/engine/mutate.ts` has six new wrong rules, D1 to D6: starved ground fresh again at once, never fresh
+again, and no cap at fresh ground, in WGSL and in GLSL. @@MUTATIONS@@
+
+### Decision 19, as measured
+
+The factor stays 1.00023, 18.4 h from the floor to fresh ground. Reason: the measurements above. It is the shortest of
+the times measured at which the faint strands do not come back; 12 h, the next shorter, makes the network of the Tokyo
+scene longer by more than two sets of seeds differ.
+
+- Own choice: no time between 12 and 18 h. What a shorter time could bring, a faster return into a region that the
+  colony lost, is not needed: the colony returns within half an hour with 18 h already (the regrowth above).
+
+- Own choice: the decision rests on the Tokyo scene. It has growth, which fills the opened ground with a mesh; the Maze
+  has no growth, and its agents leave the route for open ground only while the network thins. So the Maze separates
+  only 1 h from the rest.
+- Own choice: the regrowth with three seeds for each time, and not ten. It answers whether and when the network grows
+  back, and in every run it did, within 1,000 steps of the event; the spread of three seeds does not change that.
+
+### Consequences
+
+- The app, its scenes and their bytes do not change. No file of the app changed but a test file, so the digests of the
+  scenes did not run again, and the scenes of ADR 0032 keep their record.
+- The open point of `TODO.md` is closed: starved ground stays closed for 18 h, and the colony grows back where a tube
+  is needed. What the 18 h keep closed is the ground between the tubes, where the mesh of Jones' growth rule would grow
+  again. Row 16 of `docs/fidelity.md` has the numbers of the regrowth.
+- Decision 7 now has its measurement. The words "lived for ever" hold for 6 h and less: there the network stops thinning
+  by step 8,000.
+- Open, not built: the scent of food lifts the mark (decision 19). The organism avoids ground with its own slime and
+  enters it when it perceives food (Reid et al. 2012 and 2013; "What is true today" of the amendment 2026-11-14). A rule
+  of that kind would open starved ground near a food and keep it closed elsewhere (`TODO.md`, Later).
+- Found on the way, not changed: the Cut tool moves the agents of its wound to random open points of the whole grid
+  (ADR 0023), and the rule for an agent under a painted wall does the same (ADR 0038). On the Tokyo map these points lie
+  also in the sea beyond the coast and on starved land, and with growth they become colonies there ("The Cut tool on the
+  Tokyo map" above). Where a cut agent goes is an owner decision (`TODO.md`).

@@ -9,14 +9,31 @@
 // - VITE_NAME: the name of the files; without it `<scene>-<kind>-<flow or base>-s<seed>`.
 // - VITE_PATCH and VITE_STRAIN: settings and strain settings as JSON, on top of the scene's.
 // - VITE_DUMP_P: 1 also writes the environment, the whole flow memory and the pressure (exact-flux.ts reads them).
+// - VITE_RECOVER: the share by which the flow memory of ground without a tube grows per step (FLOW.recover in
+//   src/engine/flow.ts), in place of the app's, for the measurement of decision 19 of ADR 0029. Each line of the log
+//   names the share of the run.
+// - VITE_GROUND: 1 also writes the flow memory of every cell, with the ground that holds no tube (`-ground-`;
+//   strands.ts reads it).
+// - VITE_CUT: the Cut tool held over a disc, as JSON [x, y, r, from, to]: the centre and the radius in the frame of the
+//   scene's shapes (EnvShape in src/model/presets.ts), from the step `from` to the step `to`, as the app holds it
+//   (Engine.agentTool()).
+// - VITE_REMOVE: the colony taken off a disc at a step, as JSON [x, y, r, step] in the same frame: every agent in the
+//   disc dies, its trail is 0, and its cells hold no tube of the first strain (tube body 0). The flow memory stays: the
+//   next step of the flow treats it as that of ground that lost its tube (ADR 0029, decision 7). The Cut tool moves
+//   the agents of its wound to random points of the grid instead, where growth makes colonies of them (decision 19).
+// - VITE_EDITS: painted discs at a step, as JSON [[step, kind, x, y, r], ...] in the same frame, kind erase or food
+//   (Engine.paint()).
 //
 // The trail, the flow memory and the pressure are those of the first strain: the measure scripts read a scene with
 // one strain. strains.gpu.test.ts counts the strains of a scene with several (ADR 0031).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
+import { fromShape, strokeOn } from '../../../src/engine/environment';
+import { FLOW as RULE } from '../../../src/engine/flow';
 import { WebGl2Backend } from '../../../src/engine/gl/backend';
-import type { Backend } from '../../../src/engine/types';
+import { AgentToolKind } from '../../../src/engine/pack';
+import type { Backend, EnvTool } from '../../../src/engine/types';
 import { WebGpuBackend } from '../../../src/engine/webgpu';
 import { constrain } from '../../../src/model/params';
 import { presetById } from '../../../src/model/presets';
@@ -31,6 +48,12 @@ const STEPS = (env.VITE_STEPS ?? '500,1000,2000,3000,4000,6000').split(',').map(
 const NAME = env.VITE_NAME ?? `${SCENE}-${KIND}-${FLOW ? 'flow' : 'base'}-s${String(SEED)}`;
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Record<string, unknown>;
 const STRAIN = JSON.parse(env.VITE_STRAIN ?? '{}') as Record<string, unknown>;
+// packFlow() reads the share at every upload of the uniform block, so a share set before the engine starts holds for
+// the whole run.
+if (env.VITE_RECOVER !== undefined) (RULE as { recover: number }).recover = Number(env.VITE_RECOVER);
+const CUT = env.VITE_CUT === undefined ? undefined : (JSON.parse(env.VITE_CUT) as number[]);
+const REMOVE = env.VITE_REMOVE === undefined ? undefined : (JSON.parse(env.VITE_REMOVE) as number[]);
+const EDITS = JSON.parse(env.VITE_EDITS ?? '[]') as [number, EnvTool, number, number, number][];
 
 function b64(bytes: Uint8Array): string {
   let s = '';
@@ -65,13 +88,56 @@ it('dumps a run of a scene', async () => {
   const engine = await Engine.create(canvas, settings, undefined, backend);
   await engine.load(settings, preset.env ?? []);
   const sim = engine.sim;
+  // A disc in the frame of the scene's shapes, on the grid of the simulation: its centre and its radius in cells. The
+  // kind of the shape does not change where it lies.
+  const onGrid = (x: number, y: number, r: number) => {
+    const st = strokeOn(fromShape({ kind: 'food', at: [x, y], r }, settings.boundary), sim.width, sim.height);
+    if (!st) throw new Error(`the disc ${String([x, y, r])} lies outside the grid`);
+    return { at: st.from, radius: st.radius };
+  };
+  const cut = CUT && { ...onGrid(CUT[0] ?? 0, CUT[1] ?? 0, CUT[2] ?? 0), from: CUT[3] ?? 0, to: CUT[4] ?? 0 };
+  const remove = REMOVE && { ...onGrid(REMOVE[0] ?? 0, REMOVE[1] ?? 0, REMOVE[2] ?? 0), step: REMOVE[3] ?? 0 };
+  // The steps at which the run changes: the cut starts or ends, the colony is taken off, or an edit is painted. A frame
+  // ends at each of them.
+  const marks = [...(cut ? [cut.from, cut.to] : []), ...(remove ? [remove.step] : []), ...EDITS.map((e) => e[0])];
   const log: string[] = [];
   let done = 0;
   const t0 = performance.now();
   for (const target of STEPS) {
-    for (let i = done; i < target; i += 16) {
-      engine.frame(performance.now(), Math.min(16, target - i));
+    for (let i = done; i < target;) {
+      for (const [step, kind, x, y, r] of EDITS)
+        if (step === i) {
+          const disc = onGrid(x, y, r);
+          engine.paint({ kind, from: disc.at, to: disc.at, radius: disc.radius });
+        }
+      if (remove?.step === i) {
+        await sim.finish();
+        const within = (x: number, y: number) => Math.hypot(x - remove.at[0], y - remove.at[1]) < remove.radius;
+        (await sim.readAgents()).forEach((a, k) => {
+          if ((a.bits & 4) !== 0 && within(a.x, a.y)) sim.writeAgent(k, { ...a, bits: a.bits & 3 });
+        });
+        const trail = await sim.readTrail();
+        for (let c = 0; c < sim.width * sim.height; c++)
+          if (within((c % sim.width) + 0.5, Math.floor(c / sim.width) + 0.5)) trail.fill(0, c * 4, c * 4 + 4);
+        sim.writeTrail(trail);
+        const memory = await sim.readFlow(0);
+        for (let c = 0; c < sim.width * sim.height; c++)
+          if (within((c % sim.width) + 0.5, Math.floor(c / sim.width) + 0.5)) memory[c * 4 + 1] = 0;
+        sim.writeFlow(memory, 0);
+      }
+      const next = Math.min(target, i + 16, ...marks.filter((m) => m > i));
+      if (cut && i >= cut.from && i < cut.to)
+        engine.agentTool({
+          kind: AgentToolKind.cut,
+          x: cut.at[0],
+          y: cut.at[1],
+          radius: cut.radius,
+          strain: 0,
+          rate: 0,
+        });
+      engine.frame(performance.now(), next - i);
       if (i % 64 === 0) await sim.finish();
+      i = next;
     }
     await sim.finish();
     done = target;
@@ -84,6 +150,10 @@ it('dumps a run of a scene', async () => {
         (flow[i * 4 + 1] ?? 0) >= 0.05 ? (flow[i * 4] ?? 0) : 0,
       );
       await commands.writeFile(`${OUT}${NAME}-D-${String(target)}.f32.b64`, b64(new Uint8Array(d.buffer)));
+    }
+    if (env.VITE_GROUND === '1' && flow.length > 0) {
+      const d = Float32Array.from({ length: flow.length / 4 }, (_, i) => flow[i * 4] ?? 0);
+      await commands.writeFile(`${OUT}${NAME}-ground-${String(target)}.f32.b64`, b64(new Uint8Array(d.buffer)));
     }
     if (env.VITE_DUMP_P === '1' && flow.length > 0) {
       const envBytes = await sim.readEnv();
@@ -104,6 +174,7 @@ it('dumps a run of a scene', async () => {
         boundary: settings.boundary,
         agents: sim.agents,
         alive,
+        recover: RULE.recover,
         ms: Math.round(performance.now() - t0),
       }),
     );
