@@ -118,7 +118,8 @@ GitHub Actions builds, tests and deploys to GitHub Pages from `main`
 
 - Model: J. Jones, _Characteristics of Pattern Formation and Evolution in Approximations of
   Physarum Transport Networks_, Artificial Life 16(2): 127–153, 2010,
-  [doi:10.1162/artl.2010.16.2.16202](https://doi.org/10.1162/artl.2010.16.2.16202).
+  [doi:10.1162/artl.2010.16.2.16202](https://doi.org/10.1162/artl.2010.16.2.16202)
+  ([free PDF](https://web.archive.org/web/20260923011704/https://uwe-repository.worktribe.com/preview/980585/artl.2010.16.2.pdf)).
 - GPU approach and inspiration: [Sage Jenson](https://cargocollective.com/sagejenson/physarum).
 - Multiple species and the presets Cyclones, Dunes and Dot grid:
   [Michael Fogleman](https://github.com/fogleman/physarum) (MIT).
