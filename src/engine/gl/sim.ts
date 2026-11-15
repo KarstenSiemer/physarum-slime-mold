@@ -16,7 +16,7 @@ import {
 } from '../pack';
 import { diffusePlanOf, viewTrailOn } from '../sizing';
 import { TUBE_TILE, tubesShown } from '../tubes';
-import { EnvKind, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
+import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
 import {
   allOrNothing,
   clear,
@@ -40,12 +40,17 @@ const flip = (b: Bit): Bit => (b === 0 ? 1 : 0);
 const AGENT_ROW = 2048;
 /** Side of the alive tally target (points.vert kind 3): 128² pixels keep every pixel sum exact. */
 const TALLY_SIDE = 128;
-/** Channels a brush writes: erase and walls all, food only green, light only blue (the maximum of old and new). */
+/**
+ * Channels a brush writes: erase and walls all, food only green, light only blue (the maximum of old and new), an
+ * electrode only alpha (ADR 0047).
+ */
 const MASKS: Record<number, [boolean, boolean, boolean, boolean]> = {
   [EnvKind.erase]: [true, true, true, true],
   [EnvKind.wall]: [true, true, true, true],
   [EnvKind.food]: [false, true, false, false],
   [EnvKind.light]: [false, false, true, false],
+  [EnvKind.anode]: [false, false, false, true],
+  [EnvKind.cathode]: [false, false, false, true],
 };
 /** Side of the tiles syncShape() copies the outline target in: 1 MiB at a time. */
 const REFRESH_TILE = 512;
@@ -135,6 +140,9 @@ const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDra
   },
   food: { segment: [[0, [false, true, false, false], 'MAX']], run: [] },
   light: { segment: [], run: [[2, [false, false, true, false], null]] },
+  // An electrode changes no byte of the outline target: the renderer reads its byte from `env` (render.frag poleAt).
+  anode: { segment: [], run: [] },
+  cathode: { segment: [], run: [] },
 };
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
@@ -180,6 +188,8 @@ export class GlSim implements Sim {
    * environment.
    */
   hasEnvironment = false;
+  /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
+  hasElectrodes = false;
   /**
    * The boundary under which every byte of the outline target is held to `env`. After a change of boundary, or after
    * strokes painted under another boundary (then undefined), syncShape() holds it again before its next use.
@@ -560,6 +570,11 @@ export class GlSim implements Sim {
 
   get shapeTexture(): WebGLTexture {
     return this.shape.texture;
+  }
+
+  /** The cells of the simulation, 4 bytes each as readEnv() returns them: the renderer reads the electrodes. */
+  get envTexture(): WebGLTexture {
+    return this.env.texture;
   }
 
   /** Agents per cell after the last step, kept in collision mode only; none without float blending. */
@@ -950,18 +965,18 @@ export class GlSim implements Sim {
       const b = stroke.boundary ?? this.settings.boundary;
       const wrap = b === 'wrap';
       const k = EnvKind[stroke.kind];
+      const pole = isPole(stroke.kind);
       if (b !== this.settings.boundary) foreign = true;
       if (k === EnvKind.wall) [this.walls, this.wallOverAgents] = [true, true];
-      if (k === EnvKind.food || k === EnvKind.light) [this.sources, this.scentless] = [true, false];
-      if (k !== EnvKind.erase) {
-        this.hasEnvironment = true;
-        this.layers[k - 1] = true;
-      }
+      if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];
+      if (k !== EnvKind.erase) this.hasEnvironment = true;
+      if (pole) this.hasElectrodes = true;
+      if (k !== EnvKind.erase && !pole) this.layers[k - 1] = true;
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const rects = scissorRects(segment, this.width, this.height, wrap);
         if (rects.length === 0) continue; // outside a closed arena: no cell to paint or outline
         const reach = outlineRects(segment, this.width, this.height, wrap);
-        if (b !== boundary || this.pending.meets(reach, k, wrap)) {
+        if (b !== boundary || (!pole && this.pending.meets(reach, k, wrap))) {
           drawRun(); // with the parameters of its own boundary
           if (b !== boundary) {
             this.writeParams(undefined, 0, b);
@@ -988,6 +1003,8 @@ export class GlSim implements Sim {
           gl.scissor(...r);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
+        // An electrode has no outline, so it joins no run: its paint changes no byte that an outline reads.
+        if (pole) continue;
         run.push({ segment, kind: stroke.kind, rects: reach });
         this.pending.add(reach, k, wrap);
       }
@@ -1020,6 +1037,7 @@ export class GlSim implements Sim {
     clear(this.gl, this.shape);
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
+    this.hasElectrodes = false;
     // The scent that the targets hold stays until the next reset.
     this.sources = false;
     this.shapeHeld = this.settings.boundary;
@@ -1159,8 +1177,9 @@ export class GlSim implements Sim {
     this.walls = any(0);
     this.wallOverAgents = this.walls;
     [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
-    this.hasEnvironment = this.layers.some(Boolean);
-    this.sources = any(1) || any(2);
+    this.hasElectrodes = any(3);
+    this.hasEnvironment = this.layers.some(Boolean) || this.hasElectrodes;
+    this.sources = any(1) || any(2) || any(3);
     if (this.sources) this.scentless = false;
     this.shapeHeld = undefined;
     if (this.walls) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
 import { packDrawing, unpackDrawing, type Drawing } from './link';
-import { constrain, defaultSettings, defaultStrain, LINK_RULES, type Settings } from './params';
+import { constrain, defaultSettings, defaultStrain, LINK_RULES, sanitize, type Settings } from './params';
 import { presetById, shapeRevision } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
 
@@ -34,7 +34,7 @@ describe('URL settings', () => {
   it('holds the mean window only when it is not 3 × 3, and round-trips it', async () => {
     const network = presetById('network')?.settings() ?? defaultSettings();
     for (const s of [defaultSettings(), network]) {
-      const { meanWindow: _, ...before } = s;
+      const { meanWindow: _, electrodeStrength: _e, ...before } = s;
       // A link made now also holds the mark `rules` of ADR 0044.
       expect(await encodeSettings(s)).toBe(await hashPart(JSON.stringify({ ...before, rules: LINK_RULES })));
       expect(await decodeSettings(await encodeSettings(s))).toEqual(s);
@@ -45,6 +45,20 @@ describe('URL settings', () => {
     // The extended model has no window but 3 × 3: its link holds none.
     const extended = { ...defaultSettings(), meanWindow: 7 };
     expect((await decodeSettings(await encodeSettings(extended)))?.meanWindow).toBe(3);
+  });
+
+  // ADR 0047: a link holds the electrode strength only when it is not 1 (the test above: without it the link has the
+  // bytes of a link made before the setting), and a link without it opens with 1, the ±255 of Tsuda et al. 2011.
+  it('holds the electrode strength only when it is not 1, and round-trips it in both models', async () => {
+    const network = presetById('network')?.settings() ?? defaultSettings();
+    for (const s of [defaultSettings(), network]) {
+      const weak = { ...s, electrodeStrength: 0.25 };
+      expect(await encodeSettings(weak)).not.toBe(await encodeSettings(s));
+      expect(await decodeSettings(await encodeSettings(weak))).toEqual(weak);
+      expect((await decodeSettings(await encodeSettings(s)))?.electrodeStrength).toBe(1);
+    }
+    expect(sanitize({ electrodeStrength: 7 }).electrodeStrength).toBe(1);
+    expect(sanitize({ electrodeStrength: -1 }).electrodeStrength).toBe(0);
   });
 
   // ADR 0025: growth, its values and the capacity travel with the link.

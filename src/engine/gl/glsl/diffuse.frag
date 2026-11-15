@@ -64,6 +64,9 @@ void sources(ivec2 q, inout vec4 t, inout vec2 s) {
 #else
   s += vec2(e.g * P.scent.x, e.b * P.scent.y);
 #endif
+  // The Electrode tool (sources() in diffuse.wgsl, ADR 0047): the cathode into the food scent, the anode into the
+  // repellent.
+  if (e.a > 0.0) s += e.a > 0.75 ? vec2(P.electrode.x, 0.0) : vec2(0.0, P.electrode.x);
 }
 
 // Cut tool: only in the extended model the wound also loses its chemicals (wound in diffuse.wgsl).

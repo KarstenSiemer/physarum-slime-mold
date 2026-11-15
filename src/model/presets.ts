@@ -19,7 +19,7 @@ import { tokyoLight, tokyoShapes } from './tokyo';
  * shape. The radius is in units of the short side.
  */
 export interface EnvShape {
-  kind: 'food' | 'light' | 'wall';
+  kind: 'food' | 'light' | 'wall' | 'anode' | 'cathode';
   at: [number, number];
   to?: [number, number];
   r: number;
@@ -100,6 +100,42 @@ export const BAUMGARTEN_PDF = 'https://www.actaphys.uj.edu.pl/R/46/6/1201/pdf';
 function baumgartenFigure(label: string, journalPage: number): Figure {
   const page = journalPage - 1200;
   return { href: `${BAUMGARTEN_PDF}#page=${page}`, label, note: `page ${page} of the free PDF` };
+}
+
+/**
+ * Tsuda, Jones, Adamatzky and Mills 2011, "Routing Physarum with electrical flow/current", on arXiv, free to read
+ * (ADR 0047). arXiv states no licence that lets this app show a figure, so the app links it (ADR 0037).
+ */
+export const TSUDA_PDF = 'https://arxiv.org/pdf/1204.1752';
+
+/**
+ * The layout of the scene Electrotaxis in cells (ADR 0047). The paper gives no lattice and no positions: Fig. 11 shows
+ * five current sinks in a column on the left, five current sources in a column on the right, and the agents in a
+ * vertical line just left of the sources (p. 11). This lattice holds its 1,500 agents at a density of 0.025. The line
+ * of the start layout stands in the middle column (init.wgsl LINE), the anodes `anode` cells right of it and the
+ * cathodes `cathode` cells left of it, each column with `count` electrodes `pitch` cells apart, of `radius` cells.
+ */
+export const ELECTROTAXIS = {
+  lattice: [250, 240],
+  anode: 20,
+  cathode: 100,
+  count: 5,
+  pitch: 31,
+  radius: 1.5,
+} as const;
+
+/** The electrodes of the scene Electrotaxis in the frame of its box (EnvShape): the cathodes, then the anodes. */
+function electrotaxisShapes(): EnvShape[] {
+  const { lattice, anode, cathode, count, pitch, radius } = ELECTROTAXIS;
+  const [w, h] = lattice;
+  const column = (kind: 'anode' | 'cathode', dx: number) =>
+    Array.from({ length: count }, (_, k): EnvShape => ({
+      kind,
+      // The frame of a box: 1.6 units along its long side, 1 along its short side (environment.ts).
+      at: [(dx / w) * 1.6, ((k - (count - 1) / 2) * pitch) / h],
+      r: radius / h,
+    }));
+  return [...column('cathode', -cathode), ...column('anode', anode)];
 }
 
 /** The revision of a scene's shapes that the scene loads now: the number of its earlier shape lists. */
@@ -626,6 +662,43 @@ PRESETS.push(
       ),
   },
   {
+    id: 'electrotaxis',
+    name: 'Electrotaxis',
+    group: 'experiments',
+    source: 'Tsuda et al. 2011, Fig. 11',
+    summary: 'A line of agents between two rows of electrodes moves to the cathodes.',
+    watch:
+      'The line of agents starts between the two columns of electrodes, near the red anodes. It moves left as one band, away from the anodes and toward the blue cathodes. After about 450 steps it is half way, and after 800 steps a third of the agents stand at the cathodes. It never turns back.',
+    about:
+      'A real slime mold on a gel with an electric current grows toward the cathode: 13 of 16 pieces did so within six hours, and none turned (p. 4 of the paper). The paper’s model puts the current into Jones’ trail map: a cathode adds 255 to its cells in every step, and an anode takes 255 away. The map spreads over a wide window, so the agents feel the electrodes from far away. Paint your own with the Electrode tool.',
+    strainRoles: ['Jones’ agent, pushed by the anodes and drawn to the cathodes'],
+    why: 'The paper’s values (p. 10 and 11): 1,500 agents in a vertical line, sensor angle 22.5°, rotation angle 45°, sensor distance 5, deposit 5, Mean window 15, ±255 at the electrodes. The lattice, the places of the electrodes and the decay of 0.01 are this app’s choice: the paper gives none. In the paper the field settles for 400 steps before the agents start, and a blocked agent keeps its heading. Not here.',
+    figure: {
+      href: `${TSUDA_PDF}#page=11`,
+      label: 'Fig. 11',
+      note: 'page 11 of the free PDF',
+    },
+    settings: () =>
+      jones(
+        // The damping d of the paper's mean has no value there (p. 10). It is the decay of Jones' one map; ADR 0047
+        // has the reason for 0.01.
+        { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 5, deposit: 5, decay: 0.01 },
+        {
+          lattice: [...ELECTROTAXIS.lattice],
+          // 1,500 agents (p. 11) on the 60,000 cells of this app's lattice.
+          density: 1500 / (ELECTROTAXIS.lattice[0] * ELECTROTAXIS.lattice[1]),
+          boundary: 'box',
+          layout: 'line',
+          meanWindow: 15,
+          // The Jones model binds the scent decay to the decay of the strain (asJones()).
+          scentDecay: 0.01,
+          electrodeStrength: 1,
+          bloom: 0,
+        },
+      ),
+    env: electrotaxisShapes(),
+  },
+  {
     id: 'tokyo',
     name: 'Tokyo rail network',
     group: 'experiments',
@@ -838,7 +911,7 @@ export function latticeLostNotice(lattice: Lattice, now: Pick<Settings, 'lattice
   return `This device cannot hold Jones’ grid of ${latticeText(lattice)} for this figure. The scene runs on a grid of ${gridText(now)}, so the result can be different from the paper.`;
 }
 
-export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'app';
+export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'tsuda' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Jones 2010')) return 'jones';
@@ -847,6 +920,7 @@ export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Tero')) return 'tero';
   if (p.source.startsWith('After Jones')) return 'later';
   if (p.source.startsWith('Baumgarten')) return 'coarsening';
+  if (p.source.startsWith('Tsuda')) return 'tsuda';
   return 'app';
 }
 
@@ -873,6 +947,8 @@ export function sourceText(p: Preset): string {
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'coarsening':
       return 'Baumgarten, Jones and Hauser, Acta Physica Polonica B 46: 1201 (2015), watched the vein network of a real slime mold coarsen and ran Jones’ model, with growth and shrinkage, for a comparison. This scene uses the settings of the model of the paper, on its lattice of 400\u00a0×\u00a0400 cells on every screen.';
+    case 'tsuda':
+      return 'Tsuda, Jones, Adamatzky and Mills (2011, arXiv:1204.1752) steered a real slime mold with electric current: it grew toward the cathode. In Jones’ model they made each current sink a source above 0 of the trail map, and each current source one below 0. This scene uses the values of that model. The grid and the places of the electrodes were chosen for this app: the paper gives none.';
     case 'app':
       return 'This scene was made for this app. Its settings are not taken from a paper.';
   }

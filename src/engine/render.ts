@@ -64,7 +64,8 @@ export function trailLevel(scale: number): number {
 /**
  * Fills `struct View` (render.wgsl), which is also the std140 `View` block of the WebGL2 renderer. `occupancy`:
  * the simulation keeps agents per cell (collision mode), for the agents style and for agents on food. `stream`: the
- * step of the state, while the view draws the stream of the plasm (tubes.ts, point 6).
+ * step of the state, while the view draws the stream of the plasm (tubes.ts, point 6). `electrodes`: an electrode may
+ * be painted (Sim.hasElectrodes).
  */
 export function packView(
   data: ArrayBuffer,
@@ -79,6 +80,7 @@ export function packView(
   occupancy: boolean,
   strand: number,
   stream?: number,
+  electrodes = false,
 ) {
   const fl = new Float32Array(data);
   const u = new Uint32Array(data);
@@ -96,7 +98,10 @@ export function packView(
   // The pattern of the grains starts again after STREAM.period steps, and the grains go back and forth once in
   // STREAM.swing steps.
   const phases = (step: number) => [(step % STREAM.period) / STREAM.period, (step % STREAM.swing) / STREAM.swing];
+  // The last value is not of the stream: the electrodes are drawn only while one may be painted (ADR 0047), so other
+  // scenes do not read their cells.
   fl.set(stream === undefined ? [0, 0, 0, 0] : [1, ...phases(stream), 0], 36);
+  fl[39] = electrodes ? 1 : 0;
   fl.set([...GEL_FX[settings.gelColor], 0, 0], 40);
   // The scent view: the map it reads (scentLevel()), and the sensors of its line, their half spread and the hold of a
   // strand (scentSensors()). It draws the repellent in both models: both read it (ADR 0044).
@@ -235,6 +240,7 @@ export class Renderer {
         { binding: 10, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 12, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        storage(13),
       ],
     });
     this.downLayout = device.createBindGroupLayout({
@@ -332,6 +338,7 @@ export class Renderer {
       occupancy,
       strand,
       stream ? sim.step : undefined,
+      sim.hasElectrodes,
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
@@ -378,6 +385,8 @@ export class Renderer {
           { binding: 11, resource: this.trailCoarse?.view ?? this.noCoarse.createView() },
           // The stream belongs to the picture of the tubes, which is the trail here: one texture for each trail.
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
+          // The cells of the simulation, for the electrodes (ADR 0047).
+          { binding: 13, resource: { buffer: sim.env } },
         ],
       });
       const heightGroup = this.device.createBindGroup({

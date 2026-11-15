@@ -93,6 +93,7 @@
     center: 'Center spot',
     empty: 'Empty (inoculate)',
     food: 'On food, one colony each',
+    line: 'Vertical line',
   };
   const BOUNDARY_LABEL: Record<(typeof BOUNDARIES)[number], string> = {
     wrap: 'Wrap around (no edges)',
@@ -358,6 +359,8 @@
     <Slider spec={globalSpec.foodStrength} bind:value={s.foodStrength} id="food" />
     <!-- The Jones model reads drawn light as a repellent source of its trail map, and names it so (ADR 0044). -->
     <Slider spec={extended ? globalSpec.lightStrength : repellentSpec} bind:value={s.lightStrength} id="light" />
+    <!-- The strength of the poles of the Electrode tool, in both models (ADR 0047). -->
+    <Slider spec={globalSpec.electrodeStrength} bind:value={s.electrodeStrength} id="electrode" />
     <div class="check">
       <label>
         <input
@@ -383,7 +386,7 @@
       <Slider spec={globalSpec.coveredFoodFactor} bind:value={s.coveredFoodFactor} id="covered-factor" />
     {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
-    <button type="button" onclick={clearEnvironment}>Clear food, {lightName(s.model)} and walls</button>
+    <button type="button" onclick={clearEnvironment}>Clear food, {lightName(s.model)}, walls and electrodes</button>
   </Section>
 
   <Section title="Growth">

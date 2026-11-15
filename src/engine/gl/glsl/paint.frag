@@ -1,8 +1,8 @@
-// Brush stroke on the environment texture (R wall, G food, B light). Blending and color masks in
+// Brush stroke on the environment texture (R wall, G food, B light, A electrode: 128 anode, 255 cathode, ADR 0047). Blending and color masks in
 // gl/sim.ts decide how values combine. Mirrors ../../shaders/paint.wgsl. Prepended with common.glsl
 // and brush.glsl.
 
-uniform int kind; // 0 erase, 1 wall, 2 food, 3 light
+uniform int kind; // 0 erase, 1 wall, 2 food, 3 light, 4 anode, 5 cathode
 
 out vec4 result;
 
@@ -20,5 +20,7 @@ void main() {
   if (kind == 1) result = vec4(1.0, 0.0, 0.0, 0.0);
   else if (kind == 2) result = vec4(0.0, 1.0, 0.0, 0.0);
   else if (kind == 3) result = vec4(0.0, 0.0, lightEdge(d, radius), 0.0);
+  else if (kind == 4) result = vec4(0.0, 0.0, 0.0, 128.0 / 255.0);
+  else if (kind == 5) result = vec4(0.0, 0.0, 0.0, 1.0);
   else result = vec4(0.0);
 }

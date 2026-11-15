@@ -85,7 +85,8 @@ export const diffusePlanOf = (s: Pick<Settings, 'diffusion' | 'model' | 'meanWin
  * trail's for a view zoomed out and the scent view's (16 B per texel, a quarter of a texel per cell; render.ts,
  * gl/backend.ts). The user zooms out or turns the scent view on without a new grid, so the fit holds both maps from
  * the start (ADR 0028). WebGL2 without float blending has no collision buffers but 32 B of counting panels with a
- * stencil (gl/sim.ts deposit()); its coarse maps are the same.
+ * stencil (gl/sim.ts deposit()); its coarse maps are the same. The electrodes (ADR 0047) lie in the fourth byte of the
+ * environment's 4, which no pass used before, and the renderer reads them there: no byte more on either backend.
  */
 export const BYTES_PER_CELL = 98;
 export const BYTES_PER_CELL_HALF_FLOAT = 118;

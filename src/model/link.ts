@@ -33,9 +33,14 @@ export const MAX_WORK = 64;
 /**
  * Version 2 writes the revision of the scene's shapes after the scene's id (ADR 0027). A link of version 1 names
  * revision 0, the shapes of 2026-11-10. Version 3 writes the number of the scene's shapes as a varint, where versions 1
- * and 2 write one byte: the scene Tokyo with light has more than 255 shapes (ADR 0042).
+ * and 2 write one byte: the scene Tokyo with light has more than 255 shapes (ADR 0042). Version 4 can hold the strokes of
+ * the Electrode tool (ADR 0047): the head byte of a stroke has two bits for its kind, and all four values were taken.
+ * So a stroke of a later kind writes the value 3 where the arena was, which no arena has, its arena where the kind
+ * was, and then one byte with its kind (EnvKind). Every other stroke has the bytes of version 3.
  */
-const VERSION = 3;
+const VERSION = 4;
+/** The value in the arena bits of a head byte that marks a stroke of a later kind (version 4). */
+const LATER = 3;
 /** Grid sides that gridSize() (engine/sizing.ts) gives. */
 const [SIDE_MIN, SIDE_MAX] = [16, 4096];
 /** Largest distance of a position from the grid's origin, in cells. A drag on screen stays below 2^17. */
@@ -44,6 +49,8 @@ const REACH = 2 ** 20;
 const RADIUS_MAX = 2 ** 14;
 const SCENE_ID = /^[a-z0-9-]{1,32}$/;
 const KINDS: EnvTool[] = ['erase', 'wall', 'food', 'light'];
+/** The later kinds by their number (EnvKind), which a stroke of version 4 writes after its head byte. */
+const LATER_KINDS: Partial<Record<number, EnvTool>> = { [EnvKind.anode]: 'anode', [EnvKind.cathode]: 'cathode' };
 const BIT = { grid: 16, from: 32, to: 64, radius: 128 } as const;
 
 /** Cells to whole steps (STEP), or undefined for a value off the steps or out of `[-max, max]`. */
@@ -182,7 +189,7 @@ class Reader {
 }
 
 /**
- * The drawing as bytes (docs/adr/0021): a version, the scene's id, for a scene the revision of its shapes (ADR 0027),
+ * The drawing as bytes (docs/adr/0021, ADR 0047 for an electrode's stroke): a version, the scene's id, for a scene the revision of its shapes (ADR 0027),
  * its strains' origins, the number of its shapes (a varint) and which of them the list holds, then the strokes. Each stroke has a head byte (kind, arena, and which of grid, start, end and radius
  * follow), then those that follow: its grid when it differs from the stroke before, its start from the end of the
  * stroke before unless it starts there (a drag), its end from its start unless it is a dab, and its radius unless it
@@ -231,7 +238,12 @@ export function packDrawing(d: Drawing): Uint8Array<ArrayBuffer> | undefined {
     const to = tx !== fx || ty !== fy;
     const r = radius !== last.radius;
     const flags = (grid ? BIT.grid : 0) | (from ? BIT.from : 0) | (to ? BIT.to : 0) | (r ? BIT.radius : 0);
-    out.byte(EnvKind[e.kind] | (arena << 2) | flags);
+    const kind = EnvKind[e.kind];
+    if (kind < KINDS.length) out.byte(kind | (arena << 2) | flags);
+    else {
+      out.byte(arena | (LATER << 2) | flags);
+      out.byte(kind);
+    }
     if (grid) {
       out.varint(w);
       out.varint(h);
@@ -266,7 +278,7 @@ export function unpackDrawing(data: Uint8Array): Drawing | undefined {
 
 function unpack(input: Reader): Drawing | undefined {
   const version = input.byte();
-  if (version !== 1 && version !== 2 && version !== VERSION) return undefined;
+  if (!Number.isInteger(version) || version < 1 || version > VERSION) return undefined;
   const length = input.byte();
   const scene = String.fromCharCode(...Array.from({ length }, () => input.byte()));
   const d: Drawing = { scene, revision: 0, origins: [], shapes: [], strokes: [] };
@@ -282,7 +294,7 @@ function unpack(input: Reader): Drawing | undefined {
     d.origins = Array.from({ length: n }, () => input.byte() - 1);
     if (d.origins.some((o) => o >= strains)) return undefined;
     // One byte before version 3: no scene had more than 255 shapes.
-    const shapes = version === VERSION ? input.varint() : input.byte();
+    const shapes = version >= 3 ? input.varint() : input.byte();
     if (shapes !== env.length) return undefined;
     for (let j = 0; j < shapes; j += 8) {
       const bits = input.byte();
@@ -298,7 +310,10 @@ function unpack(input: Reader): Drawing | undefined {
   let last: { grid?: [number, number]; to: [number, number]; radius?: number } = { to: [0, 0] };
   for (let i = 0; i < count; i++) {
     const head = input.byte();
-    const boundary = BOUNDARIES[(head >> 2) & 3];
+    // A stroke of a later kind (version 4): the arena lies where the kind was, and the kind follows in a byte.
+    const later = version >= 4 && ((head >> 2) & 3) === LATER;
+    const boundary = BOUNDARIES[later ? head & 3 : (head >> 2) & 3];
+    const kind = later ? LATER_KINDS[input.byte()] : KINDS[head & 3];
     const grid: [number, number] | undefined = head & BIT.grid ? [input.varint(), input.varint()] : last.grid;
     const [ax, ay] = last.to;
     const from: [number, number] =
@@ -306,7 +321,6 @@ function unpack(input: Reader): Drawing | undefined {
     const [bx, by] = from;
     const to: [number, number] = head & BIT.to ? [bx + input.signed() * STEP, by + input.signed() * STEP] : [bx, by];
     const radius = head & BIT.radius ? input.varint() * STEP : last.radius;
-    const kind = KINDS[head & 3];
     if (!kind || !boundary || !grid || radius === undefined || radius < MIN_RADIUS || radius > RADIUS_MAX)
       return undefined;
     if (!grid.every((v) => v >= SIDE_MIN && v <= SIDE_MAX)) return undefined;

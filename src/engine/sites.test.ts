@@ -117,6 +117,18 @@ describe('the food strokes of an edit list', () => {
     expect(foodStrokes([base, erase, edit(food([30, 10], [40, 10]))]).length).toBe(2);
   });
 
+  // ADR 0047: a cathode attracts as food does, but it is no food site of the flow, and neither is an anode.
+  it('hold no stroke of an electrode', () => {
+    const a = food([10, 10], [20, 10]);
+    const cathode = edit({ ...a, kind: 'cathode' });
+    const poles = [cathode, edit({ ...a, kind: 'anode' })];
+    expect(foodStrokes(poles)).toEqual([]);
+    expect(foodStrokes([edit(a), ...poles]).length).toBe(1);
+    for (const pole of poles) expect(continues(edit(a), pole)).toBe(false);
+    // A drag of food with a pole between its segments is two strokes, as with any edit of another kind.
+    expect(foodStrokes([edit(a), cathode, edit(food([20, 10], [30, 10]))]).length).toBe(2);
+  });
+
   it('follow a drag over the edge of a periodic grid, where the list moves a segment by a period', () => {
     // The segment crosses the right edge; the next one starts on the copy of the grid to the right, and the list moves
     // it back into the grid (fromStroke()).

@@ -1,5 +1,13 @@
 import { kindsOf, packDrawing, sceneOnly, unpackDrawing, type Drawing } from './link';
-import { LINK_RULES, MEAN_WINDOW, sanitize, type Drawn, type Settings, type StepOrder } from './params';
+import {
+  defaultSettings,
+  LINK_RULES,
+  MEAN_WINDOW,
+  sanitize,
+  type Drawn,
+  type Settings,
+  type StepOrder,
+} from './params';
 import { stepOrderOf } from './presets';
 
 // Shared links carry the full settings as deflated JSON in the URL hash, and the scene with its food, light and walls
@@ -52,14 +60,15 @@ async function inflate(encoded: string): Promise<Uint8Array> {
 }
 
 /**
- * The settings as a link holds them. The mean window is in it only when it is not 3 × 3 (ADR 0046): a link of
- * settings without the larger window then has the bytes of a link made before the setting, and sanitize() reads a
- * link without it as 3 × 3.
+ * The settings as a link holds them. The mean window is in it only when it is not 3 × 3 (ADR 0046), and the electrode
+ * strength only when it is not 1 (ADR 0047): a link of settings without them then has the bytes of a link made before
+ * these settings, and sanitize() reads a link without them as 3 × 3 and 1.
  */
-function linkSettings(s: Settings): Omit<Settings, 'meanWindow'> | Settings {
-  if (s.meanWindow !== MEAN_WINDOW) return s;
-  const { meanWindow: _, ...rest } = s;
-  return rest;
+function linkSettings(s: Settings): Partial<Settings> {
+  const held: Partial<Settings> = { ...s };
+  if (s.meanWindow === MEAN_WINDOW) delete held.meanWindow;
+  if (s.electrodeStrength === defaultSettings().electrodeStrength) delete held.electrodeStrength;
+  return held;
 }
 
 /**

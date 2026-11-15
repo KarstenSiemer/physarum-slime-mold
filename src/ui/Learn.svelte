@@ -207,10 +207,12 @@
         In the Jones model, one strain follows its own trail, or flees it as in Jones’ Turing patterns. One agent fits
         in a cell, and one 3 × 3 average spreads the trail in each step. Food goes into the trail map, so its scent
         spreads and fades with the trail. A repellent source, such as salt or a current source, goes into the same map
-        with a value below 0, and agents turn away from it (Jones and Adamatzky 2015). Walls mark where agents cannot
-        go, and the trail spreads through them as through any cell. Agents can die off, as in Shrinking plasmodium. In
-        later papers Jones lets food release almost no scent while agents cover it: the switch Covered food releases
-        less.
+        with a value below 0, and agents turn away from it (Jones and Adamatzky 2015). The Electrode tool paints the two
+        poles of an electric current as Tsuda, Jones and colleagues model it (2011): a cathode puts 255 into the map in
+        every step and an anode takes 255 away, so agents move to the cathode, as the real slime mold grows toward it.
+        Walls mark where agents cannot go, and the trail spreads through them as through any cell. Agents can die off,
+        as in Shrinking plasmodium. In later papers Jones lets food release almost no scent while agents cover it: the
+        switch Covered food releases less.
       </p>
       <p>
         From 2011 on, Jones also lets the population grow and shrink (Nat. Comput. 10: 1345). Every few steps, an agent
@@ -226,9 +228,10 @@
         The extended model adds what Jones did not publish. Several strains can share the dish, each with its own trail.
         A table sets how strongly each strain follows or flees the trails of the others, an idea from Michael Fogleman’s
         version. Light releases a repellent that spreads like the food scent: the rule of Jones’ repellent sources, used
-        for light. The scent has a decay of its own, and a strain has its own weight for food and light. Agents can
-        share cells, the trail can spread in more passes, and walls also block what the sensors read. Walls take in the
-        trail and the scents, so nothing spreads through them.
+        for light. The field of a cathode spreads with the food scent and that of an anode with the repellent. The scent
+        has a decay of its own, and a strain has its own weight for food and light. Agents can share cells, the trail
+        can spread in more passes, and walls also block what the sensors read. Walls take in the trail and the scents,
+        so nothing spreads through them.
       </p>
       <p>
         With Scent decay 0.1 the scent fades within a few cells, so an agent notices food only when a sensor comes
@@ -261,20 +264,21 @@
         {/each}
       </dl>
       <p>
-        Keys: Space play/pause, . step, R reset, 1–7 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
+        Keys: Space play/pause, . step, R reset, 1–8 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
         this dialog.
       </p>
       <p>
-        Food, Light, Wall and Erase paint where you drag. For a straight line, hold Shift, click the start and then
-        click the end. A preview shows the line as wide as the brush until the second click. While you hold Shift, each
-        further click adds a line from the last end, so you can draw a wall with corners. Press Escape or let go of
-        Shift to stop. A touch screen without a keyboard has no straight lines.
+        Food, Light, Wall, Erase and Electrode paint where you drag. For a straight line, hold Shift, click the start
+        and then click the end. A preview shows the line as wide as the brush until the second click. While you hold
+        Shift, each further click adds a line from the last end, so you can draw a wall with corners. Press Escape or
+        let go of Shift to stop. A touch screen without a keyboard has no straight lines.
       </p>
       <p>
-        The page address is a link to what you see: the settings, the scene, and the food, light and walls you painted.
-        Copy it to share the scene or to come back to it. The agents and their trails start again when the link opens.
-        If the drawing is too large for a link, a notice says so. The link then opens the scene as it loads, without the
-        drawing. If this app cannot read the drawing in a link, a notice says so, and only the settings load.
+        The page address is a link to what you see: the settings, the scene, and the food, light, walls and electrodes
+        you painted. Copy it to share the scene or to come back to it. The agents and their trails start again when the
+        link opens. If the drawing is too large for a link, a notice says so. The link then opens the scene as it loads,
+        without the drawing. If this app cannot read the drawing in a link, a notice says so, and only the settings
+        load.
       </p>
     {:else if app.learnTab === 'Scenes'}
       <p>

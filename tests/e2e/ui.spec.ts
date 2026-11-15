@@ -158,11 +158,11 @@ test('the Jones model names light a repellent, and drawn light acts as a repelle
   await page.getByRole('button', { name: 'Scent', exact: true }).click();
   const legend = page.getByRole('figure', { name: 'Scent per cell' });
   await expect(legend.getByText(/^Repellent \(pink glow\)$/)).toBeVisible();
-  await page.getByRole('button', { name: 'Clear food, repellent and walls' }).click();
-  await expect(legend).toContainText('no food and no repellent');
+  await page.getByRole('button', { name: 'Clear food, repellent, walls and electrodes' }).click();
+  await expect(legend).toContainText('no food, no repellent and no electrode');
   await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
   await expect(page.getByLabel('Light strength', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Clear food, light and walls' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear food, light, walls and electrodes' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -456,7 +456,7 @@ test('the Scent switch and the S key show the scent with its legend, and go into
   const legend = page.getByRole('figure', { name: 'Scent per cell' });
   // The small scene has no food and no light: the legend says so.
   await button.click();
-  await expect(legend).toContainText('no food and no light');
+  await expect(legend).toContainText('no food, no light and no electrode');
   await button.click();
   await page.getByRole('combobox', { name: 'Preset' }).selectOption('light');
   // The scene has another density than the small scene, so the engine builds a new simulation, and that restart comes

@@ -1,6 +1,7 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
-// of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044) and of the mean over a window above 3 × 3 (ADR 0046). The script puts one wrong rule at a time into a source file of the app,
+// of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046) and of the
+// Electrode tool (ADR 0047). The script puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
 // must fail at least one test.
@@ -43,6 +44,19 @@ const [RESPAWN_GPU, RESPAWN_GL] = ['webgpu .*(the cut|a tool) is held', 'webgl2 
 const DIFFUSE_WGSL = 'src/engine/shaders/diffuse.wgsl';
 const DIFFUSE_FRAG = 'src/engine/gl/glsl/diffuse.frag';
 const [WINDOW_GPU, WINDOW_GL] = ['webgpu .*mean window', 'webgl2 .*mean window'];
+
+/** The Electrode tool (ADR 0047): its files, and the tests of it on each backend and on both. */
+const PAINT_WGSL = 'src/engine/shaders/paint.wgsl';
+const PAINT_FRAG = 'src/engine/gl/glsl/paint.frag';
+const INIT_WGSL = 'src/engine/shaders/init.wgsl';
+const INIT_FRAG = 'src/engine/gl/glsl/init.frag';
+const RENDER_WGSL = 'src/engine/shaders/render.wgsl';
+const RENDER_FRAG = 'src/engine/gl/glsl/render.frag';
+const RENDER_TS = 'src/engine/render.ts';
+const GPU_SIM = 'src/engine/sim.ts';
+const GL_SIM = 'src/engine/gl/sim.ts';
+const ELECTRODE = 'electrode tool';
+const [ELECTRODE_GPU, ELECTRODE_GL] = ['webgpu .*electrode tool', 'webgl2 .*electrode tool'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -1920,6 +1934,176 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     "      if (v.box) {\n        gl.uniform1i(d.loc('radius'), v.box.radius);\n        gl.uniform1i(d.loc('columns'), Number(v.box.columns));\n      }\n      gl.drawArrays(gl.TRIANGLES, 0, 3);\n      this.p = out;",
     "      if (v.box) {\n        gl.uniform1i(d.loc('radius'), 2);\n        gl.uniform1i(d.loc('columns'), Number(v.box.columns));\n      }\n      gl.drawArrays(gl.TRIANGLES, 0, 3);\n      this.p = out;",
     WINDOW_GL,
+    SIM_SPEC,
+  ],
+  // The Electrode tool (ADR 0047): the poles in the fourth byte of a cell, their sources in the two lanes of the scent,
+  // the start layout Vertical line and the poles in the view. Against the GPU tests of the tool.
+  [
+    'EL1 wgsl: every pole releases as a cathode',
+    DIFFUSE_WGSL,
+    'vec2f(P.electrode.x, 0.0), e.w > 0.75); }',
+    'vec2f(P.electrode.x, 0.0), e.w > 0.25); }',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL2 wgsl: the cathode releases the repellent and the anode the attractant',
+    DIFFUSE_WGSL,
+    'select(vec2f(0.0, P.electrode.x), vec2f(P.electrode.x, 0.0), e.w > 0.75)',
+    'select(vec2f(P.electrode.x, 0.0), vec2f(0.0, P.electrode.x), e.w > 0.75)',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL3 wgsl: a pole releases nothing',
+    DIFFUSE_WGSL,
+    'if (e.w > 0.0) { *s += select(',
+    'if (e.w > 2.0) { *s += select(',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL4 wgsl: the anode paints the byte of the cathode',
+    PAINT_WGSL,
+    'case 4u: { e.w = 128.0 / 255.0; }',
+    'case 4u: { e.w = 1.0; }',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL5 wgsl: a cathode clears the food and the light of its cell',
+    PAINT_WGSL,
+    'case 5u: { e.w = 1.0; }',
+    'case 5u: { e = vec4f(e.x, 0.0, 0.0, 1.0); }',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL6 wgsl: the line of the start layout as high as the grid is wide',
+    INIT_WGSL,
+    'let rows = LINE_HEIGHT * size.y;',
+    'let rows = LINE_HEIGHT * size.x;',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL7 wgsl: the line of the start layout at one agent per cell',
+    INIT_WGSL,
+    'const LINE_FILL = 0.75;',
+    'const LINE_FILL = 1.0;',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL8 wgsl: the view draws the anode in the colour of the cathode',
+    RENDER_WGSL,
+    'return mix(mix(c, CATHODE, a.x), ANODE, a.y);',
+    'return mix(mix(c, CATHODE, a.x), CATHODE, a.y);',
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL9 glsl: every pole releases as a cathode',
+    DIFFUSE_FRAG,
+    's += e.a > 0.75 ? vec2(P.electrode.x, 0.0)',
+    's += e.a > 0.25 ? vec2(P.electrode.x, 0.0)',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL10 glsl: the cathode releases the repellent and the anode the attractant',
+    DIFFUSE_FRAG,
+    '? vec2(P.electrode.x, 0.0) : vec2(0.0, P.electrode.x);',
+    '? vec2(0.0, P.electrode.x) : vec2(P.electrode.x, 0.0);',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL11 glsl: a pole releases nothing',
+    DIFFUSE_FRAG,
+    'if (e.a > 0.0) s += e.a > 0.75',
+    'if (e.a > 2.0) s += e.a > 0.75',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL12 glsl: the anode paints the byte of the cathode',
+    PAINT_FRAG,
+    'else if (kind == 4) result = vec4(0.0, 0.0, 0.0, 128.0 / 255.0);',
+    'else if (kind == 4) result = vec4(0.0, 0.0, 0.0, 1.0);',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL13 webgl2: a cathode writes every byte of its cell',
+    GL_SIM,
+    '  [EnvKind.cathode]: [false, false, false, true],',
+    '  [EnvKind.cathode]: [true, true, true, true],',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL14 glsl: the line of the start layout as high as the grid is wide',
+    INIT_FRAG,
+    'float rows = LINE_HEIGHT * size.y;',
+    'float rows = LINE_HEIGHT * size.x;',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL15 glsl: the line of the start layout at one agent per cell',
+    INIT_FRAG,
+    'const float LINE_FILL = 0.75;',
+    'const float LINE_FILL = 1.0;',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL16 glsl: the view draws the anode in the colour of the cathode',
+    RENDER_FRAG,
+    'return mix(mix(c, CATHODE, a.x), ANODE, a.y);',
+    'return mix(mix(c, CATHODE, a.x), CATHODE, a.y);',
+    ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'EL17 pack: a pole releases with the strength of the food',
+    PACK,
+    "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
+    "f.set([255 * s.foodStrength * g, 0, 0, 0], slot('electrode'));",
+    ELECTRODE,
+    SIM_SPEC,
+  ],
+  [
+    'EL18 pack: a pole of the extended model releases without the source factor',
+    PACK,
+    "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
+    "f.set([255 * s.electrodeStrength, 0, 0, 0], slot('electrode'));",
+    ELECTRODE,
+    SIM_SPEC,
+  ],
+  [
+    'EL19 view: the electrodes are never drawn',
+    RENDER_TS,
+    'fl[39] = electrodes ? 1 : 0;',
+    'fl[39] = 0;',
+    ELECTRODE,
+    SIM_SPEC,
+  ],
+  [
+    'EL20 webgpu: a stroke of a pole does not mark the scent as fed',
+    GPU_SIM,
+    '      if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];\n      if (boundary !== this.settings.boundary) foreign = true;',
+    "      if (stroke.kind === 'food' || stroke.kind === 'light') [this.sources, this.scentless] = [true, false];\n      if (boundary !== this.settings.boundary) foreign = true;",
+    ELECTRODE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'EL21 webgl2: a stroke of a pole does not mark the scent as fed',
+    GL_SIM,
+    '      if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];\n      if (k !== EnvKind.erase) this.hasEnvironment = true;',
+    '      if (k === EnvKind.food || k === EnvKind.light) [this.sources, this.scentless] = [true, false];\n      if (k !== EnvKind.erase) this.hasEnvironment = true;',
+    ELECTRODE_GL,
     SIM_SPEC,
   ],
 ];

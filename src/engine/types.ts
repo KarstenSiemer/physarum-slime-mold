@@ -2,8 +2,24 @@ import type { Boundary, Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import type { FlowSites } from './sites';
 
-export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3 } as const;
+export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5 } as const;
 export type EnvTool = keyof typeof EnvKind;
+
+/**
+ * The two poles of the Electrode tool (ADR 0047), as Tsuda, Jones et al. 2011 (p. 10) model a current: the cathode is
+ * the current sink, a source above 0 of the map that the agents sense, and the anode is the current source, a source
+ * below 0. Both lie in the fourth byte of a cell of the environment, so a cell holds one pole at most.
+ */
+export const POLES = ['cathode', 'anode'] as const;
+export type Pole = (typeof POLES)[number];
+export const isPole = (kind: EnvTool): kind is Pole => kind === 'anode' || kind === 'cathode';
+/** Whether a stroke of `kind` paints cells that release into the scent: food, light and the electrodes. */
+export const releases = (kind: EnvTool) => kind === 'food' || kind === 'light' || isPole(kind);
+/**
+ * The byte of each pole (paint.wgsl, paint.frag): 0 is no electrode. The passes read a byte above 191 as the cathode
+ * and any other byte above 0 as the anode (diffuse.wgsl `sources`, render.wgsl `poleAt`).
+ */
+export const POLE_BYTE = { anode: 128, cathode: 255 } as const;
 
 /**
  * Cells: the renderer's outline distances are clamped to ± this (SHAPE_RANGE in paint.wgsl, render.wgsl,
@@ -61,7 +77,7 @@ export interface Sim {
    * less in the frame. The sort changes no result (ADR 0005).
    */
   sortNow?(): void;
-  /** Paints brush strokes in order: the only way food, light and walls reach a simulation. */
+  /** Paints brush strokes in order: the only way food, light, walls and electrodes reach a simulation. */
   paint(strokes: readonly Stroke[]): void;
   clearEnvironment(): void;
   /**
@@ -121,7 +137,7 @@ export interface Sim {
    * that picture (tubes.ts, point 6).
    */
   readStream(): Promise<Float32Array>;
-  /** Wall, food, light, unused per cell (0–255). */
+  /** Wall, food, light, electrode per cell (0–255; the electrode byte is POLE_BYTE). */
   readEnv(): Promise<Uint8Array>;
   /**
    * For the renderer: the signed distance to the wall and to the food outline (0–255, 128 and up inside,
@@ -130,6 +146,8 @@ export interface Sim {
   readShape(): Promise<Uint8Array>;
   /** False until something other than the eraser is painted after the last clear of the environment. */
   readonly hasEnvironment: boolean;
+  /** False until an electrode is painted after the last clear of the environment (ADR 0047): the view then draws them. */
+  readonly hasElectrodes: boolean;
   writeAgent(index: number, a: AgentState): void;
   writeTrail(data: Float32Array): void;
   /** For tests: replaces the scent, 2 values per cell as readScent() returns them. */
