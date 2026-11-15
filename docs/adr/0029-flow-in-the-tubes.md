@@ -6,6 +6,7 @@
   the mathematics and on how to check this record came on 2026-11-13, at the owner's request,
   with the research code in the repository (decision 16).
 - Date: 2026-11-12
+- Later decisions on the flow get ADRs of their own ([ADR 0040](0040-one-decision-one-short-adr.md), 2026-11-15).
 - In short: [`research/flow/README.md`](../../research/flow/README.md) tells on one page, in plain
   words, how this decision came about. This record has the details.
 - Changed by [ADR 0031](0031-a-flow-for-every-strain.md) (2026-11-13): every strain has a flow of

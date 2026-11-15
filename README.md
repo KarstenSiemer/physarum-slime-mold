@@ -105,6 +105,9 @@ Tests:
 
 GPU tests use the real GPU locally and SwiftShader on GPU-less CI.
 
+[`AGENTS.md`](AGENTS.md) is the short guide for coding agents and contributors: where things are, the rules of a
+change, and the commands. The decisions and their reasons are in [`docs/adr/`](docs/adr/).
+
 ## Deployment
 
 GitHub Actions builds, tests and deploys to GitHub Pages from `main`
