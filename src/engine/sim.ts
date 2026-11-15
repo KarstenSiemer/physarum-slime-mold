@@ -1,7 +1,7 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { at } from './at';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, flowOn, flowSites, flowStrains, packFlow } from './flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from './flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -14,6 +14,7 @@ import {
   type AgentTool,
 } from './pack';
 import { readBuffer, readTexture } from './readback';
+import { NO_SITES, SITE_BLOCK, type FlowSites } from './sites';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
@@ -85,6 +86,14 @@ interface FlowState {
   pressureViews: GPUTextureView[][];
   /** Per strain: the uniform block of its passes (flow.ts packFlow()). */
   uniforms: GPUBuffer[];
+  /** Per strain and site (FLOW_SITES per strain): the port of this step and of the step before (flow.wgsl `ports`). */
+  ports: GPUBuffer;
+  /** The cells of the sites (flow.wgsl `siteCells`), made again when the list outgrows it (foodSites()). */
+  cells: GPUBuffer;
+  /** Per strain and block of `cells`: the first entry that covers its site (flow.wgsl `blockHits`), with `cells`. */
+  hits: GPUBuffer;
+  /** Whether `cells` holds the cells of the sites of now. */
+  cellsCurrent: boolean;
 }
 /**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
@@ -174,8 +183,8 @@ export class Simulation implements Sim {
   /** Which memory texture is current, and which pressure texture holds the pressure in work. */
   private flowM: Bit = 0;
   private flowP = 0;
-  /** The food sites that give and take the flux (foodSites()). */
-  private sites: [number, number][] = [];
+  /** The food sites that give and take the flux, with their cells (foodSites()). */
+  private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
   private paintGroup?: GPUBindGroup;
   /**
@@ -701,12 +710,35 @@ export class Simulation implements Sim {
   }
 
   /**
-   * The starts of the food strokes on this grid, in cells and in the order of the strokes (ADR 0029): the food sites
-   * that give and take the flux of the flow in the tubes (flow.ts flowSites()). For a food dot the start is its
-   * centre. The engine sets them after each paint.
+   * The food sites of this grid with their cells (ADR 0029, decision 17; sites.ts): the sites that give and take the
+   * flux of the flow in the tubes. The engine sets them after each paint; the next step with the flow takes their cells
+   * to the GPU.
    */
-  foodSites(centres: readonly (readonly [number, number])[]) {
-    this.sites = flowSites(centres, this.width, this.height);
+  foodSites(sites: FlowSites) {
+    this.sites = sites;
+    if (this.flow) this.flow.cellsCurrent = false;
+  }
+
+  /**
+   * The cells of the sites on the GPU, in a buffer that holds them (flow.wgsl `siteCells`), and the buffer of the hits
+   * of their blocks for every strain (`blockHits`), both made again when the list outgrows them.
+   */
+  private siteCells(flow: FlowState) {
+    const { cells } = this.sites;
+    if (!flow.cellsCurrent) {
+      const hits = (cells.length / SITE_BLOCK) * flow.strains * 4;
+      if (flow.cells.size < cells.byteLength || flow.hits.size < hits) {
+        flow.cells.destroy();
+        flow.hits.destroy();
+        const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+        flow.cells = this.device.createBuffer({ size: Math.max(4, cells.byteLength), usage });
+        flow.hits = this.device.createBuffer({ size: Math.max(4, hits), usage });
+        for (const key of [...this.bindCache.keys()]) if (key.startsWith('flowSites')) this.bindCache.delete(key);
+      }
+      if (cells.length > 0) this.device.queue.writeBuffer(flow.cells, 0, cells);
+      flow.cellsCurrent = true;
+    }
+    return { cells: flow.cells, hits: flow.hits, blocks: cells.length / SITE_BLOCK };
   }
 
   /**
@@ -742,6 +774,13 @@ export class Simulation implements Sim {
         uniforms: each(() =>
           this.device.createBuffer({ size: FLOW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
         ),
+        ports: this.device.createBuffer({
+          size: FLOW_SITES * strains * 8,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        }),
+        cells: this.device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }),
+        hits: this.device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }),
+        cellsCurrent: false,
       };
       const enc = this.device.createCommandEncoder();
       this.clearFlow(enc, this.flow);
@@ -757,6 +796,8 @@ export class Simulation implements Sim {
     };
     for (const view of flow.memoryViews.flat()) clear(view, [FLOW.fresh, 0, 0, 0]);
     for (const view of flow.pressureViews.flat()) clear(view, [0, 0, 0, 0]);
+    // No site has a port yet, nor had one in a step before.
+    this.device.queue.writeBuffer(flow.ports, 0, new Int32Array(flow.ports.size / 4).fill(-1));
     this.flowM = 0;
     this.flowP = 0;
   }
@@ -765,7 +806,7 @@ export class Simulation implements Sim {
   private dropFlow() {
     if (!this.flow) return;
     for (const t of [...this.flow.memory, ...this.flow.pressure]) t.destroy();
-    for (const b of this.flow.uniforms) b.destroy();
+    for (const b of [...this.flow.uniforms, this.flow.ports, this.flow.cells, this.flow.hits]) b.destroy();
     this.flow = undefined;
     for (const key of [...this.bindCache.keys()]) if (key.includes('flow')) this.bindCache.delete(key);
     this.forgetTubes();
@@ -1294,6 +1335,29 @@ export class Simulation implements Sim {
     const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
+    // The port of every site and strain, from the memory before the step (flow.wgsl `blocks` and `sites`): one
+    // invocation per block of the list of cells and strain, then a workgroup per site and strain. The block of the
+    // first strain has the sites of all.
+    const { cells, hits, blocks } = this.siteCells(flow);
+    const uniform = at(flow.uniforms, 0);
+    pass.setPipeline(passes.blocks);
+    pass.setBindGroup(
+      0,
+      this.bind(`flowSitesBlocks${m}`, passes.blocks, [
+        ...[this.params, uniform, null, this.env, null, null, null, null, null, cells],
+        ...[null, at(flow.memoryArrays, m), hits],
+      ]),
+    );
+    pass.dispatchWorkgroups(Math.ceil(blocks / 64), flow.strains);
+    pass.setPipeline(passes.sites);
+    pass.setBindGroup(
+      0,
+      this.bind('flowSitesPorts', passes.sites, [
+        ...[null, uniform, null, null, null, null, null, null, null, cells],
+        ...[flow.ports, null, hits],
+      ]),
+    );
+    pass.dispatchWorkgroups(FLOW_SITES, flow.strains);
     for (let strain = 0; strain < flow.strains; strain++) {
       const [uniform, memory, pressure] = [
         at(flow.uniforms, strain),
@@ -1312,6 +1376,10 @@ export class Simulation implements Sim {
           memory[m],
           memory[next],
           at(pressure, p),
+          null,
+          null,
+          null,
+          flow.ports,
         ]),
       );
       pass.dispatchWorkgroups(...groups);
@@ -1332,6 +1400,8 @@ export class Simulation implements Sim {
             at(pressure, p),
             at(pressure, before),
             at(pressure, out),
+            null,
+            flow.ports,
           ]),
         );
         pass.dispatchWorkgroups(...groups);
@@ -1611,6 +1681,8 @@ interface Flowing extends Steering {
 
 /** The passes of the flow in the tubes (flow.wgsl): the update, and the pressure iteration by RECENTRE (0, 1, 2). */
 interface FlowKernels {
+  blocks: GPUComputePipeline;
+  sites: GPUComputePipeline;
   update: GPUComputePipeline;
   pressure: GPUComputePipeline[];
 }
@@ -1703,6 +1775,8 @@ class Kernels {
       const pipeline = (entryPoint: string, constants: Record<string, number> = {}) =>
         this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
       this.flowPipelines = {
+        blocks: pipeline('blocks'),
+        sites: pipeline('sites'),
         update: pipeline('update'),
         pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
       };

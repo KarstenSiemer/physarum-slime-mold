@@ -309,6 +309,19 @@ function engineTokyoEnd(files: string[]) {
         }`,
       );
     }
+    // The network as a whole late in the run: every sample from step 16,000 on, so that one step weighs less
+    // (ADR 0029, amendment 2026-11-14 (2)).
+    const late = [...seeds.values()].flatMap((s) =>
+      [16000, 24000, 32000, 40000, 48000].map((t) => s.get(t)).filter((x) => x !== undefined),
+    );
+    if (late.length > 1) {
+      const of = (key: 'tl' | 'md' | 'ft') => late.map((x) => x[key]);
+      console.log(
+        `   steps 16000 to 48000: ${late.length} samples | TL ${mean(of('tl')).toFixed(2)} ± ${deviation(
+          of('tl'),
+        ).toFixed(2)} | MD ${mean(of('md')).toFixed(2)} | FT ${mean(of('ft')).toFixed(2)}`,
+      );
+    }
   }
 }
 

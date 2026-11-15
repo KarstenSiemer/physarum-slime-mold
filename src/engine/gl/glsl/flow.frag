@@ -1,5 +1,8 @@
 // Flow in the tubes (ADR 0029), after common.glsl. Mirrors ../../shaders/flow.wgsl, where the model is described:
 // PASS 0 is `update` (the memory of each cell), PASS 1 is `pressure` (one iteration of the pressure of the four lanes).
+// The port of every site and strain takes three passes (`blocks` and `sites` in flow.wgsl): PASS 2 is `blocks`, a texel
+// per block of the list of cells and strain; PASS 3 looks at the blocks of a site, a texel per site, strain and lane
+// of 64; PASS 4 takes the least of the lanes, a texel per site and strain.
 
 layout(std140) uniform Flow {
   vec4 a; // I0, gamma, rate, recover
@@ -7,23 +10,53 @@ layout(std140) uniform Flow {
   vec4 c; // weight, body rate, body low, fresh memory
   vec4 d; // memory floor, trail low, 1 / (trail full − trail low), site count
   vec4 e; // death, half², birth, birth from (tools.glsl, agents.frag)
-  vec4 f; // reference cell x, y, the strain of the pass, unused
+  vec4 f; // reference cell x, y, the strain of the pass, blocks of `cells`
   vec4 g; // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
-  vec4 sites[64]; // cell x, cell y, unused, unused
+  vec4 sites[64]; // its first cell x, y; its cells in `cells`: from z, w of them (sites.ts FlowSites)
 } U;
 
 uniform sampler2D env;
 uniform sampler2D memory; // x flow memory, y tube body, z conductivity, w roles of a site that gives or takes
-uniform sampler2D pressureIn;
 #if PASS == 0
+uniform sampler2D pressureIn;
 uniform sampler2D trail;
-#else
+#elif PASS == 1
+uniform sampler2D pressureIn;
 uniform sampler2D pressureBefore;
 // 1 and 2: the first two iterations of a step take the pressure of the reference cell off (RECENTRE in flow.wgsl).
 uniform int recentre;
+#else
+// The cells of every site, as indices y · W + x, W per row of the texture, and −1 for no cell (siteCells in
+// flow.wgsl).
+uniform sampler2D cells;
+// Per block of `cells` and strain (blockHits in flow.wgsl): x the first entry of the block that covers its site,
+// counted in the block, or −1. Block b of strain s is texel (b % W, s · hitRows + b / W).
+uniform sampler2D hits;
+uniform int hitRows;
+#endif
+#if PASS == 2
+// The memory of strains B, C and D (`memory` is that of strain A); a scene with fewer strains binds strain A in their
+// place, and no texel reads it there.
+uniform sampler2D memory1;
+uniform sampler2D memory2;
+uniform sampler2D memory3;
+#elif PASS == 4
+// The hit of each lane of PASS 3: texel (site, strain · 64 + lane), x the block, y the entry in it; −1 for none.
+uniform sampler2D lanes;
+// The ports of the step before (`ports` in flow.wgsl): texel (site, strain), x the port, y the port before it.
+uniform sampler2D portsIn;
+#endif
+#if PASS < 2
+// The ports of this step: texel (site, strain), x the port of the site, y its port in the step before; −1 for none.
+uniform sampler2D ports;
 #endif
 
 out vec4 result;
+
+#if PASS < 2
+// The port of site i for the strain of the pass in this step, or −1 (port in flow.wgsl).
+int port(int i) { return int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).x); }
+#endif
 
 // The cell at c as coordinates inside the grid if it is open: inside the arena and no wall. Else (−1, −1).
 ivec2 openXY(ivec2 c) {
@@ -46,13 +79,11 @@ float conductivity(ivec2 q) {
   return texelFetch(memory, q, 0).z;
 }
 
-// Whether the plasmodium covers site i: its cell held food and a tube in the step before (covered in flow.wgsl).
-bool covered(int i) {
-  ivec2 s = ivec2(U.sites[i].xy);
-  return texelFetch(env, s, 0).g > 0.0 && texelFetch(memory, s, 0).y >= U.c.z;
-}
+// Whether the plasmodium covers site i: a cell of the site held food and a tube in the step before (covered in
+// flow.wgsl).
+bool covered(int i) { return port(i) >= 0; }
 
-// The roles of the food site whose cell is p, as a number whose digit k in base 3 is its role in lane k: 1
+// The roles of the food site whose port is p, as a number whose digit k in base 3 is its role in lane k: 1
 // gives, 2 takes, 0 neither (roleCode in flow.wgsl; flowRoles() in ../../flow.ts has the rule and the reasons).
 float roleCode(ivec2 p) {
   int n = int(U.d.w);
@@ -60,12 +91,13 @@ float roleCode(ivec2 p) {
   int count = 0;
   int first = -1;
   int mine = -1;
+  int c = p.y * int(W()) + p.x;
   for (int i = 0; i < 64; i++) {
     cover[i] = i < n && covered(i);
     if (cover[i]) {
       count++;
       if (first < 0) first = i;
-      if (ivec2(U.sites[i].xy) == p) mine = i;
+      if (port(i) == c) mine = i;
     }
   }
   if (mine < 0 || count < 2) return 0.0;
@@ -96,13 +128,13 @@ float roleCode(ivec2 p) {
   return code;
 }
 
-// Whether a flux runs between foods: at least two food sites give or take (fed in flow.wgsl).
+// Whether a flux runs between foods: at least two food sites gave or took in the step before, at their ports of that
+// step (fed in flow.wgsl).
 bool fed() {
-  int n = int(U.d.w);
   int found = 0;
   for (int i = 0; i < 64; i++) {
-    if (i >= n) break;
-    if (texelFetch(memory, ivec2(U.sites[i].xy), 0).w != 0.0) {
+    int c = int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).y);
+    if (c >= 0 && texelFetch(memory, cellCoord(c), 0).w != 0.0) {
       found++;
       if (found == 2) return true;
     }
@@ -153,12 +185,12 @@ void main() {
   bool food = texelFetch(env, p, 0).g > 0.0;
   float g = 0.0;
   if (body >= U.c.z) g = body * (food ? U.b.y : U.b.x + d);
-  // The roles, if this cell is the cell of a food site that the plasmodium covers (roleCode()).
+  // The roles, if this cell is the port of a food site that the plasmodium covers (roleCode()).
   float code = 0.0;
   if (food && m.y >= U.c.z) code = roleCode(p);
   result = vec4(d, body, g, code);
 }
-#else
+#elif PASS == 1
 // The edge for the pressure iteration: both cells with the ghost conductivity; 0 without a neighbour.
 float ghostEdge(float a, ivec2 q) {
   if (q.x < 0) return 0.0;
@@ -172,7 +204,7 @@ vec4 roleSigns(float code) {
   return vec4(equal(d, uvec4(1u))) - vec4(equal(d, uvec4(2u)));
 }
 
-// The share of its flux that the site at this cell gives or takes, per lane: all of it while its pressure lies within
+// The share of its flux that the site at this port gives or takes, per lane: all of it while its pressure lies within
 // the limit U.g.y of the mean pressure of the sites that give or take in at least one lane, and none beyond (headroom
 // in flow.wgsl).
 vec4 headroom(vec4 pc, vec4 signs) {
@@ -181,7 +213,9 @@ vec4 headroom(vec4 pc, vec4 signs) {
   float count = 0.0;
   for (int i = 0; i < 64; i++) {
     if (i >= n) break;
-    ivec2 s = ivec2(U.sites[i].xy);
+    int c = port(i);
+    if (c < 0) continue;
+    ivec2 s = cellCoord(c);
     if (texelFetch(memory, s, 0).w != 0.0) {
       level += texelFetch(pressureIn, s, 0);
       count += 1.0;
@@ -191,13 +225,15 @@ vec4 headroom(vec4 pc, vec4 signs) {
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4(0.0), vec4(1.0));
 }
 
-// The cell whose pressure the first two iterations of a step take off: the cell of the first site that gives or
+// The cell whose pressure the first two iterations of a step take off: the port of the first site that gives or
 // takes, else the cell of the uniform block (referenceCell in flow.wgsl).
 ivec2 referenceCell() {
   int n = int(U.d.w);
   for (int i = 0; i < 64; i++) {
     if (i >= n) break;
-    ivec2 s = ivec2(U.sites[i].xy);
+    int c = port(i);
+    if (c < 0) continue;
+    ivec2 s = cellCoord(c);
     if (texelFetch(memory, s, 0).w != 0.0) return s;
   }
   return ivec2(U.f.xy);
@@ -243,5 +279,77 @@ void main() {
   }
   if (recentre == 1) next -= texelFetch(pressureIn, referenceCell(), 0);
   result = next;
+}
+#elif PASS == 2
+// The memory of strain s at cell q.
+vec4 memoryOf(int s, ivec2 q) {
+  if (s == 1) return texelFetch(memory1, q, 0);
+  if (s == 2) return texelFetch(memory2, q, 0);
+  if (s == 3) return texelFetch(memory3, q, 0);
+  return texelFetch(memory, q, 0);
+}
+
+// The first entry of block b of the list of cells whose cell is open and holds food and a tube of strain s in the memory
+// before the step, counted in the block, or −1 (blocks in flow.wgsl).
+void main() {
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  int w = W();
+  int s = at.y / hitRows;
+  int b = (at.y % hitRows) * w + at.x;
+  float hit = -1.0;
+  if (b < int(U.f.w)) {
+    for (int o = 0; o < 64; o++) {
+      int k = b * 64 + o;
+      int c = int(texelFetch(cells, ivec2(k % w, k / w), 0).r);
+      if (c < 0) break;
+      ivec2 q = cellCoord(c);
+      vec4 e = texelFetch(env, q, 0);
+      if (!isWall(e) && e.g > 0.0 && memoryOf(s, q).y >= U.c.z) {
+        hit = float(o);
+        break;
+      }
+    }
+  }
+  result = vec4(hit, 0.0, 0.0, 0.0);
+}
+#elif PASS == 3
+// Lane l of site i and strain s: every 64th block of the site from the block l on, up to the first block with a hit
+// (sites in flow.wgsl). x the block, y the entry in it, or −1.
+void main() {
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  int i = at.x;
+  int s = at.y / 64;
+  int lane = at.y % 64;
+  int w = W();
+  vec4 found = vec4(-1.0, -1.0, 0.0, 0.0);
+  if (i < int(U.d.w)) {
+    int first = int(U.sites[i].z) / 64;
+    int end = (int(U.sites[i].z) + int(U.sites[i].w) + 63) / 64;
+    for (int b = first + lane; b < end; b += 64) {
+      float hit = texelFetch(hits, ivec2(b % w, s * hitRows + b / w), 0).x;
+      if (hit >= 0.0) {
+        found = vec4(float(b), hit, 0.0, 0.0);
+        break;
+      }
+    }
+  }
+  result = found;
+}
+#else
+// The port of site i (x of the texel) for strain s (y of the texel): the cell of the least entry of the lanes of
+// PASS 3, else −1; the port of the step before moves to y (sites in flow.wgsl).
+void main() {
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  int least = -1;
+  for (int lane = 0; lane < 64; lane++) {
+    vec4 hit = texelFetch(lanes, ivec2(at.x, at.y * 64 + lane), 0);
+    if (hit.x < 0.0) continue;
+    int j = int(hit.x) * 64 + int(hit.y);
+    if (least < 0 || j < least) least = j;
+  }
+  float found = -1.0;
+  int w = W();
+  if (least >= 0) found = texelFetch(cells, ivec2(least % w, least / w), 0).r;
+  result = vec4(found, texelFetch(portsIn, at, 0).x, 0.0, 0.0);
 }
 #endif

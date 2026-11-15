@@ -10,6 +10,7 @@ import {
   fitResolution,
   FLOW_BYTES_PER_CELL,
   flowBytesPerCell,
+  SITE_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
   tubesBytesPerCell,
@@ -128,9 +129,11 @@ describe('the flow in the tubes', () => {
   it('counts the textures of every strain, and none while the flow is off or the model is Jones’', () => {
     const strains = (n: number) => Array.from({ length: n }, (_, i) => defaultStrain(i));
     const on = { ...defaultSettings(), model: 'extended' as const, flow: true };
-    expect(flowBytesPerCell({ ...on, strains: strains(1) })).toBe(80);
-    expect(flowBytesPerCell({ ...on, strains: strains(3) })).toBe(240);
-    expect(flowBytesPerCell({ ...on, strains: strains(4) })).toBe(320);
+    // The cells of the food sites once for all strains (ADR 0029, decision 17).
+    expect(SITE_BYTES_PER_CELL).toBe(4);
+    expect(flowBytesPerCell({ ...on, strains: strains(1) })).toBe(84);
+    expect(flowBytesPerCell({ ...on, strains: strains(3) })).toBe(244);
+    expect(flowBytesPerCell({ ...on, strains: strains(4) })).toBe(324);
     expect(flowBytesPerCell({ ...on, flow: false, strains: strains(3) })).toBe(0);
     expect(flowBytesPerCell({ ...on, model: 'jones', strains: strains(1) })).toBe(0);
   });
