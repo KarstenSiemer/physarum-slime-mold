@@ -65,6 +65,14 @@ export const TUBE_REACH = TUBES.radius + TUBES.edge / 2;
 export const TUBE_WINDOW = Math.ceil(TUBE_REACH) - 1;
 
 /**
+ * The cells per side of a tile of the picture pass: a workgroup of tubes.wgsl, which loads the window of its tile
+ * once, and a texel of the map of the tiles of tubes.frag. A tile whose window holds no disc keeps the trail alone,
+ * and one without a cell of a wall needs no wall test (ADR 0034, amendment of 2026-11-15). Display only: the picture
+ * is the same as without the tiles.
+ */
+export const TUBE_TILE = 8;
+
+/**
  * Whether the view draws the picture of the tubes: the setting is on, the flow runs, and the style draws the trail.
  * The agents style draws the agents, and it takes the strain of an agent that stayed from the trail of its cell.
  */

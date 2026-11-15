@@ -170,6 +170,11 @@ export interface Backend<S extends Sim = Sim> {
   readonly bytesPerAgent: number;
   /** More GPU bytes per grid cell while covered food is on (sizing.ts COVERED_BYTES_PER_CELL_HALF_FLOAT). */
   readonly coveredBytesPerCell: number;
+  /**
+   * More GPU bytes per grid cell while the flow is on, for the map of the tiles of the picture of the tubes that this
+   * backend holds (sizing.ts TUBE_MAP_BYTES_PER_CELL_GL); 0 on a backend that holds none.
+   */
+  readonly tubeMapBytesPerCell: number;
   readonly supportsCollisions: boolean;
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;

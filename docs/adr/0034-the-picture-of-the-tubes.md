@@ -482,4 +482,183 @@ cost grows with the cells and the strains: the start scene has 5.6 times the cel
 
 Not decided yet (`TODO.md`). The options to measure: draw the picture of a state only every few frames while the
 simulation runs; skip the tiles that hold no tube of any strain; read fewer cells for the disc of a tube. The switch
-"Draw the tubes by their flow" turns the picture off today.
+"Draw the tubes by their flow" turns the picture off today. Decided on 2026-11-15: the amendment below.
+
+## Amendment 2026-11-15: the picture tile by tile
+
+### Context
+
+The amendment above leaves open how to make the picture cheaper on a large grid. The coordinator asked for it on
+2026-11-15 under the owner's delegation, with one condition: the picture must stay the same. Drawing the picture only
+every few frames changes what the user sees, so it was the last option, for the case that nothing else helps.
+
+Where the time goes. `research/flow/engine/picture-passes.gpu.test.ts` times the three passes alone, on the state of
+the start scene after 1,500 steps with the flow on (three strains on 1,536 × 960 cells): 13.3 to 17.0 ms per picture
+on WebGPU and 19.7 to 20.3 ms on WebGL2 in the first runs of this work. Builds with one part of a pass left out, one at
+a time, split it (WebGPU):
+
+- `picture` took 9.9 to 12.5 ms. 9 ms of it was the wall test: a cell looks for a wall on the line to each disc that
+  reaches it, up to 45 lines, in a scene without a wall.
+- `roots` took 1.6 to 2.7 ms, of which 0.4 ms for the look at the walls of the 3 × 3 cells, and `stream` 1.8 to
+  2.0 ms.
+
+How the tubes lie, in tiles of 8 × 8 cells and their windows (the tile and the 3 cells around it, from which a disc
+can reach a cell of the tile), on WebGPU: in the start scene 97.7 % of the cells hold a disc of a strain. Of its
+23,040 tiles, 18 have no disc in their window, and 21,931 have one that reaches 3 cells, the whole window. On the Tokyo
+rail network (512 × 512 cells, one strain) 10.7 % of the cells hold a disc: 3,079 of its 4,096 tiles have none in
+their window, and 550 have one that reaches 3 cells. WebGL2 runs a state of its own, with about the same shares.
+
+### Decision
+
+Under the owner's delegation of 2026-11-12, by the coordinator's choice of 2026-11-15.
+
+1. **The picture works tile by tile** (`TUBE_TILE`, 8 cells). Two facts of the window of a tile decide what its
+   cells must do:
+   - Without a disc in the window, no disc reaches a cell of the tile. Its cells keep a quarter of their trail
+     (`sheet`) without a look at the 45 cells around them.
+   - Without a cell of a wall in the window, no line between two of its cells meets one. Its cells skip the wall test.
+
+   A skip leaves out only what adds nothing, and the sums keep their order. So the picture is the same, to the bit:
+   the start scene and the Tokyo rail network gave the same picture, factors and stream as the build before on both
+   backends (the comparison under Results).
+
+2. **On WebGPU a workgroup is a tile.** It loads the window of its tile once into the memory of the workgroup, 14 × 14
+   cells: the factors, the trail of each disc, and the wall bit. Each read of a texture then serves up to 45 cells. Its
+   invocations mark the two facts with `atomicOr` before the barrier; no barrier comes after it, so each invocation
+   may read them and skip on its own.
+3. **On WebGL2 two small passes make a map of the tiles** between `roots` and `picture` (PASS 3 and PASS 4 of
+   `tubes.frag`): per tile the two facts, 4 B per tile. A fragment of `picture` reads the texel of its tile. The window
+   is a rectangle of cells, so PASS 3 looks along a row, per tile column and row of cells, at the 14 cells of the row
+   in the window, and PASS 4 looks at the 14 rows of the window of a tile. A map in one pass, with 14 × 14 reads per
+   tile one after the other, took more than it saves on the Tokyo rail network: in one page against the code before,
+   the least of 11 samples was 2.05 ms against 1.25 to 1.48 ms, and with the two passes 1.33 against 1.29 ms
+   (`logs/view/cost-2026-11-15.txt`). In the start scene the two maps cost the same. WebGL2 has no memory of a
+   workgroup, so a cell still reads the 45 cells around it when its tile has a disc.
+4. **On WebGL2 `roots` finds the 3 × 3 cells around a cell and their walls once for every strain**: 9 reads of the
+   wall bytes in place of up to 17, and one wrap for each cell in place of one per strain. In two rounds in turns it
+   took 0.9 and 1.1 ms less in the start scene. The same change on WebGPU took 0.2 and 0.4 ms more in two rounds, so
+   `tubes.wgsl` keeps its `roots`.
+5. **Measured and not taken:**
+   - A tighter window where the discs of a tile are small (option 3 of the amendment above): 95 % of the tiles of the
+     start scene need the whole window, and most tiles of the Tokyo scene skip anyway.
+   - `roots` from the memory of a workgroup on WebGPU: 1.65 against 1.62 ms, within the spread of a run. `roots` and
+     `stream` each read the memory of the flow of the three strains, 71 MB per picture, and `stream` reads their
+     pressure too, 71 MB more. At the 150 GB/s of the M3 Pro that alone takes 0.6 and 1.1 ms with what they write,
+     a third to a half of their time, and a workgroup memory does not make it less.
+   - A picture every few frames: not needed.
+6. **The memory**: on WebGL2 the map of the tiles needs 4 B per 64 cells and its rows 4 B per 8 cells, 0.5625 B per
+   cell. The WebGL2 backend counts them while the flow is on (`Backend.tubeMapBytesPerCell`,
+   `TUBE_MAP_BYTES_PER_CELL_GL` in `sizing.ts`); WebGPU and the CPU backend of the tests count none, as WebGPU holds
+   the window of a tile in the memory of a workgroup. `TUBES_BYTES_PER_CELL` stays 48, the three textures of both
+   backends. The first version counted the 0.5625 B on every backend; the review of 2026-11-15 asked for the count of
+   what each backend holds, as `coveredBytesPerCell` counts the target of covered food only where it is made.
+
+### Results
+
+All numbers on the M3 Pro. The old build is `main` at `1cd1c56`, the new build this change. Until about 03:50 up to
+four runs of other sessions used the GPU at the same time, and they slowed both builds by up to two times; the load
+average beside a run shows only a part of that. So the old build and the new one ran in turns, and the ratio of the two
+in one page (`picture-ab.gpu.test.ts`) is the number that holds best. `logs/view/cost-2026-11-15.txt` has every run.
+The runs came before `main` went into this branch with four pull requests (#71, #73, #74, #75: the food sites and the
+radius of the solver of ADR 0029, the reach of the scent of ADR 0036, an agent under a painted wall of ADR 0038); none
+of them changes the passes of the picture, and the tests and the wrong rules below ran again after them.
+
+**The same picture.** The picture, the factors and the stream of the new build equal those of the old build in every
+value, on both backends: 0 of 5,898,240 values of a field differ in the start scene, and 0 of 1,048,576 on the Tokyo
+rail network. That held in the first round of the passes alone, where the new build compared its fields with the files
+of the old one and the digests of what the passes read were the same, and in each of the four runs in one page.
+
+**The passes alone**, ms per picture (`picture-passes.gpu.test.ts`, the median of 11 samples of 50 pictures in each
+run, four rounds in turns). The WebGPU rows ran with `97a7078`, whose WGSL is that of this change; the WebGL2 rows ran
+again with the final map (decision 3):
+
+| Backend | Scene       | Old, rounds 1 to 4         | Median | New, rounds 1 to 4      | Median | Load       |
+| ------- | ----------- | -------------------------- | ------ | ----------------------- | ------ | ---------- |
+| WebGPU  | Start scene | 13.31, 28.53, 14.92, 19.12 | 17.02  | 19.96, 8.65, 7.78, 8.12 | 8.39   | 3.1 to 12  |
+| WebGPU  | Tokyo       | 0.91, 3.01, 1.26, 1.62     | 1.44   | 1.12, 1.18, 0.98, 0.90  | 1.05   | 3.1 to 12  |
+| WebGL2  | Start scene | 20.53, 16.61, 16.54, 16.46 | 16.57  | 7.33, 7.71, 7.74, 7.35  | 7.53   | 3.1 to 4.9 |
+| WebGL2  | Tokyo       | 1.29, 0.69, 0.74, 0.67     | 0.72   | 0.50, 0.55, 0.57, 0.54  | 0.54   | 3.1 to 4.9 |
+
+The first WebGPU round of the new build and the second of the old one ran while four runs of other sessions used the
+GPU (load 6 to 12).
+
+**In one page**, the old passes and the new ones in turns on one state, ms per picture (the median of 11 samples each).
+Runs 1 and 2 had the map of WebGL2 in one pass; runs 3 and 4 are the final code:
+
+| Run | Load       | WebGPU, start scene | WebGPU, Tokyo | WebGL2, start scene | WebGL2, Tokyo |
+| --- | ---------- | ------------------- | ------------- | ------------------- | ------------- |
+| 1   | 3.5 to 3.9 | 16.93 → 9.16        | 1.44 → 1.22   | 21.75 → 13.70       | 1.40 → 2.22   |
+| 2   | 3.9 to 2.9 | 14.78 → 7.44        | 1.32 → 0.96   | 21.61 → 14.22       | 2.84 → 3.03   |
+| 3   | 4.7 to 4.1 | 10.08 → 4.57        | 0.50 → 0.30   | 15.52 → 7.42        | 0.69 → 0.52   |
+| 4   | 4.1 to 4.2 | 9.99 → 4.59         | 0.47 → 0.28   | 15.98 → 7.54        | 0.68 → 0.54   |
+
+The runs of the other sessions had ended before run 3: the old passes then took 0.6 to 0.75 of their time before. In
+the start scene the new passes take 0.45 to 0.54 of the time of the old ones on WebGPU and 0.47 to 0.48 on WebGL2; on
+the Tokyo rail network 0.6 to 0.85 and 0.75 to 0.79.
+
+**A frame**, as the check of ADR 0028 of 2026-11-14 measured it (`picture.gpu.test.ts` on a canvas of 2560 × 1600
+pixels: 1,500 steps, then the median of 11 samples of 50 frames, each one step and one drawn picture, in the glow
+style, with the picture of the tubes off and on in turns in the same run). ms per frame, off / on, and the cost of the
+picture, on less off:
+
+| Backend | Scene       | Round | Old: off / on   | Old: cost | New: off / on   | New: cost |
+| ------- | ----------- | ----- | --------------- | --------- | --------------- | --------- |
+| WebGPU  | Start scene | 1     | 60.66 / 70.13   | 9.48      | 55.01 / 60.33   | 5.31      |
+| WebGPU  | Start scene | 2     | 105.41 / 123.43 | 18.02     | 144.61 / 153.86 | 9.25      |
+| WebGPU  | Tokyo       | 1     | 4.91 / 5.63     | 0.72      | 3.97 / 4.39     | 0.42      |
+| WebGPU  | Tokyo       | 2     | 8.22 / 9.44     | 1.22      | 32.52 / 36.88   | 4.36      |
+| WebGL2  | Start scene | 1     | 67.99 / 86.00   | 18.02     | 65.84 / 74.08   | 8.23      |
+| WebGL2  | Start scene | 2     | 235.56 / 270.96 | 35.40     | 250.93 / 261.55 | 10.61     |
+| WebGL2  | Tokyo       | 1     | 6.23 / 7.04     | 0.81      | 6.30 / 6.88     | 0.58      |
+| WebGL2  | Tokyo       | 2     | 24.89 / 27.55   | 2.66      | 23.78 / 25.77   | 2.00      |
+
+Round 1 ran from 04:04 to 04:16 with a load of 3.6 to 4.2, while no other session used the GPU. From 04:27 on, three
+runs of another session used it, and the frames of round 2 took 1.7 to 8 times as long. Rounds 3 and 4 did not run, and
+a frame in one page (`picture-ab.gpu.test.ts` with `VITE_FRAME=1`) ran once, at 04:50, beside four such runs: the old
+and the new build took 151 and 144 ms per frame in the start scene on WebGPU, 285 and 263 ms on WebGL2, and the same
+on the Tokyo rail network. A frame then waited mostly for the work of the other session. So round 1 is the number of
+a frame here; the passes alone in one page above are the better measure of what the change saves.
+
+### Tests
+
+- `src/engine/tubes.gpu.test.ts`, on both backends: a grid of 45 × 37 cells, no whole number of tiles, in a box, on
+  the periodic grid and in a dish, with eight short tubes of two strains and two walls one cell thick, each on the
+  first column or row of a tile. The factors and the picture follow the CPU reference (`tubes-reference.ts`, the rule
+  before this change). The test checks that the case is not empty: 49 to 136 discs reach a cell from another tile
+  into a tile without a disc of its own, 32 discs stop at a wall of another tile, 6 to 16 tiles have no disc in their
+  window, and on the periodic grid 56 discs reach a cell across the edge into a tile whose window holds no disc
+  inside the grid.
+- `research/flow/engine/mutate.ts` has 20 more wrong rules (V74 to V93), and ten wrong rules got the text of the new
+  code (V13, V15, V18, V27, V31 to V35, V37). Each of the 93 wrong rules of the picture fails at least one test
+  (`logs/view/mutations.txt`). The new ones on WebGPU: a tile that has a disc only if one of its own cells holds one,
+  or a cell of a wall only if one of its own cells is one; a window that is not wrapped but held inside the grid; a
+  window from the corner of the tile, not 3 cells before it; and no trail of the discs in the window. On WebGL2: the
+  same for the rows of the map (PASS 3, along a row) and for the map (PASS 4, along a column); a cell that reads the
+  map at the tile beside its own; a map and rows without the last tile of a row and of a column that is not whole;
+  rows only as many as the rows of tiles; and rows or a map that are not made again for a new state. For the memory:
+  WebGL2 that counts no map, WebGPU that counts one, and a fit of the grid without the map of the backend. Only the
+  test above catches the map without its last tiles, and the map that is not wrapped from row to row.
+- The test on WebGL2 in which a target of the picture cannot be made, and the simulation must free the targets made
+  before it, now also lets the fourth and the fifth target fail: the rows of the map and the map.
+- The memory (decision 6): `sizing.test.ts` holds the 48 B of both backends and the 0.5625 B of WebGL2;
+  `engine.test.ts` fits a lattice with a backend whose map takes 0 and 64 B per cell, so that a lattice that fits
+  without the map does not fit with it, and fits again without the flow; and `tubes.gpu.test.ts` checks that WebGL2
+  counts its map and WebGPU none.
+- A test cannot see a skip: a picture is the same with it and without it. The time shows it (the tables above).
+
+### Consequences
+
+- The picture is the same as before, to the bit, on both backends. No result of a simulation changes.
+- In the start scene with the flow the passes of the picture take about half their time before: in one page 0.45 to
+  0.54 of it on WebGPU and 0.47 on WebGL2. In the cleanest round of a frame the picture cost 5.3 in place of 9.5 ms of
+  a frame on WebGPU and 8.2 in place of 18.0 ms on WebGL2, and on the Tokyo rail network 0.42 in place of 0.72 ms and
+  0.58 in place of 0.81 ms.
+- Most of what is left on WebGPU is `roots` and `stream`, which read the memory of the flow of each strain. So the
+  cost still grows with the cells and the strains. One pass for both would read that memory once; it is not built
+  and not measured.
+- On WebGL2 the picture has two passes more and two textures more, 0.5625 B per cell, which the fit of the grid counts
+  there.
+- A tighter window and a picture only every few frames are not built; neither is needed now.
+- A scene with walls in most tiles keeps the wall test, as before: the skip of the wall test helps only where a tile
+  and its window hold no wall. The measured scenes are the start scene, which has no wall, and the Tokyo rail network,
+  whose coast is a wall.

@@ -297,7 +297,7 @@ export class Engine {
   fit(s: Settings): Settings {
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const memory = (navigator as { deviceMemory?: number }).deviceMemory;
-    const { maxAgents, maxBufferBytes, maxGridSide, coveredBytesPerCell } = this.backend;
+    const { maxAgents, maxBufferBytes, maxGridSide, coveredBytesPerCell, tubeMapBytesPerCell } = this.backend;
     const collisions = s.collisions && this.backend.supportsCollisions;
     // Covered food needs more memory only on some backends, and only while it is on; growth only while it is on.
     const growth = growthOn({ ...s, collisions });
@@ -307,7 +307,7 @@ export class Engine {
       (s.coveredFood ? coveredBytesPerCell : 0) +
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
       flowBytesPerCell(s) +
-      tubesBytesPerCell(s) +
+      tubesBytesPerCell(s, tubeMapBytesPerCell) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);

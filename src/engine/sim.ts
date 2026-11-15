@@ -27,7 +27,7 @@ import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlan, viewTrailOn, type Diffuse } from './sizing';
-import { STREAM, TUBES, tubesShown } from './tubes';
+import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import { EnvKind, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
 const AGENT_BYTES = 16;
@@ -45,8 +45,6 @@ const SORT_INTERVAL = 32;
 const SORT_TILE = 8;
 /** Cells per side of a workgroup of the flow passes (flow.wgsl). */
 const FLOW_GROUP = 8;
-/** Cells per side of a workgroup of the passes of the picture of the tubes (tubes.wgsl). */
-const TUBE_GROUP = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -427,7 +425,7 @@ export class Simulation implements Sim {
     const from = trail === this.trail[0] ? 0 : trail === this.trail[1] ? 1 : 2;
     const trailView = from === 2 ? this.ensureViewThird().trailView : this.trailViews[from];
     const k = this.kernels.tubes();
-    const groups = [Math.ceil(this.width / TUBE_GROUP), Math.ceil(this.height / TUBE_GROUP)] as const;
+    const groups = [Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE)] as const;
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(k.roots);
@@ -1807,6 +1805,8 @@ class Kernels {
         SPAN: TUBES.span,
         BODY_LOW: FLOW.bodyLow,
         FAST: STREAM.fast,
+        TILE: TUBE_TILE,
+        WINDOW: TUBE_WINDOW,
       };
       // A pipeline takes only the constants that its entry point uses.
       const pipeline = (entryPoint: string, names: (keyof typeof constants)[]) =>
@@ -1815,9 +1815,9 @@ class Kernels {
           compute: { module, entryPoint, constants: Object.fromEntries(names.map((n) => [n, constants[n]])) },
         });
       this.tubePipelines = {
-        roots: pipeline('roots', ['SPAN', 'BODY_LOW']),
-        picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET']),
-        stream: pipeline('stream', ['BODY_LOW', 'FAST']),
+        roots: pipeline('roots', ['SPAN', 'BODY_LOW', 'TILE']),
+        picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET', 'TILE', 'WINDOW']),
+        stream: pipeline('stream', ['BODY_LOW', 'FAST', 'TILE']),
       };
     }
     return this.tubePipelines;
