@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
 import {
+  BAUMGARTEN_PDF,
   GROUPS,
   JONES_PDF,
   latticeLostNotice,
@@ -48,8 +49,10 @@ describe('presets', () => {
       const s = p.settings();
       const jones = fromJones.includes(p.id);
       expect(p.source.startsWith('Jones'), p.id).toBe(jones);
-      expect(s.model, p.id).toBe(jones ? 'jones' : 'extended');
-      if (jones) expect(jonesFits(s), p.id).toBe(true);
+      // The Coarsening network is the Jones model of Baumgarten, Jones and Hauser 2015 (ADR 0045).
+      const jonesModel = jones || p.id === 'coarsening';
+      expect(s.model, p.id).toBe(jonesModel ? 'jones' : 'extended');
+      if (jonesModel) expect(jonesFits(s), p.id).toBe(true);
       // No scene of Jones paints light: his papers have no light that releases a repellent.
       if (jones) expect(p.env?.some((e) => e.kind === 'light') ?? false, p.id).toBe(false);
       expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, 0.1]);
@@ -95,6 +98,7 @@ describe('presets', () => {
       'light',
       'maze',
       'foraging-maze',
+      'coarsening',
       'tokyo',
       'food-ring',
       'rival-networks',
@@ -133,6 +137,29 @@ describe('presets', () => {
     for (const id of ['network', 'hexagons', 'spots', 'stripes', 'wound']) expect(settingsOf(id).boundary).toBe('wrap');
   });
 
+  it('keep the model of Baumgarten, Jones and Hauser 2015 (p. 1204 to 1206; ADR 0045)', () => {
+    const s = settingsOf('coarsening');
+    const a = s.strains[0];
+    expect(sourceKind(preset('coarsening'))).toBe('coarsening');
+    expect([s.model, s.collisions, s.boundary, s.stepOrder, s.diffusion]).toEqual([
+      'jones',
+      true,
+      'dish',
+      'sense-first',
+      1,
+    ]);
+    // SA = RA = 67.5°, SO 5 (p. 1204, Fig. 2), a step of 1 cell, 5 units per move, the mean times 0.9 (p. 1205).
+    expect([a?.sensorAngle, a?.rotationAngle, a?.sensorOffset]).toEqual([67.5, 67.5, 5]);
+    expect([a?.stepSize, a?.deposit, a?.decay, a?.randomTurn, a?.attraction[0]]).toEqual([1, 5, 0.1, 0, 1]);
+    // 25,000 agents on 400 × 400 cells (p. 1204), and room for a child in every cell: the paper has no limit.
+    expect(s.density * 400 * 400).toBe(25_000);
+    expect(s.capacity).toBe(1);
+    // Gf = Sf = 5, 0 to 10 agents in 9 × 9 cells divide, 0 to 22 in 5 × 5 survive (p. 1205 to 1206).
+    expect([s.growth, s.growthEvery, s.growthWindow, s.growthMin, s.growthMax]).toEqual([true, 5, 9, 0, 10]);
+    expect([s.shrinkEvery, s.shrinkWindow, s.shrinkMin, s.shrinkMax, s.shrink]).toEqual([5, 5, 0, 22, 0]);
+    expect(constrain(s)).toEqual(s);
+  });
+
   // Owner decision 2026-11-11 (ADR 0024 decision 3, ADR 0026): a scene of Jones' papers runs on the lattice of its
   // figure, the app's scenes on a grid shaped like the screen. The lattices are in the captions of Jones 2010. The map
   // of Tokyo runs on a square lattice: a grid shaped like a tall screen would turn it, and north stays up (ADR 0024
@@ -140,6 +167,7 @@ describe('presets', () => {
   it('run each scene of Jones on the lattice of its figure, and the app’s scenes on a grid shaped like the screen', () => {
     const lattices: Record<string, [number, number]> = {
       tokyo: [512, 512], // this app's choice (ADR 0029)
+      coarsening: [400, 400], // Baumgarten, Jones and Hauser 2015, p. 1204 (ADR 0045)
       'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
       'rival-networks': [384, 384],
       'tokyo-rivals': [512, 512], // the map of the Tokyo scene
@@ -370,9 +398,18 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
     expect(preset('tokyo').figure?.href).toBe('https://doi.org/10.1126/science.1177894');
   });
 
+  it('opens the free PDF of Baumgarten, Jones and Hauser 2015 at the page of Fig. 2 (ADR 0045)', () => {
+    // Page 1 of the PDF is page 1201 of the journal; Fig. 2 is on page 1207.
+    expect(preset('coarsening').figure).toEqual({
+      href: `${BAUMGARTEN_PDF}#page=7`,
+      label: 'Fig. 2',
+      note: 'page 7 of the free PDF',
+    });
+  });
+
   it('is absent where no figure shows the result of the scene', () => {
     const linked = PRESETS.filter((p) => p.figure).map((p) => p.id);
-    expect(linked).toHaveLength(10);
+    expect(linked).toHaveLength(11);
     for (const p of PRESETS)
       if (sourceKind(p) === 'app' || sourceKind(p) === 'fogleman' || p.source.startsWith('After'))
         expect(p.figure, p.id).toBeUndefined();

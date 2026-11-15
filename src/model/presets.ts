@@ -90,6 +90,18 @@ function jonesFigure(label: string, journalPage: number): Figure {
   return { href: `${JONES_PDF}#page=${page}`, label, note: `page ${page} of the free PDF` };
 }
 
+/**
+ * Baumgarten, Jones and Hauser 2015 at its journal, free to read: the publisher's PDF, whose page 1 is page 1201 of
+ * the journal (ADR 0045). The PDF states no licence, so the app links the figure and does not show it (ADR 0037).
+ */
+export const BAUMGARTEN_PDF = 'https://www.actaphys.uj.edu.pl/R/46/6/1201/pdf';
+
+/** A figure of Baumgarten, Jones and Hauser 2015 on page `journalPage` of the journal. */
+function baumgartenFigure(label: string, journalPage: number): Figure {
+  const page = journalPage - 1200;
+  return { href: `${BAUMGARTEN_PDF}#page=${page}`, label, note: `page ${page} of the free PDF` };
+}
+
 /** The revision of a scene's shapes that the scene loads now: the number of its earlier shape lists. */
 export const shapeRevision = (p: Preset) => p.envHistory?.length ?? 0;
 
@@ -204,6 +216,9 @@ const forager = (extra: Partial<Settings>, rivals = 1): Settings => {
   if (!first) return s;
   return { ...s, strains: Array.from({ length: rivals }, (_, i) => (i === 0 ? first : strainLike(first, i))) };
 };
+
+/** The lattice of Baumgarten, Jones and Hauser 2015 (p. 1204; ADR 0045). */
+const L400 = (): Lattice => [400, 400];
 
 /** The lattice of the dish scenes with the flow (ADR 0032): the same picture on every screen. */
 const L384 = (): Lattice => [384, 384];
@@ -551,6 +566,41 @@ PRESETS.push(
     ],
   },
   {
+    id: 'coarsening',
+    name: 'Coarsening network',
+    group: 'experiments',
+    source: 'Baumgarten, Jones and Hauser 2015, Fig. 2',
+    summary: 'A dense network loses vein after vein until one ring is left, and the ring closes.',
+    watch:
+      'Within 100 steps the agents form a dense mesh of veins. Loops close one by one, and the mesh leaves the rim of the dish and shrinks. After about 11,000 steps one ring is left. It closes to a spot within some 4,000 more steps.',
+    about:
+      'Baumgarten, Jones and Hauser watched the vein network of a real slime mold coarsen on agar and ran Jones’ model beside it. The agents start at random in a dish, and the population grows and shrinks by Jones’ rule. The share of the network’s circle that veins cover falls and stays near a fifth, in the organism too (Fig. 4). In the paper the last ring is left after 6,850 steps; here it takes about 11,400.',
+    strainRoles: ['Jones’ agent with equal angles of 67.5°'],
+    why: 'The paper’s values (p. 1204 to 1206): 25,000 agents in a dish on 400 × 400 cells, sensor and rotation angle 67.5°, sensor distance 5, growth and shrinkage tested every 5 steps: an agent with 0 to 10 agents in its 9 × 9 window divides, one with 0 to 22 in its 5 × 5 window survives. Capacity 1 leaves room for a child in every cell. The dish’s size is this app’s; agents update at once, not in random order.',
+    figure: baumgartenFigure('Fig. 2', 1207),
+    settings: () =>
+      jones(
+        { sensorAngle: 67.5, rotationAngle: 67.5, sensorOffset: 5 },
+        {
+          lattice: L400(),
+          // 25,000 agents (p. 1204): the dish counts the square around it (sizing.ts).
+          density: 25_000 / 400 ** 2,
+          capacity: 1,
+          boundary: 'dish',
+          bloom: 0,
+          growth: true,
+          growthEvery: 5,
+          growthWindow: 9,
+          growthMin: 0,
+          growthMax: 10,
+          shrinkEvery: 5,
+          shrinkWindow: 5,
+          shrinkMin: 0,
+          shrinkMax: 22,
+        },
+      ),
+  },
+  {
     id: 'tokyo',
     name: 'Tokyo rail network',
     group: 'experiments',
@@ -760,7 +810,7 @@ export function latticeLostNotice(lattice: Lattice, now: Pick<Settings, 'lattice
   return `This device cannot hold Jones’ grid of ${latticeText(lattice)} for this figure. The scene runs on a grid of ${gridText(now)}, so the result can be different from the paper.`;
 }
 
-export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'app';
+export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Jones 2010')) return 'jones';
@@ -768,6 +818,7 @@ export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Nakagaki')) return 'nakagaki';
   if (p.source.startsWith('Tero')) return 'tero';
   if (p.source.startsWith('After Jones')) return 'later';
+  if (p.source.startsWith('Baumgarten')) return 'coarsening';
   return 'app';
 }
 
@@ -788,6 +839,8 @@ export function sourceText(p: Preset): string {
       return 'Tero and colleagues, Science 327: 439 (2010): a real slime mold, fed where 36 cities around Tokyo lie, built a network much like the rail system. This scene rebuilds the experiment of Fig. 1. The flow in the tubes is built from the model of the paper, on the grid’s cells; the agents and their growth are Jones’. The paper gives no positions: the cities are fitted to its figures.';
     case 'later':
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
+    case 'coarsening':
+      return 'Baumgarten, Jones and Hauser, Acta Physica Polonica B 46: 1201 (2015), watched the vein network of a real slime mold coarsen and ran Jones’ model, with growth and shrinkage, for a comparison. This scene uses the settings of the model of the paper, on its lattice of 400\u00a0×\u00a0400 cells on every screen.';
     case 'app':
       return 'This scene was made for this app. Its settings are not taken from a paper.';
   }

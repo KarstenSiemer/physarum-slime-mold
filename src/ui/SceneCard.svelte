@@ -39,6 +39,7 @@
     nakagaki: 'Physarum',
     tero: 'Physarum',
     later: 'The model',
+    coarsening: 'The model',
     app: 'Scenes',
   };
 </script>
