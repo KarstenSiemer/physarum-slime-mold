@@ -1298,6 +1298,7 @@ asks for the new digest.
 | `logs/view/`                                         | the runs of part 10: the numbers of eight saved states, the widths of a straight tube, the time of a frame with and without the picture of the tubes, its 93 wrong rules, and its cost on a large grid                          | 2026-11-13 and 2026-11-15, M3 Pro                     |
 | `logs/engine/*sites*`, `*-main*`                     | the runs of part 11: the campaigns, the scenes of ADR 0032, the time of a step and of the passes of the ports, the digests, the wrong rules, and the same runs of `main` on the same evening                                    | 2026-11-14, M3 Pro, `main` at `5195079`               |
 | `logs/engine/radius/`                                | the runs of part 12: the radii on fixed networks, the tests of the bounded pressure, the local flux against the exact one on the dumps, the campaigns, the GPU tests and the wrong rules of the radius                          | 2026-11-15, M3 Pro, `main` at `3f579ff`               |
+| `logs/engine/wall-cost/`                             | the time of a step before and after the rule for an agent under a painted wall, with its flag clear and set, and of its first build (ADR 0038, check of 2026-11-15)                                                             | 2026-11-15, M3 Pro, a free GPU                        |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1349,6 +1350,7 @@ Notes on the record:
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
+| `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
 | `engine/mutate.ts`        | 188 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
