@@ -203,7 +203,8 @@ every scene.
 
 ## 7. The agents
 
-ADR 0007, 0008, 0020, 0022, 0023, 0027. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`, `gl/glsl/tools.glsl`.
+ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
+`gl/glsl/tools.glsl`.
 
 The agent pass runs these parts in order for each agent.
 
@@ -216,10 +217,10 @@ The agent pass runs these parts in order for each agent.
 
 A dead agent neither moves nor deposits in this step.
 
-### 7.2 Placement by a tool or by the flow
+### 7.2 Placement by a tool, by the flow or off a wall
 
-A dead agent, and an agent that the cut reaches, may be placed instead of moving (ADR 0023). A placed agent makes no
-move and no deposit in its step.
+A dead agent, an agent that the cut reaches and an agent under a wall may be placed instead of moving (ADR 0023,
+ADR 0038). A placed agent makes no move and no deposit in its step.
 
 - **Inoculate**: a dead agent of the tool's strain is taken with a chance per step of 1 − exp(−rate · Δt), so the
   tool places the same number per second at every frame rate (`inoculateRate()` and `stepChance()` in
@@ -228,6 +229,11 @@ move and no deposit in its step.
   at the start of the step.
 - **Cut**: an alive agent whose position lies within the radius of the tool takes the first of 8 uniform random points
   of the grid whose cell is open and that lie outside the radius. It keeps its heading. If none fits, it moves as usual.
+- **Under a wall**: an alive agent whose cell is a wall at the start of its step (a wall was painted onto it) is placed
+  as the cut places its agents, with or without a tool: it takes the first of 8 uniform random points of the grid
+  whose cell is open, and while the cut is held one that also lies outside its radius. It keeps its heading. If none
+  fits, it moves as usual (7.5). The points are those of the cut (the stream tool, 7.7): an agent that the cut reaches
+  under a wall draws them once.
 - **Respawn** (flow on, for every agent that no tool places): a dead agent of strain s draws one uniform point of the
   grid. It comes to life there with the chance 0.2 · (D_s − 0.5) / 0.5 if the cell is open, holds a tube of its own
   strain (B_s ≥ 0.05) and has D_s > 0.5 (section 8.5; ADR 0031). A tube of another strain gives it no life. With one
@@ -269,8 +275,10 @@ it passes within 0.001 cells (ADR 0019, ADR 0020). On the torus p' wraps.
 - **Blocked**: the agent stays, takes a uniform random heading in place of the one it turned to, and deposits nothing
   (Jones 2010, p. 133).
 
-A move inside the agent's own cell succeeds unless that cell is a wall. The start cell is never checked on the way, so
-an agent under a wall that was painted onto it can step out of it.
+A move inside the agent's own cell succeeds unless that cell is a wall. An agent whose cell is a wall at the start of
+its step is placed off the wall instead of moving (7.2). It moves only if none of its 8 points fits, or, with one agent
+per cell, after it lost the claim of its point (7.6); then the start cell is not checked on the way, so it can step
+out of the wall.
 
 ### 7.6 One agent per cell
 
@@ -279,9 +287,9 @@ claims:
 
 1. **Claim**: each agent senses, turns and claims its target cell with `atomicMax(claims[cell], key)`. A key is unique
    in a step: a bijective hash of the id, the step and the seed. It may claim only an open cell other than its own that
-   was empty at the start of the step, with no wall on the way. A tool's placement claims its cell the same way.
+   was empty at the start of the step, with no wall on the way. A placement (7.2) claims its cell the same way.
 2. **Settle**: the agent whose key won moves and deposits. A loser is blocked (7.5). A placement that loses stays dead
-   (inoculate, respawn) or stays where it was (cut).
+   (inoculate, respawn) or stays where it was (cut, under a wall), with its heading, and draws again in the next step.
 
 A cell that an agent leaves in this step stays closed to others until the next step. Without the rule, agents share
 cells without a limit.
@@ -289,11 +297,11 @@ cells without a limit.
 ### 7.7 Random numbers
 
 Every random number comes from a PCG hash of (id, step, seed, stream): rng = pcg(id ^ pcg(step ^ pcg(seed ^ stream))),
-then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1, shrink 2, blocked heading 3,
-growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9. So a run is the same for the same seed on one backend.
-For one agent and step the streams differ by construction, because pcg is a bijection. A start round's stream can
-equal another stream at a later step: for seeds 0 to 999, start rounds 0 to 64 and steps below 10^6, this happens at
-one step in each of 134 (seed, round, stream) cases.
+then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1 (also an agent under a wall,
+7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9. So a run is the
+same for the same seed on one backend. For one agent and step the streams differ by construction, because pcg is a
+bijection. A start round's stream can equal another stream at a later step: for seeds 0 to 999, start rounds 0 to 64
+and steps below 10^6, this happens at one step in each of 134 (seed, round, stream) cases.
 
 ## 8. Flow in the tubes
 
@@ -520,6 +528,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
+| An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
@@ -539,14 +548,13 @@ strains; a change of the sites during a run, also when the list gets shorter; 64
 holds no port. `engine-env.test.ts` holds the engine to the rule: a drag of the brush is one site, a link gives the
 sites of its list, and the start layout Food puts each strain on a stroke of its own.
 
-Not tested: the random turn pCD (no test uses pCD > 0), the rate of random shrinkage, the value of the blocked heading
-(a test checks only that it changes), and agents under a painted wall.
+Not tested: the random turn pCD (no test uses pCD > 0) and the rate of random shrinkage. The value of the blocked
+heading is checked only beside a wall ("leaves an agent beside the wall to its move").
 
 ## 14. Open points in the code
 
-Each one is open, not a rule. Both were found while this file was written:
+This one is open, not a rule. It was found while this file was written:
 
-- An agent under a wall that was painted onto it is not moved off the wall, and can step out (7.5).
 - A start round's stream of random numbers can equal another stream at a later step (7.7).
 
 Closed on 2026-11-14: a site was the one cell at the start of a food stroke (8.2). So a strain covered a food dot only
@@ -559,3 +567,7 @@ nobody had inoculated (found by the owner). Every strain has a flow of its own n
 nothing for a strain whose trail stayed below 0.2 deposits, as in the start scene Three strains with one agent per
 cell. The levels follow the decay of the strain now (8.1, ADR 0032). A child of the growth rule could land between two
 wall cells that touch at a corner, where no move can go (9); it no longer can (ADR 0025, decision 35).
+
+Closed on 2026-11-15: an agent under a wall that was painted onto it was not moved off the wall. It could step out of
+it, and deep in a thick wall it stayed there for good, alive, with every move blocked and no deposit. Such an agent is
+placed off the wall now, as the cut places its agents (7.2, ADR 0038).

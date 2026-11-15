@@ -83,27 +83,38 @@ Spot respawn(vec4 a, uint i) {
 }
 #endif
 
+// An alive agent whose cell is a wall: a wall was painted onto it (underWall in agents.wgsl, ADR 0038). Only while a
+// wall may lie over an alive agent (P.extra.w, decision 8; gl/sim.ts wallOverAgents).
+bool underWall(vec4 a) {
+  if (P.extra.w == 0u || (bitsOf(a) & ALIVE) == 0u) return false;
+  ivec2 q = cellXY(ivec2(floor(a.xy)));
+  return q.x >= 0 && isWall(texelFetch(env, q, 0));
+}
+
 // Inoculate takes a dead agent of the tool's strain to a random point of the brush, never a living one; cut takes a
-// living agent in the wound to the first of 8 random points outside it whose cell is open. A pure function of the
-// agent after shrinkage, so the claim pass, the claim points and the settle pass find the same spot.
+// living agent in the wound to the first of 8 random points outside it whose cell is open. An agent under a wall goes
+// the cut's way, with or without a tool, and outside the wound while the cut is held (ADR 0038). A pure function of
+// the agent after shrinkage, so the claim pass, the claim points and the settle pass find the same spot.
 Spot placement(vec4 a, uint i) {
+  bool walled = underWall(a);
 #if FLOW
-  if (P.tool.w == 0.0) return respawn(a, i);
+  if (P.tool.w == 0.0 && !walled) return respawn(a, i);
 #else
-  if (P.tool.w == 0.0) return Spot(a.xy, a.z, -1); // no tool held: the usual step
+  if (P.tool.w == 0.0 && !walled) return Spot(a.xy, a.z, -1); // no tool held: the usual step
 #endif
   uint rng = rngSeed(i, TOOL);
   uint bits = bitsOf(a);
   bool alive = (bits & ALIVE) != 0u;
+  bool cut = P.tool.w == 2.0;
   if (P.tool.w == 1.0 && !alive && float(bits & 3u) == P.tool2.x && rand(rng) < P.tool2.y) {
     vec2 p = randomIn(P.tool.xy, P.tool.z, rng);
     int c = cellOf(p);
     if (openCell(c)) return Spot(wrapPos(p), rand(rng) * TAU, c);
-  } else if (P.tool.w == 2.0 && alive && toolDistance(a.xy, P.tool.xy) < P.tool.z) {
+  } else if (walled || (cut && alive && toolDistance(a.xy, P.tool.xy) < P.tool.z)) {
     for (int k = 0; k < 8; k++) {
       vec2 p = vec2(rand(rng) * float(W()), rand(rng) * float(H()));
       int c = cellOf(p);
-      if (openCell(c) && toolDistance(p, P.tool.xy) >= P.tool.z) return Spot(wrapPos(p), a.z, c);
+      if (openCell(c) && (!cut || toolDistance(p, P.tool.xy) >= P.tool.z)) return Spot(wrapPos(p), a.z, c);
     }
   }
 #if FLOW

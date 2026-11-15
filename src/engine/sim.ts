@@ -193,6 +193,12 @@ export class Simulation implements Sim {
    */
   private walls = false;
   /**
+   * An alive agent may stand on a wall cell: a wall was painted, or bytes or an agent were written, since the agents
+   * were last placed on open cells (reset()) or the environment was cleared. Only then does the agent pass read the
+   * wall byte of each agent's cell (agents.wgsl underWall, ADR 0038, decision 8).
+   */
+  private wallOverAgents = false;
+  /**
    * A food or a light may lie in `env`: a stroke painted one, or bytes written held one, since the last clear.
    */
   private sources = false;
@@ -607,6 +613,8 @@ export class Simulation implements Sim {
   reset() {
     this.changed();
     this.revision++;
+    // init.wgsl starts every alive agent on an open cell, after the walls (ADR 0038, decision 8).
+    this.wallOverAgents = false;
     // The scent textures are cleared below, and without a food or a light no step adds scent.
     this.scentless = !this.sources;
     this.step = 0;
@@ -946,7 +954,7 @@ export class Simulation implements Sim {
     for (const stroke of strokes) {
       const boundary = stroke.boundary ?? this.settings.boundary;
       const wrap = boundary === 'wrap';
-      if (stroke.kind === 'wall') this.walls = true;
+      if (stroke.kind === 'wall') [this.walls, this.wallOverAgents] = [true, true];
       if (stroke.kind !== 'erase') this.hasEnvironment = true;
       if (stroke.kind === 'food' || stroke.kind === 'light') [this.sources, this.scentless] = [true, false];
       if (boundary !== this.settings.boundary) foreign = true;
@@ -1026,7 +1034,7 @@ export class Simulation implements Sim {
     enc.clearBuffer(this.env);
     enc.clearBuffer(this.shapeBuffer);
     this.device.queue.submit([enc.finish()]);
-    this.walls = false;
+    [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
     // The scent that the textures hold stays until the next reset.
     this.sources = false;
@@ -1094,6 +1102,8 @@ export class Simulation implements Sim {
     v.setFloat32(4, a.y, true);
     v.setFloat32(8, a.heading, true);
     v.setUint32(12, ((a.bits & 7) | (index << 3)) >>> 0, true);
+    // A test can put an agent anywhere, also on a wall.
+    if (this.walls) this.wallOverAgents = true;
     this.device.queue.writeBuffer(this.replacement, 0, b);
     const k = this.kernels;
     const enc = this.device.createCommandEncoder();
@@ -1137,6 +1147,7 @@ export class Simulation implements Sim {
     enc.clearBuffer(this.shapeBuffer);
     this.device.queue.submit([enc.finish()]);
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
+    this.wallOverAgents = this.walls;
     this.hasEnvironment = data.some((v, i) => i % 4 !== 3 && v > 0);
     this.sources = data.some((v, i) => (i % 4 === 1 || i % 4 === 2) && v > 0);
     if (this.sources) this.scentless = false;
@@ -1172,6 +1183,7 @@ export class Simulation implements Sim {
       step: this.step,
       tool,
       walls: this.walls,
+      wallOverAgents: this.wallOverAgents,
       round,
       start: this.start,
     };

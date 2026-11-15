@@ -63,13 +63,14 @@ describe('Params layout', () => {
     }
   });
 
-  it('packs the layout, the walls flag and the start claim round into extra', () => {
+  it('packs the layout, the walls flag, the start claim round and a wall over agents into extra', () => {
     const s = { ...defaultSettings(), layout: 'ring' as const };
-    const extra = (more: { walls?: boolean; round?: number }) => [
+    const extra = (more: { walls?: boolean; round?: number; wallOverAgents?: boolean }) => [
       ...new Uint32Array(packParams(s, { width: 8, height: 8, agents: 1, step: 0, ...more })).slice(19 * 4, 20 * 4),
     ];
     expect(extra({})).toEqual([4, 0, 0, 0]);
     expect(extra({ walls: true, round: 7 })).toEqual([4, 1, 7, 0]);
+    expect(extra({ walls: true, wallOverAgents: true })).toEqual([4, 1, 0, 1]);
   });
 });
 

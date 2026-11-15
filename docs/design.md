@@ -150,8 +150,8 @@ The rules of a step, as mathematics, for both models and both orders: [model.md]
 these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
 
 1. `clearBuffer(counts)` (and `claims` in collision mode).
-2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups): death, placement by a tool
-   or by the flow, sense, turn and move (model.md, section 7). A successful move runs
+2. **Agent pass** (1 thread per agent, 256 per workgroup, 2-D dispatch above 65 535 groups): death, placement by a tool,
+   by the flow or off a wall painted onto the agent, sense, turn and move (model.md, section 7). A successful move runs
    `atomicAdd(counts[cell][strain], 1)`; WebGL2 marks the agent and counts it with additive points. With covered food
    and without one agent per cell, an `occupy` pass then marks the cells that hold an agent (model.md, section 6.5).
 3. **Claim pass** (collision mode only, Jones' one agent per cell): pass 2a sets the heading and calls
