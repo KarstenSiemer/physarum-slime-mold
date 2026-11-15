@@ -12,7 +12,7 @@
     strainSpec,
     tubeViewHelp,
   } from '../model/params';
-  import { GROUPS, PRESETS } from '../model/presets';
+  import { GROUPS, JONES_PDF, PRESETS } from '../model/presets';
   import { letter, strainNumbers } from '../model/scene';
   import { app, LEARN_TABS, loadPreset } from './state.svelte';
 
@@ -333,7 +333,8 @@
       <p>
         Model: J. Jones, “Characteristics of Pattern Formation and Evolution in Approximations of Physarum Transport
         Networks”, <em>Artificial Life</em> 16(2): 127–153, 2010,
-        <a href="https://doi.org/10.1162/artl.2010.16.2.16202" rel="noreferrer">doi:10.1162/artl.2010.16.2.16202</a>.
+        <a href="https://doi.org/10.1162/artl.2010.16.2.16202" rel="noreferrer">doi:10.1162/artl.2010.16.2.16202</a>
+        (<a href={JONES_PDF} rel="noreferrer">free PDF</a>).
       </p>
       <p>
         The scene Coarsening network: W. Baumgarten, J. Jones and M. J. B. Hauser, “Network coarsening dynamics in a
