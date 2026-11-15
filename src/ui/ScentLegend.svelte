@@ -19,8 +19,10 @@
   });
 
   const food = $derived(drawn('food'));
-  // Only the extended model reads the repellent, and the view draws it only there (ADR 0009).
-  const light = $derived(app.settings.model === 'extended' && drawn('light'));
+  // Both models read the repellent, and the view draws it in both (ADR 0044). The Jones model has no light: there
+  // the source is a repellent, such as salt.
+  const light = $derived(drawn('light'));
+  const jones = $derived(app.settings.model === 'jones');
   // The view draws its line once a strand is measured and a strain follows food (scentSensors()).
   const lined = $derived(scentSensors(app.settings, strand).half.some((h) => h > 0));
 
@@ -47,7 +49,9 @@
 <figure class="legend" aria-labelledby="scent-legend-title" aria-describedby="scent-legend-note">
   <figcaption id="scent-legend-title">Scent per cell</figcaption>
   {#if !food && !light}
-    <p class="empty" id="scent-legend-note">This scene has no food and no light, so it has no scent to show.</p>
+    <p class="empty" id="scent-legend-note">
+      This scene has no food and no {jones ? 'repellent' : 'light'}, so it has no scent to show.
+    </p>
   {:else}
     {#if food}
       <div class="row">
@@ -57,7 +61,7 @@
     {/if}
     {#if light}
       <div class="row">
-        <span class="name">Light <span class="sr-only">(pink glow)</span></span>
+        <span class="name">{jones ? 'Repellent' : 'Light'} <span class="sr-only">(pink glow)</span></span>
         <span class="bar" style:background={colours.repellent}></span>
       </div>
     {/if}
@@ -80,7 +84,7 @@
     {/if}
     <p class="note" id="scent-legend-note">
       {food ? 'Green glow: food scent.' : ''}
-      {light ? 'Pink glow: the repellent of light.' : ''}
+      {light ? (jones ? 'Pink glow: the repellent.' : 'Pink glow: the repellent of light.') : ''}
       The glow is stronger where the scent is stronger. Each number is ten times the number before it, and the glow stays
       the same from 10,000 up.
     </p>

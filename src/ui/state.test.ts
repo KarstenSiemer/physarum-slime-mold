@@ -705,12 +705,21 @@ describe('dead agents for the inoculate tool', () => {
 // Owner rule of 2026-11-11 (ADR 0022): a run labelled Jones is always Jones. A switch to Jones drops the extended values
 // and says what went, a switch to Extended keeps Jones' values, and the tools offered follow the model.
 describe('the model switch', () => {
-  const BASE = 'The Jones model has only Jones’ rules, and light has no effect in it.';
+  const BASE = 'The Jones model has only Jones’ rules.';
 
-  it('offers every tool in the extended model and all but Light in the Jones model', async () => {
-    const { TOOLS, toolsFor } = await fresh();
+  // ADR 0044: Jones' papers have repellent sources, and no light that releases a repellent. Both models offer every
+  // tool with its key; the Jones model names the Light tool Repellent, and no text of it says light.
+  it('offers every tool in both models, and names light a repellent in the Jones model', async () => {
+    const { TOOLS, lightName, toolsFor } = await fresh();
     expect(toolsFor('extended')).toEqual(TOOLS);
-    expect(toolsFor('jones').map((t) => t.id)).toEqual(['pan', 'inoculate', 'food', 'wall', 'erase', 'cut']);
+    const jones = toolsFor('jones');
+    expect(jones.map((t) => [t.id, t.key])).toEqual(TOOLS.map((t) => [t.id, t.key]));
+    expect(jones.find((t) => t.id === 'light')?.label).toBe('Repellent');
+    expect(jones.filter((t) => /light/i.test(`${t.label} ${t.help}`))).toEqual([]);
+    expect(jones.filter((t) => t.id !== 'light' && t.id !== 'erase')).toEqual(
+      TOOLS.filter((t) => t.id !== 'light' && t.id !== 'erase'),
+    );
+    expect([lightName('jones'), lightName('extended')]).toEqual(['repellent', 'light']);
   });
 
   it('to Jones keeps strain A, the rule and one diffusion pass, and says what went', async () => {
@@ -721,7 +730,7 @@ describe('the model switch', () => {
     setModel('jones');
     const s = app.settings;
     expect([s.model, jonesFits(s), s.strains.length, s.collisions, s.diffusion]).toEqual(['jones', true, 1, true, 1]);
-    expect([app.strainOrigin, app.strain, app.tool]).toEqual([[0], 0, 'pan']);
+    expect([app.strainOrigin, app.strain, app.tool]).toEqual([[0], 0, 'light']); // the tool stays: Repellent
     expect(app.notice).toBe(
       `${BASE} It removed strains B to C and agents that share a cell. It changed Agents per cell from 3 to 1, ` +
         'Diffusion passes from 2 to 1 and Scent decay from 0.1 to 0.6 (the Decay of strain A).',
@@ -744,7 +753,8 @@ describe('the model switch', () => {
   });
 
   // Every value that toJones() changes is in the notice, also those that the panel of the extended model shows
-  // elsewhere: the light strength, the weights of strain A and no diffusion.
+  // elsewhere: the weights of strain A and no diffusion. The light strength stays: it is the strength of the repellent
+  // (ADR 0044), and the notice says that the drawn light acts as one.
   it('to Jones names every value it changed', async () => {
     const { app, loadPreset, setModel } = await fresh();
     loadPreset('light');
@@ -755,11 +765,12 @@ describe('the model switch', () => {
     Object.assign(app.settings, { diffusion: 0, trailSaturation: 30, scentDecay: 0.01 });
     setModel('jones');
     expect(app.notice).toBe(
-      `${BASE} It changed Diffusion passes from 0 to 1, Light strength from 0.2 to 0.05, Scent decay from 0.01 to ` +
-        '0.1 (the Decay of strain A), Trail saturation from 30 to 0, the weight of strain A on its own trail from ' +
-        '+0.5 to +1, Food attraction from +0.4 to +1 and Light avoidance from +2 to +1.',
+      `${BASE} The light acts as a repellent source in Jones’ trail map. It changed Diffusion passes from 0 to 1, ` +
+        'Scent decay from 0.01 to 0.1 (the Decay of strain A), Trail saturation from 30 to 0, the weight of strain A ' +
+        'on its own trail from +0.5 to +1, Food attraction from +0.4 to +1 and Light avoidance from +2 to +1.',
     );
     expect(app.settings.strains[0]?.share).toBe(1);
+    expect(app.settings.lightStrength).toBe(0.2);
     // A scene of Jones that is Jones already: nothing changes, and there is no notice.
     loadPreset('network');
     app.notice = '';
@@ -834,7 +845,7 @@ describe('the model switch', () => {
       loadPreset(id);
       setModel('extended');
       expect(sceneChanged(), id).toBe(true);
-      Object.assign(app.settings, { trailSaturation: 30, scentDecay: 0.01, lightStrength: 0.3, diffusion: 2 });
+      Object.assign(app.settings, { trailSaturation: 30, scentDecay: 0.01, diffusion: 2 });
       addStrain();
       const a = app.settings.strains[0];
       if (!a) throw new Error('no strain');
@@ -847,6 +858,16 @@ describe('the model switch', () => {
       setModel('jones');
       expect(sceneChanged(), id).toBe(false);
     }
+  });
+
+  // The strength of the light is the strength of the repellent in the Jones model (ADR 0044): the way back keeps it.
+  it('to Extended and back keeps a light strength as the strength of the repellent', async () => {
+    const { app, loadPreset, sceneChanged, setModel } = await fresh();
+    loadPreset('network');
+    setModel('extended');
+    app.settings.lightStrength = 0.3;
+    setModel('jones');
+    expect([app.settings.lightStrength, sceneChanged()]).toEqual([0.3, true]);
   });
 
   it('to Jones and back changes an extended scene that fits Jones only for the switch itself', async () => {
@@ -879,33 +900,21 @@ describe('the model switch', () => {
 });
 
 describe('the tools of the model', () => {
-  it('lose Light when a scene of Jones loads, also by Reload scene', async () => {
-    const { app, loadPreset, setModel } = await fresh();
-    loadPreset('light');
-    app.tool = 'light';
-    loadPreset('network');
-    expect(app.tool).toBe('pan');
-    loadPreset('light');
-    app.tool = 'light';
-    setModel('jones');
-    expect(app.tool).toBe('pan');
-    setModel('extended');
-    app.tool = 'light';
-    loadPreset('light'); // Reload scene of an extended scene: the tool stays
-    expect(app.tool).toBe('light');
-    app.tool = 'food';
-    loadPreset('network'); // a tool that both models have stays
-    expect(app.tool).toBe('food');
-  });
-
-  it('lose Light when a Jones link opens', async () => {
-    const { app, openLink } = await fresh();
-    app.tool = 'light';
-    openLink({ settings: sceneOf('network') });
-    expect(app.tool).toBe('pan');
-    app.tool = 'light';
-    openLink({ settings: sceneOf('light') });
-    expect(app.tool).toBe('light');
+  // Both models have every tool (ADR 0044), so no load and no switch of the model changes the selected tool.
+  it('stay selected when a scene loads, the model switches or a link opens', async () => {
+    const { app, loadPreset, openLink, setModel } = await fresh();
+    for (const tool of ['light', 'food'] as const) {
+      loadPreset('light');
+      app.tool = tool;
+      loadPreset('network');
+      expect(app.tool).toBe(tool);
+      setModel('extended');
+      setModel('jones');
+      expect(app.tool).toBe(tool);
+      openLink({ settings: sceneOf('network') });
+      openLink({ settings: sceneOf('light') });
+      expect(app.tool).toBe(tool);
+    }
   });
 
   // App.svelte's settings effect: constrain() turns a Jones model with a value Jones does not have into Extended, or
@@ -914,14 +923,14 @@ describe('the tools of the model', () => {
     const { adopt, app, loadPreset } = await fresh();
     loadPreset('network');
     const strains = app.settings.strains;
-    app.tool = 'light'; // as before the fix of decision 25: a tool the model does not offer
+    app.tool = 'light';
     const a = app.settings.strains[0];
     if (!a) throw new Error('no strain');
     a.decay = 0.05;
     adopt(constrainedJones(app.settings));
     expect(app.settings.scentDecay).toBe(0.05);
     expect(app.settings.strains).toBe(strains); // the strains held the bound values already
-    expect(app.tool).toBe('pan');
+    expect(app.tool).toBe('light');
     adopt({ ...structuredClone(app.settings), model: 'extended', diffusion: 2 });
     expect([app.settings.model, app.settings.diffusion]).toEqual(['extended', 2]);
     app.tool = 'light';
@@ -929,9 +938,10 @@ describe('the tools of the model', () => {
     expect(app.tool).toBe('light');
   });
 
-  // Decision 29: the Jones model draws light without effect, and the panel says so while light is drawn.
-  it('say that drawn light has no effect in the Jones model, before and after the engine starts', async () => {
-    const { app, clearEnvironment, lightDrawn, loadPreset, setEngine, setModel, startScene } = await fresh();
+  // The legend of the scent and the notice of the switch ask whether light is drawn (drawn()).
+  it('know whether light is drawn, in both models, before and after the engine starts', async () => {
+    const { app, clearEnvironment, drawn, loadPreset, setEngine, setModel, startScene } = await fresh();
+    const lightDrawn = () => drawn('light');
     loadPreset('light');
     expect(lightDrawn()).toBe(true);
     setModel('jones');

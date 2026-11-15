@@ -39,7 +39,7 @@ export const TOOLS = [
     id: 'light',
     key: '4',
     label: 'Light',
-    help: 'Shine light. Physarum flees from it. Only the extended model has light. Hold Shift and click two points for a straight line.',
+    help: 'Shine light. Physarum flees from it. Lit cells release a repellent that spreads. Hold Shift and click two points for a straight line.',
   },
   {
     id: 'wall',
@@ -63,16 +63,26 @@ export const TOOLS = [
 
 export type Tool = (typeof TOOLS)[number]['id'];
 
-/** The tools of a model: Jones' papers have no light that releases a repellent (ADR 0022). */
-export const toolsFor = (model: Model) => TOOLS.filter((t) => model === 'extended' || t.id !== 'light');
-
 /**
- * Keeps the selected tool one that the current model offers (toolsFor()): every change of the model calls it, a load
- * of a scene or a link too. Light in the Jones model selects Move (ADR 0022, decision 25).
+ * What the Jones model calls the tools that paint and erase light (ADR 0044). Jones' papers have repellent sources,
+ * such as salt or a current source: a value below 0 in the lattice of the trail (Jones and Adamatzky 2015, Sec. 4.1;
+ * Tsuda et al. 2012, p. 10). Their light is another rule, which this app does not have (Jones and Adamatzky 2012,
+ * p. 7).
  */
-function fitTool() {
-  if (!toolsFor(app.settings.model).some((t) => t.id === app.tool)) app.tool = 'pan';
-}
+const JONES_TOOLS: Partial<Record<Tool, { label?: string; help: string }>> = {
+  light: {
+    label: 'Repellent',
+    help: 'Place a repellent source, such as salt or a current source. It puts a value below 0 into Jones’ trail map, and agents turn away from it. Hold Shift and click two points for a straight line.',
+  },
+  erase: { help: 'Remove food, repellent and walls. Hold Shift and click two points for a straight line.' },
+};
+
+/** The tools as a model names them: the same tools and keys in both models, with the names of JONES_TOOLS in Jones. */
+export const toolsFor = (model: Model): readonly { id: Tool; key: string; label: string; help: string }[] =>
+  model === 'jones' ? TOOLS.map((t) => ({ ...t, ...JONES_TOOLS[t.id] })) : TOOLS;
+
+/** "light" as a model names it in a sentence: Jones' repellent (ADR 0044), or this app's light. */
+export const lightName = (model: Model) => (model === 'jones' ? 'repellent' : 'light');
 
 export const LEARN_TABS = ['Physarum', 'The model', 'Controls', 'Scenes', 'About'] as const;
 
@@ -204,7 +214,6 @@ export function setScene(p: Preset) {
   app.strainOrigin = s.strains.map((_, i) => i);
   // The inoculate tool places the selected strain, and a scene with fewer strains has no such strain.
   app.strain = Math.min(app.strain, s.strains.length - 1);
-  fitTool();
 }
 
 let ruleNoticeShown = false;
@@ -257,7 +266,6 @@ export function clearEnvironment() {
 export function openLink({ settings, drawing, drawingLost }: Link) {
   app.settings = settings;
   app.linkBase = structuredClone(settings);
-  fitTool();
   linkDrawing = drawing;
   app.envVersion++;
   if (drawingLost) showNotice('This app cannot read the scene and drawing in this link, so only its settings load.');
@@ -337,18 +345,6 @@ export function drawn(kind: EnvTool): boolean {
   return app.envVersion >= 0 && kindsOf(currentDrawing()).has(kind);
 }
 
-/**
- * Whether the food, light and walls hold light, which the Jones model draws without effect: the panel says so below
- * the model choice (ADR 0022, decision 29).
- */
-export function lightDrawn(): boolean {
-  return drawn('light');
-}
-
-/** Shown below the model choice while the Jones model draws light (lightDrawn()). */
-export const JONES_LIGHT =
-  'The light on the canvas has no effect in the Jones model. To remove it, use the Erase tool. To use it, select Extended.';
-
 /** The arena of the scene's shapes in the engine's list: the scene's own (startScene(), loadPreset()). */
 const sceneArena = () => app.sceneBase?.boundary ?? app.settings.boundary;
 
@@ -359,7 +355,6 @@ const sceneArena = () => app.sceneBase?.boundary ?? app.settings.boundary;
 export function ruleUnavailable() {
   app.canCollide = false;
   app.settings = constrain({ ...$state.snapshot(app.settings), collisions: false });
-  fitTool();
   if (app.sceneBase) app.sceneBase = constrain({ ...app.sceneBase, collisions: false });
   noteMissingRule();
 }
@@ -386,10 +381,12 @@ export function setModel(model: Model) {
   app.settings = next;
   app.strainOrigin = app.strainOrigin.slice(0, 1);
   app.strain = 0;
-  fitTool();
   // Only the extended model's sensors check walls on their way (ADR 0020): drawn walls act differently now.
-  const walls = kindsOf(currentDrawing()).has('wall') ? ' The walls stop agents, but they do not block sensors.' : '';
-  const text = `The Jones model has only Jones’ rules, and light has no effect in it.${walls}${jonesChanges(s, next)}`;
+  const kinds = kindsOf(currentDrawing());
+  const walls = kinds.has('wall') ? ' The walls stop agents, but they do not block sensors.' : '';
+  // Drawn light stays and acts: the Jones model reads it as a repellent source of its trail map (ADR 0044).
+  const light = kinds.has('light') ? ' The light acts as a repellent source in Jones’ trail map.' : '';
+  const text = `The Jones model has only Jones’ rules.${light}${walls}${jonesChanges(s, next)}`;
   // About 3.3 words per second, as for the other long notices.
   showNotice(text, Math.max(10_000, text.split(' ').length * 300));
 }
@@ -435,7 +432,6 @@ export function adopt(valid: Settings) {
   for (const [k, v] of Object.entries(valid)) {
     if (JSON.stringify(s[k]) !== JSON.stringify(v)) s[k] = structuredClone(v);
   }
-  fitTool();
 }
 
 /** Adds a strain that copies strain A: the defaults are Jones' values without the rule, which collapse. */

@@ -441,7 +441,7 @@ const WITHOUT_SCENT = {
           '  }\n  // The view lies below the flake of food and the walls.\n  if (SCENT) { c = mix(scentView(p, c, near, cells), c, f.cover); }\n  if (near) {\n',
           '',
         ),
-        '  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused\n' +
+        '  scentFx: vec4f,     // scent view: map level (0 to 3), unused, unused, unused\n' +
           '  scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells\n' +
           '  scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())\n',
         '',
@@ -2114,7 +2114,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // Jones 2010, p. 144: food goes into the one trail map and diffuses and decays with it. The app keeps food in a
     // scent field of its own (ADR 0007); the Jones model gives it the strain's decay (pack.ts), so trail + scent must
-    // be Jones' map. CPU reference of that one map, stepped with the deposits that the GPU's agents made in each step.
+    // be Jones' map. A repellent is a source below 0 of the same map (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044):
+    // the app keeps it above 0 in a second lane of the scent, so trail + food scent − repellent must be that map. CPU
+    // reference of that one map, stepped with the deposits that the GPU's agents made in each step.
     it.each(
       (
         [
@@ -2124,10 +2126,11 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         ] as const
       ).flatMap((c) => STEP_ORDERS.map((o) => [...c, o] as const)),
     )(
-      'keep trail + scent equal to Jones’ one trail map (%s, %s, %s, %s)',
+      'keep trail + scent − repellent equal to Jones’ one trail map (%s, %s, %s, %s)',
       async (_, self, boundary, decay, stepOrder) => {
         const [w, h] = [48, 40];
         const strain = { ...defaultStrain(0), decay, food: self, attraction: [self, 0, 0, 0] };
+        const repellent = 0.08;
         const settings: Settings = {
           ...defaultSettings(),
           seed: 3,
@@ -2136,6 +2139,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           density: 0.15,
           boundary,
           foodStrength: 0.05,
+          lightStrength: repellent,
           // Past constrain(): packParams() must bind the scent to the strain's decay itself.
           scentDecay: 0.1,
           strains: [strain],
@@ -2147,6 +2151,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           { kind: 'food', from: [10, 12], to: [30, 14], radius: 3 },
           { kind: 'food', from: [1, 30], to: [1, 30], radius: 2 }, // across the seam of the periodic grid
           { kind: 'wall', from: [24, 20], to: [24, 34], radius: 1 },
+          { kind: 'light', from: [34, 24], to: [38, 26], radius: 3 }, // a repellent source, beside the wall
         ]);
         sim.reset();
         const env = await sim.readEnv();
@@ -2159,18 +2164,115 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         for (let k = 0; k < 40; k++) {
           sim.run(1);
           const counts = await sim.readCounts();
+          // The one map takes the deposits, the food above 0 and the repellent below 0.
           const source = (c: number) =>
-            (counts[c * 4] ?? 0) * strain.deposit + ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05;
+            (counts[c * 4] ?? 0) * strain.deposit +
+            ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 -
+            ((env[c * 4 + 2] ?? 0) / 255) * 255 * repellent;
           map = siteStep(map, env, w, cellAt, true, keep, source, false, stepOrder);
         }
         const [trail, scent] = [await sim.readTrail(), await sim.readScent()];
-        const sum = Float32Array.from({ length: w * h }, (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0));
+        const sum = Float32Array.from(
+          { length: w * h },
+          (_, c) => (trail[c * 4] ?? 0) + (scent[c * 2] ?? 0) - (scent[c * 2 + 1] ?? 0),
+        );
         expect(maxRelError(sum, map)).toBeLessThan(1e-5);
-        // Food and agents both count: the map without the deposits or without the food is far off.
-        expect(Math.max(...Array.from(scent))).toBeGreaterThan(1);
+        // Food, agents and the repellent all count: the map without one of them is far off, and it falls below 0.
+        const lane = (k: number) => Array.from(scent).filter((_, i) => i % 2 === k);
+        expect(Math.max(...lane(0))).toBeGreaterThan(1);
+        expect(Math.max(...lane(1))).toBeGreaterThan(1);
         expect(Math.max(...Array.from(trail))).toBeGreaterThan(1);
+        expect(Math.min(...Array.from(map))).toBeLessThan(-1);
       },
       // Up to 20.4 s on SwiftShader in CI (#28): 120 s keeps it under a quarter (ADR 0010).
+      120_000,
+    );
+
+    // ADR 0044: the sensors of the Jones model weigh the repellent as the strain weighs its own trail, and subtract
+    // it. The extended model with Jones' values (scent decay 0.1, where its source factor is 1; food and light weighed
+    // as the own trail) computes the same, so the agents, the trail and the scent of the two runs are equal bit for
+    // bit. The Jones settings hold other values past constrain(): packParams() must bind them itself.
+    it.each(
+      (
+        [
+          ['attraction', 1],
+          ['chemorepulsion', -1],
+        ] as const
+      ).flatMap((c) => STEP_ORDERS.map((o) => [...c, o] as const)),
+    )(
+      'run a repellent in the Jones model as the extended model with Jones’ values does (%s, %s)',
+      async (_, self, stepOrder) => {
+        const [w, h] = [96, 64];
+        const strain = { ...defaultStrain(0), decay: 0.1, attraction: [self, 0, 0, 0] };
+        const base: Settings = {
+          ...defaultSettings(),
+          seed: 9,
+          collisions: true,
+          density: 0.3,
+          foodStrength: 0.05,
+          lightStrength: 0.1,
+          stepOrder,
+        };
+        const run = async (s: Settings) => {
+          const sim = await build(s, w, h, Math.round(0.3 * w * h));
+          sim.paint(FOOD);
+          sim.reset();
+          sim.run(60);
+          return state(sim);
+        };
+        const jones: Settings = {
+          ...base,
+          model: 'jones',
+          scentDecay: 0.3,
+          strains: [{ ...strain, food: 0.3, light: 2 }],
+        };
+        const extended: Settings = {
+          ...base,
+          model: 'extended',
+          scentDecay: 0.1,
+          strains: [{ ...strain, food: self, light: self }],
+        };
+        const expected = await run(extended);
+        expect(await run(jones)).toEqual(expected);
+        // The repellent steers the agents: without its source the run is another one.
+        expect((await run({ ...jones, lightStrength: 0 })).agents).not.toEqual(expected.agents);
+      },
+      120_000,
+    );
+
+    // Jones and Adamatzky 2015, Sec. 5.1: a repellent pushes a network away. A strain that follows its trail leaves
+    // the disc of a repellent source, which lies below 0 in Jones' map. A strain that flees its trail goes toward
+    // low values of the map, so it gathers on the source. The agents in the disc after 300 steps, with the source
+    // and without it, from the same start.
+    it.each([
+      ['attraction', 1],
+      ['chemorepulsion', -1],
+    ] as const)(
+      'move the agents of the Jones model off a repellent source (%s)',
+      async (_, self) => {
+        const [w, h] = [96, 64];
+        const [cx, cy, r] = [48, 32, 10];
+        const inDisc = async (lightStrength: number) => {
+          const s: Settings = {
+            ...defaultSettings(),
+            seed: 4,
+            model: 'jones',
+            collisions: true,
+            density: 0.2,
+            lightStrength,
+            strains: [{ ...defaultStrain(0), food: self, light: self, attraction: [self, 0, 0, 0] }],
+          };
+          const sim = await build(s, w, h, Math.round(0.2 * w * h));
+          sim.paint([{ kind: 'light', from: [cx, cy], to: [cx, cy], radius: r }]);
+          sim.reset();
+          sim.run(300);
+          return (await sim.readAgents()).filter((a) => Math.hypot(a.x - cx, a.y - cy) < r).length;
+        };
+        const [without, withSource] = [await inDisc(0), await inDisc(0.2)];
+        expect(without).toBeGreaterThan(20);
+        if (self > 0) expect(withSource).toBeLessThan(without / 4);
+        else expect(withSource).toBeGreaterThan(without * 1.5);
+      },
       120_000,
     );
 
@@ -2220,7 +2322,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         const keep = 1 - 0.1;
         const g = jones ? 1 : emissionScale(settings.scentDecay, settings.stepOrder);
         const food = (c: number) => ((env[c * 4 + 1] ?? 0) / 255) * 255 * 0.05 * g;
-        const light = (c: number) => (jones ? 0 : ((env[c * 4 + 2] ?? 0) / 255) * 255 * 0.2 * g);
+        const light = (c: number) => ((env[c * 4 + 2] ?? 0) / 255) * 255 * 0.2 * g;
         const run = (lane: Float64Array, source: (c: number) => number, walls: boolean, reflective = false) => {
           let v = lane;
           for (let k = 0; k < steps; k++) v = siteStep(v, env, w, cellAt, walls, keep, source, reflective, stepOrder);
@@ -2241,8 +2343,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           expect(maxRelError(gpu(gpuTrail, 4, l), cpu), `trail lane ${l}`).toBeLessThan(1e-5);
         });
         expect(maxRelError(gpu(gpuScent, 2, 0), expected.food), 'food').toBeLessThan(1e-5);
-        if (jones) expect(Math.max(...gpu(gpuScent, 2, 1))).toBe(0);
-        else expect(maxRelError(gpu(gpuScent, 2, 1), expected.light), 'light').toBeLessThan(1e-5);
+        // The light is a repellent source in the Jones model too (ADR 0044).
+        expect(maxRelError(gpu(gpuScent, 2, 1), expected.light), 'light').toBeLessThan(1e-5);
+        expect(Math.max(...gpu(gpuScent, 2, 1))).toBeGreaterThan(1);
         // The rule of the other model at walls, and the reflective mean of before, are far off. On the periodic grid of
         // the Jones model every neighbour is a site, so there the reflective mean is the same.
         expect(maxRelError(gpu(gpuTrail, 4, 0), run(lanes[0] ?? zero, none, !jones))).toBeGreaterThan(1e-3);
@@ -2316,8 +2419,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     /**
      * One step of the scent on the CPU, on a periodic grid (ADR 0027): moving first the 3 × 3 means, the decay, then the
      * sources; sensing first the sources, the means, then the decay (food × `covered` factor; with `coverLight` the
-     * light too, which the shaders must not do). The Jones model has no light, and its scent decays with the strain's
-     * decay (pack.ts).
+     * light too, which the shaders must not do). The scent of the Jones model decays with the strain's decay, and its
+     * sources have the factor 1: the food, and the light as a repellent source (pack.ts, ADR 0044).
      */
     function scentStep(
       s: Float64Array,
@@ -2336,7 +2439,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const food = ((env[c * 4 + 1] ?? 0) / 255) * 255 * settings.foodStrength * g;
           const f = coveredAt(c) && (env[c * 4 + 1] ?? 0) > 0 ? factor : 1;
           m[c * 2] = (m[c * 2] ?? 0) + food * f;
-          const light = jones ? 0 : ((env[c * 4 + 2] ?? 0) / 255) * 255 * settings.lightStrength * g;
+          const light = ((env[c * 4 + 2] ?? 0) / 255) * 255 * settings.lightStrength * g;
           m[c * 2 + 1] = (m[c * 2 + 1] ?? 0) + light * (coverLight ? f : 1);
         }
       };
@@ -2366,8 +2469,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     };
 
     // A food and a light disc on a periodic grid, 30 steps: the GPU scent within 1e-4 of the CPU reference, in both
-    // models and at three decays. In the Jones model the decay is the strain's, Scent decay stays at 0.1 and the light
-    // releases nothing.
+    // models and at three decays. In the Jones model the decay is the strain's, Scent decay stays at 0.1, and the
+    // light releases the repellent of Jones' map with the factor 1 (ADR 0044).
     it.each(
       MODELS.flatMap((model) =>
         [0.1, 0.01, 0.001].flatMap((d) => STEP_ORDERS.map((stepOrder) => [model, d, stepOrder] as const)),
@@ -2397,9 +2500,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         sim.run(30);
         const scent = await sim.readScent();
         expect(maxRelError(scent, cpu)).toBeLessThan(1e-4);
-        const light = Math.max(...Array.from(scent).filter((_, i) => i % 2 === 1));
-        if (jones) expect(light).toBe(0);
-        else expect(light).toBeGreaterThan(1);
+        expect(Math.max(...Array.from(scent).filter((_, i) => i % 2 === 1))).toBeGreaterThan(1);
       },
     );
 
@@ -6030,8 +6131,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const edge = copies < 1 ? insideArena('box', [w, h], p, view.scale) : 1;
           if (edge > 0 && edge < 1) continue;
           arena++;
-          const repellent = settings.model === 'extended';
-          const ref = scentAt(scent, [w, h], settings.boundary, wall, p, view.scale, repellent, sensors);
+          const ref = scentAt(scent, [w, h], settings.boundary, wall, p, view.scale, true, sensors);
           if (ref.kink) continue;
           const bytes = [0, 1, 2].map((k) => off.data[i + k] ?? 0);
           if (bytes.some((b) => b >= 254) || (settings.style === 'paper' && bytes.some((b) => b <= 1))) continue;
@@ -6190,8 +6290,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // Every pixel inside the arena against the CPU reference of the view over the picture without it: across the seam
     // of the periodic grid, at the edge of the box and at the rim of the dish, zoomed in, near fit and zoomed out onto
     // the coarse maps of levels 1 and 2, with the line where the food scent equals a strand's trail. Outside the
-    // arena and on the flake of food the view changes nothing. In the Jones model the view draws no repellent: the
-    // model does not read it.
+    // arena and on the flake of food the view changes nothing. In the Jones model the view draws the repellent too: the
+    // model reads it as a source below 0 of Jones' map (ADR 0044).
     it.each(BOUNDARIES)(
       'follows the scent by the scale of scent.ts, at every zoom and in every style (%s)',
       async (boundary) => {

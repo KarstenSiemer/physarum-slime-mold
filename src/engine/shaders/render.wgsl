@@ -19,7 +19,7 @@ struct View {
   fx: vec4f,          // bloom strength, black level (summed trail), copies (packView), level of the trail's map (0 to 4)
   streamFx: vec4f,    // the stream of the plasm: drawn (1) or not (0), the phases of its pattern and its swing, unused
   gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
-  scentFx: vec4f,     // scent view: map level (0 to 3), repellent drawn (1) or not (0), unused, unused
+  scentFx: vec4f,     // scent view: map level (0 to 3), unused, unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
 }
@@ -1003,7 +1003,7 @@ fn scentSensorLine(p: vec2f, s: Scent, k: u32) -> f32 {
 // The view over colour c: the glow of the food scent, its line, then the glow of the repellent over them. Up to 2
 // cells per pixel it reads the 4 cells around p and, near walls, leaves out theirs (`near`, `cells`: as in scene());
 // zoomed out to 2 cells per pixel or more it reads the coarse map, whose texels leave them out. The repellent shows
-// only where the model reads it: the extended model.
+// in both models: both read it (ADR 0044).
 fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
   let level = u32(V.scentFx.x);
   var s: Scent;
@@ -1018,7 +1018,7 @@ fn scentView(p: vec2f, c: vec3f, near: bool, cells: array<u32, 9>) -> vec3f {
   }
   let paperStyle = V.style == 2u;
   let fill = select(1.0, SCENT_PAPER_FILL, paperStyle);
-  let repellent = select(0.0, scentGlow(s.v.y), V.scentFx.y > 0.5);
+  let repellent = scentGlow(s.v.y);
   let food = scentGlow(s.v.x) * fill;
   var o = mix(c, select(vec3f(0.1383, 0.7091, 0.1623), vec3f(0.0207, 0.2429, 0.033), paperStyle), food);
   o = mix(o, select(vec3f(0.3553, 0.9273, 0.3684), vec3f(0.0063, 0.1096, 0.0124), paperStyle),

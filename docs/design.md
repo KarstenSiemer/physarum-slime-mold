@@ -197,10 +197,10 @@ periodic grid over all its cells.
 | Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model, step order; extended: scent decay and its reach in cells, K       |
 | Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight                                   |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)                                             |
-| Environment         | food strength, covered food, random shrinkage; extended: diffusion passes, light strength                                                    |
+| Environment         | food strength, light strength (Jones: repellent strength), covered food, random shrinkage; extended: diffusion passes                        |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
 | Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
-| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (extended), wall, erase, cut; brush; straight lines (Shift)        |
+| Tools               | pan/zoom, inoculate (selected strain, uses only dead agents), food, light (Jones: repellent), wall, erase, cut; brush; lines (Shift)         |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
 | Share               | the page address as a link: settings, scene, food, light and walls (ADR 0021); PNG export                                                    |
@@ -262,7 +262,7 @@ the arrows.
   (a blocked agent deposits nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
 - Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
-  glow and the light repellent (extended model only) as a pink glow over the picture, below the oat flake and the
+  glow and the repellent (light; in the Jones model a repellent source, ADR 0044) as a pink glow over the picture, below the oat flake and the
   walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and
   models compare. One thin line marks where the food steers an agent across its left and right sensors as hard as a
   strand of trail holds it (the strand: the 99th percentile of the trail that the auto levels measure). A legend shows

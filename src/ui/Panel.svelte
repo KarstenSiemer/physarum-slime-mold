@@ -8,6 +8,7 @@
     decayForReach,
     flowHelp,
     globalSpec,
+    repellentSpec,
     growthHelp,
     LAYOUTS,
     MAX_STRAINS,
@@ -45,10 +46,9 @@
     app,
     clearEnvironment,
     getEngine,
-    JONES_LIGHT,
     latticeLeft,
     latticeValue,
-    lightDrawn,
+    lightName,
     loadPreset,
     pickGrid,
     removeStrain,
@@ -61,8 +61,6 @@
   const s = $derived(app.settings);
   /** The Jones model offers only Jones' settings (ADR 0022). */
   const extended = $derived(s.model === 'extended');
-  /** Light that the Jones model draws without effect: the panel says so below the model choice. */
-  const lit = $derived(!extended && lightDrawn());
   /** The scene's lattice while the grid is another one: the panel says why the result differs (ADR 0026). */
   const left = $derived(latticeLeft());
   /** The scene's lattice that this device could not hold, while it runs on another grid (ADR 0026). */
@@ -265,8 +263,7 @@
         <span>{modelHelp.label}</span>
         <select
           value={s.model}
-          aria-describedby={[modelHelpOpen && 'model-help', lit && 'jones-light'].filter(Boolean).join(' ') ||
-            undefined}
+          aria-describedby={modelHelpOpen ? 'model-help' : undefined}
           onchange={(e) => {
             setModel(e.currentTarget.value as (typeof MODELS)[number]);
           }}
@@ -325,8 +322,6 @@
         />
       {/if}
       <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
-    {:else if lit}
-      <p class="helptext" id="jones-light">{JONES_LIGHT}</p>
     {/if}
   </Section>
 
@@ -358,9 +353,8 @@
       <Slider spec={globalSpec.diffusion} bind:value={s.diffusion} id="diffusion" />
     {/if}
     <Slider spec={globalSpec.foodStrength} bind:value={s.foodStrength} id="food" />
-    {#if extended}
-      <Slider spec={globalSpec.lightStrength} bind:value={s.lightStrength} id="light" />
-    {/if}
+    <!-- The Jones model reads drawn light as a repellent source of its trail map, and names it so (ADR 0044). -->
+    <Slider spec={extended ? globalSpec.lightStrength : repellentSpec} bind:value={s.lightStrength} id="light" />
     <div class="check">
       <label>
         <input
@@ -386,7 +380,7 @@
       <Slider spec={globalSpec.coveredFoodFactor} bind:value={s.coveredFoodFactor} id="covered-factor" />
     {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
-    <button type="button" onclick={clearEnvironment}>Clear food, light and walls</button>
+    <button type="button" onclick={clearEnvironment}>Clear food, {lightName(s.model)} and walls</button>
   </Section>
 
   <Section title="Growth">

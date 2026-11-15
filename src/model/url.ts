@@ -1,5 +1,5 @@
 import { kindsOf, packDrawing, sceneOnly, unpackDrawing, type Drawing } from './link';
-import { sanitize, type Drawn, type Settings, type StepOrder } from './params';
+import { LINK_RULES, sanitize, type Drawn, type Settings, type StepOrder } from './params';
 import { stepOrderOf } from './presets';
 
 // Shared links carry the full settings as deflated JSON in the URL hash, and the scene with its food, light and walls
@@ -51,8 +51,12 @@ async function inflate(encoded: string): Promise<Uint8Array> {
   );
 }
 
-export async function encodeSettings(s: Settings): Promise<string> {
-  return toB64url(await deflate(JSON.stringify(s), MAX_JSON));
+/**
+ * The `s` part of a link: the settings, and the mark `rules` (LINK_RULES in params.ts) that tells sanitize() which
+ * rules the link was made with. `rules`: the mark; a test passes 0 for a link made before the mark (ADR 0044).
+ */
+export async function encodeSettings(s: Settings, rules = LINK_RULES): Promise<string> {
+  return toB64url(await deflate(JSON.stringify(rules > 0 ? { ...s, rules } : s), MAX_JSON));
 }
 
 /**
@@ -94,10 +98,14 @@ async function drawingPart(d: Drawing, room: number): Promise<string | undefined
 /**
  * The page address hash of a link: `s=<settings>`, and `&e=<drawing>` for a scene or strokes. When the drawing does
  * not fit in MAX_HASH characters or the caps of link.ts, the link holds the settings and the scene as it loads, with
- * no part of the drawing, and `dropped` is true.
+ * no part of the drawing, and `dropped` is true. `rules`: the mark of the link (encodeSettings()).
  */
-export async function encodeLink(settings: Settings, drawing?: Drawing): Promise<{ hash: string; dropped: boolean }> {
-  const s = `s=${await encodeSettings(settings)}`;
+export async function encodeLink(
+  settings: Settings,
+  drawing?: Drawing,
+  rules = LINK_RULES,
+): Promise<{ hash: string; dropped: boolean }> {
+  const s = `s=${await encodeSettings(settings, rules)}`;
   const room = MAX_HASH - s.length - '&e='.length;
   const join = (e: string | undefined) => (e ? `${s}&e=${e}` : s);
   const whole = drawing && (await drawingPart(drawing, room));
