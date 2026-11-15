@@ -54,7 +54,9 @@ test('the Jones model offers only Jones’ settings, and a switch back to it dro
   await expect(saturation).toHaveCount(0);
   await expect(page.getByLabel('Scent decay', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Scent reach', { exact: true })).toHaveCount(0);
+  // Light is a repellent source in the Jones model (ADR 0044).
   await expect(light).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Repellent' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add strain' })).toHaveCount(0);
   await expect(rule).toBeChecked();
   await expect(rule).toBeDisabled();
@@ -126,34 +128,41 @@ test('a switch to Jones keeps strain A and says what went', async ({ page }) => 
   expect(errors).toEqual([]);
 });
 
-// ADR 0022, decisions 25 and 29: the tools follow the model, also after a change of the preset, and the panel says
-// that the Jones model draws light without effect.
-test('the Jones model offers no Light tool, and says that drawn light has no effect', async ({ page }) => {
+// ADR 0044: the Jones model reads drawn light as a repellent source of its trail map, as Jones' papers have it, and
+// names it so. The tool stays selected through a change of the preset and of the model, and the strength stays.
+test('the Jones model names light a repellent, and drawn light acts as a repellent source', async ({ page }) => {
   const errors = watchErrors(page);
   const preset = page.getByRole('combobox', { name: 'Preset' });
   const light = page.getByRole('radio', { name: 'Light' });
-  const move = page.getByRole('radio', { name: 'Move' });
-  const hint = page.locator('#jones-light');
+  const repellent = page.getByRole('radio', { name: 'Repellent' });
   await preset.selectOption('light');
   await light.click();
+  await expect(repellent).toHaveCount(0);
   await preset.selectOption('network');
   await expect(light).toHaveCount(0);
-  await expect(move).toHaveAttribute('aria-checked', 'true');
+  await expect(repellent).toHaveAttribute('aria-checked', 'true');
+  await expect(repellent).toHaveAttribute('title', /salt or a current source/);
   await preset.selectOption('light');
   await page.waitForFunction(() => globalThis.physarum?.settings.lightStrength === 0.2);
-  await light.click();
-  await expect(hint).toHaveCount(0);
+  await expect(light).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
-  await expect(page.getByRole('status')).toContainText('It changed Light strength from 0.2 to 0.05.');
+  await expect(page.getByRole('status')).toContainText('The light acts as a repellent source in Jones’ trail map.');
+  await expect(page.getByRole('status')).not.toContainText('Light strength');
   await expect(light).toHaveCount(0);
-  await expect(move).toHaveAttribute('aria-checked', 'true');
-  await expect(hint).toHaveText(
-    'The light on the canvas has no effect in the Jones model. To remove it, use the Erase tool. To use it, select Extended.',
-  );
-  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveAttribute('aria-describedby', 'jones-light');
+  await expect(repellent).toHaveAttribute('aria-checked', 'true');
+  expect(await page.evaluate(() => globalThis.physarum?.settings.lightStrength)).toBe(0.2);
   await page.locator('summary', { hasText: 'Environment' }).click();
-  await page.getByRole('button', { name: 'Clear food, light and walls' }).click();
-  await expect(hint).toHaveCount(0);
+  await expect(page.getByLabel('Repellent strength', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Light strength', { exact: true })).toHaveCount(0);
+  // The legend of the scent names the repellent too.
+  await page.getByRole('button', { name: 'Scent', exact: true }).click();
+  const legend = page.getByRole('figure', { name: 'Scent per cell' });
+  await expect(legend.getByText(/^Repellent \(pink glow\)$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Clear food, repellent and walls' }).click();
+  await expect(legend).toContainText('no food and no repellent');
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
+  await expect(page.getByLabel('Light strength', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear food, light and walls' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 

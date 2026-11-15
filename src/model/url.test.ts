@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvEdit } from '../engine/environment';
 import { packDrawing, unpackDrawing, type Drawing } from './link';
-import { constrain, defaultSettings, defaultStrain, type Settings } from './params';
+import { constrain, defaultSettings, defaultStrain, LINK_RULES, type Settings } from './params';
 import { presetById, shapeRevision } from './presets';
 import { decodeLink, decodeSettings, encodeLink, encodeSettings } from './url';
 
@@ -362,7 +362,9 @@ describe('URL links and the model', () => {
     const shapes = p?.env?.map(() => true) ?? [];
     const revision = p ? shapeRevision(p) : 0;
     const origins = scene ? s.strains.map((_, i) => i) : [];
-    const { hash } = await encodeLink(s, { scene, revision, origins, shapes, strokes });
+    // A link without a model is older than the mark `rules` too (ADR 0044).
+    const rules = 'model' in s ? LINK_RULES : 0;
+    const { hash } = await encodeLink(s, { scene, revision, origins, shapes, strokes }, rules);
     const link = await decodeLink(hash);
     if (!link) throw new Error('no link');
     return link.settings;
@@ -374,6 +376,10 @@ describe('URL links and the model', () => {
     expect(await open(before(network), [wrap('food')], 'network')).toEqual(network);
     // Light without an effect, and a trail decay of its own without food: the scent is 0, and Jones binds it.
     expect((await open(before(network, { lightStrength: 0 }), [wrap('light')])).model).toBe('jones');
+    // Light that the strain ignored: Jones with a repellent strength of 0, so the drawn light still does nothing.
+    const ignored = before(network, { strains: [{ ...network.strains[0], light: 0 } as never] });
+    const blind = await open(ignored, [wrap('light')]);
+    expect([blind.model, blind.lightStrength]).toEqual(['jones', 0]);
     const slow = await open(before(network, { strains: [{ ...network.strains[0], decay: 0.05 } as never] }));
     expect([slow.model, slow.scentDecay]).toEqual(['jones', 0.05]);
     // Chemorepulsion without food: Jones weighs food as the own trail, −1, and the run has no food.
@@ -421,9 +427,51 @@ describe('URL links and the model', () => {
       scentDecay: 0.01,
       strains: [{ ...network.strains[0], attraction: [-1, 0, 0, 0], food: 0.4, light: 2, share: 0.5 }],
     });
-    expect(bound).toEqual({ ...network, strains: [{ ...network.strains[0], attraction: [-1, 0, 0, 0], food: -1 }] });
-    // Its walls and light stay drawn: Jones' obstacles, and light without an effect (packParams()).
-    expect((await open(network, [wrap('wall'), wrap('light')])).model).toBe('jones');
+    // The strength of the repellent is the link's, and the strain weighs it as its own trail (ADR 0044).
+    expect(bound).toEqual({
+      ...network,
+      lightStrength: 0.3,
+      strains: [{ ...network.strains[0], attraction: [-1, 0, 0, 0], food: -1, light: -1 }],
+    });
+    // Its walls and light stay drawn: Jones' obstacles, and a repellent source of Jones' map.
+    const drawn = await open({ ...network, lightStrength: 0.3 }, [wrap('wall'), wrap('light')]);
+    expect([drawn.model, drawn.lightStrength]).toEqual(['jones', 0.3]);
+  });
+
+  // ADR 0044: until then the Jones model drew light without an effect (ADR 0022, decision 8), and bound Light strength
+  // to its default. A Jones link from that time holds no mark `rules`: with drawn light it opens with a repellent
+  // strength of 0 and runs as it was made. A link made since holds the mark and keeps its strength.
+  it('that claims Jones from before ADR 0044 keeps its drawn light without an effect', async () => {
+    const old = async (s: Settings, strokes: EnvEdit[], scene = '') => {
+      const p = presetById(scene);
+      const drawing = {
+        scene,
+        revision: p ? shapeRevision(p) : 0,
+        origins: scene ? [0] : [],
+        shapes: p?.env?.map(() => true) ?? [],
+        strokes,
+      };
+      return (await decodeLink((await encodeLink(s, drawing, 0)).hash))?.settings;
+    };
+    expect((await encodeLink(network)).hash).not.toBe((await encodeLink(network, undefined, 0)).hash);
+    const lit = await old(network, [wrap('light')]);
+    expect([lit?.model, lit?.lightStrength]).toEqual(['jones', 0]);
+    // The light of a scene counts as drawn: Fleeing light, switched to Jones and shared.
+    const lamp = await old({ ...network, lightStrength: defaultSettings().lightStrength }, [], 'light');
+    expect([lamp?.model, lamp?.lightStrength]).toEqual(['jones', 0]);
+    // Without drawn light nothing ran otherwise: the link keeps its values.
+    expect(await old(network, [wrap('food'), wrap('wall')])).toEqual(network);
+    expect(await old(network, [])).toEqual(network);
+    // The extended model is as it was: its light keeps its strength.
+    const ext = { ...network, model: 'extended' as const, lightStrength: 0.2 };
+    expect((await old(ext, [wrap('light')]))?.lightStrength).toBe(0.2);
+    // A mark that is no number of an ADR from 0044 on counts as none.
+    const strokes = { scene: '', revision: 0, origins: [], shapes: [], strokes: [wrap('light')] };
+    const e = (await encodeLink(network, strokes, 0)).hash.split('&e=')[1] ?? '';
+    const marked = async (rules: unknown) =>
+      (await decodeLink(`s=${await hashPart(JSON.stringify({ ...network, rules }))}&e=${e}`))?.settings.lightStrength;
+    for (const rules of ['44', 43, null, true]) expect(await marked(rules), String(rules)).toBe(0);
+    for (const rules of [LINK_RULES, 45]) expect(await marked(rules), String(rules)).toBe(network.lightStrength);
   });
 
   it('keeps a scent decay that the Jones model bound below 0.001 in the extended model', async () => {

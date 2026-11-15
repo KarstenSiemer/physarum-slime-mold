@@ -164,12 +164,20 @@ describe('model slot and sources', () => {
   });
 
   // Jones 2010, p. 144: food goes into the trail map, which decays with decayT, and the strain weighs it as its trail.
-  it('packs Jones’ one trail map in the Jones model: the scent bound to the trail, and no light', () => {
+  // A repellent goes into the same map as a source below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the app
+  // keeps it above 0 in a lane of its own and the sensors subtract it, so the strain weighs it as its trail too, and
+  // its source has no factor, as the food has none.
+  it('packs Jones’ one trail map in the Jones model: food and repellent bound to the trail', () => {
     const strain = { ...defaultStrain(0), decay: 0.05, food: 0.3, light: 2, attraction: [-1, 0, 0, 0] };
     const s = jones({ strains: [strain], scentDecay: 0.2, lightStrength: 0.4, foodStrength: 0.02 });
     const f = floats(s);
-    expect([f[9 * 4], f[10 * 4]]).toEqual([-1, 0]); // food weight = own trail weight, light weight 0
-    expect(scent(s)).toEqual([Math.fround(255 * 0.02), 0, Math.fround(1 - 0.05), 0]);
+    expect([f[9 * 4], f[10 * 4]]).toEqual([-1, -1]); // food weight = repellent weight = own trail weight
+    expect(scent(s)).toEqual([255 * 0.02, 255 * 0.4, 1 - 0.05, 0].map((v) => Math.fround(v)));
+    // Attraction: the weight +1 on the repellent, which the sensors subtract.
+    const follow = floats(jones({ strains: [{ ...strain, attraction: [1, 0, 0, 0] }] }));
+    expect([follow[9 * 4], follow[10 * 4]]).toEqual([1, 1]);
+    // Without a strength the repellent has no source.
+    expect(scent({ ...s, lightStrength: 0 })[1]).toBe(0);
     const e = floats({ ...s, model: 'extended' });
     expect([e[9 * 4], e[10 * 4]]).toEqual([Math.fround(0.3), 2]);
     const g = emissionScale(0.2, s.stepOrder);
@@ -198,9 +206,14 @@ describe('model slot and sources', () => {
     const [food = 0, light = 0] = scent({ ...ext, scentDecay: 0.001 });
     expect(food).toBeCloseTo(255 * 0.05 * (0.001 / 0.1), 4);
     expect(light).toBeCloseTo(255 * 0.2 * (0.001 / 0.1), 4);
-    // The Jones model releases 255 · wProj at every decay of the strain.
-    const low = jones({ foodStrength: 0.05, strains: [{ ...defaultStrain(0), decay: 0.001 }], scentDecay: 0.001 });
-    expect(scent(low).slice(0, 3)).toEqual([Math.fround(255 * 0.05), 0, Math.fround(0.999)]);
+    // The Jones model releases 255 · wProj, and 255 · the repellent strength, at every decay of the strain.
+    const low = jones({
+      foodStrength: 0.05,
+      lightStrength: 0.2,
+      strains: [{ ...defaultStrain(0), decay: 0.001 }],
+      scentDecay: 0.001,
+    });
+    expect(scent(low).slice(0, 3)).toEqual([255 * 0.05, 255 * 0.2, 0.999].map((v) => Math.fround(v)));
   });
 
   // Moving first, the agents sense the map after the step's sources, before its diffusion (ADR 0027).

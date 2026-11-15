@@ -3,6 +3,8 @@
 - Status: accepted (owner decisions, 2026-11-11: a model switch "Jones" and "Erweitert"; "Jones streng": the Jones model
   holds only Jones' published rules; the default changes are open)
 - Date: 2026-11-11
+- Extended by [ADR 0044](0044-a-repellent-source-in-the-jones-model.md) (2026-11-15): the Jones model has a repellent
+  source, as Jones' papers use it. It replaces decision 8 and the list item "Light that releases a repellent scent".
 
 ## Context
 

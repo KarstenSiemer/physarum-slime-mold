@@ -1,6 +1,6 @@
 <script lang="ts">
   import { letter } from '../model/scene';
-  import { app, getEngine, showNotice, toolsFor } from './state.svelte';
+  import { app, getEngine, lightName, showNotice, toolsFor } from './state.svelte';
 
   function step() {
     app.paused = true;
@@ -74,7 +74,7 @@
     <button
       type="button"
       aria-pressed={app.settings.showScent}
-      title="Show the scent of food and light (S)"
+      title="Show the scent of food and {lightName(app.settings.model)} (S)"
       onclick={() => (app.settings.showScent = !app.settings.showScent)}>Scent</button
     >
     <button type="button" onclick={savePng}>Save PNG</button>

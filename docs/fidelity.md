@@ -144,6 +144,10 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 
 - **Organism**: the plasmodium grows out from Tokyo and covers the land in about 11 to 16 h; its network stands at
   26 h (Tero et al. 2010, Fig. 1 [V]; the hours are a reading of the times of the panels, not a number of the text).
+  The front moves at up to 1 cm/h (Jones and Adamatzky 2015, p. 2, cited there from Wohlfarth-Bottermann 1986 [V]). On
+  a plate shaped like France the plasmodium is back at its start on the fourth day, after all other cities (Adamatzky
+  et al., motorways, p. 6 [V]). On an agar gel of about 10 × 10 cm the front reaches the far electrodes after 21 h
+  (Tsuda et al. 2012, p. 3 and 5 [V]). The papers: [jones-later-papers.md](knowledge-base/jones-later-papers.md).
 - **Model**: growth and shrinkage of Jones 2011 (ADR 0025).
 - **Measured**: the Tokyo colony reaches all 36 foods by step 2,000, which is 1.1 h of model time, in 10 of 10 seeds
   (ADR 0029). So it grows about ten times as fast as the organism. Jones' growth rule has no speed of its own to set.
@@ -183,10 +187,16 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   network at steps 99, 512, 1,740 and 4,151 are 50.4, 24.5, 12.0 and 6.7 (Fig. 4: 56, 23, 12, 8). The Minimizing
   network ends with 1.6 to 2.0 lacunae at step 31,190 (Fig. 5: 1). The scale grows with SO (Fig. 10), a GPU test in
   `src/engine/sim.gpu.test.ts`.
+- **Not measured**: the numbers of Baumgarten et al. in this app: the count of veins over time, the coverage and the
+  exponent.
 
 ### 9. Shortest path and Steiner tree between foods
 
-- **Organism**: the docs hold no number. The scene text of Shortest path names the real slime mold without a source.
+- **Organism**: between cities on a plate shaped like France, in 12 experiments (Adamatzky et al., motorways [V]): the
+  graph of all tubes seen at least once is not planar. It is planar when only tubes seen in 3 or more experiments
+  count, and it splits into four parts at 8 or more (p. 9). The graph of all tubes contains the relative neighbourhood
+  graph, the Gabriel graph and the spanning tree rooted in Paris (p. 13). So the organism builds more than a tree, and
+  one run differs from the next. The scene text of Shortest path names the real slime mold without a source.
 - **Measured against Jones** (ADR 0027): Shortest path gives one band without a loop in 20 of 20 runs. Steiner tree
   gives a tree in 20 of 20 runs at step 12,000, with a bridge of 10 to 15 cells in 14 of 20, as in Fig. 19.
 - **Not measured**: the angles at the junctions (Plateau's 120°), and Fig. 20 (a high food weight turns the Steiner
@@ -229,14 +239,21 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Organism**: Tero et al. 2010 (p. 440) state that the plasmodium avoids bright light, and used light of graded
   intensity for mountains and lakes [V, read 2026-11-13]. The mask kept the growth to the more shaded areas (caption
   of Fig. 2) [V, read 2026-11-15]; the paper gives no number for it. Jones 2010, p. 142 names light as a trigger of the
-  sclerotium [J]. The docs hold no measurement of the avoidance itself.
-- **Model**: extended model only. Lit cells release a repellent that spreads like the food scent. This is this app's
-  rule (ADR 0007). Jones' light of 2017 dampens what a sensor reads and is not built (ADR 0022).
+  sclerotium [J]. White light repels the plasmodium, and so do sodium chloride, sugar in a high concentration and
+  removed substrate (Tsuda et al. 2012, p. 1 and 2 [V]). In an electric field 13 of 16 pieces had grown more toward
+  the cathode after 6 h (p. 4 [V]). The docs hold no measurement of how far or how fast the plasmodium leaves light.
+- **Model**: lit cells release a repellent that spreads like the food scent. This is the rule of the repellent sources
+  in Jones' papers: a source below 0 in the lattice that holds the trail (Jones and Adamatzky 2015, Sec. 4.1, p. 7;
+  Tsuda et al. 2012, p. 10 [V]). Both models have it. The Jones model calls it a repellent, as for salt or a current
+  source ([ADR 0044](adr/0044-a-repellent-source-in-the-jones-model.md)). To use this rule for light is this app's
+  choice (ADR 0007). Jones' own light rule is another one: an agent in a lit region has its sensor values multiplied
+  by a factor below 1 (Jones and Adamatzky 2012, p. 7 [V]). It is not built.
 - **Measured** (ADR 0042, the scene Tokyo with light, WebGPU, 10 seeds): the light covers 23.9 % of the land. At step
   2,000 the network holds 15.9 % of its cells on lit ground (13 to 18), against 21 to 25 % where the light would be in
   the scene without light (3 seeds): the colony grows over lit ground almost as over dark ground. From step 16,000 on
   it holds 4.6 % there (1.3 to 8.7) against 9.1 % (6.2 to 16.2). Light strengths of 0.02, 0.2 and 0.5 give 4.5, 3.8
-  and 5.1 % (2 seeds each). No ADR has a number for Fleeing light.
+  and 5.1 % (2 seeds each). In the Jones model the agents leave the disc of a repellent source, and the field follows
+  Jones' one map with a source below 0 (GPU tests, ADR 0044). No ADR has a number for Fleeing light.
 - **Limits**: in a filled lit area the repellent is the same in every cell, so by the rule the light turns an agent
   only at the edge of the area (read in the rule, not measured), and growth does not read light. In the paper the
   mask kept the growth of the organism to the shaded areas.
@@ -244,8 +261,11 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 ### 14. Answer to new food within about 15 min
 
 - **Organism** [H]: after a food stimulus the tubes near the food dilate up to twofold within about 15 min, the
-  dilation spreads at 15 μm/s, and the pattern lasts at least 45 min (Kramar and Alim 2021).
-- **Model**: a newly covered food gets a role in the flow, and the flow memory adapts with a time of 11 min.
+  dilation spreads at 15 μm/s, and the pattern lasts at least 45 min (Kramar and Alim 2021). An oat flake raises the
+  frequency of the oscillation by a median of 12.2 % in the 10 minutes after it, against 2.1 % without a stimulus
+  (Whiting et al., logic gates, p. 3 and Table 1 on p. 4 [V]).
+- **Model**: a newly covered food gets a role in the flow, and the flow memory adapts with a time of 11 min. The model
+  has no oscillation (row 17), so it has no frequency that a food could raise.
 - **Measured**: nothing. A test would add a food to a settled network and measure the width of the tubes over time.
 
 ### 15. Memory in the tube network
@@ -272,7 +292,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 ### 17. Shuttle streaming
 
 - **Organism**: the plasm streams back and forth with a period of about 2 minutes (Jones 2010, p. 129 [J]; Tero et al.
-  2007, Sec. 2 [V]; Marbach et al. 2023: 1 to 2 min [V]; Kramar and Alim 2021: 100 to 250 s [H]).
+  2007, Sec. 2 [V]; Marbach et al. 2023: 1 to 2 min [V]; Kramar and Alim 2021: 100 to 250 s [H]; 60 to 200 s, cited
+  in Whiting et al., logic gates, p. 1 [V]).
 - **Model**: none. The flow is a mean over the period, as in Tero et al. 2007 (Sec. 6). The roles of the foods change
   every 300 steps, 10 min. Jones' Fig. 7 shows one tracer agent that moves back and forth; Jones gives random differences in the
   strength of the path and collisions between agents as the cause (p. 137), not a period. The app has no tracer (`TODO.md`, Later).
@@ -284,6 +305,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 
 - **Model**: food never runs out. Covered food (Adamatzky and Jones 2010) lowers the scent of a food while agents
   cover it, comes back when they leave, and is off in every scene (ADR 0022).
+- **Jones' own rule** [V]: the value that a source projects is decremented while an agent covers the source, until the
+  source is consumed (Jones and Adamatzky 2012, p. 7). The app does not have this rule.
 
 ### 19. Pattern classes after the life conditions
 
@@ -297,7 +320,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Organism** [S]: two plasmodia of one species do not always fuse when they meet (Masui, Satoh and Seto 2018, on
   _Physarum rigidum_). In _Physarum polycephalum_ they fuse only when they are alike at several loci (Carlile and Dee
   1967). After a fusion of two strains that do not fit, a lethal reaction can follow. The papers were not read:
-  [flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia".
+  [flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia". Pieces of one culture do fuse, after a
+  delay [V]: their growth fronts leave a strip of free substrate between them at 10 h and merge by 16 h (Jones and
+  Adamatzky 2015, p. 4, Fig. 3), and eight pieces on one gel are one cell after 8 h (Tsuda et al. 2012, p. 5).
 - **Model**: each strain has a flow of its own, so no flux passes from the tubes of one strain into the tubes of another
   (ADR 0031). The strains keep apart by a negative weight on each other's trail (Fogleman 2020), which is no rule of
   the organism. The model has no fusion and no lethal reaction.
@@ -326,7 +351,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   (amendment 2026-11-15). A larger radius of its momentum settles a fixed network sooner, but lets the errors of a
   growing colony run off, so the radius stays (same amendment).
 - The front of the growth is not a fan of fine veins (row 6).
-- Light is this app's repellent, not the light of Jones' papers (row 13). Dryness is not modelled.
+- Light is a repellent source, the rule of Jones' papers for repellents such as salt. The light rule of Jones'
+  papers, weaker sensors on a lit agent, is not built (row 13). Dryness is not modelled.
 - Two strains never fuse: no flux passes between strains (row 20; [ADR 0031](adr/0031-a-flow-for-every-strain.md),
   decision 4).
 - The Jones model never runs the flow (ADR 0029, decision 1). Rows 1 to 7 and 14 to 16 hold for the extended model

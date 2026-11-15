@@ -1,6 +1,6 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
-// of respawn while the cut is held (ADR 0041). The script puts one wrong rule at a time into a source file of the app,
+// of respawn while the cut is held (ADR 0041), and of the repellent source of the Jones model (ADR 0044). The script puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
 // must fail at least one test.
@@ -33,6 +33,9 @@ const SIM_SPEC = 'src/engine/sim.gpu.test.ts';
 const [UNDER_WALL_GPU, UNDER_WALL_GL] = ['webgpu .*under a painted wall', 'webgl2 .*under a painted wall'];
 /** The tests of the agent tools on each backend, with those of the cut and a wall while growth runs (ADR 0039). */
 const [TOOLS_GPU, TOOLS_GL] = ['webgpu .*agent tools', 'webgl2 .*agent tools'];
+/** The settings as the GPU gets them, for both backends, and the tests of the Jones model's repellent (ADR 0044). */
+const PACK = 'src/engine/pack.ts';
+const REPELLENT = 'repellent|food and light';
 /** The tests of respawn while the cut is held (ADR 0041), with the other tests of respawn under a tool. */
 const [RESPAWN_GPU, RESPAWN_GL] = ['webgpu .*(the cut|a tool) is held', 'webgl2 .*(the cut|a tool) is held'];
 
@@ -1581,6 +1584,57 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '  if (alive) alive = !removed(a);\n',
     '',
     TOOLS_GL,
+    SIM_SPEC,
+  ],
+  // The repellent source of the Jones model (ADR 0044): drawn light is a source below 0 of Jones' one map, and the
+  // strain weighs it as its own trail. pack.ts packs it for both backends; the sensor is in the agent pass of each.
+  // Against the tests of the model switch in sim.gpu.test.ts, on both backends.
+  [
+    'J1 pack: the Jones model gives the repellent no weight',
+    PACK,
+    "lanes('light', (st, i) => (jones ? (st.attraction[i] ?? 0) : st.light));",
+    "lanes('light', (st) => (jones ? 0 : st.light));",
+    REPELLENT,
+    SIM_SPEC,
+  ],
+  [
+    'J2 pack: the Jones model weighs the repellent by Light avoidance, not as the own trail',
+    PACK,
+    "lanes('light', (st, i) => (jones ? (st.attraction[i] ?? 0) : st.light));",
+    "lanes('light', (st) => st.light);",
+    REPELLENT,
+    SIM_SPEC,
+  ],
+  [
+    'J3 pack: the repellent of the Jones model has no source',
+    PACK,
+    "f.set([255 * s.foodStrength * g, 255 * s.lightStrength * g, 1 - scentDecay, s.shrink], slot('scent'));",
+    "f.set([255 * s.foodStrength * g, jones ? 0 : 255 * s.lightStrength * g, 1 - scentDecay, s.shrink], slot('scent'));",
+    REPELLENT,
+    SIM_SPEC,
+  ],
+  [
+    'J4 pack: the repellent of the Jones model has the source factor of the extended model',
+    PACK,
+    "f.set([255 * s.foodStrength * g, 255 * s.lightStrength * g, 1 - scentDecay, s.shrink], slot('scent'));",
+    "f.set([255 * s.foodStrength * g, 255 * s.lightStrength * (jones ? emissionScale(scentDecay, s.stepOrder) : g), 1 - scentDecay, s.shrink], slot('scent'));",
+    REPELLENT,
+    SIM_SPEC,
+  ],
+  [
+    'J5 wgsl: the sensor adds the repellent',
+    AGENTS_WGSL,
+    'return dot(t, P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;',
+    'return dot(t, P.attraction[s]) + P.food[s] * sc.x + P.light[s] * sc.y;',
+    'webgpu .*repellent',
+    SIM_SPEC,
+  ],
+  [
+    'J6 glsl: the sensor adds the repellent',
+    'src/engine/gl/glsl/agents.frag',
+    'return dot(texelFetch(trail, q, 0), P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;',
+    'return dot(texelFetch(trail, q, 0), P.attraction[s]) + P.food[s] * sc.x + P.light[s] * sc.y;',
+    'webgl2 .*repellent',
     SIM_SPEC,
   ],
   // Respawn while the cut is held (ADR 0041): a point in the wound is no respawn point, with and without growth. Against

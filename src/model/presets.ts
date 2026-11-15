@@ -152,8 +152,8 @@ function fogleman(rows: number[][], perStrainDensity: number): Settings {
 
 // Jones' model: Table 1 (p. 134), 15 % of cells with an agent as in Fig. 4 and 5, and his rule of one agent per
 // cell (p. 133). Sensor offset and step size are in cells, so the grid sets the scale of the model. The scenes of
-// Jones' papers run on the lattice of their figure (ADR 0026) and on the Jones model, which weighs food as the
-// strain's own trail (ADR 0022). The app's scenes with these agents set the extended model and a grid of 512 cells on
+// Jones' papers run on the lattice of their figure (ADR 0026) and on the Jones model, which weighs food and a
+// repellent as the strain's own trail (ADR 0022, ADR 0044). The app's scenes with these agents set the extended model and a grid of 512 cells on
 // the long side, shaped like the screen; so does a scene of Jones on a device that cannot hold its lattice.
 const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
   settings({
@@ -161,7 +161,7 @@ const jones = (patch: Partial<Strain>, extra: Partial<Settings> = {}) =>
     density: 0.15,
     collisions: true,
     model: 'jones',
-    strains: strains([{ food: patch.attraction?.[0] ?? 1, ...patch }]),
+    strains: strains([{ food: patch.attraction?.[0] ?? 1, light: patch.attraction?.[0] ?? 1, ...patch }]),
     ...extra,
   });
 
@@ -513,8 +513,9 @@ PRESETS.push(
     about:
       'Real Physarum avoids light. A lamp in the middle releases a repellent that spreads and fades, so agents feel it before they enter the lit disc. The network itself uses Jones’ settings for Fig. 4.',
     strainRoles: ['Jones’ standard agent, flees light'],
-    why: 'The network uses Jones’ values for Fig. 4 with one agent per cell. The light is this app’s simplification: a spreading repellent with strength 0.2. Jones 2010 has no light.',
-    // Light that releases a repellent is no rule of Jones: the extended model (ADR 0022).
+    why: 'The network uses Jones’ values for Fig. 4 with one agent per cell. The lamp releases a spreading repellent with strength 0.2. That is the rule of the repellent sources in Jones’ later papers (Jones and Adamatzky 2015). To use it for light is this app’s choice: Jones’ own light rule of 2012 makes the sensors of a lit agent weaker, and this app does not have it.',
+    // A repellent source is a rule of Jones (ADR 0044), and the Jones model runs this scene with the same bytes. To
+    // call the source light is this app's reading, so the scene stays in the extended model (ADR 0022).
     settings: () =>
       jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, { model: 'extended', lightStrength: 0.2 }),
     env: [{ kind: 'light', at: [0, 0], r: 0.16 }],
