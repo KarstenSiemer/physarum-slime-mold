@@ -38,3 +38,23 @@ Notes:
 - OpenAlex tags several UWE copies as CC BY, also ones whose PDF says © MIT or © IOP. That looks like a default of the
   repository, not a grant of the rights holder; only a written answer of UWE or the publisher would change "link only".
 - A copy of a paper in another repository on GitHub gives no right to its figures.
+
+## What the papers give the app, and what not
+
+Read on 2026-11-15 for corrections and extensions of the model. What the app can build is in `TODO.md`, section "From
+the papers read on 2026-11-15"; the corrections went into ADR 0044 and `docs/fidelity.md`, the coarsening into ADR 0045. These parts give the app nothing to build, each for its reason:
+
+- The cytoskeleton paper: no rule, no parameter and no number about behaviour; the actin automata and the graphs of
+  nuclei are another model.
+- Data smoothing and splines: the scene needs a timed removal of the stimulus and a halt of all movement, shows no
+  behaviour of the organism, and names no lattice, kernel or damping.
+- Sound synthesis and the logic gates: the surface potential (±40 mV) would be a read-out the app invents, as the app
+  has no electrical state; the gates, thresholds and sounds are about computing. Their frequency numbers are test
+  targets for a later model of shuttle streaming (`TODO.md`, Later).
+- The learning chip: the AC stimulation at 10 Hz and 1000 Hz maps to plain positive and negative stimuli in the paper
+  itself (p. 4); the rise of the baseline after repeated stimuli is a result of the model, not of the organism.
+- Heat as an attractant (+19.8 % frequency, logic gates, Table 1): one number, and the app has no temperature field.
+- The Oregonator model in the routing paper: another class of model.
+- "Damping 0.07" in the amoeboid paper (p. 3): it is not clear whether it is a decay, and the paper names no lattice or
+  deposit.
+- The multi-agent model for computing and robotics: no free copy found.
