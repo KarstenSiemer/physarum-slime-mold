@@ -349,6 +349,11 @@
         <a href="https://doi.org/10.5506/APhysPolB.46.1201" rel="noreferrer">doi:10.5506/APhysPolB.46.1201</a>.
       </p>
       <p>
+        The scene Voronoi diagram: J. Jones and A. Adamatzky, “Slime mould inspired generalised Voronoi diagrams with
+        repulsive fields”, 2015,
+        <a href="https://arxiv.org/abs/1503.06973" rel="noreferrer">arXiv:1503.06973</a>.
+      </p>
+      <p>
         GPU approach and visual inspiration: Sage Jenson,
         <a href="https://cargocollective.com/sagejenson/physarum" rel="noreferrer">physarum</a> (2019). Multiple species
         and presets “Cyclones”, “Dunes”, “Dot grid”: Michael Fogleman,

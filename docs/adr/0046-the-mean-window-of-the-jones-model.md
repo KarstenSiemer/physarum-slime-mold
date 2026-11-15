@@ -4,6 +4,7 @@
   2026-11-15
 - Date: 2026-11-15
 - Extends ADR 0022 (the Jones and the extended model) and ADR 0027 (the mean at edges and walls).
+- Extended by ADR 0048 (2026-11-15): the scene Voronoi diagram, the first scene that uses it.
 
 ## Context
 

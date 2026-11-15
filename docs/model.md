@@ -129,8 +129,9 @@ ADR 0007, 0022, 0027, 0046. Code: `shaders/diffuse.wgsl`, `gl/glsl/diffuse.frag`
 M f(x) = 1_S(x) · (1/w²) · Σ_{y ∈ N_w(x)} 1_S(y) · f(y).
 
 The side w of the window is 3 in the extended model. In the Jones model it is the setting Mean window: 3, 5, 7, 9, 11,
-13 or 15, and 3 in every scene (ADR 0046). Jones 2010 uses 3 × 3; his later papers use larger windows (5 × 5 as a
-rule: Jones and Adamatzky 2015, arXiv:1503.06973, p. 7; 15 × 15: Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10).
+13 or 15. It is 5 in the scene Voronoi diagram (ADR 0048) and 3 in every other scene (ADR 0046). Jones 2010 uses
+3 × 3; his later papers use larger windows (5 × 5 as a rule: Jones and Adamatzky 2015, arXiv:1503.06973, p. 7;
+15 × 15: Tsuda, Jones et al. 2011, arXiv:1204.1752, p. 10).
 
 The divisor is w², the number of cells of the window, at every site. A cell outside S counts 0 and holds 0. So trail
 that reaches a closed edge, a dish's rim, or a wall of the extended model is lost (absorbing edges, Jones 2011). A
@@ -228,6 +229,10 @@ t² (3 − 2t)) rounded to a byte, with t = clamp((d − r) / (0.3 r − r), 0, 
 within 0.3 r, 0 at r. The shaders write this step out, because GLSL ES 3.00 leaves smoothstep undefined with its first
 edge above its second (ADR 0007, amendment of 2026-11-13). Erase: all bytes 0 (`shaders/paint.wgsl`,
 `gl/glsl/paint.frag`, CPU reference `lightByte()` in `brush.ts`).
+
+A dab of light with a radius of 2.5 cells on the centre of a cell holds bytes that sum to 2,243: 0.977 of 3 × 3 cells
+of the full byte. The scene Voronoi diagram paints its repellent dots so, in place of the hard dots of 3 × 3 cells of
+its paper (ADR 0048).
 
 ### 6.8 Trail saturation K
 

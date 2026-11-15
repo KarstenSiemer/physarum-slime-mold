@@ -5,6 +5,7 @@
 - Date: 2026-11-15
 - Extends [ADR 0022](0022-jones-and-extended-model.md) (the Jones and the extended model): it replaces decision 8 and
   the list item "Light that releases a repellent scent" of "Not Jones".
+- Extended by ADR 0048 (2026-11-15): the scene Voronoi diagram, the first scene that uses it.
 
 ## Context
 

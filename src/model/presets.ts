@@ -102,6 +102,17 @@ function baumgartenFigure(label: string, journalPage: number): Figure {
   return { href: `${BAUMGARTEN_PDF}#page=${page}`, label, note: `page ${page} of the free PDF` };
 }
 
+/**
+ * Jones and Adamatzky 2015, "Slime mould inspired generalised Voronoi diagrams with repulsive fields", as arXiv holds
+ * it (arXiv:1503.06973v1, a non-exclusive licence): the app links a figure and does not show it (ADR 0037, ADR 0048).
+ */
+export const VORONOI_PDF = 'https://arxiv.org/pdf/1503.06973v1';
+
+/** A figure of Jones and Adamatzky 2015 on page `page` of the PDF, which is the page number printed there. */
+function voronoiFigure(label: string, page: number): Figure {
+  return { href: `${VORONOI_PDF}#page=${page}`, label, note: `page ${page} of the free PDF` };
+}
+
 /** The revision of a scene's shapes that the scene loads now: the number of its earlier shape lists. */
 export const shapeRevision = (p: Preset) => p.envHistory?.length ?? 0;
 
@@ -219,6 +230,86 @@ const forager = (extra: Partial<Settings>, rivals = 1): Settings => {
 
 /** The lattice of Baumgarten, Jones and Hauser 2015 (p. 1204; ADR 0045). */
 const L400 = (): Lattice => [400, 400];
+
+/**
+ * The dish of Jones and Adamatzky 2015, Fig. 6a and 10 (ADR 0048): 225 cells across, as the app's dish is on a
+ * lattice of 239 × 239 cells, with its centre on the centre of a cell.
+ */
+const L239 = (): Lattice => [239, 239];
+
+/**
+ * The seven repellent dots of the scene Voronoi diagram, in cells from the centre of the dish: read from Fig. 6a of
+ * Jones and Adamatzky 2015, where each is a square of 3 × 3 cells (ADR 0048). A hexagon around one dot, a few cells
+ * off the centre of the dish, as in the figure.
+ */
+export const VORONOI_DOTS: readonly (readonly [number, number])[] = [
+  [-3, -41],
+  [-43, -21],
+  [37, -21],
+  [-4, 2],
+  [-43, 23],
+  [37, 23],
+  [-4, 44],
+];
+
+/** The ring of attractant of the same figure: 3 cells wide, its middle 111 cells from the centre of the dish. */
+export const VORONOI_RING = { radius: 111, width: 3, segments: 72 } as const;
+
+/**
+ * The radius of a repellent dot in cells. The light brush has a smooth edge (docs/model.md, 6.7): with this radius the
+ * bytes of a dot sum to 2,243, as much as 0.977 of the paper's 3 × 3 cells of 255 (ADR 0048).
+ */
+export const VORONOI_DOT_RADIUS = 2.5;
+
+/**
+ * The model of Jones and Adamatzky 2015 (p. 6 to 8; ADR 0048): SA = RA = 60°, SO 5, a deposit of 1, a mean over
+ * 5 × 5 cells times 0.9, growth and shrinkage tested every 3 steps (1 to 10 agents in 9 × 9 cells divide, 0 to 24 in
+ * 5 × 5 survive), in a dish. Capacity 1 leaves room for a child in every cell: the paper has no limit.
+ */
+const repelled = (extra: Partial<Settings>) =>
+  jones(
+    { sensorAngle: 60, rotationAngle: 60, sensorOffset: 5, deposit: 1 },
+    {
+      capacity: 1,
+      boundary: 'dish',
+      bloom: 0,
+      meanWindow: 5,
+      growth: true,
+      growthEvery: 3,
+      growthWindow: 9,
+      growthMin: 1,
+      growthMax: 10,
+      shrinkEvery: 3,
+      shrinkWindow: 5,
+      shrinkMin: 0,
+      shrinkMax: 24,
+      ...extra,
+    },
+  );
+
+/** The shapes of the scene Voronoi diagram on its lattice: the ring as a chain of food strokes, then the dots. */
+function voronoiShapes(): EnvShape[] {
+  const side = L239()[0];
+  // Rounded, so that a scene and a link to it hold the same numbers: to 1/400 of a cell.
+  const at = (cells: number) => Math.round((cells / side) * 1e5) / 1e5;
+  const { radius, width, segments } = VORONOI_RING;
+  const corner = (i: number): [number, number] => {
+    const angle = (2 * Math.PI * (i % segments)) / segments;
+    return [at(radius * Math.cos(angle)), at(radius * Math.sin(angle))];
+  };
+  const ringShapes = Array.from({ length: segments }, (_, i): EnvShape => ({
+    kind: 'food',
+    at: corner(i),
+    to: corner(i + 1),
+    r: at(width / 2),
+  }));
+  const dots = VORONOI_DOTS.map(([x, y]): EnvShape => ({
+    kind: 'light',
+    at: [at(x), at(y)],
+    r: at(VORONOI_DOT_RADIUS),
+  }));
+  return [...ringShapes, ...dots];
+}
 
 /** The lattice of the dish scenes with the flow (ADR 0032): the same picture on every screen. */
 const L384 = (): Lattice => [384, 384];
@@ -626,6 +717,24 @@ PRESETS.push(
       ),
   },
   {
+    id: 'voronoi',
+    name: 'Voronoi diagram',
+    group: 'experiments',
+    source: 'Jones and Adamatzky 2015, Fig. 10',
+    summary: 'Seven repellent dots in a dish: the network settles on the lines halfway between them.',
+    watch:
+      'The sheet breaks into a mesh. The mesh leaves the dots and gathers on the lines that lie as far from one dot as from the next. After about 3,000 steps a hexagon and six spokes to the rim are left: the Voronoi diagram of the dots. In about one run of five a loop around one dot replaces two spokes.',
+    about:
+      'A Voronoi diagram splits a plane into cells: each cell holds the points that lie nearest to one site. A real slime mold draws one when repellents lie on it and food lies along the rim of its dish. Jones and Adamatzky did the same with Jones’ model. A repellent is a source below zero in the trail map, so the agents keep as far from every dot as they can.',
+    strainRoles: ['Jones’ agent, angles of 60°: seeks the ring, flees dots'],
+    why: 'The paper’s values (p. 7): sensor and rotation angle 60°, sensor distance 5, a deposit of 1, a 5 × 5 mean, growth and shrinkage tested every 3 steps. It gives no lattice, no strengths and no number of agents. Dish, ring and dots are read from Fig. 6a and 10. Both strengths are 0.5, the most this app allows: they fit the diagram best. A dot has a smooth edge here and releases as much as the paper’s hard one.',
+    figure: voronoiFigure('Fig. 10', 10),
+    settings: () =>
+      // About 10,000 agents, read from Fig. 10a; the dish counts the square around it (sizing.ts).
+      repelled({ lattice: L239(), density: 10_000 / 239 ** 2, foodStrength: 0.5, lightStrength: 0.5 }),
+    env: voronoiShapes(),
+  },
+  {
     id: 'tokyo',
     name: 'Tokyo rail network',
     group: 'experiments',
@@ -838,10 +947,11 @@ export function latticeLostNotice(lattice: Lattice, now: Pick<Settings, 'lattice
   return `This device cannot hold Jones’ grid of ${latticeText(lattice)} for this figure. The scene runs on a grid of ${gridText(now)}, so the result can be different from the paper.`;
 }
 
-export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'app';
+export type SourceKind = 'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'voronoi' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Jones 2010')) return 'jones';
+  if (p.source.startsWith('Jones and Adamatzky 2015')) return 'voronoi';
   if (p.source.startsWith('Fogleman 2020')) return 'fogleman';
   if (p.source.startsWith('Nakagaki')) return 'nakagaki';
   if (p.source.startsWith('Tero')) return 'tero';
@@ -873,6 +983,8 @@ export function sourceText(p: Preset): string {
       return 'Jones’ later papers (Natural Computing 2011; Jones, Mayne and Adamatzky 2017) let the population grow and shrink, and they forage with a sensor angle of 22.5°. This scene uses their rule and values in this app’s maze. The maze, its foods and the other values were chosen for this app.';
     case 'coarsening':
       return 'Baumgarten, Jones and Hauser, Acta Physica Polonica B 46: 1201 (2015), watched the vein network of a real slime mold coarsen and ran Jones’ model, with growth and shrinkage, for a comparison. This scene uses the settings of the model of the paper, on its lattice of 400\u00a0×\u00a0400 cells on every screen.';
+    case 'voronoi':
+      return 'Jones and Adamatzky, “Slime mould inspired generalised Voronoi diagrams with repulsive fields” (2015, arXiv:1503.06973), add repellents to Jones’ model: sources below zero in the trail map. With them the agents draw the Voronoi diagram of a set of points. This scene uses the model of the paper. Its lattice and its strengths are read from the figures or chosen for this app.';
     case 'app':
       return 'This scene was made for this app. Its settings are not taken from a paper.';
   }

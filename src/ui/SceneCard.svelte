@@ -40,6 +40,7 @@
     tero: 'Physarum',
     later: 'The model',
     coarsening: 'The model',
+    voronoi: 'The model',
     app: 'Scenes',
   };
 </script>

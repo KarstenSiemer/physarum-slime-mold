@@ -29,12 +29,14 @@ now: [model.md](../model.md). The decision that came from these notes:
   RA 60°, a step of 1 pixel and a deposit of 1 (p. 7).
 - **The strength of a repellent.** The repellent nodes of Fig. 14 have weights of 0.005, 0.025, 0.05, 0.075, 0.125,
   0.15, 0.45 and 0.7 (Voronoi, p. 14). A stronger repellent pushes a network farther out (Sec. 5.1, p. 8, Fig. 9).
-  The paper does not say how a weight becomes the projected value.
+  The paper does not say how a weight becomes the projected value. ADR 0048 has the reading that a weight is the
+  app's strength, and what speaks for it; no run tests it.
 - **Current sources and sinks.** A current source projects −255 into the field at every step and a current sink
   +255. The field is the mean of a 15 × 15 window times (1 − d), with a damping d. An agent deposits 5 units
   (Tsuda, p. 10).
-- **What this app does** (ADR 0044): the Jones model reads drawn light as such a source below 0, with a 3 × 3 mean.
-  It has no 5 × 5 or 15 × 15 mean. Its strength goes up to 0.5 (a source of −127.5), so it holds the weights of
+- **What this app does** (ADR 0044): the Jones model reads drawn light as such a source below 0. The side of its mean
+  is a setting from 3 to 15 since ADR 0046, and the scene Voronoi diagram runs the values of the Voronoi paper
+  (ADR 0048). Its strength goes up to 0.5 (a source of −127.5), so it holds the weights of
   Fig. 14 up to 0.45, and not the −255 of Tsuda.
 
 ## Light and consumption in Jones' model
