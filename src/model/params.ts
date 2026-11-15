@@ -233,7 +233,7 @@ export const globalSpec = {
   growthEvery: {
     label: 'Growth test every',
     unit: 'steps',
-    help: 'How often each agent tests whether it divides (Gf). 0 turns the growth test off. Jones uses 3 (2011, 2017), 5 (2014) and 10 (2015).',
+    help: 'How often each agent tests whether it divides (Gf). 0 turns the growth test off: then no agent divides, and the Cut tool and a wall painted onto agents move them elsewhere, as without Growth and shrinkage. Jones uses 3 (2011, 2017), 5 (2014) and 10 (2015).',
     min: 0,
     max: 100,
     step: 1,
@@ -433,7 +433,7 @@ export function emissionScale(scentDecay: number, order: StepOrder): number {
 /** Help for the switch "Growth and shrinkage"; Learn → Controls lists it with the sliders (ADR 0025). */
 export const growthHelp = {
   label: 'Growth and shrinkage',
-  help: 'Jones’ rule from 2011 for the size of the population. Every few steps, each agent that moved counts the agents in a square around it, itself included. If the count lies between Growth minimum and Growth maximum, the agent divides: a dead agent comes to life in a random empty cell next to it. Every few steps, each agent also counts the agents in its shrinkage square. If that count is below Shrinkage minimum or above Shrinkage maximum, the agent dies. So a colony grows at its thin edge, and crowded paths stay thin. A child needs a dead agent: Capacity sets how many agents the simulation holds. In a full scene with the default Capacity, growth only replaces the agents that shrinkage removes, and in a dense scene of Jones shrinkage first removes many agents. The rule needs one agent per cell, because the counts assume it. On a device with little memory, the switch can lower the grid, which restarts the scene. The scene Foraging maze uses the rule.',
+  help: 'Jones’ rule from 2011 for the size of the population. Every few steps, each agent that moved counts the agents in a square around it, itself included. If the count lies between Growth minimum and Growth maximum, the agent divides: a dead agent comes to life in a random empty cell next to it. Every few steps, each agent also counts the agents in its shrinkage square. If that count is below Shrinkage minimum or above Shrinkage maximum, the agent dies. So a colony grows at its thin edge, and crowded paths stay thin. A child needs a dead agent: Capacity sets how many agents the simulation holds. In a full scene with the default Capacity, growth only replaces the agents that shrinkage removes, and in a dense scene of Jones shrinkage first removes many agents. With the rule, the Cut tool and a wall painted onto agents kill them, as a wound takes away the plasm of the slime mold, and the colony grows back from the edge; without it, they move the agents elsewhere. The rule needs one agent per cell, because the counts assume it. On a device with little memory, the switch can lower the grid, which restarts the scene. The scene Foraging maze uses the rule.',
   ref: 'Jones 2011, Nat. Comput. 10: 1345, Sec. 5.1; Jones and Adamatzky 2014; Jones 2015; Jones, Mayne and Adamatzky 2017',
 } as const;
 

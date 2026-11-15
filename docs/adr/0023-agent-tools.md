@@ -4,6 +4,8 @@
 - Date: 2026-11-11
 - Extended by ADR 0038 (2026-11-15): an alive agent under a painted wall is placed as the cut places its agents, with
   or without a tool.
+- Extended by ADR 0039 (2026-11-15): while growth runs, the cut kills the alive agents of its wound instead of moving
+  them; without growth it moves them as decided here.
 
 ## Context
 

@@ -159,8 +159,9 @@ bool starved(vec4 a, uint i) {
 }
 
 #endif
-// Shrinkage: an agent alive at the start of the step dies with the shrink probability. Returns false if it is dead.
-// Clears the markers of the last step.
+// Shrinkage: an agent alive at the start of the step dies with the shrink probability, and while growth runs in the
+// wound of a cut or under a wall (removed() in tools.glsl, ADR 0039). Returns false if it is dead. Clears the markers
+// of the last step.
 bool shrinkage(inout vec4 a, uint i) {
   uint s = bitsOf(a) & 3u;
   bool alive = (bitsOf(a) & ALIVE) != 0u;
@@ -171,6 +172,7 @@ bool shrinkage(inout vec4 a, uint i) {
 #if FLOW
   if (alive) alive = !starved(a, i);
 #endif
+  if (alive) alive = !removed(a);
   a.w = float(s | (alive ? ALIVE : 0u));
   return alive;
 }

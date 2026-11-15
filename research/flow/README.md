@@ -710,8 +710,8 @@ A test is worth what it catches. This script puts 87 wrong rules of the flow, of
 of its radius into the code of the app, one at a time, and runs the tests of the flow for each one
 (about 50 minutes; the 42 of the food sites are part 11, the 4 of the radius part 12). Without a
 name it also runs the 93 wrong rules of the picture of the tubes (part 10), and the 8 wrong rules of
-an agent under a painted wall (ADR 0038, `U1` to `U8`) against the tests of the agents in
-`sim.gpu.test.ts`:
+an agent under a painted wall (ADR 0038, `U1` to `U8`) and the 10 of the cut and a wall while
+growth runs (ADR 0039, `K1` to `K10`) against the tests of the agents in `sim.gpu.test.ts`:
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/mutate.ts

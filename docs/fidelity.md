@@ -186,7 +186,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Organism**: the docs hold no measurement of the organism.
 - **Model**: the Cut tool. In the Jones model the wound keeps its trail; in the extended model the cut clears it.
   Jones kept agents out of the wound until all were placed elsewhere; the app lets them back as soon as the tool is
-  released.
+  released. The scene has no growth, so the cut places its agents elsewhere, as Jones did (Jones 2010, Sec. 4.3).
+  While growth runs, in other scenes or with the switch on, the cut kills them instead, as a wound takes away the plasm
+  of the organism, and the colony grows back from the margin (ADR 0039).
 - **Measured against Jones**: the spot pattern before the cut is less regular than Fig. 22: a spacing variation of
   9.3 ± 3.4 % (WebGPU) and 8.8 ± 3.5 % (WebGL2) at step 2,650 against about 3 to 5 % (ADR 0027). Its cause is not
   found. The time until the wound closes (about 275 steps in Jones, p. 148) is not measured, and Fig. 23 (a wound in a
