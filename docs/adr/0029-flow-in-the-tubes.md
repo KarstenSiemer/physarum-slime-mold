@@ -9,6 +9,8 @@
 - Later decisions on the flow get ADRs of their own ([ADR 0040](0040-one-decision-one-short-adr.md), 2026-11-15).
 - Extended by [ADR 0042](0042-a-second-tokyo-scene-with-light.md) (2026-11-15): the second Tokyo scene of decision 20,
   with light on the mountains and the lakes.
+- Extended by [ADR 0053](0053-no-child-onto-starved-ground.md) (2026-11-16): no child is born onto starved ground;
+  decision 9 stays. It also measures how long the mark of starved ground of decision 7 keeps ground closed.
 - In short: [`research/flow/README.md`](../../research/flow/README.md) tells on one page, in plain
   words, how this decision came about. This record has the details.
 - Changed by [ADR 0031](0031-a-flow-for-every-strain.md) (2026-11-13): every strain has a flow of

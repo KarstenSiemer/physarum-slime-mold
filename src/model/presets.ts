@@ -757,7 +757,7 @@ PRESETS.push(
     watch:
       'The network first fills every corridor. The flow runs from food to food and passes the dead ends by. They starve and are empty after about 4,000 steps. One thick tube remains and pulls tight along a short route. Turn Flow in the tubes off to see Jones’ rules alone: many paths remain.',
     about:
-      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and joined the food along the shortest route. Here, walls form a winding corridor with food at both ends, with one route between them. The flow in the tubes does what the flow in the real one does: the tube that carries it stays and gets wider, and the dead ends starve.',
+      'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and kept tubes on short routes, in 5 of 19 runs on the shortest alone. Here, walls form a winding corridor with one route between two foods. The flow in the tubes does what the flow in the real one does: the tube that carries it stays and gets wider, and the dead ends starve.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
     why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Flow in the tubes is on: each food gives or takes a flux of 8, after the model of Tero et al. Walls block movement and sensing, so no agent follows a trail behind a wall.',
     figure: {
@@ -843,7 +843,7 @@ PRESETS.push(
     watch:
       'The colony starts at the top left and reaches the food at the bottom right after about 3,500 steps, along several routes. From about step 5,000 only the shortest route carries flow. The other corridors thin out, but short branches keep growing back into them.',
     about:
-      'A maze like one cut into a corn field: 12 × 8 rooms with dead ends and loops. Six routes join the entrance at the top left and the exit at the bottom right, and the longest is 1.47 times as long as the shortest. A real slime mold kept the shortest route of a maze (Nakagaki et al. 2000), and the flow model of Tero et al. (2007) predicts it. Here the flow keeps it too.',
+      'A maze like one cut into a corn field: 12 × 8 rooms with dead ends and loops. Six routes join the entrance at the top left and the exit at the bottom right, and the longest is 1.47 times as long as the shortest. In the maze of Nakagaki et al. (2000) a real slime mold kept the shortest route alone in 5 of 19 runs, and a route 1 mm longer in 6. Here the flow keeps the shortest of the six routes.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
     why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles. Flow in the tubes is on with a strength of 8, the Maze’s. The grid has 480 × 320 cells on every screen: rooms of 40 cells, corridors 34 cells wide. A seeded generator made the walls: a maze without loops, then 7 walls taken away. Sensor distance 7 and food weight 0.03 are the Maze’s.',
     settings: () =>
@@ -1184,7 +1184,7 @@ export function sourceText(p: Preset): string {
     case 'fogleman':
       return 'Fogleman 2020 is Michael Fogleman’s version of the model, written in Go, with several species that follow or flee each other’s trails. This scene uses one of the settings he saved in his code (MIT license).';
     case 'nakagaki':
-      return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold found the shortest way through a maze. This scene stages that idea; its settings were chosen for this app. The flow in the tubes is built from the model of Tero, Kobayashi and Nakagaki (2007), on the cells of the grid.';
+      return 'Nakagaki, Yamada and Tóth, Nature 407: 470 (2000): a real slime mold left the dead ends of a maze and kept tubes on short ways between two foods. This scene stages that idea; its settings were chosen for this app. The flow in the tubes is built from the model of Tero, Kobayashi and Nakagaki (2007), on the cells of the grid.';
     case 'tero': {
       // "Fig. 1": the runs without light; "Fig. 2B": the runs with light on the mountains and the lakes.
       const figure = p.source.slice('Tero et al. 2010, '.length);

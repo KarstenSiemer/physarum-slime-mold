@@ -1,7 +1,8 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
-// of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046) and of the
-// Electrode tool (ADR 0047). The script puts one wrong rule at a time into a source file of the app,
+// of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046), of the
+// Electrode tool (ADR 0047), of Light stops growth (ADR 0050) and of the rule that no child is born onto starved ground
+// (ADR 0053). The script puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
 // must fail at least one test.
@@ -63,6 +64,9 @@ const GROWTH_WGSL = 'src/engine/shaders/growth.wgsl';
 const GROWTH_FRAG = 'src/engine/gl/glsl/growth.frag';
 const SHADE = 'stop births onto lit cells';
 const [SHADE_GPU, SHADE_GL] = [`webgpu .*${SHADE}`, `webgl2 .*${SHADE}`];
+/** No child is born onto starved ground (ADR 0053): the tests of the rule on each backend, in the tests of the flow. */
+const STARVED = 'no child be born onto starved ground';
+const [STARVED_GPU, STARVED_GL] = [`webgpu .*${STARVED}`, `webgl2 .*${STARVED}`];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -164,8 +168,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'G1 wgsl: an agent divides on a starved cell',
     'src/engine/shaders/growth.wgsl',
-    'if (memory * memory < F.e.y) { return -1; }',
-    'if (memory * memory < 0.0 * F.e.y) { return -1; }',
+    'if (starved(s, q)) { return -1; }',
+    'if (false && starved(s, q)) { return -1; }',
     GPU,
   ],
   // Every strain has a flow of its own (ADR 0031): the wrong rules that give a strain the flow of the first strain.
@@ -353,8 +357,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'F8 glsl: an agent divides on a starved cell',
     'src/engine/gl/glsl/growth.frag',
-    'if (memory * memory < F.e.y) return -1;',
-    'if (memory * memory < 0.0 * F.e.y) return -1;',
+    'if (starved(bits & 3u, q)) return -1;',
+    'if (false && starved(bits & 3u, q)) return -1;',
     GL,
   ],
   [
@@ -423,7 +427,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'F13 glsl: an agent divides by the flow memory of the first strain',
     'src/engine/gl/glsl/growth.frag',
-    'float memory = flowMemoryOf(bits & 3u, q).x;',
+    'float memory = flowMemoryOf(s, q).x;',
     'float memory = flowMemoryOf(0u, q).x;',
     GL,
   ],
@@ -2201,6 +2205,78 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
     SHADE,
     SIM_SPEC,
+  ],
+  // No child is born onto starved ground (ADR 0053): the rule reads the cell of the child, by the flow memory of the
+  // strain of the child, after the wrap of the grid, and it leaves a starved neighbour out of the pick.
+  [
+    'SG1 wgsl: a child is born onto starved ground',
+    GROWTH_WGSL,
+    'if (starved(s, cellCoord(u32(m)))) { continue; }',
+    'if (false && starved(s, cellCoord(u32(m)))) { continue; }',
+    STARVED_GPU,
+  ],
+  [
+    'SG2 wgsl: the rule reads the cell of the parent in place of the cell of the child',
+    GROWTH_WGSL,
+    'if (starved(s, cellCoord(u32(m)))) { continue; }',
+    'if (starved(s, q)) { continue; }',
+    STARVED_GPU,
+  ],
+  [
+    'SG3 wgsl: the rule reads the cell of the child by the flow memory of the first strain',
+    GROWTH_WGSL,
+    'if (starved(s, cellCoord(u32(m)))) { continue; }',
+    'if (starved(0u, cellCoord(u32(m)))) { continue; }',
+    STARVED_GPU,
+  ],
+  [
+    'SG4 wgsl: a starved neighbour stops the birth, and the parent picks no other cell',
+    GROWTH_WGSL,
+    'if (starved(s, cellCoord(u32(m)))) { continue; }',
+    'if (starved(s, cellCoord(u32(m)))) { return -1; }',
+    STARVED_GPU,
+  ],
+  [
+    'SG5 wgsl: the rule reads the neighbour before the wrap of the grid',
+    GROWTH_WGSL,
+    'if (starved(s, cellCoord(u32(m)))) { continue; }',
+    'if (starved(s, q + around(k))) { continue; }',
+    STARVED_GPU,
+  ],
+  [
+    'SG6 glsl: a child is born onto starved ground',
+    GROWTH_FRAG,
+    'if (starved(bits & 3u, cellCoord(m))) continue;',
+    'if (false && starved(bits & 3u, cellCoord(m))) continue;',
+    STARVED_GL,
+  ],
+  [
+    'SG7 glsl: the rule reads the cell of the parent in place of the cell of the child',
+    GROWTH_FRAG,
+    'if (starved(bits & 3u, cellCoord(m))) continue;',
+    'if (starved(bits & 3u, q)) continue;',
+    STARVED_GL,
+  ],
+  [
+    'SG8 glsl: the rule reads the cell of the child by the flow memory of the first strain',
+    GROWTH_FRAG,
+    'if (starved(bits & 3u, cellCoord(m))) continue;',
+    'if (starved(0u, cellCoord(m))) continue;',
+    STARVED_GL,
+  ],
+  [
+    'SG9 glsl: a starved neighbour stops the birth, and the parent picks no other cell',
+    GROWTH_FRAG,
+    'if (starved(bits & 3u, cellCoord(m))) continue;',
+    'if (starved(bits & 3u, cellCoord(m))) return -1;',
+    STARVED_GL,
+  ],
+  [
+    'SG10 glsl: the rule reads the neighbour before the wrap of the grid',
+    GROWTH_FRAG,
+    'if (starved(bits & 3u, cellCoord(m))) continue;',
+    'if (starved(bits & 3u, q + around(k))) continue;',
+    STARVED_GL,
   ],
 ];
 

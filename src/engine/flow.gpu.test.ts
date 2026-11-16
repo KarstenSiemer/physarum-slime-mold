@@ -9,7 +9,8 @@ import { at } from './at';
 import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowFields, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { compile } from './gl/programs';
-import { AgentToolKind, type AgentTool } from './pack';
+import { growthStep } from './growth-reference';
+import { AgentToolKind, strainEnds, type AgentTool } from './pack';
 import { GlSim } from './gl/sim';
 import { flowSites, foodStrokes, type FlowSites, type FoodStroke } from './sites';
 import type { AgentState, Backend, Sim, Stroke } from './types';
@@ -1476,6 +1477,101 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       });
     }
   }, 240_000);
+
+  // No child is born onto starved ground (ADR 0053): one growth step against the CPU copy of the growth passes
+  // (growth-reference.ts), which gets the flow memory of each strain. A twin without growth runs the same moves. The
+  // ground of each strain is a pattern of blocks of 3 × 3 cells of its own, with four levels of the memory: its floor,
+  // just below the level `half`, just above it, and fresh ground. So parents on fed cells stand beside starved cells,
+  // and parents on starved cells beside fed ones. In a box, and on the periodic grid, where a child lies across the
+  // seam.
+  it.each(['box', 'wrap'] as const)(
+    'lets no child be born onto starved ground, as the CPU copy of the growth passes does (%s)',
+    async (boundary) => {
+      const [w, h] = [64, 48];
+      const n = w * h;
+      const strains = [defaultStrain(0, 2), { ...defaultStrain(1, 2), share: 0.6 }].map((st) => ({
+        ...st,
+        sensorOffset: 5,
+      }));
+      const s = flowing({
+        seed: 17,
+        boundary,
+        layout: 'empty',
+        density: 1,
+        strains,
+        growth: true,
+        growthEvery: 1,
+        growthMax: 30,
+        shrink: 0,
+      });
+      const plain = { ...s, growth: false, collisions: false };
+      const [a, b] = [await make(plain, w, h, n), await make(plain, w, h, n)];
+      const levels = [FLOW.floor, FLOW.half * 0.99, FLOW.half * 1.01, FLOW.fresh];
+      const ground = (strain: number) => {
+        const memory = new Float32Array(n * 4);
+        for (let c = 0; c < n; c++) {
+          const block = Math.floor((c % w) / 3) + 2 * Math.floor(Math.floor(c / w) / 3) + strain;
+          memory[c * 4] = levels[block % 4] ?? 0;
+        }
+        return memory;
+      };
+      const ends = strainEnds(s.strains, n);
+      for (const sim of [a, b]) {
+        // An agent in about every seventh cell, of either strain: each strain owns a range of the ids.
+        let r = 5;
+        const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+        const next = [0, ends[0] ?? 0];
+        for (let c = 0; c < n; c++) {
+          if (rnd() > 0.15) continue;
+          const strain = rnd() < 0.5 ? 0 : 1;
+          const id = next[strain] ?? 0;
+          next[strain] = id + 1;
+          const [fx, fy] = [Math.fround(0.05 + 0.9 * rnd()), Math.fround(0.05 + 0.9 * rnd())];
+          const heading = Math.fround(rnd() * 6.28);
+          sim.writeAgent(id, { x: (c % w) + fx, y: Math.floor(c / w) + fy, heading, bits: strain | ALIVE });
+        }
+        // The rule is switched on after the agents are written: the switch builds the occupancy from them.
+        sim.update({ ...s, growth: sim === a });
+        strains.forEach((_, strain) => {
+          sim.writeFlow(ground(strain), strain);
+        });
+      }
+      const env = await a.readEnv();
+      const memory = [await a.readFlow(0), await a.readFlow(1)];
+      expect(Array.from(memory[0]?.subarray(0, 40) ?? [])).toEqual(Array.from(ground(0).subarray(0, 40)));
+      a.run(1);
+      b.run(1);
+      const moved = await b.readAgents();
+      const input = {
+        kind: kind as 'webgpu' | 'webgl2',
+        settings: s,
+        ...{ w, h, env, step: 0, agents: moved, counts: await b.readCounts(), memory },
+      };
+      const got = await a.readAgents();
+      expect(got).toEqual(growthStep(input).agents);
+      // A child is an agent that was dead after the moves and lives now. `starved`: only the children on a cell that
+      // is starved for their strain.
+      const half2 = Math.fround(FLOW.half * FLOW.half);
+      const children = (agents: readonly AgentState[], starved: boolean) =>
+        agents.filter((g, id) => {
+          const m = moved[id];
+          if ((g.bits & ALIVE) === 0 || (m !== undefined && (m.bits & ALIVE) !== 0)) return false;
+          const d = memory[g.bits & 3]?.[(Math.floor(g.y) * w + Math.floor(g.x)) * 4] ?? 0;
+          return !starved || Math.fround(d * d) < half2;
+        }).length;
+      expect(children(got, false)).toBeGreaterThan(60);
+      expect(children(got, true)).toBe(0);
+      // Both halves of the rule act on this ground. The copy that reads the cell of the parent alone, the rule before
+      // ADR 0053, puts children onto starved cells. The copy that reads the cell of the child alone lets the agents on
+      // starved cells divide: it has more children.
+      const parentAlone = growthStep({ ...input, starvedCells: 'parent' }).agents;
+      expect(children(parentAlone, true)).toBeGreaterThan(20);
+      const childAlone = growthStep({ ...input, starvedCells: 'child' }).agents;
+      expect(children(childAlone, true)).toBe(0);
+      expect(children(childAlone, false)).toBeGreaterThan(children(got, false) + 20);
+    },
+    240_000,
+  );
 
   it('gives the same bytes for the same seed, and others for another seed', async () => {
     const [w, h] = [64, 48];

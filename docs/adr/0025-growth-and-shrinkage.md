@@ -3,6 +3,7 @@
 - Status: accepted (owner rule, 2026-11-11: every decision goes into an ADR)
 - Date: 2026-11-11
 - Extended by ADR 0050 (2026-11-16): in the extended model, light can stop a birth onto a lit cell.
+- Extended by ADR 0053 (2026-11-16): with the flow, no child is born onto a starved cell.
 - Changed by ADR 0032 (2026-11-13): the start layout "At the first food" starts a colony of each strain on a food of
   its own, strain A on the first food as here, and the panel names it "On food, one colony each".
 
