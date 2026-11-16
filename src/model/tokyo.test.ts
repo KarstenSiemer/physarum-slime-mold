@@ -198,7 +198,7 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
   const outside = (x: number, y: number, s: EnvShape) =>
     segmentDistance(x * k, y * k, s.at, s.to ?? s.at) / k - s.r / k;
 
-  it('is the Tokyo scene with light added: its food, walls and settings, and a light strength', () => {
+  it('is the Tokyo scene with light added: its food, walls and settings, and the two settings of light', () => {
     const lit = presetById('tokyo-light');
     const dark = presetById('tokyo');
     if (!lit || !dark) throw new Error('no Tokyo scene');
@@ -209,13 +209,15 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
     const [a, b] = [lit.settings(), dark.settings()];
     expect({ ...a, seed: 0, lightStrength: 0 }).toEqual({ ...b, seed: 0, lightStrength: 0 });
     expect(a.lightStrength).toBeGreaterThan(0);
+    // Light stops growth at 1, the default (ADR 0050): no agent is born on a lit cell.
+    expect(a.lightGrowth).toBe(1);
     expect(a.strains[0]?.light).toBe(1);
   });
 
-  it('lights 53 cells of the grid of elevations, none under a city, and the three parts of Lake Kasumigaura', () => {
+  it('lights 51 cells of the grid of elevations, none under a city, and the three parts of Lake Kasumigaura', () => {
     expect(TOKYO_ELEVATION_GRID).toBe(20);
-    expect(TOKYO_MOUNTAINS).toHaveLength(53);
-    expect(new Set(TOKYO_MOUNTAINS.map(([c, r]) => r * 20 + c)).size).toBe(53);
+    expect(TOKYO_MOUNTAINS).toHaveLength(51);
+    expect(new Set(TOKYO_MOUNTAINS.map(([c, r]) => r * 20 + c)).size).toBe(51);
     for (const [c, r] of TOKYO_MOUNTAINS) {
       expect(Number.isInteger(c) && c >= 0 && c < 20, `column ${String(c)}`).toBe(true);
       expect(Number.isInteger(r) && r >= 0 && r < 20, `row ${String(r)}`).toBe(true);
@@ -233,9 +235,9 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
       for (const [name, x, y] of TOKYO_CITIES) expect(x > x0 && x < x1 && y > y0 && y < y1, name).toBe(false);
     }
     expect(TOKYO_LAKES.map((l) => l.name)).toEqual(['Nishiura', 'Takahamairi', 'Kitaura']);
-    // 24 runs of lit cells in the rows, each filled by 11 strokes; then one stroke per piece of the lines of the lakes.
-    expect(light).toHaveLength(24 * 11 + 4 + 2 + 4);
-    for (const s of light.slice(0, 264)) expect(s.r).toBeCloseTo(TOKYO_LIGHT_BRUSH * k, 12);
+    // 22 runs of lit cells in the rows, each filled by 11 strokes; then one stroke per piece of the lines of the lakes.
+    expect(light).toHaveLength(22 * 11 + 4 + 2 + 4);
+    for (const s of light.slice(0, 242)) expect(s.r).toBeCloseTo(TOKYO_LIGHT_BRUSH * k, 12);
   });
 
   it('keeps every food source outside every light shape, with Tsuchiura on the shore of Nishiura', () => {
@@ -247,14 +249,14 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
         least = Math.min(least, gap);
       }
     // The line of Nishiura starts 0.021 from Tsuchiura: its light ends 0.0016 outside the food (the specification).
-    const nishiura = light[264];
+    const nishiura = light[242];
     const tsuchiura = TOKYO_CITIES.find(([name]) => name === 'Tsuchiura');
     if (!nishiura || !tsuchiura) throw new Error('no Nishiura or Tsuchiura');
     expect(outside(tsuchiura[1], tsuchiura[2], nishiura) - TOKYO_FOOD_RADIUS).toBeCloseTo(0.0016, 4);
     expect(least).toBeCloseTo(0.0016, 4);
     // The light of the mountains ends at least 0.0044 (1.3 km) from a food source.
     for (const [name, x, y] of foods)
-      for (const s of light.slice(0, 264)) expect(outside(x, y, s) - TOKYO_FOOD_RADIUS, name).toBeGreaterThan(0.0044);
+      for (const s of light.slice(0, 242)) expect(outside(x, y, s) - TOKYO_FOOD_RADIUS, name).toBeGreaterThan(0.0044);
   });
 
   // The scene on its lattice and on two other grids, painted as the simulation paints it (paint-reference.ts).
@@ -278,10 +280,45 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
         if ((env[c * 4 + 1] ?? 0) > 0) expect(env[c * 4 + 2], `cell ${String(c)}`).toBe(0);
     });
 
+    // ADR 0050: with Light stops growth at 1 no birth crosses full light, so light and the coast must enclose no food.
+    // A walk over the cells without a wall and without light, in the four directions, from the first food cell.
+    it('joins every food cell to every other over dark ground', () => {
+      const dark = (c: number) => (env[c * 4] ?? 0) < 128 && (env[c * 4 + 2] ?? 0) === 0;
+      const food = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
+      const start = Array.from({ length: w * h }, (_, c) => c).find(food) ?? -1;
+      const seen = new Uint8Array(w * h);
+      const todo = [start];
+      seen[start] = 1;
+      while (todo.length > 0) {
+        const c = todo.pop() ?? 0;
+        const [x, y] = [c % w, Math.floor(c / w)];
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const) {
+          const [u, v] = [x + dx, y + dy];
+          const m = v * w + u;
+          if (u < 0 || v < 0 || u >= w || v >= h || seen[m] || !dark(m)) continue;
+          seen[m] = 1;
+          todo.push(m);
+        }
+      }
+      let [foods, joined] = [0, 0];
+      for (let c = 0; c < w * h; c++) {
+        if (!food(c) || !dark(c)) continue;
+        foods++;
+        joined += seen[c] ?? 0;
+      }
+      expect(foods).toBeGreaterThan(36);
+      expect(joined).toBe(foods);
+    });
+
     it('gives the cells inside a lit cell of the grid of elevations the full light byte: light of one strength', () => {
       // The cells of the simulation whose centre lies in a lit cell of the grid of elevations. Only the cells around
       // each lit cell are visited, one cell wider on each side than its box, with the same test of the centre: a test
-      // of every cell against all 53 boxes took more than 5 s on a runner of CI.
+      // of every cell against all 51 boxes took more than 5 s on a runner of CI.
       const lit = new Set<number>();
       for (const [c, r] of TOKYO_MOUNTAINS) {
         const [x0, y0, x1, y1] = elevationCell(c, r);

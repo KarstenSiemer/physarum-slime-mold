@@ -22,7 +22,7 @@ struct Params {
   growth: vec4u,         // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   shrinkage: vec4u,      // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   startEnd: vec4u,       // exclusive end index of each strain's agents alive at the start (ADR 0025)
-  electrode: vec4f,      // the source of a cell of an electrode (ADR 0047), 3 unused
+  electrode: vec4f,      // the source of a cell of an electrode (ADR 0047); y: Light stops growth (ADR 0050)
 }
 
 struct Agent {

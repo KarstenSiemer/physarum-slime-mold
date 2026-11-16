@@ -197,6 +197,15 @@ export const globalSpec = {
     max: 0.5,
     step: 0.005,
   },
+  // Light stops growth (ADR 0050), a rule of the extended model. 0 is the code before: growth does not read light.
+  // The default is 1 (the owner, 2026-11-16): no agent is born on a fully lit cell.
+  lightGrowth: {
+    label: 'Light stops growth',
+    help: 'Only the extended model has this setting. A birth onto a lit cell fails with this chance, times the brightness of the cell. At 0 growth does not read light, and a colony grows over lit ground as over dark ground. At 1, the default, no agent is born on a fully lit cell, so the colony grows around the light. Agents can still walk onto lit ground: Light avoidance of a strain turns them at the edge. The real plasmodium grows away from bright light. The rule is this app’s own: Jones’ papers have none for growth and light.',
+    min: 0,
+    max: 1,
+    step: 0.01,
+  },
   // The Electrode tool (ADR 0047). 1 is the ±255 of Tsuda, Jones et al. 2011, which the ranges of the food and of the
   // repellent do not reach: so the electrodes have a strength of their own.
   electrodeStrength: {
@@ -579,6 +588,7 @@ export function defaultSettings(): Settings {
     foodStrength: 0.05,
     lightStrength: 0.05,
     electrodeStrength: 1,
+    lightGrowth: 1,
     scentDecay: 0.1,
     // Adamatzky and Jones 2010 (arXiv:0912.3967): each pixel of a food area releases 0.001 of its projection while a
     // particle lies in the 3 × 3 neighbourhood around it, as this app checks each food cell (ADR 0022).
@@ -683,6 +693,10 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // K is a whole number (its step): a tiny K such as 1e-300 would pick the saturating passes and pack as 0 in f32.
   out.trailSaturation = Math.round(out.trailSaturation);
   out.coveredFood = raw.coveredFood === true;
+  // A link of the extended model holds Light stops growth only when it is not 0 (linkSettings() in url.ts). So a link
+  // without it runs with 0: a link made before the rule runs as it was made, with growth that does not read light
+  // (ADR 0050). A link of the Jones model gets the default back below (asJones() in constrain()).
+  if (typeof raw.lightGrowth !== 'number') out.lightGrowth = 0;
   // Growth and shrinkage (ADR 0025): whole steps and counts, and windows of an odd side, so that the agent sits in the
   // middle of its window. A link without them keeps growth off.
   out.growth = raw.growth === true;
@@ -823,7 +837,7 @@ export function jonesFits(s: Settings): boolean {
  * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. A
  * repellent source goes into the same map with a value below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the
  * strain weighs it as its own trail too, and its strength stays the user's. Jones' papers have neither trail
- * saturation nor a flow in the tubes, so their values return to the defaults, and a link holds none of them. Returns
+ * saturation, nor a flow in the tubes, nor light that stops growth, so their values return to the defaults, and a link holds none of them. Returns
  * `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
@@ -835,7 +849,8 @@ function asJones(s: Settings): Settings {
   const strainOk = st.food === self && st.light === self && st.share === 1;
   const bound = s.scentDecay === st.decay && s.trailSaturation === 0;
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
-  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength;
+  // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
+  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && s.lightGrowth === d.lightGrowth;
   if (ok) return s;
   return {
     ...s,
@@ -843,6 +858,7 @@ function asJones(s: Settings): Settings {
     trailSaturation: 0,
     flow: false,
     flowStrength: d.flowStrength,
+    lightGrowth: d.lightGrowth,
     strains: strainOk ? s.strains : [{ ...st, food: self, light: self, share: 1 }],
   };
 }

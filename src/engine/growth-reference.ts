@@ -12,6 +12,7 @@ const TAU = Math.fround(6.28318530717959);
 const GROW = 4;
 const BIRTH = 5;
 const PLACE_ORDER = 6;
+const SHADE = 10;
 
 /** rngSeed() of common.wgsl: the stream of agent `id` in step `step` for `salt`. */
 export function rngSeed(id: number, salt: number, step: number, seed: number): number {
@@ -163,7 +164,11 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
       .map(([dx, dy]) => at(dx, dy));
     if (open.length === 0) return -1;
     const pick = Math.min(Math.floor(stream(rngSeed(id, GROW, step, seed))() * open.length), open.length - 1);
-    return open[pick] ?? -1;
+    const t = open[pick] ?? -1;
+    // Light stops growth (lightStops in growth.wgsl; ADR 0050), in f32 as the shaders compute it.
+    const chance = Math.fround(Math.fround(s.model === 'jones' ? 0 : s.lightGrowth) * (env[t * 4 + 2] ?? 0));
+    if (chance > 0 && Math.fround(stream(rngSeed(id, SHADE, step, seed))() * 255) < chance) return -1;
+    return t;
   };
   // Shrinkage, then the claims of the parents that survive.
   const claims = new Map<number, number>();

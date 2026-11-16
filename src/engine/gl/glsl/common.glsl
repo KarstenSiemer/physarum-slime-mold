@@ -26,7 +26,7 @@ layout(std140) uniform Params {
   uvec4 growth;        // growth test every Gf steps (0 off), window Gw, Gmin, Gmax (ADR 0025)
   uvec4 shrinkage;     // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   uvec4 startEnd;      // exclusive end index of each strain's agents alive at the start (ADR 0025)
-  vec4 electrode;      // the source of a cell of an electrode (ADR 0047), 3 unused
+  vec4 electrode;      // the source of a cell of an electrode (ADR 0047); y: Light stops growth (ADR 0050)
 } P;
 
 const float PI = 3.14159265358979;
