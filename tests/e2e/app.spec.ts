@@ -5,7 +5,8 @@ import { smallScene, watchErrors } from './helpers';
 test('boots from a shared link, simulates and draws a network without errors', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto(await smallScene());
-  // The engine exists once the WebGPU device has built its pipelines: 14 to 16 s on SwiftShader in the CI image.
+  // The engine exists once the WebGPU device has built the pipelines of a start: 2 to 3 s on SwiftShader in the CI
+  // image, and the first step builds its diffusion passes (ADR 0049).
   await page.waitForFunction(() => globalThis.physarum !== undefined, undefined, { timeout: 120_000 });
   const adapter = await page.evaluate(() => globalThis.physarum?.backend.description ?? '?');
   test.info().annotations.push({ type: 'adapter', description: adapter });

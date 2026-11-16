@@ -1,4 +1,7 @@
 // Flow in the tubes (ADR 0029): the switch of the extended model, its strength, the scene card and the link.
+// The file sorts after scenes.spec.ts (it was flow.spec.ts): CI shares the e2e tests out to its shards by their count,
+// in the order of the files, so its tests that wait for steps run in the second shard, beside the short tests of
+// ui.spec.ts, and the other tests that wait for steps in the first (ADR 0049).
 import { expect, test, type Page } from '@playwright/test';
 import { decodeLink } from '../../src/model/url';
 import { smallScene, watchErrors } from './helpers';

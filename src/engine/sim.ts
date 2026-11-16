@@ -26,7 +26,7 @@ import sortWgsl from './shaders/sort.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { diffusePlan, diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
+import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
 
@@ -998,7 +998,7 @@ export class Simulation implements Sim {
         // need no search of their own cells.
         // An electrode changes no byte of `shape`: the renderer reads its byte from `env` (render.wgsl poleAt).
         if (isPole(chunk[j]?.kind ?? 'erase')) return;
-        pass.setPipeline(this.kernels.outline[outlineVariant(chunk[j], own[first + j] ?? true)]);
+        pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], own[first + j] ?? true)));
         pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
       });
       pass.end();
@@ -1726,6 +1726,10 @@ class Kernels {
   private walledPipelines?: Walled;
   /** The steering passes with the saturating trail perception (agents.wgsl SATURATE), without and with walls. */
   private readonly saturatedPipelines: [Steering?, Steering?] = [];
+  /** The diffusion passes (diffuse.wgsl), by variantKey(). */
+  private readonly variants = new Map<string, GPUComputePipeline>();
+  /** The outline pass (paint.wgsl `outline`), by outlineVariant(). */
+  private readonly outlinePipelines = new Map<OutlineVariant, GPUComputePipeline>();
   /** The last diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
   /** The view's diffusion passes of a step that moves first (diffuse.wgsl VIEW), by variantKey(). */
@@ -1752,18 +1756,16 @@ class Kernels {
     readonly occupy: GPUComputePipeline,
     readonly replace: GPUComputePipeline,
     readonly paint: GPUComputePipeline,
-    /** The outline pass, by outlineVariant(). */
-    readonly outline: Readonly<Record<OutlineVariant, GPUComputePipeline>>,
     readonly refresh: GPUComputePipeline,
     readonly sort: Record<'countTiles' | 'scanTiles' | 'scatter', GPUComputePipeline>,
     readonly diffuseLayout: GPUBindGroupLayout,
     readonly paintLayout: GPUBindGroupLayout,
-    private readonly variants: Map<string, GPUComputePipeline>,
     private readonly device: GPUDevice,
     private readonly agents: GPUShaderModule,
     private readonly walls: GPUShaderModule,
     private readonly diffuseModule: GPUShaderModule,
     private readonly startModule: GPUShaderModule,
+    private readonly brush: GPUShaderModule,
     private readonly agentsSource: string,
   ) {}
 
@@ -2001,10 +2003,39 @@ class Kernels {
     return p;
   }
 
+  /**
+   * A diffusion pass (diffuse.wgsl), built at its first use as covered() builds its passes (ADR 0049): a step runs one
+   * to three of the ten variants of 0 to 4 passes in both orders. Built at the start, the ten took about 4 s each on
+   * SwiftShader in the image of CI, most of every start of the app there.
+   */
   diffuse(v: Diffuse, senseFirst: boolean): GPUComputePipeline {
     if (v.box) return this.box(v, v.box, senseFirst, false, false);
-    const p = this.variants.get(variantKey(v, senseFirst));
-    if (!p) throw new Error(`No diffusion pipeline for variant ${variantKey(v, senseFirst)}`);
+    const key = variantKey(v, senseFirst);
+    let p = this.variants.get(key);
+    if (!p) {
+      const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.diffuseLayout] });
+      p = this.device.createComputePipeline({
+        layout,
+        compute: { module: this.diffuseModule, entryPoint: 'diffuse', constants: variantConstants(v, senseFirst) },
+      });
+      this.variants.set(key, p);
+    }
+    return p;
+  }
+
+  /**
+   * The outline pass of a segment (paint.wgsl `outline`, outlineVariant()), built at its first use (ADR 0049): food
+   * and light take another variant than walls and the eraser, and a scene without shapes paints none at its start.
+   */
+  outline(v: OutlineVariant): GPUComputePipeline {
+    let p = this.outlinePipelines.get(v);
+    if (!p) {
+      p = this.device.createComputePipeline({
+        layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.paintLayout] }),
+        compute: { module: this.brush, entryPoint: 'outline', constants: OUTLINE_CONSTANTS[v] },
+      });
+      this.outlinePipelines.set(v, p);
+    }
     return p;
   }
 
@@ -2042,37 +2073,11 @@ class Kernels {
         { binding: 3, visibility: C, buffer: { type: 'storage' } },
       ],
     });
-    const diffuseModule = module(diffuseSource);
-    const layout = device.createPipelineLayout({ bindGroupLayouts: [diffuseLayout] });
-    // Every pass of 0 to 4 passes, in each order of a step (diffuse.wgsl SENSE_FIRST, ADR 0027).
-    const plans = [0, 1, 2, 3, 4]
-      .flatMap((passes) => diffusePlan(passes))
-      .flatMap((v) => [false, true].map((senseFirst) => ({ ...v, senseFirst })));
-    const unique = [...new Map(plans.map((v) => [variantKey(v, v.senseFirst), v])).values()];
-    const variants = Promise.all(
-      unique.map(
-        async (v) =>
-          [
-            variantKey(v, v.senseFirst),
-            await device.createComputePipelineAsync({
-              layout,
-              compute: {
-                module: diffuseModule,
-                entryPoint: 'diffuse',
-                constants: { ...variantConstants(v, v.senseFirst) },
-              },
-            }),
-          ] as const,
-      ),
-    );
+    // The passes that the start builds. The diffusion and outline passes come at their first use (diffuse(),
+    // outline()).
     const sort = module(sortWgsl);
     const start = module(initSource);
     const brush = module(paintWgsl);
-    const paintPipeline = (entryPoint: string, constants?: Record<string, number>) =>
-      device.createComputePipelineAsync({
-        layout: device.createPipelineLayout({ bindGroupLayouts: [paintLayout] }),
-        compute: { module: brush, entryPoint, ...(constants ? { constants } : {}) },
-      });
     const [
       init,
       claimStart,
@@ -2084,12 +2089,6 @@ class Kernels {
       occupy,
       replace,
       paint,
-      coreOwn,
-      coreHeld,
-      tiledOwn,
-      tiledHeld,
-      untiledOwn,
-      untiledHeld,
       refresh,
       countTiles,
       scanTiles,
@@ -2104,13 +2103,10 @@ class Kernels {
       compute(agents, 'settle'),
       compute(agents, 'occupy'),
       compute(agents, 'replace'),
-      paintPipeline('paint'),
-      paintPipeline('outline'),
-      paintPipeline('outline', { OWN_SEARCH: 0 }),
-      paintPipeline('outline', { CORE: 0 }),
-      paintPipeline('outline', { CORE: 0, OWN_SEARCH: 0 }),
-      paintPipeline('outline', { TILED: 0, CORE: 0 }),
-      paintPipeline('outline', { TILED: 0, CORE: 0, OWN_SEARCH: 0 }),
+      device.createComputePipelineAsync({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [paintLayout] }),
+        compute: { module: brush, entryPoint: 'paint' },
+      }),
       compute(brush, 'refresh'),
       compute(sort, 'countTiles'),
       compute(sort, 'scanTiles'),
@@ -2128,23 +2124,32 @@ class Kernels {
       occupy,
       replace,
       paint,
-      { coreOwn, coreHeld, tiledOwn, tiledHeld, untiledOwn, untiledHeld },
       refresh,
       sorting,
       diffuseLayout,
       paintLayout,
-      new Map(await variants),
       device,
       agents,
       module(wallsWgsl),
-      diffuseModule,
+      module(diffuseSource),
       start,
+      brush,
       agentsSource,
     );
   }
 }
 
 type OutlineVariant = `${'core' | 'tiled' | 'untiled'}${'Own' | 'Held'}`;
+
+/** The pipeline constants of each variant of the outline pass (paint.wgsl CORE, TILED and OWN_SEARCH; 1 if left out). */
+const OUTLINE_CONSTANTS: Readonly<Record<OutlineVariant, Record<string, number>>> = {
+  coreOwn: {},
+  coreHeld: { OWN_SEARCH: 0 },
+  tiledOwn: { CORE: 0 },
+  tiledHeld: { CORE: 0, OWN_SEARCH: 0 },
+  untiledOwn: { TILED: 0, CORE: 0 },
+  untiledHeld: { TILED: 0, CORE: 0, OWN_SEARCH: 0 },
+};
 
 /**
  * Which pipeline of the outline pass a segment takes (Kernels.outline): the eraser and walls with the tile of `env`

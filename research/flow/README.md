@@ -721,7 +721,7 @@ npx vitest run --project gpu src/engine/flow.gpu.test.ts
 ```
 
 ```bash
-npm run build && npx playwright test --project=e2e tests/e2e/flow.spec.ts
+npm run build && npx playwright test --project=e2e tests/e2e/tubes.spec.ts
 ```
 
 You must see 24, 77 and 5 tests pass (27 and 47 before the food sites of part 11, 71 before the
@@ -734,7 +734,7 @@ ADR 0041).
   GitHub, which has no GPU). Both backends follow the CPU copy of the passes step by step;
   Kirchhoff's law; the shorter of two tubes wins; starvation and births; the pressure limit; the
   same bytes for the same seed; and a flow for every strain (part 8).
-- `flow.spec.ts` (headless browser): the switch, the strength and the Tokyo scene in the built
+- `tubes.spec.ts` (headless browser, `flow.spec.ts` before ADR 0049): the switch, the strength and the Tokyo scene in the built
   app.
 
 A test is worth what it catches. This script puts 93 wrong rules of the flow, of its food sites, of
@@ -1027,7 +1027,7 @@ The record is `logs/view/cost-2026-11-15.txt`: each run with its start, its end 
 machine (`uptime`), then its lines.
 
 The tests of the picture: you must see 19 tests pass, and 64 with 4 skipped. The test of the switch
-in the built app is one of the tests of `tests/e2e/flow.spec.ts` (part 7).
+in the built app is one of the tests of `tests/e2e/tubes.spec.ts` (part 7).
 
 ```bash
 npx vitest run --project unit src/engine/tubes.test.ts

@@ -253,16 +253,14 @@ test('the Electrode tool paints a cathode and an anode, and the link holds them'
   expect(cells.anode).toBeGreaterThan(50);
   expect([cells.other, cells.food]).toEqual([0, 0]);
   expect(await page.evaluate(() => globalThis.physarum?.sim.hasElectrodes)).toBe(true);
+  // The address follows the drawing 400 ms after its last change (App.svelte), so a read can come before the anode.
+  // A drag records a dab and its segments: a wait for more than one stroke ended with the cathode alone, in both runs
+  // of this test in the image of CI on 2026-11-16.
   const kinds = async () => {
-    await expect
-      .poll(
-        async () => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.drawing?.strokes.length ?? 0,
-      )
-      .toBeGreaterThan(1);
     const link = await decodeLink(await page.evaluate(() => location.hash.slice(1)));
     return [...new Set(link?.drawing?.strokes.map((e) => e.kind))].sort();
   };
-  expect(await kinds()).toEqual(['anode', 'cathode']);
+  await expect.poll(kinds).toEqual(['anode', 'cathode']);
   // The strength is a setting of both models, and the link holds it once it is not 1.
   await page.locator('summary', { hasText: 'Environment' }).click();
   await expect(page.getByLabel('Electrode strength', { exact: true })).toBeVisible();

@@ -12,6 +12,8 @@ export default defineConfig({
     { name: 'gallery', testDir: 'tests/gallery' },
     { name: 'pictures', testDir: 'tests/pictures' },
   ],
+  // Each test is a test of its own for --shard: CI shares them out by their count, in the order of the files. The
+  // slowest tests wait for many steps in tubes.spec.ts, which sorts after scenes.spec.ts into the second shard (ADR 0049).
   fullyParallel: true,
   // One browser at a time on CI: parallel WebGPU browsers are flaky on SwiftShader.
   ...(ci ? { workers: 1 } : {}),
