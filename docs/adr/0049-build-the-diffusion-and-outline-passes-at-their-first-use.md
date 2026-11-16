@@ -88,18 +88,21 @@ the first run of each test:
   8.7 min, against 17.0 on PR #91). Shard 1 took 25.3 min (42 tests in 23.9 min; `flow.spec.ts` 9.3 min, against
   8.2). GitHub compiled the start faster than the image, so it saved less, and it ran the steps about three times
   slower: the five tests of `flow.spec.ts` took 3.2 min in the image.
-- With the new name, the same tests split 11.2 and 11.5 min in the image. On GitHub (run 43797149358) shard 1 took
-  17.7 min (42 tests in 16.3 min) and shard 2 24.1 min (41 tests in 22.7 min: `ui.spec.ts` 13.5 min, `tubes.spec.ts`
-  9.1 min). The runner of shard 2 was slower: `npm ci` took 49 s there against 34 s, and `ui.spec.ts` 8.7 min in the
-  run before. The order does not slow `ui.spec.ts` down: in the image, shard 2 alone took 11.6 min, with
-  `ui.spec.ts` 8.6 min after the tests of the flow, against 8.5 min in the whole suite.
+- With the new name, the same tests split 11.2 and 11.5 min in the image. On GitHub, two runs gave shard 1 17.7 and
+  16.6 min (42 tests in 16.3 and 15.0 min) and shard 2 24.1 and 23.0 min (41 tests in 22.7 and 21.6 min: `ui.spec.ts`
+  13.5 and 12.9 min, `tubes.spec.ts` 9.1 and 8.6 min; runs 43797149358 and 43801234812).
+- So `ui.spec.ts` takes about 13 min on GitHub, not the 8.7 min of the run before: that runner of shard 2 was faster.
+  It ran `npm ci` in 34 s; the five other runners of these three runs took 49 to 51 s. The order does not slow
+  `ui.spec.ts` down: in the image, shard 2 alone took 11.6 min, with `ui.spec.ts` 8.6 min after the tests of the flow,
+  against 8.5 min in the whole suite.
 - The bytes stay: the digests of every scene after 500 steps on both backends equal those of `main` (48 of 48 runs, M3
   Pro, `research/flow/engine/digest.gpu.test.ts`).
 - A GPU test checks that a new simulation builds no diffusion and no outline pass, and that a step and a stroke build
   each pass they use once (`sim.gpu.test.ts`, "build the diffusion and outline passes at their first use").
 - To watch: a pass that every start builds adds to every e2e test. Build a pass at its first use unless every step
   runs it. The split by count moves with every new test: a new file of tests that wait for steps, or many new tests
-  at the end of the order, can tip the shards again. The runners of GitHub differ by up to 1.5 times, so a shard of
-  about 17 min on one can take 24 on another.
-- More shards (`.github/`, the owner's review) leave more room only with the four slow tests of `tubes.spec.ts` apart:
-  they take about 9 min on GitHub, and with 3 shards they would share one with 13 tests of `scenes.spec.ts`.
+  at the end of the order, can tip the shards again. On GitHub the e2e tests take about 38 min in all, so two shards
+  cannot both stay below about 19 min.
+- More shards (`.github/`, the owner's review) leave more room. With 4 shards in this order, shard 3 holds the four
+  slow tests of `tubes.spec.ts` (about 9 min on GitHub) and 17 tests of `ui.spec.ts`: about 15 min. With 3 shards,
+  shard 2 holds them with 13 tests of `scenes.spec.ts` and 10 of `ui.spec.ts`: about 17 min.

@@ -34,8 +34,9 @@ bytes: the digests after 500 steps are those of `main`.
 container. The second job took 11 minutes instead of 19, but the first one still took 25. CI shares the tests out by
 their count, in the order of the files, and the five tests of `flow.spec.ts`, which wait for steps, took 9 minutes of
 it. The file is now `tubes.spec.ts`: it sorts after `scenes.spec.ts`, and four of its tests run in the second job. In
-the container the two jobs then take 11.2 and 11.5 minutes. On GitHub they took 18 and 24 minutes: the second ran on
-a slower runner, which took 49 seconds for `npm ci` instead of 34.
+the container the two jobs then take 11.2 and 11.5 minutes. On GitHub, in two runs, they took 17 to 18 and 23 to 24
+minutes. There the tests of the panel take about 13 minutes: the 9 minutes of the run before came from a faster
+runner, which took 34 seconds for `npm ci` against 49 to 51 on the others. More jobs would need the owner (`.github/`).
 
 **What is not exact.** The times come from an M3 Pro, in a container of 4 cores, with the arm64 build of Chromium of
 the image. GitHub runs its x86-64 build on other CPUs: it started the app faster, and stepped slower. The first run of
