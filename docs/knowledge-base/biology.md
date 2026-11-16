@@ -2,8 +2,10 @@
 
 Sources: Jones 2010, p. 128–130 and 142 (see [jones-2010-model.md](jones-2010-model.md)); Tero, Kobayashi and Nakagaki
 2007 and Tero et al. 2010, and the vein papers of Marbach et al. 2023 and Kramar and Alim 2021 (see
-[flow-in-the-tubes.md](flow-in-the-tubes.md), which marks what was read in the full text). Nakagaki, Yamada and Tóth,
-_Maze-solving by an amoeboid organism_, Nature 407: 470 (2000), is cited, but nobody read it for this project.
+[flow-in-the-tubes.md](flow-in-the-tubes.md), which marks what was read in the full text). Of Nakagaki, Yamada and
+Tóth, _Maze-solving by an amoeboid organism_, Nature 407: 470 (2000), the abstract and Fig. 1 with its legend were
+read on 2026-11-16, and the body text was not. The papers on slime, mazes and the growth front, and how each was
+read: [slime-mazes-and-the-front.md](slime-mazes-and-the-front.md).
 
 How close the model comes to each fact: [fidelity.md](../fidelity.md).
 
@@ -23,9 +25,18 @@ How close the model comes to each fact: [fidelity.md](../fidelity.md).
   tends to disappear, and of two tubes between the same foods the longer one tends to disappear (Tero et al. 2007,
   Sec. 2). Veins without flow vanish in 15 to 40 minutes (Marbach et al. 2023). Tubes near a new food dilate within
   about 15 minutes (Kramar and Alim 2021).
-- Known experiments: the shortest path through a maze (Nakagaki et al. 2000), and a network comparable to the Tokyo
+- Known experiments: a short path through a maze (Nakagaki et al. 2000), and a network comparable to the Tokyo
   rail system when oat flakes sit at the cities (Tero et al. 2010: total length 1.75 ± 0.30 and mean distance 0.85 ±
-  0.04 of the minimum spanning tree).
+  0.04 of the minimum spanning tree). In the maze the plasmodium first filled every corridor. When food came at the
+  two ends, its dead ends shrank within 4 hours, and a path between the foods was selected 4 hours later. In 19 runs
+  the shortest of the four routes was left alone 5 times, and the shorter of the first two ways was part of every
+  network ([slime-mazes-and-the-front.md](slime-mazes-and-the-front.md), "Mazes").
+- The plasmodium is covered with **slime**, a layer that it secretes and leaves behind where it was. It avoids ground
+  with slime while fresh ground is free: in a Y-maze 39 of 40 plasmodia chose the arm without slime (Reid et al.
+  2012). Food lifts the avoidance, and nobody measured how long slime lasts (the same file, "Slime").
+- A growth front is a thin **sheet** without visible structure. Channels appear in it and become tubes, and the main
+  vein shows about 50 minutes after the front passed (Le Verge-Serandour and Alim 2023; Schenz 2019; the same file,
+  "The front").
 - Jones relates the pattern classes of his model to life conditions (p. 142): reticular to rich food, labyrinthine or
   dendritic to low food, isolated islands to hostile conditions (the sclerotium stage). This is his analogy; he gives
   no measurement of the organism for it.
@@ -42,8 +53,8 @@ What the simulator shows with these facts:
 | Light restricts where it goes   | Lit cells release a repellent (this app's rule, ADR 0007)             | extended | Light brush                     |
 | Damage repair                   | Agents flow back into a cut                                           | both     | Cut tool                        |
 
-Not modelled: shuttle streaming and its period, food that is eaten, dryness. Several strains with a table of
-attraction (Fogleman 2020) are not biology.
+Not modelled: shuttle streaming and its period, food that is eaten, dryness, the slime, and the sheet of a growth
+front. Several strains with a table of attraction (Fogleman 2020) are not biology.
 
 Model simplification: in the Jones model one diffusing chemical stands for both food signals and the trail of the
 agents (p. 133). The extended model keeps the scent of food and light in a field of its own (ADR 0007).

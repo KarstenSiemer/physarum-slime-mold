@@ -3,9 +3,10 @@
 Notes for ADR 0029, read on 2026-11-12. Each line names the paper and the section, equation or figure
 that holds it. "[V]" marks a fact read in the full text. "[H]" marks a fact that a helper read in the
 copy of the paper at PubMed Central (abstract, results and captions; not its methods). "[S]" marks a
-fact that only the summary of a web search gave: nobody of this project read the page. "[I]" marks an
-inference of this project. The papers are copyrighted: this file holds facts and at most a few quoted
-words, no figures.
+fact that only the summary of a web search gave: nobody of this project read the page. "[A]" marks a
+fact of which only the abstract, or a figure with its legend, was read, not the body of the paper
+(ADR 0052; this file has none yet). "[I]" marks an inference of this project. The papers are
+copyrighted: this file holds facts and at most a few quoted words, no figures.
 
 ## The organism
 
@@ -29,7 +30,8 @@ words, no figures.
   at 15 μm/s, the speed of the flow. The pattern lasts to the end of the experiment, 45 min (Kramar
   and Alim 2021, Results) [H].
 - In a maze only the shortest path was left after 12 h (Ma et al. 2013, Sec. 1, on the Towers of Hanoi
-  maze) [V]; Nakagaki, Yamada and Tóth 2000 is the first maze experiment.
+  maze) [V]; Nakagaki, Yamada and Tóth 2000 is the first maze experiment. Its routes, its times and
+  its protocol are in [slime-mazes-and-the-front.md](slime-mazes-and-the-front.md), "Mazes".
 
 The owner's plan of 2026-11-11 named three facts. All three hold:
 
@@ -49,6 +51,11 @@ another? Every line here is "[S]". Three pages with the texts refused an automat
 day (a bot check at PubMed Central, an error of the repository of the University of Tsukuba, a
 refusal at Europhysics News), and this project does not pass a bot check. Read the papers before a
 decision rests on more than the first line.
+
+Since 2026-11-16 two of the papers are read in the full text: Masui, Satoh and Seto 2018, and a review
+of the fusion loci by Clark and Haskins 2012. Their facts, with pages, are in
+[slime-mazes-and-the-front.md](slime-mazes-and-the-front.md), "Several plasmodia". They confirm the
+three lines below and add numbers. The lines stay as they were written.
 
 - Two plasmodia of one species do not always fuse when they meet [S] (M. Masui, S. Satoh, K. Seto:
   J. Phys. D: Appl. Phys. 51: 284001 (2018), on _Physarum rigidum_).
