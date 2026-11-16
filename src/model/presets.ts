@@ -360,6 +360,107 @@ const ring = (count: number, radius: number, r: number): EnvShape[] =>
   });
 
 /**
+ * Points and lengths in cells of a lattice as the canonical frame of a box holds them (EnvShape), for a lattice that
+ * is not higher than wide. Rounded, so that a scene and a link to it hold the same numbers.
+ */
+const boxCells = ([w, h]: Lattice) => {
+  const round = (v: number) => Math.round(v * 1e6) / 1e6;
+  return {
+    at: (x: number, y: number): [number, number] => [round((x - w / 2) / (w / 1.6)), round((y - h / 2) / h)],
+    r: (cells: number) => round(cells / h),
+  };
+};
+
+/**
+ * Half the width of a wall of the two mazes of ADR 0051, in cells: a wall along a line of the lattice covers 6
+ * cells, and the centre of no cell lies near its edge.
+ */
+const MAZE_WALL = 2.75;
+
+/**
+ * The scene Snail maze (ADR 0051), in cells of its lattice of 384 × 384. Ring walls around the middle. The outermost
+ * ring is closed. Every other ring has one gap of `gap` cells, on the right and on the left in turns. A bar closes
+ * each ring corridor a quarter turn past its inner gap, so the maze has one route and no loop. A ring is a chain of
+ * straight walls, each at most `chord` cells long.
+ */
+export const SNAIL_MAZE = { side: 384, rings: [28, 68, 108, 148, 188], gap: 30, chord: 16 } as const;
+
+/** The angle of the gap in ring wall `k` of the Snail maze (0 is the innermost): right, left, right, left. */
+const snailGap = (k: number) => (k % 2 === 0 ? 0 : Math.PI);
+
+/** The shapes of the Snail maze: the food at the entrance, the food in the middle, then the walls. */
+function snailShapes(): EnvShape[] {
+  const { side, rings, gap, chord } = SNAIL_MAZE;
+  const cells = boxCells([side, side]);
+  const point = (radius: number, angle: number) =>
+    cells.at(side / 2 + radius * Math.cos(angle), side / 2 + radius * Math.sin(angle));
+  const line = (a: [number, number], b: [number, number]): EnvShape => ({
+    kind: 'wall',
+    at: a,
+    to: b,
+    r: cells.r(MAZE_WALL),
+  });
+  const walls: EnvShape[] = [];
+  rings.forEach((radius, k) => {
+    const outer = rings[k + 1];
+    // Half the angle of the gap: its two ends are `gap` cells apart. The outermost ring has none.
+    const half = outer === undefined ? 0 : Math.asin(gap / 2 / radius);
+    const [from, sweep] = [snailGap(k) + half, 2 * Math.PI - 2 * half];
+    const parts = Math.ceil((radius * sweep) / chord);
+    for (let i = 0; i < parts; i++)
+      walls.push(line(point(radius, from + (sweep * i) / parts), point(radius, from + (sweep * (i + 1)) / parts)));
+    // The bar across the corridor outside this ring: a quarter turn past the gap.
+    if (outer !== undefined) {
+      const angle = snailGap(k) + Math.PI / 2;
+      walls.push(line(point(radius, angle), point(outer, angle)));
+    }
+  });
+  // The entrance lies in the outermost corridor, half a turn from the gap of its inner wall.
+  const [inner = 0, outer = 0] = rings.slice(-2);
+  const entrance = point((inner + outer) / 2, snailGap(rings.length - 2) + Math.PI);
+  return [
+    { kind: 'food', at: entrance, r: cells.r(6) },
+    { kind: 'food', at: cells.at(side / 2, side / 2), r: cells.r(6) },
+    ...walls,
+  ];
+}
+
+/**
+ * The scene Corn maze (ADR 0051): 12 × 8 rooms of 40 cells on a lattice of 480 × 320. `walls` are the walls between
+ * the rooms, from corner to corner of the rooms: the output of research/flow/engine/corn-maze.ts for its seed 8, a
+ * maze without loops with 7 walls taken away. The entrance is the top-left room and the exit the bottom-right one.
+ */
+export const CORN_MAZE = {
+  cols: 12,
+  rows: 8,
+  room: 40,
+  // prettier-ignore
+  walls: [
+    [1,2,1,3],[2,0,2,2],[2,3,2,6],[3,1,3,4],[3,6,3,7],[4,0,4,1],[5,1,5,2],[5,4,5,5],[6,5,6,6],[7,1,7,2],[7,3,7,7],
+    [8,2,8,3],[8,5,8,7],[9,0,9,1],[9,6,9,8],[10,4,10,7],[11,5,11,6],[0,1,1,1],[3,1,4,1],[6,1,7,1],[8,1,9,1],
+    [10,1,11,1],[1,2,2,2],[4,2,6,2],[7,2,11,2],[1,3,2,3],[3,3,5,3],[7,3,8,3],[9,3,12,3],[0,4,1,4],[4,4,7,4],
+    [8,4,9,4],[10,4,11,4],[1,5,5,5],[8,5,10,5],[0,6,1,6],[3,6,4,6],[5,6,6,6],[11,6,12,6],[1,7,2,7],[4,7,8,7],
+    [10,7,11,7],
+  ],
+} as const;
+
+/** The shapes of the Corn maze: the food at the entrance, the food at the exit, then the walls. */
+function cornShapes(): EnvShape[] {
+  const { cols, rows, room, walls } = CORN_MAZE;
+  const cells = boxCells([cols * room, rows * room]);
+  return [
+    { kind: 'food', at: cells.at(room / 2, room / 2), r: cells.r(6) },
+    { kind: 'food', at: cells.at((cols - 0.5) * room, (rows - 0.5) * room), r: cells.r(6) },
+    ...walls.map(([x1, y1, x2, y2]): EnvShape => ({
+      kind: 'wall',
+      at: cells.at(x1 * room, y1 * room),
+      to: cells.at(x2 * room, y2 * room),
+      r: cells.r(MAZE_WALL),
+    })),
+  ];
+}
+
+/**
  * The settings of the scene Tokyo rail network (ADR 0024, 0029), with `extra` on top: the scene with light adds the
  * strength of its light (ADR 0042).
  */
@@ -716,6 +817,39 @@ PRESETS.push(
       food(0.64, 0.4, 0.018),
       food(-0.64, -0.4, 0.018),
     ],
+  },
+  {
+    id: 'snail-maze',
+    name: 'Snail maze',
+    group: 'experiments',
+    source: 'Made for this app',
+    summary: 'A spiral with one route: a colony grows in to the food in the middle, and one tube stays.',
+    watch:
+      'The colony starts on the food at the right and fills every corridor. After about 9,000 steps it reaches the food in the middle. Then the flow runs along the one route, and the blind branches thin out. They do not stay empty: the colony keeps growing short branches into them.',
+    about:
+      'A maze like a snail shell: four ring corridors around a room in the middle. Each ring wall has one gap, on the right and on the left in turns, and a bar closes each corridor a quarter turn past the gap. So one route winds inward, every corridor has two blind branches, and the maze has no loop. The walls are this app’s design.',
+    strainRoles: ['Jones’ foraging agent, drawn to food'],
+    why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles, as in the Foraging maze. Flow in the tubes is on with a strength of 8, the Maze’s. The grid has 384 × 384 cells on every screen, so the rings stay round. A corridor is 34 cells wide. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    settings: () => forager({ lattice: [SNAIL_MAZE.side, SNAIL_MAZE.side], boundary: 'box' }),
+    // The start layout 'food' places the colony on the first food: the one at the entrance.
+    env: snailShapes(),
+  },
+  {
+    id: 'corn-maze',
+    name: 'Corn maze',
+    group: 'experiments',
+    source: 'Made for this app',
+    summary: 'A maze with six routes between two foods: the flow keeps a tube on the shortest one.',
+    watch:
+      'The colony starts at the top left and reaches the food at the bottom right after about 3,500 steps, along several routes. From about step 5,000 only the shortest route carries flow. The other corridors thin out, but short branches keep growing back into them.',
+    about:
+      'A maze like one cut into a corn field: 12 × 8 rooms with dead ends and loops. Six routes join the entrance at the top left and the exit at the bottom right, and the longest is 1.47 times as long as the shortest. A real slime mold kept the shortest route of a maze (Nakagaki et al. 2000), and the flow model of Tero et al. (2007) predicts it. Here the flow keeps it too.',
+    strainRoles: ['Jones’ foraging agent, drawn to food'],
+    why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles. Flow in the tubes is on with a strength of 8, the Maze’s. The grid has 480 × 320 cells on every screen: rooms of 40 cells, corridors 34 cells wide. A seeded generator made the walls: a maze without loops, then 7 walls taken away. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    settings: () =>
+      forager({ lattice: [CORN_MAZE.cols * CORN_MAZE.room, CORN_MAZE.rows * CORN_MAZE.room], boundary: 'box' }),
+    // The start layout 'food' places the colony on the first food: the one at the entrance.
+    env: cornShapes(),
   },
   {
     id: 'coarsening',

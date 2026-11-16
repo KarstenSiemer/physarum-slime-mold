@@ -39,7 +39,7 @@ page; **none** the docs hold no source.
 | 2   | Dead ends lose their tube                        | Partly                                  | Maze                                  |
 | 3   | Tubes with much flow get thicker                 | Partly                                  | Maze, Tokyo rail network              |
 | 4   | Time scales of a tube                            | Fitted                                  | every scene with the flow             |
-| 5   | Shortest path through a maze                     | Partly (one route only)                 | Maze                                  |
+| 5   | Shortest path through a maze                     | Partly                                  | Maze, Corn maze                       |
 | 6   | Growth front and its speed                       | Partly: about ten times too fast        | Tokyo rail network, Foraging maze     |
 | 7   | Speed of the flow                                | Fitted with the time scale              | Tokyo rail network                    |
 | 8   | Network formation and coarsening                 | Partly: coverage, degree, β; not widths | Coarsening network, Transport network |
@@ -108,6 +108,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   sites of the amendment 2026-11-14 (2); 0.54 with the sites before it). Without the flow it stays at 0.60 to 0.91.
 - **Limits**: the time of the decay is not compared with the organism. No measurement follows one dead end from the
   moment its flux stops.
+  With growth on, a dead end does not stay empty: in the Snail maze the blind branches hold 11 to 36 % of the route's
+  trail to step 30,000, because the colony keeps growing short branches into them (ADR 0051).
 
 ### 3. Tubes with much flow get thicker
 
@@ -141,6 +143,13 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Limits**: every wall of the Maze touches the edge of the box or a wall that does (the preset `maze` in `src/model/presets.ts`).
   So the free space has one route only, and the scene shows how the dead ends die and the tube pulls tight. It does not
   show a choice between two routes.
+- **Measured, a choice between routes** (ADR 0051): the Corn maze has six routes between its two foods, the longest
+  1.47 times as long as the shortest, and a colony that grows from one food. In 10 of 10 seeds on WebGPU the shortest
+  route alone carries the flow, from 500 to 2,500 steps after the colony joins the foods, and the tube is 1.00 to 1.02
+  times as long as the shortest way.
+- **Limits of that**: with growth the dead ends and the side routes do not empty. Short branches grow back into them,
+  and in 63 of the last 200 dumps one of them closes a route that is 6 to 7 % longer. One layout was measured. The
+  routes of the experiment of 2000 and their lengths are not in the docs, so no number is compared with it.
 
 ### 6. Growth front and its speed
 
