@@ -489,6 +489,12 @@ copy in `src/engine/growth-reference.ts`.
   between it and the agent's cell are not both walls: with one wall a move from the agent's cell can reach it through
   the other cell, with two walls no move can (7.5). A cell outside a box or the dish is no wall here, as for a move.
   The agent claims one of the free neighbours at random, with the key of a move (ADR 0025, decision 35).
+- **Light stops growth** (extended model, ADR 0050): the birth onto the picked neighbour m fails with the chance
+  G_L · λ(m), G_L the setting Light stops growth and λ the light byte / 255 of m. The agent then makes no claim in this
+  step and picks no other neighbour. The draw u is the first of a stream of its own (10), and the birth fails if
+  u · 255 < G_L · byte, in f32. No draw is made when G_L · byte is 0, so a run with G_L = 0 or without light keeps its
+  bits. The rule reads the cell of the child, not the cell of the parent: a parent in the dark does not divide into
+  the light, and a parent on lit ground still divides into the dark. The Jones model holds G_L at 0 (`asJones()`).
 - **Births**: the winners' births are matched to dead agents of the same strain by rank, in a new random order of the
   cells each step. A birth without a dead agent is dropped. The capacity limits the population.
 - **The child**: a uniform random position in its cell, a uniform random heading, no deposit in its step.
@@ -540,6 +546,7 @@ checks that this table names every key.
 | `foodStrength`      | wProj    | 0 to 0.5                                                             | 0.05              | both     | 6.4     |
 | `lightStrength`     | wLight   | 0 to 0.5; Jones: the strength of the repellent                       | 0.05              | both     | 6.4     |
 | `electrodeStrength` | wElec    | 0 to 1; 1 is the ±255 of Tsuda, Jones et al. 2011                    | 1                 | both     | 6.4     |
+| `lightGrowth`       | G_L      | 0 to 1; 0 is off                                                     | 0                 | extended | 9       |
 | `scentDecay`        | d_C      | fraction lost per step, 0.0001 to 0.9                                | 0.1               | extended | 6.4     |
 | `coveredFoodFactor` | φ        | 0.0001 to 1                                                          | 0.001             | both     | 6.5     |
 | `trailSaturation`   | K        | trail units, 0 to 1000; 0 is off                                     | 0                 | extended | 6.8     |

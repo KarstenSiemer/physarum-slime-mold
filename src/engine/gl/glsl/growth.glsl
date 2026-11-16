@@ -9,6 +9,7 @@ const uint DIR_SHIFT = 7u;
 const uint GROW = 4u;
 const uint BIRTH = 5u;
 const uint PLACE_ORDER = 6u;
+const uint SHADE = 10u;
 
 bool growthTest() { return P.growth.x > 0u && P.grid.w % P.growth.x == 0u; }
 bool shrinkTest() { return P.shrinkage.x > 0u && P.grid.w % P.shrinkage.x == 0u; }

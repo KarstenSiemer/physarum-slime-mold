@@ -451,6 +451,9 @@
         bind:value={s.shrinkMax}
         id="shrink-max"
       />
+      {#if extended}
+        <Slider spec={globalSpec.lightGrowth} bind:value={s.lightGrowth} id="light-growth" />
+      {/if}
     {/if}
     <!-- Capacity is at least Agents per cell and at most 1 with the rule: the slider shows what the simulation holds
     (capacityOf()). A value at or below Agents per cell stores 0, as many as Agents per cell. -->

@@ -838,17 +838,17 @@ PRESETS.push(
     source: 'Tero et al. 2010, Fig. 2B',
     summary: 'The Tokyo map with light on the mountains and the lakes: the colony keeps to low ground.',
     watch:
-      'The colony grows from Tokyo over the whole land, the lit mountains too: light turns an agent away only at its edge. Then the tubes on lit ground starve first. From step 4,000 on about a twentieth of the network lies on lit ground, which is a quarter of the land. Without light it is about a tenth.',
+      'The colony grows from Tokyo around the lit mountains: no agent is born on a lit cell. From step 4,000 on a hundredth of the network lies on lit ground, a quarter of the land. Light and the coast enclose the food Ito in the south-west: it stays alone. Set Light stops growth to 0 to compare.',
     about:
       'The slime mold avoids bright light. So Tero and colleagues lit the mountains and the lakes of their map, and its network kept to the low ground, more like the railway. Here the light lies on 53 squares of 9 × 10 km that are 200 m or more above the sea, and on Lake Kasumigaura. Every lit cell is equally bright; the mask of the paper has shades.',
     strainRoles: ['Jones’ foraging agent, drawn to food, flees light'],
-    why: 'The settings of the scene Tokyo rail network, with the app’s Light strength of 0.05: strengths from 0.02 to 0.5 kept as much of the network off the lit ground. The light is this app’s repellent, not a rule of the paper. Elevations: SRTM (NASA and USGS). Lake Kasumigaura and coast: © OpenStreetMap contributors. Stations: Wikidata.',
+    why: 'The settings of the scene Tokyo rail network, with the app’s Light strength of 0.05 and Light stops growth at 1. Without the growth rule a sixth of the young network lay on lit ground, with it a thirtieth; a value of 0.5 changed little. Both light rules are this app’s, not rules of the paper. Elevations: SRTM (NASA and USGS). Lake Kasumigaura and coast: © OpenStreetMap contributors. Stations: Wikidata.',
     figure: {
       href: 'https://doi.org/10.1126/science.1177894',
       label: 'Fig. 2B',
       note: 'at Science, free to read after a free registration',
     },
-    settings: () => tokyo({ lightStrength: 0.05 }),
+    settings: () => tokyo({ lightStrength: 0.05, lightGrowth: 1 }),
     // The light comes after the food and the walls: the start layout 'food' places the colony on the first food.
     env: [...tokyoShapes(), ...tokyoLight()],
   },

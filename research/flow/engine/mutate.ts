@@ -58,6 +58,12 @@ const GL_SIM = 'src/engine/gl/sim.ts';
 const ELECTRODE = 'electrode tool';
 const [ELECTRODE_GPU, ELECTRODE_GL] = ['webgpu .*electrode tool', 'webgl2 .*electrode tool'];
 
+/** Light stops growth (ADR 0050): the passes of growth, and the tests of the rule on each backend and on both. */
+const GROWTH_WGSL = 'src/engine/shaders/growth.wgsl';
+const GROWTH_FRAG = 'src/engine/gl/glsl/growth.frag';
+const SHADE = 'stop births onto lit cells';
+const [SHADE_GPU, SHADE_GL] = [`webgpu .*${SHADE}`, `webgl2 .*${SHADE}`];
+
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
  * names; '' for all tests of the file), and their file (without one: the GPU tests of the flow). A file of unit tests
@@ -2069,16 +2075,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'EL17 pack: a pole releases with the strength of the food',
     PACK,
-    "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
-    "f.set([255 * s.foodStrength * g, 0, 0, 0], slot('electrode'));",
+    "f.set([255 * s.electrodeStrength * g, s.lightGrowth, 0, 0], slot('electrode'));",
+    "f.set([255 * s.foodStrength * g, s.lightGrowth, 0, 0], slot('electrode'));",
     ELECTRODE,
     SIM_SPEC,
   ],
   [
     'EL18 pack: a pole of the extended model releases without the source factor',
     PACK,
-    "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
-    "f.set([255 * s.electrodeStrength, 0, 0, 0], slot('electrode'));",
+    "f.set([255 * s.electrodeStrength * g, s.lightGrowth, 0, 0], slot('electrode'));",
+    "f.set([255 * s.electrodeStrength, s.lightGrowth, 0, 0], slot('electrode'));",
     ELECTRODE,
     SIM_SPEC,
   ],
@@ -2104,6 +2110,96 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '      if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];\n      if (k !== EnvKind.erase) this.hasEnvironment = true;',
     '      if (k === EnvKind.food || k === EnvKind.light) [this.sources, this.scentless] = [true, false];\n      if (k !== EnvKind.erase) this.hasEnvironment = true;',
     ELECTRODE_GL,
+    SIM_SPEC,
+  ],
+  // Light stops growth (ADR 0050): a birth onto a lit cell fails with the chance G_L · λ. Against the GPU test of the
+  // rule, which compares both backends with the CPU copy.
+  [
+    'LG1 wgsl: light stops no birth',
+    GROWTH_WGSL,
+    'return rand(&rng) * 255.0 < chance;',
+    'return false;',
+    SHADE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'LG2 wgsl: the rule reads the food byte of the cell',
+    GROWTH_WGSL,
+    'let chance = P.electrode.y * f32((env[m] >> 16u) & 0xffu);',
+    'let chance = P.electrode.y * f32((env[m] >> 8u) & 0xffu);',
+    SHADE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'LG3 wgsl: the rule reads the light of the cell of the parent',
+    GROWTH_WGSL,
+    'return select(m, -1, lightStops(a, m));',
+    'return select(m, -1, lightStops(a, c));',
+    SHADE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'LG4 wgsl: the rule draws from the stream that picks the cell',
+    GROWTH_WGSL,
+    'var rng = rngSeed(agentId(a), SHADE);',
+    'var rng = rngSeed(agentId(a), GROW);',
+    SHADE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'LG5 wgsl: the strength does not scale the chance',
+    GROWTH_WGSL,
+    'return rand(&rng) * 255.0 < chance;',
+    'return rand(&rng) * 255.0 < f32((env[m] >> 16u) & 0xffu);',
+    SHADE_GPU,
+    SIM_SPEC,
+  ],
+  [
+    'LG6 glsl: light stops no birth',
+    GROWTH_FRAG,
+    'return rand(rng) * 255.0 < chance;',
+    'return false;',
+    SHADE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'LG7 glsl: the rule reads the food byte of the cell',
+    GROWTH_FRAG,
+    'floor(texelFetch(env, cellCoord(m), 0).b * 255.0 + 0.5);',
+    'floor(texelFetch(env, cellCoord(m), 0).g * 255.0 + 0.5);',
+    SHADE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'LG8 glsl: the rule reads the light of the cell of the parent',
+    GROWTH_FRAG,
+    'if (pick == 0u) return lightStops(i, cellAt(q + around(k))) ? -1 : int(k);',
+    'if (pick == 0u) return lightStops(i, c) ? -1 : int(k);',
+    SHADE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'LG9 glsl: the rule draws from the stream that picks the cell',
+    GROWTH_FRAG,
+    'uint rng = rngSeed(i, SHADE);',
+    'uint rng = rngSeed(i, GROW);',
+    SHADE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'LG10 glsl: the strength does not scale the chance',
+    GROWTH_FRAG,
+    'return rand(rng) * 255.0 < chance;',
+    'return rand(rng) * 255.0 < floor(texelFetch(env, cellCoord(m), 0).b * 255.0 + 0.5);',
+    SHADE_GL,
+    SIM_SPEC,
+  ],
+  [
+    'LG11 pack: the GPU gets no strength of the rule',
+    PACK,
+    "f.set([255 * s.electrodeStrength * g, s.lightGrowth, 0, 0], slot('electrode'));",
+    "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
+    SHADE,
     SIM_SPEC,
   ],
 ];

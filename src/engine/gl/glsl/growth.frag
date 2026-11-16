@@ -82,6 +82,15 @@ vec4 flowMemoryOf(uint s, ivec2 q) {
 }
 #endif
 
+// Light stops growth (ADR 0050; lightStops in growth.wgsl): a birth of agent i onto cell m fails with the chance
+// G_L · λ(m). The blue channel of the environment is the light byte / 255.
+bool lightStops(uint i, int m) {
+  float chance = P.electrode.y * floor(texelFetch(env, cellCoord(m), 0).b * 255.0 + 0.5);
+  if (chance == 0.0) return false;
+  uint rng = rngSeed(i, SHADE);
+  return rand(rng) * 255.0 < chance;
+}
+
 // The neighbour that a living agent in cell c divides into, or −1 (divideInto in growth.wgsl): a habitable cell
 // that is empty after the moves, and a diagonal one only if the two cells beside the corner between it and cell c
 // are not both walls (ADR 0025, amendment of 2026-11-13). It moved in this step if the settle pass marked it MOVED.
@@ -120,7 +129,7 @@ int target(uint bits, int c, uint i) {
   uint pick = min(uint(rand(rng) * float(free)), free - 1u);
   for (uint k = 0u; k < 8u; k++) {
     if ((open & (1u << k)) != 0u) {
-      if (pick == 0u) return int(k);
+      if (pick == 0u) return lightStops(i, cellAt(q + around(k))) ? -1 : int(k);
       pick--;
     }
   }

@@ -61,13 +61,15 @@ async function inflate(encoded: string): Promise<Uint8Array> {
 
 /**
  * The settings as a link holds them. The mean window is in it only when it is not 3 × 3 (ADR 0046), and the electrode
- * strength only when it is not 1 (ADR 0047): a link of settings without them then has the bytes of a link made before
- * these settings, and sanitize() reads a link without them as 3 × 3 and 1.
+ * strength only when it is not 1 (ADR 0047), and Light stops growth only when it is not 0 (ADR 0050): a link of
+ * settings without them then has the bytes of a link made before these settings, and sanitize() reads a link without
+ * them as 3 × 3, 1 and 0.
  */
 function linkSettings(s: Settings): Partial<Settings> {
   const held: Partial<Settings> = { ...s };
   if (s.meanWindow === MEAN_WINDOW) delete held.meanWindow;
   if (s.electrodeStrength === defaultSettings().electrodeStrength) delete held.electrodeStrength;
+  if (s.lightGrowth === 0) delete held.lightGrowth;
   return held;
 }
 

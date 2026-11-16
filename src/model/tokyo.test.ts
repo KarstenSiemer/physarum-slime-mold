@@ -198,7 +198,7 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
   const outside = (x: number, y: number, s: EnvShape) =>
     segmentDistance(x * k, y * k, s.at, s.to ?? s.at) / k - s.r / k;
 
-  it('is the Tokyo scene with light added: its food, walls and settings, and a light strength', () => {
+  it('is the Tokyo scene with light added: its food, walls and settings, and the two settings of light', () => {
     const lit = presetById('tokyo-light');
     const dark = presetById('tokyo');
     if (!lit || !dark) throw new Error('no Tokyo scene');
@@ -207,8 +207,10 @@ describe('the light of the scene Tokyo with light (Tero et al. 2010, Fig. 2B)', 
     expect(light.every((s) => s.kind === 'light')).toBe(true);
     // The same settings but the light: the scene of today stays the protocol without light.
     const [a, b] = [lit.settings(), dark.settings()];
-    expect({ ...a, seed: 0, lightStrength: 0 }).toEqual({ ...b, seed: 0, lightStrength: 0 });
+    expect({ ...a, seed: 0, lightStrength: 0, lightGrowth: 0 }).toEqual({ ...b, seed: 0, lightStrength: 0 });
     expect(a.lightStrength).toBeGreaterThan(0);
+    // Light stops growth at 1 (ADR 0050): no agent is born on a lit cell.
+    expect([a.lightGrowth, b.lightGrowth]).toEqual([1, 0]);
     expect(a.strains[0]?.light).toBe(1);
   });
 

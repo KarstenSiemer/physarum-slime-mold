@@ -6,6 +6,7 @@
 - Extends [ADR 0029](0029-flow-in-the-tubes.md) (decision 20 of its amendment of 2026-11-14) and
   [ADR 0024](0024-scenes-from-later-papers.md) (the Tokyo scene).
 - Changes [ADR 0021](0021-links-carry-food-light-and-walls.md): a link of version 3.
+- Extended by ADR 0050 (2026-11-16): light stops growth, and the scene runs it at 1.
 - In short: [`research/flow/README.md`](../../research/flow/README.md), part 14, has the commands and the tables.
 
 ## Context

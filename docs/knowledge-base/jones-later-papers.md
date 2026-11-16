@@ -49,6 +49,11 @@ now: [model.md](../model.md). The decision that came from these notes:
 - **Light is another rule** (Amoeboid, p. 7): an agent in a lit region has its sampled sensor values multiplied by a
   factor below 1 while it stays there. Lower factors give a stronger response. The lit region releases nothing. This
   app does not have this rule. Earlier docs of this app dated it to 2017; the paper is of 2012.
+- **The rule acts at the edge of the lit region** (read on 2026-11-16; ADR 0050). One factor on all three values of an
+  agent changes no comparison of the sensory stage (Amoeboid, Fig. 1(b)), so it turns no agent. The paper explains the
+  effect at the interface (p. 7 to 8, Fig. 6(c) and (d)): agents there get input from the unexposed region and read
+  it as stronger, because the lit side is damped. So the factor must apply to each sample on a lit cell. An agent
+  whose three sensors are all lit turns as without light. The paper names the interface as the cause of the movement.
 - **Consumption** (Amoeboid, p. 7): the value that a food source projects is decremented while an agent covers the
   source. This app has no such rule: its covered food releases less while it is covered, and releases fully again
   afterwards (Adamatzky and Jones 2010; [model.md](../model.md), section 6.5).
