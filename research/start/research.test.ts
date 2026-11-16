@@ -33,8 +33,23 @@ const pipelines = (name: string) =>
     .map((m) => ({ entry: m[1], s: Number(m[2]) }));
 
 describe('the record of the start of the app (ADR 0049)', () => {
-  it('holds the 6 logs', () => {
-    expect(readArchive(here('./logs.tar.gz'))).toHaveLength(6);
+  it('holds the 7 logs', () => {
+    expect(readArchive(here('./logs.tar.gz'))).toHaveLength(7);
+  });
+
+  it('gives the minutes of shard 2 alone, with ui.spec.ts after the tests of the flow', () => {
+    const adr = readFileSync(
+      here('../../docs/adr/0049-build-the-diffusion-and-outline-passes-at-their-first-use.md'),
+      'utf8',
+    );
+    const alone = runsOf(log('e2e/shard2.json'));
+    const ui = (runs: typeof alone) => minutes(runs.filter((r) => r.file === 'e2e/ui.spec.ts'));
+    expect([alone.length, alone[0]?.file]).toEqual([41, 'e2e/tubes.spec.ts']);
+    const text = adr.replace(/\s+/g, ' ');
+    expect(text).toContain(`shard 2 alone took ${minutes(alone)} min`);
+    expect(text).toContain(
+      `\`ui.spec.ts\` ${ui(alone)} min after the tests of the flow, against ${ui(runsOf(log('e2e/branch.json')))} min`,
+    );
   });
 
   it('gives every row of the table of the ADR from the reports of the e2e tests', () => {

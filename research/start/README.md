@@ -34,7 +34,8 @@ bytes: the digests after 500 steps are those of `main`.
 container. The second job took 11 minutes instead of 19, but the first one still took 25. CI shares the tests out by
 their count, in the order of the files, and the five tests of `flow.spec.ts`, which wait for steps, took 9 minutes of
 it. The file is now `tubes.spec.ts`: it sorts after `scenes.spec.ts`, and four of its tests run in the second job. In
-the container the two jobs then take 11.2 and 11.5 minutes.
+the container the two jobs then take 11.2 and 11.5 minutes. On GitHub they took 18 and 24 minutes: the second ran on
+a slower runner, which took 49 seconds for `npm ci` instead of 34.
 
 **What is not exact.** The times come from an M3 Pro, in a container of 4 cores, with the arm64 build of Chromium of
 the image. GitHub runs its x86-64 build on other CPUs: it started the app faster, and stepped slower. The first run of
@@ -49,7 +50,7 @@ Node 26 and the packages of the repository (`npm ci`), Docker, and the image of 
 
 ### The logs
 
-The 6 logs are one archive, `logs.tar.gz`. Unpack it to `research/start/logs/`, which git ignores:
+The 7 logs are one archive, `logs.tar.gz`. Unpack it to `research/start/logs/`, which git ignores:
 
 ```bash
 node --import ./research/flow/register.mjs research/start/logs.ts unpack
@@ -57,25 +58,32 @@ node --import ./research/flow/register.mjs research/start/logs.ts unpack
 
 `list` shows what the archive holds, and `pack` packs the folder again after a new measurement.
 
-| Files                        | What                                                                |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `logs/e2e/*.json`            | the JSON reports of Playwright of the e2e tests, `main` and here    |
-| `logs/start/start-*.txt`     | one start in parts, its pipelines one at a time, and a second start |
-| `logs/digest/digest-*.jsonl` | the digests of every scene after 500 steps, `main` and here         |
+| Files                        | What                                                                   |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `logs/e2e/*.json`            | the JSON reports of Playwright of the e2e tests: `main`, here, shard 2 |
+| `logs/start/start-*.txt`     | one start in parts, its pipelines one at a time, and a second start    |
+| `logs/digest/digest-*.jsonl` | the digests of every scene after 500 steps, `main` and here            |
 
 ### Step 1: the e2e tests
 
 `run.sh` copies a checkout into the image of CI, installs its packages, builds the site and runs a command as CI
-does. The suite takes about 70 minutes on `main` and 25 minutes here. Run one at a time, while no other GPU work runs:
+does. The suite takes about 70 minutes on `main` and 25 minutes with the change. The report of the change in the
+record is of `7a71a45`, before `flow.spec.ts` got its new name. Run one at a time, while no other GPU work runs:
 
 ```bash
 git worktree add ../start-main 83d5fc2
+git worktree add ../start-change 7a71a45
 research/start/run.sh ../start-main e2e-main npx playwright test --project e2e --reporter=json,line
-research/start/run.sh . e2e-branch npx playwright test --project e2e --reporter=json,line
+research/start/run.sh ../start-change e2e-branch npx playwright test --project e2e --reporter=json,line
 node --import ./research/flow/register.mjs research/start/tables.ts research/start/out/e2e-main.json research/start/out/e2e-branch.json
 ```
 
-The last command prints the table of the ADR and the split with the new name of the file; without files it reads the logs of the record.
+The last command prints the table of the ADR and the split with the new name of the file; without files it reads the
+logs of the record. Shard 2 alone, here (12 minutes):
+
+```bash
+research/start/run.sh . shard2 npx playwright test --project e2e --shard=2/2 --reporter=json,line
+```
 
 ### Step 2 to 4: the start
 
@@ -89,6 +97,7 @@ cp -R research/start ../start-main/research/
 research/start/run.sh ../start-main start-main npx playwright test --config research/start/playwright.config.ts
 research/start/run.sh . start-branch npx playwright test --config research/start/playwright.config.ts
 git worktree remove --force ../start-main
+git worktree remove --force ../start-change
 ```
 
 ### Step 5: the bytes of the scenes
