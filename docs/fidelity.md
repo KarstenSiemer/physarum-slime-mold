@@ -28,8 +28,10 @@ This file keeps the two apart. Most of the app's measurements answer question 1.
 
 Marks on the organism's facts, as in [flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md): **[V]** read in the
 full text; **[H]** a helper read the copy at PubMed Central (results and captions, not the methods); **[J]** read in
-Jones 2010 (journal pages); **[S]** only the summary of a web search gave it, and nobody of this project read the
-page; **none** the docs hold no source.
+Jones 2010 (journal pages); **[A]** only the abstract, or a figure with its legend, was read, not the body of the
+paper (ADR 0052); **[S]** only the summary of a web search gave it, and nobody of this project read the page; **none**
+the docs hold no source. "Cited there" after a source: that source says it of another paper, which nobody of this
+project read.
 
 ## Summary
 
@@ -57,6 +59,8 @@ page; **none** the docs hold no source.
 | 20  | Two plasmodia that do not fuse stay two bodies   | Partly                                  | Rival networks, Tokyo, two networks   |
 | 21  | Growth toward the cathode of a current           | Partly: the direction only              | Electrotaxis                          |
 | 22  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
+| 23  | Avoidance of its own slime                       | Not modelled                            | none                                  |
+| 24  | Veins form a tree that follows Murray's law      | Not measured; no tree toward a front    | none                                  |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
 figures (ADR 0027, Measurements: stripes 15.7 cells against 16.2, 19.7 spots against 20). Several strains with a table
@@ -103,7 +107,11 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 ### 2. Dead ends lose their tube
 
 - **Organism** [V]: a tube with an open end tends to disappear (Tero et al. 2007, Sec. 2). A dangling end vanishes or
-  grows, and is never stable (Marbach et al. 2023).
+  grows, and is never stable (Marbach et al. 2023); it grows where the pressure at it is high (p. 11). Of tubes in the
+  shape of a T with food at two ends, the tubes of the third branch disappeared quickly (Tero et al. 2007, Sec. 5.1,
+  Fig. 11). In the maze of 2000 the dead ends of the plasmodium shrink within 4 h after the food is set (Nakagaki,
+  Yamada and Tóth 2000, legend of Fig. 1 [A]). No source of the docs says whether a plasmodium grows back into a dead
+  end that it left ([slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "What nobody found").
 - **Model**: the flow (ADR 0029). A dead end carries no flux, its flow memory falls, and its agents starve.
 - **Measured** (ADR 0029, The Maze; 10 seeds on WebGPU, 3 on WebGL2, 3 without the flow): the trail in the dead ends
   over the trail of the route falls from 0.53 at step 1,000 to 0.000 at step 5,000 (median on WebGPU, with the food
@@ -111,7 +119,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Limits**: the time of the decay is not compared with the organism. No measurement follows one dead end from the
   moment its flux stops.
   With growth on, a dead end does not stay empty: in the Snail maze the blind branches hold 11 to 36 % of the route's
-  trail to step 30,000, because the colony keeps growing short branches into them (ADR 0051).
+  trail to step 30,000, because the colony keeps growing short branches into them (ADR 0051). The experiment of 2000
+  had no growth after the food came (row 5), so it does not say what the organism does there. The likely cause in the
+  model, read in the code and not measured, is in `TODO.md` ("Slime, dead ends and the growth front").
 
 ### 3. Tubes with much flow get thicker
 
@@ -136,22 +146,45 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 
 ### 5. Shortest path through a maze
 
-- **Organism**: Nakagaki, Yamada and Tóth 2000 is the first maze experiment. The docs hold none of its numbers, and
-  nobody read the paper for this project. Ma et al. 2013 (Sec. 1) [V]: in a maze of the Towers of Hanoi only the
-  shortest path was left after 12 h.
-- **Model**: the Maze with the flow.
+- **Organism**: Nakagaki, Yamada and Tóth 2000 is the first maze experiment. Its abstract and its Fig. 1 with the
+  legend are free and were read on 2026-11-16; nobody read the body text [A]. The maze has four routes between two
+  foods: α1 (41 ± 1 mm) or α2 (33 ± 1 mm) on one part of the way, and β1 (44 ± 1 mm) or β2 (45 ± 1 mm) on another.
+  Four hours after the food was set the dead ends shrink, and four hours later the shortest path is selected
+  (legend). The paths of 19 runs (Fig. 1d, read from the picture by the coordinator): the shortest route, α2 with β1,
+  alone in 5; α2 with β2 in 6; α2 with both β in 3; both α with both β in 3; no tube in 2. So the shorter α2 is in
+  all 17 networks, and β1 and β2, 1 mm apart, are left about equally often.
+- **Organism, the protocol** [V]: the plasmodium filled the whole maze before the food came (Tero et al. 2007,
+  Sec. 3). It was starved, and when the food came, nearly all of its protoplasm gathered on the two foods, with a
+  tube between them (Nakagaki et al. 2007, Phys. Rev. Lett. 99: 068104, p. 1; Tero et al. 2007, Sec. 1). So the
+  plasmodium did not grow after the food came: it withdrew. This is this project's reading of these lines; no source
+  uses these words.
+- **Organism, later** [V]: Akita et al. 2017 (Dev. Growth Differ. 59: 465, Sec. 2 and 4) ran the same maze again:
+  the tube cuts the corners, and it often lies on a longer route. Ma et al. 2013 (Sec. 1): in a maze of the Towers
+  of Hanoi only the shortest path was left after 12 h. How each source was read:
+  [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md).
+- **Model**: the Maze with the flow. It follows the protocol of 2000. It starts filled: 12 % of the cells hold an
+  agent, spread evenly over the grid (the preset `maze` in `src/model/presets.ts` sets no start layout and no growth,
+  and `defaultSettings()` in `src/model/params.ts` has the layout `mixed` and `growth: false`; `docs/model.md`, 10).
+  It runs without growth (ADR 0029, "The Maze (flux 8)"), and food lies at both ends. The Snail maze and the Corn maze
+  grow a colony from one food (ADR 0051). That is another experiment: the plasmodium of 2000 did not grow after the
+  food came (ADR 0052).
 - **Measured**: one tube remains, 1.10 times as long as the shortest route at step 15,000 (ADR 0029, The Maze; the
   same with the food sites of the amendment 2026-11-14 (2), 10 seeds on WebGPU).
 - **Limits**: every wall of the Maze touches the edge of the box or a wall that does (the preset `maze` in `src/model/presets.ts`).
   So the free space has one route only, and the scene shows how the dead ends die and the tube pulls tight. It does not
-  show a choice between two routes.
+  show a choice between two routes. The maze of 2000 has four routes, and no scene has its layout, so the counts of
+  Fig. 1d are compared with nothing. In a dead end of the Maze the agents die where the flux is missing
+  (`docs/model.md`, 8.5); the protoplasm of the organism moves to the foods. The Maze has no length, so its times
+  stand beside the 4 h and 8 h of the organism only loosely: its dead ends are below 2 % of the route's trail at step
+  2,500, 83 min of model time (ADR 0029, "The Maze (flux 8)").
 - **Measured, a choice between routes** (ADR 0051): the Corn maze has six routes between its two foods, the longest
   1.47 times as long as the shortest, and a colony that grows from one food. In 10 of 10 seeds on WebGPU the shortest
   route alone carries the flow, from 500 to 2,500 steps after the colony joins the foods, and the tube is 1.00 to 1.02
   times as long as the shortest way.
 - **Limits of that**: with growth the dead ends and the side routes do not empty. Short branches grow back into them,
-  and in 63 of the last 200 dumps one of them closes a route that is 6 to 7 % longer. One layout was measured. The
-  routes of the experiment of 2000 and their lengths are not in the docs, so no number is compared with it.
+  and in 63 of the last 200 dumps one of them closes a route that is 6 to 7 % longer. One layout was measured. Its
+  routes are not the routes of the experiment of 2000, and its colony grows where the plasmodium of 2000 withdrew. So
+  its numbers are not compared with Fig. 1d.
 
 ### 6. Growth front and its speed
 
@@ -161,12 +194,31 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   a plate shaped like France the plasmodium is back at its start on the fourth day, after all other cities (Adamatzky
   et al., motorways, p. 6 [V]). On an agar gel of about 10 × 10 cm the front reaches the far electrodes after 21 h
   (Tsuda et al. 2012, p. 3 and 5 [V]). The papers: [jones-later-papers.md](knowledge-base/jones-later-papers.md).
+- **Organism, the front and what lies behind it** [V]
+  ([slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "The front"): a front is a thin sheet
+  without visible structure. Channels appear in it and become tubes, and the sheet between them thins away (Le
+  Verge-Serandour and Alim 2023, arXiv:2306.09063, Sec. 2.2, 4.1 and 5.1). The main vein shows at a spot about 50 min
+  after the front passed it and then keeps its place, and a spot gives its mass to the veins with a time scale of
+  195 s (Schenz 2019, doctoral thesis, Sec. 3.1.3, p. 30, and p. 52). A front that is cut off extends for at least
+  10 min more and stops about 20 min after the cut (the same thesis, Sec. 2.2.3, cited there). The plasmodium is
+  thickest close to the front, and its thickness falls exponentially toward the rear, with a decay distance of 2.6 to
+  11.6 mm; its speed is 0.17 · h^0.94 mm per min at a largest thickness of h mm, about 1 cm/h at 1 mm (Kuroda et al.
+  2015, J. Exp. Biol. 218: 3729, Fig. 5A and 6). A front can split in two, and one of the two then stops (p. 3736).
+  Above a size of about 1 mm a plasmodium has several fronts, which appear below a curvature of 2.5 per mm (the
+  review, Sec. 4.1, cited there; the docs do not know the first source of the number). The review gives 2 to 3 cm/h
+  as the speed that a plasmodium reaches (Sec. 4.1, cited there). On a rich medium the plasmodium grows as a mesh
+  with a sheet at the front, and under starvation or with repellents as trees of branches (Takamatsu et al. 2009
+  [A]). Jones 2011 (p. 1346, cited there) describes the front as a fine, almost uniform mesh that gets coarser toward
+  the origin. No source of the docs gives the widths of the zones behind a front in mm.
 - **Model**: growth and shrinkage of Jones 2011 (ADR 0025).
 - **Measured**: the Tokyo colony reaches all 36 foods by step 2,000, which is 1.1 h of model time, in 10 of 10 seeds
   (ADR 0029). So it grows about ten times as fast as the organism. Jones' growth rule has no speed of its own to set.
   The Foraging maze reaches its far food in 10 of 10 seeds, in a median of 3,151 to 4,601 steps sensing first (ADR
   0027, Growth after the merge of ADR 0025); it has no length or time scale.
-- **Limits**: the front of the organism is a fan of fine veins. The app does not draw one (ADR 0025, decision 28).
+- **Limits**: the app has no sheet at the front and no zones behind it. Its front is the mesh that the growth rule
+  makes, and no vein forms toward a front, because the flux runs only between foods (row 24). The app draws no fan
+  (ADR 0025, decision 28). Nobody measured in the app how long after the front a tube between two foods shows, or how
+  a front splits.
 
 ### 7. Speed of the flow
 
@@ -331,25 +383,41 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 
 - **Jones** [J]: reticular patterns resemble growth on rich food, labyrinthine ones low food, islands hostile
   conditions (Jones 2010, p. 142). This is Jones' analogy, without a measurement of the organism.
+- **Organism**: on a rich medium the plasmodium grows as a mesh with a sheet at the front, and under starvation or
+  with repellents as trees of branches (Takamatsu et al. 2009 [A]). Its shape is compact and its exploration slow at
+  high concentrations of nutrients or of salt; on ground that is poor in nutrients it migrates fast and keeps main
+  branches (Le Verge-Serandour and Alim 2023, Sec. 4.2.1, cited there [V]). In 35 h on plain agar it leaves 5 % of its
+  arena unexplored, with glucose in the agar 15 % and 35 %, and with salt 38 % (Patino-Ramirez et al. 2019, Sci. Rep.
+  9: 15444, p. 3 [V]). The sources: [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md).
 - **Model**: the classes come from SA and RA (Fig. 13 and 14). No parameter is tied to food or light. Nobody measured
   the classes, not even against Jones.
 
 ### 20. Two plasmodia that do not fuse
 
-- **Organism** [S]: two plasmodia of one species do not always fuse when they meet (Masui, Satoh and Seto 2018, on
-  _Physarum rigidum_). In _Physarum polycephalum_ they fuse only when they are alike at several loci (Carlile and Dee
-  1967). After a fusion of two strains that do not fit, a lethal reaction can follow. The papers were not read:
-  [flow-in-the-tubes.md](knowledge-base/flow-in-the-tubes.md), "Two plasmodia". Pieces of one culture do fuse, after a
-  delay [V]: their growth fronts leave a strip of free substrate between them at 10 h and merge by 16 h (Jones and
-  Adamatzky 2015, p. 4, Fig. 3), and eight pieces on one gel are one cell after 8 h (Tsuda et al. 2012, p. 5).
+- **Organism** [V]: two plasmodia of one species fuse only when they are alike, in phenotype, at about 16 loci. The
+  count is the sum of a review over two species; for _Physarum polycephalum_ it reports four loci for the fusion and
+  three for a lethal reaction (Clark and Haskins 2012, Mycosphere 3: 131, p. 131 and 133). After a fusion of two that
+  do not fit, a slow lethal reaction removes the nuclei of one side within 5 to 20 hours (p. 131). Two that do not
+  fuse stay apart: they ignore each other, or one eliminates the other, and in a dish with several plasmodia one is
+  usually left after some time (p. 134 and 136). Of 10 pairs of five strains of _Physarum rigidum_ one pair fused,
+  and the other nine avoided each other in all 100 encounters. In a third of the encounters that ended in avoidance
+  the two stopped without touching, in many cases 0.1 to 1 mm apart, for 13 min to about 7 h (Masui, Satoh and Seto
+  2018, J. Phys. D 51: 284001, p. 3 to 5). Three strains showed no difference between ground that their own strain
+  had explored and ground of another strain (Briard et al. 2020; a research helper read it, and nobody checked it
+  again). The sources: [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "Several
+  plasmodia". Pieces of one culture do fuse, after a delay: their growth fronts leave a strip of free substrate
+  between them at 10 h and merge by 16 h (Jones and Adamatzky 2015, p. 4, Fig. 3), and eight pieces on one gel are one
+  cell after 8 h (Tsuda et al. 2012, p. 5).
 - **Model**: each strain has a flow of its own, so no flux passes from the tubes of one strain into the tubes of another
-  (ADR 0031). The strains keep apart by a negative weight on each other's trail (Fogleman 2020), which is no rule of
-  the organism. The model has no fusion and no lethal reaction.
+  (ADR 0031). The strains keep apart by a negative weight on each other's trail (Fogleman 2020). That is a rule of
+  this app: plasmodia that do not fit do turn away from each other, but no number of the app is fitted to them. The
+  model has no fusion, no lethal reaction, and no strain that eliminates another.
 - **Measured** (ADR 0032, again with the food sites of ADR 0029, amendment 2026-11-14 (2); seed 1, WebGPU): in Rival
   networks each of two strains keeps a network on all ten foods from step 4,002 to step 12,002, with 3,749 and 2,994
   agents at the end (2,993 and 2,730 with the sites before). On the Tokyo map each of two strains holds 40 to 42 of the
   42 food sites in every sample from step 2,002 on, and 42 and 42 at step 14,002 (38 to 42 before): a strain now
-  covers a food from any of its cells. The docs hold no number of the organism to compare with.
+  covers a food from any of its cells. The numbers of the organism in the docs, the distance and the time of an
+  encounter, are other measures: nothing is compared.
 
 ### 21. Growth toward the cathode of a current
 
@@ -393,6 +461,46 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Limits**: the comparison is with the geometry and with the figures of the paper's model, not with the organism.
   The paper gives no lattice and no strengths; they are read from its figures or chosen (ADR 0048).
 
+### 23. Avoidance of its own slime
+
+- **Organism**: the plasmodium leaves slime where it was, and it avoids ground with slime. In a Y-maze with food at
+  both ends, 39 of 40 plasmodia chose the arm without slime; with slime on both arms they showed no preference
+  (n = 23). Through a U-shaped trap 96 % of 24 reached the goal within 120 h on blank agar, and 33 % on agar coated
+  with slime (Reid et al. 2012, PNAS 109: 17490; a research helper read the full text, and nobody checked it again).
+  Plasmodia on plain agar usually do not cross their own path, and they often turn away at a distance from the trail.
+  Plasmodia below 0.65 mm² do not avoid, and they cross their trail from 3 h on (Tröger, Goirand and Alim 2024, PNAS
+  121: e2312611121, p. 3 to 6 [V]). Slime is a cue for "no food here", and a plasmodium that perceives food enters
+  ground with slime (Reid et al. 2013, Behav. Ecol. 24: 812 [A]). Ground that a starved clone mate explored is
+  avoided (16 % chose it), ground of a well-fed one attracts (88 %), and the own strain and another make no
+  difference (Briard et al. 2020; read and not checked again, as Reid et al. 2012). Against it: fed plasmodia on plain
+  agar grew over ground that they had left as often as chance gives it (Patino-Ramirez et al. 2019, Sci. Rep. 9:
+  15444, p. 4 [V]). Nobody measured how long slime lasts: 3 h to 6 days are reported. The sources:
+  [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "Slime".
+- **Model**: none. The model has no slime: a cell keeps no mark of an agent that left it, and an agent enters any
+  open cell. The nearest rule is starved ground, with the flow on: where a tube starved, the flow memory D stays low
+  for up to 18 h of model time, and no agent divides on a cell with D below 0.01 (`docs/model.md`, 8.4, 8.5 and 9; row
+  16). It marks only ground where a tube starved, not every cell that the colony left, and it stops no move.
+- **Measured**: nothing. A slime field is stage 2 of the plan of 2026-11-16 (`TODO.md`; ADR 0052).
+
+### 24. Veins form a tree that follows Murray's law
+
+- **Organism** [V]: a plasmodium that leaves an arena through one exit builds a tree of veins: the veins get thicker
+  toward the exit, and they fork again and again toward the rim. At 57 junctions the radii follow
+  r0^n = r1^n + r2^n with a median n of 3.15; the mean lies between 2.53 and 3.29 (Akita et al. 2017, J. Phys. D 50:
+  024001, Sec. III.E). Murray's law is n = 3. The sheet between the veins gets thinner at the same rate all over the
+  arena, with a time constant of 6 to 7 h in a circle of 10 mm (Sec. III.B). These trees drain an arena: no source of
+  the docs measures the exponent behind a growing front. Behind a front many veins form side by side, and they join
+  to one main vein farther back (Schenz 2019, doctoral thesis, Sec. 3.1.4 and 4.2.2; row 6). In nature the front is
+  the sink that gives the flow its direction (the same thesis, Sec. 5.1, p. 68). The sources:
+  [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "The front" and "Models of a front".
+- **Model**: the flow (ADR 0029). Flux runs only between food sites with a role (`docs/model.md`, 8.2 and 8.4). A
+  tube that leads only to a growing front carries no flux, so no tree forms toward a front. Between foods the tubes
+  do branch. The thickness of a tube is a number of agents, and the picture draws a radius from the flow memory (row
+  3; ADR 0034). The rule has f(Q) = Q^1.8 / (1 + Q^1.8). By the relation n = 4/μ of Akita et al. (Eq. 7), a rule
+  f = Q^μ gives Murray's law at μ = 4/3; an exponent of 1.8 gives n = 2.2 where the flux is small, and no fixed n
+  where f saturates. This is an inference of this project, not a measurement.
+- **Measured**: nothing. Nobody measured an exponent at the branchings of the app.
+
 ## What the model does not do
 
 - No oscillation and no shuttle streaming (row 17).
@@ -411,12 +519,14 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   10 % from 200 steps after a draw on, 10 to 31 % 100 to 175 steps after it, and about half in the first 50 steps
   (amendment 2026-11-15). A larger radius of its momentum settles a fixed network sooner, but lets the errors of a
   growing colony run off, so the radius stays (same amendment).
-- The front of the growth is not a fan of fine veins (row 6).
+- The growth front has no sheet and no zones by age, and no vein forms toward it: the flux runs only between foods
+  (rows 6 and 24).
+- No slime: a cell keeps no mark of an agent that left it (row 23).
 - Light is a repellent source, the rule of Jones' papers for repellents such as salt. The light rule of Jones'
   papers, weaker sensors on a lit agent, is not built (row 13). Dryness is not modelled.
 - Two strains never fuse: no flux passes between strains (row 20; [ADR 0031](adr/0031-a-flow-for-every-strain.md),
   decision 4).
-- The Jones model never runs the flow (ADR 0029, decision 1). Rows 1 to 7 and 14 to 16 hold for the extended model
+- The Jones model never runs the flow (ADR 0029, decision 1). Rows 1 to 7, 14 to 16 and 24 hold for the extended model
   only.
 - The app differs from Jones 2010 in one point: agents update in parallel, where Jones picks them in random order (ADR
   0008). Where Jones 2011 is silent, the app chose: a growth count includes the agent itself, and a child gets a random
@@ -430,20 +540,23 @@ The organism has a number in the docs, and the model was never measured:
 - the life of one tube after its flux stops, and the delay of its answer (row 4; Marbach et al. 2023);
 - the longer of two tubes between two foods disappears (row 3; Tero et al. 2007);
 - the coverage of the land over time against the panels of Fig. 1, and the second protocol (row 1 and 6; Tero et al.
-  2010).
+  2010);
+- the paths of the maze of 2000, in a scene with its four routes (row 5; Nakagaki et al. 2000, Fig. 1d);
+- the exponent at the branchings of the tubes (row 24; Akita et al. 2017).
 
 The model has a number, and the docs hold none of the organism:
 
 - the scenes of Jones 2010 (rows 8 to 11; row 8 has the organism's numbers for the Coarsening network only), the reach of the food scent (row 12), the times of the Foraging maze, and the
-  Maze, until someone reads Nakagaki et al. 2000 (row 5).
+  length of the Maze's tube over its shortest route (row 5: the docs hold the route lengths, the times and the paths
+  of Nakagaki et al. 2000, and no length of its tube).
 
 Neither side is measured, not even against Jones: Plateau's angles, Jones' Fig. 6, 9, 11 to 14, 20 and 23, the time
 until a wound closes, the tracer of Fig. 7, and Fleeing light.
 
 ## How to add a row or a number
 
-- An organism's number names its paper, page, section or figure, and its mark [V], [H] or [J]. A number without a
-  source stays out.
+- An organism's number names its paper, page, section or figure, and its mark [V], [H], [J] or [A]. A number without
+  a source stays out.
 - A model number names its ADR section, the commit, the seeds, the backend and the scene's settings.
 - A constant that was chosen to give a number makes that number "Fitted".
 - A new measurement updates its row here in the same pull request.

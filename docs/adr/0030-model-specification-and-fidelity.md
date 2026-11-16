@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-11-13
+- Extended by ADR 0052 (2026-11-16): the mark [A] for a fact read only in an abstract or in a figure with its legend,
+  and the free part of Nakagaki et al. 2000 is read.
 
 ## Context
 
