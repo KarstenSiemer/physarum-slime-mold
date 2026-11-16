@@ -172,6 +172,15 @@ food, Ito, lay on dark land that the lit mountains and the coast enclosed, and t
 longer joined it. So two lit cells on the coast from Odawara to Ito are dark now, and one seed on
 that map joins all 36 foods. The default of the setting is 1. The rule of Jones for light, which TODO.md proposed first, would not have helped:
 it acts only at the edge of a lit area, as the repellent does.
+**Two mazes with growth** ([ADR 0051](../../docs/adr/0051-the-scenes-snail-maze-and-corn-maze.md),
+part 16). The Maze has one route, so it cannot show a choice. Two new scenes start as a small
+colony on one food, with growth and the flow. The Snail maze is a spiral with one route and eight
+blind branches. The Corn maze has rooms with loops: six routes join its two foods, and the longest
+is 1.47 times as long as the shortest. Ten seeds ran for each. In the Corn maze the shortest route
+alone carries the flow in every run, 500 to 2,500 steps after the colony joins the foods, and its
+tube is at most 2 % longer than the shortest way. In the Snail maze the tube follows the one
+route. But the dead ends do not empty as in the Maze: the colony keeps growing short branches
+into the corridors that the flow has left, and they hold 11 to 36 % of the route's trail.
 
 ## What is in this folder, and what you need to read
 
@@ -1518,9 +1527,44 @@ and the digests with the default 1 are open (`TODO.md`). The records are in `log
 | `digest-branch.jsonl`, `-main`   | the digests of every scene after 500 steps, branch and `main` |
 | `mutations.txt`                  | the wrong rules LG1 to LG11 and the tests that fail with them |
 
+### 16. Do the mazes with growth keep one tube on the shortest route? [ADR 0051]
+
+The layout of the Corn maze, as text, with its routes and the list of walls that the scene holds
+(`CORN_MAZE` in `src/model/presets.ts`); without a seed the script takes the first seed that fits:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/corn-maze.ts
+```
+
+The scenes Snail maze (`snail-maze`) and Corn maze (`corn-maze`) on WebGPU, seeds 1 to 10, to step
+30,000 with a dump every 500 steps. A run alone on the GPU took 45 to 50 s, and the dumps of all
+runs take 2.5 GB:
+
+```bash
+STEPS=$(seq -s, 500 500 30000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=$scene-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+```bash
+for scene in snail-maze corn-maze; do node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene $(for seed in 1 2 3 4 5 6 7 8 9 10; do echo $scene-webgpu-s$seed; done) > research/flow/out/engine/$scene-webgpu.txt; done
+```
+
+`measure-mazes.ts` prints one line per dump and one line per run, which starts with the name of
+the run and `run:`; its head says what each number is. The line of a run holds means over the
+dumps of its last 10,000 steps. You must see in every line of a run of the Snail maze `joined in
+the tail 1.00` and `tube 1.00` or `1.01`, and in every line of a run of the Corn maze `flow on
+each route 1.00,0.00,0.00,0.00,0.00,0.00`. Called with a scene and no run, the script writes a
+picture of the maze with its route and its dead ends (`out/engine/<scene>-zones.png`).
+
+The same on WebGL2 for seeds 1 and 2 (`VITE_KIND=webgl2`, names `<scene>-webgl2-s<seed>`), and
+with the flow strengths 2 and 4 for seed 1 (`VITE_I0=2`, names `<scene>-webgpu-i2-s1`). The record
+is `logs/engine/mazes/`: `<scene>-webgpu.txt`, `<scene>-webgl2.txt` and `<scene>-strength.txt`.
+
+Result: the tube follows the shortest route in both mazes, and the flow runs on that route alone.
+The dead ends thin out but do not empty, because growth goes on (ADR 0051 has the tables).
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 250 files, 3.5 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 256 files, 4.0 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1549,6 +1593,7 @@ asks for the new digest.
 | `logs/engine/respawn-wound/`                         | the runs of ADR 0041: the digests of every scene on the branch and on `main`, and its wrong rules N1 to N10                                                                                                                     | 2026-11-15, M3 Pro, `main` at `b93584e`               |
 | `logs/engine/light/`                                 | the runs of part 14 (ADR 0042): the scene Tokyo with light and the runs beside it, the digests of every scene on the branch and on `main`, and the SRTM samples                                                                 |
 | `logs/engine/light-growth/`                          | the runs of part 15 (ADR 0050): Tokyo with light with Light stops growth at 1, 0.98, 0.9 and 0.5, the digests of every scene, and the wrong rules LG1 to LG11                                                                   | 2026-11-16, M3 Pro                                    |
+| `logs/engine/mazes/`                                 | the runs of part 16 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1598,6 +1643,7 @@ Notes on the record:
 | `engine/*.gpu.test.ts`    | runs of the real engine: dumps, the time of a step, a frame and the picture, digests, strains     |
 | `../vitest.config.ts`     | the Vitest configuration of the runs of the real engine                                           |
 | `engine/measure-*.ts`     | the measures of a dump                                                                            |
+| `engine/corn-maze.ts`     | the seeded generator of the layout of the scene Corn maze, and its routes (ADR 0051)              |
 | `engine/strands.ts`       | the tubes that the flux has left, and the ground that their starvation marks, on a dump           |
 | `engine/light-dabs.ts`    | the light of Tokyo with light as one disc per lit cell, which the scene does not use (ADR 0042)   |
 | `engine/light-islands.ts` | the parts of the dark land of Tokyo with light, and the foods that light encloses (ADR 0050)      |

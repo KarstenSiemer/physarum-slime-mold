@@ -113,6 +113,8 @@ describe('presets', () => {
       'light',
       'maze',
       'foraging-maze',
+      'snail-maze',
+      'corn-maze',
       'coarsening',
       'electrotaxis',
       'voronoi',
@@ -287,6 +289,8 @@ describe('presets', () => {
       voronoi: [239, 239], // the dish of Jones and Adamatzky 2015, Fig. 6a and 10: 225 cells across (ADR 0048)
       'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
       'rival-networks': [384, 384],
+      'snail-maze': [384, 384], // this app's choice: the rings stay round on every screen (ADR 0051)
+      'corn-maze': [480, 320], // 12 × 8 rooms of 40 cells (ADR 0051)
       'tokyo-rivals': [512, 512], // the map of the Tokyo scene
       network: [200, 200], // Fig. 4, p. 135
       hexagons: [200, 200], // Fig. 5, p. 136

@@ -123,8 +123,8 @@
         tubes with little flow fade. In experiments it found the shortest way through a maze (Nakagaki 2000) and built a
         network like the Tokyo rail system (Tero 2010). Jones’ model has no flow. The extended model of this app can add
         one: with Flow in the tubes, a tube that carries flow between foods stays, and the others starve. The scenes
-        Maze, Tokyo rail network, Tokyo with light and Food ring use it. In Rival networks and Tokyo, two networks, two
-        strains each have a flow of their own.
+        Maze, Snail maze, Corn maze, Tokyo rail network, Tokyo with light and Food ring use it. In Rival networks and
+        Tokyo, two networks, two strains each have a flow of their own.
       </p>
       <p>
         It moves toward food by chemotaxis: it follows chemical gradients. It avoids bright light: Tero and colleagues
@@ -286,7 +286,8 @@
         Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
         figure in his paper, on the grid of that figure. Fogleman 2020 scenes are his saved settings, and the others
         were made for this app. These scenes use a grid shaped like your screen. The three Tokyo scenes, Food ring and
-        Rival networks have a square grid on every screen, so north stays up on the map of Tokyo.
+        Rival networks have a square grid on every screen, so north stays up on the map of Tokyo. Snail maze and Corn
+        maze have a grid of their own too, so their corridors are as wide on every screen.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>

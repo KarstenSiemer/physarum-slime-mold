@@ -213,6 +213,8 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
     // and the Voronoi diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048).
     const grows = [
       'foraging-maze',
+      'snail-maze',
+      'corn-maze',
       'coarsening',
       'voronoi',
       'tokyo',
@@ -341,7 +343,16 @@ describe('flow in the tubes (ADR 0029)', () => {
   });
 
   it('is on in the Maze, in the two Tokyo scenes and in the scenes made for it (ADR 0032)', () => {
-    const flowing = ['maze', 'tokyo', 'tokyo-light', 'food-ring', 'rival-networks', 'tokyo-rivals'];
+    const flowing = [
+      'maze',
+      'snail-maze',
+      'corn-maze',
+      'tokyo',
+      'tokyo-light',
+      'food-ring',
+      'rival-networks',
+      'tokyo-rivals',
+    ];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
   });

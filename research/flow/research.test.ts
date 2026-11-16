@@ -156,6 +156,25 @@ describe('the research code of ADR 0034', () => {
   });
 });
 
+describe('the layout of the scene Corn maze (ADR 0051)', () => {
+  it('is what the generator gives for its seed, the first seed that fits', async () => {
+    const { CORN, CORN_SEED, cornMaze, doorsOf, fits, routes } = await import('./engine/corn-maze.ts');
+    const { CORN_MAZE } = await import('../../src/model/presets.ts');
+    const maze = cornMaze(CORN_SEED);
+    expect([CORN_MAZE.cols, CORN_MAZE.rows]).toEqual([CORN.cols, CORN.rows]);
+    expect(CORN_MAZE.walls).toEqual(maze.walls);
+    for (let seed = 1; seed <= CORN_SEED; seed++) expect(fits(cornMaze(seed)), String(seed)).toBe(seed === CORN_SEED);
+    // The doors read back from the walls are the doors of the generator: six routes from the entrance to the exit.
+    const doors = doorsOf(CORN_MAZE.cols, CORN_MAZE.rows, CORN_MAZE.walls);
+    expect(doors.map((list) => [...list].sort((x, y) => x - y))).toEqual(
+      maze.open.map((list) => [...list].sort((x, y) => x - y)),
+    );
+    expect(routes(doors, 0, CORN_MAZE.cols * CORN_MAZE.rows - 1).map((r) => r.length - 1)).toEqual([
+      26, 28, 30, 34, 36, 40,
+    ]);
+  });
+});
+
 describe('the archive of the logs', () => {
   /** One number for all files of an archive: their names, their sizes and their bytes. */
   const digestOf = (files: Entry[]) => {
@@ -164,16 +183,16 @@ describe('the archive of the logs', () => {
     return digest.digest('hex');
   };
 
-  it('holds the 250 logs of the record, unchanged', () => {
+  it('holds the 256 logs of the record, unchanged', () => {
     const files = readArchive();
-    expect(files).toHaveLength(250);
+    expect(files).toHaveLength(256);
     // A new campaign changes the record: pack the archive again (`logs.ts pack`) and put the new number here.
-    expect(digestOf(files)).toBe('32e3d3d9ee6245b9c88591b7c9d2fb00e1255fff2a9657974fb6dcd462b356dd');
+    expect(digestOf(files)).toBe('b188c7535c01644c81abd332de2718a35cf23d12ec36bcb60932eb55aa172b48');
   });
 
   it('packs a folder so that unpacking gives the same files', () => {
     const again = join(record, 'again.tar.gz');
-    expect(packLogs(record, again)).toBe(250);
+    expect(packLogs(record, again)).toBe(256);
     expect(digestOf(readArchive(again))).toBe(digestOf(readArchive()));
   });
 
