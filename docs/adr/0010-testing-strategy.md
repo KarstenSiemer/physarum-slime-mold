@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-11-08
+- Extended by ADR 0049 (2026-11-16): a start builds the diffusion and outline passes at their first use, and the e2e
+  tests take a third of their time.
 
 ## Context
 

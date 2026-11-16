@@ -1036,6 +1036,84 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const expected = stepOrder === 'move-first' ? 0.9 * before + 5 * moved : 0.9 * (before + 5 * moved);
       expect(Math.abs(after - expected) / expected).toBeLessThan(1e-5);
     });
+
+    // ADR 0049: a new simulation builds no diffusion pass and no outline pass. A step builds the diffusion passes it
+    // runs, and a stroke the outline pass it takes, each once. Built at the start, the ten diffusion passes took most
+    // of a start of the app on SwiftShader. The simulation here gets pipelines of its own, also in a repeated run: no
+    // other test or run can have built them already.
+    let runs = 0;
+    it.runIf(kind === 'webgpu')(
+      'build the diffusion and outline passes at their first use, and each once',
+      async () => {
+        const { device } = (backend as WebGpuBackend).gpu;
+        const now = vi.spyOn(device, 'createComputePipeline');
+        const later = vi.spyOn(device, 'createComputePipelineAsync');
+        onTestFinished(() => {
+          now.mockRestore();
+          later.mockRestore();
+        });
+        /** The constants of each pipeline built so far of this entry point: of the plain passes, without VIEW or COVERED. */
+        const built = (entryPoint: string) =>
+          [...now.mock.calls, ...later.mock.calls]
+            .map(([d]) => d.compute)
+            .filter((c) => c.entryPoint === entryPoint && !c.constants?.VIEW && !c.constants?.COVERED)
+            .map((c) => {
+              const k = c.constants ?? {};
+              return Object.keys(k)
+                .sort()
+                .map((name) => `${name}=${String(k[name])}`)
+                .join(' ');
+            })
+            .sort();
+        const pass = (first: number, last: number, senseFirst: number) =>
+          `BLUR=1 FIRST=${first} LAST=${last} SENSE_FIRST=${senseFirst}`;
+        const settings = {
+          ...defaultSettings(),
+          layout: 'empty' as const,
+          diffusion: 3,
+          stepOrder: 'sense-first' as const,
+        };
+        device.pushErrorScope('validation');
+        const sim = await Simulation.create(
+          device,
+          settings,
+          32,
+          16,
+          1,
+          agentsWgsl,
+          `${diffuseWgsl}\n// Run ${++runs} of one test.\n`,
+        );
+        live.push(sim);
+        expect([built('diffuse'), built('outline')], 'at the start').toEqual([[], []]);
+
+        sim.run(2);
+        const three = [pass(0, 0, 1), pass(0, 1, 1), pass(1, 0, 1)];
+        expect(built('diffuse'), 'three passes sensing first').toEqual(three);
+        // Two passes run the first and the last of the three: none is built again.
+        sim.update({ ...settings, diffusion: 2 });
+        sim.run(2);
+        expect(built('diffuse'), 'two passes').toEqual(three);
+        sim.update({ ...settings, diffusion: 2, stepOrder: 'move-first' });
+        sim.run(2);
+        expect(built('diffuse'), 'two passes moving first').toEqual([...three, pass(0, 1, 0), pass(1, 0, 0)].sort());
+
+        // Food takes the outline pass without the tile of `env`, a wall the one with it.
+        const food: Stroke = { kind: 'food', from: [4, 4], to: [12, 6], radius: 2 };
+        sim.paint([food]);
+        sim.paint([{ ...food, from: [20, 8], to: [24, 8] }]);
+        const foods = built('outline');
+        expect(foods.length, 'food').toBeGreaterThan(0);
+        for (const c of foods) expect(c, 'food').toContain('TILED=0');
+        sim.paint([{ kind: 'wall', from: [16, 2], to: [16, 12], radius: 1 }]);
+        sim.run(1);
+        await sim.finish();
+        const all = built('outline');
+        expect(all.filter((c) => !c.includes('TILED=0')).length, 'a wall').toBeGreaterThan(0);
+        expect(new Set(all).size, 'each once').toBe(all.length);
+        expect((await device.popErrorScope())?.message).toBeUndefined();
+      },
+      120_000,
+    );
   });
 
   // Moving first (Jones 2010, p. 133): every agent moves and deposits, then every agent senses and turns, then the

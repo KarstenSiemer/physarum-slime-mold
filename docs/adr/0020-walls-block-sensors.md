@@ -2,6 +2,7 @@
 
 - Status: accepted (owner decision, 2026-11-10: "Wände blocken Sensoren")
 - Date: 2026-11-10
+- Extended by ADR 0049 (2026-11-16): the diffusion and outline passes are built at their first use too.
 
 ## Context
 
