@@ -46,14 +46,18 @@ changed it.
    people run.
 4. **More shards or a longer limit** (`.github/`, the owner's review). The start stays slow, and every new pass still
    adds to every test.
-5. **Balance the shards by the order of the files.** The next new test moves the split again, and the total time
-   stays.
+5. **Balance the shards by the order of the files.** It helps where option 1 does not: on GitHub the steps, not the
+   start, take the time of the tests that wait for steps. But the total time stays, and new tests move the split.
 
 ## Decision
 
-Option 1. `Kernels.diffuse()` and `Kernels.outline()` build a pass at its first use and keep it, as
+Options 1 and 5. `Kernels.diffuse()` and `Kernels.outline()` build a pass at its first use and keep it, as
 `Kernels.covered()` does. `Kernels.build()` builds the other 14 passes at the start, as before. WebGL2 is
-unchanged: its engine existed 0.8 s after the page load, with all its programs. The shards stay as they are.
+unchanged: its engine existed 0.8 s after the page load, with all its programs.
+
+With option 1 alone, shard 1 still took 25.3 min on GitHub (below). So `tests/e2e/flow.spec.ts` is now
+`tests/e2e/tubes.spec.ts`. It sorts after `scenes.spec.ts`, and four of its five tests, which wait for 30 steps of a
+scene with the flow, run in shard 2 beside the short tests of `ui.spec.ts`.
 
 The e2e test of the Electrode tool read the address once a drawing had more than one stroke. A drag records a dab and
 its segments, so that read could come before the anode, and it did in both runs of the test on `main` in the image
@@ -61,7 +65,8 @@ of CI. It now waits until the address holds both poles.
 
 ## Consequences
 
-The e2e tests in the image of CI, `main` (`83d5fc2`) against this branch, the first run of each test:
+The e2e tests in the image of CI, `main` (`83d5fc2`) against option 1 (`7a71a45`, before the new name of the file),
+the first run of each test:
 
 | Tests             | Count | `main` (min) | Here (min) |
 | ----------------- | ----: | -----------: | ---------: |
@@ -79,13 +84,16 @@ The e2e tests in the image of CI, `main` (`83d5fc2`) against this branch, the fi
 - The engine exists 1.8 to 3.1 s after the page load, against 36.6 to 38.1 s. The first 5 steps end about 6 s
   later: the first step builds its diffusion pass.
 - The median test took 13.2 s, against 44.2 s. "Keyboard shortcuts pause, step and switch tools" took 8.6 s.
-- On GitHub the shards of PR #91 took 0.76 and 0.60 of these times of `main`. With the same factors, shard 1 takes
-  about 10 min and shard 2 about 6 min, plus about 1.5 min to set up the job. GitHub steps slower than the image (the
-  file `flow.spec.ts` took 1.37 times as long), and the steps now take a larger share. So the shards can take up to
-  about 18 and 13 min. The first run of CI of this branch gives the number.
+- On GitHub, option 1 helped less (PR #94, run 43793768936). Shard 2 took 10.6 min (41 tests in 9.4 min; `ui.spec.ts`
+  8.7 min, against 17.0 on PR #91). Shard 1 took 25.3 min (42 tests in 23.9 min; `flow.spec.ts` 9.3 min, against
+  8.2). GitHub compiled the start faster than the image, so it saved less, and it ran the steps about three times
+  slower: the five tests of `flow.spec.ts` took 3.2 min in the image.
+- With the new name, the same tests split 11.2 and 11.5 min in the image. On GitHub the run of CI of this change gives the number.
 - The bytes stay: the digests of every scene after 500 steps on both backends equal those of `main` (48 of 48 runs, M3
   Pro, `research/flow/engine/digest.gpu.test.ts`).
 - A GPU test checks that a new simulation builds no diffusion and no outline pass, and that a step and a stroke build
   each pass they use once (`sim.gpu.test.ts`, "build the diffusion and outline passes at their first use").
 - To watch: a pass that every start builds adds to every e2e test. Build a pass at its first use unless every step
-  runs it. Shard 1 still takes longer than shard 2: the four tests of the flow wait for steps, and they sit in shard 1.
+  runs it. The split by count moves with every new test: a new file of tests that wait for steps, or many new tests
+  at the end of the order, can tip the shards again. More shards (`.github/`, the owner's review) would make that
+  harder.

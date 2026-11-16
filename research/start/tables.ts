@@ -54,7 +54,14 @@ export function shards(runs: Run[], total = 2): Run[][] {
   return parts;
 }
 
-const minutes = (runs: Run[]) => (runs.reduce((sum, r) => sum + r.ms, 0) / 60_000).toFixed(1);
+export const minutes = (runs: Run[]) => (runs.reduce((sum, r) => sum + r.ms, 0) / 60_000).toFixed(1);
+
+/** The same tests with a file of another name, in the order of Playwright: the files by their names. */
+export function renamed(runs: Run[], from: string, to: string): Run[] {
+  const moved = runs.map((r) => (r.file === from ? { ...r, file: to } : r));
+  const files = [...new Set(moved.map((r) => r.file))].sort();
+  return files.flatMap((f) => moved.filter((r) => r.file === f));
+}
 
 /** The rows of the table of the ADR: each file, each shard and all tests, with their count and minutes before and after. */
 export function table(main: Run[], branch: Run[]): string[] {
@@ -82,4 +89,6 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const here = (file: string) => fileURLToPath(new URL(file, import.meta.url));
   const [main = here('logs/e2e/main.json'), branch = here('logs/e2e/branch.json')] = process.argv.slice(2);
   console.log(table(runsOf(main), runsOf(branch)).join('\n'));
+  const split = shards(renamed(runsOf(branch), 'e2e/flow.spec.ts', 'e2e/tubes.spec.ts'));
+  console.log(`\nHere with tubes.spec.ts for flow.spec.ts: ${split.map(minutes).join(' and ')} min`);
 }

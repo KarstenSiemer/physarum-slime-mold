@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { readArchive, unpackLogs } from '../flow/logs.ts';
-import { runsOf, table } from './tables.ts';
+import { minutes, renamed, runsOf, shards, table } from './tables.ts';
 
 const here = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 const record = mkdtempSync(join(tmpdir(), 'research-start-logs-'));
@@ -45,6 +45,11 @@ describe('the record of the start of the app (ADR 0049)', () => {
     const made = dataRows(table(runsOf(log('e2e/main.json')), runsOf(log('e2e/branch.json'))));
     expect(made).toHaveLength(10);
     expect(dataRows(adr.split('\n'))).toEqual(made);
+    // The same tests with the new name of the file: the shards of Playwright then hold these minutes.
+    const split = shards(renamed(runsOf(log('e2e/branch.json')), 'e2e/flow.spec.ts', 'e2e/tubes.spec.ts'));
+    expect(split.map((s) => s.length)).toEqual([42, 41]);
+    const [one = [], two = []] = split;
+    expect(adr).toContain(`the same tests split ${minutes(one)} and ${minutes(two)} min in the image`);
   });
 
   it('holds the 30 pipelines of a start on main and the 14 of a start here', () => {

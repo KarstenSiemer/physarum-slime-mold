@@ -30,6 +30,12 @@ it, and keeps it. The engine exists after 2 to 3 seconds, and the first step wai
 pass. The 83 tests took 23 minutes instead of 67. The median test took 13 seconds instead of 44. Every scene keeps its
 bytes: the digests after 500 steps are those of `main`.
 
+**Step 6: the shards.** On GitHub the change saved less: there the start was faster and the steps slower than in the
+container. The second job took 11 minutes instead of 19, but the first one still took 25. CI shares the tests out by
+their count, in the order of the files, and the five tests of `flow.spec.ts`, which wait for steps, took 9 minutes of
+it. The file is now `tubes.spec.ts`: it sorts after `scenes.spec.ts`, and four of its tests run in the second job. In
+the container the two jobs then take 11.2 and 11.5 minutes.
+
 **What is not exact.** The times come from an M3 Pro, in a container of 4 cores, with the arm64 build of Chromium of
 the image. GitHub runs its x86-64 build on other CPUs: it started the app faster, and stepped slower. The first run of
 CI after the change gives its own times.
@@ -69,7 +75,7 @@ research/start/run.sh . e2e-branch npx playwright test --project e2e --reporter=
 node --import ./research/flow/register.mjs research/start/tables.ts research/start/out/e2e-main.json research/start/out/e2e-branch.json
 ```
 
-The last command prints the table of the ADR; without files it reads the logs of the record.
+The last command prints the table of the ADR and the split with the new name of the file; without files it reads the logs of the record.
 
 ### Step 2 to 4: the start
 
