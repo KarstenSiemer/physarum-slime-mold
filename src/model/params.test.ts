@@ -210,10 +210,11 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
 
   it('keeps growth off in every scene but the foraging scenes and the Coarsening network, and in a link without it', () => {
     // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031). The Coarsening network
-    // has the growth and shrinkage of its paper (ADR 0045).
+    // and the Voronoi diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048).
     const grows = [
       'foraging-maze',
       'coarsening',
+      'voronoi',
       'tokyo',
       'tokyo-light',
       'food-ring',
@@ -706,9 +707,12 @@ describe('the reach of the scent (ADR 0036)', () => {
 describe('the mean window (ADR 0046)', () => {
   const network = () => presetById('network')?.settings() ?? defaultSettings();
 
-  it('is 3 × 3 by default and in every scene but Electrotaxis, which has the 15 × 15 of its paper (ADR 0047)', () => {
+  it('is 3 × 3 by default and in every scene but Electrotaxis and the Voronoi diagram', () => {
     expect(defaultSettings().meanWindow).toBe(MEAN_WINDOW);
-    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(p.id === 'electrotaxis' ? 15 : 3);
+    // Electrotaxis has the 15 × 15 mean of its paper (Tsuda et al. 2011, p. 10; ADR 0047), the Voronoi diagram the
+    // 5 × 5 mean of its paper (Jones and Adamatzky 2015, p. 7; ADR 0048).
+    const wide: Record<string, number> = { electrotaxis: 15, voronoi: 5 };
+    for (const p of PRESETS) expect(p.settings().meanWindow, p.id).toBe(wide[p.id] ?? 3);
   });
 
   it('is 3 × 3 for a link from before the setting, and an odd side from 3 to 15 otherwise', () => {

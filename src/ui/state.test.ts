@@ -989,7 +989,9 @@ describe('the tools of the model', () => {
 // only if the Jones model runs it as it was made (ADR 0022, decision 24).
 describe('a link and the model', () => {
   it('of every scene, from before the model switch, opens with the scene unchanged', async () => {
-    for (const p of PRESETS) {
+    // The Voronoi diagram came after the switch (ADR 0048), with a repellent and a mean window that a link of before
+    // cannot hold: no link to it is older.
+    for (const p of PRESETS.filter((x) => x.id !== 'voronoi')) {
       const { app, openLink, sceneChanged } = await fresh();
       const { model: _, coveredFood: __, coveredFoodFactor: ___, trailSaturation: ____, ...now } = p.settings();
       // Before the switch the scenes of Jones weighed food with +1, also the repelling ones (jones() in presets.ts).

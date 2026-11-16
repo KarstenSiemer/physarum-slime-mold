@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { lightByte } from '../engine/brush';
 import { agentCount } from '../engine/sizing';
-import { constrain, defaultSettings, jonesFits, MAX_STRAINS, sanitize, type Settings } from './params';
+import { constrain, defaultSettings, jonesFits, MAX_STRAINS, meanWindowOf, sanitize, type Settings } from './params';
 import {
   BAUMGARTEN_PDF,
   ELECTROTAXIS,
@@ -19,6 +20,10 @@ import {
   stepOrderOf,
   TSUDA_PDF,
   usesRule,
+  VORONOI_DOT_RADIUS,
+  VORONOI_DOTS,
+  VORONOI_PDF,
+  VORONOI_RING,
   type Preset,
 } from './presets';
 
@@ -51,14 +56,18 @@ describe('presets', () => {
     for (const p of PRESETS) {
       const s = p.settings();
       const jones = fromJones.includes(p.id);
-      expect(p.source.startsWith('Jones'), p.id).toBe(jones);
-      // The Coarsening network is the Jones model of Baumgarten, Jones and Hauser 2015 (ADR 0045).
-      // So is Electrotaxis, the Jones model of Tsuda, Jones et al. 2011 (ADR 0047).
-      const jonesModel = jones || p.id === 'coarsening' || p.id === 'electrotaxis';
+      expect(p.source.startsWith('Jones 2010'), p.id).toBe(jones);
+      // The Coarsening network is the Jones model of Baumgarten, Jones and Hauser 2015 (ADR 0045), Electrotaxis that of
+      // Tsuda, Jones et al. 2011 (ADR 0047), and the Voronoi diagram that of Jones and Adamatzky 2015 (ADR 0048).
+      const jonesModel = jones || ['coarsening', 'electrotaxis', 'voronoi'].includes(p.id);
       expect(s.model, p.id).toBe(jonesModel ? 'jones' : 'extended');
       if (jonesModel) expect(jonesFits(s), p.id).toBe(true);
-      // No scene of Jones paints light: his papers have no light that releases a repellent.
+      // No scene of Jones 2010 paints a repellent: that paper has none. The Voronoi diagram paints the repellent
+      // sources of Jones and Adamatzky 2015 (ADR 0044, ADR 0048).
       if (jones) expect(p.env?.some((e) => e.kind === 'light') ?? false, p.id).toBe(false);
+      expect(p.env?.some((e) => e.kind === 'light') ?? false, p.id).toBe(
+        ['light', 'tokyo-light', 'voronoi'].includes(p.id),
+      );
       // Electrotaxis has the decay of its field, which the Jones model also gives the scent (ADR 0047).
       const decay = p.id === 'electrotaxis' ? 0.01 : 0.1;
       expect([s.coveredFood, s.trailSaturation, s.scentDecay], p.id).toEqual([false, 0, decay]);
@@ -106,6 +115,7 @@ describe('presets', () => {
       'foraging-maze',
       'coarsening',
       'electrotaxis',
+      'voronoi',
       'tokyo',
       'tokyo-light',
       'food-ring',
@@ -201,6 +211,69 @@ describe('presets', () => {
     expect(constrain(s)).toEqual(s);
   });
 
+  it('keep the model of Jones and Adamatzky 2015 (p. 6 to 8; ADR 0048)', () => {
+    const s = settingsOf('voronoi');
+    const a = s.strains[0];
+    expect(sourceKind(preset('voronoi'))).toBe('voronoi');
+    expect([s.model, s.collisions, s.boundary, s.stepOrder, s.diffusion]).toEqual([
+      'jones',
+      true,
+      'dish',
+      'sense-first',
+      1,
+    ]);
+    // SA = RA = 60°, SO 5, a step of 1 cell, 1 unit per move (p. 7); a 5 × 5 mean times 1 − 0.1 (Sec. 4.1, p. 7).
+    expect([a?.sensorAngle, a?.rotationAngle, a?.sensorOffset]).toEqual([60, 60, 5]);
+    expect([a?.stepSize, a?.deposit, a?.decay, a?.randomTurn, a?.attraction[0]]).toEqual([1, 1, 0.1, 0, 1]);
+    expect(meanWindowOf(s)).toBe(5);
+    // Growth and shrinkage every 3 steps: 1 to 10 agents in 9 × 9 cells divide, 0 to 24 in 5 × 5 survive (p. 7).
+    expect([s.growth, s.growthEvery, s.growthWindow, s.growthMin, s.growthMax]).toEqual([true, 3, 9, 1, 10]);
+    expect([s.shrinkEvery, s.shrinkWindow, s.shrinkMin, s.shrinkMax, s.shrink]).toEqual([3, 5, 0, 24, 0]);
+    // This app's choices, the paper is silent: about 10,000 agents (read from Fig. 10a), room for a child in every
+    // cell, and both strengths at the end of their range (research/voronoi/README.md).
+    expect(Math.round(s.density * 239 * 239)).toBe(10_000);
+    expect([s.capacity, s.foodStrength, s.lightStrength]).toEqual([1, 0.5, 0.5]);
+    // The repellent is weighed as the own trail, and the food too: Jones' one map (ADR 0044).
+    expect([a?.food, a?.light]).toEqual([1, 1]);
+    expect(constrain(s)).toEqual(s);
+  });
+
+  it('draw the ring and the seven dots of Fig. 6a of Jones and Adamatzky 2015 (ADR 0048)', () => {
+    const env = preset('voronoi').env ?? [];
+    const ring = env.filter((e) => e.kind === 'food');
+    const dots = env.filter((e) => e.kind === 'light');
+    expect([ring.length, dots.length, env.length]).toEqual([VORONOI_RING.segments, 7, 79]);
+    const cells = (v: number) => v * 239;
+    // The ring: a closed chain of strokes, each corner 111 cells from the centre, 3 cells wide, inside the dish of
+    // 0.945 × 239 / 2 = 112.9 cells.
+    ring.forEach((e, i) => {
+      expect(Math.hypot(cells(e.at[0]), cells(e.at[1])), String(i)).toBeCloseTo(111, 1);
+      expect(e.to, String(i)).toEqual(ring[(i + 1) % ring.length]?.at);
+      expect(cells(e.r) * 2).toBeCloseTo(3, 1);
+    });
+    expect(111 + 1.5).toBeLessThan((0.945 * 239) / 2);
+    // The dots: on the centres of their cells (the centre of the lattice is the centre of cell 119), in the places
+    // of the figure, with the radius whose smooth edge releases as much as the paper's 3 × 3 cells.
+    dots.forEach((e, i) => {
+      const [x, y] = VORONOI_DOTS[i] ?? [NaN, NaN];
+      expect(cells(e.at[0])).toBeCloseTo(x, 2);
+      expect(cells(e.at[1])).toBeCloseTo(y, 2);
+      expect(cells(e.r)).toBeCloseTo(VORONOI_DOT_RADIUS, 2);
+      expect(e.to).toBeUndefined();
+    });
+    let bytes = 0;
+    for (let y = -4; y <= 4; y++)
+      for (let x = -4; x <= 4; x++) bytes += lightByte(Math.hypot(x, y), VORONOI_DOT_RADIUS);
+    expect(bytes).toBe(2243);
+    expect(bytes / (9 * 255)).toBeCloseTo(0.977, 3);
+    // Six dots around one: each of the six lies 40 to 48 cells from the middle one.
+    const [mx, my] = VORONOI_DOTS[3] ?? [0, 0];
+    for (const [x, y] of VORONOI_DOTS.filter((_, i) => i !== 3)) {
+      expect(Math.hypot(x - mx, y - my)).toBeGreaterThan(40);
+      expect(Math.hypot(x - mx, y - my)).toBeLessThan(48);
+    }
+  });
+
   // Owner decision 2026-11-11 (ADR 0024 decision 3, ADR 0026): a scene of Jones' papers runs on the lattice of its
   // figure, the app's scenes on a grid shaped like the screen. The lattices are in the captions of Jones 2010. The map
   // of Tokyo runs on a square lattice: a grid shaped like a tall screen would turn it, and north stays up (ADR 0024
@@ -211,6 +284,7 @@ describe('presets', () => {
       'tokyo-light': [512, 512], // the map of the Tokyo scene
       coarsening: [400, 400], // Baumgarten, Jones and Hauser 2015, p. 1204 (ADR 0045)
       electrotaxis: [250, 240], // this app's choice: the paper gives no lattice (ADR 0047)
+      voronoi: [239, 239], // the dish of Jones and Adamatzky 2015, Fig. 6a and 10: 225 cells across (ADR 0048)
       'food-ring': [384, 384], // this app's choice: the same dish on every screen (ADR 0032)
       'rival-networks': [384, 384],
       'tokyo-rivals': [512, 512], // the map of the Tokyo scene
@@ -465,9 +539,19 @@ describe('the link to the figure of the paper (ADR 0037)', () => {
     expect(sourceKind(preset('electrotaxis'))).toBe('tsuda');
   });
 
+  it('opens the PDF of Jones and Adamatzky 2015 at arXiv at the page of Fig. 10 (ADR 0048)', () => {
+    // The PDF prints its page numbers: Fig. 10 is on page 10, the tenth page of the file.
+    expect(preset('voronoi').figure).toEqual({
+      href: `${VORONOI_PDF}#page=10`,
+      label: 'Fig. 10',
+      note: 'page 10 of the free PDF',
+    });
+    expect(VORONOI_PDF).toBe('https://arxiv.org/pdf/1503.06973v1');
+  });
+
   it('is absent where no figure shows the result of the scene', () => {
     const linked = PRESETS.filter((p) => p.figure).map((p) => p.id);
-    expect(linked).toHaveLength(13);
+    expect(linked).toHaveLength(14);
     for (const p of PRESETS)
       if (sourceKind(p) === 'app' || sourceKind(p) === 'fogleman' || p.source.startsWith('After'))
         expect(p.figure, p.id).toBeUndefined();

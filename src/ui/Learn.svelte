@@ -205,14 +205,15 @@
       </p>
       <p>
         In the Jones model, one strain follows its own trail, or flees it as in Jones’ Turing patterns. One agent fits
-        in a cell, and one 3 × 3 average spreads the trail in each step. Food goes into the trail map, so its scent
-        spreads and fades with the trail. A repellent source, such as salt or a current source, goes into the same map
-        with a value below 0, and agents turn away from it (Jones and Adamatzky 2015). The Electrode tool paints the two
-        poles of an electric current as Tsuda, Jones and colleagues model it (2011): a cathode puts 255 into the map in
-        every step and an anode takes 255 away, so agents move to the cathode, as the real slime mold grows toward it.
-        Walls mark where agents cannot go, and the trail spreads through them as through any cell. Agents can die off,
-        as in Shrinking plasmodium. In later papers Jones lets food release almost no scent while agents cover it: the
-        switch Covered food releases less.
+        in a cell, and one 3 × 3 average spreads the trail in each step; the setting Mean window widens it to the 5 × 5
+        or 15 × 15 of Jones’ later papers, as in the scenes Voronoi diagram and Electrotaxis. Food goes into the trail
+        map, so its scent spreads and fades with the trail. A repellent source, such as salt or a current source, goes
+        into the same map with a value below 0, and agents turn away from it (Jones and Adamatzky 2015). The Electrode
+        tool paints the two poles of an electric current as Tsuda, Jones and colleagues model it (2011): a cathode puts
+        255 into the map in every step and an anode takes 255 away, so agents move to the cathode, as the real slime
+        mold grows toward it. Walls mark where agents cannot go, and the trail spreads through them as through any cell.
+        Agents can die off, as in Shrinking plasmodium. In later papers Jones lets food release almost no scent while
+        agents cover it: the switch Covered food releases less.
       </p>
       <p>
         From 2011 on, Jones also lets the population grow and shrink (Nat. Comput. 10: 1345). Every few steps, an agent
@@ -351,6 +352,11 @@
         The scene Coarsening network: W. Baumgarten, J. Jones and M. J. B. Hauser, “Network coarsening dynamics in a
         plasmodial slime mould: modelling and experiments”, <em>Acta Physica Polonica B</em> 46(6): 1201–1218, 2015,
         <a href="https://doi.org/10.5506/APhysPolB.46.1201" rel="noreferrer">doi:10.5506/APhysPolB.46.1201</a>.
+      </p>
+      <p>
+        The scene Voronoi diagram: J. Jones and A. Adamatzky, “Slime mould inspired generalised Voronoi diagrams with
+        repulsive fields”, 2015,
+        <a href="https://arxiv.org/abs/1503.06973" rel="noreferrer">arXiv:1503.06973</a>.
       </p>
       <p>
         GPU approach and visual inspiration: Sage Jenson,

@@ -6,6 +6,7 @@
   the same PDF in the Wayback Machine; the repository loses the path after its bot check.
 - Extended by ADR 0045 (2026-11-15): the scene Coarsening network.
 - Extended by ADR 0047 (2026-11-15): the scene Electrotaxis.
+- Extended by ADR 0048 (2026-11-15): the scene Voronoi diagram.
 
 ## Context
 

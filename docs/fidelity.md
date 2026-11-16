@@ -56,6 +56,7 @@ page; **none** the docs hold no source.
 | 19  | Pattern classes after the life conditions        | Not measured                            | none                                  |
 | 20  | Two plasmodia that do not fuse stay two bodies   | Partly                                  | Rival networks, Tokyo, two networks   |
 | 21  | Growth toward the cathode of a current           | Partly: the direction only              | Electrotaxis                          |
+| 22  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
 figures (ADR 0027, Measurements: stripes 15.7 cells against 16.2, 19.7 spots against 20). Several strains with a table
@@ -353,6 +354,26 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   neither. The split of the front at more current sources (Fig. 12 of the model) is not measured. The docs hold no
   number of the organism for a time or a speed. In the extended model the tool is this app's reading, measured
   against nothing.
+
+### 22. A network around repellents draws their Voronoi diagram
+
+- **Organism** [V]: a plasmodium that fills a round arena, with repellents put onto it and attractants around the
+  border, adapts its network so that it avoids the repellents and stays joined to the border. The network
+  approximates the Voronoi diagram of the repellents (Jones and Adamatzky 2015, arXiv:1503.06973, p. 3, Sec. 2.1 and
+  Fig. 2, from Shirakawa et al. 2009 and Shirakawa and Gunji 2010, which nobody of this project read). Salt grains
+  repel (p. 2, Fig. 1). The paper gives no number for the fit.
+- **Model**: the repellent source of the Jones model (row 13, ADR 0044), the mean over 5 × 5 cells (ADR 0046) and
+  growth and shrinkage (ADR 0025), with the values of the paper (p. 7). The scene Voronoi diagram has seven repellent
+  dots and a ring of food at the rim, read from the paper's Fig. 6a and 10
+  ([ADR 0048](adr/0048-the-scene-voronoi-diagram.md)).
+- **Measured** (ADR 0048, `research/voronoi/README.md`; step 10,000, 30 seeds on each backend): 0.87 of the network's
+  cells lie within 3 cells of an edge of the Voronoi diagram of the dots (WebGL2 0.84; cells at random 0.12), and the
+  network covers 0.91 of the length of the edges (0.88). It is the whole diagram, 12 edges and seven cells, in 26 of
+  30 runs (21 of 30). With a weaker repellent the network is a hybrid, as in the paper: 6 to 9 of the 12 edges at
+  strengths of 0.025 to 0.15. A path between two foods stands 20.8, 34.0 and 50.2 cells off its line with one, two
+  and three repellents beside it; the paper's Fig. 8, read from its pixels, has 16.5, 32.5 and 51.
+- **Limits**: the comparison is with the geometry and with the figures of the paper's model, not with the organism.
+  The paper gives no lattice and no strengths; they are read from its figures or chosen (ADR 0048).
 
 ## What the model does not do
 
