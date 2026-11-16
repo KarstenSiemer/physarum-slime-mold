@@ -70,6 +70,10 @@ One campaign: seeds 1 to 10 on WebGPU and seeds 1 and 2 on WebGL2, 30,000 steps,
 2026-11-16, 45 to 62 s per run). `research/flow/engine/measure-mazes.ts` gives the numbers; the record is
 `logs/engine/mazes/` in the archive of `research/flow/`.
 
+The campaign ran on `main` at `9dad09b`, before the rule Light stops growth (ADR 0050) came into `main`. Seed 1 of
+each maze ran again on WebGPU with that rule in the code (`main` at `7f8ef64`): every line of both runs equals the
+record. The mazes hold no light.
+
 The measures are those of the Maze (`research/flow/prototype/maze.ts`). A tube is the cells with a trail above twice
 the mean trail of the open cells. A dead end is every cell from which the way from food to food is 120 cells or more
 longer than the shortest route. "The tail" is the 20 dumps of the last 10,000 steps.
@@ -149,7 +153,7 @@ does not compare numbers with it (`docs/fidelity.md`, row 5).
 - A scene with growth and the flow does not reach the clean end of the Maze, where the dead ends fall below 1 % of
   the route's trail. Its dead ends thin out and stay at 10 to 40 %. The texts of the two scenes say so.
 - The two scenes add no e2e test that waits for steps (ADR 0049). The unit tests hold their settings and lattices.
-- The record of the runs is 6 files in `logs/engine/mazes/`; the archive of `research/flow/` now holds 247 logs.
+- The record of the runs is 6 files in `logs/engine/mazes/`; the archive of `research/flow/` now holds 256 logs.
 
 ## Open points
 

@@ -5520,6 +5520,60 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect((await census(a, boundary)).most).toBe(1);
     });
 
+    // Light stops growth (ADR 0050): one growth step against the CPU copy, with light on the upper half of the grid:
+    // full light left of x = 20, and from there a light byte that rises with x. The copy without the rule gives the
+    // births that the rule stops. At the strength 1 no child is born on a cell with full light.
+    it.each([0.6, 1])(
+      'stop births onto lit cells as the CPU copy does (Light stops growth %s)',
+      async (lightGrowth) => {
+        const [w, h] = [64, 48];
+        const n = w * h;
+        const s: Settings = { ...defaultSettings(), ...GROWTH, strains: two, density: 1, lightGrowth };
+        const s0 = { ...s, lightGrowth: 0 };
+        const plain = { ...s, growth: false, collisions: false };
+        const [a, b] = [await make(plain, w, h, n), await make(plain, w, h, n)];
+        let r = 5;
+        const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+        for (const sim of [a, b]) {
+          const bytes = await sim.readEnv();
+          for (let y = 0; y < 24; y++) for (let x = 0; x < w; x++) bytes[(y * w + x) * 4 + 2] = x < 20 ? 255 : x * 3;
+          sim.writeEnv(bytes);
+          r = 5;
+          seedAgents(sim, s, rnd, bytes);
+          sim.update({ ...s, growth: sim === a });
+        }
+        const env = await a.readEnv();
+        a.run(1);
+        b.run(1);
+        const moved = await b.readAgents();
+        const input = {
+          kind: kind as 'webgpu' | 'webgl2',
+          w,
+          h,
+          env,
+          step: 0,
+          agents: moved,
+          counts: await b.readCounts(),
+        };
+        const got = await a.readAgents();
+        expect(got).toEqual(growthStep({ ...input, settings: s }).agents);
+        // The children on cells with a light byte of at least `least`.
+        const children = (agents: readonly AgentState[], least: number) =>
+          agents.filter((g, id) => {
+            const m = moved[id];
+            const born = !!(g.bits & 4) && (!m || !(m.bits & 4) || m.x !== g.x || m.y !== g.y);
+            return born && (env[(Math.floor(g.y) * w + Math.floor(g.x)) * 4 + 2] ?? 0) >= least;
+          }).length;
+        const free = growthStep({ ...input, settings: s0 }).agents;
+        expect(children(free, 255)).toBeGreaterThan(5);
+        expect(children(free, 1) - children(got, 1)).toBeGreaterThan(5);
+        if (lightGrowth === 1) expect(children(got, 255)).toBe(0);
+        else expect(children(got, 255)).toBeGreaterThan(0);
+        // Light stops no birth in the dark: there the rule only frees cells that a stopped parent would have claimed.
+        expect(children(got, 0) - children(got, 1)).toBeGreaterThanOrEqual(children(free, 0) - children(free, 1));
+      },
+    );
+
     // Review of 2026-11-11: one growth step from fresh buffers missed what a step leaves for the next, such as claims
     // that were not cleared. Four growth steps in a row against the CPU copy, with more births than dead agents: both
     // strains run out, one of them has no dead agent at all, and the buffer of 700 agents is no power of 4. After each

@@ -50,6 +50,7 @@ struct FlowRule {
 const GROW = 4u; // the cell that a parent divides into
 const BIRTH = 5u; // the position of a child in its cell, and its heading
 const PLACE_ORDER = 6u; // the order of the births (place())
+const SHADE = 10u; // whether light stops a birth (lightStops()); 7 to 9: init.wgsl and agents.wgsl
 
 fn index(gid: vec3u, groups: vec3u) -> u32 { return gid.x + gid.y * groups.x * 256u; }
 
@@ -123,10 +124,21 @@ fn aroundIndex(o: vec2i) -> u32 {
   return j - select(0u, 1u, j > 4u);
 }
 
+// Light stops growth (ADR 0050): a birth onto cell m fails with the chance G_L · λ(m), λ the light byte / 255 and G_L
+// the setting Light stops growth (P.electrode.y). The draw has a stream of its own, and no draw is made while the
+// chance is 0: a run without the rule, or without light, keeps its bits.
+fn lightStops(a: Agent, m: i32) -> bool {
+  let chance = P.electrode.y * f32((env[m] >> 16u) & 0xffu);
+  if (chance == 0.0) { return false; }
+  var rng = rngSeed(agentId(a), SHADE);
+  return rand(&rng) * 255.0 < chance;
+}
+
 // The cell that a living agent in cell c divides into in this step, or −1. It divides on a growth test step if it
 // moved in this step and its growth count lies in [Gmin, Gmax], into a random cell of its 3 × 3 neighbourhood that
 // is habitable and empty after the moves (Jones 2011, Sec. 5.1: "if there is an empty location in the immediate
-// neighbourhood"). A pure function of the agent, the counts and the occupancy, so `test` and `win` agree.
+// neighbourhood"). Light stops the birth onto a lit cell with a chance (lightStops()): the agent then does not divide
+// in this step, and it picks no other cell. A pure function of the agent, the counts and the occupancy, so `test` and `win` agree.
 // A diagonal neighbour counts only if the two cells beside the corner between it and cell c are not both walls
 // (ADR 0025, amendment of 2026-11-13): then a move from cell c can reach it through the free one of them, and with
 // two walls no move can (clearPath and CORNER in agents.wgsl). A cell outside a closed arena is no wall there, as for
@@ -164,7 +176,10 @@ fn divideInto(a: Agent, c: i32) -> i32 {
   var pick = min(u32(rand(&rng) * f32(free)), free - 1u);
   for (var k = 0u; k < 8u; k++) {
     if ((open & (1u << k)) != 0u) {
-      if (pick == 0u) { return cellAt(q + around(k)); }
+      if (pick == 0u) {
+        let m = cellAt(q + around(k));
+        return select(m, -1, lightStops(a, m));
+      }
       pick--;
     }
   }

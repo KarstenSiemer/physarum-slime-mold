@@ -162,8 +162,18 @@ without light holds 9.1 % there. Its length, its directness and its fault tolera
 by more than two sets of seeds differ. No light strength from 0.02 to 0.5 kept the network off the
 lit ground better. The scene made the list of a scene's shapes longer than one byte counts, so a
 link now writes that number in a new way, and old links still open.
+**Light stops growth** ([ADR 0050](../../docs/adr/0050-light-stops-growth.md), part 15). The
+colony grew over the lit ground because it spreads by births, and a birth did not read light. A
+new rule of the extended model lets a birth onto a lit cell fail with a chance: the setting Light
+stops growth times the brightness of the cell. The scene Tokyo with light runs it at 1. Then the
+young network holds 3.3 % of its cells on lit ground in place of 15.9 %, and the old network 1.3 %
+in place of 4.6 %. Half a chance changes little: growth is far faster than the front needs. One
+food, Ito, lay on dark land that the lit mountains and the coast enclosed, and the colony no
+longer joined it. So two lit cells on the coast from Odawara to Ito are dark now, and one seed on
+that map joins all 36 foods. The default of the setting is 1. The rule of Jones for light, which TODO.md proposed first, would not have helped:
+it acts only at the edge of a lit area, as the repellent does.
 **Two mazes with growth** ([ADR 0051](../../docs/adr/0051-the-scenes-snail-maze-and-corn-maze.md),
-part 15). The Maze has one route, so it cannot show a choice. Two new scenes start as a small
+part 16). The Maze has one route, so it cannot show a choice. Two new scenes start as a small
 colony on one food, with growth and the flow. The Snail maze is a spiral with one route and eight
 blind branches. The Corn maze has rooms with loops: six routes join its two foods, and the longest
 is 1.47 times as long as the shortest. Ten seeds ran for each. In the Corn maze the shortest route
@@ -1473,7 +1483,51 @@ with the strengths 0.02 and 0.2, ran on 2026-11-15 before `main` was merged (the
 part 11 (`g17-tk-i1.4-s1`, equal in every number), and seeds 1 and 2 of the scene with light gave
 the same lines before and after the merge.
 
-### 15. Do the mazes with growth keep one tube on the shortest route? [ADR 0051]
+### 15. Does the colony keep off the light when light stops growth? [ADR 0050]
+
+The scene Tokyo with light with the setting Light stops growth (`lightGrowth`) at 1, 0.98, 0.9 and
+0.5, on WebGPU to step 48,000, on the first map of the scene with 53 lit cells. The default is 1 now; a run of the time before the rule is the
+record of part 14. For G = 1 (10 seeds), and with seeds 1 to 3 for the three other values:
+
+```bash
+G=1; for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=tokyo-light VITE_PATCH="{\"lightGrowth\":$G}" VITE_SEED=$seed VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g50-tl-G$G-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && LIT=tokyo-light node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g50-tl-G$G-s$seed 1.5 99999 >> research/flow/out/tokyo-light-growth$G.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo-end research/flow/out/tokyo-light-growth1.txt
+```
+
+| G    | Seeds | On lit ground, step 2,000 | On lit ground, from 16,000 | All 36 foods joined, from 4,000 |
+| ---- | ----- | ------------------------- | -------------------------- | ------------------------------- |
+| 0    | 10    | 15.9 % (13 to 18)         | 4.6 % (1.3 to 8.7)         | 73 of 80 samples                |
+| 0.5  | 3     | 13.0 % (12.6 to 13.6)     | 3.4 % (1.3 to 8.7)         | 12 of 24                        |
+| 0.9  | 3     | 7.4 % (5.3 to 8.8)        | 1.9 % (1.2 to 4.7)         | 2 of 24                         |
+| 0.98 | 3     | 5.5 % (4.8 to 6.2)        | 1.6 % (1.0 to 2.8)         | 2 of 24                         |
+| 1    | 10    | 3.3 % (2.7 to 4.4)        | 1.3 % (0.9 to 1.9)         | 8 of 80                         |
+
+With G = 1 from step 16,000 on (50 samples): TL 1.73 ± 0.10, MD 0.83, FT 0.86, 53.2 links, 3,908
+agents. The food that stayed unjoined on that map was Ito. So the cells [0, 16] and [0, 17] of the
+grid of elevations are dark now (51 lit cells). This command prints the parts of the dark land and
+the foods that do not lie in the largest part (1 second):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/light-islands.ts
+```
+
+It must print `1 dark parts of the land, cells: 54496` and no food. On the first map it printed two
+parts, of 53,458 and 480 cells, with Ito in the small one. On the map of 51 cells only seed 1 ran
+(the command above with the name `g50b-tl-G1-s1`): all 36 foods joined in 8 of the 9 samples from
+step 2,000 on, and 0.8 to 1.4 % of the network on lit ground from step 4,000 on. Ten seeds, WebGL2
+and the digests with the default 1 are open (`TODO.md`). The records are in `logs/engine/light-growth/`:
+
+| Record                           | Runs                                                          |
+| -------------------------------- | ------------------------------------------------------------- |
+| `tokyo-light-growth<G>.txt`      | the lines of `measure-tokyo.ts` for each G                    |
+| `tokyo-light-growth1-webgl2.txt` | the scene on WebGL2, seeds 1 and 2, to step 16,000            |
+| `digest-branch.jsonl`, `-main`   | the digests of every scene after 500 steps, branch and `main` |
+| `mutations.txt`                  | the wrong rules LG1 to LG11 and the tests that fail with them |
+
+### 16. Do the mazes with growth keep one tube on the shortest route? [ADR 0051]
 
 The layout of the Corn maze, as text, with its routes and the list of walls that the scene holds
 (`CORN_MAZE` in `src/model/presets.ts`); without a seed the script takes the first seed that fits:
@@ -1510,7 +1564,7 @@ The dead ends thin out but do not empty, because growth goes on (ADR 0051 has th
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 247 files, 3.9 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 256 files, 4.0 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1538,7 +1592,8 @@ asks for the new digest.
 | `logs/engine/cut-cost/`                              | the time of a step before and after the rule of ADR 0039, with the flag of ADR 0038 clear and set (check of 2026-11-15)                                                                                                         | 2026-11-15, M3 Pro, a free GPU                        |
 | `logs/engine/respawn-wound/`                         | the runs of ADR 0041: the digests of every scene on the branch and on `main`, and its wrong rules N1 to N10                                                                                                                     | 2026-11-15, M3 Pro, `main` at `b93584e`               |
 | `logs/engine/light/`                                 | the runs of part 14 (ADR 0042): the scene Tokyo with light and the runs beside it, the digests of every scene on the branch and on `main`, and the SRTM samples                                                                 |
-| `logs/engine/mazes/`                                 | the runs of part 15 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
+| `logs/engine/light-growth/`                          | the runs of part 15 (ADR 0050): Tokyo with light with Light stops growth at 1, 0.98, 0.9 and 0.5, the digests of every scene, and the wrong rules LG1 to LG11                                                                   | 2026-11-16, M3 Pro                                    |
+| `logs/engine/mazes/`                                 | the runs of part 16 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1591,6 +1646,7 @@ Notes on the record:
 | `engine/corn-maze.ts`     | the seeded generator of the layout of the scene Corn maze, and its routes (ADR 0051)              |
 | `engine/strands.ts`       | the tubes that the flux has left, and the ground that their starvation marks, on a dump           |
 | `engine/light-dabs.ts`    | the light of Tokyo with light as one disc per lit cell, which the scene does not use (ADR 0042)   |
+| `engine/light-islands.ts` | the parts of the dark land of Tokyo with light, and the foods that light encloses (ADR 0050)      |
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
