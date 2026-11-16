@@ -44,6 +44,13 @@ struct FlowRule {
 }
 @group(0) @binding(15) var flowMemory: texture_2d_array<f32>; // a layer per strain: x flow memory, of the step before
 @group(0) @binding(16) var<uniform> F: FlowRule;
+
+// Whether cell q is starved for strain s: its flow memory lies below `half`. No agent divides on such a cell (ADR
+// 0029, decision 9), and no child is born onto one (ADR 0053).
+fn starved(s: u32, q: vec2i) -> bool {
+  let memory = textureLoad(flowMemory, q, s, 0).x;
+  return memory * memory < F.e.y;
+}
 //#endif
 
 // Random streams of their own (STEER 0 to BLOCK 3 in agents.wgsl), so growth never shifts the other draws.
@@ -149,8 +156,7 @@ fn divideInto(a: Agent, c: i32) -> i32 {
   if (!growthTest() || counts[c][s] == 0u || n < P.growth.z || n > P.growth.w) { return -1; }
   let q = cellCoord(u32(c));
 //#if FLOW
-  let memory = textureLoad(flowMemory, q, s, 0).x;
-  if (memory * memory < F.e.y) { return -1; }
+  if (starved(s, q)) { return -1; }
 //#endif
   // Bit k of `open`: neighbour k is habitable and empty. Bit k of `walls`: neighbour k is a wall.
   var open = 0u;
@@ -161,6 +167,10 @@ fn divideInto(a: Agent, c: i32) -> i32 {
     if (isWall(env[m])) {
       walls |= 1u << k;
     } else if (occ[m] == 0u) {
+//#if FLOW
+      // No child is born onto starved ground (ADR 0053): such a neighbour is not open.
+      if (starved(s, cellCoord(u32(m)))) { continue; }
+//#endif
       open |= 1u << k;
     }
   }

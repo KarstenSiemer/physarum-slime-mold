@@ -80,6 +80,13 @@ vec4 flowMemoryOf(uint s, ivec2 q) {
   if (s == 3u) return texelFetch(flowMemory3, q, 0);
   return texelFetch(flowMemory, q, 0);
 }
+
+// Whether cell q is starved for strain s (starved in growth.wgsl): its flow memory lies below `half`. No agent divides
+// on such a cell (ADR 0029, decision 9), and no child is born onto one (ADR 0053).
+bool starved(uint s, ivec2 q) {
+  float memory = flowMemoryOf(s, q).x;
+  return memory * memory < F.e.y;
+}
 #endif
 
 // Light stops growth (ADR 0050; lightStops in growth.wgsl): a birth of agent i onto cell m fails with the chance
@@ -100,8 +107,7 @@ int target(uint bits, int c, uint i) {
   if (!growthTest() || !moved || n < float(P.growth.z) || n > float(P.growth.w)) return -1;
   ivec2 q = cellCoord(c);
 #if FLOW
-  float memory = flowMemoryOf(bits & 3u, q).x;
-  if (memory * memory < F.e.y) return -1;
+  if (starved(bits & 3u, q)) return -1;
 #endif
   // Bit k of `open`: neighbour k is habitable and empty. Bit k of `walls`: neighbour k is a wall.
   uint open = 0u;
@@ -112,6 +118,10 @@ int target(uint bits, int c, uint i) {
     if (isWall(texelFetch(env, cellCoord(m), 0))) {
       walls |= 1u << k;
     } else if (texelFetch(occ, cellCoord(m), 0).r < 0.5) {
+#if FLOW
+      // No child is born onto starved ground (ADR 0053): such a neighbour is not open.
+      if (starved(bits & 3u, cellCoord(m))) continue;
+#endif
       open |= 1u << k;
     }
   }

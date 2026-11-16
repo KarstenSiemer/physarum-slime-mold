@@ -1,8 +1,9 @@
 // The order of the births (place() in growth.wgsl and growth.glsl; the CPU copy equals both, bit for bit, by the
 // CPU-copy test in sim.gpu.test.ts). ADR 0025, decision 9. And the cell of a child at the corner of a wall (ADR 0025,
-// decision 35).
+// decision 35), and on starved ground (ADR 0053).
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { FLOW } from './flow';
 import { growthStep, place } from './growth-reference';
 
 describe('place(): the order of the births', () => {
@@ -114,5 +115,96 @@ describe('growthStep(): the child at the corner of a wall', () => {
 
   it('goes to its only free cell without walls', () => {
     expect(child([], [...neighbours, [6, 5], [5, 6]])).toEqual([[6, 6]]);
+  });
+});
+
+// ADR 0053: with the flow, no child is born onto starved ground, and no agent divides on a starved cell (ADR 0029,
+// decision 9). One parent in cell (5, 5) that moved in this step, alone on fresh ground but for the cells named. The
+// flow.gpu.test.ts test of the CPU copy holds both backends to this copy.
+describe('growthStep(): a child and starved ground', () => {
+  const [w, h] = [16, 16];
+  const s: Settings = {
+    ...defaultSettings(),
+    layout: 'empty',
+    boundary: 'box',
+    model: 'extended',
+    flow: true,
+    strains: [defaultStrain(0), defaultStrain(1)],
+    collisions: true,
+    growth: true,
+    growthEvery: 1,
+    growthWindow: 3,
+    growthMin: 1,
+    growthMax: 9,
+    shrinkEvery: 0,
+  };
+  const around: [number, number][] = [-1, 0, 1].flatMap((dy) =>
+    [-1, 0, 1].filter((dx) => dx !== 0 || dy !== 0).map((dx): [number, number] => [5 + dx, 5 + dy]),
+  );
+
+  /**
+   * The cells of the children of one parent of strain `strain` in (5, 5), over 40 seeds. `ground` gives the flow
+   * memory of the cells of the first strain; the ground of the second strain is `other`.
+   */
+  function children(
+    ground: (x: number, y: number) => number,
+    patch: { strain?: number; other?: number; starvedCells?: 'both' | 'parent' | 'child'; flow?: boolean } = {},
+  ) {
+    const strain = patch.strain ?? 0;
+    const agents = [
+      { x: 5.5, y: 5.5, heading: 0, bits: strain | 4 },
+      { x: 0.5, y: 0.5, heading: 0, bits: 0 },
+      { x: 0.5, y: 0.5, heading: 0, bits: 1 },
+    ];
+    const counts = new Float32Array(w * h * 4);
+    counts[(5 * w + 5) * 4 + strain] = 1; // the parent moved into its cell in this step
+    const first = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) first[c * 4] = ground(c % w, Math.floor(c / w));
+    const second = new Float32Array(w * h * 4).fill(patch.other ?? FLOW.fresh);
+    const memory = patch.flow === false ? undefined : [first, second];
+    const cells = new Set<string>();
+    for (let seed = 1; seed <= 40; seed++) {
+      const input = { kind: 'webgpu' as const, settings: { ...s, seed }, w, h, env: new Uint8Array(w * h * 4) };
+      const rule = patch.starvedCells === undefined ? {} : { starvedCells: patch.starvedCells };
+      const out = growthStep({ ...input, step: 0, agents, counts, ...(memory ? { memory } : {}), ...rule }).agents;
+      for (const [id, a] of out.entries())
+        if (a.bits & 4 && !((agents[id]?.bits ?? 0) & 4)) cells.add(`${Math.floor(a.x)},${Math.floor(a.y)}`);
+    }
+    return [...cells].sort();
+  }
+  const all = around.map(([x, y]) => `${x},${y}`).sort();
+  const beside = (x: number, y: number) => Math.max(Math.abs(x - 5), Math.abs(y - 5)) === 1;
+
+  it('is born on any free neighbour on fresh ground, and without the flow on any ground', () => {
+    expect(children(() => FLOW.fresh)).toEqual(all);
+    expect(children(() => FLOW.floor, { flow: false })).toEqual(all);
+  });
+
+  it('is not born onto a starved neighbour: the parent picks among the others', () => {
+    // Only (6, 6) is not starved: every child goes there. One more cell just above the level: the two of them.
+    expect(children((x, y) => (beside(x, y) && !(x === 6 && y === 6) ? FLOW.floor : FLOW.fresh))).toEqual(['6,6']);
+    const two = (x: number, y: number) =>
+      x === 6 && y === 6 ? FLOW.fresh : x === 4 && y === 5 ? FLOW.half * 1.01 : beside(x, y) ? FLOW.half * 0.99 : 0.2;
+    expect(children(two)).toEqual(['4,5', '6,6']);
+  });
+
+  it('is not born when every free neighbour is starved, and not when the cell of the parent is', () => {
+    expect(children((x, y) => (beside(x, y) ? FLOW.half * 0.99 : FLOW.fresh))).toEqual([]);
+    expect(children((x, y) => (x === 5 && y === 5 ? FLOW.half * 0.99 : FLOW.fresh))).toEqual([]);
+  });
+
+  it('reads the flow memory of the strain of the parent', () => {
+    // The ground of the first strain starved around the parent, the ground of the second strain fresh, and the other
+    // way round.
+    const ring = (x: number, y: number) => (beside(x, y) ? FLOW.floor : FLOW.fresh);
+    expect(children(ring, { strain: 1 })).toEqual(all);
+    expect(children(() => FLOW.fresh, { strain: 1, other: FLOW.floor })).toEqual([]);
+  });
+
+  it('has two halves: the copy that reads one cell alone gives the births that the other half stops', () => {
+    const ring = (x: number, y: number) => (beside(x, y) ? FLOW.floor : FLOW.fresh);
+    expect(children(ring, { starvedCells: 'parent' })).toEqual(all);
+    const centre = (x: number, y: number) => (x === 5 && y === 5 ? FLOW.floor : FLOW.fresh);
+    expect(children(centre, { starvedCells: 'child' })).toEqual(all);
   });
 });

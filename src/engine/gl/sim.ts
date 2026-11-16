@@ -1484,8 +1484,9 @@ export class GlSim implements Sim {
     const tested = this.agentsTex[flip(this.a)];
     const env = this.env.texture;
     const windows = g.windows.texture;
-    // With the flow in the tubes, the test in which an agent on a starved cell does not divide (FLOW in growth.frag,
-    // ADR 0029): it reads the flow memory that the agent pass of the step read.
+    // With the flow in the tubes, the test in which an agent on a starved cell does not divide and no child is born
+    // onto one (FLOW in growth.frag, ADR 0029 and ADR 0053): it reads the flow memory that the agent pass of the step
+    // read.
     const flow = flowOn(this.settings) ? this.flow : undefined;
     const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
     this.pass(

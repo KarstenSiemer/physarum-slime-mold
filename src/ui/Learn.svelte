@@ -120,9 +120,9 @@
       <p>
         Still, it finds food and connects food sources with an efficient network of tubes. Inside, the cell squeezes its
         liquid back and forth about every two minutes (shuttle streaming). Tubes that carry much flow grow thicker;
-        tubes with little flow fade. In experiments it found the shortest way through a maze (Nakagaki 2000) and built a
-        network like the Tokyo rail system (Tero 2010). Jones’ model has no flow. The extended model of this app can add
-        one: with Flow in the tubes, a tube that carries flow between foods stays, and the others starve. The scenes
+        tubes with little flow fade. In experiments it kept tubes on short ways through a maze (Nakagaki 2000) and built
+        a network like the Tokyo rail system (Tero 2010). Jones’ model has no flow. The extended model of this app can
+        add one: with Flow in the tubes, a tube that carries flow between foods stays, and the others starve. The scenes
         Maze, Snail maze, Corn maze, Tokyo rail network, Tokyo with light and Food ring use it. In Rival networks and
         Tokyo, two networks, two strains each have a flow of their own.
       </p>

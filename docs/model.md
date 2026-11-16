@@ -451,6 +451,9 @@ shifts the whole history and changes no difference.
   D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles
   D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · 1.00023), so starved ground comes back to 0.2 in
   about 33,000 steps.
+- D falls only while the cell holds a tube. So ground whose tube vanished keeps the D that the tube had then, and each
+  cell of ground that a starved tube left has a D of its own between 1e-4 and 0.01. It is open for births again
+  (D ≥ 0.01, section 9) after ln(0.01 / D) / ln(1.00023) steps: about 20,000 steps from 1e-4, and 3,000 from 0.005.
 
 ### 8.5 The flow and the agents
 
@@ -460,7 +463,8 @@ An agent follows the flow of its own strain: D and B below are those of the agen
   D = 0.2.
 - **Respawn** (7.2): never for D ≤ 0.5, 20 % per step and dead agent at D = 1 on the cell it draws; never in the wound
   of a held cut.
-- **Growth**: an agent does not divide on a cell with D < 0.01 (section 9).
+- **Growth**: an agent does not divide on a cell with D < 0.01, and no child is born onto a cell with D < 0.01
+  (section 9).
 - The agent and growth passes of step k read D of step k − 1.
 - A strain that covers fewer than 2 sites has no flux, and none of its cells adapts (8.4): its agents follow the memory
   that its cells hold.
@@ -469,7 +473,8 @@ An agent follows the flow of its own strain: D and B below are those of the agen
 
 30 steps are one minute. The constants give: body 50 steps (1.7 min), adaptation 333 steps (11 min), a tube without flux
 falls from D = 0.2 to 0.01 in 998 steps (33 min) while the flow of its strain has two sites with a role, roles 300 steps
-(10 min), recovery of starved ground about 33,000 steps (18 h). The time scale, 30 steps per minute, was set so that
+(10 min), recovery of starved ground about 33,000 steps (18 h) from the floor to fresh ground, and about 20,000 steps
+(11 h) from the floor to the level 0.01 of the births (8.4). The time scale, 30 steps per minute, was set so that
 these constants give the organism's times (ADR 0029, decision 10; Marbach et al. 2023); see [fidelity.md](fidelity.md),
 row 4.
 
@@ -489,6 +494,10 @@ copy in `src/engine/growth-reference.ts`.
   between it and the agent's cell are not both walls: with one wall a move from the agent's cell can reach it through
   the other cell, with two walls no move can (7.5). A cell outside a box or the dish is no wall here, as for a move.
   The agent claims one of the free neighbours at random, with the key of a move (ADR 0025, decision 35).
+- **No child onto starved ground** (flow on, ADR 0053): a neighbour with D_s < 0.01, from the last step, is not free.
+  The agent picks among the other free neighbours, with the same one draw, and it does not divide when every free
+  neighbour is starved. So the rule of starved ground reads two cells: the cell of the parent (ADR 0029, decision 9)
+  and the cell of the child. D_s is that of the strain of the parent, which is the strain of the child.
 - **Light stops growth** (extended model, ADR 0050): the birth onto the picked neighbour m fails with the chance
   G_L · λ(m), G_L the setting Light stops growth and λ the light byte / 255 of m. The agent then makes no claim in this
   step and picks no other neighbour. The draw u is the first of a stream of its own (10), and the birth fails if
@@ -623,6 +632,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The cut and a wall with growth (7.1)    | "the cut and a painted wall while growth runs": the agents die, none lands in a closed room; placed with Gf 0 or growth off     |
 | Respawn and the cut (7.2)               | `flow.gpu.test.ts`, "respawn while the cut is held": no birth in the wound, with and without growth; outside it as before       |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
+| No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
 | The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |

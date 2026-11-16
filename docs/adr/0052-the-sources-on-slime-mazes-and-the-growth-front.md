@@ -5,6 +5,8 @@
   done with this record. Each later stage gets an ADR of its own.
 - Date: 2026-11-16
 - Extends [ADR 0030](0030-model-specification-and-fidelity.md): a new mark and two new rows in `docs/fidelity.md`.
+- Extended by [ADR 0053](0053-no-child-onto-starved-ground.md) (2026-11-16): stage 1 of the plan, what it measured
+  about the dead ends, and the texts of the app on the maze of 2000 (the first open point below).
 - In short: the facts are in
   [`docs/knowledge-base/slime-mazes-and-the-front.md`](../knowledge-base/slime-mazes-and-the-front.md), and the plan
   is in `TODO.md`, "Slime, dead ends and the growth front".

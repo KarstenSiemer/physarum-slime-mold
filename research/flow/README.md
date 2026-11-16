@@ -181,6 +181,22 @@ alone carries the flow in every run, 500 to 2,500 steps after the colony joins t
 tube is at most 2 % longer than the shortest way. In the Snail maze the tube follows the one
 route. But the dead ends do not empty as in the Maze: the colony keeps growing short branches
 into the corridors that the flow has left, and they hold 11 to 36 % of the route's trail.
+**No child onto starved ground** ([ADR 0053](../../docs/adr/0053-no-child-onto-starved-ground.md),
+part 17). Why does the colony come back into the dead ends of the two mazes? The plan of
+2026-11-16 had read one cause in the code: an agent on a fed tube could place a child onto starved
+ground beside it. A count of the births showed that this was a third of the births in the dead
+ends. A new rule stops them: a starved neighbour is not free. Then ten seeds of each maze and of
+the Tokyo scene ran again, and no measure moved by more than the seeds differ. The blind branches
+of the Snail maze hold 9 to 25 % of the trail of the route, as before. The cause is the mark of
+starved ground. Ground is closed for births while its flow memory is below 0.01. The memory falls
+only while a cell holds a tube, and a starved tube is gone soon. So each cell stops at a memory of
+its own, and about a fifth of the ground of a dead end is open at any time. The colony comes back
+as a wave: a blind branch fills about twice in 10,000 steps and starves again. Seven other rules
+ran on three seeds each. One keeps the blind branches empty: a starved tube that vanishes leaves
+its ground at the floor of the flow memory. It is not built, because it changes the rule of the
+flow memory: the owner decides. The rule that the plan has for the slime, a lower weight for
+marked ground in the pick of a birth, changes nothing in a dead end: there every free neighbour
+has the mark.
 
 ## What is in this folder, and what you need to read
 
@@ -1562,9 +1578,131 @@ is `logs/engine/mazes/`: `<scene>-webgpu.txt`, `<scene>-webgl2.txt` and `<scene>
 Result: the tube follows the shortest route in both mazes, and the flow runs on that route alone.
 The dead ends thin out but do not empty, because growth goes on (ADR 0051 has the tables).
 
+### 17. Does the colony stay out of the dead ends when no child is born onto starved ground? [ADR 0053]
+
+**Where children are born.** The Snail maze, stepped one step at a time for 300 steps from the steps
+12,000, 20,000 and 28,000. Each child counts by the flow memory of its cell: starved (below 0.01),
+open (0.01 to 0.5) or fed (above 0.5). A run takes 1 minute.
+
+```bash
+for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_AT=12000,20000,28000 VITE_NAME=g53-births-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/births.gpu.test.ts; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/births.ts snail-maze g53-births-s1 g53-births-s2 g53-births-s3
+```
+
+`births.ts` prints one line per window, with a part for all cells, one for the corridor of the route
+and one for the dead ends; its head says what each number is. With the rule you must see
+`born starved 0` in every part. `opens` is the time until the closed ground of the part is open for
+births again, as three quartiles in steps.
+
+The same with the rule of before, where only the cell of the parent decides. `variant.ts` puts
+another rule into the WGSL passes of the app, runs the command, and puts the files back:
+
+```bash
+for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_AT=12000,20000,28000 VITE_NAME=g53-births-parent-s$seed node --import ./research/flow/register.mjs research/flow/engine/variant.ts parent npx vitest run --config research/vitest.config.ts research/flow/engine/births.gpu.test.ts; done
+```
+
+**The two mazes with the rule.** The commands of part 16, with the names `g53-<scene>-webgpu-s<seed>`
+(seeds 1 to 10) and `g53-<scene>-webgl2-s<seed>` (seeds 1 and 2, `VITE_KIND=webgl2`). The lines of
+`measure-mazes.ts` are the records `snail-maze-webgpu.txt`, `corn-maze-webgpu.txt` and the two of
+WebGL2.
+
+**Other rules.** `variant.ts` has seven of them; its head says what each one is. The Snail maze with
+each, seeds 1 to 3, with the dumps of the last 10,000 steps only (15 minutes in all). The line of a
+run is then the line of a full run but for `joined at`:
+
+```bash
+STEPS=$(seq -s, 20500 500 30000 | sed 's/,$//'); for v in parent child left weight floor left+floor parent+floor; do for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g53-snail-maze-$v-s$seed node --import ./research/flow/register.mjs research/flow/engine/variant.ts $v npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts snail-maze $(for v in parent child left weight floor left+floor parent+floor; do for seed in 1 2 3; do echo g53-snail-maze-$v-s$seed; done; done) | grep ' run:'
+```
+
+The three lines of `parent` must equal the lines of the seeds 1 to 3 of the record of part 16
+(`logs/engine/mazes/snail-maze-webgpu.txt`) from `tube` on. This command checks that every text
+that a variant replaces is still in its file:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/variant.ts check
+```
+
+**The Tokyo scenes.** The Tokyo scene with the rule, seeds 1 to 10 on WebGPU to step 48,000
+(4 minutes per run), as part 15 measures Tokyo with light:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_GROUND=1 VITE_SCENE=tokyo VITE_SEED=$seed VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g53-tokyo-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g53-tokyo-webgpu-s$seed 1.5 99999 >> research/flow/out/g53-tokyo-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo-end research/flow/out/g53-tokyo-webgpu.txt
+```
+
+The record of before is `logs/engine/tokyo-flux1.4-sites.txt`; the same command prints its summary.
+The same runs with `VITE_SCENE=tokyo-light` (seeds 1 to 3, `LIT=tokyo-light` before
+`measure-tokyo.ts`), with `VITE_KIND=webgl2` to step 24,000 (seeds 1 to 3), and with the variant
+`floor` (seeds 1 to 3, the command with `variant.ts floor` before `npx`).
+
+**The bytes of the scenes.** The digests of every scene after 500 steps on both backends, with the
+state of the flow (3 minutes), on the branch and on `main` on the same machine:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g53-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g53-digest-branch.jsonl research/flow/logs/engine/starved-ground/digest-main.jsonl
+```
+
+It must print that all 54 runs are equal: no cell is starved in the first 500 steps. The seven
+scenes with growth and the flow after 3,000 steps (4 minutes); the digests of `main` for it are the
+record `digest-3000-main.jsonl`, made on the same machine with the two growth passes of `main`:
+
+```bash
+VITE_FLOW=1 VITE_STEPS=3000 VITE_ONLY=snail-maze,corn-maze,tokyo,tokyo-light,food-ring,rival-networks,tokyo-rivals VITE_NAME=g53-digest-3000-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g53-digest-3000-branch.jsonl research/flow/logs/engine/starved-ground/digest-3000-main.jsonl
+```
+
+**The wrong rules** SG1 to SG10, with G1, G2, F8, F13 and F16, which change the same lines (4 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SG1 SG2 SG3 SG4 SG5 SG6 SG7 SG8 SG9 SG10 G1 G2 F8 F13 F16
+```
+
+The regrowth of part 13, the foods of four cities away from step 24,000 to step 27,000, with the
+rule and with the variant `floor` (seeds 1 to 3, names `g53-starve-rule-s<seed>` and
+`g53-starve-floor-s<seed>`): the second command of the regrowth in part 13 without `VITE_RECOVER`,
+and for `floor` with `variant.ts floor` before `npx`. `summary.ts regrowth` with the two files of a
+rule and the step 27000 prints when the foods are joined again.
+
+Result: the rule stops every birth onto a starved cell, a third of the births in the dead ends,
+and it changes no measure of the mazes or of the Tokyo scenes. The dead ends do not empty. Of the
+other rules only `floor` empties them (ADR 0053 has the tables). The records are in
+`logs/engine/starved-ground/`:
+
+| Record                                            | Runs                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `births.txt`                                      | the lines of `births.ts`: the Snail maze, seeds 1 to 3, the rule and `parent`     |
+| `snail-maze-webgpu.txt`, `corn-maze-webgpu.txt`   | the lines of `measure-mazes.ts` with the rule, seeds 1 to 10                      |
+| `snail-maze-webgl2.txt`, `corn-maze-webgl2.txt`   | the same on WebGL2, seeds 1 and 2                                                 |
+| `variants-snail.txt`, `variants-corn.txt`         | the run lines of the Snail maze with each variant, and the Corn maze with `floor` |
+| `tokyo-webgpu.txt`, `tokyo-strands.jsonl`         | the Tokyo scene with the rule, seeds 1 to 10: the measures and the closed ground  |
+| `tokyo-webgl2.txt`, `tokyo-light.txt`             | the Tokyo scene on WebGL2, and Tokyo with light, seeds 1 to 3                     |
+| `tokyo-floor.txt`                                 | the Tokyo scene with the variant `floor`, seeds 1 to 3                            |
+| `starve-rule.txt`, `starve-floor.txt`, `-strands` | the regrowth of part 13 with the rule and with `floor`, seeds 1 to 3              |
+| `scenes-*.jsonl`                                  | the three scenes of part 9 with the rule, seed 1                                  |
+| `digest-branch.jsonl`, `digest-main.jsonl`        | the digests of every scene after 500 steps, branch and `main`                     |
+| `digest-3000-branch.jsonl`, `digest-3000-main`    | the same after 3,000 steps for the seven scenes with growth and the flow          |
+| `mutations.txt`                                   | the wrong rules SG1 to SG10, G1, G2, F8, F13 and F16, and the tests that fail     |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 256 files, 4.0 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 280 files, 4.6 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1594,6 +1732,7 @@ asks for the new digest.
 | `logs/engine/light/`                                 | the runs of part 14 (ADR 0042): the scene Tokyo with light and the runs beside it, the digests of every scene on the branch and on `main`, and the SRTM samples                                                                 |
 | `logs/engine/light-growth/`                          | the runs of part 15 (ADR 0050): Tokyo with light with Light stops growth at 1, 0.98, 0.9 and 0.5, the digests of every scene, and the wrong rules LG1 to LG11                                                                   | 2026-11-16, M3 Pro                                    |
 | `logs/engine/mazes/`                                 | the runs of part 16 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
+| `logs/engine/starved-ground/`                        | the runs of part 17 (ADR 0053): where children are born, the two mazes and the Tokyo scenes with the rule, the other rules, the digests and the wrong rules SG1 to SG10                                                         | 2026-11-16, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1650,7 +1789,9 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 246 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/mutate.ts`        | 288 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
+| `engine/variant.ts`       | other rules of the births in the WGSL passes for one run, for the measurements of ADR 0053        |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

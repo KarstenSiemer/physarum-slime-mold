@@ -161,8 +161,8 @@ export interface Programs {
   /** The passes of the picture of the tubes, compiled at their first use, with the numbers of tubes.ts. */
   tubes: () => TubePrograms;
   /**
-   * PASS 2 of growth.frag in which an agent on a starved cell does not divide (FLOW in growth.frag, ADR 0029),
-   * compiled at its first use: only a scene with growth and the flow needs it.
+   * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
+   * growth.frag, ADR 0029 and ADR 0053), compiled at its first use: only a scene with growth and the flow needs it.
    */
   growthFlowing: () => Program;
   /**

@@ -42,10 +42,13 @@ the legend again through an automatic reader. Nobody read the body text.
   the error of one length [I]. The shortest route is α2 with β1.
 - Four hours after the food was set, the dead ends of the plasmodium shrink, and pseudopodia explore every
   connection. Four hours later the shortest path is selected (legend, panels b and c) [A]. The plasmodium weighed
-  90 ± 10 mg wet (legend) [A]; this number comes from the automatic reader alone, and the notes do not have it.
-- Fig. 1d counts the paths of 19 runs. The page holds the counts only as a picture. The coordinator read them from
-  the picture, and the helper did not see it: α2 with β1, the shortest route, 5 runs; α2 with β2, 6; α2 with both β,
-  3; both α with both β, 3; no tube, 2.
+  90 ± 10 mg wet (legend) [A]; the notes do not have this number.
+- Fig. 1d counts the paths of 19 runs. The page holds the counts only as a picture, a table with a row for each
+  choice of α and a column for each choice of β. The coordinator read them from the picture, and the helper did not
+  see it: α2 with β1, the shortest route, 5 runs; α2 with β2, 6; α2 with both β, 3; both α with both β, 3; and no
+  tube in 2 runs. Every other cell of the table holds 0.
+- The coordinator of stage 1 opened the figure page in a browser on 2026-11-16 and read the legend and the table of
+  panel d again: the lengths, the times, the wet weight and the five counts are as written here.
 - [I] So the shortest route alone was left in 5 of 19 runs. The shorter α2 was part of every network (17 of 17 runs
   with a tube), and in 14 of them without α1. β1 and β2 were left alone about equally often: 5 against 6. De Almeida
   2021 (p. 8) sums up the paper in the same way, cited there [V]: α2 was always selected, and β1 and β2 about the
@@ -253,14 +256,19 @@ These lines are conclusions [I], not facts of a paper.
   lowers the weight of a slimed cell only while a fresh cell is free gives both. The walk model of Tröger et al. is
   for one small migrating plasmodium, not for a growing network: there a strict rule with an end after 3 h fitted,
   and a penalty did not.
+- **Such a bias does not keep the colony out of a dead end** (measured in stage 1, ADR 0053, with the mark of
+  starved ground in the place of the slime). Inside a dead end that the colony left, every free cell has slime, so
+  the bias never acts there, and the colony comes back as before. What kept the dead ends empty in that measurement
+  was ground that stays closed for births for a fixed time.
 - **Food lifts it.** Reid et al. 2013 (abstract) and Briard et al. 2020 say so. The state of the plasmodium matters as
   well: ground of a well-fed plasmodium attracts, and the fed plasmodia of Patino-Ramirez et al. 2019 did not avoid
   left ground at all.
 - **The reach is short.** The organism senses slime at contact (Reid et al. 2012) or from a short distance (Tröger et
   al. 2024; Masui et al. 2018: 0.1 to 1 mm). A cell of the Tokyo scene is 0.54 mm. So a rule that reads the slime of
   the cell of the child reads at the organism's distance.
-- **No life time to take from a paper**: 3 h to 6 days are reported. Starved ground lasts 18 h in the model today
-  (`docs/model.md`, 8.6).
+- **No life time to take from a paper**: 3 h to 6 days are reported. In the model today, starved ground is fresh
+  again after up to 18 h, and it is open for births again much sooner: from the lowest memory after 11 h, and half of
+  the closed ground of a dead end within about 7,000 steps, 4 h (`docs/model.md`, 8.4 and 8.6; ADR 0053).
 - **No answer for the dead ends.** No paper says whether the organism grows back into a dead end. The maze of 2000
   had no growth after the food came, so the growth of the Snail maze and the Corn maze has no experiment to follow.
 
@@ -544,15 +552,21 @@ main vein follows, from the newest front backward, the nearest point of the fron
 4. The thesis of Schenz: Sec. 3.1.3 (p. 26 to 30), Sec. 4.1.1 and 4.1.2 (p. 42 to 49), Table 4.1 (p. 52) and Sec. 4.2
    (p. 58 to 65).
 
-## Read in the code
+## Read in the code, and what stage 1 measured
 
-Read by the coordinator on 2026-11-16 and not measured; stage 1 checks them (`TODO.md`):
+Read by the coordinator on 2026-11-16:
 
-- The rule "an agent does not divide on a cell with D < 0.01" reads the cell of the parent (`divideInto()` in
-  `growth.wgsl`). A parent on a living tube beside starved ground still places a child there. The rule of light reads
-  the cell of the child (ADR 0050).
+- The rule "an agent does not divide on a cell with D < 0.01" read the cell of the parent (`divideInto()` in
+  `growth.wgsl`). A parent on a living tube beside starved ground still placed a child there. The rule of light reads
+  the cell of the child (ADR 0050). **Measured in stage 1** (ADR 0053): this was a third of the births in the dead
+  ends of the Snail maze. Since ADR 0053 no child is born onto a starved cell, and the test of the cell of the parent
+  stays.
+- **That was not the cause of the growth back into dead ends** (ADR 0053). The cause is the mark of starved ground: a
+  cell is closed for births while D < 0.01, D falls only while the cell holds a tube, and a starved tube is gone soon.
+  So the ground of a dead end opens again after some thousand steps, and the colony comes back as a wave. `TODO.md`
+  has what follows for stages 2 to 4.
 - Flux exists only between food sites with a role (`docs/model.md`, 8.4 and 8.5). A tube that leads only to a growing
-  front carries no flux, so no trunk can form toward a front.
+  front carries no flux, so no trunk can form toward a front. Not measured.
 
 ## Where the PDFs differ from the notes of 2026-11-16
 

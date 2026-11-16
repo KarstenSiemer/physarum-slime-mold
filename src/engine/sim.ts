@@ -1444,8 +1444,9 @@ export class Simulation implements Sim {
     flowMemory: GPUTextureView | null,
     flowUniform: GPUBuffer | null,
   ) {
-    // With the flow in the tubes, the passes in which an agent on a starved cell does not divide (growth.wgsl
-    // `//#if FLOW`, ADR 0029): they read the flow memory that the agent passes of the step read.
+    // With the flow in the tubes, the passes in which an agent on a starved cell does not divide and no child is born
+    // onto one (growth.wgsl `//#if FLOW`, ADR 0029 and ADR 0053): they read the flow memory that the agent passes of
+    // the step read.
     const flow = flowMemory !== null;
     const k = this.kernels.growth(flow);
     const f = flow ? `flow${this.flowM}` : '';

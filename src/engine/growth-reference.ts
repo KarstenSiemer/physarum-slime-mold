@@ -1,8 +1,9 @@
 // The CPU copy of growth and shrinkage (shaders/growth.wgsl, gl/glsl/growth.frag and growth.vert; ADR 0025), for
 // tests only: sim.gpu.test.ts steps it from the state after the moves of a step and compares both GPU backends with it.
+// flow.gpu.test.ts does the same with the flow on, and gives it the flow memory (ADR 0053).
 import type { Boundary, Settings } from '../model/params';
 import { DISH_FILL } from './brush';
-import { pcg } from './flow';
+import { FLOW, pcg } from './flow';
 import { strainEnds } from './pack';
 import type { AgentState } from './types';
 
@@ -126,6 +127,16 @@ export interface GrowthInput {
   agents: readonly AgentState[];
   /** The moves into each cell in the step, 4 lanes per cell (Sim.readCounts()). */
   counts: Float32Array;
+  /**
+   * With the flow in the tubes: the flow memory of each strain before the step, 4 values per cell (Sim.readFlow()).
+   * Without it the flow is off, and no cell is starved.
+   */
+  memory?: readonly Float32Array[];
+  /**
+   * For the tests of the rule only: the cells whose flow memory the rule of starved ground reads. The passes read
+   * both, the cell of the parent (ADR 0029, decision 9) and the cell of the child (ADR 0053).
+   */
+  starvedCells?: 'both' | 'parent' | 'child';
 }
 
 /**
@@ -151,15 +162,26 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
     const j = k + (k >= 4 ? 1 : 0);
     return [(j % 3) - 1, Math.floor(j / 3) - 1] as const;
   };
+  // With the flow, a cell is starved for a strain while the flow memory of the strain lies below `half`, in f32 as
+  // the shaders compute it (starved() in growth.wgsl). No agent divides on a starved cell (ADR 0029, decision 9), and
+  // no child is born onto one: a starved neighbour is not free (ADR 0053).
+  const half2 = Math.fround(FLOW.half * FLOW.half);
+  const reads = input.starvedCells ?? 'both';
+  const starved = (strain: number, c: number) => {
+    const d = input.memory?.[strain]?.[c * 4];
+    return d !== undefined && Math.fround(d * d) < half2;
+  };
   const divideInto = (a: AgentState, id: number, c: number) => {
     const n = windows[c * 2] ?? 0;
     if (!grow || (counts[c * 4 + (a.bits & 3)] ?? 0) === 0 || n < s.growthMin || n > s.growthMax) return -1;
+    if (reads !== 'child' && starved(a.bits & 3, c)) return -1;
     const [x, y] = [c % w, Math.floor(c / w)];
     const at = (dx: number, dy: number) => cellAt(x + dx, y + dy);
     // A diagonal neighbour only if the two cells beside the corner between it and c are not both walls (ADR 0025,
     // amendment of 2026-11-13).
     const open = Array.from({ length: 8 }, (_, k) => around(k))
       .filter(([dx, dy]) => habitable(at(dx, dy)) && occ[at(dx, dy)] === 0)
+      .filter(([dx, dy]) => reads === 'parent' || !starved(a.bits & 3, at(dx, dy)))
       .filter(([dx, dy]) => dx === 0 || dy === 0 || !(wall(at(dx, 0)) && wall(at(0, dy))))
       .map(([dx, dy]) => at(dx, dy));
     if (open.length === 0) return -1;
