@@ -295,7 +295,10 @@ export const TOKYO_ELEVATION_GRID = 20;
 /**
  * The lit cells of the grid of elevations, as [column, row] from the north-west corner of the map. A cell is lit when
  * the SRTM sample at its centre is 200 m or more above the sea: 59 cells, less the 6 that a disc of half the diagonal
- * of a cell around their centre would reach a food source with (the cities lie on low ground). From 200 m on, because
+ * of a cell around their centre would reach a food source with (the cities lie on low ground), and less the cells
+ * [0, 16] and [0, 17] (ADR 0050). With them lit, the light and the coast enclose Ito, and no birth crosses full light
+ * (Light stops growth). The two cells hold the coast from Odawara to Ito: the samples beside them to the east lie at
+ * 40 m and at sea level, and the coast of the map leaves no dark land east of the cells. From 200 m on, because
  * at 100 or 150 m the cells under Maebashi, Takasaki, Kiryu, Ashikaga, Hachioji, Sagamihara, Odawara and Katsuura would
  * be lit, which the mask of Fig. 2B shows dark (the specification of 2026-11-11, section 1.4, which gives the centres).
  */
@@ -349,9 +352,7 @@ export const TOKYO_MOUNTAINS = [
   [0, 15],
   [9, 15],
   [11, 15],
-  [0, 16],
   [10, 16],
-  [0, 17],
   [0, 19],
 ] as const;
 

@@ -166,7 +166,7 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
     const pick = Math.min(Math.floor(stream(rngSeed(id, GROW, step, seed))() * open.length), open.length - 1);
     const t = open[pick] ?? -1;
     // Light stops growth (lightStops in growth.wgsl; ADR 0050), in f32 as the shaders compute it.
-    const chance = Math.fround(Math.fround(s.lightGrowth) * (env[t * 4 + 2] ?? 0));
+    const chance = Math.fround(Math.fround(s.model === 'jones' ? 0 : s.lightGrowth) * (env[t * 4 + 2] ?? 0));
     if (chance > 0 && Math.fround(stream(rngSeed(id, SHADE, step, seed))() * 255) < chance) return -1;
     return t;
   };

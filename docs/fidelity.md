@@ -88,10 +88,11 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   - The positions of the cities are fitted to the figures (ADR 0024). The network is the trail above 1.5, thinned to
     lines. That threshold is this app's, and nobody measured how the numbers depend on it.
   - The protocol with light is the scene Tokyo with light (ADR 0042, with Light stops growth at 1 since ADR 0050;
-    WebGPU, 10 seeds): at step 48,000 TL 1.69 ± 0.13, MD 0.83 ± 0.01 and FT 0.85 ± 0.02, and over the samples from step
+    WebGPU, 10 seeds on the first map of ADR 0050, with 53 lit cells): at step 48,000 TL 1.69 ± 0.13, MD 0.83 ± 0.01 and FT 0.85 ± 0.02, and over the samples from step
     16,000 on TL 1.73 and FT 0.86 against 1.84 and 0.91 without light. Before ADR 0050 the scene gave TL 1.78 ± 0.07
     and FT 0.88 ± 0.04. The differences are no larger than two sets of seeds of one rule differ, so the runs do not
-    show that light changes the measures. Ito, a food of Fig. 1 that the statistics do not have, stays unjoined. The paper gives no TL or MD of its own for
+    show that light changes the measures. On that map Ito stayed unjoined; the scene has 51 lit cells now, and one seed
+    joins all 36 foods with TL 1.68 and FT 0.85 at step 48,000. The paper gives no TL or MD of its own for
     the runs with light; its FT with light is 0.86 ± 0.04. The light of the scene has one strength, the mask of the
     paper has shades, and the large food source outside the map is not built. Row 13 has the avoidance.
   - The second protocol of the paper (a sheet first, then all foods) ran only in a CPU prototype with 2 seeds
@@ -259,13 +260,13 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   it holds 4.6 % there (1.3 to 8.7) against 9.1 % (6.2 to 16.2). Light strengths of 0.02, 0.2 and 0.5 give 4.5, 3.8
   and 5.1 % (2 seeds each). In the Jones model the agents leave the disc of a repellent source, and the field follows
   Jones' one map with a source below 0 (GPU tests, ADR 0044). No ADR has a number for Fleeing light. With Light stops
-  growth at 1 (ADR 0050, the scene as it is now, 10 seeds) the network holds 3.3 % of its cells on lit ground at step
+  growth at 1 (ADR 0050, 10 seeds, on the first map with 53 lit cells) the network holds 3.3 % of its cells on lit ground at step
   2,000 (2.7 to 4.4) and 1.3 % from step 16,000 on (0.9 to 1.9). At 0.5 it holds 13.0 % at step 2,000 (3 seeds).
 - **Limits**: in a filled lit area the repellent is the same in every cell, so by the rule the light turns an agent
   only at the edge of the area (read in the rule, not measured). Light stops births, not moves: agents still walk
-  onto lit ground. A food that light encloses stays out of reach (Ito in Tokyo with light). The default of Light
-  stops growth is 0, so a painted light does not stop growth until the user sets it. The paper gives no number for
-  how much of the organism lay on lit ground, so the 1.3 % has no value to compare with.
+  onto lit ground. A food that light encloses stays out of reach, so the scene leaves a dark way to each food. The
+  map of the scene as it is now (51 lit cells) is measured with one seed. The paper gives no number for how much of
+  the organism lay on lit ground, so the 1.3 % has no value to compare with.
 
 ### 14. Answer to new food within about 15 min
 

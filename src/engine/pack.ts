@@ -253,8 +253,8 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   // The Electrode tool (ADR 0047): each cell of a pole releases this per step, the cathode into the food scent and the
   // anode into the repellent, with the factor of the food and light sources. In the Jones model that is ±255 times
   // the strength in Jones' one map (Tsuda, Jones et al. 2011, p. 10).
-  // electrode.y: Light stops growth (ADR 0050), a rule of the extended model (asJones() holds it at 0): a birth onto a lit cell fails with the
+  // electrode.y: Light stops growth (ADR 0050), a rule of the extended model, so 0 in the Jones model: a birth onto a lit cell fails with the
   // chance of this value times the light byte / 255 (growth.wgsl lightStops()).
-  f.set([255 * s.electrodeStrength * g, s.lightGrowth, 0, 0], slot('electrode'));
+  f.set([255 * s.electrodeStrength * g, jones ? 0 : s.lightGrowth, 0, 0], slot('electrode'));
   return buf;
 }

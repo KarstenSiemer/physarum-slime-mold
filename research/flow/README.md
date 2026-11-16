@@ -168,8 +168,9 @@ new rule of the extended model lets a birth onto a lit cell fail with a chance: 
 stops growth times the brightness of the cell. The scene Tokyo with light runs it at 1. Then the
 young network holds 3.3 % of its cells on lit ground in place of 15.9 %, and the old network 1.3 %
 in place of 4.6 %. Half a chance changes little: growth is far faster than the front needs. One
-food, Ito, lies on dark land that the lit mountains and the coast enclose, and the colony no
-longer joins it. The rule of Jones for light, which TODO.md proposed first, would not have helped:
+food, Ito, lay on dark land that the lit mountains and the coast enclosed, and the colony no
+longer joined it. So two lit cells on the coast from Odawara to Ito are dark now, and one seed on
+that map joins all 36 foods. The default of the setting is 1. The rule of Jones for light, which TODO.md proposed first, would not have helped:
 it acts only at the edge of a lit area, as the repellent does.
 
 ## What is in this folder, and what you need to read
@@ -1476,7 +1477,7 @@ the same lines before and after the merge.
 ### 15. Does the colony keep off the light when light stops growth? [ADR 0050]
 
 The scene Tokyo with light with the setting Light stops growth (`lightGrowth`) at 1, 0.98, 0.9 and
-0.5, on WebGPU to step 48,000. The scene holds 1 now; a run of the time before the rule is the
+0.5, on WebGPU to step 48,000, on the first map of the scene with 53 lit cells. The default is 1 now; a run of the time before the rule is the
 record of part 14. For G = 1 (10 seeds), and with seeds 1 to 3 for the three other values:
 
 ```bash
@@ -1496,15 +1497,19 @@ node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo
 | 1    | 10    | 3.3 % (2.7 to 4.4)        | 1.3 % (0.9 to 1.9)         | 8 of 80                         |
 
 With G = 1 from step 16,000 on (50 samples): TL 1.73 ± 0.10, MD 0.83, FT 0.86, 53.2 links, 3,908
-agents. The food that stays unjoined is Ito. This command prints the parts of the dark land and the
-foods that do not lie in the largest part (1 second):
+agents. The food that stayed unjoined on that map was Ito. So the cells [0, 16] and [0, 17] of the
+grid of elevations are dark now (51 lit cells). This command prints the parts of the dark land and
+the foods that do not lie in the largest part (1 second):
 
 ```bash
 node --import ./research/flow/register.mjs research/flow/engine/light-islands.ts
 ```
 
-It must print `2 dark parts of the land, cells: 53458 480` and one food, Ito, in the part of 480
-cells. The records are in `logs/engine/light-growth/`:
+It must print `1 dark parts of the land, cells: 54496` and no food. On the first map it printed two
+parts, of 53,458 and 480 cells, with Ito in the small one. On the map of 51 cells only seed 1 ran
+(the command above with the name `g50b-tl-G1-s1`): all 36 foods joined in 8 of the 9 samples from
+step 2,000 on, and 0.8 to 1.4 % of the network on lit ground from step 4,000 on. Ten seeds, WebGL2
+and the digests with the default 1 are open (`TODO.md`). The records are in `logs/engine/light-growth/`:
 
 | Record                           | Runs                                                          |
 | -------------------------------- | ------------------------------------------------------------- |
@@ -1515,7 +1520,7 @@ cells. The records are in `logs/engine/light-growth/`:
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 249 files, 3.5 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 250 files, 3.5 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.

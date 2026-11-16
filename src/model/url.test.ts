@@ -34,7 +34,10 @@ describe('URL settings', () => {
   it('holds the mean window only when it is not 3 × 3, and round-trips it', async () => {
     const network = presetById('network')?.settings() ?? defaultSettings();
     for (const s of [defaultSettings(), network]) {
-      const { meanWindow: _, electrodeStrength: _e, lightGrowth: _l, ...before } = s;
+      const { meanWindow: _, electrodeStrength: _e, ...held } = s;
+      // Light stops growth is in a link of the extended model, and in none of the Jones model (ADR 0050).
+      const { lightGrowth: _l, ...none } = held;
+      const before = s.model === 'jones' ? none : held;
       // A link made now also holds the mark `rules` of ADR 0044.
       expect(await encodeSettings(s)).toBe(await hashPart(JSON.stringify({ ...before, rules: LINK_RULES })));
       expect(await decodeSettings(await encodeSettings(s))).toEqual(s);
@@ -61,20 +64,29 @@ describe('URL settings', () => {
     expect(sanitize({ electrodeStrength: -1 }).electrodeStrength).toBe(0);
   });
 
-  // ADR 0050: a link holds Light stops growth only when it is not 0 (the test of the mean window: without it the link
-  // has the bytes of a link made before the setting). A link without it opens with 0, the rule off, and the Jones
-  // model never holds it.
-  it('holds Light stops growth only when it is not 0, round-trips it, and drops it in the Jones model', async () => {
+  // ADR 0050: a link of the extended model holds Light stops growth when it is not 0, so a link made now holds the
+  // default 1. A link without it, as every link made before the rule, opens with 0 and runs as it was made. The Jones
+  // model does not have the rule: its link holds none, and it opens with the default.
+  it('holds Light stops growth in a link of the extended model, and opens a link without it with 0', async () => {
     const s = defaultSettings();
-    const shade = { ...s, lightGrowth: 0.75 };
-    expect(await encodeSettings(shade)).not.toBe(await encodeSettings(s));
-    expect(await decodeSettings(await encodeSettings(shade))).toEqual(shade);
-    expect((await decodeSettings(await encodeSettings(s)))?.lightGrowth).toBe(0);
+    expect(s.lightGrowth).toBe(1);
+    for (const lightGrowth of [1, 0.75, 0]) {
+      const shade = { ...s, lightGrowth };
+      expect(await decodeSettings(await encodeSettings(shade))).toEqual(shade);
+    }
+    const { lightGrowth: _, ...old } = s;
+    expect(sanitize(old).lightGrowth).toBe(0);
+    // A link with 0 has the bytes of a link made before the rule.
+    const { meanWindow: _m, electrodeStrength: _e, ...made } = old;
+    expect(await encodeSettings({ ...s, lightGrowth: 0 })).toBe(
+      await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
+    );
     expect(sanitize({ lightGrowth: 7 }).lightGrowth).toBe(1);
     expect(sanitize({ lightGrowth: -1 }).lightGrowth).toBe(0);
     const network = presetById('network')?.settings() ?? s;
     expect(network.model).toBe('jones');
-    expect(sanitize({ ...network, lightGrowth: 0.75 }).lightGrowth).toBe(0);
+    expect(sanitize({ ...network, lightGrowth: 0.75 }).lightGrowth).toBe(1);
+    expect(await encodeSettings({ ...network, lightGrowth: 0.75 })).toBe(await encodeSettings(network));
   });
 
   // ADR 0025: growth, its values and the capacity travel with the link.

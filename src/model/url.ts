@@ -61,15 +61,16 @@ async function inflate(encoded: string): Promise<Uint8Array> {
 
 /**
  * The settings as a link holds them. The mean window is in it only when it is not 3 × 3 (ADR 0046), and the electrode
- * strength only when it is not 1 (ADR 0047), and Light stops growth only when it is not 0 (ADR 0050): a link of
- * settings without them then has the bytes of a link made before these settings, and sanitize() reads a link without
- * them as 3 × 3, 1 and 0.
+ * strength only when it is not 1 (ADR 0047), and Light stops growth only when it is not 0 (ADR 0050): a link made
+ * before these settings holds none of them, and sanitize() reads a link without them as 3 × 3, 1 and 0, so the link
+ * runs as it was made. The default of Light stops growth is 1, so a link of the extended model made now holds it; a
+ * link of the Jones model holds none: the model does not have the rule.
  */
 function linkSettings(s: Settings): Partial<Settings> {
   const held: Partial<Settings> = { ...s };
   if (s.meanWindow === MEAN_WINDOW) delete held.meanWindow;
   if (s.electrodeStrength === defaultSettings().electrodeStrength) delete held.electrodeStrength;
-  if (s.lightGrowth === 0) delete held.lightGrowth;
+  if (s.lightGrowth === 0 || s.model === 'jones') delete held.lightGrowth;
   return held;
 }
 
