@@ -73,9 +73,11 @@ const median = (values: number[]) => {
   return v.length % 2 ? (v[mid] ?? NaN) : ((v[mid - 1] ?? NaN) + (v[mid] ?? NaN)) / 2;
 };
 const fixed = (v: number, digits = 2) => (Number.isNaN(v) ? '-' : v.toFixed(digits));
+/** A chance with four places, or as a power of ten below 0.0001. */
+const chance = (p: number) => (p < 1e-4 ? p.toExponential(1) : p.toFixed(4));
 
 /** The chance that a fair coin gives a count as far from n / 2 as k of n, or farther: two sides, exact. */
-export function binomial(k: number, n: number): number {
+function binomial(k: number, n: number): number {
   if (n === 0) return 1;
   const pmf = (i: number) => {
     let c = 1;
@@ -142,9 +144,9 @@ function table(names: string[]) {
     const errors = runs.filter((run) => run.gpuErrors.length > 0).length;
     console.log(
       `${name}: runs ${String(runs.length)} | ${one ? 'blank' : 'left'} ${String(coarse.a)} ${one ? 'slime' : 'right'} ${String(coarse.b)}` +
-        ` split ${String(coarse.split)} none ${String(coarse.none)} p ${fixed(binomial(coarse.a, coarse.a + coarse.b), 4)}` +
+        ` split ${String(coarse.split)} none ${String(coarse.none)} p ${chance(binomial(coarse.a, coarse.a + coarse.b))}` +
         ` | exact ${String(exact.a)}:${String(exact.b)} split ${String(exact.split)} none ${String(exact.none)}` +
-        ` p ${fixed(binomial(exact.a, exact.a + exact.b), 4)}` +
+        ` p ${chance(binomial(exact.a, exact.a + exact.b))}` +
         ` | first ${fixed(median(runs.flatMap((run) => run.exact?.t ?? [])), 0)} sample ${fixed(median(runs.flatMap((run) => run.first ?? [])), 0)}` +
         ` | lag ${fixed(median(lags), 0)}${never ? ` +${String(never)}` : ''}` +
         ` | loser ${fixed(loser((run) => run.exact?.fill))} end ${fixed(loser((run) => run.fillAtEnd))}` +
