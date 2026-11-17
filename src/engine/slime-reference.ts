@@ -74,21 +74,23 @@ export function slimeStrength(held: number, step: number, life: number): number 
 /**
  * The strength of the layer of the slime at the grid position (px, py), in cells, as the picture reads it (ADR 0055,
  * decision 8; `slimed` in render.wgsl and render.frag): 0 to 1, a share of the full strength of the layer. `stamps`:
- * the field, as Sim.readSlime() returns it, on a grid of `width` × `height` cells. `step` and `life`: as for
- * slimeStrength(). `scale`: the cells per pixel of the view. `level`: the level of the trail's map that the frame
- * reads (render.ts trailLevel()). On the periodic grid the field repeats; outside a closed arena the strength is 0.
+ * the field, as Sim.readSlime() returns it. `grid`: the grid of the simulation with its boundary and its environment.
+ * `step` and `life`: as for slimeStrength(). `scale`: the cells per pixel of the view. `level`: the level of the
+ * trail's map that the frame reads (render.ts trailLevel()). On the periodic grid the field repeats.
  *
- *  - Up to 1 cell per pixel: the strengths of the 4 cells around the position, bilinear. The strengths are blended,
- *    never the stamps.
+ *  - Up to 1 cell per pixel: the strengths of the 4 cells around the position, bilinear over the open ones, with
+ *    their weights scaled up to 1. A cell is open when it lies inside the arena and holds no wall
+ *    (flow-reference.ts openCell()): the cells that can hold slime. So the layer goes on up to a wall and to the edge
+ *    of the arena. Without an open cell the strength is 0. The strengths are blended, never the stamps.
  *  - Zoomed out: the mean of the strength over the square of the pixel, `scale` cells wide, over the 3 × 3 texels of
  *    the map of that level under the pixel, each by the share that lies under it. At level 0 a texel is a cell, and
  *    the mean is exact. At a level above 0 a texel is width / n cells wide, with n = ceil(width / 2^level) texels per
  *    side, and the cell in the middle of the texel stands for it: the cell floor((2 t + 1) · width / (2 n)) of the
- *    texel t, and so for the rows.
+ *    texel t, and so for the rows. A wall and a cell outside a closed arena count with a strength of 0.
  */
 export function slimeLayer(
   stamps: Uint32Array,
-  grid: { width: number; height: number; boundary: Settings['boundary'] },
+  grid: FlowGrid,
   step: number,
   life: number,
   [px, py]: readonly [number, number],
@@ -100,17 +102,24 @@ export function slimeLayer(
   const mod = (v: number, n: number) => ((v % n) + n) % n;
   /** The strength of the cell (x, y), which lies inside the grid. */
   const held = (x: number, y: number) => slimeStrength(stamps[y * w + x] ?? 0, step, life);
-  const cell = (x: number, y: number) => {
-    if (periodic) return held(mod(x, w), mod(y, h));
-    return x < 0 || y < 0 || x >= w || y >= h ? 0 : held(x, y);
-  };
   if (scale <= 1) {
     const [qx, qy] = [px - 0.5, py - 0.5];
     const [i, j] = [Math.floor(qx), Math.floor(qy)];
     const [fx, fy] = [qx - i, qy - j];
-    const a = cell(i, j) * (1 - fx) + cell(i + 1, j) * fx;
-    const b = cell(i, j + 1) * (1 - fx) + cell(i + 1, j + 1) * fx;
-    return a * (1 - fy) + b * fy;
+    let [sum, total] = [0, 0];
+    for (const [dx, dy] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      const c = openCell(grid, i + dx, j + dy);
+      if (c < 0) continue;
+      const weight = (dx === 1 ? fx : 1 - fx) * (dy === 1 ? fy : 1 - fy);
+      sum += weight * slimeStrength(stamps[c] ?? 0, step, life);
+      total += weight;
+    }
+    return total > 0 ? sum / total : 0;
   }
   const n = [Math.ceil(w / 2 ** level), Math.ceil(h / 2 ** level)] as const;
   const ratio = [n[0] / w, n[1] / h] as const; // texels per cell

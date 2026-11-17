@@ -735,23 +735,54 @@ fn slimeCell(c: vec2i) -> f32 {
   return slimeOf(stamps[q.y * size().x + q.x]);
 }
 
-// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear. The stamps are never blended: between a
-// new stamp and no stamp lies no old one.
-fn slimeBilinear(p: vec2f) -> f32 {
+// Whether grid cell c lies in the arena. A cell outside it never holds slime.
+fn slimeArena(c: vec2i) -> bool {
+  if (V.boundary == 0u) { return true; }
+  let s = size();
+  if (any(c < vec2i(0)) || any(c >= s)) { return false; }
+  return V.boundary != 2u || distance(vec2f(c) + 0.5, 0.5 * vec2f(s)) <= DISH_FILL * 0.5 * f32(min(s.x, s.y));
+}
+
+// Which of the 4 cells around p hold no wall: 1 open, 0 wall, in the order of the blend (`cells`: shapeCells of the
+// cell under p, which holds those 4). No wall holds slime. The scent view has the same rule (openCells()); this one is
+// the layer's own, so that each of the two parts of the picture stands without the other.
+fn unwalled(p: vec2f, cells: array<u32, 9>) -> vec4f {
+  let o = vec2i(floor(p - 0.5)) - vec2i(floor(p)) + 1;
+  let wall = vec4u(cells[o.y * 3 + o.x], cells[o.y * 3 + o.x + 1], cells[(o.y + 1) * 3 + o.x],
+                   cells[(o.y + 1) * 3 + o.x + 1]) & vec4u(0x80u);
+  return select(vec4f(1.0), vec4f(0.0), wall != vec4u(0u));
+}
+
+// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear over the open ones. A cell is open when it
+// lies in the arena and holds no wall (`open`, from unwalled()): the cells that can hold slime. The weights of the
+// open cells are scaled up to 1, as trailBesideWalls() does for the trail. So the layer goes on up to a wall and to
+// the edge of the arena, which are drawn over it; with their cells in the blend it fell towards them, in steps of
+// whole cells along a slanted wall and along the rim of the dish. The stamps are never blended: between a new stamp
+// and no stamp lies no old one.
+fn slimeBilinear(p: vec2f, open: vec4f) -> f32 {
   let q = p - 0.5;
   let i = vec2i(floor(q));
   let f = q - floor(q);
-  let a = mix(slimeCell(i), slimeCell(i + vec2i(1, 0)), f.x);
-  let b = mix(slimeCell(i + vec2i(0, 1)), slimeCell(i + vec2i(1, 1)), f.x);
-  return mix(a, b, f.y);
+  var sum = 0.0;
+  var total = 0.0;
+  for (var dy = 0; dy < 2; dy++) {
+    for (var dx = 0; dx < 2; dx++) {
+      let c = i + vec2i(dx, dy);
+      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) { continue; }
+      let w = select(1.0 - f.x, f.x, dx == 1) * select(1.0 - f.y, f.y, dy == 1);
+      sum += w * slimeCell(c);
+      total += w;
+    }
+  }
+  return select(0.0, sum / total, total > 0.0);
 }
 
 // Zoomed out: the mean of the strength over the square of the pixel, V.scale cells wide, with the weights of
 // trailArea(): the 3 × 3 texels of the map of level V.fx.w under the pixel, each by the share that lies under it. Up to
 // 2 cells per pixel a texel is a cell (level 0), and this is the exact mean. The slime has no coarser map: above 2
 // cells per pixel the cell in the middle of a texel stands for the texel. Those cells are fixed in the grid and the
-// weights change smoothly with p, so the layer does not shimmer when the view moves. Outside a closed arena the
-// strength is 0, as for slimeCell().
+// weights change smoothly with p, so the layer does not shimmer when the view moves. A wall and a cell outside the
+// arena count with a strength of 0, as they count with a trail of 0 in trailArea(): a pixel holds a cell or more here.
 fn slimeArea(p: vec2f) -> f32 {
   let s = size();
   let k = u32(V.fx.w);
@@ -793,9 +824,10 @@ fn slimeArea(p: vec2f) -> f32 {
 }
 
 // The ground `bg` at p with the slime on it: the colour of the layer over the ground, as strong as the slime there.
-fn slimed(bg: vec3f, p: vec2f) -> vec3f {
+// `open`: as for slimeBilinear().
+fn slimed(bg: vec3f, p: vec2f, open: vec4f) -> vec3f {
   var strength: f32;
-  if (V.scale <= 1.0) { strength = slimeBilinear(p); } else { strength = slimeArea(p); }
+  if (V.scale <= 1.0) { strength = slimeBilinear(p, open); } else { strength = slimeArea(p); }
   return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);
 }
 
@@ -825,7 +857,11 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   let halo = textureSampleLevel(bloom, bloomSampler, p / s, 0.0);
   var base = V.background.rgb;
   // The slime tints the ground: the flake of food, the trail and all else lie on it.
-  if (SLIME) { base = slimed(base, p); }
+  if (SLIME) {
+    var open = vec4f(1.0);
+    if (ENV && near) { open = unwalled(p, cells); }
+    base = slimed(base, p, open);
+  }
   var e: Env;
   var f: Flake;
   if (ENV && near) {

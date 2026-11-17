@@ -238,11 +238,17 @@ describe('the CPU reference of the slime field', () => {
       for (const [x, y] of at) stamps[y * width + x] = stampOf(0);
       return stamps;
     };
-    const grid = (width: number, height: number, boundary: Settings['boundary'] = 'box') => ({
-      width,
-      height,
-      boundary,
-    });
+    /** A grid without walls, or with a wall in each cell of `walls`. */
+    const grid = (
+      width: number,
+      height: number,
+      boundary: Settings['boundary'] = 'box',
+      walls: readonly (readonly [number, number])[] = [],
+    ): FlowGrid => {
+      const env = new Uint8Array(width * height * 4);
+      for (const [x, y] of walls) env[(y * width + x) * 4] = 255;
+      return { width, height, boundary, env };
+    };
     const one = field(8, 6, [[3, 2]]);
 
     it('is the strength of a cell at its centre, and bilinear between the centres of four cells', () => {
@@ -258,6 +264,41 @@ describe('the CPU reference of the slime field', () => {
       expect(look(5.2, 2.5)).toBe(0);
       // The same at 1 cell per pixel.
       expect(slimeLayer(one, grid(8, 6), 0, life, [4, 3], 1, 0)).toBe(0.25);
+    });
+
+    // A wall and a cell outside the arena never hold slime. The layer does not fade towards them: the blend leaves
+    // their cells out, and the layer goes on up to the wall and to the edge of the arena.
+    it('blends only the open cells, so the layer goes on up to a wall and to the edge of the arena', () => {
+      // A wall in the cell to the right of the cell with slime, and a cell without slime to its left.
+      const walled = grid(8, 6, 'box', [[4, 2]]);
+      const look = (x: number, y = 2.5) => slimeLayer(one, walled, 0, life, [x, y], 0.25, 0);
+      expect(look(3.5)).toBe(1);
+      // Towards the wall: the full strength up to the centre of the wall cell, which the wall covers.
+      expect([look(3.75), look(4), look(4.25), look(4.49)]).toEqual([1, 1, 1, 1]);
+      expect(look(4.5)).toBe(0);
+      // Towards the cell without slime the layer fades as before.
+      expect([look(3.25), look(3), look(2.75)]).toEqual([0.75, 0.5, 0.25]);
+      // Beside the wall, a row lower: the cell with slime counts with its weight among the three open cells.
+      expect(look(4, 3)).toBeCloseTo(0.25 / 0.75, 12);
+      // The edge of a box: the cells of the first column go on to the edge, and beyond it.
+      const edge = field(8, 6, [
+        [0, 2],
+        [0, 3],
+      ]);
+      const atEdge = (x: number, boundary: Settings['boundary']) =>
+        slimeLayer(edge, grid(8, 6, boundary), 0, life, [x, 3], 0.25, 0);
+      expect([atEdge(0.5, 'box'), atEdge(0.2, 'box'), atEdge(0, 'box'), atEdge(-0.3, 'box')]).toEqual([1, 1, 1, 1]);
+      expect(atEdge(1, 'box')).toBe(0.5);
+      // On the periodic grid the last column lies beside the first: there the layer fades towards it.
+      expect([atEdge(0.25, 'wrap'), atEdge(0, 'wrap'), atEdge(-0.25, 'wrap')]).toEqual([0.75, 0.5, 0.25]);
+      // The rim of a dish of 8 × 6 cells, 2.835 cells around (4, 3): the centre of the cell (0, 2) lies 3.54 cells
+      // from it, outside the dish, and that of the cell (1, 2) 2.55 cells, inside.
+      const rim = field(8, 6, [[1, 2]]);
+      const atRim = (x: number) => slimeLayer(rim, grid(8, 6, 'dish'), 0, life, [x, 2.5], 0.25, 0);
+      expect([atRim(1.5), atRim(1.2), atRim(0.8), atRim(0.51)]).toEqual([1, 1, 1, 1]);
+      expect(atRim(2)).toBe(0.5);
+      // No open cell around the point: nothing.
+      expect(slimeLayer(rim, grid(8, 6, 'dish'), 0, life, [0.4, 0.4], 0.25, 0)).toBe(0);
     });
 
     it('blends the strengths of old and new slime, never their stamps', () => {

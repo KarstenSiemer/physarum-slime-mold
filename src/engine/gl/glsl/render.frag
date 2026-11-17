@@ -509,14 +509,41 @@ float slimeCell(ivec2 c) {
   return q.x < 0 ? 0.0 : slimeOf(texelFetch(stamps, q, 0).r);
 }
 
-// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear (slimeBilinear in render.wgsl).
-float slimeBilinear(vec2 p) {
+// Whether grid cell c lies in the arena (slimeArena in render.wgsl).
+bool slimeArena(ivec2 c) {
+  if (V.boundary == 0u) return true;
+  ivec2 s = gridSize();
+  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) return false;
+  return V.boundary != 2u || distance(vec2(c) + 0.5, 0.5 * vec2(s)) <= DISH_FILL * 0.5 * float(min(s.x, s.y));
+}
+
+#if ENV
+// Which of the 4 cells around p hold no wall: 1 open, 0 wall, in the order of the blend (unwalled in render.wgsl).
+vec4 unwalled(vec2 p, vec4 cells[9]) {
+  ivec2 o = ivec2(floor(p - 0.5)) - ivec2(floor(p)) + 1;
+  return vec4(lessThan(vec4(cells[o.y * 3 + o.x].r, cells[o.y * 3 + o.x + 1].r, cells[(o.y + 1) * 3 + o.x].r,
+                            cells[(o.y + 1) * 3 + o.x + 1].r), vec4(0.5)));
+}
+#endif
+
+// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear over the open ones, with their weights
+// scaled up to 1 (slimeBilinear in render.wgsl). `open`: from unwalled().
+float slimeBilinear(vec2 p, vec4 open) {
   vec2 q = p - 0.5;
   ivec2 i = ivec2(floor(q));
   vec2 f = q - floor(q);
-  float a = mix(slimeCell(i), slimeCell(i + ivec2(1, 0)), f.x);
-  float b = mix(slimeCell(i + ivec2(0, 1)), slimeCell(i + ivec2(1, 1)), f.x);
-  return mix(a, b, f.y);
+  float sum = 0.0;
+  float total = 0.0;
+  for (int dy = 0; dy < 2; dy++) {
+    for (int dx = 0; dx < 2; dx++) {
+      ivec2 c = i + ivec2(dx, dy);
+      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) continue;
+      float w = (dx == 1 ? f.x : 1.0 - f.x) * (dy == 1 ? f.y : 1.0 - f.y);
+      sum += w * slimeCell(c);
+      total += w;
+    }
+  }
+  return total > 0.0 ? sum / total : 0.0;
 }
 
 // Zoomed out: the mean of the strength over the square of the pixel, with the weights of trailArea(); above 2 cells per
@@ -560,9 +587,9 @@ float slimeArea(vec2 p) {
   return sum / (area.x * area.y);
 }
 
-// The ground `bg` at p with the slime on it (slimed in render.wgsl).
-vec3 slimed(vec3 bg, vec2 p) {
-  float strength = V.scale <= 1.0 ? slimeBilinear(p) : slimeArea(p);
+// The ground `bg` at p with the slime on it (slimed in render.wgsl). `open`: as for slimeBilinear().
+vec3 slimed(vec3 bg, vec2 p, vec4 open) {
+  float strength = V.scale <= 1.0 ? slimeBilinear(p, open) : slimeArea(p);
   return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);
 }
 #endif
@@ -800,7 +827,11 @@ vec3 scene(vec2 p, vec2 s) {
   vec3 base = V.background.rgb;
 #ifdef SLIME
   // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).
-  base = slimed(base, p);
+  vec4 open = vec4(1.0);
+#if ENV
+  if (near) open = unwalled(p, cells);
+#endif
+  base = slimed(base, p, open);
 #endif
   Flake f = Flake(vec3(0.0), vec3(0.0), 0.0, 0.0);
 #if ENV

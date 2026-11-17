@@ -121,7 +121,9 @@ const WITHOUT_SLIME = {
         '// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake) -> vec3f {\n  let bg = V.background.rgb;\n',
       ],
       [
-        '  // The slime tints the ground: the flake of food, the trail and all else lie on it.\n  if (SLIME) { base = slimed(base, p); }\n',
+        '  // The slime tints the ground: the flake of food, the trail and all else lie on it.\n' +
+          '  if (SLIME) {\n    var open = vec4f(1.0);\n    if (ENV && near) { open = unwalled(p, cells); }\n' +
+          '    base = slimed(base, p, open);\n  }\n',
         '',
       ],
       ['    base = substrate(f, base);\n', '    base = substrate(f);\n'],
@@ -133,7 +135,9 @@ const WITHOUT_SLIME = {
     rewrite(renderFrag, [
       ['vec3 substrate(Flake f, vec3 bg) {\n', 'vec3 substrate(Flake f) {\n  vec3 bg = V.background.rgb;\n'],
       [
-        '#ifdef SLIME\n  // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).\n  base = slimed(base, p);\n#endif\n',
+        '#ifdef SLIME\n  // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).\n' +
+          '  vec4 open = vec4(1.0);\n#if ENV\n  if (near) open = unwalled(p, cells);\n#endif\n' +
+          '  base = slimed(base, p, open);\n#endif\n',
         '',
       ],
       ['    base = substrate(f, base);\n', '    base = substrate(f);\n'],
@@ -173,11 +177,12 @@ function slimedGround(style: Settings['style'], share: number): Rgb {
  * The picture of a simulation without trail, food, light and walls on the CPU, as render.wgsl `fs` draws it, 3 bytes
  * per pixel: inside the arena the ground, with the layer of the slime on it while `layer` is true (slimeLayer() in
  * slime-reference.ts), and outside it the free space, with a ramp one pixel wide between them. Around a periodic
- * lattice the copies of the grid show dimmed (ADR 0026). `stamps`: the slime field of the simulation; `step`: the
- * steps that ran so far.
+ * lattice the copies of the grid show dimmed (ADR 0026). `stamps`: the slime field of the simulation; `env`: its
+ * environment, which holds no wall, or no walls at all; `step`: the steps that ran so far.
  */
 function groundPicture(
   stamps: Uint32Array,
+  env: Uint8Array | undefined,
   [w, h]: readonly [number, number],
   settings: Settings,
   step: number,
@@ -190,7 +195,7 @@ function groundPicture(
   const space = bg.map((v) => v * (settings.style === 'paper' ? 0.92 : 0.55)) as Rgb;
   const life = slimeSteps(settings);
   const level = trailLevel(view.scale);
-  const grid = { width: w, height: h, boundary: settings.boundary };
+  const grid: FlowGrid = { width: w, height: h, boundary: settings.boundary, env: env ?? new Uint8Array(w * h * 4) };
   const ramp = (sd: number) => smoothstep(-0.5 * view.scale, 0.5 * view.scale, sd);
   const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
   for (let y = 0; y < ch; y++)
@@ -1111,7 +1116,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         const img = await close(sim, s);
         // No pixel of the picture differs from the bare ground: the stamp stays, and the picture draws none of it.
         expect(
-          worst(img, groundPicture(new Uint32Array(PW * PH), [PW, PH], s, sim.step, CLOSE, [512, 384])),
+          worst(img, groundPicture(new Uint32Array(PW * PH), undefined, [PW, PH], s, sim.step, CLOSE, [512, 384])),
         ).toBeLessThanOrEqual(1);
       }
       expect((await sim.readSlime())[10 * PW + 10]).toBe(1);
@@ -1191,8 +1196,8 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       const img = await backend.capture(sim, settings, view, SIZE[0], SIZE[1]);
       const size = [sim.width, sim.height] as const;
       const stamps = await sim.readSlime();
-      const want = groundPicture(stamps, size, settings, sim.step, view, SIZE);
-      const plain = groundPicture(stamps, size, settings, sim.step, view, SIZE, false);
+      const want = groundPicture(stamps, undefined, size, settings, sim.step, view, SIZE);
+      const plain = groundPicture(stamps, undefined, size, settings, sim.step, view, SIZE, false);
       let changed = 0;
       for (let i = 0; i < want.length; i += 3)
         if ([0, 1, 2].some((k) => Math.abs((want[i + k] ?? 0) - (plain[i + k] ?? 0)) > 2)) changed++;
@@ -1305,6 +1310,20 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         // The wall: its middle, and its outer cells, whose neighbours have slime.
         for (const x of [8, 10, 12]) expect(off(both(x, 18).on, both(x, 18).plain), 'wall').toBeLessThanOrEqual(2);
         expect(off(both(10, 18).plain, bytes(bg))).toBeGreaterThan(20);
+        // The layer goes on up to the wall. The wall holds the cells 8 to 12 of this row, and its outline lies on
+        // their outer edges. One pixel outside the outline the blend holds three eighths of the wall's cell, which
+        // has no slime: the layer is at its full strength there all the same. The shadow of the wall darkens the
+        // ground with the layer as much as the ground without it. In the paper style, where the bytes of the ground
+        // without the layer tell its shade.
+        if (style === 'paper')
+          for (const x of [59, 101]) {
+            const [a, b] = [pixel(on, x, 144), pixel(plain, x, 144)];
+            const shade = (share: number) =>
+              bytes(slimedGround(style, share).map((g, k) => (g * fromByte(b[k] ?? 0)) / (bg[k] ?? 1)) as Rgb);
+            expect(off(a, shade(1)), `beside the wall at pixel ${String(x)}`).toBeLessThanOrEqual(2);
+            // A blend with the wall's cell in it would draw five eighths of the strength.
+            expect(off(a, shade(0.625)), `beside the wall at pixel ${String(x)}`).toBeGreaterThanOrEqual(4);
+          }
         // The light adds to the ground below it, with the layer or without it.
         const lit = both(40, 12);
         const added = lit.linear.map((v, k) => v + (ground[k] ?? 0) - (bg[k] ?? 0)) as Rgb;
