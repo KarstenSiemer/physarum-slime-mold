@@ -1,8 +1,9 @@
 // Which test catches which wrong rule of the flow (ADR 0029, "The tests against wrong rules"), of the picture of the
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
 // of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046), of the
-// Electrode tool (ADR 0047), of Light stops growth (ADR 0050) and of the rule that no child is born onto starved ground
-// (ADR 0053). The script puts one wrong rule at a time into a source file of the app,
+// Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
+// (ADR 0053) and of the mark that a starved tube leaves (ADR 0054). The script puts one wrong rule at a time into a
+// source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
 // must fail at least one test.
@@ -64,6 +65,9 @@ const GROWTH_WGSL = 'src/engine/shaders/growth.wgsl';
 const GROWTH_FRAG = 'src/engine/gl/glsl/growth.frag';
 const SHADE = 'stop births onto lit cells';
 const [SHADE_GPU, SHADE_GL] = [`webgpu .*${SHADE}`, `webgl2 .*${SHADE}`];
+/** A starved tube that vanishes leaves its ground at the floor (ADR 0054): the tests of the mark on each backend. */
+const MARK = '(tube that vanishes|starved ground recover)';
+const [MARK_GPU, MARK_GL] = [`webgpu .*${MARK}`, `webgl2 .*${MARK}`];
 /** No child is born onto starved ground (ADR 0053): the tests of the rule on each backend, in the tests of the flow. */
 const STARVED = 'no child be born onto starved ground';
 const [STARVED_GPU, STARVED_GL] = [`webgpu .*${STARVED}`, `webgl2 .*${STARVED}`];
@@ -2205,6 +2209,78 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     "f.set([255 * s.electrodeStrength * g, 0, 0, 0], slot('electrode'));",
     SHADE,
     SIM_SPEC,
+  ],
+  // A starved tube that vanishes leaves its ground at the floor of the flow memory (ADR 0054): only a tube, only a
+  // starved one, only in the step in which it vanishes, and at the floor.
+  [
+    'FL1 wgsl: a starved tube that vanishes keeps its flow memory',
+    WGSL,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    'if (false && m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    MARK_GPU,
+  ],
+  [
+    'FL2 wgsl: a tube that is not starved leaves its ground at the floor too',
+    WGSL,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    'if (m.y >= U.c.z && body < U.c.z) { d = U.d.x; }',
+    MARK_GPU,
+  ],
+  [
+    'FL3 wgsl: starved ground without a tube falls to the floor in every step',
+    WGSL,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    'if (body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    MARK_GPU,
+  ],
+  [
+    'FL4 wgsl: a starved tube falls to the floor before it vanishes',
+    WGSL,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    'if (m.y >= U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    MARK_GPU,
+  ],
+  [
+    'FL5 wgsl: a starved tube that vanishes leaves fresh ground',
+    WGSL,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }',
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.c.w; }',
+    MARK_GPU,
+  ],
+  [
+    'FL6 glsl: a starved tube that vanishes keeps its flow memory',
+    FRAG,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    'if (false && m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    MARK_GL,
+  ],
+  [
+    'FL7 glsl: a tube that is not starved leaves its ground at the floor too',
+    FRAG,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    'if (m.y >= U.c.z && body < U.c.z) d = U.d.x;',
+    MARK_GL,
+  ],
+  [
+    'FL8 glsl: starved ground without a tube falls to the floor in every step',
+    FRAG,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    'if (body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    MARK_GL,
+  ],
+  [
+    'FL9 glsl: a starved tube falls to the floor before it vanishes',
+    FRAG,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    'if (m.y >= U.c.z && d * d < U.e.y) d = U.d.x;',
+    MARK_GL,
+  ],
+  [
+    'FL10 glsl: a starved tube that vanishes leaves fresh ground',
+    FRAG,
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;',
+    'if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.c.w;',
+    MARK_GL,
   ],
   // No child is born onto starved ground (ADR 0053): the rule reads the cell of the child, by the flow memory of the
   // strain of the child, after the wrap of the grid, and it leaves a starved neighbour out of the pick.

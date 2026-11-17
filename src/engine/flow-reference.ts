@@ -132,6 +132,8 @@ export function flowUpdate(
   const [base, foodG] = [u[4] ?? 0, u[5] ?? 0];
   const [bodyRate, bodyLow, fresh] = [u[9] ?? 0, u[10] ?? 0, u[11] ?? 0];
   const [floor, trailLow, trailScale] = [u[12] ?? 0, u[13] ?? 0, u[14] ?? 0];
+  /** The square of the flow memory below which a cell is starved (FLOW.half). */
+  const half2 = u[17] ?? 0;
   const strain = Math.trunc(u[22] ?? 0);
   const flux = flowFlux(grid, fields.memory, fields.pressure);
   // A flux runs between foods while at least two food sites gave or took in the step before, at their ports of that
@@ -168,6 +170,8 @@ export function flowUpdate(
       const own = trail[i + strain] ?? 0;
       const presence = Math.min(1, Math.max(0, (own - trailLow) * trailScale));
       const body = bodyOld + bodyRate * (presence - bodyOld);
+      // A starved tube that vanishes leaves starved ground: its flow memory falls to the floor in this step (ADR 0054).
+      if (bodyOld >= bodyLow && body < bodyLow && d * d < half2) d = floor;
       // Only a cell with a tube conducts; a food cell then with the conductivity of food.
       const food = (env[i + 1] ?? 0) > 0;
       const g = body >= bodyLow ? body * (food ? foodG : base + d) : 0;

@@ -731,6 +731,67 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(expected[8]).toBe(fresh);
   }, 240_000);
 
+  it('leaves the ground of a starved tube that vanishes at the floor of the flow memory', async () => {
+    // ADR 0054. No agent lives, so no trail: the tube body of a cell falls by the share FLOW.bodyRate per step, and a
+    // cell loses its tube in the step in which its body falls below FLOW.bodyLow. No food: no tube adapts. The column of
+    // a cell gives its flow memory at the start. The rows 0 and 1 hold a tube that vanishes in the first step, the rows
+    // 2 and 3 a tube that vanishes in the tenth step, and the other rows ground without a tube.
+    const [w, h] = [18, 8];
+    const starts = [FLOW.floor, 0.001, 0.005, FLOW.half * 0.99, FLOW.half * 1.01, 0.05, 0.19, FLOW.fresh, 0.5];
+    const bodies = [0.0505, 0.0505, 0.06, 0.06, 0, 0, 0, 0];
+    const sim = await make(flowing(), w, h, 32, 0);
+    const memory = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++)
+      memory.set([starts[c % starts.length] ?? 0, bodies[Math.floor(c / w)] ?? 0, 0, 0], c * 4);
+    sim.writeFlow(memory);
+    // The rule in float32, as the passes compute it: the memory and the tube body of every cell.
+    const f = Math.fround;
+    const [fresh, floor, factor] = [f(FLOW.fresh), f(FLOW.floor), f(1 + f(FLOW.recover))];
+    const [low, rate, half2] = [f(FLOW.bodyLow), f(FLOW.bodyRate), f(FLOW.half * FLOW.half)];
+    const cells = Array.from({ length: w * h }, (_, c) => ({
+      d: f(starts[c % starts.length] ?? 0),
+      body: f(bodies[Math.floor(c / w)] ?? 0),
+    }));
+    const step = () => {
+      for (const cell of cells) {
+        const tube = cell.body >= low;
+        if (!tube) cell.d = f(Math.min(fresh, f(Math.max(cell.d, floor) * factor)));
+        const body = f(cell.body + f(rate * f(0 - cell.body)));
+        if (tube && body < low && f(cell.d * cell.d) < half2) cell.d = floor;
+        cell.body = body;
+      }
+    };
+    let done = 0;
+    for (const steps of [1, 1, 7, 1, 1, 40]) {
+      sim.run(steps);
+      for (let s = 0; s < steps; s++) step();
+      done += steps;
+      const got = await sim.readFlow();
+      cells.forEach((want, c) => {
+        const what = `cell ${String(c)}, step ${String(done)}`;
+        expect(Math.abs((got[c * 4] ?? 0) - want.d) / want.d, `memory of ${what}`).toBeLessThan(1e-4);
+        expect((got[c * 4 + 1] ?? 0) >= low, `tube of ${what}`).toBe(want.body >= low);
+      });
+      // The cells of the first columns are starved: FLOW.floor to just below FLOW.half.
+      const starved = (row: number) => [0, 1, 2, 3].map((x) => got[(row * w + x) * 4]);
+      const fed = (row: number) => [4, 5, 6, 7, 8].map((x) => got[(row * w + x) * 4]);
+      // A starved tube that vanished holds the floor in the step in which it vanishes, and it recovers from there.
+      if (done === 1) expect(starved(0)).toEqual([floor, floor, floor, floor]);
+      // A tube that is not starved keeps its memory when it vanishes; the step after, a memory above fresh ground falls
+      // to fresh ground (ADR 0029, decision 7).
+      if (done === 1) expect(fed(0)).toEqual([4, 5, 6, 7, 8].map((x) => f(starts[x] ?? 0)));
+      if (done === 2) expect(fed(0)[4]).toBe(fresh);
+      // A starved tube keeps its memory while it stands, and falls to the floor in the step in which it vanishes.
+      if (done === 9) expect(starved(2)).toEqual([0, 1, 2, 3].map((x) => f(starts[x] ?? 0)));
+      if (done === 10) expect(starved(2)).toEqual([floor, floor, floor, floor]);
+      // Starved ground without a tube does not fall: it recovers from its own memory.
+      if (done === 1) expect((starved(5)[2] ?? 0) / f(0.005)).toBeCloseTo(1 + FLOW.recover, 6);
+    }
+    // 51 steps after the start the ground of the first tubes has recovered by the factor of the rule for 50 steps.
+    expect(cells[2]?.d).toBeCloseTo(FLOW.floor * (1 + FLOW.recover) ** 50, 8);
+    expect(cells[2]?.d).toBeLessThan(0.001);
+  }, 240_000);
+
   it('lets a food give or take only when a tube covers it and one more food, and keeps the memory until then', async () => {
     // A tube from the first food that ends before the second food: one covered food alone has no role.
     const { tube, memory, pressure } = await tubes(

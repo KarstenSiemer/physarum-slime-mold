@@ -259,16 +259,19 @@ These lines are conclusions [I], not facts of a paper.
 - **Such a bias does not keep the colony out of a dead end** (measured in stage 1, ADR 0053, with the mark of
   starved ground in the place of the slime). Inside a dead end that the colony left, every free cell has slime, so
   the bias never acts there, and the colony comes back as before. What kept the dead ends empty in that measurement
-  was ground that stays closed for births for a fixed time.
+  was ground that stays closed for births for a fixed time. Since ADR 0054 the mark of starved ground is such ground:
+  a starved tube that vanishes leaves the lowest flow memory, and no child is born there for 3.7 days of model time.
 - **Food lifts it.** Reid et al. 2013 (abstract) and Briard et al. 2020 say so. The state of the plasmodium matters as
   well: ground of a well-fed plasmodium attracts, and the fed plasmodia of Patino-Ramirez et al. 2019 did not avoid
   left ground at all.
 - **The reach is short.** The organism senses slime at contact (Reid et al. 2012) or from a short distance (Tröger et
   al. 2024; Masui et al. 2018: 0.1 to 1 mm). A cell of the Tokyo scene is 0.54 mm. So a rule that reads the slime of
   the cell of the child reads at the organism's distance.
-- **No life time to take from a paper**: 3 h to 6 days are reported. In the model today, starved ground is fresh
-  again after up to 18 h, and it is open for births again much sooner: from the lowest memory after 11 h, and half of
-  the closed ground of a dead end within about 7,000 steps, 4 h (`docs/model.md`, 8.4 and 8.6; ADR 0053).
+- **No life time to take from a paper**: 3 h to 6 days are reported. In the model, starved ground is fresh again
+  after 6 days, the longest of these times, and it is open for births again after 3.7 days (`docs/model.md`, 8.4 and
+  8.6; ADR 0054). Before ADR 0054 the times were 18 h and 11 h at most, and half of the closed ground of a dead end
+  was open again within about 7,000 steps, 4 h (ADR 0053). A mark that fades lets the colony come back when it has
+  faded: measured once, 160,182 steps after the ground closed (ADR 0054).
 - **No answer for the dead ends.** No paper says whether the organism grows back into a dead end. The maze of 2000
   had no growth after the food came, so the growth of the Snail maze and the Corn maze has no experiment to follow.
 
@@ -561,10 +564,12 @@ Read by the coordinator on 2026-11-16:
   the cell of the child (ADR 0050). **Measured in stage 1** (ADR 0053): this was a third of the births in the dead
   ends of the Snail maze. Since ADR 0053 no child is born onto a starved cell, and the test of the cell of the parent
   stays.
-- **That was not the cause of the growth back into dead ends** (ADR 0053). The cause is the mark of starved ground: a
-  cell is closed for births while D < 0.01, D falls only while the cell holds a tube, and a starved tube is gone soon.
-  So the ground of a dead end opens again after some thousand steps, and the colony comes back as a wave. `TODO.md`
-  has what follows for stages 2 to 4.
+- **That was not the cause of the growth back into dead ends** (ADR 0053). The cause was the mark of starved ground:
+  a cell is closed for births while D < 0.01, D fell only while the cell held a tube, and a starved tube is gone soon.
+  So the ground of a dead end opened again after some thousand steps, and the colony came back as a wave. ADR 0054
+  changed the mark on 2026-11-17: a starved tube that vanishes leaves its ground at the lowest flow memory, and the
+  mark lasts 6 days. With it the dead ends of the Snail maze stay empty until the mark has faded. `TODO.md` has what
+  follows for stages 2 to 4.
 - Flux exists only between food sites with a role (`docs/model.md`, 8.4 and 8.5). A tube that leads only to a growing
   front carries no flux, so no trunk can form toward a front. Not measured.
 

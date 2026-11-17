@@ -477,10 +477,11 @@ const tokyo = (extra: Partial<Settings> = {}) =>
       foodStrength: 0.03,
       growth: true,
       flow: true,
-      // Measured with 1, 1.4 and 2 over ten seeds each, twice (ADR 0029): with 1.4 the total length of the
-      // network is that of the organism (1.77 against 1.75 times the minimum spanning tree). The I0 = 2 of the
-      // model of Tero et al. 2010 (Fig. 4) has another unit.
-      flowStrength: 1.4,
+      // Measured with 1.4, 2 and 2.8 with the mark of starved ground of ADR 0054: with 2.8 the total length of the
+      // network at step 48,000 is 1.72 times the minimum spanning tree, and that of the organism at 26 h is 1.75.
+      // Before that mark the strength was 1.4 (ADR 0029, decision 12). The I0 = 2 of the model of Tero et al. 2010
+      // (Fig. 4) has another unit.
+      flowStrength: 2.8,
       ...extra,
     },
   );
@@ -825,11 +826,11 @@ PRESETS.push(
     source: 'Made for this app',
     summary: 'A spiral with one route: a colony grows in to the food in the middle, and one tube stays.',
     watch:
-      'The colony starts on the food at the right and fills every corridor. After about 9,000 steps it reaches the food in the middle. Then the flow runs along the one route, and the blind branches thin out. They do not stay empty: the colony keeps growing short branches into them.',
+      'The colony starts on the right food and fills every corridor. After about 9,000 steps it reaches the food in the middle. The flow then follows the one route, and the blind branches starve. From step 20,000 on they stay empty: no child is born where a tube starved. Short twigs still leave the tube.',
     about:
       'A maze like a snail shell: four ring corridors around a room in the middle. Each ring wall has one gap, on the right and on the left in turns, and a bar closes each corridor a quarter turn past the gap. So one route winds inward, every corridor has two blind branches, and the maze has no loop. The walls are this app’s design.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
-    why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles, as in the Foraging maze. Flow in the tubes is on with a strength of 8, the Maze’s. The grid has 384 × 384 cells on every screen, so the rings stay round. A corridor is 34 cells wide. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    why: 'Growth and shrinkage with Jones’ values of 2011 and his foraging angles, as in the Foraging maze. Flow in the tubes is on with a strength of 8, the Maze’s. The grid has 384 × 384 cells on every screen, so the rings stay round. A corridor is 34 cells wide. Sensor distance 7 and food weight 0.03 are the Maze’s. Starved ground stays closed for about 160,000 steps; then the colony looks into a blind branch once more.',
     settings: () => forager({ lattice: [SNAIL_MAZE.side, SNAIL_MAZE.side], boundary: 'box' }),
     // The start layout 'food' places the colony on the first food: the one at the entrance.
     env: snailShapes(),
@@ -841,7 +842,7 @@ PRESETS.push(
     source: 'Made for this app',
     summary: 'A maze with six routes between two foods: the flow keeps a tube on the shortest one.',
     watch:
-      'The colony starts at the top left and reaches the food at the bottom right after about 3,500 steps, along several routes. From about step 5,000 only the shortest route carries flow. The other corridors thin out, but short branches keep growing back into them.',
+      'The colony starts at the top left and reaches the food at the bottom right after about 3,500 steps, along several routes. From about step 5,000 only the shortest route carries flow. The other corridors starve and stay empty: no child is born where a tube starved. Short twigs still leave the tube.',
     about:
       'A maze like one cut into a corn field: 12 × 8 rooms with dead ends and loops. Six routes join the entrance at the top left and the exit at the bottom right, and the longest is 1.47 times as long as the shortest. In the maze of Nakagaki et al. (2000) a real slime mold kept the shortest route alone in 5 of 19 runs, and a route 1 mm longer in 6. Here the flow keeps the shortest of the six routes.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
@@ -955,7 +956,7 @@ PRESETS.push(
     about:
       'In 2010, Atsushi Tero and colleagues put oat flakes on a plate where the cities around Tokyo lie, with the coast as its edge. A slime mold grew out from Tokyo and joined all flakes within 26 hours. Its network was about as short, as fast and as robust as the real railway. Here, Jones’ agents grow from Tokyo, and the flow in the tubes decides which tubes stay.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
-    why: 'Growth and shrinkage with Jones’ values of 2011 let the colony grow from Tokyo. Flow in the tubes is on with a strength of 1.4: the network is then as long as the organism’s. Tokyo is seven foods, as in the model of the paper. The map has 512 × 512 cells on every screen, so north stays up. Sensor distance 7 and food weight 0.03 are the Maze’s. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
+    why: 'Growth and shrinkage with Jones’ values of 2011 let the colony grow from Tokyo. Flow in the tubes is on with a strength of 2.8: the network is then as long as the organism’s. Tokyo is seven foods, as in the model of the paper. The map has 512 × 512 cells on every screen, so north stays up. Sensor distance 7 and food weight 0.03 are the Maze’s. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
     figure: {
       href: 'https://doi.org/10.1126/science.1177894',
       label: 'Fig. 1',
@@ -1040,8 +1041,8 @@ PRESETS.push(
     about:
       'The map of the scene Tokyo rail network, with two strains that flee each other’s trail. Each strain is a slime mold of its own and has its own flow, so each keeps the tubes that carry its own flow between cities. The experiment of Tero and colleagues had one slime mold. This scene is this app’s question of what two rivals build.',
     strainRoles: ['Starts at Tokyo station', 'The same settings as A, starts at Utsunomiya'],
-    why: 'The settings of the scene Tokyo rail network, twice: Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 1.4 for each strain. A weight of −1 on the other strain’s trail keeps the tubes apart. The start layout puts strain A on Tokyo and strain B on Utsunomiya. The map has 512 × 512 cells. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
-    settings: () => forager({ lattice: [512, 512], flowStrength: 1.4 }, 2),
+    why: 'The settings of the scene Tokyo rail network, twice: Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 2.8 for each strain. A weight of −1 on the other strain’s trail keeps the tubes apart. The start layout puts strain A on Tokyo and strain B on Utsunomiya. The map has 512 × 512 cells. Stations: Wikidata. Coast: © OpenStreetMap contributors.',
+    settings: () => forager({ lattice: [512, 512], flowStrength: 2.8 }, 2),
     // The start layout 'food' places strain A on the first food and strain B on the second.
     env: tokyoShapes(['Tokyo', 'Utsunomiya']),
   },

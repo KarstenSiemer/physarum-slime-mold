@@ -1,20 +1,26 @@
-// Other rules for the births of a colony with the flow, for the measurements of ADR 0053. The script puts one of them
+// Other rules for a colony with the flow, for the measurements of ADR 0053 and ADR 0054. The script puts one of them
 // into the WGSL passes of the app, runs a command, and puts the files back as they were. WebGPU only: the GLSL passes
 // stay as they are, so a run on WebGL2 has the rule of the app. No variant is a rule of the app.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/variant.ts <name> <command ...>
 // With the name `check` it only checks that every text that a variant replaces is once in its file.
 //
+// The births (growth.wgsl):
 // - parent: the rule before ADR 0053. No agent divides on a starved cell; a child is born onto any free neighbour.
 // - child: the cell of the child alone decides. An agent on a starved cell divides onto a neighbour that is not starved.
 // - left: also no birth onto ground that a starved tube left and that is not fresh again: a cell without a tube body
 //   and with a flow memory below that of fresh ground.
 // - weight: the plan of stage 2 of `TODO.md` with the mark of starved ground in the place of the slime. Such ground
 //   has the weight 0.025 in the pick of the neighbour, and the pick is as before when every free neighbour has it.
-// - floor: a starved tube that vanishes leaves its ground at the floor of the flow memory. This changes the rule of
-//   the flow memory (flow.wgsl), and the rule of the births stays that of the app.
-// - left+floor: both.
-// - parent+floor: `floor` with the rule of the births of before ADR 0053. It says whether the rule of ADR 0053 is a
-//   part of what `floor` does.
+//
+// The mark of starved ground (flow.wgsl):
+// - leaky: the mark before ADR 0054. A starved tube that vanishes keeps its flow memory, so each cell of its ground
+//   holds a mark of its own depth. With `VITE_RECOVER=0.00023` of dump.gpu.test.ts, the time of the mark before ADR
+//   0054, a run is the app of ADR 0053.
+// - mark: also a tube that is not starved yet leaves its ground at the floor, when its flow memory is below that of
+//   fresh ground.
+//
+// The records of ADR 0053 name more variants: `floor`, `left+floor` and `parent+floor`. `floor` is the rule of the app
+// since ADR 0054, so they are the app, `left` and `parent` now; `variant.ts` of the commit `02c3772` has them as they ran.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -46,11 +52,8 @@ const NO_BIRTH_ON_LEFT: Edit = [
   CHILD,
   '      if (starved(s, cellCoord(u32(m))) || left(s, cellCoord(u32(m)))) { continue; }\n',
 ];
-const TO_THE_FLOOR: Edit = [
-  FLOW,
-  '  let body = m.y + U.c.y * (presence - m.y);\n',
-  '  let body = m.y + U.c.y * (presence - m.y);\n  if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }\n',
-];
+/** The mark of the app (ADR 0054): a starved tube that vanishes leaves its ground at the floor. */
+const FLOOR = '  if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }\n';
 const PICK = `  var rng = rngSeed(agentId(a), GROW);
   var pick = min(u32(rand(&rng) * f32(free)), free - 1u);
   for (var k = 0u; k < 8u; k++) {
@@ -86,9 +89,8 @@ const VARIANTS: Record<string, Edit[]> = {
   child: [[GROWTH, PARENT, '']],
   left: [NO_BIRTH_ON_LEFT, LEFT],
   weight: [LEFT, [GROWTH, PICK, WEIGHTED_PICK]],
-  floor: [TO_THE_FLOOR],
-  'left+floor': [NO_BIRTH_ON_LEFT, LEFT, TO_THE_FLOOR],
-  'parent+floor': [[GROWTH, CHILD, ''], TO_THE_FLOOR],
+  leaky: [[FLOW, FLOOR, '']],
+  mark: [[FLOW, FLOOR, '  if (m.y >= U.c.z && body < U.c.z && d < U.c.w) { d = U.d.x; }\n']],
 };
 
 const [name = '', ...command] = process.argv.slice(2);

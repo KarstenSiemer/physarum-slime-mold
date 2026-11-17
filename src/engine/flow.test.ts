@@ -44,10 +44,13 @@ describe('the time scale (ADR 0029)', () => {
     expect(minutes(starve)).toBeLessThan(40);
     // The foods keep their roles for 10 min.
     expect(minutes(FLOW_HOLD)).toBe(10);
-    // Starved ground is fresh again after about 18 h.
+    // Starved ground is fresh again after about 6 days, and open for births again after 3.7 days (ADR 0054): slime
+    // from a large culture is avoided for up to 6 days (Reid et al. 2013, as Tröger et al. 2024 cite it, p. 3).
     const fresh = Math.log(FLOW.fresh / FLOW.floor) / Math.log(1 + FLOW.recover);
-    expect(minutes(fresh) / 60).toBeGreaterThan(17);
-    expect(minutes(fresh) / 60).toBeLessThan(19);
+    expect(minutes(fresh) / 60 / 24).toBeGreaterThan(6);
+    expect(minutes(fresh) / 60 / 24).toBeLessThan(6.2);
+    const open = Math.log(FLOW.half / FLOW.floor) / Math.log(1 + FLOW.recover);
+    expect(minutes(open) / 60 / 24).toBeCloseTo(3.7, 1);
   });
 
   it('lets few agents starve on fresh ground: half of a colony without a flux in about 8 hours', () => {
