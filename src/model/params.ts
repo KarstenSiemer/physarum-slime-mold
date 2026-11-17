@@ -466,6 +466,12 @@ export const scentViewHelp = {
   help: 'Shows the scent of food as a green glow and the repellent as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where food steers an agent as strongly as a strand of trail holds it: inside the line, food steers it more. The simulation does not change.',
 } as const;
 
+/** Help for the view switch "Show slime" (ADR 0055, decision 8); Learn → Controls lists it. */
+export const slimeViewHelp = {
+  label: 'Show slime',
+  help: 'Changes only the picture, not the simulation. The picture shows the slime as a pale layer on the ground: where the colony was, and where you painted slime. The food, the trail, the tubes, the light, the walls and the electrodes lie on the layer. The layer is strongest where the slime is new. It fades in a straight line as the slime gets older, and it is gone after the Slime life time. The Scent view does not draw it. Without the switch the ground is plain.',
+} as const;
+
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
 export const REFERENCE_SCENT_DECAY = 0.1;
 
@@ -536,6 +542,11 @@ export interface Settings extends Record<GlobalKey, number> {
    * grains that move with the flow (tubeViewHelp, ADR 0034). Display only.
    */
   showTubes: boolean;
+  /**
+   * The view draws the slime as a pale layer on the ground, while the model has slime (slimeViewHelp, ADR 0055,
+   * decision 8). Display only.
+   */
+  showSlime: boolean;
   strains: Strain[];
 }
 
@@ -593,6 +604,7 @@ export function defaultSettings(): Settings {
     gelColor: 'mild',
     showScent: false,
     showTubes: true,
+    showSlime: true,
     density: 1,
     diffusion: 1,
     meanWindow: 3,
@@ -698,6 +710,9 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // A link from before the picture of the tubes holds no switch for it: the picture is on, as for a new scene. It
   // changes no result (ADR 0034).
   out.showTubes = raw.showTubes !== false;
+  // So with the layer of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the layer
+  // is on. It changes no result.
+  out.showSlime = raw.showSlime !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
   // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).

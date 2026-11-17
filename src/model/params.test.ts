@@ -151,6 +151,23 @@ describe('sanitize (untrusted input)', () => {
     for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showTubes: v }).showTubes).toBe(true);
   });
 
+  // So is the layer of the slime (ADR 0055, decision 8): on for a new scene and for a link from before it, in both
+  // models. The switch changes no other setting.
+  it('keeps the layer of the slime on unless a link says false', () => {
+    expect(defaultSettings().showSlime).toBe(true);
+    expect(sanitize({}).showSlime).toBe(true);
+    expect(sanitize({ showSlime: false }).showSlime).toBe(false);
+    for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showSlime: v }).showSlime).toBe(true);
+    for (const model of ['jones', 'extended'] as const) {
+      const on = sanitize({ model, collisions: true, slimeLife: 24 });
+      expect(sanitize({ model, collisions: true, slimeLife: 24, showSlime: false })).toEqual({
+        ...on,
+        showSlime: false,
+      });
+      expect(constrain({ ...on, showSlime: false })).toEqual({ ...constrain(on), showSlime: false });
+    }
+  });
+
   it('takes the model, covered food and trail saturation', () => {
     const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
     expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);

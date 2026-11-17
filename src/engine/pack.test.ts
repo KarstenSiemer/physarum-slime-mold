@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dishRadius, DISH_FILL } from './brush';
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, emissionScale, strainSpec, type Settings } from '../model/params';
+import { packFlow } from './flow';
 import {
   AgentToolKind,
   CLEAR_TILE,
@@ -20,6 +21,7 @@ import {
   trailSaturation,
   type AgentTool,
 } from './pack';
+import { NO_SITES } from './sites';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const wgsl = read('./shaders/common.wgsl');
@@ -71,6 +73,20 @@ describe('Params layout', () => {
       // So with the picture of the tubes (ADR 0034).
       expect(new Uint8Array(packParams({ ...s, showTubes: false }, at))).toEqual(new Uint8Array(packParams(s, at)));
     }
+  });
+
+  // The layer of the slime is a switch of the view (ADR 0055, decision 8): it reaches no pass of the simulation, with
+  // slime and without it.
+  it('packs the same bytes with the layer of the slime on and off, for the passes and for the flow', () => {
+    const at = { width: 64, height: 32, agents: 1000, step: 7 };
+    for (const model of ['jones', 'extended'] as const)
+      for (const slimeLife of [0, 18, 144]) {
+        const s = { ...defaultSettings(), model, flow: model === 'extended', slimeLife };
+        const off = { ...s, showSlime: false };
+        expect(s.showSlime).toBe(true);
+        expect(new Uint8Array(packParams(off, at))).toEqual(new Uint8Array(packParams(s, at)));
+        expect(new Uint8Array(packFlow(off, NO_SITES))).toEqual(new Uint8Array(packFlow(s, NO_SITES)));
+      }
   });
 
   it('packs the layout, the walls flag, the start claim round and a wall over agents into extra', () => {

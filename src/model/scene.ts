@@ -75,6 +75,7 @@ const NOT_MODEL = new Set<keyof Settings>([
   'gelColor',
   'showScent',
   'showTubes',
+  'showSlime',
   'exposure',
   'bloom',
   'speed',

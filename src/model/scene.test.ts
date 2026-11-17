@@ -69,6 +69,7 @@ describe('modelChanged', () => {
       gelColor: 'strong' as const,
       showScent: true,
       showTubes: false,
+      showSlime: false,
       exposure: 1,
       bloom: 0.2,
       speed: 30,
