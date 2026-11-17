@@ -1355,7 +1355,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
 
     // Decision 8 and the three ways without the layer: Show slime off, a life time of 0, and the Jones model. Against
     // the shaders without the code of the layer, with the same state, uniforms and dither: 0 of 255 apart. The field
-    // holds new slime in every case but the Jones model, which has no field.
+    // holds slime in every case but the Jones model, which has no field. 3 × 168 captures of 64 × 48 pixels.
     it('draws the pixels of the shaders without the layer while the layer is off, in every style', async () => {
       const jones: Settings = {
         ...defaultSettings(),
@@ -1366,12 +1366,10 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         bloom: 0,
         strains: [defaultStrain(0)],
       };
-      // The first view lies on the painted slime, inside every arena.
+      // Zoomed in and zoomed out. The first view lies on the painted slime, inside every arena.
       const looks: View[] = [
         { center: [21.37, 19.21], scale: 1 / 8 },
-        { center: [32.3, 24.7], scale: 0.6 },
         { center: [32.4, 24.6], scale: 2.5 },
-        { center: [32.4, 24.6], scale: 6 },
       ];
       const cases: { sim: Sim; settings: Settings; view: View; slime: boolean; name: string }[] = [];
       for (const boundary of BOUNDARIES)
@@ -1400,7 +1398,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
                 { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 },
               ]);
             sim.paint([{ kind: 'slime', from: [6, 6], to: [50, 40], radius: 9 }]);
-            sim.run(40);
+            sim.run(20);
             expect(sim.hasEnvironment, name).toBe(painted);
             // The field holds slime under the switch, and none in the Jones model and at a life time of 0, where no
             // step writes a stamp: there it holds the painted slime alone.

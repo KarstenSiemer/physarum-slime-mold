@@ -2,8 +2,8 @@
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
 // of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046), of the
 // Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
-// (ADR 0053), of the mark that a starved tube leaves (ADR 0054) and of the slime field and its brush (ADR 0055). The
-// script puts one wrong rule at a time into a source file of the app,
+// (ADR 0053), of the mark that a starved tube leaves (ADR 0054) and of the slime field, its brush and its picture
+// (ADR 0055). The script puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
 // the engine, the sweep, the link or the tool for painted slime. Every wrong rule must fail at least one test.
@@ -98,6 +98,15 @@ const LINK_SPEC = 'src/model/link.test.ts';
 const STATE_TS = 'src/ui/state.svelte.ts';
 const STATE_SPEC = 'src/ui/state.test.ts';
 const PAINTED = 'painted slime';
+/**
+ * The picture of the slime (ADR 0055, decision 8): the layer in the render pass of each backend, the code that packs
+ * and draws it, the switch of the view, and the tests of the picture on each backend and on the CPU.
+ */
+const GL_BACKEND = 'src/engine/gl/backend.ts';
+const PARAMS_TS = 'src/model/params.ts';
+const PARAMS_SPEC = 'src/model/params.test.ts';
+const RENDER_UNIT = 'src/engine/render.test.ts';
+const [PICTURE_GPU, PICTURE_GL] = [`${SLIME} webgpu .*the picture`, `${SLIME} webgl2 .*the picture`];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -3008,6 +3017,313 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'if (toolsFor(s).length === 0) app.tool = TOOLS[0].id;',
     'Slime',
     STATE_SPEC,
+  ],
+  // The picture of the slime (ADR 0055, decision 8): the layer in the render pass of WebGPU.
+  [
+    'SL78 wgsl: the layer keeps its full strength at every age',
+    RENDER_WGSL,
+    '  return 1.0 - f32(age) / f32(V.slime.y);',
+    '  return 1.0;',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL79 wgsl: the layer does not end at the life time',
+    RENDER_WGSL,
+    '  if (held == 0u || age >= V.slime.y) { return 0.0; }',
+    '  if (held == 0u) { return 0.0; }',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL80 wgsl: a cell without a stamp has slime',
+    RENDER_WGSL,
+    '  if (held == 0u || age >= V.slime.y) { return 0.0; }',
+    '  if (age >= V.slime.y) { return 0.0; }',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL81 wgsl: the age is the steps that ran less the stamp, so a new stamp is older than every life time',
+    RENDER_WGSL,
+    '  let age = V.slime.x + 1u - held;',
+    '  let age = V.slime.x - held;',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL82 wgsl: the layer blends the stamps of the cells, not their strengths',
+    RENDER_WGSL,
+    '      sum += w * slimeCell(c);\n      total += w;\n    }\n  }\n  return select(0.0, sum / total, total > 0.0);',
+    '      sum += w * f32(stamps[cellAt(c)]);\n      total += w;\n    }\n  }\n  return select(0.0, slimeOf(u32(sum / total)), total > 0.0);',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL83 wgsl: the layer lies on the flake of food',
+    RENDER_WGSL,
+    '    base = substrate(f, base);\n',
+    '    base = substrate(f, base);\n    if (SLIME) { base = slimed(substrate(f, V.background.rgb), p, unwalled(p, cells)); }\n',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL84 wgsl: the layer lies on the trail, the walls and the electrodes too',
+    RENDER_WGSL,
+    '  if (ENV && V.streamFx.w != 0.0 && V.frame.z != 0u) { c = electrodes(c, p); }\n  return c;',
+    '  if (ENV && V.streamFx.w != 0.0 && V.frame.z != 0u) { c = electrodes(c, p); }\n  if (SLIME) { c = slimed(c, p, vec4f(1.0)); }\n  return c;',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL85 wgsl: the layer fades towards a wall',
+    RENDER_WGSL,
+    '      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) { continue; }',
+    '      if (!slimeArena(c)) { continue; }',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL86 wgsl: the layer fades towards the edge of the arena',
+    RENDER_WGSL,
+    '      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) { continue; }',
+    '      if (open[dy * 2 + dx] == 0.0) { continue; }',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL87 wgsl: zoomed out, the layer takes the cells around the middle of the pixel, not the mean over the pixel',
+    RENDER_WGSL,
+    '  if (V.scale <= 1.0) { strength = slimeBilinear(p, open); } else { strength = slimeArea(p); }',
+    '  strength = slimeBilinear(p, open);',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL88 wgsl: the first cell of a texel stands for the texel, not the cell in its middle',
+    RENDER_WGSL,
+    '      if (k > 0u) { cell = ((2 * t + 1) * s) / (2 * n); }',
+    '      if (k > 0u) { cell = (t * s) / n; }',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL89 wgsl: the layer does not follow the copies of the periodic grid',
+    RENDER_WGSL,
+    '  if (V.boundary == 0u) { return true; }\n',
+    '',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL90 wgsl: the layer has the colour of the first strain',
+    RENDER_WGSL,
+    '  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);',
+    '  return mix(bg, V.colors[0].rgb, V.slimeFx.a * strength);',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL91 wgsl: new slime hides the ground',
+    RENDER_WGSL,
+    '  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);',
+    '  return mix(bg, V.slimeFx.rgb, strength);',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  // The same in the render pass of WebGL2.
+  [
+    'SL92 glsl: the layer keeps its full strength at every age',
+    RENDER_FRAG,
+    '  return 1.0 - float(age) / float(V.slime.y);',
+    '  return 1.0;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL93 glsl: the layer does not end at the life time',
+    RENDER_FRAG,
+    '  if (held == 0u || age >= V.slime.y) return 0.0;',
+    '  if (held == 0u) return 0.0;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL94 glsl: a cell without a stamp has slime',
+    RENDER_FRAG,
+    '  if (held == 0u || age >= V.slime.y) return 0.0;',
+    '  if (age >= V.slime.y) return 0.0;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL95 glsl: the age is the steps that ran less the stamp, so a new stamp is older than every life time',
+    RENDER_FRAG,
+    '  uint age = V.slime.x + 1u - held;',
+    '  uint age = V.slime.x - held;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL96 glsl: the layer blends the stamps of the cells, not their strengths',
+    RENDER_FRAG,
+    '      sum += w * slimeCell(c);\n      total += w;\n    }\n  }\n  return total > 0.0 ? sum / total : 0.0;',
+    '      sum += w * float(texelFetch(stamps, cellXY(c), 0).r);\n      total += w;\n    }\n  }\n  return total > 0.0 ? slimeOf(uint(sum / total)) : 0.0;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL97 glsl: the layer lies on the flake of food',
+    RENDER_FRAG,
+    '    base = substrate(f, base);\n',
+    '#ifdef SLIME\n    base = slimed(substrate(f, V.background.rgb), p, unwalled(p, cells));\n#else\n    base = substrate(f, base);\n#endif\n',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL98 glsl: the layer lies on the trail, the walls and the electrodes too',
+    RENDER_FRAG,
+    '  if (V.streamFx.w != 0.0 && V.frame.z != 0u) c = electrodes(c, p);\n#endif\n  return c;',
+    '  if (V.streamFx.w != 0.0 && V.frame.z != 0u) c = electrodes(c, p);\n#endif\n#ifdef SLIME\n  c = slimed(c, p, vec4(1.0));\n#endif\n  return c;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL99 glsl: the layer fades towards a wall',
+    RENDER_FRAG,
+    '      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) continue;',
+    '      if (!slimeArena(c)) continue;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL100 glsl: the layer fades towards the edge of the arena',
+    RENDER_FRAG,
+    '      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) continue;',
+    '      if (open[dy * 2 + dx] == 0.0) continue;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL101 glsl: zoomed out, the layer takes the cells around the middle of the pixel, not the mean over the pixel',
+    RENDER_FRAG,
+    '  float strength = V.scale <= 1.0 ? slimeBilinear(p, open) : slimeArea(p);',
+    '  float strength = slimeBilinear(p, open);',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL102 glsl: the first cell of a texel stands for the texel, not the cell in its middle',
+    RENDER_FRAG,
+    '      ivec2 cell = k > 0 ? ((2 * t + 1) * s) / (2 * n) : t;',
+    '      ivec2 cell = k > 0 ? (t * s) / n : t;',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL103 glsl: the layer does not follow the copies of the periodic grid',
+    RENDER_FRAG,
+    '  if (V.boundary == 0u) return true;\n',
+    '',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL104 glsl: the layer has the colour of the first strain',
+    RENDER_FRAG,
+    '  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);',
+    '  return mix(bg, V.colors[0].rgb, V.slimeFx.a * strength);',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL105 glsl: new slime hides the ground',
+    RENDER_FRAG,
+    '  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);',
+    '  return mix(bg, V.slimeFx.rgb, strength);',
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  // The code that packs the layer and draws it, and the switch of the view.
+  [
+    'SL106 render.ts: the steps and the life time of the layer as floats',
+    RENDER_TS,
+    '  u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), 0, 0], 56);',
+    '  fl.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), 0, 0], 56);',
+    'the layer of the slime',
+    RENDER_UNIT,
+  ],
+  [
+    'SL107 render.ts: the layer of every style has the look of the glow',
+    RENDER_TS,
+    '  const look = SLIME_LOOK[settings.style];',
+    '  const look = SLIME_LOOK.glow;',
+    'the layer of the slime',
+    RENDER_UNIT,
+  ],
+  [
+    'SL108 webgpu: a frame draws the layer while Show slime is off',
+    RENDER_TS,
+    '    const slimy = this.fixed === undefined && slimeShown(f.settings) && sim.slimeField !== undefined;',
+    '    const slimy = this.fixed === undefined && slimeSteps(f.settings) > 0 && sim.slimeField !== undefined;',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL109 webgpu: the picture keeps the bind group of a field that the simulation freed',
+    RENDER_TS,
+    '    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.stamps !== stamps) {',
+    '    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL110 webgpu: the picture reads the cells of the environment in place of the slime field',
+    RENDER_TS,
+    '    const stamps = sim.slimeField ?? sim.env;',
+    '    const stamps = sim.env;',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL111 webgl2: a frame draws the layer while Show slime is off',
+    GL_BACKEND,
+    '    const stamps = !this.fixed && slimeShown(s) ? sim.slimeTexture : undefined;',
+    "    const stamps = !this.fixed && s.model === 'extended' && s.slimeLife > 0 ? sim.slimeTexture : undefined;",
+    PICTURE_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL112 slime.ts: the scent view draws the slime too',
+    SLIME_TS,
+    '  s.showSlime && !s.showScent && slimeSteps(s) > 0;',
+    '  s.showSlime && slimeSteps(s) > 0;',
+    'is drawn in every style',
+    SLIME_UNIT,
+  ],
+  [
+    'SL113 slime.ts: the layer shows while Show slime is off',
+    SLIME_TS,
+    '  s.showSlime && !s.showScent && slimeSteps(s) > 0;',
+    '  !s.showScent && slimeSteps(s) > 0;',
+    'is drawn in every style',
+    SLIME_UNIT,
+  ],
+  [
+    'SL114 slime.ts: the view draws the layer without slime in the model',
+    SLIME_TS,
+    '  s.showSlime && !s.showScent && slimeSteps(s) > 0;',
+    '  s.showSlime && !s.showScent;',
+    'is drawn in every style',
+    SLIME_UNIT,
+  ],
+  [
+    'SL115 params.ts: a link from before the switch Show slime hides the layer',
+    PARAMS_TS,
+    '  out.showSlime = raw.showSlime !== false;',
+    '  out.showSlime = raw.showSlime === true;',
+    'layer of the slime',
+    PARAMS_SPEC,
   ],
 ];
 
