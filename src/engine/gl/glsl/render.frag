@@ -503,12 +503,6 @@ float slimeOf(uint held) {
   return 1.0 - float(age) / float(V.slime.y);
 }
 
-// The strength of the slime of grid cell c, and none outside the arena.
-float slimeCell(ivec2 c) {
-  ivec2 q = cellXY(c);
-  return q.x < 0 ? 0.0 : slimeOf(texelFetch(stamps, q, 0).r);
-}
-
 // Whether grid cell c lies in the arena (slimeArena in render.wgsl).
 bool slimeArena(ivec2 c) {
   if (V.boundary == 0u) return true;
@@ -532,14 +526,23 @@ float slimeBilinear(vec2 p, vec4 open) {
   vec2 q = p - 0.5;
   ivec2 i = ivec2(floor(q));
   vec2 f = q - floor(q);
+  ivec2 s = gridSize();
+  ivec2 x = ivec2(i.x, i.x + 1);
+  ivec2 y = ivec2(i.y, i.y + 1);
+  if (V.boundary == 0u) {
+    // One wrap for the 4 cells, as in bilinear().
+    ivec2 w = wrapCell(i, s);
+    x = ivec2(w.x, w.x == s.x - 1 ? 0 : w.x + 1);
+    y = ivec2(w.y, w.y == s.y - 1 ? 0 : w.y + 1);
+  }
   float sum = 0.0;
   float total = 0.0;
   for (int dy = 0; dy < 2; dy++) {
     for (int dx = 0; dx < 2; dx++) {
-      ivec2 c = i + ivec2(dx, dy);
+      ivec2 c = ivec2(x[dx], y[dy]);
       if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) continue;
       float w = (dx == 1 ? f.x : 1.0 - f.x) * (dy == 1 ? f.y : 1.0 - f.y);
-      sum += w * slimeCell(c);
+      sum += w * slimeOf(texelFetch(stamps, c, 0).r);
       total += w;
     }
   }
@@ -567,24 +570,32 @@ float slimeArea(vec2 p) {
     xs = ivec3(w.x, x1, x1 == n.x - 1 ? 0 : x1 + 1);
     ys = ivec3(w.y, y1, y1 == n.y - 1 ? 0 : y1 + 1);
   }
+  // The share of each column and row of texels that lies under the pixel.
+  vec3 at = vec3(0.0, 1.0, 2.0);
+  vec3 wx = max(min(vec3(hi.x), float(i.x) + at + 1.0) - max(vec3(lo.x), float(i.x) + at), vec3(0.0));
+  vec3 wy = max(min(vec3(hi.y), float(i.y) + at + 1.0) - max(vec3(lo.y), float(i.y) + at), vec3(0.0));
+  // The cell in the middle of each texel, in whole numbers; with no division on a side that 2^k divides.
+  ivec3 cx = xs;
+  ivec3 cy = ys;
+  if (k > 0) {
+    int middle = 1 << (k - 1);
+    if ((n.x << k) == s.x) cx = (xs << k) + middle;
+    else cx = ((2 * xs + 1) * s.x) / (2 * n.x);
+    if ((n.y << k) == s.y) cy = (ys << k) + middle;
+    else cy = ((2 * ys + 1) * s.y) / (2 * n.y);
+  }
   float sum = 0.0;
-  vec2 area = vec2(0.0);
   for (int j = 0; j < 3; j++) {
-    float wy = max(min(hi.y, float(i.y + j + 1)) - max(lo.y, float(i.y + j)), 0.0);
-    area.y += wy;
+    // A row that the pixel does not reach, or outside a closed arena: nothing to read.
+    if (wy[j] <= 0.0 || ys[j] < 0 || ys[j] >= n.y) continue;
     float row = 0.0;
     for (int c = 0; c < 3; c++) {
-      float wx = max(min(hi.x, float(i.x + c + 1)) - max(lo.x, float(i.x + c)), 0.0);
-      if (j == 0) area.x += wx;
-      ivec2 t = ivec2(xs[c], ys[j]);
-      if (any(lessThan(t, ivec2(0))) || any(greaterThanEqual(t, n))) continue;
-      // The cell in the middle of the texel, in whole numbers. At level 0 it is the cell.
-      ivec2 cell = k > 0 ? ((2 * t + 1) * s) / (2 * n) : t;
-      row += wx * slimeOf(texelFetch(stamps, cell, 0).r);
+      if (wx[c] <= 0.0 || xs[c] < 0 || xs[c] >= n.x) continue;
+      row += wx[c] * slimeOf(texelFetch(stamps, ivec2(cx[c], cy[j]), 0).r);
     }
-    sum += wy * row;
+    sum += wy[j] * row;
   }
-  return sum / (area.x * area.y);
+  return sum / ((wx.x + wx.y + wx.z) * (wy.x + wy.y + wy.z));
 }
 
 // The ground `bg` at p with the slime on it (slimed in render.wgsl). `open`: as for slimeBilinear().
