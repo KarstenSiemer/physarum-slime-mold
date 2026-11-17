@@ -11,15 +11,19 @@ import {
 import { tokyoLight, tokyoShapes } from './tokyo';
 
 /**
- * Food, light or a wall in the canonical frame of the preset's own arena (engine/environment.ts, toFrame()), the
- * arena it is painted in: like every edit, it goes to other grids through the canonical frame of the arena it was
- * painted in, also after a switch to another arena. Positions from the grid's centre, on a landscape grid; a
- * portrait grid turns the frame by 90°. In a dish the unit is the grid's short side on both axes. In a box or a
- * periodic grid x from −0.8 to 0.8 spans the long side and y from −0.5 to 0.5 the short side, whatever the screen's
- * shape. The radius is in units of the short side.
+ * Food, light, a wall, an electrode or painted slime in the canonical frame of the preset's own arena
+ * (engine/environment.ts, toFrame()), the arena it is painted in: like every edit, it goes to other grids through the
+ * canonical frame of the arena it was painted in, also after a switch to another arena. Positions from the grid's
+ * centre, on a landscape grid; a portrait grid turns the frame by 90°. In a dish the unit is the grid's short side on
+ * both axes. In a box or a periodic grid x from −0.8 to 0.8 spans the long side and y from −0.5 to 0.5 the short side,
+ * whatever the screen's shape. The radius is in units of the short side.
+ *
+ * A shape of the kind `slime` coats ground with slime (ADR 0055, decision 7), as the experiments of Reid et al. 2012
+ * coat the agar. At the start of a run its cells without a wall have slime of the age 0, in the extended model. A wall
+ * clears the slime of its cells, so the order of the walls and the slime of a scene does not matter.
  */
 export interface EnvShape {
-  kind: 'food' | 'light' | 'wall' | 'anode' | 'cathode';
+  kind: 'food' | 'light' | 'wall' | 'anode' | 'cathode' | 'slime';
   at: [number, number];
   to?: [number, number];
   r: number;

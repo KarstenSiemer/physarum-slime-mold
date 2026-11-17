@@ -26,7 +26,7 @@ function random(seed: number) {
   };
 }
 
-const KINDS = ['erase', 'wall', 'food', 'light', 'anode', 'cathode'] as const;
+const KINDS = ['erase', 'wall', 'food', 'light', 'anode', 'cathode', 'slime'] as const;
 /** Grids of the app: 16:10, 16:9, phones, a square, both extremes of gridSize(). */
 const GRIDS: [number, number][] = [
   [512, 320],
@@ -410,7 +410,7 @@ describe('the drawing of a link', () => {
         ]);
         expect(unpackDrawing(bytes)?.strokes).toEqual([at(kind, boundary)]);
         // A kind that no version has, and the same bytes as version 3, are refused.
-        expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 6 : v)))).toBeUndefined();
+        expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 7 : v)))).toBeUndefined();
         expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 2 : v)))).toBeUndefined();
         expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 0 ? 3 : v)))).toBeUndefined();
       }
@@ -425,6 +425,48 @@ describe('the drawing of a link', () => {
     const d = unpackDrawing(pack(mixed));
     expect(d?.strokes).toEqual(mixed);
     expect(d && [...kindsOf(d)].sort()).toEqual(['anode', 'cathode', 'food', 'wall']);
+  });
+
+  // ADR 0055, decision 7: a stroke of the Slime tool is a later kind, with the number 6, in the bytes of version 4. The
+  // version stays 4, so a link without painted slime has the bytes that it had before.
+  it('holds the strokes of the Slime tool as a later kind of version 4, and keeps the bytes of every other link', () => {
+    const at = (kind: EnvEdit['kind'], boundary: EnvEdit['boundary'], x = 10): EnvEdit => ({
+      kind,
+      from: [x, 12],
+      to: [x, 12],
+      radius: 2,
+      grid: [512, 320],
+      boundary,
+    });
+    const pack = (strokes: EnvEdit[]) =>
+      packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes }) ?? new Uint8Array();
+    for (const boundary of BOUNDARIES) {
+      const bytes = pack([at('slime', boundary)]);
+      // The version, no scene, one stroke; the head byte (grid, start and radius follow: 16 + 32 + 128) with the mark of
+      // a later kind and the arena, then the kind.
+      expect(Array.from(bytes.slice(0, 5))).toEqual([4, 0, 1, 176 | (3 << 2) | BOUNDARIES.indexOf(boundary), 6]);
+      expect(unpackDrawing(bytes)?.strokes).toEqual([at('slime', boundary)]);
+      // The bytes of a pole but for the kind: nothing else of a stroke changes.
+      expect(Array.from(bytes).map((v, i) => (i === 4 ? 5 : v))).toEqual(Array.from(pack([at('cathode', boundary)])));
+      // Read as version 3, which has no later kind, the link is refused.
+      expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 0 ? 3 : v)))).toBeUndefined();
+    }
+    // Painted slime keeps its place between the other strokes: a drag of the Slime tool, a wall and an erase over it,
+    // and slime again. The drawing names the kind.
+    const mixed: EnvEdit[] = [
+      at('food', 'box'),
+      at('slime', 'box', 20),
+      { ...at('slime', 'box', 20), to: [44, 30] },
+      at('wall', 'dish', 30),
+      at('erase', 'wrap', 40),
+      { ...at('slime', 'wrap', 40), radius: 7.5 },
+      at('anode', 'box', 50),
+    ];
+    const d = unpackDrawing(pack(mixed));
+    expect(d?.strokes).toEqual(mixed);
+    expect(d && [...kindsOf(d)].sort()).toEqual(['anode', 'erase', 'food', 'slime', 'wall']);
+    // A link without painted slime starts with the same version as before, and so does one with it.
+    expect([pack([at('food', 'box')])[0], pack(mixed)[0]]).toEqual([4, 4]);
   });
 
   it('decodes random, truncated and changed bytes without throwing, to nothing or a valid drawing', () => {

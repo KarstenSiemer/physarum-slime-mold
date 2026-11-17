@@ -1,4 +1,5 @@
-// The food, light and walls of a shared link: the engine's edit list as compact bytes (docs/adr/0021).
+// The food, light, walls, electrodes and painted slime of a shared link: the engine's edit list as compact bytes
+// (docs/adr/0021).
 import { fromShape, MIN_RADIUS, sameEdit, STEP, type EnvEdit } from '../engine/environment';
 import { EnvKind, type EnvTool } from '../engine/types';
 import { BOUNDARIES, MAX_STRAINS, type Boundary } from './params';
@@ -37,6 +38,11 @@ export const MAX_WORK = 64;
  * the Electrode tool (ADR 0047): the head byte of a stroke has two bits for its kind, and all four values were taken.
  * So a stroke of a later kind writes the value 3 where the arena was, which no arena has, its arena where the kind
  * was, and then one byte with its kind (EnvKind). Every other stroke has the bytes of version 3.
+ *
+ * A stroke of the Slime tool (ADR 0055) is such a later kind, with the number 6. The version stays 4: the bytes of a
+ * stroke do not change, only one more number is a kind. So a link without painted slime has the bytes that it had
+ * before, and an older build still opens it. An older build refuses a link with painted slime, as it refuses a later
+ * version: it does not know the kind.
  */
 const VERSION = 4;
 /** The value in the arena bits of a head byte that marks a stroke of a later kind (version 4). */
@@ -50,7 +56,11 @@ const RADIUS_MAX = 2 ** 14;
 const SCENE_ID = /^[a-z0-9-]{1,32}$/;
 const KINDS: EnvTool[] = ['erase', 'wall', 'food', 'light'];
 /** The later kinds by their number (EnvKind), which a stroke of version 4 writes after its head byte. */
-const LATER_KINDS: Partial<Record<number, EnvTool>> = { [EnvKind.anode]: 'anode', [EnvKind.cathode]: 'cathode' };
+const LATER_KINDS: Partial<Record<number, EnvTool>> = {
+  [EnvKind.anode]: 'anode',
+  [EnvKind.cathode]: 'cathode',
+  [EnvKind.slime]: 'slime',
+};
 const BIT = { grid: 16, from: 32, to: 64, radius: 128 } as const;
 
 /** Cells to whole steps (STEP), or undefined for a value off the steps or out of `[-max, max]`. */
@@ -189,7 +199,7 @@ class Reader {
 }
 
 /**
- * The drawing as bytes (docs/adr/0021, ADR 0047 for an electrode's stroke): a version, the scene's id, for a scene the revision of its shapes (ADR 0027),
+ * The drawing as bytes (docs/adr/0021, ADR 0047 for an electrode's stroke, ADR 0055 for painted slime): a version, the scene's id, for a scene the revision of its shapes (ADR 0027),
  * its strains' origins, the number of its shapes (a varint) and which of them the list holds, then the strokes. Each stroke has a head byte (kind, arena, and which of grid, start, end and radius
  * follow), then those that follow: its grid when it differs from the stroke before, its start from the end of the
  * stroke before unless it starts there (a drag), its end from its start unless it is a dab, and its radius unless it
