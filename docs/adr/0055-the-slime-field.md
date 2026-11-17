@@ -6,6 +6,8 @@
 - Extends [ADR 0052](0052-the-sources-on-slime-mazes-and-the-growth-front.md): the first part of stage 2 of its plan.
 - Changes [ADR 0054](0054-a-starved-tube-leaves-starved-ground.md), decision 4: the time of the mark of starved ground
   is a setting now.
+- Extended by [ADR 0056](0056-the-avoidance-of-slime-waits-for-the-growth-front.md) (2026-11-17): the measurement in
+  the Y-maze, and the decision that no rule reads the slime before stage 4.
 - In short: the facts are in
   [`docs/knowledge-base/slime-mazes-and-the-front.md`](../knowledge-base/slime-mazes-and-the-front.md), "Slime", and
   the rule is in `docs/model.md`.

@@ -223,6 +223,17 @@ rule reads the slime yet: every scene keeps its bytes, and with 18 hours the Sna
 runs of ADR 0054 with 18 h, line for line. The rule of avoidance comes next, after a measurement
 in a Y-maze: a lower weight in the pick of a birth acts only where blank ground meets slime, so
 its design is not safe without that measurement.
+**The Y-maze** ([ADR 0056](../../docs/adr/0056-the-avoidance-of-slime-waits-for-the-growth-front.md),
+part 20). Reid et al. 2012 let plasmodia choose between an arm with slime and a blank arm. 39 of
+40 took the blank arm, with slime on both arms they had no preference, and slime did not slow
+them. A Y-maze of that size ran here as research code, with 40 seeds. The app has no preference:
+19 to 20. The rule of the plan, a lower weight for slime in the pick of a birth, gives 26 to 11,
+and no rule of the births does better. Agents that walk carry the front: they cross an arm of 4 cm
+in 65 steps, and the children follow them. A rule for the moves gives 40 to 0, and no preference
+with slime on both arms. But its colony then needs 233 steps to the food in place of 65: the
+choice of that rule comes from a slower colony, and the plasmodium is not slower. So no rule is
+built. The plasmodium chooses as one body, whose plasm goes to the part of its front that moves
+on, and the model gets that with the growth front of stage 4.
 
 ## What is in this folder, and what you need to read
 
@@ -230,10 +241,10 @@ its design is not safe without that measurement.
 | -------------------------------------------------- | ----------- | ------------------------------------------------------- |
 | This page, up to here                              | 1 page      | yes: it is the whole story                              |
 | The ADR, section "The solvers and the mathematics" | 300 lines   | if you want the formulas                                |
-| The rest of this page                              | 1,830 lines | only to run a step again: it is a list of commands      |
+| The rest of this page                              | 1,900 lines | only to run a step again: it is a list of commands      |
 | `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
 | `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 3,200 lines | no: the scripts that made the other numbers of the ADR  |
-| `logs.tar.gz`                                      | 1.1 MB      | never: the raw output of the runs, which a script reads |
+| `logs.tar.gz`                                      | 1.4 MB      | never: the raw output of the runs, which a script reads |
 | `summary.ts`                                       | 470 lines   | no: it makes the tables of the ADR from the logs        |
 | `research.test.ts`                                 | 300 lines   | no: it checks that the scripts still give the same rows |
 
@@ -1971,9 +1982,78 @@ records are in `logs/engine/slime/`:
 | `draw-before.jsonl`, `draw-before-zooms.jsonl` | the same before the reads of the layer got cheaper (commit `f353ee8`)  |
 | `mutations.txt`, `-brush.txt`, `-picture.txt`  | the wrong rules SL1 to SL31, SL32 to SL77 and SL78 to SL119            |
 
+### 20. Does a colony choose the arm without slime in a Y-maze? [ADR 0056]
+
+The Y-maze of Reid et al. 2012 as research code: `engine/y-maze.ts` is the layout, with a unit
+test of its mirror image, and `engine/y-maze.gpu.test.ts` runs it in the real engine, on WebGPU.
+A run paints the slime, waits 18,000 steps, places about 50 agents on the base and reads after
+every step which food holds plasm first. 40 seeds take 3 minutes. The rules are variants of
+`engine/variant.ts` with names that start with `slime-`. A variant changes files below `src/`
+while its command runs and puts them back: no growth pass of the app binds the slime field.
+
+```bash
+npx vitest run --project unit research/flow/engine/y-maze.test.ts
+```
+
+```bash
+run() { npx vitest run --config research/vitest.config.ts research/flow/engine/y-maze.gpu.test.ts; }; rule() { node --import ./research/flow/register.mjs research/flow/engine/variant.ts "$1" npx vitest run --config research/vitest.config.ts research/flow/engine/y-maze.gpu.test.ts; }
+```
+
+The app with slime on one arm, on both arms and on no arm, and with arms of 9 cells. The side of
+the slime changes with the seed:
+
+```bash
+for c in one both none; do VITE_CASE=$c VITE_SEEDS=1-40 run; done; VITE_CASE=one VITE_WIDTH=9 VITE_SEEDS=1-40 run
+```
+
+The rules of the births and of the moves with slime on one arm, and the rule of the moves with
+slime on both arms and with arms of 9 cells:
+
+```bash
+for r in slime-weight slime-old-300 slime-wall-300 slime-stay-300 slime-stay-300-0.25; do VITE_CASE=one VITE_SEEDS=1-40 rule $r; done; for r in slime-stay-300 slime-stay-300-0.25; do VITE_CASE=both VITE_SEEDS=1-40 rule $r; done; VITE_CASE=one VITE_WIDTH=9 VITE_SEEDS=1-40 rule slime-stay-300
+```
+
+The runs with 10 seeds are the same commands with `VITE_SEEDS=1-10`: `slime-ban-300`,
+`slime-sense-300-10`, `slime-sense-300-100`, `slime-old-3000` and `slime-wall-3000` with slime on
+one arm; the rules of the births with `VITE_CASE=both` and `VITE_CASE=none`; `VITE_FRESH=1` for
+slime of the age 0; and `slime-bind`, which reads the field and must give the runs of the app.
+The age of the slime of the free neighbours of a parent, with no painted slime and with slime on
+one arm:
+
+```bash
+for c in none one; do VITE_CASE=$c VITE_SEEDS=1-10 VITE_BIRTHS=1 VITE_NAME=births-$c rule births; done
+```
+
+The tables, one line per record, and the ages:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-y-maze.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-y-maze.ts births births-none births-one
+```
+
+The script reads `out/engine/y-maze/`. To make the tables from the archive, copy the files
+`*.jsonl` of `logs/engine/y-maze/` there.
+
+Result: the app has no preference (19 : 20 for the blank arm and the arm with slime). The rules of
+the births reach 26 : 11 to 28 : 12. The rule of the moves reaches 40 : 0, and 39 : 1 with arms of
+9 cells, and no preference with slime on both arms, where its colony needs 233 steps to the first
+food in place of 65. ADR 0056 has the tables and the decision. The records are in
+`logs/engine/y-maze/`:
+
+| Record                          | Runs                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `none-<case>-s<seeds>.jsonl`    | the app: one line per run; `-w9` arms of 9 cells, `-fresh` slime of age 0 |
+| `slime-<rule>-<case>-s<seeds>`  | the same with a rule; a `+` joins two rules                               |
+| `births-none-*`, `births-one-*` | the runs that wrote their births; the dumps of the births are not kept    |
+| `nogrowth-*`                    | a colony without growth, with no rule and with the rule of the sensors    |
+| `tables.txt`, `births.txt`      | the lines of `measure-y-maze.ts` for all records, and the ages            |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 335 files, 6.1 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 378 files, 7.9 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2006,6 +2086,7 @@ asks for the new digest.
 | `logs/engine/starved-ground/`                        | the runs of part 17 (ADR 0053): where children are born, the two mazes and the Tokyo scenes with the rule, the other rules, the digests and the wrong rules SG1 to SG10                                                         | 2026-11-16, M3 Pro                                    |
 | `logs/engine/mark/`                                  | the runs of part 18 (ADR 0054): the analysis of the mark and its time, the campaign with the app, the runs past the fade of the mark, the digests and the wrong rules FL1 to FL10                                               | 2026-11-17, M3 Pro                                    |
 | `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
+| `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -2064,7 +2145,8 @@ Notes on the record:
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
 | `engine/mutate.ts`        | 417 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
-| `engine/variant.ts`       | other rules in the WGSL passes for one run, for the measurements of ADR 0053 and ADR 0054         |
+| `engine/variant.ts`       | other rules in the passes for one run, for the measurements of ADR 0053, ADR 0054 and ADR 0056    |
+| `engine/y-maze.*`         | the Y-maze of Reid et al. 2012: its layout, its runs, and `measure-y-maze.ts` for its tables      |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

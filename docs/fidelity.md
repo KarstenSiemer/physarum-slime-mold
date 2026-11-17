@@ -241,6 +241,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Model**: growth and shrinkage of Jones 2011 (ADR 0025).
 - **Measured**: the Tokyo colony reaches all 36 foods by step 2,000, which is 1.1 h of model time, in 10 of 10 seeds
   (ADR 0029). So it grows about ten times as fast as the organism. Jones' growth rule has no speed of its own to set.
+  In a Y-maze with arms of 4 cm a colony reaches the food of an arm 65 steps after its start, which are 2.2 min:
+  agents that walk carry its front, at about 1 cell per step. At 1 to 3 cm/h the organism needs 1.3 to 4 h (ADR 0056).
   The Foraging maze reaches its far food in 10 of 10 seeds, in a median of 3,151 to 4,601 steps sensing first (ADR
   0027, Growth after the merge of ADR 0025); it has no length or time scale.
 - **Limits**: the app has no sheet at the front and no zones behind it. Its front is the mesh that the growth rule
@@ -532,9 +534,12 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   8.5 and 9; ADR 0053; row 16). This mark fits the second cue of the organism, the one of Briard et al. 2020. It is
   on ground where a tube starved only, not on every cell that the colony left, and it stops no move. It is a mark of
   each strain, where Briard et al. found no difference between strains.
-- **Measured**: the slime changes no run: every scene keeps its bytes (ADR 0055, Results). No Y-maze is measured yet.
-  The rule of avoidance and its measurement in a Y-maze after Reid et al. 2012 are the second part of stage 2 of the
-  plan of 2026-11-16 (`TODO.md`; ADR 0055, "What the second pull request must measure first"). Since ADR 0054 the
+- **Measured**: the slime changes no run: every scene keeps its bytes (ADR 0055, Results). In a Y-maze after Reid et
+  al. 2012, as research code with 40 seeds, the app has no preference: 19 runs for the blank arm and 20 for the arm
+  with slime. Rules that are not in the app ran there as variants (ADR 0056). A lower weight for slime in the pick
+  of a birth, the rule of the plan, gives 26 : 11. A rule for the moves gives 40 : 0 and no preference with slime
+  on both arms, but its colony is 3.6 times slower on slime, and the plasmodium is not slower. So no rule is built,
+  and the avoidance waits for stage 4 of the plan of 2026-11-16 (`TODO.md`). Since ADR 0054 the
   mark of starved ground keeps a colony with growth out of ground that it left: in the Snail maze the blind branches
   stay empty until the mark has faded (row 2). Agents still walk onto such ground.
 
