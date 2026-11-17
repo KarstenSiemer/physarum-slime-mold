@@ -3,7 +3,7 @@ import { defaultSettings, defaultStrain, globalSpec, strainSpec, type Settings }
 import { FLOW, packFlow, STEPS_PER_MINUTE, trailLevels } from './flow';
 import { PARAM_SLOTS, packParams } from './pack';
 import { NO_SITES } from './sites';
-import { NO_STAMP, plasmLevels, slimeModel, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
+import { NO_STAMP, plasmLevels, slimeModel, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
 
 // ADR 0055: the slime field. One field for all strains, with the stamp of each cell.
 describe('the slime field (ADR 0055)', () => {
@@ -38,6 +38,20 @@ describe('the slime field (ADR 0055)', () => {
     expect(slimeModel({ model: 'jones' })).toBe(false);
     const none: Settings = { ...defaultSettings(), slimeLife: 0 };
     expect(slimeModel(none)).toBe(true);
+  });
+
+  // Decision 8: the view draws the slime while the model has slime and the switch is on. The scent view draws none.
+  it('is drawn in every style while the model has slime and Show slime is on, and never below the scent view', () => {
+    const d = defaultSettings();
+    expect([d.showSlime, d.showScent]).toEqual([true, false]);
+    const shown = (patch: Partial<Settings>) => slimeShown({ ...d, ...patch });
+    for (const style of ['glow', 'gel', 'paper', 'agents'] as const) expect(shown({ style })).toBe(true);
+    expect(slimeShown({ ...d, showSlime: false })).toBe(false);
+    expect(slimeShown({ ...d, slimeLife: 0 })).toBe(false);
+    expect(slimeShown({ ...d, model: 'jones' })).toBe(false);
+    expect(slimeShown({ ...d, showScent: true })).toBe(false);
+    // The flow is no part of it: the slime does not need the flow.
+    expect([shown({ flow: true }), shown({ flow: false })]).toEqual([true, true]);
   });
 
   it('holds 0 for a cell without a stamp, and the number of the step plus 1 for a stamp', () => {

@@ -59,6 +59,83 @@ export function hasSlime(held: number, step: number, life: number): boolean {
 }
 
 /**
+ * The strength of the slime of a cell that holds `held`, as the picture draws it (ADR 0055, decision 8; `slimeCell` in
+ * render.wgsl and render.frag): a share of the full strength of the layer, 0 to 1. `step`: the steps that ran so far,
+ * as Sim.step. `life`: the life time in steps. The age of the slime is step + 1 − held, in unsigned 32-bit integers as
+ * in hasSlime(): 0 for a stamp that the Slime tool wrote after the last step, and 1 for a cell that held plasm in the
+ * last step. The strength is 1 at the age 0 and falls in a straight line to 0 at the life time. A cell without slime
+ * has none: no stamp, or an age at or above the life time.
+ */
+export function slimeStrength(held: number, step: number, life: number): number {
+  if (!hasSlime(held, step, life)) return 0;
+  return 1 - ((step + 1 - held) >>> 0) / life;
+}
+
+/**
+ * The strength of the layer of the slime at the grid position (px, py), in cells, as the picture reads it (ADR 0055,
+ * decision 8; `slimed` in render.wgsl and render.frag): 0 to 1, a share of the full strength of the layer. `stamps`:
+ * the field, as Sim.readSlime() returns it, on a grid of `width` × `height` cells. `step` and `life`: as for
+ * slimeStrength(). `scale`: the cells per pixel of the view. `level`: the level of the trail's map that the frame
+ * reads (render.ts trailLevel()). On the periodic grid the field repeats; outside a closed arena the strength is 0.
+ *
+ *  - Up to 1 cell per pixel: the strengths of the 4 cells around the position, bilinear. The strengths are blended,
+ *    never the stamps.
+ *  - Zoomed out: the mean of the strength over the square of the pixel, `scale` cells wide, over the 3 × 3 texels of
+ *    the map of that level under the pixel, each by the share that lies under it. At level 0 a texel is a cell, and
+ *    the mean is exact. At a level above 0 a texel is width / n cells wide, with n = ceil(width / 2^level) texels per
+ *    side, and the cell in the middle of the texel stands for it: the cell floor((2 t + 1) · width / (2 n)) of the
+ *    texel t, and so for the rows.
+ */
+export function slimeLayer(
+  stamps: Uint32Array,
+  grid: { width: number; height: number; boundary: Settings['boundary'] },
+  step: number,
+  life: number,
+  [px, py]: readonly [number, number],
+  scale: number,
+  level: number,
+): number {
+  const { width: w, height: h } = grid;
+  const periodic = grid.boundary === 'wrap';
+  const mod = (v: number, n: number) => ((v % n) + n) % n;
+  /** The strength of the cell (x, y), which lies inside the grid. */
+  const held = (x: number, y: number) => slimeStrength(stamps[y * w + x] ?? 0, step, life);
+  const cell = (x: number, y: number) => {
+    if (periodic) return held(mod(x, w), mod(y, h));
+    return x < 0 || y < 0 || x >= w || y >= h ? 0 : held(x, y);
+  };
+  if (scale <= 1) {
+    const [qx, qy] = [px - 0.5, py - 0.5];
+    const [i, j] = [Math.floor(qx), Math.floor(qy)];
+    const [fx, fy] = [qx - i, qy - j];
+    const a = cell(i, j) * (1 - fx) + cell(i + 1, j) * fx;
+    const b = cell(i, j + 1) * (1 - fx) + cell(i + 1, j + 1) * fx;
+    return a * (1 - fy) + b * fy;
+  }
+  const n = [Math.ceil(w / 2 ** level), Math.ceil(h / 2 ** level)] as const;
+  const ratio = [n[0] / w, n[1] / h] as const; // texels per cell
+  const lo = [px * ratio[0] - 0.5 * scale * ratio[0], py * ratio[1] - 0.5 * scale * ratio[1]] as const;
+  const hi = [px * ratio[0] + 0.5 * scale * ratio[0], py * ratio[1] + 0.5 * scale * ratio[1]] as const;
+  const [i, j] = [Math.floor(lo[0]), Math.floor(lo[1])];
+  /** The cell in the middle of the texel t of one axis with `side` cells and `count` texels. */
+  const middle = (t: number, side: number, count: number) => Math.floor(((2 * t + 1) * side) / (2 * count));
+  let [sum, areaX, areaY] = [0, 0, 0];
+  for (let dy = 0; dy < 3; dy++) {
+    const wy = Math.max(Math.min(hi[1], j + dy + 1) - Math.max(lo[1], j + dy), 0);
+    areaY += wy;
+    for (let dx = 0; dx < 3; dx++) {
+      const wx = Math.max(Math.min(hi[0], i + dx + 1) - Math.max(lo[0], i + dx), 0);
+      if (dy === 0) areaX += wx;
+      let [tx, ty] = [i + dx, j + dy];
+      if (periodic) [tx, ty] = [mod(tx, n[0]), mod(ty, n[1])];
+      else if (tx < 0 || ty < 0 || tx >= n[0] || ty >= n[1]) continue;
+      sum += wx * wy * held(middle(tx, w, n[0]), middle(ty, h, n[1]));
+    }
+  }
+  return sum / (areaX * areaY);
+}
+
+/**
  * What a brush stroke does with the slime field (ADR 0055, decision 7), in place in `stamps`. `grid`: the grid of the
  * simulation with its boundary and its environment as they are when the stroke comes. `step`: the steps that ran so
  * far, as Sim.step; the next step has this number, and a stamp of it has the age 0 (hasSlime()). `model`: the model of

@@ -4,7 +4,7 @@ import { at } from './at';
 import { trailLevels } from './flow';
 import type { FlowGrid } from './flow-reference';
 import { stampOf, STEPS_PER_HOUR } from './slime';
-import { hasSlime, holdsPlasm, slimeStep, type SlimeSettings } from './slime-reference';
+import { hasSlime, holdsPlasm, slimeLayer, slimeStep, slimeStrength, type SlimeSettings } from './slime-reference';
 
 /** The 32-bit float just below a positive 32-bit float. */
 function below(v: number): number {
@@ -164,5 +164,190 @@ describe('the CPU reference of the slime field', () => {
     expect(hasSlime(held, 10, 0)).toBe(false);
     // A change of the life time acts on all slime at once.
     expect([hasSlime(held, 40, 20), hasSlime(held, 40, 31), hasSlime(held, 40, 30)]).toEqual([false, true, false]);
+  });
+
+  // Decision 8: the picture draws the slime of a cell as strong as it is young. `step` is the steps that ran so far.
+  describe('the strength of the slime of a cell in the picture', () => {
+    const life = 144 * STEPS_PER_HOUR;
+
+    it('is full at the age 0: a stamp that the Slime tool wrote after the last step', () => {
+      // After 10 steps the next step has the number 10, and a stroke writes its stamp.
+      expect(slimeStrength(stampOf(10), 10, life)).toBe(1);
+      expect(slimeStrength(stampOf(0), 0, life)).toBe(1);
+    });
+
+    it('falls in a straight line with the age, to one half at half the life time', () => {
+      // A cell that held plasm in the last step, the step 9 of 10: the age 1.
+      expect(slimeStrength(stampOf(9), 10, life)).toBe(1 - 1 / life);
+      expect(slimeStrength(stampOf(10), 10 + life / 2, life)).toBe(0.5);
+      expect(slimeStrength(stampOf(10), 10 + life / 4, life)).toBe(0.75);
+      expect(slimeStrength(stampOf(10), 10 + (3 * life) / 4, life)).toBe(0.25);
+      // The last step with slime: the age life − 1.
+      expect(slimeStrength(stampOf(10), 10 + life - 1, life)).toBeCloseTo(1 / life, 12);
+      expect(slimeStrength(stampOf(10), 10 + life - 1, life)).toBeGreaterThan(0);
+    });
+
+    it('is 0 at the life time and after it', () => {
+      expect(slimeStrength(stampOf(10), 10 + life, life)).toBe(0);
+      expect(slimeStrength(stampOf(10), 10 + life + 1, life)).toBe(0);
+      expect(slimeStrength(stampOf(10), 10 + 5 * life, life)).toBe(0);
+      // A short life time, as a test has it: 3 steps.
+      expect([0, 1, 2, 3, 4].map((age) => slimeStrength(stampOf(7), 7 + age, 3))).toEqual([
+        1,
+        1 - 1 / 3,
+        1 - 2 / 3,
+        0,
+        0,
+      ]);
+    });
+
+    it('is 0 without a stamp, and without slime in the model', () => {
+      expect(slimeStrength(0, 0, life)).toBe(0);
+      expect(slimeStrength(0, 2 ** 32 - 1, life)).toBe(0);
+      // A step count of life − 1 would give a cell without a stamp the age `life`, were 0 a stamp.
+      expect(slimeStrength(0, life - 1, life)).toBe(0);
+      expect(slimeStrength(0, life - 2, life)).toBe(0);
+      // A life time of 0: the model has no slime.
+      expect(slimeStrength(stampOf(10), 10, 0)).toBe(0);
+    });
+
+    it('takes the age in unsigned 32-bit integers, as the passes do', () => {
+      // The count of the steps is at the end of its 32 bits: the step with the number 2^32 − 1 comes next, and its
+      // stamp is 2^32, which the field holds as 0. One step before, a stamp still has the age 0 and 1.
+      const last = 2 ** 32 - 2;
+      expect(stampOf(last)).toBe(2 ** 32 - 1);
+      expect(slimeStrength(stampOf(last), last, life)).toBe(1);
+      expect(slimeStrength(stampOf(last - 1), last, life)).toBe(1 - 1 / life);
+      // The count wrapped to 3: a stamp from 6 steps before is 6 steps old, not 2^32 − 6 steps.
+      const old = stampOf(2 ** 32 - 3);
+      expect(old).toBe(2 ** 32 - 2);
+      expect(slimeStrength(old, 3, life)).toBe(1 - 6 / life);
+      // A stamp from the future of the count is older than every life time below 2^32 steps.
+      expect(slimeStrength(stampOf(11), 10, life)).toBe(0);
+      expect(slimeStrength(stampOf(11), 10, 2 ** 32 - 1)).toBe(0);
+    });
+  });
+
+  // Decision 8: how the picture reads the field between the cells and zoomed out. `step` 0 and a long life time: a
+  // cell with the stamp of step 0 has the strength 1.
+  describe('the strength of the layer at a point of the picture', () => {
+    const life = 1000;
+    /** A field with the stamp of step 0 in the cells of `at`, each a column and a row. */
+    const field = (width: number, height: number, at: readonly (readonly [number, number])[]) => {
+      const stamps = new Uint32Array(width * height);
+      for (const [x, y] of at) stamps[y * width + x] = stampOf(0);
+      return stamps;
+    };
+    const grid = (width: number, height: number, boundary: Settings['boundary'] = 'box') => ({
+      width,
+      height,
+      boundary,
+    });
+    const one = field(8, 6, [[3, 2]]);
+
+    it('is the strength of a cell at its centre, and bilinear between the centres of four cells', () => {
+      const look = (x: number, y: number) => slimeLayer(one, grid(8, 6), 0, life, [x, y], 0.25, 0);
+      expect(look(3.5, 2.5)).toBe(1);
+      // Half way to the cell beside it, and at the corner of four cells.
+      expect(look(4, 2.5)).toBe(0.5);
+      expect(look(3.5, 2)).toBe(0.5);
+      expect(look(4, 3)).toBe(0.25);
+      expect(look(3.75, 2.5)).toBe(0.75);
+      // From the centre of the next cell on: nothing.
+      expect(look(4.5, 2.5)).toBe(0);
+      expect(look(5.2, 2.5)).toBe(0);
+      // The same at 1 cell per pixel.
+      expect(slimeLayer(one, grid(8, 6), 0, life, [4, 3], 1, 0)).toBe(0.25);
+    });
+
+    it('blends the strengths of old and new slime, never their stamps', () => {
+      const stamps = new Uint32Array(8 * 6);
+      // New slime beside slime of three quarters of the life time, beside a cell without slime, after 750 steps.
+      stamps.set([stampOf(750), stampOf(0), 0], 2 * 8 + 3);
+      const look = (x: number) => slimeLayer(stamps, grid(8, 6), 750, life, [x, 2.5], 0.25, 0);
+      expect([look(3.5), look(4.5), look(5.5)]).toEqual([1, 0.25, 0]);
+      expect(look(4)).toBe(0.625);
+      // Half of the old slime. The mean of the stamps 1 and 0 would be slime of 750 steps: 0.25 at this point.
+      expect(look(5)).toBe(0.125);
+    });
+
+    it('is the mean over the square of the pixel from 1 to 2 cells per pixel', () => {
+      // A pixel of 1.5 cells on the centre of the cell: the cell, and a quarter of each cell beside it, per axis.
+      const middle = slimeLayer(one, grid(8, 6), 0, life, [3.5, 2.5], 1.5, 0);
+      expect(middle).toBeCloseTo((1 / 1.5) ** 2, 12);
+      // The same pixel one cell to the right holds a quarter of the cell in one axis.
+      expect(slimeLayer(one, grid(8, 6), 0, life, [4.5, 2.5], 1.5, 0)).toBeCloseTo((0.25 / 1.5) * (1 / 1.5), 12);
+      // The mean of a field with slime everywhere is 1, and that of two cells of four is one half.
+      const all = field(
+        8,
+        6,
+        Array.from({ length: 48 }, (_, c) => [c % 8, Math.floor(c / 8)] as const),
+      );
+      expect(slimeLayer(all, grid(8, 6, 'wrap'), 0, life, [0.3, 0.2], 1.7, 0)).toBeCloseTo(1, 12);
+      const pair = field(8, 6, [
+        [2, 2],
+        [3, 3],
+      ]);
+      expect(slimeLayer(pair, grid(8, 6), 0, life, [3, 3], 1.999, 0)).toBeCloseTo(0.5, 2);
+    });
+
+    it('takes the cell in the middle of a texel for the texel, zoomed out past 2 cells per pixel', () => {
+      // Level 1 on 8 × 6 cells: texels of 2 × 2 cells, and the cell (2 t + 1) stands for the texel t.
+      const look = (stamps: Uint32Array, x: number, y: number) => slimeLayer(stamps, grid(8, 6), 0, life, [x, y], 2, 1);
+      // A pixel of 2 cells on the texel (1, 1), the cells 2 to 3: its middle cell (3, 3) is the whole pixel.
+      expect(look(field(8, 6, [[3, 3]]), 3, 3)).toBe(1);
+      for (const other of [
+        [2, 2],
+        [3, 2],
+        [2, 3],
+      ] as const)
+        expect(look(field(8, 6, [other]), 3, 3)).toBe(0);
+      // The pixel on the corner of four texels holds a quarter of each.
+      expect(look(field(8, 6, [[3, 3]]), 4, 4)).toBe(0.25);
+      expect(look(field(8, 6, [[5, 3]]), 4, 4)).toBe(0.25);
+      // A side that 4 does not divide: 26 cells are 7 texels of level 2, and the middle cells are whole numbers. The
+      // 4 rows are one texel, with the row 2 in its middle.
+      const middles = [1, 5, 9, 13, 16, 20, 24];
+      middles.forEach((x, t) => {
+        // A pixel of 26 / 7 cells on the texel t.
+        const at = ((t + 0.5) * 26) / 7;
+        const seen = (cell: number) => slimeLayer(field(26, 4, [[cell, 2]]), grid(26, 4), 0, life, [at, 2], 26 / 7, 2);
+        expect(seen(x), `texel ${String(t)}`).toBeCloseTo(1, 12);
+        expect(seen(x - 1) + seen(x + 1), `texel ${String(t)}`).toBeCloseTo(0, 12);
+      });
+    });
+
+    it('repeats on the periodic grid, and is 0 outside a closed arena', () => {
+      // The four cells in the corner of the grid: the texel (0, 0) of level 1, with the cell (1, 1) in its middle.
+      const corner = field(8, 6, [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ]);
+      for (const [scale, level] of [
+        [0.5, 0],
+        [1.5, 0],
+        [3, 1],
+      ] as const) {
+        const look = (boundary: Settings['boundary'], x: number, y: number) =>
+          slimeLayer(corner, grid(8, 6, boundary), 0, life, [x, y], scale, level);
+        const here = look('wrap', 0.4, 0.3);
+        expect(here).toBeGreaterThan(0);
+        for (const [dx, dy] of [
+          [8, 0],
+          [0, 6],
+          [-8, -6],
+          [80, 60],
+          [-800, 600],
+        ] as const)
+          expect(look('wrap', 0.4 + dx, 0.3 + dy)).toBeCloseTo(here, 9);
+        // The corner reaches across the seam to the last column and row of the periodic grid.
+        expect(look('wrap', 7.9, 5.9)).toBeGreaterThan(0);
+        expect(look('box', 7.9, 5.9)).toBe(0);
+        expect(look('dish', 8.4, 0.3)).toBe(0);
+        expect(look('box', -5, -5)).toBe(0);
+      }
+    });
   });
 });

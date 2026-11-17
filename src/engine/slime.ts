@@ -40,6 +40,15 @@ export function slimeSteps(s: Pick<Settings, 'model' | 'slimeLife'>): number {
 }
 
 /**
+ * Whether the view draws the slime as a layer on the ground (ADR 0055, decision 8): the switch Show slime is on, the
+ * model has slime with a life time above 0, and the scent view is off. Every style draws the layer. The scent view
+ * draws none, so that its picture is the same with slime and without it. Display only: no pass of the simulation
+ * reads the switch.
+ */
+export const slimeShown = (s: Pick<Settings, 'showSlime' | 'showScent' | 'model' | 'slimeLife'>) =>
+  s.showSlime && !s.showScent && slimeSteps(s) > 0;
+
+/**
  * The trail of each strain from which a cell holds plasm (ADR 0055, decision 3): the low level of the strain, the
  * level from which its tube body grows (flow.ts trailLevels()). One value per strain of the settings, at most four.
  * Every level is above 0.
