@@ -2,7 +2,7 @@
 // foods that give and take. The passes are shaders/flow.wgsl and gl/glsl/flow.frag; flow-reference.ts mirrors them on
 // the CPU for the tests. Every strain has a flow of its own (ADR 0031): the passes run once per strain, on the trail
 // of that strain, with a state of their own.
-import { defaultSettings, MAX_STRAINS, type Settings, type StepOrder } from '../model/params';
+import { MAX_STRAINS, type Settings, type StepOrder } from '../model/params';
 import { SITE_BLOCK, type FlowSites } from './sites';
 
 /**
@@ -158,8 +158,12 @@ export function trailLevels(
   return [FLOW.trailLow * deposit * scale, FLOW.trailFull * deposit * scale];
 }
 
-/** The Slime life time in hours for which `FLOW.recover` is the share of the mark of starved ground: its default. */
-const RECOVER_LIFE = defaultSettings().slimeLife;
+/**
+ * The Slime life time in hours for which `FLOW.recover` is the share of the mark of starved ground: 144, the 6 days of
+ * ADR 0054. It is the default of the setting (a test checks it), but the rule holds the number: another default must
+ * not change the time that a life time gives the mark.
+ */
+const RECOVER_LIFE = 144;
 
 /**
  * The share by which the flow memory of ground without a tube grows per step (ADR 0055, decision 5): the setting Slime
