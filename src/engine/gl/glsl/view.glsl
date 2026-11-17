@@ -24,7 +24,8 @@ layout(std140) uniform View {
   vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
   uvec4 slime;     // the slime: the steps that ran so far, the life time of the slime in steps, 2 unused
-  vec4 slimeFx;    // the slime: the colour of its layer, linear RGB, and the full strength of the layer
+  vec4 slimeFx;    // the slime: the colour of its body, linear RGB, and how much of it full slime shows
+  vec4 slimeLight; // the slime: its highlight, its wide light, the height of its relief, the height of its beads
 } V;
 
 // The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).

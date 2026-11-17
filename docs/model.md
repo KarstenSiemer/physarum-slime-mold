@@ -90,6 +90,7 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 | G_s     | conductivity of the flow of strain s (flow only)                                       | [0, 4]    |
 | P_s,k   | pressure of the flow of strain s in lane k = 0 … 3 (flow only)                         | float     |
 | S       | stamp of the slime, one for all strains (extended model only, section 6.9)             | integers  |
+| A       | amount of slime, one for all strains (extended model only, section 6.9)                | 0 … 4095  |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step. The flow has its fields for each strain
 of the settings, at most 4 (`flowStrains()` in `src/engine/flow.ts`). Settings with another number of strains get a new
@@ -107,8 +108,8 @@ A step runs these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl
    and the flow memory of the last step, each agent the flow memory of its own strain.
 2. **Growth and shrinkage**, only on the steps of their intervals, only with one agent per cell (section 9).
 3. **Diffusion**, one or more passes over the grid (section 6). It adds the deposits n_l of this step.
-4. **Stamps of the slime**, only in the extended model while the Slime life time is above 0 (section 6.9). It reads the
-   trail of every strain after the diffusion.
+4. **Stamps and amounts of the slime**, only in the extended model while the Slime life time is above 0 (section 6.9).
+   It reads the trail of every strain after the diffusion.
 5. **Flow**, only while it is on (section 8). It runs once per strain and reads the trail of that strain after the
    diffusion.
 
@@ -263,12 +264,13 @@ every scene.
 
 ### 6.9 The slime field
 
-ADR 0055. Code: `shaders/slime.wgsl`, `gl/glsl/slime.frag`, `src/engine/slime.ts`; the brush in
-`shaders/slime-paint.wgsl` and `gl/glsl/slime-paint.frag`; CPU reference `src/engine/slime-reference.ts`.
+ADR 0055 and ADR 0057. Code: `shaders/slime.wgsl`, `shaders/amount.wgsl`, `gl/glsl/slime.frag`, `gl/glsl/amount.glsl`,
+`src/engine/slime.ts`; the brush in `shaders/slime-paint.wgsl` and `gl/glsl/slime-paint.frag`; CPU reference
+`src/engine/slime-reference.ts`.
 
 Slime is the layer that a plasmodium leaves on its ground. Only the extended model has the slime field. It is one field
-for all strains. It says where a colony was, and when it was there last. No rule of the model reads the field yet, so
-it changes no run (ADR 0055, decision 1). Only the picture reads it.
+for all strains. It says where a colony was, when it was there last, and how much slime it built there. No rule of the
+model reads the field yet, so it changes no run (ADR 0055, decision 1). Only the picture reads it.
 
 - **A cell holds plasm** in a step when the trail of at least one strain of the settings, as the diffusion of that
   step leaves it, is at or above the low level of that strain: T_s ≥ 0.2 · u_s (section 8.1). The test is the same
@@ -282,22 +284,43 @@ it changes no run (ADR 0055, decision 1). Only the picture reads it.
 - **A cell has slime** for a reader in step k while S ≠ 0 and k + 1 − S < L. The age of the slime is k + 1 − S: 1 for
   a cell that held plasm in step k − 1, and 0 for a stamp that the Slime tool wrote since that step. A change of the
   setting acts on all slime at once.
+- **The amount** (ADR 0057). The field holds a second whole number A per cell, from 0 to 4,095: how thick the slime
+  is that the plasm built there. Only the picture reads it, and it shows A / 4,095 · (1 − age / L): slime gets thinner
+  in a straight line until its life time is over. In step k a cell that holds plasm gets, in this order:
+  - what is left of its amount, from its stamp before the step: 0 without slime (S = 0, or an age at or above L); A
+    for slime of the age 0 or 1; else ⌊A · (L − age) / L⌋, with the age k + 1 − S. So plasm that comes back to old
+    slime starts from what the picture showed, and plasm on ground without slime starts from nothing.
+  - A ← max(A, min(P, A + 1)). P is the level of the plasm, the largest over the strains of
+    clamp((T_s − 0.2 · u_s) / (0.8 · u_s), 0, 1) · 4,095, rounded to the nearest: the share π that the tube body follows
+    (8.1).
+
+  Every other cell keeps its A. So the amount grows by 1 per step under a full tube and is full after 4,095 steps,
+  2.3 hours. It is never above the level that the plasm had, and it never falls while the cell has slime. A colony
+  that only passes leaves little slime, and a tube that stays leaves much. No source gives the rate at which a
+  plasmodium builds its slime: the 4,095 steps are a choice of this app, made on pictures (ADR 0057).
+
 - **The Slime tool** paints the field, not `env`. Its stroke has the cells of a food stroke (6.7), with the hard edge
   of food. Before step k it gives each open cell of the stroke S ← k + 1. A cell is open when it lies inside the arena
   and holds no wall. Painted slime ages as the slime of a colony does. An erase and a wall set S of their cells to 0,
   so no wall holds a stamp. Clear sets every S to 0. The toolbar has the tool while L > 0.
-- **A reset** sets every S to 0. The engine then paints again the strokes of the list that change the field (slime,
+  The stroke also paints the amount: a cell at the distance d from the middle line of a stroke of the radius r gets
+  A ← max(what is left of A, 4,095 · t³ (t (6t − 15) + 10)), rounded to the nearest, with
+  t = clamp((r − d + 0.5) / 4, 0, 1). So painted slime rises from the edge of its stroke to the full amount over 4
+  cells, without a step in its slope. An erase, a wall and Clear set A to 0 with S.
+- **A reset** sets every S and every A to 0. The engine then paints again the strokes of the list that change the field (slime,
   erase, wall), from the first stroke of slime on and in their order, as before the step that comes next: S = 1 after
   a reset. A switch from the Jones model to the extended model does the same. So the painted slime of a scene is new
   at the start of a run (`repaintSlime()` in `src/engine/engine.ts`).
-- **The Jones model** has no slime field: a switch to it frees the field with its stamps.
-- **Memory**: 4 B per cell, a storage buffer on WebGPU and a texture of unsigned integers on WebGL2. The fit of the
-  grid counts them in the extended model with any life time, so the setting changes no grid.
+- **The Jones model** has no slime field: a switch to it frees the field with its stamps and its amounts.
+- **Memory**: 8 B per cell. The stamps are a storage buffer on WebGPU and a texture of unsigned integers on WebGL2,
+  4 B. The amounts are a second buffer on WebGPU, 4 B, and two textures of 2 B on WebGL2, where the pass reads the
+  amounts of before a step from one and writes all of them into the other. The fit of the grid counts them, and
+  3 B more for the maps of the picture, in the extended model with any life time, so the setting changes no grid.
 - **A link** made before the setting holds no Slime life time and opens with 0: it has no slime, and it runs as it
   was made (`sanitize()`).
 
-The same setting gives the mark of starved ground its time (8.4). The picture draws the slime as a pale layer on the
-ground; the rule of the layer is in [design.md](design.md), section 5.
+The same setting gives the mark of starved ground its time (8.4). The picture draws the slime as a wet film on the
+ground, as thick as the amount says; the rule of the film is in [design.md](design.md), section 5.
 
 ## 7. The agents
 
@@ -645,7 +668,7 @@ the Slime life time to its default, and its passes get a life time of 0 (`slimeS
 `speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent`, `showTubes` and `showSlime` change only the view and
 the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
 and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
-`showSlime` draws the slime field as a pale layer on the ground; its rule is in the same section, and in ADR 0055.
+`showSlime` draws the slime field as a wet film on the ground; its rule is in the same section, and in ADR 0057.
 
 ## 12. The two backends
 
@@ -684,7 +707,8 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
 | The slime field (6.9)                   | `slime.gpu.test.ts`: the stamps against the CPU copy; the life time; a reset; the Jones model; `slime-reference.test.ts`        |
 | The Slime tool (6.9)                    | `slime.gpu.test.ts`, "the brush": against the CPU copy; erase, wall and Clear; `engine-env.test.ts`: the repaint, the link      |
-| The layer of the slime (design.md, 5)   | `slime.gpu.test.ts`, "the picture": against the CPU copy; no pixel changes with the layer off; no byte of the simulation        |
+| The amount of slime (6.9)               | `slime.gpu.test.ts`, "the amount of slime": against the CPU copy, step by step; the brush; a reset                              |
+| The film of the slime (design.md, 5)    | `slime.gpu.test.ts`, "the picture": against the CPU copy; no pixel changes with the film off; no byte of the simulation         |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |

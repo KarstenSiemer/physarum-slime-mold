@@ -333,7 +333,7 @@ export const globalSpec = {
   slimeLife: {
     label: 'Slime life time',
     unit: 'hours',
-    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain there is strong enough for a tube to grow. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. The picture shows the slime as a pale layer on the ground, which fades until this time is over (the switch Show slime). No rule reads the slime yet, so the slime changes no run. With Flow in the tubes the setting does one more thing: it says how long the ground that a starved tube left stays marked. That ground is fresh again after about this time, and children can be born onto it after about six tenths of this time: after 6 days and 3.7 days at the default of 144 hours. At 0 the mark keeps these times. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
+    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain there is strong enough for a tube to grow. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. The picture shows the slime as a wet film on the ground, which gets thinner until this time is over (the switch Show slime). No rule reads the slime yet, so the slime changes no run. With Flow in the tubes the setting does one more thing: it says how long the ground that a starved tube left stays marked. That ground is fresh again after about this time, and children can be born onto it after about six tenths of this time: after 6 days and 3.7 days at the default of 144 hours. At 0 the mark keeps these times. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
     min: 0,
     max: 240,
     step: 1,
@@ -469,7 +469,7 @@ export const scentViewHelp = {
 /** Help for the view switch "Show slime" (ADR 0055, decision 8); Learn → Controls lists it. */
 export const slimeViewHelp = {
   label: 'Show slime',
-  help: 'Changes only the picture, not the simulation. The picture shows the slime as a pale layer on the ground: where the colony was, and where you painted slime. The food, the trail, the tubes, the light, the walls and the electrodes lie on the layer. The layer is strongest where the slime is new. It fades in a straight line as the slime gets older, and it is gone after the Slime life time. The Scent view does not draw it. Without the switch the ground is plain.',
+  help: 'Changes only the picture, not the simulation. The picture shows the slime as a wet film on the ground: where the colony was, and where you painted slime. The film is thick where a tube stayed for a long time, and thin where the colony only passed. So the film keeps the shape of the tube that made it, as the slime track of a real slime mold does: a tube leaves its coat of slime behind. A tube that stays for 2.3 hours of model time leaves the thickest film. The food, the trail, the tubes, the light, the walls and the electrodes lie on the film. The film gets thinner in a straight line as the slime gets older, and it is gone after the Slime life time. The Scent view does not draw it. Without the switch the ground is plain.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
@@ -543,7 +543,7 @@ export interface Settings extends Record<GlobalKey, number> {
    */
   showTubes: boolean;
   /**
-   * The view draws the slime as a pale layer on the ground, while the model has slime (slimeViewHelp, ADR 0055,
+   * The view draws the slime as a wet film on the ground, while the model has slime (slimeViewHelp, ADR 0055,
    * decision 8). Display only.
    */
   showSlime: boolean;
@@ -710,7 +710,7 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // A link from before the picture of the tubes holds no switch for it: the picture is on, as for a new scene. It
   // changes no result (ADR 0034).
   out.showTubes = raw.showTubes !== false;
-  // So with the layer of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the layer
+  // So with the film of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the film
   // is on. It changes no result.
   out.showSlime = raw.showSlime !== false;
   out.collisions = raw.collisions === true;

@@ -234,6 +234,15 @@ with slime on both arms. But its colony then needs 233 steps to the food in plac
 choice of that rule comes from a slower colony, and the plasmodium is not slower. So no rule is
 built. The plasmodium chooses as one body, whose plasm goes to the part of its front that moves
 on, and the model gets that with the growth front of stage 4.
+**The film of the slime** ([ADR 0057](../../docs/adr/0057-the-film-of-the-slime.md), part 21). The
+owner looked at the pale layer of the slime and found it flat and jagged. The stamp says when
+plasm was in a cell, not how much, and a colony covers most ground once: the layer was the same
+everywhere. The slime field now also holds an amount of slime per cell, for the picture alone. A
+cell under a full tube gains 1 of 4,095 per step, up to the level of its plasm. So the amount is
+high where a tube stayed, and the picture draws a wet film that keeps the shape of the tube. The
+organism leaves the coat of slime of a tube behind in the same way. An amount that grows fast is
+flat, as the stamp is: with a sum that is full after 500 steps, 97 % of the cells with slime are
+above 0.9 after 22,000 steps of the Snail maze. With the rule, 16 % are. No run changes.
 
 ## What is in this folder, and what you need to read
 
@@ -1900,8 +1909,9 @@ npx vitest run --project gpu src/engine/slime.gpu.test.ts
 npm run build && npx playwright test --project=e2e tests/e2e/ui.spec.ts -g "Slime tool"
 ```
 
-You must see 36, 96 and 1 tests pass. `slime.gpu.test.ts` holds both backends to the CPU copy
-`slime-reference.ts`: the stamps step by step, the brush, and the picture of the layer.
+You saw 36, 96 and 1 tests pass with the layer of ADR 0055. Part 21 has the counts with the film
+of ADR 0057. `slime.gpu.test.ts` holds both backends to the CPU copy `slime-reference.ts`: the
+stamps step by step, the brush, and the picture.
 
 **The bytes of the scenes.** The digests as in part 17, with the names `g55-digest-branch` and
 `g55-digest-3000-branch`, after 500 steps for every scene and after 3,000 steps for the eight
@@ -1944,7 +1954,8 @@ run() { VITE_NAME=$1 VITE_SCENES=maze,tokyo,cyclones VITE_WARM=1000 VITE_PATCH="
 pixels. `slime-draw.gpu.test.ts` draws one state 21 × 50 times with the switch off and on in
 turns. The first command draws the Snail maze and Three strains in the glow and gel styles at
 four views, the second Three strains in the glow style at six views from 0.15 to 4.8 cells per
-pixel:
+pixel. Since ADR 0057 the file times the film, with a third case (part 21); a checkout of
+`17d3ac6` times the layer:
 
 ```bash
 VITE_NAME=g55-draw npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
@@ -1955,13 +1966,15 @@ VITE_SCENES=three-strains VITE_STYLES=glow VITE_ZOOMS=0.25,1,2,3,4,8 VITE_NAME=g
 ```
 
 **The wrong rules** SL1 to SL119: 31 of the stamps and of the time of the mark, 46 of the brush
-and 42 of the picture:
+and 42 of the picture. Since ADR 0057 the numbers from SL78 on name wrong rules of the film
+(part 21), and the record of the 42 of the layer is `mutations-picture.txt`:
 
 ```bash
-node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for i in $(seq 1 119); do echo SL$i; done)
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for i in $(seq 1 77); do echo SL$i; done)
 ```
 
-**The pictures** of the layer in each style, from the built app (`test-results/pictures/`):
+**The pictures** of the layer in each style, from the built app (`test-results/pictures/`).
+Since ADR 0057 the command makes the pictures of the film:
 
 ```bash
 npm run build && npx playwright test --project=pictures tests/pictures/slime.spec.ts
@@ -2050,6 +2063,112 @@ food in place of 65. ADR 0056 has the tables and the decision. The records are i
 | `births-none-*`, `births-one-*` | the runs that wrote their births; the dumps of the births are not kept    |
 | `nogrowth-*`                    | a colony without growth, with no rule and with the rule of the sensors    |
 | `tables.txt`, `births.txt`      | the lines of `measure-y-maze.ts` for all records, and the ages            |
+
+### 21. Does the film show where a tube stayed, and what does it cost? [ADR 0057]
+
+Since ADR 0057 the slime field also holds an amount of slime per cell, a whole number from 0 to
+4,095, and the picture draws the slime as a wet film whose thickness is that amount. No rule
+reads the amount. The flat layer of part 19 is gone, and so are its wrong rules SL78 to SL119:
+these numbers now name wrong rules of the film.
+
+**The tests of the rule** (Node 1 s, headless browser 30 s, and the built app):
+
+```bash
+npx vitest run --project unit src/engine/slime.test.ts src/engine/slime-reference.test.ts src/engine/render.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/slime.gpu.test.ts
+```
+
+```bash
+npm run build && npx playwright test --project=e2e tests/e2e/ui.spec.ts -g "Slime tool"
+```
+
+You must see @@UNIT@@, 126 and 1 tests pass. `slime.gpu.test.ts` holds both backends to the CPU
+copy `slime-reference.ts`: the amount step by step and under the brush, the map of the film and
+its coarse map, and the picture of the film in each style.
+
+**Which amount keeps the shape of a tube?** The Snail maze with the seed 1 to step 22,000, with
+candidate amounts kept on the CPU (10 minutes). It writes each candidate as a grey picture, and
+the table of the ADR to `test-results/pictures/amount-snail-maze-22000.txt`:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/slime-amount.spec.ts
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the names `g57-digest-branch` and
+`g57-digest-3000-branch`. The digests of `main` for it are those of part 19:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g57-digest-branch.jsonl research/flow/logs/engine/slime/digest-branch.jsonl
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g57-digest-3000-branch.jsonl research/flow/logs/engine/slime/digest-3000-branch.jsonl
+```
+
+They must print that all 54 runs and all 16 runs are equal.
+
+**The time of a step** with the amount, against `main` and against a life time of 0, which runs
+no pass. `../main` is a checkout of `main` at `a6ffe64` with `node_modules`. The three cases run
+in turns, in another order in each of three rounds, 2 minutes per run, and nothing else may use
+the GPU then:
+
+```bash
+run() { (cd $1 && VITE_NAME=$2 VITE_SCENES=maze,tokyo,cyclones VITE_WARM=1000 VITE_PATCH="$3" npx vitest run --config research/vitest.config.ts research/flow/engine/bench.gpu.test.ts); }; film() { run . g57-bench-film-r$1 '{}'; }; main() { run ../main g57-bench-main-r$1 '{}'; }; none() { run . g57-bench-none-r$1 '{"slimeLife":0}'; }; film 1; main 1; none 1; none 2; main 2; film 2; main 3; film 3; none 3
+```
+
+**The time of a draw** on a canvas of 2,560 × 1,600 pixels. `slime-draw.gpu.test.ts` draws one
+state 21 × 50 times in each of three cases in turns: `off`, with the switch Show slime off;
+`on`, with the film and its maps filled; and `fill`, where every draw fills the maps again, as
+the first frame after a step does. The first command draws the Snail maze and Three strains in
+the glow and gel styles at four views, the second Three strains in the glow style at six views
+from 0.15 to 4.8 cells per pixel, and the third the paper and agents styles. The same two first
+commands in `../main`, with the names `g57-draw-main` and `g57-draw-zooms-main`, time the layer
+of ADR 0055:
+
+```bash
+VITE_NAME=g57-draw npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+```bash
+VITE_SCENES=three-strains VITE_STYLES=glow VITE_ZOOMS=0.25,1,2,3,4,8 VITE_NAME=g57-draw-zooms npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+```bash
+VITE_SCENES=three-strains VITE_STYLES=paper,agents VITE_ZOOMS=1,4 VITE_NAME=g57-draw-styles npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+**The wrong rules** SL1 to SL222: 31 of the stamps and of the time of the mark, 46 of the brush,
+102 of the picture (SL78 to SL179) and 43 of the amount (SL180 to SL222):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for i in $(seq 1 222); do echo SL$i; done)
+```
+
+**The pictures** of the film in each style, from the built app (`test-results/pictures/`):
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/slime.spec.ts
+```
+
+Result: no scene changes a byte. With the rule of the app @@RULE@@ of the cells with slime are
+above 0.9 after 22,000 steps of the Snail maze; with a sum that is full after 500 steps @@SUM@@
+are. The amount costs 0.01 to 0.37 ms of a step on WebGPU. Where the film covers a picture of
+2,560 × 1,600 pixels it costs 2 ms of a draw on WebGPU and 4 ms on WebGL2, and the first frame
+after a step 0.6 to 1.1 ms more for the maps of 1.5 million cells. Each of the 222 wrong rules
+fails at least one test. ADR 0057 has the tables. The records are in `logs/engine/film/`:
+
+| Record                                           | Runs                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| `digest-branch.jsonl`, `digest-3000-branch`      | the digests of every scene after 500 steps, and of eight after 3,000  |
+| `amount-snail-maze-22000.txt`                    | the table of the candidate amounts                                    |
+| `bench-film-r*`, `bench-main-r*`, `bench-none-*` | the time of a step with the amount, on `main`, and without the pass   |
+| `draw.jsonl`, `draw-zooms`, `draw-styles`        | the time of a draw without the film, with it, and with a fill         |
+| `draw-main.jsonl`, `draw-zooms-main.jsonl`       | the time of a draw with the layer of ADR 0055 and without it, on main |
+| `mutations-stamps-brush.txt`, `-picture-*.txt`   | the wrong rules SL1 to SL77 and SL78 to SL179                         |
+| `mutations-amount.txt`                           | the wrong rules SL180 to SL222                                        |
 
 ## The logs
 

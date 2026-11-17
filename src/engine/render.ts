@@ -39,25 +39,36 @@ export interface Frame {
 export const GEL_FX: Record<GelColor, [pale: number, film: number]> = { mild: [0.35, 0.5], strong: [0.6, 0.35] };
 
 /**
- * The layer of the slime in each style (ADR 0055, decision 8): its colour, and its full strength A. The ground under
- * slime of the age 0 holds the share A of that colour, and under older slime the share A · (1 − age / life time)
- * (slimeStrength() in slime-reference.ts). One pale colour for all strains. It is lighter than the ground of the dark
- * styles and darker than paper.
+ * The film of the slime in each style (ADR 0057; `slimed` in render.wgsl, slimeColour() in slime-reference.ts). One
+ * pale colour for all strains.
+ * - `color`: the colour of the body of the film: lighter than the ground of the dark styles, and darker than paper.
+ * - `body`: how much of that colour slime of the full thickness shows. On the dark grounds the film adds this share
+ *   of the colour to the ground; on paper it is a wet stain, and mixes this share of the colour into the paper.
+ *   Thinner slime shows less than its share of the thickness: thin slime is clear, and thick slime is milky.
+ * - `gloss`: the strength of the small highlight of the lamp on the film.
+ * - `wide`: the strength of the wide weak light on its slopes.
  */
-export const SLIME_LOOK: Record<Settings['style'], { color: string; strength: number }> = {
-  glow: { color: '#d8dccf', strength: 0.02 },
-  gel: { color: '#e4dfcc', strength: 0.024 },
-  paper: { color: '#8f8a78', strength: 0.22 },
-  agents: { color: '#d8dccf', strength: 0.02 },
+export const SLIME_LOOK: Record<Settings['style'], { color: string; body: number; gloss: number; wide: number }> = {
+  glow: { color: '#c4d7ce', body: 0.075, gloss: 0.5, wide: 0.14 },
+  gel: { color: '#d7e1c8', body: 0.1, gloss: 0.65, wide: 0.14 },
+  paper: { color: '#8f8a78', body: 0.22, gloss: 0.7, wide: 0.35 },
+  agents: { color: '#c4d7ce', body: 0.075, gloss: 0.5, wide: 0.14 },
 };
 
-export const VIEW_BYTES = 256;
+/** The height of the relief of the film: cells of height for slime of the full thickness (render.wgsl `slimed`). */
+export const SLIME_RELIEF = 2.5;
+/** The height of a bead on the film, as a share of the full thickness (render.wgsl `slimeBeads`). */
+export const SLIME_BEAD = 0.11;
+
+export const VIEW_BYTES = 272;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 /** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
 const COARSE_FORMAT: GPUTextureFormat = 'rgba32float';
 /** The trail's coarse map: the trail of 4 strains, as the trail texture holds it. */
 const TRAIL_FORMAT: GPUTextureFormat = 'rgba32float';
+/** The map of the film of the slime and its coarse map (ADR 0057): one thickness per texel, 2 B. */
+const FILM_FORMAT: GPUTextureFormat = 'r16float';
 
 /**
  * The coarsest map of the trail that a view zoomed out reads (trailLevel()): texels of 16 cells, for up to 32 cells
@@ -79,7 +90,7 @@ export function trailLevel(scale: number): number {
  * Fills `struct View` (render.wgsl), which is also the std140 `View` block of the WebGL2 renderer. `occupancy`:
  * the simulation keeps agents per cell (collision mode), for the agents style and for agents on food. `stream`: the
  * step of the state, while the view draws the stream of the plasm (tubes.ts, point 6). `electrodes`: an electrode may
- * be painted (Sim.hasElectrodes). `slime`: the steps that ran so far (Sim.step), while the frame draws the layer of
+ * be painted (Sim.hasElectrodes). `slime`: the steps that ran so far (Sim.step), while the frame draws the film of
  * the slime (ADR 0055, decision 8).
  */
 export function packView(
@@ -126,12 +137,14 @@ export function packView(
   const sensors = scentSensors(settings, strand);
   fl.set(sensors.half, 48);
   fl.set(sensors.holds, 52);
-  // The layer of the slime: the steps that ran so far and the life time in steps, both as unsigned integers, so that
-  // the pass takes the age of a stamp as the passes of the simulation do. Then the colour and the full strength of
-  // the style. A frame without the layer reads none of them.
+  // The film of the slime: the steps that ran so far and the life time in steps, both as unsigned integers, so that
+  // the pass takes the age of a stamp as the passes of the simulation do. Then the numbers of the style: the colour
+  // and the share of its body, its highlight, its wide light, the height of its relief and of its beads. A frame
+  // without the film reads none of them.
   u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), 0, 0], 56);
   const look = SLIME_LOOK[settings.style];
-  fl.set([...hexToLinear(look.color), look.strength], 60);
+  fl.set([...hexToLinear(look.color), look.body], 60);
+  fl.set([look.gloss, look.wide, SLIME_RELIEF, SLIME_BEAD], 64);
 }
 
 /** How much of the scene the copies around a periodic lattice show (packView). */
@@ -145,8 +158,17 @@ interface Groups {
   down: GPUBindGroup;
   bloom: GPUTextureView;
   sampler: GPUSampler;
-  /** The buffer at the binding of the slime field (encode()). */
-  stamps: GPUBuffer;
+  /**
+   * The pass that fills the map of the film (`slimeFilm` in render.wgsl) with the slime field that it reads, made at
+   * the first frame that draws the film of a simulation with a field.
+   */
+  film?: { group: GPUBindGroup; stamps: GPUBuffer };
+  /**
+   * The pass that fills the coarse map of the film (`slimeDown` in render.wgsl), made at the first frame that needs
+   * it. It holds the trail for the size of the grid, so it lies with the groups of that trail: a simulation frees the
+   * picture of the tubes while it lives, and a pass with a freed texture is an error of the device.
+   */
+  filmDown?: GPUBindGroup;
 }
 
 /** The scent view: the render pass with it, without (index 0) or with (1) the food, light and walls, and `scentDown`. */
@@ -161,9 +183,30 @@ interface ScentPipelines {
 /** A render pass and the gel height pass, without (index 0) or with (1) the food, light and walls. */
 type Variants = [GPURenderPipeline, GPURenderPipeline];
 
+/** The film of the slime (ADR 0057): the render pass with it, the pass of its map, and `slimeDown`. */
+interface SlimePipelines {
+  render: Variants;
+  /** Fills the map of the film, without (index 0) or with (1) the walls. */
+  film: Variants;
+  /** Fills the coarse map of the film. */
+  down: GPURenderPipeline;
+}
+
+/** What a map of the film holds: it is filled again only when one of these changed. */
+interface FilmState {
+  sim: Simulation;
+  stamps: GPUBuffer;
+  step: number;
+  revision: number;
+  life: number;
+  boundary: number;
+  variant: number;
+  overlays: boolean;
+}
+
 /**
  * The descriptor of the render pass from `module` without or with the food, light and walls (`env`), and with one
- * part more or none (`part`): the scent view (`SCENT`) or the layer of the slime (`SLIME`). Without a part the
+ * part more or none (`part`): the scent view (`SCENT`) or the film of the slime (`SLIME`). Without a part the
  * pipeline sets only `ENV`, as before the parts existed.
  */
 function renderPipeline(
@@ -197,12 +240,20 @@ export class Renderer {
   private scent: ScentPipelines | undefined;
   private scentBuild: Promise<ScentPipelines> | undefined;
   /**
-   * The render pass with the layer of the slime (SLIME in render.wgsl, ADR 0055), built without blocking from the
-   * first frame that draws the layer (slimeNow()): a scene of the Jones model never does. Until they are built, frames
-   * draw without the layer.
+   * The passes of the film of the slime (SLIME in render.wgsl, ADR 0055 and 0057), built without blocking from the
+   * first frame that draws the film (slimeNow()): a scene of the Jones model never does. Until they are built, frames
+   * draw without the film.
    */
-  private slime: Variants | undefined;
-  private slimeBuild: Promise<Variants> | undefined;
+  private slime: SlimePipelines | undefined;
+  private slimeBuild: Promise<SlimePipelines> | undefined;
+  private readonly filmLayout: GPUBindGroupLayout;
+  private readonly filmDownLayout: GPUBindGroupLayout;
+  /** The map of the film of the slime (slimeFilm), one texel per cell, made at the first frame that draws the film. */
+  private film: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  private filmHolds: FilmState | undefined;
+  /** The coarse map of the film (slimeDown), made at the first frame with the film above 2 cells per pixel. */
+  private filmCoarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  private filmCoarseHolds: (FilmState & { level: number }) | undefined;
   private readonly downLayout: GPUBindGroupLayout;
   /** The scent view's coarse map (scentDown), made at the first frame that draws the view. */
   private coarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
@@ -231,7 +282,8 @@ export class Renderer {
    * By trail texture, then by scent texture, then by occupancy buffer. The trail and the scent of the view alternate
    * between two textures together, but the picture of the tubes is one trail texture for both (ADR 0034), so the trail
    * does not name the scent. The textures are weak keys: a texture that its simulation freed leaves no group behind.
-   * A group is made anew when the bloom, its sampler or the slime field is another one (encode()).
+   * A group is made anew when the bloom or its sampler is another one (encode()), and its pass of the film when the
+   * slime field is another one.
    */
   private groups = new WeakMap<GPUTexture, WeakMap<GPUTexture, Map<GPUBuffer, Groups>>>();
   /** Gel height field: one texel per cell plus a one-cell border (render.wgsl `heightField`). */
@@ -274,7 +326,25 @@ export class Renderer {
         { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 12, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         storage(13),
+        { binding: 15, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 17, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+      ],
+    });
+    // The pass of the map of the film: the view, the trail for the size of the grid, the walls and the slime field.
+    this.filmLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: F, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        storage(2),
         storage(14),
+        storage(18),
+      ],
+    });
+    this.filmDownLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: F, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 15, visibility: F, texture: { sampleType: 'unfilterable-float' } },
       ],
     });
     this.downLayout = device.createBindGroupLayout({
@@ -326,7 +396,7 @@ export class Renderer {
   }
 
   /**
-   * Waits until a frame with these settings shows the view as asked: the pipelines of the scent view or of the layer
+   * Waits until a frame with these settings shows the view as asked: the pipelines of the scent view or of the film
    * of the slime are built.
    */
   async ready(settings: Settings): Promise<void> {
@@ -356,7 +426,7 @@ export class Renderer {
   }
 
   /**
-   * False while the frame draws without the scent view or without the layer of the slime that it asks for: their
+   * False while the frame draws without the scent view or without the film of the slime that it asks for: their
    * pipelines are still being built.
    */
   private encode(target: GPUTexture, width: number, height: number, f: Frame): boolean {
@@ -367,10 +437,11 @@ export class Renderer {
     const { exposure, black, strand } = f;
     // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
     const stream = sim.streamTexture;
-    // The layer of the slime (ADR 0055, decision 8), while the settings show it and the simulation holds the field:
-    // without a field no cell has a stamp, and the picture is the one without the layer.
-    const slimy = this.fixed === undefined && slimeShown(f.settings) && sim.slimeField !== undefined;
-    const layer = slimy ? this.slimeNow() : undefined;
+    // The film of the slime (ADR 0055, decision 8; ADR 0057), while the settings show it and the simulation holds the
+    // field: without a field no cell has a stamp, and the picture is the one without the film.
+    const [stamps, amounts] = [sim.slimeField, sim.slimeAmount];
+    const slimy = this.fixed === undefined && slimeShown(f.settings) && stamps !== undefined && amounts !== undefined;
+    const wet = slimy ? this.slimeNow() : undefined;
     packView(
       this.data,
       width,
@@ -385,7 +456,7 @@ export class Renderer {
       strand,
       stream ? sim.step : undefined,
       sim.hasElectrodes,
-      layer ? sim.step : undefined,
+      wet ? sim.step : undefined,
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
@@ -400,6 +471,9 @@ export class Renderer {
     // Zoomed out, a pixel reads the trail from a coarser map, filled below (trailDown in render.wgsl).
     const trailMap = trailLevel(f.view.scale);
     const trailCoarse = trailMap > 0 ? this.trailCoarseFor(trail) : undefined;
+    // The maps of the film, made before the bind group that holds them.
+    const film = wet ? this.filmFor(trail) : undefined;
+    const filmCoarse = wet && trailMap > 0 ? this.filmCoarseFor(trail) : undefined;
     let byScent = this.groups.get(trail);
     if (!byScent) {
       byScent = new WeakMap();
@@ -411,9 +485,7 @@ export class Renderer {
       byScent.set(scent, byOcc);
     }
     let cached = byOcc.get(occ);
-    // The Jones model has no slime field, and no pass reads its binding then: the cells of the simulation stand in.
-    const stamps = sim.slimeField ?? sim.env;
-    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.stamps !== stamps) {
+    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {
       const trailView = trail.createView();
       const scentView = scent.createView();
       const group = this.device.createBindGroup({
@@ -436,8 +508,9 @@ export class Renderer {
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
           // The cells of the simulation, for the electrodes (ADR 0047).
           { binding: 13, resource: { buffer: sim.env } },
-          // The slime field, for the layer of the slime (ADR 0055).
-          { binding: 14, resource: { buffer: stamps } },
+          // The maps of the film of the slime (ADR 0057). A frame without the film reads none of them.
+          { binding: 15, resource: this.film?.view ?? this.noCoarse.createView() },
+          { binding: 17, resource: this.filmCoarse?.view ?? this.noCoarse.createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -458,8 +531,21 @@ export class Renderer {
           { binding: 9, resource: scentView },
         ],
       });
-      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, stamps };
+      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler };
       byOcc.set(occ, cached);
+    }
+    if (wet && stamps && amounts && cached.film?.stamps !== stamps) {
+      const group = this.device.createBindGroup({
+        layout: this.filmLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.uniform } },
+          { binding: 1, resource: trail.createView() },
+          { binding: 2, resource: { buffer: sim.shape } },
+          { binding: 14, resource: { buffer: stamps } },
+          { binding: 18, resource: { buffer: amounts } },
+        ],
+      });
+      cached.film = { group, stamps };
     }
     // Without food, light or walls the environment code would only cost time: the variant without it
     // draws the same pixels.
@@ -501,9 +587,53 @@ export class Renderer {
       down.draw(3);
       down.end();
     }
+    const boundary = BOUNDARIES.indexOf(f.settings.boundary);
+    // The map of the film of the slime, filled once for each state of the slime that a frame draws (slimeFilm in
+    // render.wgsl): after a step or a stroke, and when the life time, the arena or the walls in the picture are
+    // others. Zoomed out, the frame reads a coarser map of it, filled from it (slimeDown).
+    if (wet && film && stamps && cached.film) {
+      const now: FilmState = {
+        sim,
+        stamps,
+        step: sim.step,
+        revision: sim.revision,
+        life: slimeSteps(f.settings),
+        boundary,
+        variant,
+        overlays: this.overlays,
+      };
+      const same = (held: FilmState | undefined) =>
+        held !== undefined && (Object.keys(now) as (keyof FilmState)[]).every((k) => held[k] === now[k]);
+      if (!same(this.filmHolds)) {
+        this.filmHolds = now;
+        const fill = enc.beginRenderPass({ colorAttachments: [{ view: film, loadOp: 'clear', storeOp: 'store' }] });
+        fill.setPipeline(wet.film[variant]);
+        fill.setBindGroup(0, cached.film.group);
+        fill.draw(3);
+        fill.end();
+      }
+      if (filmCoarse && !(same(this.filmCoarseHolds) && this.filmCoarseHolds?.level === trailMap)) {
+        this.filmCoarseHolds = { ...now, level: trailMap };
+        cached.filmDown ??= this.device.createBindGroup({
+          layout: this.filmDownLayout,
+          entries: [
+            { binding: 0, resource: { buffer: this.uniform } },
+            { binding: 1, resource: trail.createView() },
+            { binding: 15, resource: film },
+          ],
+        });
+        const down = enc.beginRenderPass({
+          colorAttachments: [{ view: filmCoarse, loadOp: 'clear', storeOp: 'store' }],
+        });
+        down.setViewport(0, 0, levelSize(trail.width, trailMap), levelSize(trail.height, trailMap), 0, 1);
+        down.setPipeline(wet.down);
+        down.setBindGroup(0, cached.filmDown);
+        down.draw(3);
+        down.end();
+      }
+    }
     // Zoomed out, the scent view reads a coarser map of the scent, filled here (scentDown in render.wgsl).
     const level = scentLevel(f.view.scale);
-    const boundary = BOUNDARIES.indexOf(f.settings.boundary);
     const holds = this.coarseHolds;
     // The share of a texel that holds scent changes only with the shape, the level or the arena; steps change only
     // the scent, and they leave none in walls or outside the dish (render.wgsl SUM_ONLY).
@@ -524,12 +654,12 @@ export class Renderer {
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
     // The scent view draws no slime (slimeShown()), so a frame has one of the two parts at most.
-    pass.setPipeline((view?.render ?? layer ?? this.pipelines)[variant]);
+    pass.setPipeline((view?.render ?? wet?.render ?? this.pipelines)[variant]);
     pass.setBindGroup(0, cached.group);
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    return !(f.settings.showScent && this.fixed === undefined && !view) && !(slimy && !layer);
+    return !(f.settings.showScent && this.fixed === undefined && !view) && !(slimy && !wet);
   }
 
   /**
@@ -570,18 +700,35 @@ export class Renderer {
   private scentError: Error | undefined;
 
   /**
-   * The pipelines of the layer of the slime once they are built, else undefined; the first call starts their build,
+   * The pipelines of the film of the slime once they are built, else undefined; the first call starts their build,
    * without blocking, as scentNow() does. `wait`: resolves when they are built (exports and tests).
    */
-  private slimeNow(): Variants | undefined;
-  private slimeNow(wait: true): Promise<Variants>;
-  private slimeNow(wait = false): Variants | undefined | Promise<Variants> {
+  private slimeNow(): SlimePipelines | undefined;
+  private slimeNow(wait: true): Promise<SlimePipelines>;
+  private slimeNow(wait = false): SlimePipelines | undefined | Promise<SlimePipelines> {
     if (!this.slimeBuild) {
       const { device, module, layout, format } = this;
       const render = (env: boolean) =>
         device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, 'SLIME'));
-      this.slimeBuild = Promise.all([render(false), render(true)]).then((built) => (this.slime = built));
-      // A failed build shows in the next frame that asks for the layer.
+      const map = (entryPoint: string, uses: GPUBindGroupLayout, env?: boolean) =>
+        device.createRenderPipelineAsync({
+          layout: device.createPipelineLayout({ bindGroupLayouts: [uses] }),
+          vertex: { module, entryPoint: 'vs' },
+          fragment: {
+            module,
+            entryPoint,
+            targets: [{ format: FILM_FORMAT }],
+            ...(env === undefined ? {} : { constants: { ENV: Number(env) } }),
+          },
+        });
+      this.slimeBuild = Promise.all([
+        render(false),
+        render(true),
+        map('slimeFilm', this.filmLayout, false),
+        map('slimeFilm', this.filmLayout, true),
+        map('slimeDown', this.filmDownLayout),
+      ]).then(([off, on, bare, walled, down]) => (this.slime = { render: [off, on], film: [bare, walled], down }));
+      // A failed build shows in the next frame that asks for the film.
       this.slimeBuild.catch((err: unknown) => (this.slimeError = err instanceof Error ? err : new Error(String(err))));
     }
     if (this.slimeError) throw this.slimeError;
@@ -624,6 +771,39 @@ export class Renderer {
     return this.trailCoarse.view;
   }
 
+  /** The map of the film of the slime for a trail of this size (one texel per cell), made anew with the size. */
+  private filmFor(trail: GPUTexture): GPUTextureView {
+    if (this.film?.texture.width !== trail.width || this.film.texture.height !== trail.height) {
+      this.film?.texture.destroy();
+      const texture = this.device.createTexture({
+        size: [trail.width, trail.height],
+        format: FILM_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.film = { texture, view: texture.createView() };
+      [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
+      this.groups = new WeakMap();
+    }
+    return this.film.view;
+  }
+
+  /** The coarse map of the film for a trail of this size (half its sides, rounded up), made anew with the size. */
+  private filmCoarseFor(trail: GPUTexture): GPUTextureView {
+    const [width, height] = [levelSize(trail.width, 1), levelSize(trail.height, 1)];
+    if (this.filmCoarse?.texture.width !== width || this.filmCoarse.texture.height !== height) {
+      this.filmCoarse?.texture.destroy();
+      const texture = this.device.createTexture({
+        size: [width, height],
+        format: FILM_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.filmCoarse = { texture, view: texture.createView() };
+      this.filmCoarseHolds = undefined;
+      this.groups = new WeakMap();
+    }
+    return this.filmCoarse.view;
+  }
+
   /** The gel height field for a trail of this size, made anew when the size changes. */
   private heightsFor(trail: GPUTexture): GPUTextureView {
     const [width, height] = [trail.width + 2, trail.height + 2];
@@ -645,6 +825,7 @@ export class Renderer {
     this.groups = new WeakMap();
     this.coarseHolds = undefined;
     this.trailHolds = undefined;
+    [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
   }
 
   destroy() {
@@ -652,6 +833,8 @@ export class Renderer {
     this.heights?.texture.destroy();
     this.coarse?.texture.destroy();
     this.trailCoarse?.texture.destroy();
+    this.film?.texture.destroy();
+    this.filmCoarse?.texture.destroy();
     this.noCoarse.destroy();
   }
 }

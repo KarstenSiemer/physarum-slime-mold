@@ -1,9 +1,22 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, globalSpec, strainSpec, type Settings } from '../model/params';
 import { FLOW, packFlow, STEPS_PER_MINUTE, trailLevels } from './flow';
 import { PARAM_SLOTS, packParams } from './pack';
 import { NO_SITES } from './sites';
-import { NO_STAMP, plasmLevels, slimeModel, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
+import {
+  NO_STAMP,
+  PLASM_SPAN,
+  plasmLevels,
+  SLIME_FULL,
+  SLIME_RIM,
+  slimeModel,
+  slimeShown,
+  slimeSteps,
+  stampOf,
+  STEPS_PER_HOUR,
+} from './slime';
+import { SLIME_BEADS, SLIME_RIPPLE, SLIME_WAVES } from './slime-reference';
 
 // ADR 0055: the slime field. One field for all strains, with the stamp of each cell.
 describe('the slime field (ADR 0055)', () => {
@@ -140,5 +153,94 @@ describe('the slime field in the parameters of the passes', () => {
     const bytes = (s: Settings) => new Uint8Array(packParams(s, rt)).slice(0, lane('slimeLow') * 4);
     expect(bytes({ ...d, slimeLife: 0 })).toEqual(bytes(d));
     expect(bytes({ ...d, slimeLife: 18 })).toEqual(bytes(d));
+  });
+});
+
+// ADR 0057: the passes of the amount of slime and of its film hold the numbers of slime.ts as constants of their own,
+// and the two backends hold the same numbers of the film.
+describe('the numbers of the slime in the passes', () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+  /** The constant `name` of a pass: `const NAME = 4.0;` in WGSL, `const float NAME = 4.0;` in GLSL. */
+  const constant = (path: string, name: string) => {
+    const found = [...read(path).matchAll(new RegExp(`^const (?:float |uint )?${name} = ([0-9.]+)u?;`, 'gm'))];
+    if (found.length !== 1) throw new Error(`Not one constant ${name} in ${path}`);
+    return Number(found[0]?.[1]);
+  };
+  /** The text of the function `name` of a pass, from its first line to its closing brace. */
+  const body = (path: string, name: string) => {
+    const start = `^(?:fn |\\w+ )${name}\\([^\\n]*\\{`;
+    const found = new RegExp(`${start}(?:[^\\n]*\\}\\n|\\n[\\s\\S]*?\\n\\}\\n)`, 'm').exec(read(path));
+    if (!found) throw new Error(`No function ${name} in ${path}`);
+    return found[0];
+  };
+  /** The numbers in a text without its comments, in their order; not the digits in names such as vec3f and k1. */
+  const numbers = (text: string) =>
+    [...text.replace(/\/\/[^\n]*/g, '').matchAll(/(?<![\w.])(0x[0-9a-f]+|\d+(?:\.\d+)?)u?(?![\w.])/g)].map((m) =>
+      Number(m[1]),
+    );
+
+  it('hold the full amount of slime of a cell: 4,095', () => {
+    for (const path of ['./shaders/amount.wgsl', './gl/glsl/amount.glsl'])
+      expect(constant(path, 'FULL'), path).toBe(SLIME_FULL);
+    for (const path of ['./shaders/render.wgsl', './gl/glsl/slime-film.frag'])
+      expect(constant(path, 'SLIME_FULL'), path).toBe(SLIME_FULL);
+    expect(SLIME_FULL).toBe(4095);
+  });
+
+  it('hold the trail above the low level of a strain at which the plasm of a cell is full: 4 low levels', () => {
+    for (const path of ['./shaders/slime.wgsl', './gl/glsl/slime.frag'])
+      expect(constant(path, 'SPAN'), path).toBeCloseTo(PLASM_SPAN, 12);
+    // The full level of the tube body over its low level, less 1: 1 / 0.2 − 1.
+    expect(PLASM_SPAN).toBeCloseTo(FLOW.trailFull / FLOW.trailLow - 1, 12);
+    expect(PLASM_SPAN).toBeCloseTo(4, 12);
+  });
+
+  it('hold the rim of a stroke of the Slime tool: 4 cells', () => {
+    for (const path of ['./shaders/slime-paint.wgsl', './gl/glsl/slime-paint.frag'])
+      expect(constant(path, 'RIM'), path).toBe(SLIME_RIM);
+    expect(SLIME_RIM).toBe(4);
+  });
+
+  it('hold the same steps of the waves and of the beads and the same ripple on both backends', () => {
+    for (const [name, value] of [
+      ['SLIME_WAVES', SLIME_WAVES],
+      ['SLIME_BEADS', SLIME_BEADS],
+      ['SLIME_RIPPLE', SLIME_RIPPLE],
+    ] as const) {
+      const [wgsl, glsl] = [constant('./shaders/render.wgsl', name), constant('./gl/glsl/render.frag', name)];
+      expect(wgsl, name).toBe(glsl);
+      // The CPU reference holds them too (slime-reference.ts).
+      expect(wgsl, name).toBe(value);
+    }
+    // A step of a lattice is a whole number of cells: the passes count the steps of a side in whole numbers.
+    expect([SLIME_WAVES, SLIME_BEADS].every(Number.isInteger)).toBe(true);
+  });
+
+  // The rules of the film are written twice, in WGSL and in GLSL. The numbers in each rule are the same, in the same
+  // order: the GPU tests compare the pictures, and this names the rule when a number of one backend changes alone.
+  // Not for `filmOf` and `filmAt`: they hold no numbers of the look, and the two languages write them apart.
+  it.each([
+    'slimeOf',
+    'patternSteps',
+    'noiseSlope',
+    'slimeWaves',
+    'slimeBeads',
+    'wetShine',
+    'slimed',
+    'lattice',
+    'spline',
+    'splineSlope',
+  ])('have the same numbers in %s on both backends', (name) => {
+    const glsl = name === 'slimeOf' ? './gl/glsl/slime-film.frag' : './gl/glsl/render.frag';
+    const [a, b] = [numbers(body('./shaders/render.wgsl', name)), numbers(body(glsl, name))];
+    expect(a.length).toBeGreaterThan(0);
+    expect(b).toEqual(a);
+  });
+
+  it('reads the numbers of a rule: those of the hash of the patterns, and of the light', () => {
+    expect(numbers(body('./shaders/render.wgsl', 'lattice'))).toEqual([
+      1664525, 1013904223, 16, 0x7feb352d, 15, 0x846ca68b, 16, 8, 1, 16777216,
+    ]);
+    expect(numbers(body('./gl/glsl/render.frag', 'wetShine'))).toEqual([0, 0, 1, 0, 110, 10, 10]);
   });
 });

@@ -258,9 +258,10 @@
         from farther away. The view changes only the picture, not the simulation.
       </p>
       <p>
-        The pale layer on the ground is slime. A slime mold leaves slime where it was, and the extended model marks that
-        ground: the layer fades as the slime gets older, and it is gone after the Slime life time. No rule of the model
-        reads the slime yet. The switch Show slime, in the panel under Slime, hides the layer.
+        The wet film on the ground is slime. A slime mold leaves slime where it was, and the extended model marks that
+        ground. The film is thick where a tube stayed for a long time, so you still see where a tube ran after it is
+        gone. The film gets thinner as the slime gets older, and it is gone after the Slime life time. No rule of the
+        model reads the slime yet. The switch Show slime, in the panel under Slime, hides the film.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

@@ -1,12 +1,16 @@
-// The time of a draw with and without the layer of the slime, in the real engine (ADR 0055, decision 8). Not a test of
-// the app: it runs only when asked, with the configuration research/vitest.config.ts (README.md has the command). A
-// sample is a batch of draws of one state, without a step, so the difference of the two times is the cost of the
-// layer in the render pass. Both settings of the switch run in turns on the same state (off, on, off, on), so a load
-// of the machine falls on both alike. It writes one line per scene, backend, style, view and setting of the switch to
-// research/flow/out/engine/<name>.jsonl. Environment variables: VITE_KINDS, VITE_SCENES, VITE_STYLES (lists),
-// VITE_ZOOMS (the cells per pixel of each view, as a factor of the view that fits the grid to the canvas), VITE_WARM
-// (steps before the measurement), VITE_BATCH (draws per sample), VITE_BATCHES, VITE_NAME, VITE_PATCH (settings as
-// JSON, on top of the scene's), VITE_SIZE (the pixels of the canvas, width and height).
+// The time of a draw with and without the film of the slime, in the real engine (ADR 0055, decision 8; ADR 0057). Not
+// a test of the app: it runs only when asked, with the configuration research/vitest.config.ts (README.md has the
+// command). A sample is a batch of draws of one state, without a step. Three cases run in turns on the same state
+// (off, on, fill, off, on, fill), so a load of the machine falls on all alike:
+//   off   Show slime is off
+//   on    the film, with its maps filled before the sample: the cost of the film in the render pass
+//   fill  the film, with a life time that is another one in every draw, so that every draw fills the maps again: the
+//         cost of a frame after a step
+// It writes one line per scene, backend, style, view and case to research/flow/out/engine/<name>.jsonl. Environment
+// variables: VITE_KINDS, VITE_SCENES, VITE_STYLES (lists), VITE_ZOOMS (the cells per pixel of each view, as a factor
+// of the view that fits the grid to the canvas), VITE_WARM (steps before the measurement), VITE_BATCH (draws per
+// sample), VITE_BATCHES, VITE_NAME, VITE_PATCH (settings as JSON, on top of the scene's), VITE_SIZE (the pixels of
+// the canvas, width and height).
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
@@ -28,7 +32,7 @@ const NAME = env.VITE_NAME ?? 'slime-draw';
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Record<string, unknown>;
 const [WIDTH = 2560, HEIGHT = 1600] = (env.VITE_SIZE ?? '').split(',').filter(Boolean).map(Number);
 
-it('measures the time of a draw with and without the layer of the slime', async () => {
+it('measures the time of a draw with and without the film of the slime', async () => {
   const rows: string[] = [];
   for (const kind of KINDS)
     for (const scene of SCENES) {
@@ -52,22 +56,32 @@ it('measures the time of a draw with and without the layer of the slime', async 
       for (const style of STYLES)
         for (const zoom of ZOOMS) {
           const view: View = { center: fit.center, scale: fit.scale * zoom };
-          const of = (showSlime: boolean): Settings => ({ ...engine.settings, style, showSlime });
+          const of = (showSlime: boolean, more = 0): Settings => ({
+            ...engine.settings,
+            style,
+            showSlime,
+            slimeLife: engine.settings.slimeLife + more,
+          });
+          // The settings of each case for the draw i: the case `fill` takes two life times in turns, an hour apart.
+          const cases: Record<string, (i: number) => Settings> = {
+            off: () => of(false),
+            on: () => of(true),
+            fill: (i) => of(true, i % 2),
+          };
           // The levels of the frames, and the pipelines or programs of both settings: not in a sample.
           await backend.settle(sim);
           for (const showSlime of [false, true]) await backend.capture(sim, of(showSlime), view, 16, 16);
-          const times: Record<string, number[]> = { off: [], on: [] };
+          const times: Record<string, number[]> = { off: [], on: [], fill: [] };
           for (let b = 0; b < BATCHES; b++)
-            for (const showSlime of [false, true]) {
-              const s = of(showSlime);
-              for (let i = 0; i < 3; i++) backend.draw(sim, s, view, false);
+            for (const [name, settingsOf] of Object.entries(cases)) {
+              for (let i = 0; i < 3; i++) backend.draw(sim, settingsOf(i), view, false);
               await sim.finish();
               const t0 = performance.now();
               for (let i = 0; i < BATCH; i++) {
-                backend.draw(sim, s, view, false);
+                backend.draw(sim, settingsOf(i), view, false);
                 await sim.finish();
               }
-              times[showSlime ? 'on' : 'off']?.push((performance.now() - t0) / BATCH);
+              times[name]?.push((performance.now() - t0) / BATCH);
             }
           for (const [slime, list] of Object.entries(times)) {
             list.sort((a, b) => a - b);

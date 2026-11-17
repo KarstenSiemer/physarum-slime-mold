@@ -82,8 +82,8 @@ describe('the current scene', () => {
     expect(app.settings.showTubes).toBe(true);
   });
 
-  // So is the layer of the slime (ADR 0055, decision 8).
-  it('keeps the layer of the slime on a new scene, and does not count it as a change', async () => {
+  // So is the film of the slime (ADR 0055, decision 8).
+  it('keeps the film of the slime on a new scene, and does not count it as a change', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
     loadPreset('snail-maze');
     expect(app.settings.showSlime).toBe(true);

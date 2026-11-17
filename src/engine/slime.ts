@@ -5,8 +5,12 @@
 // step, is at or above the low level of that strain (plasmLevels()). The stamp of a cell is the number of the step in
 // which it last held plasm; the first step of a run has the number 0. A cell has slime at step t while it has a stamp
 // S and t − S is below the life time in steps (slimeSteps()).
+//
+// Beside the stamp the field holds the amount of slime of each cell, for the picture alone (ADR 0057): how thick the
+// slime is that the plasm built there. It grows while the cell holds plasm, and the picture lets it fade with the age
+// of the stamp (amountLeft() in slime-reference.ts). No rule of the model reads the amount.
 import { MAX_STRAINS, type Settings } from '../model/params';
-import { STEPS_PER_MINUTE, trailLevels } from './flow';
+import { FLOW, STEPS_PER_MINUTE, trailLevels } from './flow';
 
 /** The steps of an hour of model time: 1,800 (ADR 0029, decision 10), with the flow and without it. */
 export const STEPS_PER_HOUR = 60 * STEPS_PER_MINUTE;
@@ -16,6 +20,26 @@ export const STEPS_PER_HOUR = 60 * STEPS_PER_MINUTE;
  * reset.
  */
 export const NO_STAMP = 0;
+
+/**
+ * The full amount of slime of a cell (ADR 0057): the field holds a whole number from 0 to this. A cell under a full
+ * tube gains one of them per step, so it holds the full amount after 4,095 steps: 2.3 hours of model time. The
+ * passes hold the number as `FULL` (shaders/amount.wgsl, gl/glsl/amount.glsl).
+ */
+export const SLIME_FULL = 4095;
+
+/**
+ * The cells over which painted slime rises from the edge of its stroke to the full amount (ADR 0057): the rim of a
+ * stroke of the Slime tool. `RIM` in shaders/slime-paint.wgsl and gl/glsl/slime-paint.frag.
+ */
+export const SLIME_RIM = 4;
+
+/**
+ * The trail above the low level of a strain, in low levels, at which the plasm of a cell is full (ADR 0057): the full
+ * level of the tube body less its low level, over the low level (flow.ts FLOW, docs/model.md 8.1). The passes hold it
+ * as `SPAN`.
+ */
+export const PLASM_SPAN = (FLOW.trailFull - FLOW.trailLow) / FLOW.trailLow;
 
 /**
  * What the field holds for a cell with the stamp of step `step`: the number of the step plus 1, so that 0 stays free
@@ -40,8 +64,9 @@ export function slimeSteps(s: Pick<Settings, 'model' | 'slimeLife'>): number {
 }
 
 /**
- * Whether the view draws the slime as a layer on the ground (ADR 0055, decision 8): the switch Show slime is on, the
- * model has slime with a life time above 0, and the scent view is off. Every style draws the layer. The scent view
+ * Whether the view draws the slime as a film on the ground (ADR 0055, decision 8; ADR 0057): the switch Show slime is
+ * on, the
+ * model has slime with a life time above 0, and the scent view is off. Every style draws the film. The scent view
  * draws none, so that its picture is the same with slime and without it. Display only: no pass of the simulation
  * reads the switch.
  */

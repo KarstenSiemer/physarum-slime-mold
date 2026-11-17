@@ -75,9 +75,9 @@ describe('Params layout', () => {
     }
   });
 
-  // The layer of the slime is a switch of the view (ADR 0055, decision 8): it reaches no pass of the simulation, with
+  // The film of the slime is a switch of the view (ADR 0055, decision 8): it reaches no pass of the simulation, with
   // slime and without it.
-  it('packs the same bytes with the layer of the slime on and off, for the passes and for the flow', () => {
+  it('packs the same bytes with the film of the slime on and off, for the passes and for the flow', () => {
     const at = { width: 64, height: 32, agents: 1000, step: 7 };
     for (const model of ['jones', 'extended'] as const)
       for (const slimeLife of [0, 18, 144]) {

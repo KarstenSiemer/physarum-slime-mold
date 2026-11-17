@@ -524,16 +524,20 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "Slime".
 - **Model**: a slime field, and no rule that reads it yet (ADR 0055; `docs/model.md`, 6.9). In the extended model a
   cell gets a stamp in every step in which it holds plasm, and it has slime for the Slime life time after the last
-  such step. The field is one for all strains (the owner's decision of 2026-11-16, ADR 0052). A brush paints slime,
-  as Reid et al. 2012 coat their agar with it, and the picture shows the slime as a pale layer on the ground. The
-  default of the life time, 144 hours, is the longest avoidance of slime that a source reports; no source measured
-  the life time. An agent still enters any open cell, and a child is born onto ground with slime as onto blank
-  ground. The nearest rule that acts is starved ground, with the flow on: where a tube starved, the flow memory D
-  stays low for about the Slime life time (ADR 0054; ADR 0055, decision 5). No agent divides on a cell with D below
-  0.01, and no child is born onto one, for 0.62 times the life time: 3.7 days at the default (`docs/model.md`, 8.4,
-  8.5 and 9; ADR 0053; row 16). This mark fits the second cue of the organism, the one of Briard et al. 2020. It is
-  on ground where a tube starved only, not on every cell that the colony left, and it stops no move. It is a mark of
-  each strain, where Briard et al. found no difference between strains.
+  such step. The field is one for all strains (the owner's decision of 2026-11-16, ADR 0052). A brush paints slime, as
+  Reid et al. 2012 coat their agar with it. The picture shows the slime as a wet film on the ground that is thick
+  where a tube stayed, so the film keeps the shape of the tube (ADR 0057): the organism leaves the slime sheath of a
+  tube behind as a collapsed tube, its slime track (Clark and Haskins 2015, p. 646 [V]). For this the field holds an
+  amount of slime per cell, which no rule reads. A full tube builds the full amount in 2.3 hours of model time; that
+  rate is a choice of this app, and no source gives one. The default of the life time, 144 hours, is the longest
+  avoidance of slime that a source reports; no source measured the life time. An agent still enters any open cell, and
+  a child is born onto ground with slime as onto blank ground. The nearest rule that acts is starved ground, with the
+  flow on: where a tube starved, the flow memory D stays low for about the Slime life time (ADR 0054; ADR 0055,
+  decision 5). No agent divides on a cell with D below 0.01, and no child is born onto one, for 0.62 times the life
+  time: 3.7 days at the default (`docs/model.md`, 8.4, 8.5 and 9; ADR 0053; row 16). This mark fits the second cue of
+  the organism, the one of Briard et al. 2020. It is on ground where a tube starved only, not on every cell that the
+  colony left, and it stops no move. It is a mark of each strain, where Briard et al. found no difference between
+  strains.
 - **Measured**: the slime changes no run: every scene keeps its bytes (ADR 0055, Results). In a Y-maze after Reid et
   al. 2012, as research code with 40 seeds, the app has no preference: 19 runs for the blank arm and 20 for the arm
   with slime. Rules that are not in the app ran there as variants (ADR 0056). A lower weight for slime in the pick

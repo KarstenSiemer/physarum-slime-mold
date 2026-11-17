@@ -257,6 +257,13 @@ export class GlSim implements Sim {
    */
   private slime: Target | undefined;
   /**
+   * The amount of slime of every cell (ADR 0057; PASS 1 of slime.frag), in two targets of unsigned integers (R16UI),
+   * 2 B per cell each: the pass of a step reads one and writes the other, and `am` names the one that holds the
+   * amounts. Made and freed with the stamps (ensureSlime(), dropSlime()), and counted with them.
+   */
+  private amount: [Target, Target] | undefined;
+  private am: Bit = 0;
+  /**
    * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
    * was last empty (`stamped` in ../sim.ts). Only then does an erase or a wall clear stamps (brushSlime()).
    */
@@ -367,7 +374,10 @@ export class GlSim implements Sim {
       }
       // The slime field, while the model has it: allocated now too, and the budget counts it. A new texture holds
       // zeros: no cell has a stamp.
-      if (slimeModel(settings)) this.slime = t(width, height, gl.R32UI);
+      if (slimeModel(settings)) {
+        this.slime = t(width, height, gl.R32UI);
+        this.amount = [t(width, height, gl.R16UI), t(width, height, gl.R16UI)];
+      }
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
       for (const x of made) destroyTarget(gl, x);
@@ -748,18 +758,31 @@ export class GlSim implements Sim {
     this.flowP = 0;
   }
 
-  /** The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): no cell has a stamp. */
-  private ensureSlime(): Target {
-    this.slime ??= target(this.gl, this.width, this.height, this.gl.R32UI);
-    return this.slime;
+  /**
+   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): the stamps, and the amounts
+   * with them. No cell has a stamp, and no cell has slime.
+   */
+  private ensureSlime(): { stamps: Target; amounts: [Target, Target] } {
+    const { gl, width, height } = this;
+    this.slime ??= target(gl, width, height, gl.R32UI);
+    this.amount ??= [target(gl, width, height, gl.R16UI), target(gl, width, height, gl.R16UI)];
+    return { stamps: this.slime, amounts: this.amount };
   }
 
   /**
-   * For the renderer: the texture of the slime field, which the picture reads for the layer of the slime (render.frag
+   * For the renderer: the texture of the slime field, which the picture reads for the film of the slime (render.frag
    * `stamps`), or undefined while the simulation holds none (`slimeField` in ../sim.ts).
    */
   get slimeTexture(): WebGLTexture | undefined {
     return this.slime?.texture;
+  }
+
+  /**
+   * For the renderer: the texture of the amounts of slime (ADR 0057), which the picture reads beside the stamps, or
+   * undefined while the simulation holds no slime field (`slimeAmount` in ../sim.ts).
+   */
+  get slimeAmountTexture(): WebGLTexture | undefined {
+    return this.amount?.[this.am].texture;
   }
 
   /** Frees the slime field. */
@@ -767,6 +790,8 @@ export class GlSim implements Sim {
     if (!this.slime) return;
     destroyTarget(this.gl, this.slime);
     this.slime = undefined;
+    for (const t of this.amount ?? []) destroyTarget(this.gl, t);
+    this.amount = undefined;
     this.stamped = false;
   }
 
@@ -777,6 +802,12 @@ export class GlSim implements Sim {
   readSlime(): Promise<Uint32Array> {
     if (!this.slime) return Promise.resolve(new Uint32Array(this.width * this.height));
     return Promise.resolve(readUintTarget(this.gl, this.slime));
+  }
+
+  /** For tests and measurements: the amount of slime of every cell (ADR 0057; ../sim.ts readSlimeAmount()). */
+  readSlimeAmount(): Promise<Uint32Array> {
+    if (!this.amount) return Promise.resolve(new Uint32Array(this.width * this.height));
+    return Promise.resolve(readUintTarget(this.gl, this.amount[this.am]));
   }
 
   private dropFlow() {
@@ -857,8 +888,9 @@ export class GlSim implements Sim {
     this.writeParams();
     for (const t of [...this.trail, ...this.scent, this.counts]) clear(gl, t);
     this.clearFlow();
-    // A reset clears every stamp (ADR 0055, decision 3).
+    // A reset clears every stamp (ADR 0055, decision 3), and the amounts with them.
     if (this.slime) clearUint(gl, this.slime);
+    for (const t of this.amount ?? []) clearUint(gl, t);
     this.stamped = false;
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
@@ -1115,9 +1147,8 @@ export class GlSim implements Sim {
   private brushSlime(strokes: readonly Stroke[]) {
     if (!slimeModel(this.settings)) return;
     const gl = this.gl;
-    let p: Program | undefined;
+    let field: { stamps: Target; amounts: [Target, Target] } | undefined;
     let boundary: Boundary | undefined;
-    let kind = -1;
     for (const stroke of strokes) {
       if (stroke.kind === 'slime') this.stamped = true;
       if (!changesSlime(stroke.kind) || !this.stamped) continue;
@@ -1127,33 +1158,48 @@ export class GlSim implements Sim {
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const rects = scissorRects(segment, this.width, this.height, wrap);
         if (rects.length === 0) continue; // outside a closed arena: no cell to paint
-        if (!p) {
-          p = this.prog.slimeBrush();
-          gl.bindFramebuffer(gl.FRAMEBUFFER, this.ensureSlime().fbo);
+        if (!field) {
+          field = this.ensureSlime();
           gl.viewport(0, 0, this.width, this.height);
-          gl.useProgram(p.program);
-          textures(gl, p.program, { env: this.env.texture });
-          gl.uniform1i(p.loc('arena'), BOUNDARIES.indexOf(this.settings.boundary));
           gl.enable(gl.SCISSOR_TEST);
         }
         if (b !== boundary) {
           this.writeParams(undefined, 0, b);
           boundary = b;
         }
-        if (k !== kind) {
+        const [now, free] = [field.amounts[this.am], field.amounts[flip(this.am)]];
+        // The amounts of the segment first (PASS 1 of slime-paint.frag, ADR 0057): they read the stamps of before
+        // the segment. A stroke of the Slime tool also reads the amounts of before it, from a copy of its cells in
+        // the free target. Then the stamps (PASS 0).
+        const passes: [Program, Target, Record<string, WebGLTexture>][] = [
+          [this.prog.slimeBrushAmount(), now, { stamps: field.stamps.texture, old: free.texture }],
+          [this.prog.slimeBrush(), field.stamps, {}],
+        ];
+        for (const [p, to, more] of passes) {
+          if (to === now && stroke.kind === 'slime') {
+            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, now.fbo);
+            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, free.fbo);
+            for (const [x, y, w, h] of rects) {
+              gl.scissor(x, y, w, h);
+              gl.blitFramebuffer(x, y, x + w, y + h, x, y, x + w, y + h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+            }
+          }
+          gl.bindFramebuffer(gl.FRAMEBUFFER, to.fbo);
+          gl.useProgram(p.program);
+          textures(gl, p.program, { env: this.env.texture, ...more });
+          gl.uniform1i(p.loc('arena'), BOUNDARIES.indexOf(this.settings.boundary));
           gl.uniform1i(p.loc('kind'), k);
-          kind = k;
-        }
-        gl.uniform1f(p.loc('radius'), segment.radius);
-        gl.uniform2f(p.loc('from'), ...segment.from);
-        gl.uniform2f(p.loc('to'), ...segment.to);
-        for (const r of rects) {
-          gl.scissor(...r);
-          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          gl.uniform1f(p.loc('radius'), segment.radius);
+          gl.uniform2f(p.loc('from'), ...segment.from);
+          gl.uniform2f(p.loc('to'), ...segment.to);
+          for (const r of rects) {
+            gl.scissor(...r);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }
         }
       }
     }
-    if (p) gl.disable(gl.SCISSOR_TEST);
+    if (field) gl.disable(gl.SCISSOR_TEST);
   }
 
   /**
@@ -1176,6 +1222,7 @@ export class GlSim implements Sim {
     // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
     const stamps = this.slime;
     if (stamps) clearUint(this.gl, stamps);
+    for (const t of this.amount ?? []) clearUint(this.gl, t);
     this.stamped = false;
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
@@ -1549,7 +1596,14 @@ export class GlSim implements Sim {
     // pass discards the fragment of every other cell.
     if (slimeSteps(this.settings) > 0) {
       this.stamped = true;
-      this.pass(this.prog.slime(), this.ensureSlime(), { trail: this.trail[this.p].texture }, {});
+      const { stamps, amounts } = this.ensureSlime();
+      const trail = this.trail[this.p].texture;
+      // The amounts first (ADR 0057): their pass reads the stamps of before the step, and writes every amount into
+      // the free target.
+      const held = { trail, stamps: stamps.texture, amounts: amounts[this.am].texture };
+      this.pass(this.prog.slimeAmount(), amounts[flip(this.am)], held, {});
+      this.am = flip(this.am);
+      this.pass(this.prog.slime(), stamps, { trail }, {});
     }
     if (flow) this.encodeFlow(flow);
   }

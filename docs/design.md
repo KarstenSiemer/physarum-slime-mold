@@ -117,6 +117,8 @@ strains (one `vec4` lane each).
 | flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
 | tubes (with flow)  | `rgba32float` textures: radius, picture, stream  | 48 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
 | slime (extended)   | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the stamp of the slime of each cell (ADR 0055)        |
+| slime amount       | storage `u32` per cell (WebGL2: `R16UI` × 2)     | 4 B × W × H      | how much slime each cell holds, the view only (0057)  |
+| film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -294,21 +296,45 @@ the arrows.
   draws grains that go back and forth along the stream, 12 cells to each side in 60 steps where the speed is 1, and
   go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
   switch on or off, so the switch never changes the grid. The simulation never reads the picture.
-- Layer of the slime (ADR 0055, decision 8): while the model has slime, the view tints the ground where a cell has
-  slime, with a switch below the Slime life time that is on at the start. The flake of food, the trail, the tubes,
-  the light, the walls and the electrodes lie on the layer. Its strength at a cell is A · (1 − age / life time): A
-  at the age 0, and nothing at the life time (model.md, section 6.9, has the age). The layer has one pale colour for
-  all strains, lighter than the ground of the dark styles and darker than paper: `#d8dccf` with A = 0.02 in the glow
-  and agents styles, `#e4dfcc` with 0.024 in the gel style, `#8f8a78` with 0.22 in the paper style (`SLIME_LOOK` in
-  `src/engine/render.ts`). Up to 1 cell per pixel a pixel blends the strengths of the 4 cells around it, over the
-  cells that can hold slime: those inside the arena without a wall. So the layer goes on up to a wall and to the rim
-  of the dish. Zoomed out, a pixel shows the mean of the strength over its square, with the weights that the trail
-  has there. Up to 2 cells per pixel that mean is exact. Above, the cell in the middle of each texel of the trail's
-  coarse map stands for the texel: the slime has no coarse map, and a thin line of slime can drop out. The view
-  blends strengths and never stamps. The scent view draws no layer. The switch changes nothing in the simulation,
-  goes into the link like the style and stays as it is when a scene loads. Without the layer the render pass draws
-  the pixels of before at the same cost: the code of the layer is compiled in only for a frame that draws it. A CPU
-  copy of the rule is `slimeStrength()` and `slimeLayer()` in `src/engine/slime-reference.ts`.
+- Film of the slime (ADR 0055, decision 8; ADR 0057): while the model has slime, the view draws the slime as a wet film
+  on the ground, with a switch below the Slime life time that is on at the start. The flake of food, the trail, the
+  tubes, the light, the walls and the electrodes lie on the film. The slime of a cell is as thick as
+  amount / 4,095 · (1 − age / life time): the amount of slime of the cell, and the age of its stamp (model.md, section
+  6.9). The amount is high where a tube stayed and low where the colony only passed, so the film keeps the shape of
+  the tube that made it. The organism leaves the coat of slime of a tube behind in the same way, as its slime track
+  (`docs/knowledge-base/slime-mazes-and-the-front.md`, "Slime").
+  - **The map of the film** (`slimeFilm` in `render.wgsl`, `slime-film.frag`): a pass writes one texel per cell, the
+    mean of the thickness of the open cells among the 3 × 3 around the cell, with the weights 1, 2, 1 along each axis.
+    A cell is open when it lies inside the arena and holds no wall that the picture draws. So a wall and a cell
+    outside the arena take the film of the open cells beside them: the film goes on up to a wall and to the rim of
+    the dish, and it has no tooth for each cell along a slanted wall. A cell with no open cell among its 3 × 3 takes
+    the mean over the 5 × 5 in the same way, with the weights 1, 2, 3, 2, 1, because the smooth outline of a wall
+    runs through the cells of the wall. The pass runs once for each state of the slime
+    that a frame draws: after a step or a stroke, and when the life time, the arena or the walls are others.
+  - **The coarse map** (`slimeDown`, `slime-down.frag`): above 2 cells per pixel a second pass writes the mean of
+    that map over 2, 4, 8 or 16 cells per side, the levels of the trail's coarse map.
+  - **The surface** (`filmAt` and `slimed`): the render pass reads the 3 × 3 texels of the map of its level around a
+    pixel as a quadratic B-spline, the spline of food and walls. That gives the thickness and its gradient with no
+    crease, so the film has smooth edges at any zoom. The texels are fixed in the grid, so the film does not shimmer
+    when the view moves.
+  - **The look** (`SLIME_LOOK`, `SLIME_RELIEF` and `SLIME_BEAD` in `src/engine/render.ts`). The body: thin slime is
+    clear and thick slime is milky, the share thickness^1.6 of the full body. On the dark grounds the body adds a
+    pale colour to the ground: `#c4d7ce` with a share of 0.075 in the glow and agents styles, `#d7e1c8` with 0.1 in
+    the gel style. On paper the film is a wet stain: it mixes `#8f8a78` into the paper with a share of 0.22, and its
+    edge has a tide line. The light: the lamp of the walls and of the gel puts a small bright highlight and a wide
+    weak light on the surface, which is the film with a relief of 2.5 cells for the full thickness.
+  - **Two static patterns**, fixed in the grid. Waves: the thickness varies by 16 % in soft noise with a step of 12
+    cells and a quarter of a noise of twice the frequency. Beads: small round drops on thick slime, 0.7 to 2.2 cells
+    in radius, about one for 200 cells, which only catch the light. The lattice of each pattern has a whole number
+    of steps along each side of the grid, counted in whole numbers so that both backends count the same, and the
+    patterns repeat with a periodic grid. Detail that is smaller than a
+    pixel fades out from 1 cell per pixel on and is gone at 1.5.
+
+  The film has one colour for all strains. The scent view draws no film. The switch changes nothing in the
+  simulation, goes into the link like the style and stays as it is when a scene loads. Without the film the render
+  pass draws the pixels of before at the same cost: the code of the film is compiled in only for a frame that draws
+  it. A CPU copy of the rules is in `src/engine/slime-reference.ts`.
+
 - Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
   `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).
 - Dither before 8-bit output against banding. An HDR canvas is not built (`TODO.md`).
