@@ -307,7 +307,8 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   let mean = (f.x + f.y + f.z + f.w) * 0.25;
   // A cell that held a tube adapts while a flux runs between foods (Tero 2007, Eq. 5). Ground without a tube has at
   // most the memory of fresh ground: a larger memory falls to it at once. A smaller one stays, so starved ground stays
-  // marked; the mark fades slowly, up to the memory of fresh ground.
+  // marked; the mark fades slowly, up to the memory of fresh ground. A starved tube that vanishes leaves its ground at
+  // the floor of the memory (below, ADR 0054), so every such cell holds the same mark for the same time.
   var d = m.x;
   if (m.y >= U.c.z) {
     if (fed()) { d = max(U.d.x, d + U.a.z * (mean - d)); }
@@ -318,6 +319,7 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   let t = textureLoad(trail, p, 0)[u32(U.f.z)];
   let presence = clamp((t - U.d.y) * U.d.z, 0.0, 1.0);
   let body = m.y + U.c.y * (presence - m.y);
+  if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) { d = U.d.x; }
   // Only a cell with a tube conducts: food that the plasmodium does not cover is open ground, as any other. Else it
   // would hold a pressure of its own beside the network (ADR 0029, decision 6).
   let food = envOf(env[p.y * i32(W()) + p.x]).y > 0.0;

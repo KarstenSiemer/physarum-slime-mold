@@ -24,7 +24,9 @@ export const STEPS_PER_MINUTE = 30;
  * The constants of the rule. Each one with its source or its measurement is in ADR 0029.
  * - `gamma`: the exponent of f(Q) = Q^gamma / (1 + Q^gamma) (Tero et al. 2010, Fig. 4: 1.8).
  * - `rate`: a cell's flow memory D moves this share of the way to f(Q) per step: 333 steps, 11 min.
- * - `recover`: the flow memory of ground without a tube grows by this share per step, up to `fresh`.
+ * - `recover`: the flow memory of ground without a tube grows by this share per step, up to `fresh`: from `floor` to
+ *   `fresh` in 6 days, and to `half`, where ground is open for births again, in 3.7 days (ADR 0054; an eighth of the
+ *   share of ADR 0029, decision 19). A starved tube that vanishes leaves its ground at `floor` (flow.wgsl update).
  * - `base`: conductivity of a tube without flow memory; `food`: conductivity of a food cell.
  * - `ghost`: a conductivity that every open cell has for the pressure only, so that a cell beside the network holds
  *   the pressure of its neighbours before it joins.
@@ -45,7 +47,7 @@ export const STEPS_PER_MINUTE = 30;
 export const FLOW = {
   gamma: 1.8,
   rate: 0.003,
-  recover: 0.00023,
+  recover: 0.00002875,
   base: 0.02,
   food: 4,
   ghost: 1e-5,

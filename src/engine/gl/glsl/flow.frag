@@ -181,6 +181,8 @@ void main() {
   float t = texelFetch(trail, p, 0)[int(U.f.z)];
   float presence = clamp((t - U.d.y) * U.d.z, 0.0, 1.0);
   float body = m.y + U.c.y * (presence - m.y);
+  // A starved tube that vanishes leaves its ground at the floor of the memory (ADR 0054; update in flow.wgsl).
+  if (m.y >= U.c.z && body < U.c.z && d * d < U.e.y) d = U.d.x;
   // Only a cell with a tube conducts: food that the plasmodium does not cover is open ground, as any other.
   bool food = texelFetch(env, p, 0).g > 0.0;
   float g = 0.0;

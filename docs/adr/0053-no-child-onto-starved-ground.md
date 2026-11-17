@@ -7,6 +7,9 @@
 - Extends [ADR 0029](0029-flow-in-the-tubes.md) (decision 9: an agent does not divide on a starved cell) and
   [ADR 0025](0025-growth-and-shrinkage.md) (the growth rule). It is stage 1 of the plan of ADR 0052, and it answers the
   first open point of [ADR 0051](0051-the-scenes-snail-maze-and-corn-maze.md).
+- Extended by [ADR 0054](0054-a-starved-tube-leaves-starved-ground.md) (2026-11-17): the mark of starved ground is
+  the same in every cell and lasts 6 days. With it the blind branches of the Snail maze empty. The numbers of this
+  record are those of the mark before.
 - In short: [`research/flow/README.md`](../../research/flow/README.md), part 17, has the commands and the records.
 
 ## Context

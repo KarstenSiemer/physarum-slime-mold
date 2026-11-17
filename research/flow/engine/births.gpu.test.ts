@@ -18,6 +18,8 @@
 //
 // - VITE_SCENE, VITE_KIND, VITE_SEED, VITE_NAME, VITE_PATCH: as dump.gpu.test.ts.
 // - VITE_AT: the steps at which a window starts, as a list. VITE_WINDOW: the steps of a window (300).
+// - VITE_RECOVER: the share by which the flow memory of ground without a tube grows per step, in place of
+//   FLOW.recover, as dump.gpu.test.ts: 0.00023 is the time of the mark before ADR 0054.
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
@@ -37,6 +39,9 @@ const AT = (env.VITE_AT ?? '20000').split(',').map(Number);
 const WINDOW = Number(env.VITE_WINDOW ?? 300);
 const NAME = env.VITE_NAME ?? `${SCENE}-${KIND}-births-s${String(SEED)}`;
 const PATCH = JSON.parse(env.VITE_PATCH ?? '{}') as Record<string, unknown>;
+// packFlow() reads the share at every upload of the uniform block, so a share set before the engine starts holds for
+// the whole run.
+if (env.VITE_RECOVER !== undefined) (FLOW as { recover: number }).recover = Number(env.VITE_RECOVER);
 const ALIVE = 4;
 
 function b64(bytes: Uint8Array): string {

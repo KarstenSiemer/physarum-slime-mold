@@ -75,14 +75,18 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   network: TL about 1.8, MD 0.85, FT 0.96. TL and MD are over the values of the minimum spanning tree; FT is
   1 − the share of single cuts that separate a part. The paper labels FT as normalised by the MST (p. 440), but its
   numbers are the plain FT: a tree has FT 0 (Fig. S1).
-- **Model**: extended model, growth (Jones 2011) and the flow with a strength of 1.4; 36 foods, measured on the 33 of
-  Fig. 2.
-- **Measured** (ADR 0053, with the rule that no child is born onto starved ground; WebGPU, 10 seeds): at step 48,000
-  TL 1.77 ± 0.07, MD 0.82 ± 0.02, FT 0.89 ± 0.03, and over the samples from step 16,000 to 48,000 a mean TL of 1.84, MD
-  0.82 and FT 0.91. WebGL2, 3 seeds at step 24,000: TL 1.87, 1.59 and 1.89, MD 0.81, 0.83 and 0.89, FT 0.93, 0.83 and
-  0.91.
-- **Measured before** (ADR 0029, amendment 2026-11-14 (2), with the food sites of decision 17 and before the rule of
-  ADR 0053; WebGPU, 10 seeds): at step 48,000 TL 1.89 ± 0.13, MD 0.84 ± 0.05, FT 0.91 ± 0.04, and over the samples from
+- **Model**: extended model, growth (Jones 2011) and the flow with a strength of 2.8 (1.4 before ADR 0054); 36 foods,
+  measured on the 33 of Fig. 2.
+- **Measured** (ADR 0054, with its mark of starved ground and the strength of 2.8; WebGPU, 10 seeds): at step 48,000
+  TL 1.72 ± 0.06, MD 0.82 ± 0.01, FT 0.91 ± 0.01, and over the samples from step 16,000 to 48,000 a mean TL of 1.79, MD
+  0.82 and FT 0.91. All 33 foods are joined in 80 of 80 samples from step 4,000 on. WebGL2, 3 seeds at step 24,000:
+  TL 1.79 ± 0.10, MD 0.81 ± 0.01, FT 0.90 ± 0.03.
+- **Measured before, with a strength of 1.4** (ADR 0053, with the rule that no child is born onto starved ground;
+  WebGPU, 10 seeds): at step 48,000 TL 1.77 ± 0.07, MD 0.82 ± 0.02, FT 0.89 ± 0.03, and over the samples from step
+  16,000 to 48,000 a mean TL of 1.84, MD 0.82 and FT 0.91. WebGL2, 3 seeds at step 24,000: TL 1.87, 1.59 and 1.89, MD
+  0.81, 0.83 and 0.89, FT 0.93, 0.83 and 0.91.
+- **Measured before that** (ADR 0029, amendment 2026-11-14 (2), with the food sites of decision 17 and before the rule
+  of ADR 0053; WebGPU, 10 seeds): at step 48,000 TL 1.89 ± 0.13, MD 0.84 ± 0.05, FT 0.91 ± 0.04, and over the samples from
   step 16,000 to 48,000 a mean TL of 1.84, MD 0.83 and FT 0.91. The rule of ADR 0053 moves no measure by more than the
   seeds differ. With the sites before decision 17 (`92a63e7`): TL 1.77 ± 0.15, MD 0.84 ± 0.03, FT 0.90 ± 0.05, and
   1.80. WebGL2, 3 seeds at step 24,000: TL 1.93, 2.04 and 1.77, MD 0.83, 0.83 and 0.91 (2 seeds before: TL 1.72 and
@@ -93,8 +97,13 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
     with them (ADR 0029, amendment 2026-11-15, 10 seeds each): at step 48,000 the flux 1 gives TL 1.69, MD 0.82 and FT
     0.87, and 1.4 gives 1.89, 0.84 and 0.91, both within one standard deviation of the organism in every measure. 1 is
     a little nearer in TL, but not by more than two sets of ten seeds differ, and it leaves a food source without a tube
-    in 9 of 80 samples (1.4: 2). The scene keeps 1.4. The radius of the pressure solver was measured on the same day
-    and stays.
+    in 9 of 80 samples (1.4: 2). The scene kept 1.4 then. The radius of the pressure solver was measured on the same
+    day and stays.
+  - With the mark of starved ground of ADR 0054 the strength was chosen again, in the same way, from 1.4, 2 and 2.8 on
+    three seeds: 2.8 gives the organism's TL at step 48,000, and 1.4 gives 1.45 ± 0.14. So TL is still fitted. The
+    experiment shows its network at 26 h, which are 46,800 steps. After that the network of the model gets shorter:
+    about 1.6 from step 64,000 to step 224,000 (three seeds), with all 33 foods joined. The organism has no number for
+    these times.
   - The positions of the cities are fitted to the figures (ADR 0024). The network is the trail above 1.5, thinned to
     lines. That threshold is this app's, and nobody measured how the numbers depend on it.
   - The protocol with light is the scene Tokyo with light (ADR 0042, with Light stops growth at 1 since ADR 0050;
@@ -104,7 +113,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
     show that light changes the measures. On that map Ito stayed unjoined; the scene has 51 lit cells now, and one seed
     joins all 36 foods with TL 1.68 and FT 0.85 at step 48,000. With the rule of ADR 0053, three seeds on this map
     give TL 1.75 ± 0.11, MD 0.83 ± 0.01 and FT 0.86 ± 0.01 at step 48,000, and all 36 foods are joined in 23 of 24
-    samples from step 4,000 on. The paper gives no TL or MD of its own for
+    samples from step 4,000 on. With ADR 0054 and the strength of 2.8, the same three seeds give TL 1.68 ± 0.02, MD
+    0.83 ± 0.01 and FT 0.85 ± 0.02, and all 36 foods are joined in 21 of 24 samples. The paper gives no TL or MD of
+    its own for
     the runs with light; its FT with light is 0.86 ± 0.04. The light of the scene has one strength, the mask of the
     paper has shades, and the large food source outside the map is not built. Row 13 has the avoidance.
   - The second protocol of the paper (a sheet first, then all foods) ran only in a CPU prototype with 2 seeds
@@ -126,14 +137,17 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   sites of the amendment 2026-11-14 (2); 0.54 with the sites before it). Without the flow it stays at 0.60 to 0.91.
 - **Limits**: the time of the decay is not compared with the organism. No measurement follows one dead end from the
   moment its flux stops.
-  With growth on, a dead end does not stay empty: in the Snail maze the blind branches hold 9 to 25 % of the route's
-  trail over the last 10,000 of 30,000 steps (ADR 0053, 10 seeds on WebGPU; 11 to 36 % before its rule, ADR 0051). The
-  colony comes back in waves: a blind branch fills about 2.4 times in 10,000 steps, up to the trail of the route, and
-  starves again. The cause is measured (ADR 0053): ground is closed for births only while its flow memory is below
-  0.01, the memory falls only while a cell holds a tube, and a starved tube vanishes soon. So the ground of a dead end
-  opens again after some thousand steps, long before the 18 h of row 16. The rule of ADR 0053, no child onto starved
-  ground, does not change this. The experiment of 2000 had no growth after the food came (row 5), so it does not say
-  what the organism does there.
+- **Measured, with growth on** (ADR 0054; the Snail maze, 10 seeds on WebGPU): a dead end stays empty. The blind
+  branches hold 0.0 to 3 % of the route's trail over the last 10,000 of 30,000 steps, 0.4 % in the mean, and no child
+  is born in the dead ends from step 20,000 on. Before ADR 0054 they held 9 to 25 % (ADR 0053), and the colony came
+  back in waves: a blind branch filled about 2.4 times in 10,000 steps, up to the trail of the route. The cause was the
+  mark of starved ground: each cell kept the flow memory that its tube had when it vanished, so most of the ground of
+  a dead end opened again after some thousand steps. Since ADR 0054 a starved tube that vanishes leaves its ground at
+  the lowest flow memory, and that ground is closed for births for 3.7 days of model time (row 16).
+- **Limits of that**: when the mark has faded, after 160,182 steps, the colony comes back once: the blind branches
+  fill for 1,000 to 3,000 steps each and are empty and closed again after it (two seeds to step 220,000). Agents
+  still walk off the tube onto closed ground and starve there, as short twigs beside the tube. The experiment of 2000
+  had no growth after the food came (row 5), so it does not say what the organism does in either case.
 
 ### 3. Tubes with much flow get thicker
 
@@ -189,13 +203,15 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   (`docs/model.md`, 8.5); the protoplasm of the organism moves to the foods. The Maze has no length, so its times
   stand beside the 4 h and 8 h of the organism only loosely: its dead ends are below 2 % of the route's trail at step
   2,500, 83 min of model time (ADR 0029, "The Maze (flux 8)").
-- **Measured, a choice between routes** (ADR 0051, and again with the rule of ADR 0053): the Corn maze has six routes
-  between its two foods, the longest 1.47 times as long as the shortest, and a colony that grows from one food. In 10
-  of 10 seeds on WebGPU the shortest route alone carries the flow, from 500 to 2,500 steps after the colony joins the
-  foods, and the tube is 1.01 to 1.03 times as long as the shortest way (1.00 to 1.02 before the rule of ADR 0053).
-- **Limits of that**: with growth the dead ends and the side routes do not empty. Short branches grow back into them,
-  and in 58 of the last 200 dumps one of them closes a route that is 6 to 7 % longer (63 before the rule of ADR 0053;
-  row 2 has the cause). One layout was measured. Its routes are not the routes of the experiment of 2000, and its
+- **Measured, a choice between routes** (ADR 0051, and again with ADR 0053 and ADR 0054): the Corn maze has six
+  routes between its two foods, the longest 1.47 times as long as the shortest, and a colony that grows from one food.
+  In 10 of 10 seeds on WebGPU the shortest route alone carries the flow, from 500 to 2,000 steps after the colony
+  joins the foods, and the tube is 1.01 to 1.02 times as long as the shortest way. Since ADR 0054 the dead ends and
+  the longer routes empty: they hold 0.06 % of the route's trail over the last 10,000 of 30,000 steps (15 % before),
+  and 89 to 91 % of the cells with a tube lie on the shortest route (60 to 74 %).
+- **Limits of that**: agents still walk off the tube onto closed ground. In 37 of the last 200 dumps their trail
+  crosses every door of a route that is 6 to 7 % longer, which the measure counts as a tube on that route (58 before
+  ADR 0054, when branches grew back there; row 2). One layout was measured. Its routes are not the routes of the experiment of 2000, and its
   colony grows where the plasmodium of 2000 withdrew. So its numbers are not compared with Fig. 1d.
 
 ### 6. Growth front and its speed
@@ -340,7 +356,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   onto lit ground. A food that light encloses stays out of reach, so the scene leaves a dark way to each food. The
   map of the scene as it is now (51 lit cells) is measured with one seed, and with three seeds since the rule of ADR
   0053: the network holds 2.8 to 3.1 % of its cells on lit ground at step 2,000, and 0.5 to 1.1 % from step 16,000
-  on. The paper gives no number for how much of the organism lay on lit ground, so the 1.3 % has no value to compare
+  on. With ADR 0054 and the flow strength of 2.8: 3.0 to 4.2 % at step 2,000, and 0.8 to 1.2 % from step 16,000 on.
+  The paper gives no number for how much of the organism lay on lit ground, so the 1.3 % has no value to compare
   with.
 
 ### 14. Answer to new food within about 15 min
@@ -364,16 +381,20 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 
 - **Organism** [V]: tubes take apart and form again within a few hours (Tero et al. 2007, Sec. 1).
 - **Model**: a tube without flux starves in about 33 min, and new tubes form on fresh ground by growth and respawn.
-  Ground where a tube starved stays closed to growth until its flow memory is back at 0.01: up to 11 h of model time
-  from the deepest starvation, and up to 18 h until it is fresh ground again (ADR 0029, decision 7; `docs/model.md`,
-  8.4). Most starved ground opens sooner, because its memory stops falling when its tube vanishes (ADR 0053; row 2). A
-  tube that is taken off while its flow memory is above that of fresh ground leaves fresh ground at once.
+  Ground where a tube starved stays closed to growth until its flow memory is back at 0.01: 3.7 days of model time,
+  and 6 days until it is fresh ground again (ADR 0054; `docs/model.md`, 8.4). A starved tube that vanishes leaves its
+  ground at the lowest flow memory, so all such ground is closed for the same time. Before ADR 0054 the times were up
+  to 11 h and 18 h, and most starved ground opened much sooner (ADR 0029, decision 7; ADR 0053). A tube that is taken
+  off while its flow memory is above that of fresh ground leaves fresh ground at once.
 - **Measured** (ADR 0029, amendment 2026-11-15 (2), the Tokyo rail network, seeds 1 to 3, WebGPU): where the network
   around four cities is taken off at step 24,000 (13 h), the colony joins them again within 200 to 400 steps (7 to 13
   min); where their foods are taken away for 100 min and come back, within 300 to 1,000 steps (10 to 33 min) after they
   come back. So tubes break and form again within an hour where a tube is needed. The ground between the tubes stays
   closed for hours; with a time of 12 h or less the mesh of the growth rule comes back there, and the network is longer
   (decision 19).
+- **Measured with ADR 0054** (the mark of 6 days and the flow strength of 2.8; seeds 1 to 3, WebGPU): where the foods
+  of the four cities are away for 100 min and come back, the colony joins them again within 300 to 2,000 steps (10 to
+  67 min). The test with the network taken off was not run again.
 
 ### 17. Shuttle streaming
 
@@ -433,7 +454,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   42 food sites in every sample from step 2,002 on, and 42 and 42 at step 14,002 (38 to 42 before): a strain now
   covers a food from any of its cells. With the rule of ADR 0053 (the same seed): in Rival networks all ten foods from
   step 2,002 on, with 3,225 and 3,135 agents at the end; on the Tokyo map 39 to 42 of the 42 food sites from step 2,002
-  on, and 42 and 42 at step 14,002. The numbers of the organism in the docs, the distance and the time of an
+  on, and 42 and 42 at step 14,002. With ADR 0054 (the same seed): in Rival networks all ten foods from step 3,002 on,
+  with 2,341 and 2,318 agents at the end; on the Tokyo map, with its flow strength of 2.8, 40 to 42 of the 42 food
+  sites from step 2,002 on, and 42 and 42 at step 14,002. The numbers of the organism in the docs, the distance and the time of an
   encounter, are other measures: nothing is compared.
 
 ### 21. Growth toward the cathode of a current
@@ -495,12 +518,13 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "Slime".
 - **Model**: none. The model has no slime: a cell keeps no mark of an agent that left it, and an agent enters any
   open cell. The nearest rule is starved ground, with the flow on: where a tube starved, the flow memory D stays low
-  for up to 18 h of model time. No agent divides on a cell with D below 0.01, and no child is born onto one
-  (`docs/model.md`, 8.4, 8.5 and 9; ADR 0053; row 16). It marks only ground where a tube starved, not every cell that
+  for 6 days of model time (ADR 0054; up to 18 h before). No agent divides on a cell with D below 0.01, and no child
+  is born onto one, for 3.7 days (`docs/model.md`, 8.4, 8.5 and 9; ADR 0053; row 16). The 6 days are the longest
+  avoidance of slime that a source reports. The mark is on ground where a tube starved only, not on every cell that
   the colony left, and it stops no move.
-- **Measured**: no slime. The mark of starved ground does not keep a colony out of ground that it left: in the Snail
-  maze the colony is back in a blind branch after some thousand steps (row 2; ADR 0053). A slime field is stage 2 of
-  the plan of 2026-11-16 (`TODO.md`; ADR 0052).
+- **Measured**: no slime. Since ADR 0054 the mark of starved ground keeps a colony with growth out of ground that it
+  left: in the Snail maze the blind branches stay empty until the mark has faded (row 2). Agents still walk onto such
+  ground. A slime field is stage 2 of the plan of 2026-11-16 (`TODO.md`; ADR 0052).
 
 ### 24. Veins form a tree that follows Murray's law
 

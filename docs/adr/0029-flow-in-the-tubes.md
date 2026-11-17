@@ -11,6 +11,9 @@
   with light on the mountains and the lakes.
 - Extended by [ADR 0053](0053-no-child-onto-starved-ground.md) (2026-11-16): no child is born onto starved ground;
   decision 9 stays. It also measures how long the mark of starved ground of decision 7 keeps ground closed.
+- Changed by [ADR 0054](0054-a-starved-tube-leaves-starved-ground.md) (2026-11-17): a starved tube that vanishes
+  leaves its ground at the floor of the flow memory (decision 7), starved ground is fresh again after 6 days and not
+  after 18 h (decision 19), and the Tokyo scenes run a flow strength of 2.8 and not of 1.4 (decision 12).
 - In short: [`research/flow/README.md`](../../research/flow/README.md) tells on one page, in plain
   words, how this decision came about. This record has the details.
 - Changed by [ADR 0031](0031-a-flow-for-every-strain.md) (2026-11-13): every strain has a flow of

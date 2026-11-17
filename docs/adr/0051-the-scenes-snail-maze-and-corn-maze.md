@@ -6,6 +6,8 @@
 - Uses ADR 0025 (growth), ADR 0029 (the flow in the tubes) and ADR 0032 (the foraging colony with the flow).
 - Extended by ADR 0053 (2026-11-16): the two scenes measured again with its rule, and why the colony comes back into
   the blind branches.
+- Extended by ADR 0054 (2026-11-17): the two scenes measured again with its mark of starved ground. The blind
+  branches of the Snail maze empty; the numbers of this record are those of the mark before.
 
 ## Context
 

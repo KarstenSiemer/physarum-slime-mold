@@ -197,6 +197,22 @@ its ground at the floor of the flow memory. It is not built, because it changes 
 flow memory: the owner decides. The rule that the plan has for the slime, a lower weight for
 marked ground in the pick of a birth, changes nothing in a dead end: there every free neighbour
 has the mark.
+**A starved tube leaves starved ground**
+([ADR 0054](../../docs/adr/0054-a-starved-tube-leaves-starved-ground.md), part 18). The owner read
+that result and asked for a fix that reaches the aim. So that one rule ran in runs of 80,000 steps.
+The blind branches of the Snail maze were empty for 10,000 steps, and then the colony came back:
+the mark had faded, 20,025 steps after the ground had closed. A wider mark, on every ground that a
+tube left, did the same, and it cost the Tokyo scene its regrowth. So every mark that fades lets
+the colony come back when it has faded, and its time decides. The papers give no life time of the
+slime; the longest avoidance that one of them reports is 6 days. With the rule and a mark of 6
+days in place of 18 h, ten seeds of each maze ran again: a blind branch of the Snail maze holds
+0.4 % of the trail of the route, where it held 17.6 %, no child is born in the dead ends, and the
+tube joins the foods as before. Runs of 220,000 steps show the end of the mark: after 160,182 steps
+each blind branch fills once, for 1,000 to 3,000 steps, and it is closed again. What stays beside
+the tube are short twigs: agents walk onto closed ground and starve there, because the mark stops
+births and no moves. The long mark makes the Tokyo network leaner, so its flow strength was chosen
+again, as ADR 0029 chose it: 2.8 in place of 1.4 gives the total length of the organism at the
+time of its experiment. Both are choices of the coordinator, and the owner can change them.
 
 ## What is in this folder, and what you need to read
 
@@ -1346,7 +1362,7 @@ of seeds, and it loses a food source more often.
 ### 13. How long does starved ground stay closed? [ADR 0029, amendment 2026-11-15 (2)]
 
 A run with another time sets the share by which the flow memory of ground without a tube grows per
-step, `VITE_RECOVER` (`FLOW.recover`, 0.00023 in the app): 0.00023, 0.00035, 0.0007, 0.0014 and
+step, `VITE_RECOVER` (`FLOW.recover`; 0.00023 in the app then, 0.00002875 since ADR 0054): 0.00023, 0.00035, 0.0007, 0.0014 and
 0.0042 take 18.4, 12.1, 6.0, 3.0 and 1.0 h of model time from the floor to fresh ground. With
 `VITE_GROUND=1` a run also writes the flow memory of every cell, which `engine/strands.ts` reads.
 The logs of the record are in `logs/engine/recover/`; their names say the time, `r18` for 18 h.
@@ -1580,6 +1596,10 @@ The dead ends thin out but do not empty, because growth goes on (ADR 0051 has th
 
 ### 17. Does the colony stay out of the dead ends when no child is born onto starved ground? [ADR 0053]
 
+The records of this part are those of the app at the commit `02c3772`. Since ADR 0054 the mark of
+starved ground is another one (part 18), so the commands of this part give these records only in a
+checkout of that commit.
+
 **Where children are born.** The Snail maze, stepped one step at a time for 300 steps from the steps
 12,000, 20,000 and 28,000. Each child counts by the flow memory of its cell: starved (below 0.01),
 open (0.01 to 0.5) or fed (above 0.5). A run takes 1 minute.
@@ -1609,9 +1629,11 @@ for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_AT=12000,20000,
 `measure-mazes.ts` are the records `snail-maze-webgpu.txt`, `corn-maze-webgpu.txt` and the two of
 WebGL2.
 
-**Other rules.** `variant.ts` has seven of them; its head says what each one is. The Snail maze with
-each, seeds 1 to 3, with the dumps of the last 10,000 steps only (15 minutes in all). The line of a
-run is then the line of a full run but for `joined at`:
+**Other rules.** `variant.ts` had seven of them when this part ran, at the commit `02c3772`; its
+head there says what each one is. Since ADR 0054 the variant `floor` is the rule of the app (part
+18), so run the commands of this paragraph in a checkout of that commit. The Snail maze with each,
+seeds 1 to 3, with the dumps of the last 10,000 steps only (15 minutes in all). The line of a run
+is then the line of a full run but for `joined at`:
 
 ```bash
 STEPS=$(seq -s, 20500 500 30000 | sed 's/,$//'); for v in parent child left weight floor left+floor parent+floor; do for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g53-snail-maze-$v-s$seed node --import ./research/flow/register.mjs research/flow/engine/variant.ts $v npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
@@ -1643,7 +1665,7 @@ node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo
 The record of before is `logs/engine/tokyo-flux1.4-sites.txt`; the same command prints its summary.
 The same runs with `VITE_SCENE=tokyo-light` (seeds 1 to 3, `LIT=tokyo-light` before
 `measure-tokyo.ts`), with `VITE_KIND=webgl2` to step 24,000 (seeds 1 to 3), and with the variant
-`floor` (seeds 1 to 3, the command with `variant.ts floor` before `npx`).
+`floor` (seeds 1 to 3, the command with `variant.ts floor` before `npx`, in a checkout of `02c3772`).
 
 **The bytes of the scenes.** The digests of every scene after 500 steps on both backends, with the
 state of the flow (3 minutes), on the branch and on `main` on the same machine:
@@ -1677,8 +1699,8 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SG1 SG
 The regrowth of part 13, the foods of four cities away from step 24,000 to step 27,000, with the
 rule and with the variant `floor` (seeds 1 to 3, names `g53-starve-rule-s<seed>` and
 `g53-starve-floor-s<seed>`): the second command of the regrowth in part 13 without `VITE_RECOVER`,
-and for `floor` with `variant.ts floor` before `npx`. `summary.ts regrowth` with the two files of a
-rule and the step 27000 prints when the foods are joined again.
+and for `floor` with `variant.ts floor` before `npx`, at `02c3772`. `summary.ts regrowth` with the
+two files of a rule and the step 27000 prints when the foods are joined again.
 
 Result: the rule stops every birth onto a starved cell, a third of the births in the dead ends,
 and it changes no measure of the mazes or of the Tokyo scenes. The dead ends do not empty. Of the
@@ -1700,9 +1722,145 @@ other rules only `floor` empties them (ADR 0053 has the tables). The records are
 | `digest-3000-branch.jsonl`, `digest-3000-main`    | the same after 3,000 steps for the seven scenes with growth and the flow          |
 | `mutations.txt`                                   | the wrong rules SG1 to SG10, G1, G2, F8, F13 and F16, and the tests that fail     |
 
+### 18. Does the colony stay out of the dead ends when the mark is the same everywhere and lasts? [ADR 0054]
+
+Since ADR 0054 a starved tube that vanishes leaves its ground at the floor of the flow memory, and
+starved ground is fresh again after 6 days (`FLOW.recover` in `src/engine/flow.ts`). `VITE_RECOVER`
+of `dump.gpu.test.ts` sets another time for a run: 0.00023 is the 18 h of before.
+
+**The analysis: which mark, and for how long.** The Snail maze and the Corn maze to step 80,000,
+seeds 1 to 3 (2.5 minutes per run), with the time of before:
+
+```bash
+STEPS=$(seq -s, 500 500 80000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2 3; do VITE_RECOVER=0.00023 VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g54-$scene-floor-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+```bash
+for scene in snail-maze corn-maze; do WINDOW=10000 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene $(for seed in 1 2 3; do echo g54-$scene-floor-s$seed; done) | grep window; done
+```
+
+`WINDOW=10000` makes `measure-mazes.ts` print one line per window of 10,000 steps. With the time
+of before you must see `blind` below 0.03 in the window 30000 of the Snail maze and above 0.10 in
+the window 40000: the colony comes back when the mark has faded. The same runs with the variant
+`mark` (the command with `node --import ./research/flow/register.mjs research/flow/engine/variant.ts mark`
+before `npx`, names `g54-<scene>-mark-s<seed>`), and where the children are born with each
+(`births.gpu.test.ts` as in part 17 with `VITE_RECOVER=0.00023`, names `g54-births-floor-s<seed>`
+and `g54-births-mark-s<seed>`; then `births.ts` with `RECOVER=0.00023` before `node`).
+
+The Tokyo scene with the mark of the app and the flow strengths of before, 1.4, and 2 (the scene
+has 2.8 since ADR 0054), seeds 1 to 3. The runs with 1.4 of the record go on to step 96,000, with
+a sample every 8,000 steps:
+
+```bash
+for i0 in 1.4 2; do for seed in 1 2 3; do VITE_I0=$i0 VITE_GROUND=1 VITE_SCENE=tokyo VITE_SEED=$seed VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g54-tokyo-floor6d-i$i0-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g54-tokyo-floor6d-i$i0-s$seed 1.5 99999 >> research/flow/out/g54-tokyo-floor6d-i$i0.txt; done; done
+```
+
+The records of the analysis are the files `analysis-*` of `logs/engine/mark/`. They ran before the
+rule was in the app, with the same lines in `flow.wgsl`, put there by the variant `floor` of
+`variant.ts` at the commit `02c3772`;
+the names of their runs say `floor` for the mark of the app with 18 h, `floor6d` for the app, and
+`mark` for the variant with 18 h. The runs of 80,000 steps of the campaign give the lines of the
+runs `floor6d` of the mazes again, so these are not in the record a second time.
+
+**The campaign with the app.** The two mazes as in part 16, with the names
+`g54-<scene>-webgpu-s<seed>`; the seeds 1 to 3 run to step 80,000, and `UNTIL=30000` gives the
+lines of a run of 30,000 steps for all ten seeds:
+
+```bash
+for scene in snail-maze corn-maze; do UNTIL=30000 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene $(for seed in 1 2 3 4 5 6 7 8 9 10; do echo g54-$scene-webgpu-s$seed; done) > research/flow/out/engine/g54-$scene-webgpu.txt; done
+```
+
+Where children are born and where agents die, as in part 17, for both mazes (1 minute per run):
+
+```bash
+for scene in snail-maze corn-maze; do for seed in 1 2 3; do VITE_SCENE=$scene VITE_SEED=$seed VITE_AT=12000,20000,28000 VITE_NAME=g54-births-$scene-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/births.gpu.test.ts; done; node --import ./research/flow/register.mjs research/flow/engine/births.ts $scene g54-births-$scene-s1 g54-births-$scene-s2 g54-births-$scene-s3; done
+```
+
+You must see `born starved 0 open 0 fed 0` in the dead ends of the Snail maze in the windows from
+the steps 20,000 and 28,000. `births.ts` takes the time of the mark from the app; `RECOVER=0.00023`
+before `node` gives the `opens` of a run with the time of before.
+
+The trail on closed ground: the dumps of the last 10,000 of 30,000 steps, seeds 1 to 3 (50 s per
+run), measured with `GROUND=1`:
+
+```bash
+STEPS=$(seq -s, 20500 500 30000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2 3; do VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g54-ground-$scene-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; GROUND=1 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene g54-ground-$scene-s1 g54-ground-$scene-s2 g54-ground-$scene-s3 | grep ' run:'; done
+```
+
+`offClosed` is the share of the cells with a tube off the shortest route that lie on closed
+ground: you must see 0.98 to 1.00. But for `offClosed`, `detours` and the time, the lines of the
+dumps are the lines of the same steps in the record of the campaign.
+
+**Past the fade of the mark.** The two mazes to step 220,000 with a dump every 1,000 steps, seeds
+1 and 2 (5 minutes per run), and the Tokyo scene to step 224,000, seeds 1 to 3 (9 minutes per run):
+
+```bash
+STEPS=$(seq -s, 1000 1000 220000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2; do VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g54-$scene-fade-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; WINDOW=10000 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene g54-$scene-fade-s1 g54-$scene-fade-s2 | grep window; done
+```
+
+```bash
+for seed in 1 2 3; do VITE_GROUND=1 VITE_SCENE=tokyo VITE_SEED=$seed VITE_STEPS=16000,24000,32000,40000,48000,64000,80000,96000,112000,128000,144000,160000,176000,192000,208000,224000 VITE_NAME=g54-tokyo-fade-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g54-tokyo-fade-s$seed 1.5 99999 >> research/flow/out/g54-tokyo-fade.txt; done
+```
+
+In the Snail maze you must see `blind` below 0.02 in the windows 30000 to 170000, and 0.06 to 0.10
+in the window 180000: the first ground is open again 160,182 steps after it closed. The windows of
+a record, for all its seeds, come from its lines:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-mazes research/flow/logs/engine/mark/snail-maze-fade.txt research/flow/logs/engine/mark/analysis-snail-maze-floor.txt
+```
+
+The Maze, seeds 1 to 10 to step 48,000 (1.5 minutes per run), as part 13 measures it:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=maze VITE_I0=8 VITE_SEED=$seed VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000,20000,24000,32000,40000,48000 VITE_NAME=g54-mz-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g54-mz-webgpu-s$seed >> research/flow/out/g54-maze-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/out/g54-maze-webgpu.txt
+```
+
+The Tokyo scenes, the scenes of part 9 and the regrowth of part 13 as in part 17, with the names
+`g54-…` and without `VITE_I0`: the scenes hold their flow strength. The digests as in part 17, after
+500 steps for every scene and after 3,000 steps for the eight scenes with the flow
+(`VITE_ONLY=maze,snail-maze,corn-maze,tokyo,tokyo-light,food-ring,rival-networks,tokyo-rivals`).
+After 500 steps 42 of the 54 runs must equal those of `main` at `02c3772`, and the two mazes with
+growth still equal them after 3,000 steps.
+
+**The wrong rules** FL1 to FL10, and D1 to D6 of the recovery (5 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts FL1 FL2 FL3 FL4 FL5 FL6 FL7 FL8 FL9 FL10 D1 D2 D3 D4 D5 D6
+```
+
+Result: with the mark of the app the blind branches of the Snail maze hold 0.4 % of the trail of
+the route (17.6 % before), no child is born in the dead ends, and the Maze and the Tokyo scenes
+keep their measures, the Tokyo scenes with a flow strength of 2.8. When the mark has faded, the
+colony comes back once. ADR 0054 has the tables. The records are in `logs/engine/mark/`:
+
+| Record                                               | Runs                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `analysis-<scene>-floor.txt`, `-mark.txt`            | the mazes to step 80,000 with 18 h: the mark of the app, and the variant        |
+| `analysis-births.txt`                                | the lines of `births.ts` for these two, the Snail maze, seeds 1 to 3            |
+| `analysis-tokyo-i1.4.txt`, `-i2.txt`, `-i2.8.txt`    | the Tokyo scene with the mark of the app and three flow strengths, seeds 1 to 3 |
+| `analysis-tokyo-mark.txt`, `analysis-starve-mark.*`  | the Tokyo scene and the regrowth with the variant `mark` and 18 h               |
+| `snail-maze-webgpu.txt`, `corn-maze-webgpu.txt`      | the lines of `measure-mazes.ts`, seeds 1 to 10, to step 30,000                  |
+| `<scene>-webgpu-long.txt`, `<scene>-webgl2.txt`      | seeds 1 to 3 to step 80,000 with their windows; WebGL2, seeds 1 and 2           |
+| `<scene>-fade.txt`                                   | seeds 1 and 2 to step 220,000 with their windows                                |
+| `births-<scene>.txt`, `ground-<scene>.txt`           | the lines of `births.ts`, and of `measure-mazes.ts` with `GROUND=1`             |
+| `maze-webgpu.txt`, `maze-webgl2.txt`                 | the Maze, seeds 1 to 10 to step 48,000, and seeds 1 to 3 on WebGL2              |
+| `tokyo-webgpu.txt`, `tokyo-strands.jsonl`            | the Tokyo scene, seeds 1 to 10: the measures and the closed ground              |
+| `tokyo-webgl2.txt`, `tokyo-light.txt`                | the Tokyo scene on WebGL2, and Tokyo with light, seeds 1 to 3                   |
+| `tokyo-fade.txt`, `tokyo-fade-strands.jsonl`         | the Tokyo scene to step 224,000, seeds 1 to 3                                   |
+| `starve.txt`, `starve-strands.jsonl`                 | the regrowth of part 13, seeds 1 to 3                                           |
+| `scenes-*.jsonl`                                     | the three scenes of part 9, seed 1                                              |
+| `digest-branch.jsonl`, `digest-main.jsonl`           | the digests of every scene after 500 steps, branch and `main`                   |
+| `digest-3000-branch.jsonl`, `digest-3000-main.jsonl` | the same after 3,000 steps for the eight scenes with the flow                   |
+| `mutations.txt`                                      | the wrong rules FL1 to FL10 and D1 to D6, and the tests that fail               |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 280 files, 4.6 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 321 files, 5.8 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1733,6 +1891,7 @@ asks for the new digest.
 | `logs/engine/light-growth/`                          | the runs of part 15 (ADR 0050): Tokyo with light with Light stops growth at 1, 0.98, 0.9 and 0.5, the digests of every scene, and the wrong rules LG1 to LG11                                                                   | 2026-11-16, M3 Pro                                    |
 | `logs/engine/mazes/`                                 | the runs of part 16 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
 | `logs/engine/starved-ground/`                        | the runs of part 17 (ADR 0053): where children are born, the two mazes and the Tokyo scenes with the rule, the other rules, the digests and the wrong rules SG1 to SG10                                                         | 2026-11-16, M3 Pro                                    |
+| `logs/engine/mark/`                                  | the runs of part 18 (ADR 0054): the analysis of the mark and its time, the campaign with the app, the runs past the fade of the mark, the digests and the wrong rules FL1 to FL10                                               | 2026-11-17, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1789,9 +1948,9 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 288 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/mutate.ts`        | 298 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
-| `engine/variant.ts`       | other rules of the births in the WGSL passes for one run, for the measurements of ADR 0053        |
+| `engine/variant.ts`       | other rules in the WGSL passes for one run, for the measurements of ADR 0053 and ADR 0054         |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

@@ -58,6 +58,7 @@ export function update(
   const [base, foodG] = [u[4]!, u[5]!];
   const [bodyRate, bodyLow, fresh] = [u[9]!, u[10]!, u[11]!];
   const [floor, trailLow, trailScale] = [u[12]!, u[13]!, u[14]!];
+  const half2 = u[17]!;
   // The strain of the block: the pass reads the trail of that strain alone (ADR 0031).
   const strain = Math.trunc(u[22]!);
   const flux = flowFlux(grid, fields.memory, fields.pressure);
@@ -89,6 +90,8 @@ export function update(
       const own = trail[i + strain]!;
       const presence = Math.min(1, Math.max(0, (own - trailLow) * trailScale));
       const body = bodyOld + bodyRate * (presence - bodyOld);
+      // A starved tube that vanishes leaves its ground at the floor of the memory (ADR 0054).
+      if (bodyOld >= bodyLow && body < bodyLow && d * d < half2) d = floor;
       const isFood = food(y * w + x);
       let g = body >= bodyLow ? body * (isFood ? foodG : base + d) : 0;
       if (!rules.foodNeedsTube && isFood) g = foodG;
