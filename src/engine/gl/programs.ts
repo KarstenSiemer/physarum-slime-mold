@@ -20,6 +20,7 @@ import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
 import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
+import slimeFrag from './glsl/slime.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import trailDownFrag from './glsl/trail-down.frag?raw';
 import tubesFrag from './glsl/tubes.frag?raw';
@@ -161,6 +162,11 @@ export interface Programs {
   /** The passes of the picture of the tubes, compiled at their first use, with the numbers of tubes.ts. */
   tubes: () => TubePrograms;
   /**
+   * The pass of the stamps of the slime field (slime.frag, ADR 0055), compiled at its first use: a scene of the Jones
+   * model never runs it.
+   */
+  slime: () => Program;
+  /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
    * growth.frag, ADR 0029 and ADR 0053), compiled at its first use: only a scene with growth and the flow needs it.
    */
@@ -272,6 +278,7 @@ export function compile(gl: GL): Programs {
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
   let tubes: TubePrograms | undefined;
+  let slime: Program | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
@@ -318,6 +325,7 @@ export function compile(gl: GL): Programs {
         picture: sim(`#define PASS 1\n${TUBE_DEFINES}${tubesFrag}`),
         stream: sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`),
       }),
+    slime: () => (slime ??= sim(slimeFrag)),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;
       let p = flowing.get(key);

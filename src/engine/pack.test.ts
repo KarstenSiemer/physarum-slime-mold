@@ -35,7 +35,17 @@ describe('Params layout', () => {
     const body = /struct Params \{([\s\S]*?)\n\}/.exec(wgsl)?.[1] ?? '';
     const types = [...body.matchAll(/:\s*([\w<>, ]+?),\s*(?:\/\/|$)/gm)].map((m) => m[1]);
     expect(types.every((t) => /^vec4[uf]$|^array<vec4f, 4>$/.test(t ?? ''))).toBe(true);
-    expect(PARAMS_BYTES).toBe(25 * 16);
+    expect(PARAMS_BYTES).toBe(27 * 16);
+  });
+
+  // WebGL2 fills the same bytes into its block (gl/glsl/common.glsl): the same members in the same order.
+  it('matches the member order of the GLSL block', () => {
+    const body = /uniform Params \{([\s\S]*?)\n\} P;/.exec(read('./gl/glsl/common.glsl'))?.[1] ?? '';
+    const members = [...body.matchAll(/^\s*u?vec4\s+(\w+)(\[4\])?;/gm)].map((m) => m[1]);
+    expect(members).toEqual([...PARAM_SLOTS]);
+    // An unsigned member in WGSL is one in GLSL: pack.ts writes the same bits for both.
+    const unsigned = (source: string, pattern: RegExp) => [...source.matchAll(pattern)].map((m) => m[1]);
+    expect(unsigned(body, /^\s*uvec4\s+(\w+);/gm)).toEqual(unsigned(wgsl, /^\s*(\w+)\s*:\s*vec4u,/gm));
   });
 
   it('packs grid, config and strain lanes at the right offsets', () => {

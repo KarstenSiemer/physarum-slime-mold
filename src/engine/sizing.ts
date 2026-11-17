@@ -1,5 +1,6 @@
 import { capacityOf, MEAN_WINDOW, meanWindowOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 import { flowOn, flowStrains } from './flow';
+import { slimeModel } from './slime';
 import { TUBE_TILE } from './tubes';
 
 /**
@@ -153,6 +154,18 @@ export const TUBE_MAP_BYTES_PER_CELL_GL = 4 / TUBE_TILE + 4 / TUBE_TILE ** 2;
  */
 export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>, map = 0) =>
   flowOn(s) ? TUBES_BYTES_PER_CELL + map : 0;
+
+/**
+ * More bytes per cell for the slime field (ADR 0055, decision 9): the stamp of each cell, 4 B (sim.ts `slime`, a
+ * buffer; gl/sim.ts `slime`, a target of unsigned integers). Both backends hold the same.
+ */
+export const SLIME_BYTES_PER_CELL = 4;
+
+/**
+ * The bytes per cell of the slime field: counted in the extended model, with a Slime life time above 0 or with 0. The
+ * setting changes no grid that fits the memory. The Jones model has no slime: 0.
+ */
+export const slimeBytesPerCell = (s: Pick<Settings, 'model'>) => (slimeModel(s) ? SLIME_BYTES_PER_CELL : 0);
 
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion' | 'model' | 'meanWindow'>) =>

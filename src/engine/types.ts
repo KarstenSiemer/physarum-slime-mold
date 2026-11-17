@@ -128,6 +128,12 @@ export interface Sim {
    */
   readFlow(strain?: number): Promise<Float32Array>;
   readPressure(strain?: number): Promise<Float32Array>;
+  /**
+   * For tests and measurements: the slime field (ADR 0055), one value per cell, rows from y = 0: 0 for a cell without
+   * a stamp, else the number of the step in which the cell last held plasm, plus 1 (slime.ts). Only zeros in the Jones
+   * model, which has no slime.
+   */
+  readSlime(): Promise<Uint32Array>;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */

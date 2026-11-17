@@ -15,6 +15,7 @@ import {
 } from './pack';
 import { readBuffer, readTexture } from './readback';
 import { NO_SITES, SITE_BLOCK, type FlowSites } from './sites';
+import { slimeModel, slimeSteps } from './slime';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
@@ -22,6 +23,7 @@ import flowWgsl from './shaders/flow.wgsl?raw';
 import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
+import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
@@ -45,6 +47,8 @@ const SORT_INTERVAL = 32;
 const SORT_TILE = 8;
 /** Cells per side of a workgroup of the flow passes (flow.wgsl). */
 const FLOW_GROUP = 8;
+/** Cells per side of a workgroup of the pass of the stamps (slime.wgsl). */
+const SLIME_GROUP = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -186,6 +190,12 @@ export class Simulation implements Sim {
   /** The food sites that give and take the flux, with their cells (foodSites()). */
   private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
+  /**
+   * The slime field (slime.wgsl, ADR 0055): the stamp of every cell, 4 B each (slime.ts). Held while the model of the
+   * settings has slime, with a life time above 0 or with 0 (slimeModel()); the fit of the grid counts it then
+   * (sizing.ts slimeBytesPerCell()).
+   */
+  private slime?: GPUBuffer | undefined;
   private paintGroup?: GPUBindGroup;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.wgsl
@@ -280,6 +290,8 @@ export class Simulation implements Sim {
     this.groups = [x, Math.ceil(n / x)];
     // Now, inside the caller's out-of-memory scope, even while collisions are off: the budget counts them.
     this.ensureCollision();
+    // So with the slime field, while the model has it.
+    if (slimeModel(settings)) this.ensureSlime();
   }
 
   /**
@@ -601,6 +613,8 @@ export class Simulation implements Sim {
     if (!tubesShown(settings)) this.dropTubes();
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
     if (!flowOn(settings)) this.dropFlow();
+    // The memory fit counts the slime field only in the model that has it (sizing.ts): the Jones model has no slime.
+    if (!slimeModel(settings)) this.dropSlime();
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -632,6 +646,8 @@ export class Simulation implements Sim {
     }
     enc.clearBuffer(this.counts);
     if (this.flow) this.clearFlow(enc, this.flow);
+    // A reset clears every stamp (ADR 0055, decision 3).
+    if (this.slime) enc.clearBuffer(this.slime);
     const pass = enc.beginComputePass();
     const init = this.starts().init;
     pass.setPipeline(init);
@@ -864,6 +880,36 @@ export class Simulation implements Sim {
   async readPressure(strain = 0): Promise<Float32Array> {
     if (!this.flow || !this.flowHolds(strain)) return new Float32Array(0);
     return readTexture(this.device, at(this.flow.pressure, this.flowP), 4, strain);
+  }
+
+  /**
+   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it). A new buffer holds zeros: no
+   * cell has a stamp.
+   */
+  private ensureSlime(): GPUBuffer {
+    this.slime ??= this.device.createBuffer({
+      size: this.width * this.height * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    return this.slime;
+  }
+
+  /** Frees the slime field, and every bind group that holds it. */
+  private dropSlime() {
+    if (!this.slime) return;
+    this.slime.destroy();
+    this.slime = undefined;
+    for (const key of [...this.bindCache.keys()]) if (key.startsWith('slime')) this.bindCache.delete(key);
+  }
+
+  /**
+   * For tests and measurements: the stamp of every cell as the field holds it (slime.ts), one value per cell, rows
+   * from y = 0: 0 for a cell without a stamp, else the number of the step in which the cell last held plasm, plus 1.
+   * Only zeros in the Jones model, which has no slime.
+   */
+  async readSlime(): Promise<Uint32Array> {
+    if (!this.slime) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.slime));
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -1170,6 +1216,7 @@ export class Simulation implements Sim {
     this.viewThird?.scent.destroy();
     this.dropFlow();
     this.dropTubes();
+    this.dropSlime();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -1337,9 +1384,22 @@ export class Simulation implements Sim {
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
     }
+    // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time.
+    if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);
     if (flow) this.encodeFlow(pass, flow, d);
     pass.end();
     this.parity = d;
+  }
+
+  /**
+   * The pass of the stamps after the diffusion of a step (slime.wgsl, ADR 0055): a cell that holds plasm gets the
+   * stamp of the step. `trail`: the texture that holds the trail after the step, as the flow reads it (encodeFlow()).
+   */
+  private encodeSlime(pass: GPUComputePassEncoder, trail: Bit) {
+    const stamp = this.kernels.slime();
+    pass.setPipeline(stamp);
+    pass.setBindGroup(0, this.bind(`slime${trail}`, stamp, [this.params, this.trailViews[trail], this.ensureSlime()]));
+    pass.dispatchWorkgroups(Math.ceil(this.width / SLIME_GROUP), Math.ceil(this.height / SLIME_GROUP));
   }
 
   /**
@@ -1745,6 +1805,7 @@ class Kernels {
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
   private tubePipelines?: TubeKernels;
+  private slimePipeline?: GPUComputePipeline;
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -1805,6 +1866,18 @@ class Kernels {
       };
     }
     return this.flowPipelines;
+  }
+
+  /**
+   * The pass of the stamps of the slime field (slime.wgsl, ADR 0055), built at its first use: a scene of the Jones
+   * model never runs it.
+   */
+  slime(): GPUComputePipeline {
+    this.slimePipeline ??= this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this.device.createShaderModule({ code: common + slimeWgsl }), entryPoint: 'stamp' },
+    });
+    return this.slimePipeline;
   }
 
   /** The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. */

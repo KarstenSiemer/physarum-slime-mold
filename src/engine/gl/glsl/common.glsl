@@ -27,6 +27,8 @@ layout(std140) uniform Params {
   uvec4 shrinkage;     // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   uvec4 startEnd;      // exclusive end index of each strain's agents alive at the start (ADR 0025)
   vec4 electrode;      // the source of a cell of an electrode (ADR 0047); y: Light stops growth (ADR 0050)
+  vec4 slimeLow;       // per strain the trail from which a cell holds plasm (ADR 0055; flow.ts trailLevels())
+  uvec4 slime;         // the life time of the slime in steps, 0 for no slime (ADR 0055); y, z, w unused
 } P;
 
 const float PI = 3.14159265358979;

@@ -3,6 +3,7 @@ import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
 import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from '../flow';
 import { NO_CELL, NO_SITES, SITE_BLOCK, type FlowSites } from '../sites';
+import { slimeModel, slimeSteps } from '../slime';
 import {
   CLEAR_TILE,
   growthOn,
@@ -20,10 +21,12 @@ import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type EnvTool, 
 import {
   allOrNothing,
   clear,
+  clearUint,
   destroyTarget,
   fence,
   readTarget,
   readTargetAsync,
+  readUintTarget,
   stencilTarget,
   target,
   textures,
@@ -235,6 +238,12 @@ export class GlSim implements Sim {
   private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
   /**
+   * The slime field (slime.frag, ADR 0055; `slime` in ../sim.ts): the stamp of every cell in a target of unsigned
+   * integers, 4 B per cell. Held while the model of the settings has slime (slimeModel()); the fit of the grid counts
+   * it then (sizing.ts slimeBytesPerCell()).
+   */
+  private slime: Target | undefined;
+  /**
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
    * (diffuse.frag COVERED). Allocated at its first use.
    */
@@ -338,6 +347,9 @@ export class GlSim implements Sim {
         const r = () => t(width, height, gl.R32F);
         this.collision = { occ: [r(), r()], claims: r() };
       }
+      // The slime field, while the model has it: allocated now too, and the budget counts it. A new texture holds
+      // zeros: no cell has a stamp.
+      if (slimeModel(settings)) this.slime = t(width, height, gl.R32UI);
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
       for (const x of made) destroyTarget(gl, x);
@@ -607,6 +619,8 @@ export class GlSim implements Sim {
     }
     // The memory fit counts the targets of the flow only while it is on.
     if (!flowOn(settings) && this.flow) this.dropFlow();
+    // The memory fit counts the slime field only in the model that has it: the Jones model has no slime.
+    if (!slimeModel(settings)) this.dropSlime();
     // The picture of the tubes holds its targets only while the settings show it (tubes.ts). The memory fit counts them
     // with the flow, shown or not (sizing.ts tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
@@ -716,6 +730,28 @@ export class GlSim implements Sim {
     this.flowP = 0;
   }
 
+  /** The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): no cell has a stamp. */
+  private ensureSlime(): Target {
+    this.slime ??= target(this.gl, this.width, this.height, this.gl.R32UI);
+    return this.slime;
+  }
+
+  /** Frees the slime field. */
+  private dropSlime() {
+    if (!this.slime) return;
+    destroyTarget(this.gl, this.slime);
+    this.slime = undefined;
+  }
+
+  /**
+   * For tests and measurements: the stamp of every cell as the field holds it (../slime.ts), one value per cell; only
+   * zeros in the Jones model, which has no slime (../sim.ts readSlime()).
+   */
+  readSlime(): Promise<Uint32Array> {
+    if (!this.slime) return Promise.resolve(new Uint32Array(this.width * this.height));
+    return Promise.resolve(readUintTarget(this.gl, this.slime));
+  }
+
   private dropFlow() {
     if (!this.flow) return;
     const { memory, pressure, ports, lanes, cells, hits } = this.flow;
@@ -794,6 +830,8 @@ export class GlSim implements Sim {
     this.writeParams();
     for (const t of [...this.trail, ...this.scent, this.counts]) clear(gl, t);
     this.clearFlow();
+    // A reset clears every stamp (ADR 0055, decision 3).
+    if (this.slime) clearUint(gl, this.slime);
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
@@ -1203,6 +1241,7 @@ export class GlSim implements Sim {
     this.dropViewThird();
     this.dropFlow();
     this.dropTubes();
+    this.dropSlime();
     gl.deleteBuffer(this.ubo);
   }
 
@@ -1401,6 +1440,11 @@ export class GlSim implements Sim {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.p = out;
     }
+    // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time
+    // (slime.frag; encodeSlime in ../sim.ts, ADR 0055): a cell that holds plasm gets the stamp of the step, and the
+    // pass discards the fragment of every other cell.
+    if (slimeSteps(this.settings) > 0)
+      this.pass(this.prog.slime(), this.ensureSlime(), { trail: this.trail[this.p].texture }, {});
     if (flow) this.encodeFlow(flow);
   }
 

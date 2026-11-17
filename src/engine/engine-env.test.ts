@@ -11,7 +11,7 @@ import { NO_CELL } from './sites';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
 import { OutOfMemoryError } from './gpu';
-import { BYTES_PER_AGENT, BYTES_PER_AGENT_GL, memoryBudget } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_AGENT_GL, memoryBudget, SLIME_BYTES_PER_CELL as SLIME } from './sizing';
 import { compact, Placement, sweep } from './sweep';
 import { paintReference } from './paint-reference';
 import type { Backend, Stroke } from './types';
@@ -220,9 +220,10 @@ describe('food, light and walls on a new simulation', () => {
 
   // ADR 0031: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
   it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
-    // 1320 B per cell and 80 for the flow of one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
+    // 1316 B per cell, 4 for the slime field (ADR 0055) and 80 for the flow of one strain fit 768 × 480; with 160 for
+    // two strains, only 512 × 320 fits.
     const backend = new CpuBackend();
-    backend.bytesPerCell = 1320;
+    backend.bytesPerCell = 1316;
     const one = { ...maze.settings(), resolution: 768 };
     expect(one.flow).toBe(true);
     const { engine, sim } = await engineWith(one, mazeEnv, canvas(), backend);
@@ -1565,7 +1566,8 @@ describe('lattices', () => {
       ['growth on', growth, most(45_000, BYTES_PER_AGENT + 6, 34), true],
       ['growth on, Capacity 1', { ...growth, capacity: 1 }, most(cells, BYTES_PER_AGENT + 6, 34), true],
       // A backend without the rule (WebGL2 without float blending) runs Capacity 2 as 2 agents per cell, and no growth.
-      ['no rule here, Capacity 2', { ...growth, capacity: 2 }, most(2 * cells, BYTES_PER_AGENT, 0), false],
+      // It runs the scene on the extended model (constrain()), which holds the slime field (ADR 0055).
+      ['no rule here, Capacity 2', { ...growth, capacity: 2 }, most(2 * cells, BYTES_PER_AGENT, SLIME), false],
     ] as const) {
       for (const [more, holds] of [
         [0, true],
@@ -1587,6 +1589,7 @@ describe('lattices', () => {
     expect(most(cells, BYTES_PER_AGENT, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
     expect(most(45_000, BYTES_PER_AGENT + 6, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
     expect(most(cells, BYTES_PER_AGENT, 0)).toBeGreaterThan(most(2 * cells, BYTES_PER_AGENT, 0));
+    expect(most(2 * cells, BYTES_PER_AGENT, 0)).toBeGreaterThan(most(2 * cells, BYTES_PER_AGENT, SLIME));
   });
 
   // ADR 0028: WebGL2 holds the order of its point passes, 22 B more per agent (BYTES_PER_AGENT_GL). The fit counts the
@@ -1681,5 +1684,65 @@ describe('the memory fit of the view', () => {
     expect(engine.fit({ ...s, stepOrder: 'sense-first' }).resolution).toBe(2048);
     expect(engine.fit({ ...s, stepOrder: 'move-first' }).resolution).toBe(1536);
     expect(engine.fit({ ...s, stepOrder: 'move-first', diffusion: 1 }).resolution).toBe(2048);
+  });
+});
+
+// ADR 0055, decision 9: the slime field holds 4 B per cell on both backends. The fit of the grid counts them in the
+// extended model, with a Slime life time above 0 and with 0, so that the setting changes no grid.
+describe('the memory fit of the slime field', () => {
+  const shrinking300 = presetById('shrinking');
+  if (!shrinking300) throw new Error('no preset shrinking');
+  const jones = shrinking300.settings(); // 300 × 300 cells, a dish with 45,000 agents
+  const extended: Settings = { ...jones, model: 'extended' };
+  const cells = 300 * 300;
+  /** The most bytes per cell of the backend at which 300 × 300 cells still fit, with `extra` bytes more per cell. */
+  const most = (extra: number) => Math.floor((memoryBudget() - 45_000 * BYTES_PER_AGENT) / cells) - extra;
+
+  it('counts 4 B per cell in the extended model, whatever the life time, and none in the Jones model', async () => {
+    expect([jones.model, jones.lattice, SLIME]).toEqual(['jones', [300, 300], 4]);
+    for (const [what, settings, extra] of [
+      ['the Jones model', jones, 0],
+      ['the extended model', extended, SLIME],
+      ['the extended model without slime', { ...extended, slimeLife: 0 }, SLIME],
+      ['the extended model with the longest life time', { ...extended, slimeLife: 240 }, SLIME],
+    ] as const)
+      for (const [more, holds] of [
+        [0, true],
+        [1, false],
+      ] as const) {
+        const backend = new CpuBackend();
+        backend.bytesPerCell = most(extra) + more;
+        const engine = await Engine.create(canvas(1280, 720), settings, undefined, backend);
+        const at = `${what}, ${most(extra) + more} B per cell`;
+        expect(engine.settings.model, at).toBe(settings.model);
+        expect(engine.settings.lattice, at).toEqual(holds ? [300, 300] : null);
+      }
+    expect(most(0)).toBe(most(SLIME) + 4);
+  });
+
+  it('keeps the simulation and its grid when the life time changes: no restart, no rebuild', async () => {
+    const backend = new CpuBackend();
+    backend.bytesPerCell = most(SLIME);
+    const engine = await Engine.create(canvas(1280, 720), extended, undefined, backend);
+    const [sim, restarts] = [engine.sim, engine.restarts];
+    engine.frame(0, 3);
+    for (const slimeLife of [0, 18, 240, 144]) {
+      await engine.apply({ ...engine.settings, slimeLife });
+      expect(engine.settings.slimeLife).toBe(slimeLife);
+      expect(engine.settings.lattice).toEqual([300, 300]);
+    }
+    expect(engine.sim).toBe(sim);
+    expect(engine.restarts).toBe(restarts);
+    expect(engine.sim.step).toBe(3);
+  });
+
+  it('lowers the grid when a switch to the extended model adds the field to a grid that just fits', async () => {
+    const backend = new CpuBackend();
+    backend.bytesPerCell = most(0);
+    const told: string[] = [];
+    const engine = await Engine.create(canvas(1280, 720), jones, (m) => told.push(m), backend);
+    expect([engine.settings.lattice, told.length]).toEqual([[300, 300], 0]);
+    await engine.apply(extended);
+    expect([engine.settings.model, engine.settings.lattice, told.length]).toEqual(['extended', null, 1]);
   });
 });

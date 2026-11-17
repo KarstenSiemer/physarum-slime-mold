@@ -2,8 +2,8 @@
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
 // of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046), of the
 // Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
-// (ADR 0053) and of the mark that a starved tube leaves (ADR 0054). The script puts one wrong rule at a time into a
-// source file of the app,
+// (ADR 0053), of the mark that a starved tube leaves (ADR 0054) and of the slime field (ADR 0055). The script puts one
+// wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
 // must fail at least one test.
@@ -71,6 +71,18 @@ const [MARK_GPU, MARK_GL] = [`webgpu .*${MARK}`, `webgl2 .*${MARK}`];
 /** No child is born onto starved ground (ADR 0053): the tests of the rule on each backend, in the tests of the flow. */
 const STARVED = 'no child be born onto starved ground';
 const [STARVED_GPU, STARVED_GL] = [`webgpu .*${STARVED}`, `webgl2 .*${STARVED}`];
+
+/** The slime field (ADR 0055): the pass of the stamps on each backend, and the tests of it on each and on both. */
+const SLIME_WGSL = 'src/engine/shaders/slime.wgsl';
+const SLIME_FRAG = 'src/engine/gl/glsl/slime.frag';
+const SLIME_TS = 'src/engine/slime.ts';
+const SLIME_SPEC = 'src/engine/slime.gpu.test.ts';
+const SLIME_UNIT = 'src/engine/slime.test.ts';
+const SLIME = 'the slime field on';
+const [SLIME_GPU, SLIME_GL] = [`${SLIME} webgpu`, `${SLIME} webgl2`];
+/** The time of the mark of starved ground, which the Slime life time sets (ADR 0055, decision 5). */
+const FLOW_TS = 'src/engine/flow.ts';
+const LIFE = 'Slime life time';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -2353,6 +2365,250 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'if (starved(bits & 3u, cellCoord(m))) continue;',
     'if (starved(bits & 3u, q + around(k))) continue;',
     STARVED_GL,
+  ],
+  // The slime field (ADR 0055): a cell that holds plasm gets the stamp of the step. Plasm is the trail of a strain of
+  // the settings at or above the low level of that strain, after the diffusion of the step; every other cell keeps its
+  // stamp; a reset clears every stamp; the pass runs only with a life time above 0 and in the extended model.
+  [
+    'SL1 wgsl: only the first strain leaves slime',
+    SLIME_WGSL,
+    'for (var s = 0u; s < P.cfg.y; s++) {',
+    'for (var s = 0u; s < 1u; s++) {',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL2 wgsl: every strain is measured by the level of the first strain',
+    SLIME_WGSL,
+    'if (t[s] >= P.slimeLow[s]) { return true; }',
+    'if (t[s] >= P.slimeLow[0]) { return true; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL3 wgsl: the level of a full tube in place of the low level',
+    SLIME_WGSL,
+    'if (t[s] >= P.slimeLow[s]) { return true; }',
+    'if (t[s] >= 5.0 * P.slimeLow[s]) { return true; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL4 wgsl: a cell at the level holds no plasm',
+    SLIME_WGSL,
+    'if (t[s] >= P.slimeLow[s]) { return true; }',
+    'if (t[s] > P.slimeLow[s]) { return true; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL5 wgsl: the number of the step before',
+    SLIME_WGSL,
+    'slime[gid.y * W() + gid.x] = P.grid.w + 1u; }',
+    'slime[gid.y * W() + gid.x] = P.grid.w; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL6 wgsl: plasm does not renew a stamp',
+    SLIME_WGSL,
+    'if (holdsPlasm(textureLoad(trail, gid.xy, 0))) {',
+    'if (holdsPlasm(textureLoad(trail, gid.xy, 0)) && slime[gid.y * W() + gid.x] == 0u) {',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL7 wgsl: a cell without plasm loses its stamp',
+    SLIME_WGSL,
+    'slime[gid.y * W() + gid.x] = P.grid.w + 1u; }',
+    'slime[gid.y * W() + gid.x] = P.grid.w + 1u; } else { slime[gid.y * W() + gid.x] = 0u; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL8 wgsl: the trail of a strain that the settings do not hold counts',
+    SLIME_WGSL,
+    'for (var s = 0u; s < P.cfg.y; s++) {',
+    'for (var s = 0u; s < 4u; s++) {',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL9 webgpu: the pass reads the trail before the diffusion of the step, so a wall with trail gets a stamp',
+    GPU_SIM,
+    'if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);',
+    'if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, p);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL10 webgpu: the pass runs with a life time of 0',
+    GPU_SIM,
+    'if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);',
+    'if (slimeSteps(this.settings) >= 0) this.encodeSlime(pass, d);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL11 webgpu: a reset keeps the stamps',
+    GPU_SIM,
+    'if (this.slime) enc.clearBuffer(this.slime);',
+    'if (this.slime && this.step < 0) enc.clearBuffer(this.slime);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL12 webgpu: the Jones model keeps the field of the extended model',
+    GPU_SIM,
+    'if (!slimeModel(settings)) this.dropSlime();',
+    'if (!slimeModel(settings) && this.step < 0) this.dropSlime();',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL13 glsl: only the first strain leaves slime',
+    SLIME_FRAG,
+    'for (int s = 0; s < int(P.cfg.y); s++) {',
+    'for (int s = 0; s < 1; s++) {',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL14 glsl: every strain is measured by the level of the first strain',
+    SLIME_FRAG,
+    'if (t[s] >= P.slimeLow[s]) return true;',
+    'if (t[s] >= P.slimeLow[0]) return true;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL15 glsl: the level of a full tube in place of the low level',
+    SLIME_FRAG,
+    'if (t[s] >= P.slimeLow[s]) return true;',
+    'if (t[s] >= 5.0 * P.slimeLow[s]) return true;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL16 glsl: a cell at the level holds no plasm',
+    SLIME_FRAG,
+    'if (t[s] >= P.slimeLow[s]) return true;',
+    'if (t[s] > P.slimeLow[s]) return true;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL17 glsl: the number of the step before',
+    SLIME_FRAG,
+    'result = P.grid.w + 1u;',
+    'result = P.grid.w;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL18 glsl: a cell without plasm loses its stamp',
+    SLIME_FRAG,
+    'if (!holdsPlasm(texelFetch(trail, ivec2(gl_FragCoord.xy), 0))) discard;',
+    'if (!holdsPlasm(texelFetch(trail, ivec2(gl_FragCoord.xy), 0))) { result = 0u; return; }',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL19 glsl: the trail of a strain that the settings do not hold counts',
+    SLIME_FRAG,
+    'for (int s = 0; s < int(P.cfg.y); s++) {',
+    'for (int s = 0; s < 4; s++) {',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL20 webgl2: the pass reads the trail before the diffusion of the step, so a wall with trail gets a stamp',
+    GL_SIM,
+    'this.pass(this.prog.slime(), this.ensureSlime(), { trail: this.trail[this.p].texture }, {});',
+    'this.pass(this.prog.slime(), this.ensureSlime(), { trail: this.trail[flip(this.p)].texture }, {});',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL21 webgl2: the pass runs with a life time of 0',
+    GL_SIM,
+    'if (slimeSteps(this.settings) > 0)',
+    'if (slimeSteps(this.settings) >= 0)',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL22 webgl2: a reset keeps the stamps',
+    GL_SIM,
+    'if (this.slime) clearUint(gl, this.slime);',
+    'if (this.slime && this.step < 0) clearUint(gl, this.slime);',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  // A fragment cannot read the target that it writes, so the pass of WebGL2 cannot look at the stamp of a cell. The
+  // wrong rule of SL6 there: the pass runs in the first step only.
+  [
+    'SL23 webgl2: plasm does not renew a stamp after the first step',
+    GL_SIM,
+    'if (slimeSteps(this.settings) > 0)',
+    'if (slimeSteps(this.settings) > 0 && this.step === 0)',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL24 webgl2: the Jones model keeps the field of the extended model',
+    GL_SIM,
+    'if (!slimeModel(settings)) this.dropSlime();',
+    'if (!slimeModel(settings) && this.step < 0) this.dropSlime();',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL25 slime.ts: the passes get the level of a full tube',
+    SLIME_TS,
+    'trailLevels(strain, s.stepOrder)[0]',
+    'trailLevels(strain, s.stepOrder)[1]',
+    SLIME,
+    SLIME_SPEC,
+  ],
+  [
+    'SL26 slime.ts: the Jones model has a life time of the slime',
+    SLIME_TS,
+    'return slimeModel(s) && s.slimeLife > 0 ? Math.round(s.slimeLife * STEPS_PER_HOUR) : 0;',
+    'return s.slimeLife > 0 ? Math.round(s.slimeLife * STEPS_PER_HOUR) : 0;',
+    SLIME,
+    SLIME_SPEC,
+  ],
+  [
+    'SL27 slime.ts: the life time in hours, not in steps',
+    SLIME_TS,
+    'return slimeModel(s) && s.slimeLife > 0 ? Math.round(s.slimeLife * STEPS_PER_HOUR) : 0;',
+    'return slimeModel(s) && s.slimeLife > 0 ? Math.round(s.slimeLife) : 0;',
+    '',
+    SLIME_UNIT,
+  ],
+  // The time of the mark of starved ground (ADR 0055, decision 5): the share of the passes follows the Slime life time,
+  // in the inverse ratio, and it is FLOW.recover without slime. Against the GPU test of the recovery on both backends.
+  [
+    'SL28 flow.ts: the mark of starved ground does not follow the Slime life time',
+    FLOW_TS,
+    'return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : FLOW.recover;',
+    'return FLOW.recover;',
+    LIFE,
+  ],
+  [
+    'SL29 flow.ts: a longer Slime life time lets the mark fade faster',
+    FLOW_TS,
+    'return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : FLOW.recover;',
+    'return s.slimeLife > 0 ? FLOW.recover * (s.slimeLife / RECOVER_LIFE) : FLOW.recover;',
+    LIFE,
+  ],
+  [
+    'SL30 flow.ts: without slime the mark of starved ground never fades',
+    FLOW_TS,
+    'return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : FLOW.recover;',
+    'return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : 0;',
+    LIFE,
   ],
 ];
 

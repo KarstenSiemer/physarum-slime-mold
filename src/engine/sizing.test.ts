@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain } from '../model/params';
+import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import {
   agentCount,
   BYTES_PER_AGENT,
@@ -15,6 +15,8 @@ import {
   SITE_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
+  SLIME_BYTES_PER_CELL,
+  slimeBytesPerCell,
   TUBE_MAP_BYTES_PER_CELL_GL,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
@@ -198,5 +200,45 @@ describe('the flow in the tubes', () => {
     expect(tubesBytesPerCell({ ...on, flow: false }, TUBE_MAP_BYTES_PER_CELL_GL)).toBe(0);
     expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
     expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
+  });
+});
+
+// ADR 0055, decision 9: the slime field holds one stamp of 4 B per cell, on both backends.
+describe('the slime field', () => {
+  it('holds 4 B per cell, which the memory estimate counts per cell', () => {
+    expect(SLIME_BYTES_PER_CELL).toBe(4);
+    const [w, h] = gridSize(1536, 1.6);
+    const without = estimateBytes(w, h, 1000);
+    expect(estimateBytes(w, h, 1000, BYTES_PER_CELL + SLIME_BYTES_PER_CELL) - without).toBe(w * h * 4);
+    // The grid of the default settings: 5.6 MiB more.
+    expect((w * h * SLIME_BYTES_PER_CELL) / 2 ** 20).toBeCloseTo(5.625, 3);
+  });
+
+  // The setting changes no grid: the fit counts the field in the extended model with slime and without it.
+  it('is counted in the extended model with a life time above 0 and with 0, and not in the Jones model', () => {
+    const extended: Settings = { ...defaultSettings(), model: 'extended' };
+    expect(extended.slimeLife).toBe(144);
+    expect(slimeBytesPerCell(extended)).toBe(4);
+    // Without slime, with the longest life time, and with the flow.
+    const others: Settings[] = [
+      { ...extended, slimeLife: 0 },
+      { ...extended, slimeLife: 240 },
+      { ...extended, flow: true },
+    ];
+    for (const s of others) expect(slimeBytesPerCell(s), `${String(s.slimeLife)} h`).toBe(4);
+    expect(slimeBytesPerCell({ model: 'jones' })).toBe(0);
+  });
+
+  it('lowers a grid that just fits without it', () => {
+    const s = defaultSettings();
+    const [w, h] = gridSize(s.resolution, 16 / 10);
+    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL);
+    const limits = { ...roomy, budget };
+    expect(fitResolution(s, 16 / 10, limits)).toBe(s.resolution);
+    const withSlime = { ...limits, bytesPerCell: BYTES_PER_CELL + slimeBytesPerCell(s) };
+    expect(fitResolution(s, 16 / 10, withSlime)).toBeLessThan(s.resolution);
+    // One stamp per cell and no more: the budget with 4 B more per cell holds the grid again.
+    const more = { ...withSlime, budget: budget + w * h * SLIME_BYTES_PER_CELL };
+    expect(fitResolution(s, 16 / 10, more)).toBe(s.resolution);
   });
 });

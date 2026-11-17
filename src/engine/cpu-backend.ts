@@ -67,6 +67,9 @@ export class CpuSim implements Sim {
   readPressure() {
     return Promise.resolve(new Float32Array(0));
   }
+  readSlime() {
+    return Promise.resolve(new Uint32Array(0));
+  }
   writeFlow() {
     // nothing to write
   }

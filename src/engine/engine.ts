@@ -27,6 +27,7 @@ import {
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
+  slimeBytesPerCell,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
@@ -309,6 +310,9 @@ export class Engine {
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
       flowBytesPerCell(s) +
       tubesBytesPerCell(s, tubeMapBytesPerCell) +
+      // The slime field by the model that runs (ADR 0055): on a backend without the rule, a scene of the Jones model
+      // runs on the extended model (constrain()).
+      slimeBytesPerCell(constrain({ ...s, collisions })) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
