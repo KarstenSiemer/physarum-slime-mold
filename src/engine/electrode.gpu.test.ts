@@ -890,8 +890,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
           bloom: 0,
           seed: 5,
           strains: [defaultStrain(0), defaultStrain(1)],
-          // The renderer of a test draws no layer of the slime (render.ts `fixed`).
+          // The renderer of a test draws no layer of the slime and no fan of the growth front (render.ts `fixed`).
           showSlime: false,
+          showFront: false,
         };
         const sim = await make(base, (W * H) / 2);
         if (painted)

@@ -245,10 +245,12 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   agents that walk carry its front, at about 1 cell per step. At 1 to 3 cm/h the organism needs 1.3 to 4 h (ADR 0056).
   The Foraging maze reaches its far food in 10 of 10 seeds, in a median of 3,151 to 4,601 steps sensing first (ADR
   0027, Growth after the merge of ADR 0025); it has no length or time scale.
-- **Limits**: the app has no sheet at the front and no zones behind it. Its front is the mesh that the growth rule
-  makes, and no vein forms toward a front, because the flux runs only between foods (row 24). The app draws no fan
-  (ADR 0025, decision 28). Nobody measured in the app how long after the front a tube between two foods shows, or how
-  a front splits.
+- **Limits**: the model has no sheet at the front and no zones behind it. Its front is the arms of full plasm that
+  the growth rule makes, and no vein forms toward a front, because the flux runs only between foods (row 24). Since
+  ADR 0059 the picture draws a sheet and fine veins on young ground, by the age of the front stamp of each cell, with
+  the 195 s of the sheet and the 50 min of the main vein as its times. That is the picture alone: no run changes, and
+  the veins are a pattern, not a result of the flow. The front stamps hold the step at which the front reached each
+  cell. Nobody measured with them how long after the front a tube between two foods shows, or how a front splits.
 
 ### 7. Speed of the flow
 

@@ -35,6 +35,13 @@ export const SLIME_FULL = 4095;
 export const SLIME_RIM = 4;
 
 /**
+ * How fast the plasm hides the film of the slime below it (ADR 0059): a trail with the light x, its sum above the
+ * black level times the exposure, hides the share 1 − e^(−FILM_HIDE · x) of the film in the glow, paper and agents
+ * styles. In the gel style the film ends where the gel begins. `FILM_HIDE` in render.wgsl and render.frag.
+ */
+export const FILM_HIDE = 3;
+
+/**
  * The trail above the low level of a strain, in low levels, at which the plasm of a cell is full (ADR 0057): the full
  * level of the tube body less its low level, over the low level (flow.ts FLOW, docs/model.md 8.1). The passes hold it
  * as `SPAN`.
@@ -72,6 +79,18 @@ export function slimeSteps(s: Pick<Settings, 'model' | 'slimeLife'>): number {
  */
 export const slimeShown = (s: Pick<Settings, 'showSlime' | 'showScent' | 'model' | 'slimeLife'>) =>
   s.showSlime && !s.showScent && slimeSteps(s) > 0;
+
+/**
+ * Whether the view draws young ground as the fan of a growth front (ADR 0059): the switch Show growth front is on,
+ * the colony grows (growth is on, with its rule of one agent per cell: pack.ts growthOn()), the model has slime with
+ * a life time above 0 (the front field is a part of the slime field), and the view is neither the scent view nor the
+ * agents style, which draws the agents and not the plasm. A scene without growth has no growth front: its agents
+ * start all over the ground, and a fan would lie on all of it in the first steps. Display only: no pass of the
+ * simulation reads the switch.
+ */
+export const frontShown = (
+  s: Pick<Settings, 'showFront' | 'showScent' | 'style' | 'model' | 'slimeLife' | 'growth' | 'collisions'>,
+) => s.showFront && s.growth && s.collisions && !s.showScent && s.style !== 'agents' && slimeSteps(s) > 0;
 
 /**
  * The trail of each strain from which a cell holds plasm (ADR 0055, decision 3): the low level of the strain, the

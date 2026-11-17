@@ -1,0 +1,180 @@
+# 0059: The picture shows the growth front: a sheet, fine veins, then the tube
+
+- Status: accepted. Decisions 8 and 9 are requests of the owner of 2026-11-17. The look of decision 4 waits for the
+  owner's word on pictures of two looks (sent 2026-11-17). The other decisions are of an agent under the owner's
+  delegation of 2026-11-12. Built 2026-11-17 and 2026-11-18.
+- Date: 2026-11-17
+- Extends [ADR 0055](0055-the-slime-field.md): the slime field holds a front stamp per cell. Changes
+  [ADR 0057](0057-the-film-of-the-slime.md), decision 9: the plasm hides the film. Changes
+  [ADR 0009](0009-rendering-pipeline.md): the gel reads its height as a spline.
+- In short: the rule of the front stamp is in `docs/model.md`, section 6.9, and the rule of the picture in
+  `docs/design.md`, section 5. [`research/flow/README.md`](../../research/flow/README.md), part 22, has the commands
+  and the records.
+
+## Context
+
+Stage 3 of the plan of 2026-11-16 (`TODO.md`): a field with the step at which the front reached each cell, and a
+picture that draws zones by this age: the sheet at the front, fine channels behind it, the tubes, and the slime where
+the colony left. The picture alone; no run changes. The plan left one question open: whether the age of a cell counts
+from the first front or from the last.
+
+What the sources say ([slime-mazes-and-the-front.md](../knowledge-base/slime-mazes-and-the-front.md), "The front"):
+
+- A front is a thin sheet without visible structure. Channels appear in it and become tubes, and the sheet between
+  them thins away (Le Verge-Serandour and Alim 2023, Sec. 2.2, 4.1 and 5.1).
+- A spot gives its mass to the veins with a time scale of 195 s, about 100 steps. The main vein shows about 50 min,
+  1,500 steps, after the front passed (Schenz 2019, p. 52 and p. 30). Just behind the front there are many veins side
+  by side, and the small ones disappear slowly (Sec. 3.1.4).
+- The plasmodium is thickest close to the front (Kuroda et al. 2015).
+
+What the model does, seen on pictures of 2026-11-17 (Tokyo at step 600, the Foraging maze at step 1,500): the colony
+grows as arms of full plasm, 8 to 15 cells wide, with blunt ends. It has no sheet and no fine mesh at its front. In
+Tokyo the front runs about 0.12 cells per step: 250 cells in 2,000 steps, ten times as fast as the organism
+(`docs/fidelity.md`, row 6). The tubes of the model also move sideways while the network gets shorter.
+
+The owner wrote on 2026-11-17, while this was built:
+
+1. The film of the slime lies over the tubes in the picture, seen in Three strains: "the tubes shall always be on top
+   without slime covering them".
+2. The teeth at the edge of the gel (`TODO.md`, an open point of ADR 0057) may be fixed on the way.
+3. Few tokens and few new tests. The owner's rules for a look, of the same day: natural and smooth, pictures first.
+
+## Options
+
+**The first front or the last.**
+
+1. The first front in the life of the slime: a cell gets its front stamp when plasm comes onto ground without slime.
+2. The last front: a cell gets a new stamp whenever plasm comes back after some steps without plasm.
+
+**The look**, each tried in the app's renderer on Tokyo at step 600:
+
+- A. A sheet alone: a soft layer around the young arms that gets thin with the age.
+- B. A sheet at the youngest ground, and fine veins behind it that are thinner outward.
+- Pores that open in the sheet and grow. Rejected by the agent: they look like bubbles.
+- A net of straight veins of one width. Rejected by the agent: it looks like wire.
+
+**Where the stamp lives**: a buffer of its own, or a counter of the age in the free bits of the amount of slime. The
+counter needs no memory on WebGPU, but every pass that writes a stamp of the slime must then also count the age.
+
+## Decision
+
+1. **The front is the plasm that comes onto ground without slime**: the first front in the life of the slime. Reasons:
+   - It is the ground on which a birth will be a sink of the flow (the owner, 2026-11-16, for stage 4: "only a birth
+     onto fresh ground counts"). So the picture and the flow have one meaning of a front.
+   - A tube of the model moves sideways, and its plasm comes back onto cells that it left. With the last front, such
+     a tube would be a front for as long as it moves.
+   - The stamp of a cell does not change while the cell has slime, so no part of the picture jumps.
+
+   The cost: a colony that comes back onto slime shows no front. With the default life time of 144 hours that holds
+   for the return into the dead ends of the mazes after 160,182 steps (ADR 0054). An erase clears the slime, so the
+   colony that grows back there shows a front.
+
+2. **The front stamp** F is a third whole number per cell in the slime field, 4 B: the step, plus 1, in which plasm
+   came onto the cell while it had no slime (`docs/model.md`, 6.9). The pass of the stamps writes it on WebGPU, and a
+   pass before it on WebGL2. A stroke of the Slime tool sets F to 0 in a cell that had no slime: no front reached
+   painted slime. An erase and a wall leave F, which has a meaning only in a cell with slime. A buffer of its own,
+   and not a counter in the amount: the rule is one line in one pass, and a tool can read the step of the front as
+   the plan says.
+3. **The age of the ground** is taken for texels of 8 × 8 cells, in a map that a pass fills once for each state. The
+   age of a texel is the age of its oldest front stamp among the cells with slime: the time since the front first
+   reached the texel. So a tube that gets wider by a cell shows no new front beside it. A texel without slime has no
+   front stamp and shows no fan.
+4. **Look B: a sheet, then fine veins** (the agent's pick; the owner chooses on the pictures). The sheet is the plasm
+   around a pixel, read from the map as a smooth surface, times 2.4, times e^(−age / 100 steps). The veins are the
+   walls between the cells of a pattern that is fixed in the grid, bent by soft noise. They come as the sheet goes,
+   they are thick near strong plasm and thinner outward, and they end at the tube of the model. The tube is drawn as
+   before: the picture hides no plasm of the model.
+5. **The times.** The sheet: 100 steps, the 195 s of the source. The end of the veins: 1,500 steps, the 50 min of the
+   source. Between them a vein gets thinner by the factor e in 350 steps. This number is a choice made on pictures:
+   the front of the model runs ten times too fast, so 1,500 steps are 180 cells in Tokyo, and veins of the full
+   width for all that time put a fringe on the whole young network.
+6. **The sheet stays on its side of a wall.** The sheet reaches up to 12 cells from its plasm, more than a wall is
+   thick. The render pass walks from the pixel toward the plasm, up the slope of the plasm, one cell at a time, and
+   shows no sheet where a wall lies on the way. The veins follow the same test.
+7. **The sheet is plasm.** It adds to the trail of its strain before the style draws it, and to the height and the
+   slope of the gel. The agents style and the scent view draw no fan. The switch Show growth front is on at the
+   start, changes no run, and goes into a link like Show slime. A life time of 0 and the Jones model have no slime
+   field, so they have no front stamp and no fan. A scene without growth draws no fan either: its agents start all
+   over the ground, and the fan lay on the whole picture in its first steps (the e2e tests found this).
+8. **The plasm hides the film of the slime** (the owner, 2026-11-17). In the gel style the film ends where the gel
+   begins. In the other styles the plasm hides the share 1 − e^(−3 x) of the film, with x the light of the plasm.
+   Before, the glow added its light to the pale film, a thin gel showed the film through it, and the beads of the
+   film lay on the tubes.
+9. **The gel reads its height as a quadratic B-spline** of the cells while a cell is a pixel wide or more, from four
+   bilinear lookups in place of one (the owner's hint in `TODO.md`). The line at which the gel ends has no tooth for
+   each cell. Zoomed out, the four lookups over the pixel stay.
+10. **The proof is small** (the owner on the cost of look work, 2026-11-17). The front stamp is a rule of the passes:
+    both backends against the CPU reference. The fan has no CPU reference: the two backends must draw the same
+    pixels, the fan must be on young ground and not behind a wall or after 1,500 steps, and with both switches off
+    the pixels are those of the shaders without the code.
+
+## Results
+
+Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The commands and the records are in
+[`research/flow/README.md`](../../research/flow/README.md), part 22.
+
+- **No run changes.** The digests of the agents, the trail, the scent, the environment, the flow memory and the
+  pressure equal the record of `main`: 54 of 54 runs after 500 steps (every scene, both backends) and 16 of 16 after
+  3,000 steps (the eight scenes with the flow, both backends).
+- **The front stamp** (`front.gpu.test.ts`, both backends against `frontStep()` of `slime-reference.ts`): plasm on
+  fresh ground, plasm that comes back onto slime, plasm after the life time is over, the Slime tool on ground with
+  and without slime, a reset and the Jones model.
+- **The fan** (the same file): the two backends draw the same pixels in the glow, gel and paper styles, close and
+  fitted, 3 of 255 apart at most. The fan differs from the picture without it by more than 25 of 255 on young
+  ground, by 2 at most behind a wall and 1,500 steps after the front.
+- **Faults that the tests found**, all fixed. The first walk toward the plasm followed the slope of the sheet with
+  its veins, so veins showed behind a wall: it follows the slope of the plasm alone now. Trail on ground without a
+  stamp, which no step of the slime field saw, showed a fan: 71 tests of the trail, the tubes and the electrodes
+  failed, and such a texel shows none now. In a scene without growth the fan lay on the whole picture in the first
+  steps and hid the film (two e2e tests): the fan needs growth now (decision 7).
+- **The film below the plasm and the switches** (`slime.gpu.test.ts`): the tests of the film hold with new numbers
+  where the plasm hides the film. With both switches off every pixel equals that of the shaders without the film and
+  the fan.
+- **Wrong rules**: 18 new ones (GF1 to GF18) and 13 of the slime with a new text, because their lines changed.
+  Each of the 31 fails at least one test. The list has 625 wrong rules.
+- **All tests**: 875 unit tests with the research tests, 1,345 GPU tests on both backends (8 more run on one
+  backend only), and 84 tests of the built app.
+- **The pictures**: `tests/pictures/front.spec.ts` makes them again: Tokyo at the steps 600, 1,500 and 4,000, the
+  Foraging maze, Three strains and Rival networks in each style, fitted and close.
+
+- **The time of a step**, against `main` at `07b295e`: milliseconds per step, the mean of the medians of two rounds
+  in turns.
+
+  | Scene, grid           | Backend | Without the flow | With the flow   |
+  | --------------------- | ------- | ---------------- | --------------- |
+  | Maze, 512 × 320       | WebGPU  | 0.189 → 0.213    | 1.763 → 1.778   |
+  | Tokyo, 512 × 512      | WebGPU  | 0.483 → 0.430    | 2.903 → 2.890   |
+  | Cyclones, 1,024 × 640 | WebGPU  | 3.673 → 3.673    | 19.300 → 19.097 |
+  | Maze, 512 × 320       | WebGL2  | 0.418 → 0.489    | 2.253 → 2.241   |
+  | Tokyo, 512 × 512      | WebGL2  | 0.835 → 0.703    | 3.537 → 3.558   |
+  | Cyclones, 1,024 × 640 | WebGL2  | 11.869 → 12.043  | 28.351 → 28.753 |
+
+  Two rounds do not resolve the cost of the front stamp: two rounds of one case differ by up to 20 % in the small
+  scenes, and half of the cases are faster with it. The largest rise is 0.4 ms, 1 %, on WebGL2 with the flow.
+
+Not measured: the time of a draw with the fan. A step writes one more buffer in the pass of the stamps on WebGPU and
+runs one more pass on WebGL2. A pixel on young ground reads 9 texels of the map and 11 steps of two lattices, and
+walks up to 13 cells toward its plasm in a scene with walls.
+
+## Consequences
+
+- The extended model needs 4 B more per cell: the slime field and its picture count 15 B. A grid at the limit of the
+  memory of a GPU gets a little smaller.
+- The picture of every scene of the extended model changes while a colony grows onto ground without slime, and
+  where plasm lies on slime. The picture of every scene in the gel style changes at the edge of the gel, zoomed in.
+  No scene changes a byte of its run.
+- Stage 4 reads "ground without slime" from the stamp of the slime alone, as before. A tool can measure how long
+  after the front a tube shows from the front stamps (`Sim.readSlimeFront()`).
+- The numbers of the fan are the constants `FRONT_…` of `render.wgsl` and `render.frag`. The look of the film stays
+  in `SLIME_LOOK`.
+
+## Open points
+
+- **The look is the owner's choice.** Look A, the sheet alone, is look B without the veins and with a sheet that
+  lasts three times as long.
+- **The fan is a picture.** The model grows arms, not a sheet, and no vein forms toward a front (`docs/fidelity.md`,
+  rows 6 and 24). The crown of a tree that the owner asked for needs the flow of stage 4.
+- **The veins do not follow the direction of the growth.** Their pattern is fixed in the grid.
+- **The fan has no CPU reference.** A fault that both backends share shows only on pictures.
+- **Zoomed out beyond 4 cells per pixel** a pixel is wider than half a texel of the map of the front. Not looked at.
+- **The time of a draw with the fan is not measured**, and two rounds do not resolve the cost of a step (Results).

@@ -161,10 +161,10 @@ build, equal it line for line.
 without them, on three backends (WebGPU, WebGL2, WebGL2 without float blending), six hints of the memory of the
 device (none, 0.5, 1, 2, 4 and 8 GB) and six canvases: 2,916 cases. One grid changed when this record was built:
 the scene Cyclones on WebGL2 without float blending, with a hint of 2 GB on a canvas of 390 × 844 pixels, went from
-1024 to 768 cells on the long side. Since ADR 0057 the slime counts 11 B per cell in place of 4, and the 4 B of the
-poles change four other cases: Three strains and Two strains on WebGL2 without float blending, on a canvas of
-1,000 × 1,000 pixels with no hint and with a hint of 4 GB, go from 1536 to 1024 cells. Every other case keeps its
-grid.
+1024 to 768 cells on the long side. Since ADR 0059 the slime counts 15 B per cell in place of 4, and the 4 B of the
+poles change two other cases: Three strains on WebGL2 with a hint of 1 GB on a canvas of 390 × 844 pixels goes from
+1024 to 768 cells, and the Maze on WebGL2 with a hint of 0.5 GB on a canvas of 1,000 × 1,000 pixels from 512 to 256
+cells. Every other case keeps its grid.
 
 **Tests**, on both backends unless a backend is named:
 

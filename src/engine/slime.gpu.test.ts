@@ -18,7 +18,17 @@ import { BACKGROUND, LATTICE_COPIES, SLIME_LOOK, trailLevel } from './render';
 import { levelSize } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import { equilibrium } from './sizing';
-import { NO_STAMP, SLIME_FULL, SLIME_RIM, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
+import {
+  FILM_HIDE,
+  frontShown,
+  NO_STAMP,
+  SLIME_FULL,
+  SLIME_RIM,
+  slimeShown,
+  slimeSteps,
+  stampOf,
+  STEPS_PER_HOUR,
+} from './slime';
 import {
   amountLeft,
   amountStep,
@@ -116,6 +126,60 @@ function cutSpan(source: string, start: string, end: string) {
   return source.slice(0, a) + source.slice(b);
 }
 
+/** The lines of `scene` in render.wgsl that add the sheet of the growth front to the trail (ADR 0059). */
+const WGSL_FAN = `  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
+  // its plasm lies (fanOpen()).
+  if (SLIME && (V.slime.z & 2u) != 0u && V.style != 3u) {
+    let under = plasmCover(v);
+    var fan = fanAt(p, under);
+    if (ENV && V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
+      let open = fanOpen(p, fan.up);
+      fan.v *= open;
+      fan.h *= open;
+      fan.g *= open;
+    }
+    v += fan.v;
+    lift = vec3f(fan.h, fan.g);
+  }
+`;
+/** The lines of `scene` in render.wgsl that lay the film of the slime on the ground. */
+const WGSL_FILM = `  // The film of the slime lies on the ground, and the plasm lies on the film: where the plasm covers the ground, the
+  // picture shows no film. The flake of food, the trail and all else lie on it.
+  if (SLIME && (V.slime.z & 1u) != 0u) {
+    let hidden = plasmCover(select(v, dots, V.style == 3u));
+    if (hidden < 1.0) { base = mix(slimed(base, p), base, hidden); }
+  }
+`;
+/** The same lines of `scene` in render.frag. */
+const GLSL_FAN = `#ifdef SLIME
+  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
+  // its plasm lies (fanOpen()).
+  if ((V.slime.z & 2u) != 0u && V.style != 3u) {
+    float under = plasmCover(v);
+    Fan fan = fanAt(p, under);
+#if ENV
+    if (V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
+      float open = fanOpen(p, fan.up);
+      fan.v *= open;
+      fan.h *= open;
+      fan.g *= open;
+    }
+#endif
+    v += fan.v;
+    lift = vec3(fan.h, fan.g);
+  }
+#endif
+`;
+const GLSL_FILM = `#ifdef SLIME
+  // The film of the slime lies on the ground, and the plasm lies on the film: where the plasm covers the ground, the
+  // picture shows no film. The flake of food, the trail and all else lie on it.
+  if ((V.slime.z & 1u) != 0u) {
+    float hidden = plasmCover(V.style == 3u ? dots : v);
+    if (hidden < 1.0) base = mix(slimed(base, p), base, hidden);
+  }
+#endif
+`;
+
 /**
  * The render shaders without the code of the film of the slime (ADR 0055, decision 8; ADR 0057): every line of the
  * film is cut out of the texts of today. A frame that draws no film must have the pixels of these shaders, 0 of 255
@@ -126,6 +190,11 @@ function cutSpan(source: string, start: string, end: string) {
  * now, because the film needs them without walls. A program without food, light and walls reads none of them, and a
  * program with them holds the same text in another place: both draw the pixels of that commit. view.glsl differs
  * from that commit only by the three fields of the slime at the end of its block, which no code of that commit reads.
+ *
+ * Since ADR 0059 the texts also hold no line of the fan of the growth front, and they differ from that commit in three
+ * more ways. The gel reads its height as a smooth spline (heightSmooth), which changes its picture. The gel takes the
+ * sheet of the growth front, which is none here: thick(max(y, 0) + 0) is thick(y). And `scene` reads the food before
+ * the ground, in another order of the same lines.
  */
 const WITHOUT_SLIME = {
   wgsl: cutSpan(
@@ -135,7 +204,9 @@ const WITHOUT_SLIME = {
         '',
       ],
       [
-        '  slime: vec4u,       // the slime: the steps that ran so far, the life time of the slime in steps, 2 unused\n' +
+        '  // The slime: the steps that ran so far, the life time of the slime in steps, what the frame draws (1 the film of\n' +
+          '  // the slime, 2 the fan of the growth front), unused.\n' +
+          '  slime: vec4u,\n' +
           '  slimeFx: vec4f,     // the slime: the colour of its body, linear RGB, and how much of it full slime shows\n' +
           '  slimeLight: vec4f,  // the slime: its highlight, its wide light, the height of its relief, the height of its beads\n',
         '',
@@ -144,19 +215,18 @@ const WITHOUT_SLIME = {
         '@group(0) @binding(14) var<storage, read> stamps: array<u32>; // the stamps of the slime field (slime.wgsl); read by `slimeFilm` only\n' +
           '@group(0) @binding(18) var<storage, read> amounts: array<u32>; // the amounts of slime (amount.wgsl); read by `slimeFilm` only\n' +
           '@group(0) @binding(15) var film: texture_2d<f32>; // the film of the slime, one texel per cell (written by `slimeFilm`)\n' +
-          '@group(0) @binding(17) var filmLevels: texture_2d<f32>; // the film on a coarser map (slimeDown), zoomed out\n',
+          '@group(0) @binding(17) var filmLevels: texture_2d<f32>; // the film on a coarser map (slimeDown), zoomed out\n' +
+          '@group(0) @binding(19) var<storage, read> fronts: array<u32>; // the front field (slime.wgsl); read by `frontMap` only\n' +
+          '@group(0) @binding(20) var fanMap: texture_2d<f32>; // the map of the growth front (written by `frontMap`)\n',
         '',
       ],
       [
         '// What lies below the trail: the ground `bg`, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake, bg: vec3f) -> vec3f {\n',
         '// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake) -> vec3f {\n  let bg = V.background.rgb;\n',
       ],
-      [
-        '  // The film of the slime lies on the ground: the flake of food, the trail and all else lie on it.\n' +
-          '  if (SLIME) { base = slimed(base, p); }\n',
-        '',
-      ],
-      ['    base = substrate(f, base);\n', '    base = substrate(f);\n'],
+      [WGSL_FAN, ''],
+      [WGSL_FILM, ''],
+      ['  if (ENV && near) { base = substrate(f, base); }\n', '  if (ENV && near) { base = substrate(f); }\n'],
     ]),
     '// ---- The slime (SLIME) ---',
     '// The arena at grid position p:',
@@ -164,12 +234,9 @@ const WITHOUT_SLIME = {
   glsl: cutSpan(
     rewrite(renderFrag, [
       ['vec3 substrate(Flake f, vec3 bg) {\n', 'vec3 substrate(Flake f) {\n  vec3 bg = V.background.rgb;\n'],
-      [
-        '#ifdef SLIME\n  // The film of the slime lies on the ground: the flake of food, the trail and all else lie on it.\n' +
-          '  base = slimed(base, p);\n#endif\n',
-        '',
-      ],
-      ['    base = substrate(f, base);\n', '    base = substrate(f);\n'],
+      [GLSL_FAN, ''],
+      [GLSL_FILM, ''],
+      ['  if (near) base = substrate(f, base);\n', '  if (near) base = substrate(f);\n'],
     ]),
     '#ifdef SLIME\n// ---- The slime',
     '#ifdef SCENT\n// ---- Scent view',
@@ -1982,7 +2049,8 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
     // simulation draws its film without the pass of the map. A state is over after a step, a stroke, Clear and a
     // reset, and with another life time.
     it('fills the map of the film again after a step, a stroke, Clear and a reset, and not for a second frame of the same state', async () => {
-      const s = pictured();
+      // Without the fan of the growth front, which has a map of its own (front.gpu.test.ts).
+      const s = pictured({ showFront: false });
       const sim = await make(s, PW, PH);
       // The passes of a frame: the render passes of WebGPU, and the draws of WebGL2, which has one per pass.
       const passes: { mock: { calls: unknown[] } } =
@@ -2241,7 +2309,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
     );
 
     // Decision 8: the film lies on the ground. A flake of food covers 95 % of its ground, a wall, an electrode and a
-    // thick trail all of it, and the light and the trail of the glow lie on the ground with the film.
+    // thick trail all of it, and the light lies on the ground with the film. A thin trail hides a share of the film.
     it.each(['glow', 'gel', 'paper'] as const)(
       'draws the food, the walls, the light, the electrodes and the trail on the film (%s)',
       async (style) => {
@@ -2309,17 +2377,20 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         const pole = both(54, 12);
         expect(off(pole.plain, bytes(bg)), 'electrode').toBeGreaterThan(40);
         expect(off(pole.on, pole.plain), 'electrode').toBeLessThanOrEqual(TWO);
-        // The trail lies on the ground. Glow adds light to what the ground leaves dark, and the ink of paper takes a
-        // share of the ground away, so the thin trail shows the film through it by the rule of its style.
+        // The trail lies on the film (ADR 0059): the plasm hides the film below it, by the share 1 − e^(−3 x) for the
+        // light x of the plasm, 0.5 here. On the ground that is left, glow adds light to what the ground leaves dark,
+        // and the ink of paper takes a share of the ground away.
         const thin = both(26, 37);
         expect(off(thin.plain, bytes(bg)), 'thin trail').toBeGreaterThan(20);
+        const hidden = 1 - Math.exp(-FILM_HIDE * 0.5);
+        const under = thin.ground.map((g, k) => g + ((bg[k] ?? 0) - g) * hidden) as Rgb;
         if (style === 'glow') {
           const lightOf = (k: number) => ((thin.linear[k] ?? 0) - (bg[k] ?? 0)) / (1 - (bg[k] ?? 0));
-          const want = thin.ground.map((g, k) => g + (1 - g) * lightOf(k)) as Rgb;
+          const want = under.map((g, k) => g + (1 - g) * lightOf(k)) as Rgb;
           expect(off(thin.on, bytes(want)), 'thin trail').toBeLessThanOrEqual(TWO);
         }
         if (style === 'paper') {
-          const want = thin.ground.map((g, k) => (g * (thin.linear[k] ?? 0)) / (bg[k] ?? 1)) as Rgb;
+          const want = under.map((g, k) => (g * (thin.linear[k] ?? 0)) / (bg[k] ?? 1)) as Rgb;
           expect(off(thin.on, bytes(want)), 'thin trail').toBeLessThanOrEqual(TWO);
         }
         // A thick trail hides the ground in every style: the glow is white, the gel is opaque, the ink is black.
@@ -2360,7 +2431,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
             strains: [defaultStrain(0), defaultStrain(1)],
           });
           const off: [string, Settings][] = [
-            ['the switch', { ...base, showSlime: false }],
+            ['the switches', { ...base, showSlime: false, showFront: false }],
             ['a life time of 0', { ...base, slimeLife: 0 }],
             ['the Jones model', { ...jones, boundary }],
           ];
@@ -2415,7 +2486,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       // The same frames with the film on differ where the field holds slime and the model has slime. Not in the gel
       // style: these scenes are full of trail, and the gel over a trail hides its ground.
       hook.renderFrom();
-      const shown = await captures({ showSlime: true, slimeLife: 144 });
+      const shown = await captures({ showSlime: true, showFront: false, slimeLife: 144 });
       const differs = shown.map((img, i) => maxDiff(img, before[i] ?? img));
       const slimed = cases.flatMap((c, i) =>
         c.slime && c.settings.model === 'extended' && c.settings.style !== 'gel'
@@ -2423,8 +2494,10 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
           : [],
       );
       expect(slimed.length).toBeGreaterThan(cases.length / 3);
-      // Both runs dither alike, so every difference is one of the picture. Below a bright trail it is small.
-      expect(slimed.filter(([, d]) => d < 2)).toEqual([]);
+      // Both runs dither alike, so every difference is one of the picture. The plasm hides the film below it (ADR
+      // 0059): a close view below a strong trail shows little of the film, 1 of 255 in 8 of the 84 frames.
+      expect(slimed.filter(([, d]) => d < 1)).toEqual([]);
+      expect(slimed.filter(([, d]) => d < 2).length).toBeLessThan(slimed.length / 5);
       const jonesFrames = cases.flatMap((c, i) => (c.settings.model === 'jones' ? [differs[i] ?? 0] : []));
       expect(Math.max(0, ...jonesFrames)).toBe(0);
     }, 240_000);
@@ -2558,11 +2631,11 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         };
         // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
         frameOf = (settings) => {
-          if (slimeShown(settings)) programs.slimed();
+          if (slimeShown(settings) || frontShown(settings)) programs.slimed();
         };
       }
       for (const settings of [
-        { ...s, showSlime: false },
+        { ...s, showSlime: false, showFront: false },
         { ...s, slimeLife: 0 },
       ])
         for (let k = 0; k < 3; k++) frameOf(settings);
@@ -2574,9 +2647,9 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         frameOf(s);
         await ready();
       }
-      // The render pass with the film and the pass of its map, each without and with food, light and walls, and the
-      // pass of its coarse map.
-      expect(first).toBe(5);
+      // The render pass with the film and the pass of its map, each without and with food, light and walls, the pass
+      // of its coarse map, and the pass of the map of the growth front (ADR 0059).
+      expect(first).toBe(6);
       expect(builds.mock.calls.length).toBe(first);
     });
   });

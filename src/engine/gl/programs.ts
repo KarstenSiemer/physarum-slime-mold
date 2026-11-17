@@ -21,6 +21,7 @@ import sampleFrag from './glsl/sample.frag?raw';
 import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import amountGlsl from './glsl/amount.glsl?raw';
+import frontMapFrag from './glsl/front-map.frag?raw';
 import slimeDownFrag from './glsl/slime-down.frag?raw';
 import slimeFilmFrag from './glsl/slime-film.frag?raw';
 import slimePaintFrag from './glsl/slime-paint.frag?raw';
@@ -172,6 +173,8 @@ export interface Programs {
   slime: () => Program;
   /** The pass of the amounts of slime (PASS 1 of slime.frag, ADR 0057), compiled at its first use. */
   slimeAmount: () => Program;
+  /** The pass of the front field (PASS 2 of slime.frag, ADR 0059), compiled at its first use. */
+  slimeFront: () => Program;
   /**
    * The brush on the slime field (slime-paint.frag, ADR 0055, decision 7), compiled at its first use: a stroke of the
    * Slime tool, or an erase or a wall over a field with stamps.
@@ -179,6 +182,8 @@ export interface Programs {
   slimeBrush: () => Program;
   /** The brush on the amounts of slime (PASS 1 of slime-paint.frag, ADR 0057), compiled at its first use. */
   slimeBrushAmount: () => Program;
+  /** The brush on the front field (PASS 2 of slime-paint.frag, ADR 0059), compiled at its first use. */
+  slimeBrushFront: () => Program;
   /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
    * growth.frag, ADR 0029 and ADR 0053), compiled at its first use: only a scene with growth and the flow needs it.
@@ -294,6 +299,8 @@ export interface SlimePrograms {
   film: [Program, Program];
   /** Fills the coarse map of the film (slime-down.frag). */
   down: Program;
+  /** Fills the map of the growth front (front-map.frag, ADR 0059). */
+  front: Program;
 }
 
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
@@ -318,6 +325,8 @@ export function compile(gl: GL): Programs {
   let slimeAmount: Program | undefined;
   let slimeBrush: Program | undefined;
   let slimeBrushAmount: Program | undefined;
+  let slimeFront: Program | undefined;
+  let slimeBrushFront: Program | undefined;
   let poleShape: Program | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
@@ -369,6 +378,8 @@ export function compile(gl: GL): Programs {
     slimeAmount: () => (slimeAmount ??= sim(`#define PASS 1\n${amountGlsl}${slimeFrag}`)),
     slimeBrush: () => (slimeBrush ??= sim(`#define PASS 0\n${brushGlsl}${slimePaintFrag}`)),
     slimeBrushAmount: () => (slimeBrushAmount ??= sim(`#define PASS 1\n${brushGlsl}${amountGlsl}${slimePaintFrag}`)),
+    slimeFront: () => (slimeFront ??= sim(`#define PASS 2\n${amountGlsl}${slimeFrag}`)),
+    slimeBrushFront: () => (slimeBrushFront ??= sim(`#define PASS 2\n${brushGlsl}${amountGlsl}${slimePaintFrag}`)),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;
       let p = flowing.get(key);
@@ -424,12 +435,13 @@ export function compile(gl: GL): Programs {
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + slimeFilmFrag),
         startProgram(gl, vertex, V + '#define ENV 1\n' + viewGlsl + slimeFilmFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + slimeDownFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + frontMapFrag),
       ];
       if (!slimedStarted.every((p) => p.done())) return undefined;
       for (const p of slimedStarted) p.check();
-      const [off, on, bare, walled, down] = slimedStarted.map((p) => wrap(gl, p.program));
-      if (!off || !on || !bare || !walled || !down) return undefined;
-      return (slimed = { render: [off, on], film: [bare, walled], down });
+      const [off, on, bare, walled, down, front] = slimedStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !bare || !walled || !down || !front) return undefined;
+      return (slimed = { render: [off, on], film: [bare, walled], down, front });
     },
     trailDown: () => (trailDown ??= plain('#define ENV 0\n' + viewGlsl + trailDownFrag)),
     height: view(heightFrag),

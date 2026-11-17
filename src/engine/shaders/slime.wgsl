@@ -17,10 +17,16 @@
 // picture showed where the plasm comes back to slime. Then it gains 1 of FULL, as long as the amount is below the
 // level of the plasm. So the slime gets thick where a tube stays, a tube that stays for 4,095 steps leaves the full
 // amount, and the slime is never thicker than the plasm was.
+//
+// The same pass keeps the front field (ADR 0059), for the picture and for measurements. `front` holds the step, plus
+// 1, at which the growth front reached the cell: the step in which plasm came onto the cell while it had no slime. So
+// a cell keeps its front stamp while it has slime, with plasm or without, and plasm that comes back onto slime is no
+// front. The stamp of a cell without slime has no meaning: the pass writes it again when plasm comes.
 
 @group(0) @binding(1) var trail: texture_2d<f32>;
 @group(0) @binding(2) var<storage, read_write> slime: array<u32>;
 @group(0) @binding(3) var<storage, read_write> amount: array<u32>;
+@group(0) @binding(4) var<storage, read_write> front: array<u32>;
 
 const SPAN = 4.0; // low levels of trail above the low level at which the plasm is full (slime.ts PLASM_SPAN)
 
@@ -46,7 +52,9 @@ fn stamp(@builtin(global_invocation_id) gid: vec3u) {
   let t = textureLoad(trail, gid.xy, 0);
   if (!holdsPlasm(t)) { return; }
   let c = gid.y * W() + gid.x;
-  let a = amountLeft(amount[c], slime[c]);
+  let held = slime[c];
+  let a = amountLeft(amount[c], held);
   amount[c] = max(a, min(plasmLevel(t), a + 1u));
+  if (!hasSlime(held)) { front[c] = P.grid.w + 1u; }
   slime[c] = P.grid.w + 1u;
 }

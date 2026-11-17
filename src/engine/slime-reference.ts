@@ -118,6 +118,33 @@ export function amountStep(
 }
 
 /**
+ * The front field after step `step` (ADR 0059; the pass of the stamps, shaders/slime.wgsl): the step, plus 1, at
+ * which the growth front reached each cell. `stamps` and `fronts`: what the fields hold before the step. `trail`: the
+ * trail after the diffusion of the step. A cell that holds plasm and has no slime before the step gets the front
+ * stamp of the step: the front reaches ground without slime. Every other cell keeps what it holds, so a cell keeps
+ * its front stamp while it has slime, and plasm that comes back onto slime is no front. Without slime the pass does
+ * not run.
+ */
+export function frontStep(
+  grid: FlowGrid,
+  s: SlimeSettings,
+  step: number,
+  stamps: Uint32Array,
+  fronts: Uint32Array,
+  trail: Float32Array,
+): Uint32Array {
+  const out = fronts.slice();
+  const life = slimeSteps(s);
+  if (life === 0) return out;
+  for (let y = 0; y < grid.height; y++)
+    for (let x = 0; x < grid.width; x++) {
+      const c = y * grid.width + x;
+      if (holdsPlasm(grid, s, trail, x, y) && !hasSlime(stamps[c] ?? 0, step, life)) out[c] = stampOf(step);
+    }
+  return out;
+}
+
+/**
  * The amount that a stroke of the Slime tool with the radius `radius` gives a cell whose centre lies `d` cells from
  * the middle line of the stroke (ADR 0057; `paintedAmount` in shaders/slime-paint.wgsl): 0 half a cell outside the
  * radius, SLIME_FULL from SLIME_RIM cells inside that on, and between them the curve t³ (t (6 t − 15) + 10).
@@ -156,7 +183,9 @@ export function slimeStrength(held: number, step: number, life: number): number 
  *
  * `slime` (optional): the amount of slime of every cell (ADR 0057), which the stroke changes with the stamps, and the
  * life time in steps. The Slime tool gives a cell the larger of what is left of its amount (amountLeft()) and the
- * amount of the stroke at the cell (paintedAmount()). An erase and a wall clear the amount.
+ * amount of the stroke at the cell (paintedAmount()). An erase and a wall clear the amount. With `fronts`, the front
+ * field (ADR 0059): no front reached painted slime, so the Slime tool clears the front stamp of a cell that had no
+ * slime. An erase and a wall leave the front stamps: they have no meaning in a cell without slime.
  */
 export function slimePaint(
   grid: FlowGrid,
@@ -165,7 +194,7 @@ export function slimePaint(
   stamps: Uint32Array,
   stroke: Stroke,
   margin?: { min: number },
-  slime?: { amounts: Uint32Array; life: number },
+  slime?: { amounts: Uint32Array; life: number; fronts?: Uint32Array },
 ) {
   if (!slimeModel(model)) return;
   const { width: w, height: h } = grid;
@@ -177,6 +206,7 @@ export function slimePaint(
       if (slime) {
         const left = amountLeft(slime.amounts[c] ?? 0, stamps[c] ?? 0, step, slime.life);
         slime.amounts[c] = Math.max(left, paintedAmount(d, stroke.radius));
+        if (slime.fronts && !hasSlime(stamps[c] ?? 0, step, slime.life)) slime.fronts[c] = NO_STAMP;
       }
       stamps[c] = stampOf(step);
     }

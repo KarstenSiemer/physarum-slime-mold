@@ -229,6 +229,11 @@ export class Simulation implements Sim {
    */
   private amount?: GPUBuffer | undefined;
   /**
+   * The front field (ADR 0059; slime.wgsl `front`), 4 B per cell: the step, plus 1, at which the growth front reached
+   * the cell. It has a meaning only while the cell has slime. Made and freed with the stamps, and counted with them.
+   */
+  private front?: GPUBuffer | undefined;
+  /**
    * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
    * was last empty (a new field, a reset, a clear of the environment). Only then does an erase or a wall clear stamps
    * (brushSlime()): a scene that paints its walls before its first step runs no pass for them.
@@ -721,6 +726,7 @@ export class Simulation implements Sim {
     // A reset clears every stamp (ADR 0055, decision 3).
     if (this.slime) enc.clearBuffer(this.slime);
     if (this.amount) enc.clearBuffer(this.amount);
+    if (this.front) enc.clearBuffer(this.front);
     this.stamped = false;
     const pass = enc.beginComputePass();
     const init = this.starts().init;
@@ -960,7 +966,7 @@ export class Simulation implements Sim {
    * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): the stamps, and the amounts
    * with them. New buffers hold zeros: no cell has a stamp, and no cell has slime.
    */
-  private ensureSlime(): { stamps: GPUBuffer; amounts: GPUBuffer } {
+  private ensureSlime(): { stamps: GPUBuffer; amounts: GPUBuffer; fronts: GPUBuffer } {
     const make = () =>
       this.device.createBuffer({
         size: this.width * this.height * 4,
@@ -968,7 +974,8 @@ export class Simulation implements Sim {
       });
     this.slime ??= make();
     this.amount ??= make();
-    return { stamps: this.slime, amounts: this.amount };
+    this.front ??= make();
+    return { stamps: this.slime, amounts: this.amount, fronts: this.front };
   }
 
   /**
@@ -988,6 +995,14 @@ export class Simulation implements Sim {
     return this.amount;
   }
 
+  /**
+   * For the renderer: the front field (ADR 0059), which the picture reads for the sheet of the growth front, or
+   * undefined while the simulation holds no slime field.
+   */
+  get slimeFront(): GPUBuffer | undefined {
+    return this.front;
+  }
+
   /** Frees the slime field, and every bind group that holds it. */
   private dropSlime() {
     if (!this.slime) return;
@@ -995,6 +1010,8 @@ export class Simulation implements Sim {
     this.slime = undefined;
     this.amount?.destroy();
     this.amount = undefined;
+    this.front?.destroy();
+    this.front = undefined;
     this.stamped = false;
     for (const key of [...this.bindCache.keys()]) if (key.startsWith('slime')) this.bindCache.delete(key);
   }
@@ -1016,6 +1033,15 @@ export class Simulation implements Sim {
   async readSlimeAmount(): Promise<Uint32Array> {
     if (!this.amount) return new Uint32Array(this.width * this.height);
     return new Uint32Array(await readBuffer(this.device, this.amount));
+  }
+
+  /**
+   * For tests and measurements: the front stamp of every cell as the field holds it (ADR 0059), one value per cell,
+   * rows from y = 0. It has a meaning only in a cell that has slime. Only zeros in the Jones model.
+   */
+  async readSlimeFront(): Promise<Uint32Array> {
+    if (!this.front) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.front));
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -1296,6 +1322,7 @@ export class Simulation implements Sim {
         { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
         { binding: 3, resource: { buffer: field.stamps } },
         { binding: 4, resource: { buffer: field.amounts } },
+        { binding: 5, resource: { buffer: field.fronts } },
       ],
     });
     this.bindCache.set('slimeBrush', group);
@@ -1333,6 +1360,7 @@ export class Simulation implements Sim {
     const stamps = this.slime;
     if (stamps) enc.clearBuffer(stamps);
     if (this.amount) enc.clearBuffer(this.amount);
+    if (this.front) enc.clearBuffer(this.front);
     this.stamped = false;
     this.device.queue.submit([enc.finish()]);
     [this.walls, this.wallOverAgents] = [false, false];
@@ -1664,7 +1692,7 @@ export class Simulation implements Sim {
     const stamp = this.kernels.slime();
     pass.setPipeline(stamp);
     const field = this.ensureSlime();
-    const resources = [this.params, this.trailViews[trail], field.stamps, field.amounts];
+    const resources = [this.params, this.trailViews[trail], field.stamps, field.amounts, field.fronts];
     pass.setBindGroup(0, this.bind(`slime${trail}`, stamp, resources));
     pass.dispatchWorkgroups(Math.ceil(this.width / SLIME_GROUP), Math.ceil(this.height / SLIME_GROUP));
   }
@@ -2168,6 +2196,7 @@ class Kernels {
           { binding: 2, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
           { binding: 3, visibility: C, buffer: { type: 'storage' } },
           { binding: 4, visibility: C, buffer: { type: 'storage' } },
+          { binding: 5, visibility: C, buffer: { type: 'storage' } },
         ],
       });
       const pipeline = this.device.createComputePipeline({

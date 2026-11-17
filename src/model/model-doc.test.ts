@@ -10,6 +10,7 @@ const VIEW = new Set([
   'showScent',
   'showTubes',
   'showSlime',
+  'showFront',
   'speed',
   'exposure',
   'bloom',

@@ -243,6 +243,17 @@ high where a tube stayed, and the picture draws a wet film that keeps the shape 
 organism leaves the coat of slime of a tube behind in the same way. An amount that grows fast is
 flat, as the stamp is: with a sum that is full after 500 steps, 96.5 % of the cells with slime
 are above 0.9 after 22,000 steps of the Snail maze. With the rule, 16.4 % are. No run changes.
+**The growth front in the picture** ([ADR 0059](../../docs/adr/0059-the-growth-front-in-the-picture.md),
+part 22). A real slime mold has a sheet at its front, then fine veins, then one tube. The model
+grows arms of full plasm with blunt ends, so its picture had none of that. The slime field now
+holds a front stamp per cell: the step at which plasm came onto ground without slime. Plasm that
+comes back onto slime gets no new stamp. Such plasm is no front, as a birth there will be no sink
+of the flow in stage 4. The picture reads the age of the stamp. On young ground it adds a sheet,
+which is gone with the 195 s in which a spot of the organism gives its mass to the veins. Behind
+the sheet it adds fine veins, which get thinner and end after 1,500 steps, the 50 minutes in which
+the main vein of the organism appears. This is a picture: the model grows no sheet. Two faults of
+the picture went on the way: the film of the slime lay over the tubes, and the edge of the gel
+had a tooth for each cell. No run changes.
 
 ## What is in this folder, and what you need to read
 
@@ -2170,9 +2181,70 @@ fails at least one test. ADR 0057 has the tables. The records are in `logs/engin
 | `mutations-stamps-brush.txt`, `-picture-*.txt`   | the wrong rules SL1 to SL77 and SL78 to SL179                         |
 | `mutations-amount.txt`                           | the wrong rules SL180 to SL222                                        |
 
+### 22. Does the picture show the growth front, and does a run change? [ADR 0059]
+
+The slime field holds a front stamp per cell, and the picture draws young ground as a sheet and
+fine veins. This part has no measurement of the model: no rule reads the front stamp.
+
+**The pictures** of the growth front in each style, from the built app (`test-results/pictures/`,
+1 minute). `FRONT=tokyo,maze` makes those cases only, and `STYLES=gel` that style only. The cases
+are Tokyo at the steps 600, 1,500 and 4,000, the Foraging maze, Three strains, Rival networks, the
+edge of the gel 10 times closer, and Tokyo on WebGL2:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/front.spec.ts
+```
+
+**The tests** of the front stamp on both backends against the CPU reference, and of the fan in
+the picture (20 seconds); then the tests of the film, which hold the frames without the fan:
+
+```bash
+npx vitest run --project gpu src/engine/front.gpu.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/slime.gpu.test.ts
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the names `g59-digest-branch` and
+`g59-digest-3000-branch`. The digests of `main` for it are those of part 21:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g59-digest-branch.jsonl research/flow/logs/engine/film/digest-branch.jsonl
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g59-digest-3000-branch.jsonl research/flow/logs/engine/film/digest-3000-branch.jsonl
+```
+
+They must print that all 54 runs and all 16 runs are equal.
+
+**The wrong rules** of the front stamp, of the fan and of the film below the plasm (GF1 to GF18),
+and the 13 wrong rules of the slime whose lines changed (part 7 has the tool):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SL17 SL20 SL60 SL92 SL94 SL132 SL134 SL159 SL162 SL170 SL219 SL220 SL222 GF1 GF2 GF3 GF4 GF5 GF6 GF7 GF8 GF9 GF10 GF11 GF12 GF13 GF14 GF15 GF16 GF17 GF18
+```
+
+**The time of a step** with the front stamp, against `main`: the command of part 21 with the
+names `g59-bench-front-r1` and `-r2` here and `g59-bench-main-r1` and `-r2` in a checkout of
+`main` at `07b295e`, two rounds in turns, 2.7 minutes per run, with nothing else on the GPU.
+
+Result: no scene changes a byte. Each of the 31 wrong rules fails at least one test. Two rounds do
+not resolve the cost of the front stamp in a step: the means of the medians differ by −0.2 to
++0.02 ms on WebGPU and by −0.1 to +0.4 ms on WebGL2, and two rounds of one case differ by as
+much. Not measured: the time of a draw with the fan. ADR 0059 has the rest. The records are in
+`logs/engine/front/`:
+
+| Record                                      | Runs                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------- |
+| `digest-branch.jsonl`, `digest-3000-branch` | the digests of every scene after 500 steps, and of eight after 3,000 |
+| `mutations.txt`                             | the 31 wrong rules of the command above                              |
+| `bench-front-r*`, `bench-main-r*`           | the time of a step with the front stamp, and on `main`               |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 399 files, 8.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 406 files, 8.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2207,6 +2279,7 @@ asks for the new digest.
 | `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
 | `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
 | `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
+| `logs/engine/front/`                                 | the runs of part 22 (ADR 0059): the digests of every scene, and the wrong rules of the growth front                                                                                                                             |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

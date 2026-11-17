@@ -222,10 +222,10 @@ describe('food, light and walls on a new simulation', () => {
 
   // ADR 0031: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
   it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
-    // 1309 B per cell, 11 for the slime field and its picture (ADR 0055, ADR 0057) and 80 for the flow of one strain
-    // fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
+    // 1305 B per cell, 15 for the slime field and its picture (ADR 0055, ADR 0057, ADR 0059) and 80 for the flow of
+    // one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
     const backend = new CpuBackend();
-    backend.bytesPerCell = 1309;
+    backend.bytesPerCell = 1305;
     const one = { ...maze.settings(), resolution: 768 };
     expect(one.flow).toBe(true);
     const { engine, sim } = await engineWith(one, mazeEnv, canvas(), backend);
@@ -1677,19 +1677,19 @@ describe('lattices', () => {
 });
 
 // ADR 0027: the view of a step that moves first holds a third trail and scent from two diffusion passes on, and the
-// memory fit counts them. 2048 × 1280 cells with 2.8 agents per cell fit 512 MiB at 102 + 11 + 89.6 B per cell (the
+// memory fit counts them. 2048 × 1280 cells with 2.7 agents per cell fit 512 MiB at 102 + 15 + 86.4 B per cell (the
 // cells, the slime field with its picture, the agents), not with 24 B more.
 describe('the memory fit of the view', () => {
   it('counts the third trail and scent of a step that moves first with two passes', async () => {
     const engine = await Engine.create(canvas(), defaultSettings(), undefined, new CpuBackend());
-    const s = { ...defaultSettings(), resolution: 2048, density: 2.8, diffusion: 2 };
+    const s = { ...defaultSettings(), resolution: 2048, density: 2.7, diffusion: 2 };
     expect(engine.fit({ ...s, stepOrder: 'sense-first' }).resolution).toBe(2048);
     expect(engine.fit({ ...s, stepOrder: 'move-first' }).resolution).toBe(1536);
     expect(engine.fit({ ...s, stepOrder: 'move-first', diffusion: 1 }).resolution).toBe(2048);
   });
 });
 
-// ADR 0055, decision 9, and ADR 0057: the slime field and its picture hold 11 B per cell on both backends. The fit of
+// ADR 0055, decision 9, ADR 0057 and ADR 0059: the slime field and its picture hold 15 B per cell on both backends. The fit of
 // the grid counts them in the extended model, with a Slime life time above 0 and with 0, so that the setting changes
 // no grid.
 describe('the memory fit of the slime field', () => {
@@ -1701,8 +1701,8 @@ describe('the memory fit of the slime field', () => {
   /** The most bytes per cell of the backend at which 300 × 300 cells still fit, with `extra` bytes more per cell. */
   const most = (extra: number) => Math.floor((memoryBudget() - 45_000 * BYTES_PER_AGENT) / cells) - extra;
 
-  it('counts 11 B per cell in the extended model, whatever the life time, and none in the Jones model', async () => {
-    expect([jones.model, jones.lattice, SLIME]).toEqual(['jones', [300, 300], 11]);
+  it('counts 15 B per cell in the extended model, whatever the life time, and none in the Jones model', async () => {
+    expect([jones.model, jones.lattice, SLIME]).toEqual(['jones', [300, 300], 15]);
     for (const [what, settings, extra] of [
       ['the Jones model', jones, 0],
       ['the extended model', extended, SLIME],
@@ -1720,7 +1720,7 @@ describe('the memory fit of the slime field', () => {
         expect(engine.settings.model, at).toBe(settings.model);
         expect(engine.settings.lattice, at).toEqual(holds ? [300, 300] : null);
       }
-    expect(most(0)).toBe(most(SLIME) + 11);
+    expect(most(0)).toBe(most(SLIME) + 15);
   });
 
   it('keeps the simulation and its grid when the life time changes: no restart, no rebuild', async () => {

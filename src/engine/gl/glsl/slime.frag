@@ -1,5 +1,5 @@
 // The slime field (ADR 0055); mirrors ../../shaders/slime.wgsl. One fragment per cell. gl/programs.ts compiles the
-// file once per PASS, with amount.glsl before it for the second.
+// file once per PASS, with amount.glsl before it for the second and the third.
 //
 // PASS 0, into the target of the stamps (R32UI): the number of the step in which the cell last held plasm, plus 1,
 // and 0 for a cell without a stamp. A cell holds plasm when the trail of at least one strain of the settings, after
@@ -13,10 +13,16 @@
 // starts from what is left of its amount (amountLeft()) and gains 1 of FULL, as long as the amount is below the level
 // of the plasm. Every other cell keeps its amount: this backend reads the amounts from one target and writes all of
 // them into the other, where slime.wgsl changes its buffer in place.
+//
+// PASS 2, into the target of the front field (R32UI, ADR 0059): the step, plus 1, at which the growth front reached
+// the cell. It runs before PASS 0 too. A cell that holds plasm and had no slime before the step gets the stamp of the
+// step. The fragment of every other cell is discarded: a cell keeps its front stamp while it has slime.
 
 uniform sampler2D trail;
-#if PASS == 1
+#if PASS >= 1
 uniform highp usampler2D stamps;  // the stamps before the step
+#endif
+#if PASS == 1
 uniform highp usampler2D amounts; // the amounts before the step
 #endif
 
@@ -46,6 +52,9 @@ void main() {
   vec4 t = texelFetch(trail, q, 0);
 #if PASS == 0
   if (!holdsPlasm(t)) discard;
+  result = P.grid.w + 1u;
+#elif PASS == 2
+  if (!holdsPlasm(t) || hasSlime(texelFetch(stamps, q, 0).r)) discard;
   result = P.grid.w + 1u;
 #else
   uint old = texelFetch(amounts, q, 0).r;

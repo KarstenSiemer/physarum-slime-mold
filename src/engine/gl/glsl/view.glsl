@@ -23,7 +23,9 @@ layout(std140) uniform View {
   vec4 scentFx; // scent view: map level (0 to 3), unused, unused, unused
   vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
-  uvec4 slime;     // the slime: the steps that ran so far, the life time of the slime in steps, 2 unused
+  // The slime: the steps that ran so far, the life time of the slime in steps, what the frame draws (1 the film of
+  // the slime, 2 the fan of the growth front), unused.
+  uvec4 slime;
   vec4 slimeFx;    // the slime: the colour of its body, linear RGB, and how much of it full slime shows
   vec4 slimeLight; // the slime: its highlight, its wide light, the height of its relief, the height of its beads
 } V;
@@ -69,6 +71,8 @@ vec4 trailAt(ivec2 c) {
 ivec2 levelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
 
 const float SHAPE_RANGE = 4.0; // cells; outline distances in `shape` are clamped to ± this (shape.frag)
+const int FRONT_LEVEL = 3;         // the map of the growth front has texels of 2^3 = 8 cells per side (ADR 0059)
+const float FRONT_STEPS = 1500.0;  // steps after the front in which the main vein appears: the fan ends there
 const float PRESENCE = 0.9;      // tone-curve input of an occupied food cell (render.frag presence())
 const float PRESENCE_RAMP = 1.5; // cells inside the food outline over which presence fades in
 

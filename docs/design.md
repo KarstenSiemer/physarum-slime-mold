@@ -120,6 +120,8 @@ strains (one `vec4` lane each).
 | slime (extended)   | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the stamp of the slime of each cell (ADR 0055)        |
 | slime amount       | storage `u32` per cell (WebGL2: `R16UI` × 2)     | 4 B × W × H      | how much slime each cell holds, the view only (0057)  |
 | film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
+| front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0059) |
+| map of the front   | `rgba16float` texture, texels of 8 × 8 cells     | 0.1 B × W × H    | renderer only: young plasm and its age (ADR 0059)     |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -182,7 +184,8 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
 6. **Stamp pass of the slime**, only in the extended model while the Slime life time is above 0 (model.md,
    section 6.9; ADR 0055): a cell that holds plasm after the diffusion gets the stamp of the step. WebGPU writes
    the stamp into a storage buffer. WebGL2 draws into a target of unsigned integers and discards the fragment of
-   every other cell, so that cell keeps its stamp.
+   every other cell, so that cell keeps its stamp. The same pass on WebGPU, and a pass before it on WebGL2, writes
+   the front stamp of a cell that gets plasm on ground without slime (ADR 0059).
 7. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
    iterations, once per strain (ADR 0031). On WebGPU each texture of the flow has a layer per strain, and the agent and
    growth passes read the layer of the agent's strain from a `texture_2d_array`; on WebGL2 each strain has its own
@@ -216,7 +219,7 @@ periodic grid over all its cells.
 | Environment         | food strength, light strength (Jones: repellent strength), covered food, random shrinkage; extended: diffusion passes                        |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
 | Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
-| Slime               | slime life time, show slime (extended model only)                                                                                            |
+| Slime               | slime life time, show slime, show growth front (extended model only)                                                                         |
 | Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode, slime; brush; lines (Shift)      |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
@@ -347,11 +350,45 @@ the arrows.
     patterns repeat with a periodic grid. Detail that is smaller than a
     pixel fades out from 1 cell per pixel on and is gone at 1.5.
 
+  The plasm lies on the film (ADR 0059; `plasmCover`): the film does not show through a tube. In the gel style the
+  film ends where the gel begins. In the glow, paper and agents styles the plasm hides the share 1 − e^(−3 x) of the
+  film, with x the light of the plasm: its summed trail above the black level times the exposure.
+
   The film has one colour for all strains. The scent view draws no film. The switch changes nothing in the
   simulation, goes into the link like the style and stays as it is when a scene loads. Without the film the render
   pass draws the pixels of before at the same cost: the code of the film is compiled in only for a frame that draws
   it. A CPU copy of the rules is in `src/engine/slime-reference.ts`.
 
+- Fan of the growth front (ADR 0059): while the model has slime and growth is on, the view draws young ground as the growth front of
+  a plasmodium, with the switch Show growth front below Show slime, on at the start. The front is the plasm that comes
+  onto ground without slime; the front stamp of a cell holds the step of that (model.md, section 6.9). The organism
+  has a sheet at its front, then fine veins in a sheet that gets thinner, then one main vein
+  (`docs/knowledge-base/slime-mazes-and-the-front.md`, "The front"). The model grows arms of full plasm, so the
+  picture adds the sheet and the veins around the young arms; the tube of the model is drawn as before.
+  - **The map of the front** (`frontMap` in `render.wgsl`, `front-map.frag`): one texel for 8 × 8 cells, filled once
+    for each state. It holds the mean of the summed trail of its cells, the strain with the most trail, and the age of
+    its ground: the age of the oldest front stamp among its cells with slime, as a share of 1,500 steps. So the age
+    is the time since the front first reached the texel. Slime without a front stamp is old ground, and so is a
+    texel without slime: trail that no step of the slime field saw shows no fan.
+  - **The sheet** (`fanAt`): the render pass reads the 3 × 3 texels around a pixel as the spline of the film. The
+    plasm of the texels, weighted by their age, gives the age t at the pixel. The sheet is 2.4 times the plasm around
+    the pixel times e^(−age / 100 steps): whole at the front and gone with the time scale of 195 s, in which a spot
+    of the organism gives its mass to the veins. Each texel gives its plasm to the colour of its strain.
+  - **The veins** (`fanVeins`): the walls between the cells of a pattern that is fixed in the grid, one cell for
+    about 6.5 grid cells, bent by soft noise. They come as the sheet goes. A vein is thick near strong plasm and
+    thinner outward, it gets thinner by the factor e in 350 steps, and it is gone 1,500 steps after the front, the
+    50 minutes in which the main vein of the organism appears. A vein ends at the tube of the model, and one that is
+    thinner than a pixel shows the share of the pixel that it covers.
+  - **Walls** (`fanOpen`): the sheet is wider than a wall is thick. So the pass walks from the pixel toward the plasm,
+    up the slope of the plasm, cell by cell, and the sheet shows nothing where a wall lies on the way.
+  - The sheet is more plasm: it adds to the trail of its strain before the style draws it. In the gel style it adds
+    to the height and to the slope of the gel. The agents style and the scent view draw no fan. The switch changes
+    nothing in the simulation, goes into the link like the style and stays as it is when a scene loads. The numbers
+    are the constants `FRONT_…` of `render.wgsl` and `render.frag`; the 350 steps, the width of the sheet and the
+    look of the veins are choices made on pictures.
+- The gel reads its height as a quadratic B-spline of the cells while the view shows a cell on a pixel or more
+  (`heightSmooth`, ADR 0059): four bilinear lookups in place of one. The line at which the gel ends has no tooth at
+  the edge of a cell.
 - Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
   `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).
 - Dither before 8-bit output against banding. An HDR canvas is not built (`TODO.md`).

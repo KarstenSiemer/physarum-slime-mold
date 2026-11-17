@@ -173,6 +173,13 @@ export interface Sim {
    * no slime.
    */
   readSlimeAmount(): Promise<Uint32Array>;
+  /**
+   * For tests and measurements: the front stamp of every cell (ADR 0059), one value per cell, rows from y = 0: the
+   * step, plus 1, at which the growth front reached the cell, which is the step in which plasm came onto the cell
+   * while it had no slime. It has a meaning only in a cell that has slime; 0 there is slime that no front reached
+   * (painted slime). Only zeros in the Jones model, which has no slime.
+   */
+  readSlimeFront(): Promise<Uint32Array>;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */
