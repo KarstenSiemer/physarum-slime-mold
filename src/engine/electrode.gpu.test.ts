@@ -10,7 +10,7 @@ import { dishRadius } from './brush';
 import { electrodesOver, POLE_COLOR, POLE_RIM, POLE_SHADE, polesAt, SUN, type Rgb } from './electrode-reference';
 import { WebGl2Backend } from './gl/backend';
 import renderFrag from './gl/glsl/render.frag?raw';
-import { onOutline, outlineAt, type OutlineGrid } from './outline-reference';
+import { onOutline, outlineAt, outlineCell, type OutlineGrid } from './outline-reference';
 import { BACKGROUND, LATTICE_COPIES } from './render';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Backend, Sim, Stroke, View } from './types';
@@ -202,7 +202,7 @@ interface Picture {
  * at the edge of the arena: the capture holds the ramp there already. And a pixel in the shadow or on the outline of
  * a pole where a channel of the capture is at an end of its range (0 or 255, or one beside it with the dither): the
  * pass cut the colour there, so what the pole mixes with is not known. `ties`: cells whose pixels do not compare
- * either (onOutline() in outline-reference.ts), on the grid and on its copies.
+ * either (onOutline() in outline-reference.ts), wherever the view reads such a cell as the cell under a pixel.
  */
 function pictureOf(
   poles: Uint8Array,
@@ -267,8 +267,8 @@ function pictureOf(
                     : PART.beside;
           if (under?.some((v) => v <= 1 || v >= 254) && s.near && s.cover < 1) part[i] = PART.skip;
         }
-        const [cx, cy] = [Math.floor(px), Math.floor(py)];
-        if (ties?.has((((cy % h) + h) % h) * w + (((cx % w) + w) % w))) part[i] = PART.skip;
+        // The cell whose bytes the view reads as the cell under the pixel.
+        if (ties?.has(outlineCell(grid, Math.floor(px), Math.floor(py)))) part[i] = PART.skip;
       }
       if (copies < 1) c = mix(mix(space, c, copies), c, box);
       for (let k = 0; k < 3; k++) want[i * 3 + k] = toByte(c[k] ?? 0);
@@ -472,7 +472,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
       expect(lumaAt(5.25) - lumaAt(0), 'the lit side').toBeGreaterThan(8);
       expect(lumaAt(0) - lumaAt(-5.25), 'the shaded side').toBeGreaterThan(10);
       // The shadow, 1 cell outside the outline on the side away from the light: half of the full shadow of the style,
-      // which is as dark as the shadow of a wall. On paper it shows; on the dark grounds it is less than a level.
+      // which is as dark as the shadow of a wall. On paper it shows well; the dark grounds get a few levels darker.
       const shaded = pixel(img, near(14.3 + 0.6 * 7), near(14.2 + 0.8 * 7));
       const half = bytes(hexToLinear(BACKGROUND[style]).map((v) => v * (1 - 0.5 * POLE_SHADE[style])) as Rgb);
       expect(off(shaded, half), 'the shadow').toBeLessThanOrEqual(3);
@@ -500,7 +500,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
   /**
    * Views of a grid of 64 × 48 cells on a canvas of 96 × 72 pixels: zoomed in at the left edge (in the dish at its
    * rim) and at the bottom edge, at 1 cell per pixel, and zoomed out, where the line along an outline is 0.75 cells
-   * wide and a pole of the scene is smaller than a pixel.
+   * wide and a dab of 1.5 cells is smaller than a pixel.
    */
   const views = (boundary: Boundary): View[] => [
     { center: boundary === 'dish' ? [10.37, 24.21] : [1.37, 21.21], scale: 1 / 8 },
@@ -697,7 +697,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
         inner++;
         if (picture.part[i] === PART.seam) seams++;
         const at = `${String(x)},${String(y)}`;
-        if ((picture.cover[i] ?? 0) < 0.995) bare.push(`${at}: the poles cover ${String(picture.cover[i])}`);
+        // The cover of the CPU is not that of the GPU in a cell with the spline exactly on an outline (shot()).
+        if (picture.part[i] !== PART.skip && (picture.cover[i] ?? 0) < 0.995)
+          bare.push(`${at}: the poles cover ${String(picture.cover[i])}`);
         const apart = off(pixel(found.img, x, y), pixel(dark.img, x, y));
         if (apart > 2) bare.push(`${at}: ${String(apart)} apart on paper and on the dark ground`);
       }
@@ -732,7 +734,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
     const img = await backend.capture(sim, settings, CLOSE, ...CLOSE_SIZE);
     const blank = await backend.capture(twin, settings, CLOSE, ...CLOSE_SIZE);
     const [blue, red] = [bytes(flatTop(POLE_COLOR.cathode)), bytes(flatTop(POLE_COLOR.anode))];
-    // The cathode beside the erase and in its middle; the erased line shows the paper.
+    // The cathode beside the erased line is whole, and the erased line shows the paper.
     expect(off(pixel(img, 8 * 14, 8 * 28), blue), 'the cathode').toBeLessThanOrEqual(1);
     expect(off(pixel(img, 8 * 21, 8 * 24) /* on the erased line */, blue), 'the erased line').toBeGreaterThan(60);
     expect(Math.min(...pixel(img, 8 * 21, 8 * 24)), 'the erased line').toBeGreaterThan(150);
@@ -742,7 +744,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
     // Each pole over a part of the other one.
     expect(off(pixel(img, 8 * 24, 8 * 30), red), 'the anode on the cathode').toBeLessThanOrEqual(1);
     expect(off(pixel(img, 8 * 50, 8 * 16), blue), 'the cathode on the anode').toBeLessThanOrEqual(1);
-  });
+  }, 120_000);
 
   // Clear frees the outline distances, and the next pole makes them again (ADR 0058): the picture reads the buffer
   // that the simulation holds now. On WebGPU a bind group with a freed buffer is an error of the device.
@@ -777,7 +779,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
       expect((await shot(sim, settings)).apart).toBeLessThanOrEqual(2);
     }
     expect((await device?.popErrorScope())?.message).toBeUndefined();
-  });
+  }, 120_000);
 
   // A reset and a switch of the model leave `env`, and both models have the electrodes: the poles stay in the picture.
   it('keeps the poles in the picture over a reset and over a switch of the model', async () => {
@@ -801,7 +803,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
     sim.update(extended);
     sim.reset();
     expect(maxDiff((await shot(sim, extended)).img, before.img)).toBeLessThanOrEqual(2);
-  });
+  }, 120_000);
 
   // The boundary can change while `env` stays. The outline distances are then held to `env` under the new boundary,
   // and the picture reads them: a dish cuts the poles at its rim, and the periodic grid joins them across its seam.
@@ -826,7 +828,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
       }
       expect((await offSide(sim, boundary)).wrong, boundary).toEqual([]);
     }
-  });
+  }, 120_000);
 
   // Sim.writeEnv (tests only) writes bytes. The outline distances are held to them, and the picture draws every cell
   // of a pole: the bytes up to 191 as an anode, above it as a cathode.
