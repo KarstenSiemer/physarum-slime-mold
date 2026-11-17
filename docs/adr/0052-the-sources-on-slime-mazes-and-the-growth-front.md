@@ -11,6 +11,8 @@
   on 2026-11-16: the mark of starved ground that reaches the first aim of the plan.
 - Extended by [ADR 0055](0055-the-slime-field.md) (2026-11-17): the first part of stage 2, the slime field with its
   life time, its brush and its picture.
+- Extended by [ADR 0056](0056-the-avoidance-of-slime-waits-for-the-growth-front.md) (2026-11-17): the second part of
+  stage 2, the Y-maze. No rule of the plan reaches its targets, and the avoidance goes to stage 4.
 - In short: the facts are in
   [`docs/knowledge-base/slime-mazes-and-the-front.md`](../knowledge-base/slime-mazes-and-the-front.md), and the plan
   is in `TODO.md`, "Slime, dead ends and the growth front".
