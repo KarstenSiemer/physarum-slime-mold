@@ -6633,7 +6633,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // Painted and erased again, the environment pass runs (hasEnvironment) but must draw what the pass without
     // it draws: at most the dither apart. Both bilinear paths (fit and zoomed out), every style, collisions on and
-    // off. Erasing everything leaves no byte: with no cell of a layer within 5 cells, its bytes go to 0.
+    // off. Erasing everything leaves no byte: with no cell of a layer within 5 cells, its bytes go to 0. A wall and
+    // an erase also clear the slime of their cells (ADR 0055, decision 7), which the picture would show: the layer
+    // of the slime is off here.
     it.each(BOUNDARIES)('draw an erased environment like none at all (%s)', async (boundary) => {
       for (const collisions of backend.supportsCollisions ? [false, true] : [false]) {
         const settings: Settings = {
@@ -6641,6 +6643,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           boundary,
           collisions,
           density: 0.5,
+          showSlime: false,
           strains: [defaultStrain(0), defaultStrain(1)],
         };
         const sim = await make(settings, W, H, (W * H) / 2);
@@ -6878,7 +6881,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
     const [W, H] = [64, 48];
     const [CW, CH] = [96, 72];
-    // Food strong enough that its pull across the sensors passes the hold of a strand, so the line shows.
+    // Food strong enough that its pull across the sensors passes the hold of a strand, so the line shows. The view
+    // draws no slime (ADR 0055, decision 8; slime.gpu.test.ts), so the picture below it has none here: these tests
+    // compare the picture with the view against the view over the picture without it.
     const extended = (patch: Partial<Settings>): Settings => ({
       ...defaultSettings(),
       model: 'extended',
@@ -6886,6 +6891,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       scentDecay: 0.02,
       lightStrength: 0.2,
       density: 0.5,
+      showSlime: false,
       ...patch,
     });
     /** Food across the seam or the edge, or at the rim of the dish, and light inside: what each view looks at. */
