@@ -92,17 +92,26 @@ name for ground with a flow memory of 0.2 (ADR 0053), so this record uses the wo
    stays in the flow memory (decision 2). A second, shorter time for ground above the level 0.01 (option 6 of
    ADR 0054) changes the rule of the tubes and the bytes of the eight scenes with the flow. It is an open point for
    the second pull request, which has the campaign for it.
-7. **A brush paints slime.** The tool Slime gives the open cells of its stroke the stamp of the current step, with
-   the hard edge of food. Erase clears the stamp. A wall leaves it: no pass reads the slime of a wall. Only the
-   extended model has the tool. Reason: the experiments of Reid et al. 2012 coat the agar with slime, and a scene is
-   a list of strokes.
+7. **A brush paints slime.** Reason: the experiments of Reid et al. 2012 coat the agar with slime, and a scene is a
+   list of strokes.
+   - The tool Slime gives the open cells of its stroke the stamp of the current step, with the hard edge of food.
+     Painted slime ages as the slime of the colony does: one field holds both.
+   - Erase clears the stamp of its cells, also a stamp of the colony. A wall does the same: a wall replaces what a
+     cell holds, as it does with food and light. So no wall holds a stamp. Clear clears every stamp, as an erase of
+     the whole grid does.
+   - A reset clears every stamp (decision 3). The engine then paints the strokes of the list again that write or
+     clear a stamp, in their order, with the stamp of the current step: 0 after a reset. It does the same when a
+     switch of the model gives the model its field again. The field is then the one that the strokes painted, cell
+     for cell: after the last stroke that covers a cell, no stroke makes the cell a wall or opens it.
+   - The tool is there while the model has slime: in the extended model, with a life time above 0.
 8. **The app draws the slime** as a pale layer where a cell has slime, below the trail and the tubes. The layer
    fades with the age of the slime and is gone at the life time. A switch of the view turns it off; the switch
    changes no run.
 9. **Memory**: the stamp is 4 B per cell, on both backends. The fit of the grid counts them in the extended model,
    with slime or without it, so that the setting does not change the grid.
 10. **Links and the Jones model.** A link without the setting has a life time of 0: it has no slime, and it runs as
-    it was made, as in ADR 0050. The Jones model has no slime.
+    it was made, as in ADR 0050. The Jones model has no slime: a switch to it frees the field with its stamps, and
+    a switch back starts with the painted slime only (decision 7).
 11. **Not in this record**: a rule that reads the slime (the avoidance, the moves), the scene Y-maze, and the
     U-shaped trap. The owner's wish that the slime is "perfused" stays an open question (ADR 0052).
 
