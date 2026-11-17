@@ -107,8 +107,9 @@ strains (one `vec4` lane each).
 | `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
 | `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | successful moves that ended in the cell, per strain   |
-| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light         |
+| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light, pole   |
 | `shape`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: outline distances, light, wall shadow  |
+| `poles`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: the outlines of the poles (ADR 0058)   |
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
@@ -137,6 +138,14 @@ only as far as the cells it paints allow, so a stroke beside the edge of a box o
 dish changes no outline where it paints no cell. After a change of boundary,
 and after a replay of edits painted under another boundary, they are held to `env` again under
 the boundary on screen.
+
+`poles` holds the same two distances for the electrodes: to the outline of the cathodes and to the outline of the
+anodes (ADR 0058). The same pass writes it, for a stroke of a pole and, from the first pole on, for an erase and a
+wall. A cell holds one pole, so a pole takes its cells from the other pole. The pole below a pole or a wall ends
+where the rounded union of that stroke begins, so that no ground shows between the two; below an erase it ends at the
+plain distance of the stroke. A simulation makes the buffer at its first pole and frees it at a Clear. The fit of
+the grid counts its 4 B per cell from the start, so a stroke never changes the grid. A CPU copy of the pass, for
+both buffers, is `outlineModel()` in `src/engine/outline-reference.ts`.
 
 `rgba32float` and not `rgba16float`: with half floats `x · (1 − 0.0001)` rounds back to `x`,
 so the small decay values from Jones Fig. 12 would stop working.
@@ -269,6 +278,14 @@ the arrows.
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
   (a blocked agent deposits nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
+- Electrodes (ADR 0047, ADR 0058): a pole is a stud that lies over everything else, the cathode blue and the anode
+  red in every style. Its outline is rebuilt from the distances in `poles` with the spline of food and walls, with
+  one pixel of anti-aliasing at any zoom, and every cell centre lies on the side of the outline that `env` holds. A
+  dome rises over the outer 1.5 cells to a flat top. It is lit like the walls, with a highlight, a dark line along the
+  outline (1.5 pixels wide, at least 0.35 and at most 0.75 cells) and a shadow of 2 cells on the side away from the
+  light, as dark as the shadow of a wall. A pole covers all of what lies below it. Where two poles meet, each covers
+  its share of a pixel. A frame without a pole reads no byte of `poles` and draws the pixels of before. A CPU copy is
+  `studAt()` and `electrodesOver()` in `src/engine/electrode-reference.ts`.
 - Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
   glow and the repellent (light; in the Jones model a repellent source, ADR 0044) as a pink glow over the picture, below the oat flake and the
   walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and

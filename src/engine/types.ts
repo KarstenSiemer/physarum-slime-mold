@@ -25,11 +25,19 @@ export const changesSlime = (kind: EnvTool) => kind === 'slime' || kind === 'era
 export const POLES = ['cathode', 'anode'] as const;
 export type Pole = (typeof POLES)[number];
 export const isPole = (kind: EnvTool): kind is Pole => kind === 'anode' || kind === 'cathode';
+/**
+ * Whether a stroke of `kind` changes the outline distances of the electrodes (Sim.readPoles(), ADR 0058). A pole
+ * unites with the outline of its kind and takes its cells from the other pole. An erase and a wall clear both poles of
+ * their cells: only where a pole may lie in the environment (`poled`, Sim.hasElectrodes). Food, light and slime leave
+ * the poles.
+ */
+export const polesOutlined = (kind: EnvTool, poled: boolean) =>
+  isPole(kind) || (poled && (kind === 'erase' || kind === 'wall'));
 /** Whether a stroke of `kind` paints cells that release into the scent: food, light and the electrodes. */
 export const releases = (kind: EnvTool) => kind === 'food' || kind === 'light' || isPole(kind);
 /**
  * The byte of each pole (paint.wgsl, paint.frag): 0 is no electrode. The passes read a byte above 191 as the cathode
- * and any other byte above 0 as the anode (diffuse.wgsl `sources`, render.wgsl `poleAt`).
+ * and any other byte above 0 as the anode (diffuse.wgsl `sources`, paint.wgsl `layersOf`).
  */
 export const POLE_BYTE = { anode: 128, cathode: 255 } as const;
 
@@ -181,6 +189,12 @@ export interface Sim {
    * ±SHAPE_RANGE cells at 0 and 255), the light as in `readEnv()`, and the drop shadow of the walls (0–255).
    */
   readShape(): Promise<Uint8Array>;
+  /**
+   * For the renderer: the signed distance to the outline of the cathodes and to the outline of the anodes, in the
+   * first two bytes of a cell and in the format of readShape(); the other two bytes are 0. Only zeros while no
+   * electrode may lie in the environment (`hasElectrodes`).
+   */
+  readPoles(): Promise<Uint8Array>;
   /** False until something other than the eraser is painted after the last clear of the environment. */
   readonly hasEnvironment: boolean;
   /** False until an electrode is painted after the last clear of the environment (ADR 0047): the view then draws them. */

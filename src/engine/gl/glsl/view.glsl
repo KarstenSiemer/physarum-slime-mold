@@ -72,9 +72,9 @@ const float SHAPE_RANGE = 4.0; // cells; outline distances in `shape` are clampe
 const float PRESENCE = 0.9;      // tone-curve input of an occupied food cell (render.frag presence())
 const float PRESENCE_RAMP = 1.5; // cells inside the food outline over which presence fades in
 
-// A cell of `shape`: wrapped on the periodic grid, else clamped to the arena; outside the dish, the cell inside
-// the rim on the way to the centre (see shapeIndex in render.wgsl).
-vec4 shapeAt(ivec2 c) {
+// The texel of `shape` for a grid cell: wrapped on the periodic grid, else clamped to the arena; outside the dish, the
+// cell inside the rim on the way to the centre (see shapeIndex in render.wgsl).
+ivec2 shapeTexel(ivec2 c) {
   ivec2 s = gridSize();
   ivec2 q = clamp(c, ivec2(0), s - 1);
   if (V.boundary == 0u) {
@@ -85,7 +85,12 @@ vec4 shapeAt(ivec2 c) {
     float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
     if (dot(m, m) > rim * rim) q = ivec2(floor(o + m * ((rim - 0.75) * inversesqrt(dot(m, m)))));
   }
-  return texelFetch(shape, q, 0);
+  return q;
+}
+
+// A cell of `shape` (shapeTexel()).
+vec4 shapeAt(ivec2 c) {
+  return texelFetch(shape, shapeTexel(c), 0);
 }
 
 // How much the agent in cell q (cellXY) shows on food: 0 without an agent or outside the food, rising to 1 over

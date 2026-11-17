@@ -1677,12 +1677,12 @@ describe('lattices', () => {
 });
 
 // ADR 0027: the view of a step that moves first holds a third trail and scent from two diffusion passes on, and the
-// memory fit counts them. 2048 × 1280 cells with 2.9 agents per cell fit 512 MiB at 98 + 11 + 92.8 B per cell (the
+// memory fit counts them. 2048 × 1280 cells with 2.8 agents per cell fit 512 MiB at 102 + 11 + 89.6 B per cell (the
 // cells, the slime field with its picture, the agents), not with 24 B more.
 describe('the memory fit of the view', () => {
   it('counts the third trail and scent of a step that moves first with two passes', async () => {
     const engine = await Engine.create(canvas(), defaultSettings(), undefined, new CpuBackend());
-    const s = { ...defaultSettings(), resolution: 2048, density: 2.9, diffusion: 2 };
+    const s = { ...defaultSettings(), resolution: 2048, density: 2.8, diffusion: 2 };
     expect(engine.fit({ ...s, stepOrder: 'sense-first' }).resolution).toBe(2048);
     expect(engine.fit({ ...s, stepOrder: 'move-first' }).resolution).toBe(1536);
     expect(engine.fit({ ...s, stepOrder: 'move-first', diffusion: 1 }).resolution).toBe(2048);

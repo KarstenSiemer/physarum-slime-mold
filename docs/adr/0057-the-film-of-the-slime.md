@@ -40,16 +40,20 @@ What the sources say ([slime-mazes-and-the-front.md](../knowledge-base/slime-maz
 of the track needs an amount. `tests/pictures/slime-amount.spec.ts` runs the Snail maze with the seed 1, samples
 the trail every 16 steps, and keeps candidate amounts. The level of the plasm of a cell is the share π of its trail
 between the low level and the full level of its strain, the share that the tube body follows (`docs/model.md`,
-8.1). At step 22,000, over the 76,174 cells that have slime and hold no plasm:
+8.1). At step 22,000, over the 76,224 cells that have slime and hold no plasm:
 
 | Candidate                                               | Mean | Cells above 0.9 | Cells below 0.25 |
 | ------------------------------------------------------- | ---- | --------------- | ---------------- |
-| the largest level that the cell had                     | 0.98 | 95 %            | 0.3 %            |
-| the level summed over the steps, full after 500 steps   | 0.98 | 97 %            | 0.7 %            |
-| the same, full after 2,000 steps                        | 0.69 | 41 %            | 4 %              |
-| the same, full after 8,000 steps                        | 0.28 | 5 %             | 63 %             |
-| the rule of this record: full after 4,095 steps (below) | 0.52 | 16 %            | 9 %              |
-| the time with plasm, full after 8,000 steps             | 0.46 | 13 %            | 33 %             |
+| the largest level that the cell had                     | 0.98 | 95.3 %          | 0.4 %            |
+| the level summed over the steps, full after 500 steps   | 0.98 | 96.5 %          | 0.8 %            |
+| the same, full after 2,000 steps                        | 0.69 | 40.4 %          | 4.3 %            |
+| the same, full after 8,000 steps                        | 0.28 | 4.8 %           | 62.8 %           |
+| the rule of this record: full after 4,095 steps (below) | 0.52 | 16.4 %          | 9.4 %            |
+| the time with plasm, full after 8,000 steps             | 0.46 | 13.0 %          | 33.2 %           |
+| the amount that the app holds in its field              | 0.50 | 15.3 %          | 11.9 %           |
+
+The candidates count a sample of every 16th step. The app gains in every step, and it takes what is left of old
+slime when plasm comes back, so its amount is a little below the candidate of its rule.
 
 The colony of this model is a mesh of tubes from its start. Every cell of a corridor holds full plasm for some
 steps while the mesh sweeps over it, so the largest level and a fast sum are flat, as the stamp is. An amount that
@@ -161,7 +165,9 @@ electrodes of ADR 0058 in, against `main` at `a6ffe64`.
 
 **Every scene keeps its bytes.** The digests of the agents, the trail, the scent, the environment, the flow memory
 and the pressure equal the record of ADR 0055: 54 of 54 runs after 500 steps (every scene, both backends), and 16 of
-16 after 3,000 steps (the eight scenes with the flow, both backends). @@DIGEST@@
+16 after 3,000 steps (the eight scenes with the flow, both backends).
+The runs are of the head of the branch with the electrodes of ADR 0058 merged in. ADR 0056 and ADR 0058 changed no
+byte of a run, so that record is the state of `main`.
 
 ### The time of a step
 
@@ -239,8 +245,9 @@ difference of a channel is 2 of 255, the dither.
   with a new text, because the passes now hold the amount. 102 are wrong forms of the picture (SL78 to SL179, in
   place of the 42 of the layer) and 43 of the amount (SL180 to SL222). Each fails at least one test. One wrong rule
   was dropped: "a cell without a stamp has slime" changes no picture, because such a cell has no amount.
-  @@RULES@@
-- **All tests at the head of the branch**: @@TESTS@@
+  The list has 607 wrong rules, with the 87 new ones of the electrodes (ADR 0058).
+- **All tests at the head of the branch**, with the electrodes of ADR 0058 merged in: 874 unit tests with the
+  research tests, 1,340 GPU tests on both backends (8 more run on one backend only), and 84 tests of the built app.
 
 ## Consequences
 

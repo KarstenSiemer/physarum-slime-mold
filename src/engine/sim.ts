@@ -38,6 +38,7 @@ import {
   EnvKind,
   isPole,
   paintsEnv,
+  polesOutlined,
   releases,
   SHAPE_RANGE,
   type AgentState,
@@ -190,8 +191,18 @@ export class Simulation implements Sim {
   /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
   hasElectrodes = false;
   /**
-   * The boundary under which every byte of `shape` is held to `env`. After a change of boundary, or after strokes
-   * painted under another boundary (then undefined), syncShape() holds it again before its next use.
+   * The outline distances of the electrodes, for the renderer only (paint.wgsl `outline` with POLES, ADR 0058): per
+   * cell the distance to the outline of the cathodes and to the outline of the anodes, as `shape` holds those of walls
+   * and food, 4 B each. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and
+   * freed by a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL), so a stroke never
+   * changes the grid.
+   */
+  private poles?: GPUBuffer | undefined;
+  /** The bind group of the outline pass on `poles`, in the layout of the paint pass. */
+  private polesGroup?: GPUBindGroup | undefined;
+  /**
+   * The boundary under which every byte of `shape` and of `poles` is held to `env`. After a change of boundary, or
+   * after strokes painted under another boundary (then undefined), syncShape() holds them again before their next use.
    */
   private shapeHeld: Boundary | undefined;
   readonly stats: GPUBuffer;
@@ -597,10 +608,37 @@ export class Simulation implements Sim {
   }
 
   /**
+   * For the renderer: the outline distances of the electrodes (`poles`), or undefined while no pole may lie in `env`
+   * (`hasElectrodes`). Call syncShape() before reading it.
+   */
+  get poleField(): GPUBuffer | undefined {
+    return this.poles;
+  }
+
+  /** The outline distances of the electrodes, made at the first pole. A new buffer holds zeros: no pole is near. */
+  private ensurePoles(): GPUBuffer {
+    this.poles ??= this.device.createBuffer({
+      size: this.width * this.height * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    return this.poles;
+  }
+
+  /** Frees the outline distances of the electrodes, and every bind group that holds them: `env` holds no pole. */
+  private dropPoles() {
+    if (!this.poles) return;
+    this.poles.destroy();
+    this.poles = undefined;
+    this.polesGroup = undefined;
+    this.bindCache.delete('refreshPoles');
+  }
+
+  /**
    * Holds `shape` to `env` under the current boundary (paint.wgsl `refresh`), once after the boundary changed or
    * after strokes under another boundary (ADR 0019 replays each edit under its own): a dish counts fewer cells than
    * the box or the periodic grid, and the periodic grid has neighbours across its edges. Called before every
-   * readback and frame, and by paint() after a change of boundary; it does nothing while `shape` is held.
+   * readback and frame, and by paint() after a change of boundary; it does nothing while `shape` is held. The outline
+   * distances of the electrodes follow in the same way, while the simulation holds them.
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
@@ -608,11 +646,18 @@ export class Simulation implements Sim {
     this.shapeHeld = this.settings.boundary;
     if (!this.hasEnvironment) return; // nothing painted: `shape` holds only zeros, under every boundary
     this.writeParams();
+    const groups = [Math.ceil(this.width / TILE), Math.ceil(this.height / TILE)] as const;
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(this.kernels.refresh);
     pass.setBindGroup(0, this.bind('refresh', this.kernels.refresh, [this.params, this.env, null, this.shapeBuffer]));
-    pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
+    pass.dispatchWorkgroups(...groups);
+    if (this.poles) {
+      const refresh = this.kernels.refreshPoles();
+      pass.setPipeline(refresh);
+      pass.setBindGroup(0, this.bind('refreshPoles', refresh, [this.params, this.env, null, this.poles]));
+      pass.dispatchWorkgroups(...groups);
+    }
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }
@@ -1063,7 +1108,8 @@ export class Simulation implements Sim {
    * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
    * Every segment's paint dispatch is followed by its outline dispatch over its outline box (brush.ts outlineBox),
    * in the same compute pass: each dispatch sees the writes of the one before, so the outline reads `env` as it is
-   * after its segment (paint.wgsl `outline`), as one call per stroke does.
+   * after its segment (paint.wgsl `outline`), as one call per stroke does. A stroke of a pole has its outline in
+   * `poles` in place of `shape`, and an erase and a wall have one in both while `poles` may hold a pole.
    *
    * A stroke of the Slime tool changes no byte of `env` or `shape`. What the strokes do with the slime field follows
    * after the environment of all of them (brushSlime()). That gives the field of one stroke after another: an erase or
@@ -1102,6 +1148,8 @@ export class Simulation implements Sim {
     const reaches: Rect[] = [];
     const offsets: number[] = [];
     const own: boolean[] = [];
+    /** Per segment: whether `poles` takes its outline (polesOutlined()), by the poles that the strokes before left. */
+    const poled: boolean[] = [];
     let foreign = false;
     for (const stroke of strokes) {
       const boundary = stroke.boundary ?? this.settings.boundary;
@@ -1119,7 +1167,22 @@ export class Simulation implements Sim {
         reaches.push(outlineBox(segment, this.width, this.height, wrap) ?? box);
         offsets.push(BOUNDARIES.indexOf(boundary) * this.paramsStep);
         own.push(!ownHeldEverywhere(segment, this.width, this.height, boundary));
+        poled.push(polesOutlined(stroke.kind, this.hasElectrodes));
       }
+    }
+    // The outlines of the electrodes, from the first pole on: before it no cell holds one.
+    let polesGroup: GPUBindGroup | undefined;
+    if (this.hasElectrodes) {
+      this.polesGroup ??= this.device.createBindGroup({
+        layout: this.kernels.paintLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
+          { binding: 1, resource: { buffer: this.env } },
+          { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
+          { binding: 3, resource: { buffer: this.ensurePoles() } },
+        ],
+      });
+      polesGroup = this.polesGroup;
     }
     for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
       const chunk = segments.slice(first, first + BRUSH_CHUNK);
@@ -1133,15 +1196,23 @@ export class Simulation implements Sim {
       chunk.forEach((_, j) => {
         const [, , w, h] = boxes[first + j] ?? [0, 0, 0, 0];
         const [, , rw, rh] = reaches[first + j] ?? [0, 0, 0, 0];
+        const dynamic = [offsets[first + j] ?? 0, j * step];
+        const searches = own[first + j] ?? true;
         pass.setPipeline(this.kernels.paint);
-        pass.setBindGroup(0, this.paintGroup, [offsets[first + j] ?? 0, j * step]);
+        pass.setBindGroup(0, this.paintGroup, dynamic);
         pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
         // Same layout: the bind group and its offsets stay. The eraser and walls load a tile of `env`; most segments
-        // need no search of their own cells.
-        // An electrode changes no byte of `shape`: the renderer reads its byte from `env` (render.wgsl poleAt).
-        if (isPole(chunk[j]?.kind ?? 'erase')) return;
-        pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], own[first + j] ?? true)));
-        pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
+        // need no search of their own cells. A pole changes no byte of `shape`: its outline lies in `poles`.
+        if (!isPole(chunk[j]?.kind ?? 'erase')) {
+          pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], searches)));
+          pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
+        }
+        // The same pass on the outlines of the electrodes: the group with `poles` in the place of `shape`.
+        if (polesGroup && poled[first + j]) {
+          pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], searches, true), true));
+          pass.setBindGroup(0, polesGroup, dynamic);
+          pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
+        }
       });
       pass.end();
       this.device.queue.submit([enc.finish()]);
@@ -1267,6 +1338,8 @@ export class Simulation implements Sim {
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
     this.hasElectrodes = false;
+    // No pole is left: the simulation holds their outlines again from the next pole on.
+    this.dropPoles();
     // The scent that the textures hold stays until the next reset.
     this.sources = false;
     this.shapeHeld = this.settings.boundary;
@@ -1321,6 +1394,12 @@ export class Simulation implements Sim {
     return new Uint8Array(await readBuffer(this.device, this.shapeBuffer));
   }
 
+  async readPoles(): Promise<Uint8Array> {
+    this.syncShape();
+    if (!this.poles) return new Uint8Array(this.width * this.height * 4);
+    return new Uint8Array(await readBuffer(this.device, this.poles));
+  }
+
   /**
    * Replaces the agent with id `index` (as readAgents() orders them), wherever the sort has put it. The id
    * stays, so ids remain unique: `a.bits` sets only the strain and the alive bit.
@@ -1368,19 +1447,22 @@ export class Simulation implements Sim {
 
   /**
    * For tests. `shape` cannot know the distances of an environment written as bytes: it is cleared, and its next use
-   * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`.
+   * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`. So with
+   * the outline distances of the electrodes, which the simulation holds while the bytes hold a pole.
    */
   writeEnv(data: Uint8Array) {
     this.changed();
     this.revision++;
     this.device.queue.writeBuffer(this.env, 0, data);
-    const enc = this.device.createCommandEncoder();
-    enc.clearBuffer(this.shapeBuffer);
-    this.device.queue.submit([enc.finish()]);
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
     this.wallOverAgents = this.walls;
     this.hasEnvironment = data.some((v) => v > 0);
     this.hasElectrodes = data.some((v, i) => i % 4 === 3 && v > 0);
+    if (!this.hasElectrodes) this.dropPoles();
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.shapeBuffer);
+    if (this.hasElectrodes) enc.clearBuffer(this.ensurePoles());
+    this.device.queue.submit([enc.finish()]);
     this.sources = data.some((v, i) => i % 4 !== 0 && v > 0);
     if (this.sources) this.scentless = false;
     this.shapeHeld = undefined;
@@ -1393,6 +1475,7 @@ export class Simulation implements Sim {
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
+    this.dropPoles();
     this.viewThird?.trail.destroy();
     this.viewThird?.scent.destroy();
     this.dropFlow();
@@ -1973,8 +2056,9 @@ class Kernels {
   private readonly saturatedPipelines: [Steering?, Steering?] = [];
   /** The diffusion passes (diffuse.wgsl), by variantKey(). */
   private readonly variants = new Map<string, GPUComputePipeline>();
-  /** The outline pass (paint.wgsl `outline`), by outlineVariant(). */
-  private readonly outlinePipelines = new Map<OutlineVariant, GPUComputePipeline>();
+  /** The outline pass (paint.wgsl `outline`), by outlineVariant(), and the same on the outlines of the electrodes. */
+  private readonly outlinePipelines = new Map<string, GPUComputePipeline>();
+  private refreshPolesPipeline?: GPUComputePipeline;
   /** The last diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
   /** The view's diffusion passes of a step that moves first (diffuse.wgsl VIEW), by variantKey(). */
@@ -2318,17 +2402,32 @@ class Kernels {
   /**
    * The outline pass of a segment (paint.wgsl `outline`, outlineVariant()), built at its first use (ADR 0049): food
    * and light take another variant than walls and the eraser, and a scene without shapes paints none at its start.
+   * `poles`: the pass on the outlines of the electrodes (POLES), which a scene without a pole never builds.
    */
-  outline(v: OutlineVariant): GPUComputePipeline {
-    let p = this.outlinePipelines.get(v);
+  outline(v: OutlineVariant, poles = false): GPUComputePipeline {
+    const key = poles ? `${v}Poles` : v;
+    let p = this.outlinePipelines.get(key);
     if (!p) {
+      const constants = poles ? { ...OUTLINE_CONSTANTS[v], POLES: 1 } : OUTLINE_CONSTANTS[v];
       p = this.device.createComputePipeline({
         layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.paintLayout] }),
-        compute: { module: this.brush, entryPoint: 'outline', constants: OUTLINE_CONSTANTS[v] },
+        compute: { module: this.brush, entryPoint: 'outline', constants },
       });
-      this.outlinePipelines.set(v, p);
+      this.outlinePipelines.set(key, p);
     }
     return p;
+  }
+
+  /**
+   * The pass that holds the outlines of the electrodes to `env` (paint.wgsl `refresh` with POLES), built at its first
+   * use: after a change of boundary in a scene with a pole.
+   */
+  refreshPoles(): GPUComputePipeline {
+    this.refreshPolesPipeline ??= this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this.brush, entryPoint: 'refresh', constants: { POLES: 1 } },
+    });
+    return this.refreshPolesPipeline;
   }
 
   private static async build(
@@ -2446,14 +2545,15 @@ const OUTLINE_CONSTANTS: Readonly<Record<OutlineVariant, Record<string, number>>
 /**
  * Which pipeline of the outline pass a segment takes (Kernels.outline): the eraser and walls with the tile of `env`
  * (paint.wgsl TILED), a wide eraser also with its core (CORE), food and light without the tile; each with the search
- * of the segment's own cells where some cell may need it (OWN_SEARCH, brush.ts ownHeldEverywhere()).
+ * of the segment's own cells where some cell may need it (OWN_SEARCH, brush.ts ownHeldEverywhere()). `poles`: on the
+ * outlines of the electrodes every stroke subtracts from a layer, so every stroke takes the tile.
  */
-function outlineVariant(segment: Stroke | undefined, own: boolean): OutlineVariant {
+function outlineVariant(segment: Stroke | undefined, own: boolean, poles = false): OutlineVariant {
   const kind = segment?.kind ?? 'food';
   const base =
     kind === 'erase' && (segment?.radius ?? 0) >= CORE_RADIUS
       ? 'core'
-      : kind === 'erase' || kind === 'wall'
+      : poles || kind === 'erase' || kind === 'wall'
         ? 'tiled'
         : 'untiled';
   return `${base}${own ? 'Own' : 'Held'}`;

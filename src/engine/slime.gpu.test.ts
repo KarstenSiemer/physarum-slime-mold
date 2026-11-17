@@ -2240,8 +2240,8 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       },
     );
 
-    // Decision 8: the film lies on the ground. A flake of food covers 95 % of its ground, a wall and a thick trail
-    // all of it, and the light and the trail of the glow lie on the ground with the film.
+    // Decision 8: the film lies on the ground. A flake of food covers 95 % of its ground, a wall, an electrode and a
+    // thick trail all of it, and the light and the trail of the glow lie on the ground with the film.
     it.each(['glow', 'gel', 'paper'] as const)(
       'draws the food, the walls, the light, the electrodes and the trail on the film (%s)',
       async (style) => {
@@ -2305,11 +2305,10 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         const added = lit.linear.map((v, k) => v + (lit.ground[k] ?? 0) - (bg[k] ?? 0)) as Rgb;
         expect(off(lit.plain, bytes(bg)), 'light').toBeGreaterThan(10);
         expect(off(lit.on, bytes(added)), 'light').toBeLessThanOrEqual(TWO);
-        // The electrode covers nine tenths of what lies below it.
+        // The electrode covers all of what lies below it (ADR 0058): the film does not show through.
         const pole = both(54, 12);
-        const below = pole.linear.map((v, k) => v + 0.1 * ((pole.ground[k] ?? 0) - (bg[k] ?? 0))) as Rgb;
         expect(off(pole.plain, bytes(bg)), 'electrode').toBeGreaterThan(40);
-        expect(off(pole.on, bytes(below)), 'electrode').toBeLessThanOrEqual(TWO);
+        expect(off(pole.on, pole.plain), 'electrode').toBeLessThanOrEqual(TWO);
         // The trail lies on the ground. Glow adds light to what the ground leaves dark, and the ink of paper takes a
         // share of the ground away, so the thin trail shows the film through it by the rule of its style.
         const thin = both(26, 37);

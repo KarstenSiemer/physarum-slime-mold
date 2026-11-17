@@ -241,8 +241,8 @@ everywhere. The slime field now also holds an amount of slime per cell, for the 
 cell under a full tube gains 1 of 4,095 per step, up to the level of its plasm. So the amount is
 high where a tube stayed, and the picture draws a wet film that keeps the shape of the tube. The
 organism leaves the coat of slime of a tube behind in the same way. An amount that grows fast is
-flat, as the stamp is: with a sum that is full after 500 steps, 97 % of the cells with slime are
-above 0.9 after 22,000 steps of the Snail maze. With the rule, 16 % are. No run changes.
+flat, as the stamp is: with a sum that is full after 500 steps, 96.5 % of the cells with slime
+are above 0.9 after 22,000 steps of the Snail maze. With the rule, 16.4 % are. No run changes.
 
 ## What is in this folder, and what you need to read
 
@@ -2085,12 +2085,12 @@ npx vitest run --project gpu src/engine/slime.gpu.test.ts
 npm run build && npx playwright test --project=e2e tests/e2e/ui.spec.ts -g "Slime tool"
 ```
 
-You must see @@UNIT@@, 126 and 1 tests pass. `slime.gpu.test.ts` holds both backends to the CPU
+You must see 86, 126 and 1 tests pass. `slime.gpu.test.ts` holds both backends to the CPU
 copy `slime-reference.ts`: the amount step by step and under the brush, the map of the film and
 its coarse map, and the picture of the film in each style.
 
 **Which amount keeps the shape of a tube?** The Snail maze with the seed 1 to step 22,000, with
-candidate amounts kept on the CPU (10 minutes). It writes each candidate as a grey picture, and
+candidate amounts kept on the CPU (1 minute). It writes each candidate as a grey picture, and
 the table of the ADR to `test-results/pictures/amount-snail-maze-22000.txt`:
 
 ```bash
@@ -2153,8 +2153,8 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for 
 npm run build && npx playwright test --project=pictures tests/pictures/slime.spec.ts
 ```
 
-Result: no scene changes a byte. With the rule of the app @@RULE@@ of the cells with slime are
-above 0.9 after 22,000 steps of the Snail maze; with a sum that is full after 500 steps @@SUM@@
+Result: no scene changes a byte. With the rule of the app 16.4 % of the cells with slime are
+above 0.9 after 22,000 steps of the Snail maze; with a sum that is full after 500 steps 96.5 %
 are. The amount costs 0.01 to 0.37 ms of a step on WebGPU. Where the film covers a picture of
 2,560 × 1,600 pixels it costs 2 ms of a draw on WebGPU and 4 ms on WebGL2, and the first frame
 after a step 0.6 to 1.1 ms more for the maps of 1.5 million cells. Each of the 222 wrong rules
@@ -2172,7 +2172,7 @@ fails at least one test. ADR 0057 has the tables. The records are in `logs/engin
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 378 files, 7.9 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 399 files, 8.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2206,6 +2206,7 @@ asks for the new digest.
 | `logs/engine/mark/`                                  | the runs of part 18 (ADR 0054): the analysis of the mark and its time, the campaign with the app, the runs past the fade of the mark, the digests and the wrong rules FL1 to FL10                                               | 2026-11-17, M3 Pro                                    |
 | `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
 | `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
+| `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -2238,7 +2239,7 @@ Notes on the record:
 
 | File                      | What it is                                                                                        |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| `register.mjs`            | lets Node run the TypeScript files                                                                |
+| `register.mjs`            | lets Node run the TypeScript files, and read the shaders that the engine imports as text          |
 | `logs.tar.gz`, `logs.ts`  | the logs of the runs as one archive, and the script that unpacks and packs it                     |
 | `prototype/world.ts`      | the grid of a scene as the app paints it, distances along the maze, pictures                      |
 | `prototype/jones.ts`      | a CPU copy of the agent model (not bit-equal to the GPU)                                          |
@@ -2262,7 +2263,7 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 417 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
+| `engine/mutate.ts`        | 607 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
 | `engine/variant.ts`       | other rules in the passes for one run, for the measurements of ADR 0053, ADR 0054 and ADR 0056    |
 | `engine/y-maze.*`         | the Y-maze of Reid et al. 2012: its layout, its runs, and `measure-y-maze.ts` for its tables      |

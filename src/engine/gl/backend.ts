@@ -482,8 +482,9 @@ export class WebGl2Backend implements Backend<GlSim> {
       trailLevels,
       // Without the picture of the tubes no frame reads the stream: the trail stands in.
       stream: stream ?? trail,
-      // The cells of the simulation, for the electrodes (ADR 0047): only the program with ENV reads them.
-      env: sim.envTexture,
+      // The outline distances of the electrodes (ADR 0058): only the program with ENV reads them, and only while a
+      // pole may be painted. Without a pole the simulation holds none: those of walls and food stand in.
+      poles: sim.poleTexture ?? sim.shapeTexture,
     };
     const scentLevels = coarse?.texture ?? viewScent;
     // The maps of the film of the slime: up to 2 cells per pixel no frame reads the coarse one, and the map of the

@@ -201,6 +201,11 @@ export interface Programs {
   box: (covered: boolean, view: boolean) => Program;
   paint: Program;
   shape: Program;
+  /**
+   * The outline pass on the outlines of the electrodes (POLES in shape.frag), compiled at its first use: a scene
+   * without a pole never draws it.
+   */
+  poleShape: () => Program;
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
   render: [Program, Program];
   /**
@@ -313,6 +318,7 @@ export function compile(gl: GL): Programs {
   let slimeAmount: Program | undefined;
   let slimeBrush: Program | undefined;
   let slimeBrushAmount: Program | undefined;
+  let poleShape: Program | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
@@ -386,6 +392,7 @@ export function compile(gl: GL): Programs {
     },
     paint: sim(brushGlsl + paintFrag),
     shape: sim(brushGlsl + shapeFrag),
+    poleShape: () => (poleShape ??= sim('#define POLES 1\n' + brushGlsl + shapeFrag)),
     counts: sim(countsFrag),
     fill: plain(fillFrag),
     order: { keys: orderPass(0), level: orderPass(1), gather: orderPass(2) },
