@@ -1,5 +1,5 @@
-// A brush segment for paint.frag and shape.frag, after common.glsl. Mirrors nearestPoint, segmentDistance and
-// strokeDistance in ../../shaders/paint.wgsl.
+// A brush segment for paint.frag, shape.frag and slime-paint.frag, after common.glsl. Mirrors nearestPoint,
+// segmentDistance and strokeDistance in ../../shaders/brush.wgsl.
 
 uniform vec2 from;
 uniform vec2 to;

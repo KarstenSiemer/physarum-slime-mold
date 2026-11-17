@@ -52,8 +52,10 @@ function replaySlime(list: readonly EnvEdit[], w: number, h: number, boundary: B
   return stamps;
 }
 
+/** The bytes of an array of bytes or of stamps, without a copy. */
+const bytesOf = (a: Uint8Array | Uint32Array) => Buffer.from(a.buffer, a.byteOffset, a.byteLength);
 const same = (a: Uint8Array | Uint32Array, b: Uint8Array | Uint32Array) =>
-  a.length === b.length && Buffer.compare(Buffer.from(a.buffer), Buffer.from(b.buffer)) === 0;
+  a.length === b.length && Buffer.compare(bytesOf(a), bytesOf(b)) === 0;
 const BOUNDARIES = ['dish', 'box', 'wrap'] as const;
 /** The kinds of the random strokes: food, the poles, light, walls and erases, as often as before ADR 0055. */
 const KINDS: readonly EnvTool[] = [
