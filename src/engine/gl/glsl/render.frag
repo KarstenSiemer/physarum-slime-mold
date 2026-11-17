@@ -230,10 +230,23 @@ vec4 agentsAt(vec2 p) {
   return moved + strainMix(trailAt(ivec2(floor(p)))) * stayed;
 }
 
-#if ENV
-// ---- Food, light and walls (see render.wgsl) ----
+// ---- Shared by the food, the walls and the film of the slime (see render.wgsl) ----
 
 const vec3 SUN = vec3(-0.45, -0.6, 0.65) / sqrt(0.985); // toward the light, as in gel()
+
+// Quadratic B-spline weights and their derivatives (see render.wgsl).
+vec3 spline(float u) { return vec3(0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)); }
+vec3 splineSlope(float u) { return vec3(u - 0.5, -2.0 * u, u + 0.5); }
+
+float lattice(ivec2 c) {
+  uint x = uint(c.x) * 1664525u + uint(c.y) * 1013904223u;
+  x = (x ^ (x >> 16u)) * 0x7feb352du;
+  x = (x ^ (x >> 15u)) * 0x846ca68bu;
+  return float((x ^ (x >> 16u)) >> 8u) * (1.0 / 16777216.0);
+}
+
+#if ENV
+// ---- Food, light and walls (see render.wgsl) ----
 
 struct Env {
   float wall;      // the spline, for the light
@@ -248,10 +261,6 @@ struct Env {
   vec3 weightX;
   vec3 weightY;
 };
-
-// Quadratic B-spline weights and their derivatives (see render.wgsl).
-vec3 spline(float u) { return vec3(0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)); }
-vec3 splineSlope(float u) { return vec3(u - 0.5, -2.0 * u, u + 0.5); }
 
 // The columns and rows of the 3 × 3 cells around c: wrapped once on the periodic grid, else as they are (see
 // shapeCells in render.wgsl).
@@ -352,13 +361,6 @@ vec3 rimNormal(float sd, vec2 grad, float width, float steep) {
   float t = clamp(sd / width, 0.0, 1.0);
   float rise = 6.0 * t * (1.0 - t) / width;
   return normalize(vec3(-grad * rise * steep, 1.0));
-}
-
-float lattice(ivec2 c) {
-  uint x = uint(c.x) * 1664525u + uint(c.y) * 1013904223u;
-  x = (x ^ (x >> 16u)) * 0x7feb352du;
-  x = (x ^ (x >> 15u)) * 0x846ca68bu;
-  return float((x ^ (x >> 16u)) >> 8u) * (1.0 / 16777216.0);
 }
 
 float valueNoise(vec2 q, ivec2 period) {
@@ -517,115 +519,150 @@ vec3 electrodes(vec3 c, vec2 p) {
 #endif
 
 #ifdef SLIME
-// ---- The slime (SLIME; see render.wgsl, ADR 0055) ----
-uniform highp usampler2D stamps; // the slime field (slime.frag); read for the slime only
+// ---- The slime (SLIME; see render.wgsl, ADR 0055 and ADR 0057) ----
+// The slime as a wet film on the ground. slime-film.frag writes the thickness of the film of every cell into a map,
+// and slime-down.frag the mean of that map for a view that is zoomed out; this pass reads the 3 × 3 texels of its map
+// around a pixel as a smooth surface, and lights it.
+uniform sampler2D film;       // the film of the slime, one texel per cell (slime-film.frag)
+uniform sampler2D filmLevels; // the film on a coarser map (slime-down.frag), zoomed out
 
-// The strength of the slime of a cell that holds the stamp `held`, 0 to 1 (slimeOf in render.wgsl).
-float slimeOf(uint held) {
-  uint age = V.slime.x + 1u - held;
-  if (held == 0u || age >= V.slime.y) return 0.0;
-  return 1.0 - float(age) / float(V.slime.y);
-}
+const float SLIME_WAVES = 12.0;  // cells per step of the lattice of the waves of the film
+const float SLIME_BEADS = 7.0;   // cells per step of the lattice of the beads
+const float SLIME_RIPPLE = 0.16; // how much the waves change the thickness of the film, as a share of it
 
-// Whether grid cell c lies in the arena (slimeArena in render.wgsl).
-bool slimeArena(ivec2 c) {
-  if (V.boundary == 0u) return true;
-  ivec2 s = gridSize();
-  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) return false;
-  return V.boundary != 2u || distance(vec2(c) + 0.5, 0.5 * vec2(s)) <= DISH_FILL * 0.5 * float(min(s.x, s.y));
-}
+struct Film {
+  float h; // the thickness of the film at a point, 0 to 1
+  vec2 g;  // its gradient, per cell
+};
 
-#if ENV
-// Which of the 4 cells around p hold no wall: 1 open, 0 wall, in the order of the blend (unwalled in render.wgsl).
-vec4 unwalled(vec2 p, vec4 cells[9]) {
-  ivec2 o = ivec2(floor(p - 0.5)) - ivec2(floor(p)) + 1;
-  return vec4(lessThan(vec4(cells[o.y * 3 + o.x].r, cells[o.y * 3 + o.x + 1].r, cells[(o.y + 1) * 3 + o.x].r,
-                            cells[(o.y + 1) * 3 + o.x + 1].r), vec4(0.5)));
-}
-#endif
-
-// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear over the open ones, with their weights
-// scaled up to 1 (slimeBilinear in render.wgsl). `open`: from unwalled().
-float slimeBilinear(vec2 p, vec4 open) {
-  vec2 q = p - 0.5;
-  ivec2 i = ivec2(floor(q));
-  vec2 f = q - floor(q);
-  ivec2 s = gridSize();
-  ivec2 x = ivec2(i.x, i.x + 1);
-  ivec2 y = ivec2(i.y, i.y + 1);
-  if (V.boundary == 0u) {
-    // One wrap for the 4 cells, as in bilinear().
-    ivec2 w = wrapCell(i, s);
-    x = ivec2(w.x, w.x == s.x - 1 ? 0 : w.x + 1);
-    y = ivec2(w.y, w.y == s.y - 1 ? 0 : w.y + 1);
-  }
-  float sum = 0.0;
-  float total = 0.0;
-  for (int dy = 0; dy < 2; dy++) {
-    for (int dx = 0; dx < 2; dx++) {
-      ivec2 c = ivec2(x[dx], y[dy]);
-      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) continue;
-      float w = (dx == 1 ? f.x : 1.0 - f.x) * (dy == 1 ? f.y : 1.0 - f.y);
-      sum += w * slimeOf(texelFetch(stamps, c, 0).r);
-      total += w;
-    }
-  }
-  return total > 0.0 ? sum / total : 0.0;
-}
-
-// Zoomed out: the mean of the strength over the square of the pixel, with the weights of trailArea(); above 2 cells per
-// pixel the cell in the middle of a texel stands for the texel (slimeArea in render.wgsl).
-float slimeArea(vec2 p) {
-  ivec2 s = gridSize();
+// The film at p: a quadratic B-spline over the 3 × 3 texels around p of the map of level V.fx.w, with its gradient
+// (filmAt in render.wgsl).
+Film filmAt(vec2 p) {
   int k = int(V.fx.w);
-  ivec2 n = (s + ((1 << k) - 1)) >> k; // levelSize(k), and the grid itself at level 0
-  vec2 ratio = vec2(n) / vec2(s);
-  vec2 half_ = 0.5 * V.scale * ratio;
-  vec2 lo = p * ratio - half_;
-  vec2 hi = p * ratio + half_;
-  ivec2 i = ivec2(floor(lo));
-  ivec3 xs = ivec3(i.x, i.x + 1, i.x + 2);
-  ivec3 ys = ivec3(i.y, i.y + 1, i.y + 2);
+  ivec2 n = k > 0 ? levelSize(k) : gridSize();
+  vec2 ratio = vec2(n) / vec2(gridSize()); // texels per cell
+  vec2 q = p * ratio - 0.5;
+  ivec2 c = ivec2(floor(q + 0.5));
+  vec2 u = q - vec2(c);
+  vec3 wx = spline(u.x);
+  vec3 wy = spline(u.y);
+  vec3 sx = splineSlope(u.x);
+  vec3 sy = splineSlope(u.y);
+  ivec3 xs = clamp(ivec3(c.x - 1, c.x, c.x + 1), ivec3(0), ivec3(n.x - 1));
+  ivec3 ys = clamp(ivec3(c.y - 1, c.y, c.y + 1), ivec3(0), ivec3(n.y - 1));
   if (V.boundary == 0u) {
-    // One wrap for the 3 × 3 texels, as in trailArea().
-    ivec2 w = wrapCell(i, n);
-    int x1 = w.x == n.x - 1 ? 0 : w.x + 1;
-    int y1 = w.y == n.y - 1 ? 0 : w.y + 1;
-    xs = ivec3(w.x, x1, x1 == n.x - 1 ? 0 : x1 + 1);
-    ys = ivec3(w.y, y1, y1 == n.y - 1 ? 0 : y1 + 1);
+    // One wrap for the 3 × 3 texels.
+    ivec2 w = wrapCell(c, n);
+    xs = ivec3(w.x == 0 ? n.x - 1 : w.x - 1, w.x, w.x == n.x - 1 ? 0 : w.x + 1);
+    ys = ivec3(w.y == 0 ? n.y - 1 : w.y - 1, w.y, w.y == n.y - 1 ? 0 : w.y + 1);
   }
-  // The share of each column and row of texels that lies under the pixel.
-  vec3 at = vec3(0.0, 1.0, 2.0);
-  vec3 wx = max(min(vec3(hi.x), float(i.x) + at + 1.0) - max(vec3(lo.x), float(i.x) + at), vec3(0.0));
-  vec3 wy = max(min(vec3(hi.y), float(i.y) + at + 1.0) - max(vec3(lo.y), float(i.y) + at), vec3(0.0));
-  // The cell in the middle of each texel, in whole numbers; with no division on a side that 2^k divides.
-  ivec3 cx = xs;
-  ivec3 cy = ys;
-  if (k > 0) {
-    int middle = 1 << (k - 1);
-    if ((n.x << k) == s.x) cx = (xs << k) + middle;
-    else cx = ((2 * xs + 1) * s.x) / (2 * n.x);
-    if ((n.y << k) == s.y) cy = (ys << k) + middle;
-    else cy = ((2 * ys + 1) * s.y) / (2 * n.y);
-  }
-  float sum = 0.0;
+  Film f = Film(0.0, vec2(0.0));
   for (int j = 0; j < 3; j++) {
-    // A row that the pixel does not reach, or outside a closed arena: nothing to read.
-    if (wy[j] <= 0.0 || ys[j] < 0 || ys[j] >= n.y) continue;
-    float row = 0.0;
-    for (int c = 0; c < 3; c++) {
-      if (wx[c] <= 0.0 || xs[c] < 0 || xs[c] >= n.x) continue;
-      row += wx[c] * slimeOf(texelFetch(stamps, ivec2(cx[c], cy[j]), 0).r);
+    for (int i = 0; i < 3; i++) {
+      ivec2 t = ivec2(xs[i], ys[j]);
+      float h = k == 0 ? texelFetch(film, t, 0).r : texelFetch(filmLevels, t, 0).r;
+      f.h += wx[i] * wy[j] * h;
+      f.g += vec2(sx[i] * wy[j], wx[i] * sy[j]) * h;
     }
-    sum += wy[j] * row;
   }
-  return sum / ((wx.x + wx.y + wx.z) * (wy.x + wy.y + wy.z));
+  f.g *= ratio;
+  return f;
 }
 
-// The ground `bg` at p with the slime on it (slimed in render.wgsl). `open`: as for slimeBilinear().
-vec3 slimed(vec3 bg, vec2 p, vec4 open) {
-  float strength = V.scale <= 1.0 ? slimeBilinear(p, open) : slimeArea(p);
-  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);
+// The steps of the lattice of a pattern along each side of the grid, about one per `step` cells: whole numbers,
+// computed in whole numbers (patternSteps in render.wgsl).
+vec2 patternSteps(float step_) {
+  int n = int(step_);
+  return vec2(max((2 * gridSize() + n) / (2 * n), ivec2(1)));
+}
+
+// Value noise that repeats every `period` lattice steps, with its gradient (noiseSlope in render.wgsl).
+vec3 noiseSlope(vec2 x, ivec2 period) {
+  ivec2 i = ivec2(floor(x));
+  vec2 f = x - floor(x);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  ivec2 i0 = wrapCell(i, period);
+  ivec2 i1 = wrapCell(i + 1, period);
+  float a = lattice(i0);
+  float b = lattice(ivec2(i1.x, i0.y));
+  float c = lattice(ivec2(i0.x, i1.y));
+  float d = lattice(i1);
+  float k1 = b - a;
+  float k2 = c - a;
+  float k3 = a - b - c + d;
+  return vec3(a + k1 * u.x + k2 * u.y + k3 * u.x * u.y, du.x * (k1 + k3 * u.y), du.y * (k2 + k3 * u.x));
+}
+
+// The waves of the film, a pattern that is fixed in the grid (slimeWaves in render.wgsl).
+vec3 slimeWaves(vec2 p) {
+  vec2 n = patternSteps(SLIME_WAVES);
+  vec2 scale = n / vec2(gridSize()); // lattice steps per cell
+  vec2 x = p * scale;
+  vec3 a = noiseSlope(x, ivec2(n));
+  vec3 b = noiseSlope(2.0 * x + vec2(19.7, 7.3), 2 * ivec2(n));
+  return vec3((a.x + 0.25 * b.x) / 1.25, (a.yz + 0.5 * b.yz) * scale / 1.25);
+}
+
+// The beads on the film: small round drops at places that are fixed in the grid (slimeBeads in render.wgsl).
+vec3 slimeBeads(vec2 p) {
+  vec2 n = patternSteps(SLIME_BEADS);
+  vec2 scale = n / vec2(gridSize()); // lattice steps per cell
+  vec2 x = p * scale;
+  ivec2 i = ivec2(floor(x));
+  vec3 best = vec3(0.0);
+  for (int dy = -1; dy <= 1; dy++) {
+    for (int dx = -1; dx <= 1; dx++) {
+      ivec2 k = i + ivec2(dx, dy);
+      ivec2 w = wrapCell(k, ivec2(n));
+      if (lattice(w + ivec2(7, 211)) > 0.25) continue;
+      // The place of the bead in its step of the lattice, and its radius: 0.1 to 0.32 steps.
+      vec2 o = vec2(lattice(w), lattice(w + ivec2(57, 113)));
+      float r = 0.1 + 0.22 * lattice(w + ivec2(191, 31));
+      vec2 d = x - (vec2(k) + o);
+      float m = 1.0 - dot(d, d) / (r * r);
+      if (m > best.x) best = vec3(m, -2.0 * d * scale / (r * r));
+    }
+  }
+  if (best.x <= 0.0) return vec3(0.0);
+  return vec3(best.x * best.x, 2.0 * best.x * best.yz);
+}
+
+// The light of the lamp on a wet surface with the normal n, less what a flat film shows (wetShine in render.wgsl).
+vec2 wetShine(vec3 n) {
+  vec3 half_ = normalize(SUN + vec3(0.0, 0.0, 1.0));
+  float shine = max(dot(n, half_), 0.0);
+  return vec2(pow(shine, 110.0), pow(shine, 10.0) - pow(half_.z, 10.0));
+}
+
+// The ground `bg` at p with the film of the slime on it (slimed in render.wgsl).
+vec3 slimed(vec3 bg, vec2 p) {
+  Film f = filmAt(p);
+  if (f.h <= 0.0) return bg;
+  float fine = clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
+  float cov = smoothstep(0.0, 0.05, f.h);
+  vec3 waves = slimeWaves(p);
+  float wave = 1.0 + SLIME_RIPPLE * (2.0 * waves.x - 1.0);
+  float h = f.h * wave;
+  vec2 g = f.g * wave + f.h * SLIME_RIPPLE * 2.0 * waves.yz * fine;
+  vec2 shine = wetShine(normalize(vec3(-V.slimeLight.z * g, 1.0)));
+  float spark = shine.x;
+  float bead = V.slimeLight.w * fine * smoothstep(0.15, 0.45, f.h);
+  if (bead > 0.0) {
+    vec3 beads = slimeBeads(p);
+    vec2 glint = wetShine(normalize(vec3(-V.slimeLight.z * (g + bead * beads.yz), 1.0)));
+    spark = max(shine.x, glint.x) + 0.25 * max(glint.y - shine.y, 0.0);
+  }
+  float depth = pow(clamp(h, 0.0, 1.0), 1.6);
+  if (V.style == 2u) {
+    float edge = smoothstep(0.0, 0.04, f.h) * (1.0 - smoothstep(0.05, 0.2, f.h));
+    vec3 stain = mix(bg, V.slimeFx.rgb, V.slimeFx.a * depth) *
+                 (1.0 - 0.04 * edge + V.slimeLight.y * cov * clamp(shine.y, -0.4, 0.1));
+    return mix(stain, vec3(1.0), min(V.slimeLight.x * spark * cov, 1.0));
+  }
+  float wide = V.slimeLight.y * cov * clamp(shine.y, -0.15, 0.5);
+  return max(bg + V.slimeFx.rgb * (V.slimeFx.a * depth + wide), vec3(0.0)) +
+         vec3(min(V.slimeLight.x * spark * cov, 0.8));
 }
 #endif
 
@@ -861,12 +898,8 @@ vec3 scene(vec2 p, vec2 s) {
   vec4 halo = texture(bloom, p / s);
   vec3 base = V.background.rgb;
 #ifdef SLIME
-  // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).
-  vec4 open = vec4(1.0);
-#if ENV
-  if (near) open = unwalled(p, cells);
-#endif
-  base = slimed(base, p, open);
+  // The film of the slime lies on the ground: the flake of food, the trail and all else lie on it.
+  base = slimed(base, p);
 #endif
   Flake f = Flake(vec3(0.0), vec3(0.0), 0.0, 0.0);
 #if ENV

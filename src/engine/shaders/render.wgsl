@@ -5,7 +5,7 @@
 override ENV: bool = true;
 // The scent view (ADR 0009, amendment 2026-11-11), compiled in only while it is on (render.ts).
 override SCENT: bool = false;
-// The layer of the slime (ADR 0055, decision 8), compiled in only while a frame draws it (render.ts).
+// The film of the slime (ADR 0055, decision 8; ADR 0057), compiled in only while a frame draws it (render.ts).
 override SLIME: bool = false;
 
 struct View {
@@ -27,7 +27,8 @@ struct View {
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
   slime: vec4u,       // the slime: the steps that ran so far, the life time of the slime in steps, 2 unused
-  slimeFx: vec4f,     // the slime: the colour of its layer, linear RGB, and the full strength of the layer
+  slimeFx: vec4f,     // the slime: the colour of its body, linear RGB, and how much of it full slime shows
+  slimeLight: vec4f,  // the slime: its highlight, its wide light, the height of its relief, the height of its beads
 }
 
 // The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
@@ -44,7 +45,10 @@ const DISH_FILL = 0.945;
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
-@group(0) @binding(14) var<storage, read> stamps: array<u32>; // the slime field (slime.wgsl); read for the slime only
+@group(0) @binding(14) var<storage, read> stamps: array<u32>; // the stamps of the slime field (slime.wgsl); read by `slimeFilm` only
+@group(0) @binding(18) var<storage, read> amounts: array<u32>; // the amounts of slime (amount.wgsl); read by `slimeFilm` only
+@group(0) @binding(15) var film: texture_2d<f32>; // the film of the slime, one texel per cell (written by `slimeFilm`)
+@group(0) @binding(17) var filmLevels: texture_2d<f32>; // the film on a coarser map (slimeDown), zoomed out
 // The outline distances of the electrodes (paint.wgsl POLES, ADR 0058); read for the electrodes only.
 @group(0) @binding(16) var<storage, read> poles: array<u32>;
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
@@ -724,9 +728,19 @@ fn wallBeside(p: vec2f, cells: array<u32, 9>) -> bool {
 }
 
 // ---- The slime (SLIME) --------------------------------------------------------------------------------
-// The slime of the model as a pale layer on the ground (ADR 0055, decision 8). The flake of food, the trail, the
-// light, the walls and the electrodes lie on it. Display only. src/engine/slime-reference.ts holds the same rule
-// (slimeStrength()), and SLIME_LOOK in render.ts the colour and the full strength of each style.
+// The slime of the model as a wet film on the ground (ADR 0055, decision 8; ADR 0057). The film is thick where a tube
+// stayed and thin where the colony only passed, so it keeps the shape of the tube that made it. The flake of food,
+// the trail, the light, the walls and the electrodes lie on it. Display only. src/engine/slime-reference.ts holds the
+// same rules (filmCells(), filmAt(), slimeColour()), and SLIME_LOOK in render.ts the numbers of each style.
+//
+// Three steps. `slimeFilm` writes the thickness of the film of every cell into a map, once for each state of the
+// simulation. `slimeDown` writes the mean of that map over 2^k cells per side for a view that is zoomed out. The
+// render pass reads the 3 × 3 texels of its map around a pixel as a smooth surface, and lights it.
+
+const SLIME_FULL = 4095.0;  // the full amount of slime of a cell (slime.ts SLIME_FULL)
+const SLIME_WAVES = 12.0;   // cells per step of the lattice of the waves of the film
+const SLIME_BEADS = 7.0;    // cells per step of the lattice of the beads
+const SLIME_RIPPLE = 0.16;  // how much the waves change the thickness of the film, as a share of it
 
 // The strength of the slime of a cell that holds the stamp `held`, 0 to 1. The age of a stamp is the steps that ran so
 // far plus 1 less the stamp, in unsigned integers as in the passes of the simulation (slime.wgsl). The strength is 1 at
@@ -745,107 +759,224 @@ fn slimeArena(c: vec2i) -> bool {
   return V.boundary != 2u || distance(vec2f(c) + 0.5, 0.5 * vec2f(s)) <= DISH_FILL * 0.5 * f32(min(s.x, s.y));
 }
 
-// Which of the 4 cells around p hold no wall: 1 open, 0 wall, in the order of the blend (`cells`: shapeCells of the
-// cell under p, which holds those 4). No wall holds slime. The scent view has the same rule (openCells()); this one is
-// the layer's own, so that each of the two parts of the picture stands without the other.
-fn unwalled(p: vec2f, cells: array<u32, 9>) -> vec4f {
-  let o = vec2i(floor(p - 0.5)) - vec2i(floor(p)) + 1;
-  let wall = vec4u(cells[o.y * 3 + o.x], cells[o.y * 3 + o.x + 1], cells[(o.y + 1) * 3 + o.x],
-                   cells[(o.y + 1) * 3 + o.x + 1]) & vec4u(0x80u);
-  return select(vec4f(1.0), vec4f(0.0), wall != vec4u(0u));
+// The thickness of the slime of the cell with the index i, 0 to 1: its amount as a share of the full amount, times the
+// strength of the age of its stamp.
+fn filmCell(i: i32) -> f32 {
+  return slimeOf(stamps[i]) * f32(amounts[i]) / SLIME_FULL;
 }
 
-// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear over the open ones. A cell is open when it
-// lies in the arena and holds no wall (`open`, from unwalled()): the cells that can hold slime. The weights of the
-// open cells are scaled up to 1, as trailBesideWalls() does for the trail. So the layer goes on up to a wall and to
-// the edge of the arena, which are drawn over it; with their cells in the blend it fell towards them, in steps of
-// whole cells along a slanted wall and along the rim of the dish. The stamps are never blended: between a new stamp
-// and no stamp lies no old one.
-fn slimeBilinear(p: vec2f, open: vec4f) -> f32 {
-  let q = p - 0.5;
-  let i = vec2i(floor(q));
-  let f = q - floor(q);
+// The film of cell c, which may hold a wall or lie outside the arena: the mean of the thickness of the open cells among
+// the 3 × 3 around it, with the weights 1, 2, 1 along each axis. A cell is open when it lies in the arena and holds no
+// wall that the picture draws. So a wall and a cell outside the arena take the film of the open cells beside them, and
+// the film goes on up to a wall and to the rim of the dish, which are drawn over it. Without the mean the film had a
+// tooth for each cell along a slanted wall: the cells beside a wall hold less trail than their neighbours.
+//
+// A cell with no open cell among its 3 × 3 takes the mean over the 5 × 5 in the same way, with the weights 1, 2, 3, 2,
+// 1: the smooth outline of a wall runs through the cells of the wall, and a pixel beside it reads the cells two deep
+// (besideWall() does the same for the gel). 0 without an open cell among the 5 × 5.
+fn filmOf(c: vec2i) -> f32 {
   let s = size();
-  var x = vec2i(i.x, i.x + 1);
-  var y = vec2i(i.y, i.y + 1);
-  if (V.boundary == 0u) {
-    // One wrap for the 4 cells, as in bilinear().
-    let w = wrapCell(i, s);
-    x = vec2i(w.x, select(w.x + 1, 0, w.x == s.x - 1));
-    y = vec2i(w.y, select(w.y + 1, 0, w.y == s.y - 1));
+  let walls = ENV && V.frame.z != 0u;
+  for (var r = 1; r <= 2; r++) {
+    var sum = 0.0;
+    var total = 0.0;
+    for (var j = -r; j <= r; j++) {
+      for (var i = -r; i <= r; i++) {
+        var k = c + vec2i(i, j);
+        if (V.boundary == 0u) { k = wrapCell(k, s); }
+        if (!slimeArena(k)) { continue; }
+        let at = k.y * s.x + k.x;
+        if (walls && (shape[at] & 0x80u) != 0u) { continue; }
+        let w = f32((r + 1 - abs(i)) * (r + 1 - abs(j)));
+        sum += w * filmCell(at);
+        total += w;
+      }
+    }
+    if (total > 0.0) { return sum / total; }
   }
+  return 0.0;
+}
+
+// The map of the film, one texel per cell and one fragment per texel (render.ts fills it once for each state that a
+// frame draws).
+@fragment
+fn slimeFilm(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  return vec4f(filmOf(vec2i(floor(frag.xy))), 0.0, 0.0, 1.0);
+}
+
+// The film on the coarse map of level V.fx.w (1 and up), one texel per fragment: the mean over the cells that the texel
+// covers, each by the share it covers, as trailDown has it for the trail. A cell outside the arena that no open cell
+// touches holds no film.
+@fragment
+fn slimeDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  let s = size();
+  let span = vec2f(s) / vec2f(levelSize(u32(V.fx.w))); // cells per texel
+  let lo = floor(frag.xy) * span;
+  let hi = lo + span;
   var sum = 0.0;
-  var total = 0.0;
-  for (var dy = 0; dy < 2; dy++) {
-    for (var dx = 0; dx < 2; dx++) {
-      let c = vec2i(x[dx], y[dy]);
-      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) { continue; }
-      let w = select(1.0 - f.x, f.x, dx == 1) * select(1.0 - f.y, f.y, dy == 1);
-      sum += w * slimeOf(stamps[c.y * s.x + c.x]);
-      total += w;
+  for (var y = i32(floor(lo.y)); f32(y) < hi.y && y < s.y; y++) {
+    let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
+    for (var x = i32(floor(lo.x)); f32(x) < hi.x && x < s.x; x++) {
+      let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
+      sum += w * textureLoad(film, vec2i(x, y), 0).r;
     }
   }
-  return select(0.0, sum / total, total > 0.0);
+  return vec4f(sum / (span.x * span.y), 0.0, 0.0, 1.0);
 }
 
-// Zoomed out: the mean of the strength over the square of the pixel, V.scale cells wide, with the weights of
-// trailArea(): the 3 × 3 texels of the map of level V.fx.w under the pixel, each by the share that lies under it. Up to
-// 2 cells per pixel a texel is a cell (level 0), and this is the exact mean. The slime has no coarser map: above 2
-// cells per pixel the cell in the middle of a texel stands for the texel. Those cells are fixed in the grid and the
-// weights change smoothly with p, so the layer does not shimmer when the view moves. A wall and a cell outside the
-// arena count with a strength of 0, as they count with a trail of 0 in trailArea(): a pixel holds a cell or more here.
-fn slimeArea(p: vec2f) -> f32 {
-  let s = size();
+struct Film {
+  h: f32,   // the thickness of the film at a point, 0 to 1
+  g: vec2f, // its gradient, per cell
+}
+
+// The film at p: a quadratic B-spline over the 3 × 3 texels around p of the map of level V.fx.w (0 the map of the
+// cells, up to 2 cells per pixel; above, the coarse map whose texels are 1/2 to 1 pixel wide), with its gradient from
+// the same texels (envAt() has the weights). The spline has no crease, so the light on the film has no seam at the
+// edge of a cell. The texels are fixed in the grid, so the film does not shimmer when the view moves. On the periodic
+// grid the map wraps; in a closed arena the texels at its edge go on beyond it.
+fn filmAt(p: vec2f) -> Film {
   let k = u32(V.fx.w);
-  let n = (s + i32((1u << k) - 1u)) >> vec2u(k); // levelSize(k), and the grid itself at level 0
+  let s = size();
+  var n = s;
+  if (k > 0u) { n = levelSize(k); }
   let ratio = vec2f(n) / vec2f(s); // texels per cell
-  let half = 0.5 * V.scale * ratio;
-  let lo = p * ratio - half;
-  let hi = p * ratio + half;
-  let i = vec2i(floor(lo));
-  var xs = vec3i(i.x, i.x + 1, i.x + 2);
-  var ys = vec3i(i.y, i.y + 1, i.y + 2);
+  let q = p * ratio - 0.5;
+  let c = vec2i(floor(q + 0.5));
+  let u = q - vec2f(c);
+  let wx = spline(u.x);
+  let wy = spline(u.y);
+  let sx = splineSlope(u.x);
+  let sy = splineSlope(u.y);
+  var xs = clamp(vec3i(c.x - 1, c.x, c.x + 1), vec3i(0), vec3i(n.x - 1));
+  var ys = clamp(vec3i(c.y - 1, c.y, c.y + 1), vec3i(0), vec3i(n.y - 1));
   if (V.boundary == 0u) {
-    // One wrap for the 3 × 3 texels, as in trailArea().
-    let w = wrapCell(i, n);
-    let x1 = select(w.x + 1, 0, w.x == n.x - 1);
-    let y1 = select(w.y + 1, 0, w.y == n.y - 1);
-    xs = vec3i(w.x, x1, select(x1 + 1, 0, x1 == n.x - 1));
-    ys = vec3i(w.y, y1, select(y1 + 1, 0, y1 == n.y - 1));
+    // One wrap for the 3 × 3 texels, as in shapeCells().
+    let w = wrapCell(c, n);
+    xs = vec3i(select(w.x - 1, n.x - 1, w.x == 0), w.x, select(w.x + 1, 0, w.x == n.x - 1));
+    ys = vec3i(select(w.y - 1, n.y - 1, w.y == 0), w.y, select(w.y + 1, 0, w.y == n.y - 1));
   }
-  // The share of each column and row of texels that lies under the pixel.
-  let at = vec3f(0.0, 1.0, 2.0);
-  let wx = max(min(vec3f(hi.x), f32(i.x) + at + 1.0) - max(vec3f(lo.x), f32(i.x) + at), vec3f(0.0));
-  let wy = max(min(vec3f(hi.y), f32(i.y) + at + 1.0) - max(vec3f(lo.y), f32(i.y) + at), vec3f(0.0));
-  // The cell in the middle of each texel, in whole numbers: a texel is s / n cells wide. At level 0 it is the cell.
-  // On a side that 2^k divides the texel t starts at the cell t · 2^k, with no division, which is slow (ADR 0028).
-  var cx = xs;
-  var cy = ys;
-  if (k > 0u) {
-    let middle = i32(1u << (k - 1u));
-    if ((n.x << k) == s.x) { cx = (xs << vec3u(k)) + middle; } else { cx = ((2 * xs + 1) * s.x) / (2 * n.x); }
-    if ((n.y << k) == s.y) { cy = (ys << vec3u(k)) + middle; } else { cy = ((2 * ys + 1) * s.y) / (2 * n.y); }
-  }
-  var sum = 0.0;
+  var f: Film;
   for (var j = 0; j < 3; j++) {
-    // A row that the pixel does not reach, or outside a closed arena: nothing to read.
-    if (wy[j] <= 0.0 || ys[j] < 0 || ys[j] >= n.y) { continue; }
-    var row = 0.0;
-    for (var c = 0; c < 3; c++) {
-      if (wx[c] <= 0.0 || xs[c] < 0 || xs[c] >= n.x) { continue; }
-      row += wx[c] * slimeOf(stamps[cy[j] * s.x + cx[c]]);
+    for (var i = 0; i < 3; i++) {
+      var h: f32;
+      if (k == 0u) {
+        h = textureLoad(film, vec2i(xs[i], ys[j]), 0).r;
+      } else {
+        h = textureLoad(filmLevels, vec2i(xs[i], ys[j]), 0).r;
+      }
+      f.h += wx[i] * wy[j] * h;
+      f.g += vec2f(sx[i] * wy[j], wx[i] * sy[j]) * h;
     }
-    sum += wy[j] * row;
   }
-  return sum / ((wx.x + wx.y + wx.z) * (wy.x + wy.y + wy.z));
+  f.g *= ratio;
+  return f;
 }
 
-// The ground `bg` at p with the slime on it: the colour of the layer over the ground, as strong as the slime there.
-// `open`: as for slimeBilinear().
-fn slimed(bg: vec3f, p: vec2f, open: vec4f) -> vec3f {
-  var strength: f32;
-  if (V.scale <= 1.0) { strength = slimeBilinear(p, open); } else { strength = slimeArea(p); }
-  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);
+// The steps of the lattice of a pattern along each side of the grid, about one per `step` cells: whole numbers, so
+// the pattern repeats with a periodic grid and shows no seam at its edge. The side over `step`, rounded to the nearest
+// whole number, and up for a side half way between two. In whole numbers: `round` takes the even number at a half in
+// WGSL and either one in GLSL, so the two backends drew other waves on a grid of 30 cells.
+fn patternSteps(step: f32) -> vec2f {
+  let n = i32(step);
+  return vec2f(max((2 * size() + n) / (2 * n), vec2i(1)));
+}
+
+// Value noise that repeats every `period` lattice steps, with its gradient: (the value, 0 to 1; its change per
+// lattice step along x and along y). The curve between two lattice points starts and ends flat in its slope and in
+// its bend, so the gradient has no crease.
+fn noiseSlope(x: vec2f, period: vec2i) -> vec3f {
+  let i = vec2i(floor(x));
+  let f = x - floor(x);
+  let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  let i0 = wrapCell(i, period);
+  let i1 = wrapCell(i + 1, period);
+  let a = lattice(i0);
+  let b = lattice(vec2i(i1.x, i0.y));
+  let c = lattice(vec2i(i0.x, i1.y));
+  let d = lattice(i1);
+  let k1 = b - a;
+  let k2 = c - a;
+  let k3 = a - b - c + d;
+  return vec3f(a + k1 * u.x + k2 * u.y + k3 * u.x * u.y, du.x * (k1 + k3 * u.y), du.y * (k2 + k3 * u.x));
+}
+
+// The waves of the film, a pattern that is fixed in the grid: wide soft noise, and a quarter of a noise of twice the
+// frequency. (the value, 0 to 1; its gradient per cell).
+fn slimeWaves(p: vec2f) -> vec3f {
+  let n = patternSteps(SLIME_WAVES);
+  let scale = n / vec2f(size()); // lattice steps per cell
+  let x = p * scale;
+  let a = noiseSlope(x, vec2i(n));
+  let b = noiseSlope(2.0 * x + vec2f(19.7, 7.3), 2 * vec2i(n));
+  return vec3f((a.x + 0.25 * b.x) / 1.25, (a.yz + 0.5 * b.yz) * scale / 1.25);
+}
+
+// The beads on the film: small round drops at places that are fixed in the grid, one for about four steps of their
+// lattice. (the height of the bead at p, 0 to 1; its gradient per cell). 0 where no bead lies.
+fn slimeBeads(p: vec2f) -> vec3f {
+  let n = patternSteps(SLIME_BEADS);
+  let scale = n / vec2f(size()); // lattice steps per cell
+  let x = p * scale;
+  let i = vec2i(floor(x));
+  var best = vec3f(0.0);
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let k = i + vec2i(dx, dy);
+      let w = wrapCell(k, vec2i(n));
+      if (lattice(w + vec2i(7, 211)) > 0.25) { continue; }
+      // The place of the bead in its step of the lattice, and its radius: 0.1 to 0.32 steps.
+      let o = vec2f(lattice(w), lattice(w + vec2i(57, 113)));
+      let r = 0.1 + 0.22 * lattice(w + vec2i(191, 31));
+      let d = x - (vec2f(k) + o);
+      let m = 1.0 - dot(d, d) / (r * r);
+      if (m > best.x) { best = vec3f(m, -2.0 * d * scale / (r * r)); }
+    }
+  }
+  if (best.x <= 0.0) { return vec3f(0.0); }
+  return vec3f(best.x * best.x, 2.0 * best.x * best.yz);
+}
+
+// The light of the lamp on a wet surface with the normal n, less what a flat film shows: (a small bright highlight; a
+// wide weak light, below 0 on a slope that faces away from the lamp).
+fn wetShine(n: vec3f) -> vec2f {
+  let half = normalize(SUN + vec3f(0.0, 0.0, 1.0));
+  let shine = max(dot(n, half), 0.0);
+  return vec2f(pow(shine, 110.0), pow(shine, 10.0) - pow(half.z, 10.0));
+}
+
+// The ground `bg` at p with the film of the slime on it. Thin slime is clear and thick slime is milky, so the body of
+// the film shows where a tube stayed. The surface is the film with its waves: the lamp of the walls and the gel puts
+// a small highlight and a wide weak light on it. Beads sit on thick slime and only catch the light. On paper the film
+// is a wet stain: it mixes its colour into the paper, it is darker on the side away from the lamp, and its edge has a
+// tide line. Detail that is smaller than a pixel fades out from 1 cell per pixel on, and is gone at 1.5.
+fn slimed(bg: vec3f, p: vec2f) -> vec3f {
+  let f = filmAt(p);
+  if (f.h <= 0.0) { return bg; }
+  let fine = clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
+  let cov = smoothstep(0.0, 0.05, f.h);
+  let waves = slimeWaves(p);
+  let wave = 1.0 + SLIME_RIPPLE * (2.0 * waves.x - 1.0);
+  let h = f.h * wave;
+  let g = f.g * wave + f.h * SLIME_RIPPLE * 2.0 * waves.yz * fine;
+  let shine = wetShine(normalize(vec3f(-V.slimeLight.z * g, 1.0)));
+  var spark = shine.x;
+  let bead = V.slimeLight.w * fine * smoothstep(0.15, 0.45, f.h);
+  if (bead > 0.0) {
+    let beads = slimeBeads(p);
+    let glint = wetShine(normalize(vec3f(-V.slimeLight.z * (g + bead * beads.yz), 1.0)));
+    spark = max(shine.x, glint.x) + 0.25 * max(glint.y - shine.y, 0.0);
+  }
+  let depth = pow(clamp(h, 0.0, 1.0), 1.6);
+  if (V.style == 2u) {
+    let edge = smoothstep(0.0, 0.04, f.h) * (1.0 - smoothstep(0.05, 0.2, f.h));
+    let stain = mix(bg, V.slimeFx.rgb, V.slimeFx.a * depth) *
+                (1.0 - 0.04 * edge + V.slimeLight.y * cov * clamp(shine.y, -0.4, 0.1));
+    return mix(stain, vec3f(1.0), min(V.slimeLight.x * spark * cov, 1.0));
+  }
+  let wide = V.slimeLight.y * cov * clamp(shine.y, -0.15, 0.5);
+  return max(bg + V.slimeFx.rgb * (V.slimeFx.a * depth + wide), vec3f(0.0)) +
+         vec3f(min(V.slimeLight.x * spark * cov, 0.8));
 }
 
 // The arena at grid position p: the styled trail on its substrate, then light and walls on top.
@@ -873,12 +1004,8 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   v *= 1.0 + STREAM_GAIN * grain;
   let halo = textureSampleLevel(bloom, bloomSampler, p / s, 0.0);
   var base = V.background.rgb;
-  // The slime tints the ground: the flake of food, the trail and all else lie on it.
-  if (SLIME) {
-    var open = vec4f(1.0);
-    if (ENV && near) { open = unwalled(p, cells); }
-    base = slimed(base, p, open);
-  }
+  // The film of the slime lies on the ground: the flake of food, the trail and all else lie on it.
+  if (SLIME) { base = slimed(base, p); }
   var e: Env;
   var f: Flake;
   if (ENV && near) {

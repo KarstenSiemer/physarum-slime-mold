@@ -522,7 +522,7 @@
       <!-- How long the slime stays where the colony was. At 0 the model has no slime, and the switch below goes. -->
       <Slider spec={globalSpec.slimeLife} bind:value={s.slimeLife} id="slime-life" />
       {#if slimy}
-        <!-- The layer of the slime changes the view only (decision 8). -->
+        <!-- The film of the slime changes the view only (decision 8). -->
         <div class="check">
           <label>
             <input

@@ -249,7 +249,7 @@ export function setScene(p: Preset) {
   s.showScent = app.settings.showScent;
   // So is the picture of the tubes (ADR 0034).
   s.showTubes = app.settings.showTubes;
-  // And the layer of the slime (ADR 0055, decision 8).
+  // And the film of the slime (ADR 0055, decision 8).
   s.showSlime = app.settings.showSlime;
   // And the colour of the gel: the style is the scene's, the colour of its gel is the user's (ADR 0009).
   s.gelColor = app.settings.gelColor;

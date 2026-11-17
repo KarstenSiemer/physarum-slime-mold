@@ -33,7 +33,7 @@ const runRows = (lines: string[]) =>
 
 describe('the record of the Electrode tool (ADR 0047)', () => {
   it('holds the 13 logs, and the 5 of ADR 0058', () => {
-    expect(readArchive(here('./logs.tar.gz'))).toHaveLength(18);
+    expect(readArchive(here('./logs.tar.gz'))).toHaveLength(22);
   });
 
   it('gives every row of the table of the ADR and of README.md from the logs', () => {
@@ -116,17 +116,23 @@ describe('the record of the look of the electrodes (ADR 0058)', () => {
     expect(wall[1]?.split('|')[1]).toBe('0.98');
   }, 120_000);
 
-  it('changes one grid of 2,916 cases with the 4 B per cell of the outlines of the poles', async () => {
+  // One grid when ADR 0058 was built. Since ADR 0057 the slime counts 7 B more per cell, and the fit stands at other
+  // limits.
+  it('changes four grids of 2,916 cases with the 4 B per cell of the outlines of the poles', async () => {
     const lines = await fitReport();
     const text = [ADR, './README.md'].map((file) => readFileSync(here(file), 'utf8').replace(/\s+/g, ' '));
-    expect(lines[0]).toBe('2916 cases: 1 with another grid');
-    expect(lines).toHaveLength(2);
-    // The one case, as the ADR and README.md name it.
-    expect(lines[1]).toBe(
-      'cyclones on WebGL2 without float blending, a memory hint of 2 GB, a canvas of 390 × 844: 1024 before, 768 now',
+    expect(lines[0]).toBe('2916 cases: 4 with another grid');
+    expect(lines).toHaveLength(5);
+    // The four cases, as the ADR and README.md name them.
+    const cases = ['no memory hint', 'a memory hint of 4 GB'].flatMap((hint) =>
+      ['three-strains', 'two-strains'].map(
+        (scene) => `${scene} on WebGL2 without float blending, ${hint}, a canvas of 1000 × 1000: 1536 before, 1024 now`,
+      ),
     );
+    expect(lines.slice(1)).toEqual(cases);
     for (const t of text) {
       expect(t).toContain('2,916 cases');
+      expect(t).toContain('from 1536 to 1024');
       expect(t).toContain('from 1024 to 768');
     }
   }, 120_000);

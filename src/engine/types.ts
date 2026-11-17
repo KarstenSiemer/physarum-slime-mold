@@ -167,6 +167,12 @@ export interface Sim {
    * zeros in the Jones model, which has no slime.
    */
   readSlime(): Promise<Uint32Array>;
+  /**
+   * For tests and measurements: the amount of slime of every cell (ADR 0057), one value per cell, rows from y = 0: a
+   * whole number from 0 to SLIME_FULL (slime.ts). The picture alone reads it. Only zeros in the Jones model, which has
+   * no slime.
+   */
+  readSlimeAmount(): Promise<Uint32Array>;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */
@@ -254,7 +260,7 @@ export interface Backend<S extends Sim = Sim> {
   createSim(settings: Settings, width: number, height: number, agents: number, start?: number): Promise<S>;
   /**
    * Draws a frame; `measure` lets auto levels sample the trail. False while a part of the picture is still being
-   * built, as the pipelines of the scent view or of the layer of the slime at their first frames: the same call then
+   * built, as the pipelines of the scent view or of the film of the slime at their first frames: the same call then
    * draws another picture later.
    */
   draw(sim: S, settings: Settings, view: View, measure: boolean): boolean;

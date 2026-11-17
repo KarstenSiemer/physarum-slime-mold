@@ -242,14 +242,20 @@ node --import ./research/flow/register.mjs research/electrode/fit.ts
 
 The second command fits the default settings and the 26 scenes with the 4 B and without them, on three backends, six
 hints of the memory of the device and six canvases: 2,916 cases. It runs the fit of the engine itself on the CPU
-backend of the engine tests. One grid changes, and the command must print:
+backend of the engine tests. Four grids change, and the command must print:
 
 ```text
-2916 cases: 1 with another grid
-cyclones on WebGL2 without float blending, a memory hint of 2 GB, a canvas of 390 × 844: 1024 before, 768 now
+2916 cases: 4 with another grid
+three-strains on WebGL2 without float blending, no memory hint, a canvas of 1000 × 1000: 1536 before, 1024 now
+two-strains on WebGL2 without float blending, no memory hint, a canvas of 1000 × 1000: 1536 before, 1024 now
+three-strains on WebGL2 without float blending, a memory hint of 4 GB, a canvas of 1000 × 1000: 1536 before, 1024 now
+two-strains on WebGL2 without float blending, a memory hint of 4 GB, a canvas of 1000 × 1000: 1536 before, 1024 now
 ```
 
-So the scene Cyclones goes from 1024 to 768 cells on the long side there, and every other case keeps its grid.
+So these two scenes go from 1536 to 1024 cells on the long side there, and every other case keeps its grid. When
+ADR 0058 was built, one other grid changed: Cyclones on WebGL2 without float blending, with a hint of 2 GB on a
+canvas of 390 × 844 pixels, went from 1024 to 768 cells. The film of the slime (ADR 0057) counts 7 B more per cell
+since then, so the fit stands at other limits.
 
 **The tests.** The CPU copies in Node, then both backends against them in a headless browser:
 
@@ -294,7 +300,7 @@ case `strokes` has the shot `seam`: thin poles over a wide pole.
 npm run build && npx playwright test --project=pictures tests/pictures/electrodes.spec.ts
 ```
 
-**The times**, which nobody measured yet. Nothing else may use the GPU while they run. `time.gpu.test.ts` draws
+**The times**, measured on 2026-11-17 (ADR 0058, "The times"). Nothing else may use the GPU while they run. `time.gpu.test.ts` draws
 three states (the scene Electrotaxis, the default settings with wide poles, and the default settings without a pole)
 in two styles and two zooms, 21 × 50 draws each, and paints a pole, an erase and a wall 21 × 32 times each. It uses
 only calls that the engine had before ADR 0058. So the same file measures `main`: copy it into a checkout of `main`
@@ -321,3 +327,5 @@ simulation, which builds the pass).
 | `logs/digest-0058-3000-branch.jsonl` | the same after 3,000 steps for the eight scenes with the flow         |
 | `logs/digest-0058-main.jsonl`        | the digests of `main` after 500 steps: the record of ADR 0055         |
 | `logs/digest-0058-3000-main.jsonl`   | the same after 3,000 steps                                            |
+| `logs/time-0058-branch-r*.jsonl`     | the times of a draw and of a stroke at `9c01431`, two rounds          |
+| `logs/time-0058-main-r*.jsonl`       | the same on `main` at `a6ffe64`                                       |

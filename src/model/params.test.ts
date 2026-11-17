@@ -151,9 +151,9 @@ describe('sanitize (untrusted input)', () => {
     for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showTubes: v }).showTubes).toBe(true);
   });
 
-  // So is the layer of the slime (ADR 0055, decision 8): on for a new scene and for a link from before it, in both
+  // So is the film of the slime (ADR 0055, decision 8): on for a new scene and for a link from before it, in both
   // models. The switch changes no other setting.
-  it('keeps the layer of the slime on unless a link says false', () => {
+  it('keeps the film of the slime on unless a link says false', () => {
     expect(defaultSettings().showSlime).toBe(true);
     expect(sanitize({}).showSlime).toBe(true);
     expect(sanitize({ showSlime: false }).showSlime).toBe(false);
@@ -425,7 +425,7 @@ describe('Slime life time (ADR 0055)', () => {
     // The help says what 0 means, and what the time does with the flow.
     expect(globalSpec.slimeLife.help).toContain('At 0 the model has no slime.');
     // The picture draws the slime (decision 8), and still no rule reads it.
-    expect(globalSpec.slimeLife.help).toContain('as a pale layer on the ground');
+    expect(globalSpec.slimeLife.help).toContain('as a wet film on the ground');
     expect(globalSpec.slimeLife.help).toContain('No rule reads the slime yet');
     expect(globalSpec.slimeLife.help).toContain('With Flow in the tubes');
   });

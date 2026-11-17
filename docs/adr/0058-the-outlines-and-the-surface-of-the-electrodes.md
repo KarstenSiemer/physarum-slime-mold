@@ -1,8 +1,8 @@
 # 0058: The electrodes get outlines from their strokes, and a surface
 
 - Status: accepted (decisions of the session "slime look" and of its two helpers of 2026-11-17, under the owner's
-  delegation of 2026-11-12), built 2026-11-17. The look of a pole is the owner's to accept: the owner saw the
-  pictures of the first build on 2026-11-17. The session "slime look" records the answer of the owner here.
+  delegation of 2026-11-12), built 2026-11-17. The owner accepted the look of a pole on 2026-11-17, on the pictures
+  of the second build (translated from German): "the new gel cut examples look great. Do it like this, please."
 - Date: 2026-11-17
 - Extends [ADR 0047](0047-an-electrode-tool-and-the-scene-electrotaxis.md): its decision 8, the view of a pole,
   changes. Its sentence "It costs no memory" holds for the simulation and no longer for the view.
@@ -148,7 +148,7 @@ Option 2. Who decided what, each on 2026-11-17 under the owner's delegation of 2
 
 ## Results
 
-All on an M3 Pro (Metal), 2026-11-17. No time was measured: the session "slime look" ran other work on the GPU.
+All on an M3 Pro (Metal), 2026-11-17. The times were measured after the build, with nothing else on the GPU.
 
 **No run changes.** The digests of the agents, the trail, the scent, the environment, the flow memory and the
 pressure (`research/flow/engine/digest.gpu.test.ts`) equal those of `main` at `a6ffe64`: 54 of 54 runs after 500
@@ -159,9 +159,12 @@ build, equal it line for line.
 
 **The fit of the grid.** `research/electrode/fit.ts` fits the default settings and the 26 scenes with the 4 B and
 without them, on three backends (WebGPU, WebGL2, WebGL2 without float blending), six hints of the memory of the
-device (none, 0.5, 1, 2, 4 and 8 GB) and six canvases: 2,916 cases. One grid changes: the scene Cyclones on WebGL2
-without float blending, with a hint of 2 GB on a canvas of 390 × 844 pixels, goes from 1024 to 768 cells on the long
-side. Every other case keeps its grid.
+device (none, 0.5, 1, 2, 4 and 8 GB) and six canvases: 2,916 cases. One grid changed when this record was built:
+the scene Cyclones on WebGL2 without float blending, with a hint of 2 GB on a canvas of 390 × 844 pixels, went from
+1024 to 768 cells on the long side. Since ADR 0057 the slime counts 11 B per cell in place of 4, and the 4 B of the
+poles change four other cases: Three strains and Two strains on WebGL2 without float blending, on a canvas of
+1,000 × 1,000 pixels with no hint and with a hint of 4 GB, go from 1536 to 1024 cells. Every other case keeps its
+grid.
 
 **Tests**, on both backends unless a backend is named:
 
@@ -197,7 +200,7 @@ side. Every other case keeps its grid.
 
 Each fails at least one test, 1 to 34 of them. Seven fail one test only: `EL53`, `EL55`, `EL57`, `EL61`, `EL65`,
 `EL66` and `EL73`. The same run took `EL1` to `EL21` of ADR 0047 and `SL109` of ADR 0055 again, whose code this
-record changed: each still fails tests. The list has 504 wrong rules.
+record changed: each still fails tests. The list had 504 wrong rules then, and has 607 with those of ADR 0057.
 
 **Checks**: `npm run lint`, `npm run check`, `RESEARCH=full npm test`, `npm run test:gpu`, `npm run build` and the
 e2e tests pass on the code of the pull request; its description has the counts.
@@ -215,10 +218,33 @@ e2e tests pass on the code of the pull request; its description has the counts.
 - The outline pass has a rule that walls and food do not share (decision 15). The CPU model states both rules.
 - `docs/design.md`, section 3 and section 5, and `docs/model.md`, section 6.7, describe the buffer and the stud.
 
+**The times.** The branch at `9c01431` against `main` at `a6ffe64`, two rounds in turns, in milliseconds. A draw
+is the median of 21 batches of 50 draws on a canvas of 2,560 × 1,600 pixels, over the glow and paper styles, fitted
+and zoomed in 8 times. A stroke is the median of 21 batches of 32 calls of `Sim.paint()`:
+
+| Case                               | WebGPU                      | WebGL2                      |
+| ---------------------------------- | --------------------------- | --------------------------- |
+| A draw of the scene Electrotaxis   | 1.43 to 1.71 → 1.31 to 1.61 | 4.25 to 4.38 → 4.27 to 4.45 |
+| A draw with wide poles             | 2.13 to 2.65 → 1.97 to 2.70 | 5.35 to 6.26 → 5.11 to 6.02 |
+| A draw without a pole              | 1.40 to 1.93 → 1.40 to 1.90 | 4.33 to 4.74 → 4.34 to 4.70 |
+| A dab or a line of a pole          | 0.036 to 0.040 → 0.040      | 0.125 → 0.131 to 0.133      |
+| An erase beside poles              | 0.038 → 0.041               | 0.131 → 0.211               |
+| A wall beside poles                | 0.426 → 0.423               | 1.44 → 1.50                 |
+| An erase without a pole            | 0.040 → 0.039               | 0.127 → 0.149               |
+| A wall without a pole              | 0.367 → 0.420               | 1.41 → 1.44                 |
+| The first pole of a new simulation | 0.30 → 0.95                 | 3.9 → 9.2                   |
+
+- **A draw with poles costs no more than before**: between 0.34 ms less and 0.20 ms more over the 16 cases. A
+  draw without a pole costs what it cost, within 0.05 ms.
+- **A stroke of a pole costs 0.002 to 0.008 ms more.** An erase beside poles runs the outline pass twice: 0.003 ms
+  more on WebGPU, and 0.08 ms more on WebGL2, where its two rounds gave 0.17 and 0.25 ms.
+- **The first pole of a simulation** makes the buffer and builds the pass: 0.65 ms more on WebGPU and 5.3 ms more
+  on WebGL2, once.
+- A wall without a pole runs no pass on the buffer of the poles. Its 0.05 ms more on WebGPU are not resolved: the
+  same stroke beside poles costs 0.43 ms on `main`.
+
 ## Open points
 
-- **Not measured: the time of a draw with poles, and the time of a stroke of a pole.** With them: an erase and a
-  wall in a simulation with a pole, and the first pole. `research/electrode/README.md` has the commands.
 - **Thin strokes and small dabs.** A stroke of the thinnest brush (0.75 cells) has knots, and a dab of it on a
   corner of four cells is a small cross. A dab of 1.5 cells is drawn up to 0.16 cells smaller than its brush. It
   is the same for walls and food since ADR 0009: the spline of the view smooths, so a cell that is barely inside

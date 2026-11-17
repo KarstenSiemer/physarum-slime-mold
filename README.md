@@ -22,9 +22,11 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
   The Maze then keeps one tube along a short route. The picture draws every tube as wide as its
   flow memory says: a tube that keeps much flow stays thick, the others get thin and faint. Small
   grains move back and forth in each tube with the flow.
-- See the **slime** that a colony leaves behind: a pale layer on the ground shows where the colony
-  was, and it fades as the slime gets older. A brush coats ground with slime. The slime changes
-  no run yet ([ADR 0055](docs/adr/0055-the-slime-field.md)).
+- See the **slime** that a colony leaves behind: a wet film on the ground shows where the colony
+  was. The film is thick where a tube stayed, so you still see the shape of a tube after it is
+  gone, and it gets thinner as the slime gets older. A brush coats ground with slime. The slime
+  changes no run yet ([ADR 0055](docs/adr/0055-the-slime-field.md),
+  [ADR 0057](docs/adr/0057-the-film-of-the-slime.md)).
 - Read what each scene shows: where its settings come from, what to watch, and why it uses them.
 - Switch looks (glow, gel relief, paper, agents), pan and zoom, save a PNG, share the settings,
   the scene and its food, light and walls as a link.

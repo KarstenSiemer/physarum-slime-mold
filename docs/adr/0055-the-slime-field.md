@@ -8,6 +8,9 @@
   is a setting now.
 - Extended by [ADR 0056](0056-the-avoidance-of-slime-waits-for-the-growth-front.md) (2026-11-17): the measurement in
   the Y-maze, and the decision that no rule reads the slime before stage 4.
+- Extended by [ADR 0057](0057-the-film-of-the-slime.md) (2026-11-17): the picture of the slime (decision 8) is a wet
+  film that is thick where a tube stayed, from an amount of slime per cell, and the slime counts 11 B per cell
+  (decision 9).
 - In short: the facts are in
   [`docs/knowledge-base/slime-mazes-and-the-front.md`](../knowledge-base/slime-mazes-and-the-front.md), "Slime", and
   the rule is in `docs/model.md`.

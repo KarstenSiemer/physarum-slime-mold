@@ -24,6 +24,7 @@ import flowWgsl from './shaders/flow.wgsl?raw';
 import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
+import amountWgsl from './shaders/amount.wgsl?raw';
 import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
 import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
@@ -222,6 +223,11 @@ export class Simulation implements Sim {
    * (sizing.ts slimeBytesPerCell()).
    */
   private slime?: GPUBuffer | undefined;
+  /**
+   * The amount of slime of every cell (ADR 0057; amount.wgsl), 4 B each: made and freed with the stamps (ensureSlime(),
+   * dropSlime()), and counted with them. Only the picture reads it.
+   */
+  private amount?: GPUBuffer | undefined;
   /**
    * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
    * was last empty (a new field, a reset, a clear of the environment). Only then does an erase or a wall clear stamps
@@ -714,6 +720,7 @@ export class Simulation implements Sim {
     if (this.flow) this.clearFlow(enc, this.flow);
     // A reset clears every stamp (ADR 0055, decision 3).
     if (this.slime) enc.clearBuffer(this.slime);
+    if (this.amount) enc.clearBuffer(this.amount);
     this.stamped = false;
     const pass = enc.beginComputePass();
     const init = this.starts().init;
@@ -950,19 +957,22 @@ export class Simulation implements Sim {
   }
 
   /**
-   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it). A new buffer holds zeros: no
-   * cell has a stamp.
+   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): the stamps, and the amounts
+   * with them. New buffers hold zeros: no cell has a stamp, and no cell has slime.
    */
-  private ensureSlime(): GPUBuffer {
-    this.slime ??= this.device.createBuffer({
-      size: this.width * this.height * 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-    });
-    return this.slime;
+  private ensureSlime(): { stamps: GPUBuffer; amounts: GPUBuffer } {
+    const make = () =>
+      this.device.createBuffer({
+        size: this.width * this.height * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+    this.slime ??= make();
+    this.amount ??= make();
+    return { stamps: this.slime, amounts: this.amount };
   }
 
   /**
-   * For the renderer: the slime field, which the picture reads for the layer of the slime (render.wgsl `stamps`), or
+   * For the renderer: the slime field, which the picture reads for the film of the slime (render.wgsl `stamps`), or
    * undefined while the simulation holds none: in the Jones model, and after a switch to the extended model until the
    * first step or stroke that writes a stamp. No cell has a stamp then.
    */
@@ -970,11 +980,21 @@ export class Simulation implements Sim {
     return this.slime;
   }
 
+  /**
+   * For the renderer: the amount of slime of every cell (ADR 0057), which the picture reads beside the stamps, or
+   * undefined while the simulation holds no slime field.
+   */
+  get slimeAmount(): GPUBuffer | undefined {
+    return this.amount;
+  }
+
   /** Frees the slime field, and every bind group that holds it. */
   private dropSlime() {
     if (!this.slime) return;
     this.slime.destroy();
     this.slime = undefined;
+    this.amount?.destroy();
+    this.amount = undefined;
     this.stamped = false;
     for (const key of [...this.bindCache.keys()]) if (key.startsWith('slime')) this.bindCache.delete(key);
   }
@@ -987,6 +1007,15 @@ export class Simulation implements Sim {
   async readSlime(): Promise<Uint32Array> {
     if (!this.slime) return new Uint32Array(this.width * this.height);
     return new Uint32Array(await readBuffer(this.device, this.slime));
+  }
+
+  /**
+   * For tests and measurements: the amount of slime of every cell as the field holds it (ADR 0057), one value per
+   * cell, rows from y = 0: 0 to SLIME_FULL (slime.ts). Only zeros in the Jones model, which has no slime.
+   */
+  async readSlimeAmount(): Promise<Uint32Array> {
+    if (!this.amount) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.amount));
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -1258,13 +1287,15 @@ export class Simulation implements Sim {
    * boundary and the brush slot by dynamic offset, `env` to read, and the field. dropSlime() frees it with the field.
    */
   private slimeBrushGroup(layout: GPUBindGroupLayout): GPUBindGroup {
+    const field = this.ensureSlime();
     const group = this.device.createBindGroup({
       layout,
       entries: [
         { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
         { binding: 1, resource: { buffer: this.env } },
         { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
-        { binding: 3, resource: { buffer: this.ensureSlime() } },
+        { binding: 3, resource: { buffer: field.stamps } },
+        { binding: 4, resource: { buffer: field.amounts } },
       ],
     });
     this.bindCache.set('slimeBrush', group);
@@ -1301,6 +1332,7 @@ export class Simulation implements Sim {
     // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
     const stamps = this.slime;
     if (stamps) enc.clearBuffer(stamps);
+    if (this.amount) enc.clearBuffer(this.amount);
     this.stamped = false;
     this.device.queue.submit([enc.finish()]);
     [this.walls, this.wallOverAgents] = [false, false];
@@ -1631,7 +1663,9 @@ export class Simulation implements Sim {
     this.stamped = true;
     const stamp = this.kernels.slime();
     pass.setPipeline(stamp);
-    pass.setBindGroup(0, this.bind(`slime${trail}`, stamp, [this.params, this.trailViews[trail], this.ensureSlime()]));
+    const field = this.ensureSlime();
+    const resources = [this.params, this.trailViews[trail], field.stamps, field.amounts];
+    pass.setBindGroup(0, this.bind(`slime${trail}`, stamp, resources));
     pass.dispatchWorkgroups(Math.ceil(this.width / SLIME_GROUP), Math.ceil(this.height / SLIME_GROUP));
   }
 
@@ -2110,7 +2144,10 @@ class Kernels {
   slime(): GPUComputePipeline {
     this.slimePipeline ??= this.device.createComputePipeline({
       layout: 'auto',
-      compute: { module: this.device.createShaderModule({ code: common + slimeWgsl }), entryPoint: 'stamp' },
+      compute: {
+        module: this.device.createShaderModule({ code: common + amountWgsl + slimeWgsl }),
+        entryPoint: 'stamp',
+      },
     });
     return this.slimePipeline;
   }
@@ -2130,12 +2167,13 @@ class Kernels {
           { binding: 1, visibility: C, buffer: { type: 'read-only-storage' } },
           { binding: 2, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
           { binding: 3, visibility: C, buffer: { type: 'storage' } },
+          { binding: 4, visibility: C, buffer: { type: 'storage' } },
         ],
       });
       const pipeline = this.device.createComputePipeline({
         layout: this.device.createPipelineLayout({ bindGroupLayouts: [layout] }),
         compute: {
-          module: this.device.createShaderModule({ code: common + brushWgsl + slimePaintWgsl }),
+          module: this.device.createShaderModule({ code: common + brushWgsl + amountWgsl + slimePaintWgsl }),
           entryPoint: 'paintSlime',
         },
       });

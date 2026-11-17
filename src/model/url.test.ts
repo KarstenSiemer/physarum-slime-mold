@@ -23,7 +23,7 @@ describe('URL settings', () => {
     Object.assign(s, { model: 'extended', coveredFood: true, coveredFoodFactor: 0.01, trailSaturation: 40 });
     s.showScent = true; // a setting of the look, as the style: the link shows what the sender sees
     s.showTubes = false; // so is the picture of the tubes (ADR 0034)
-    s.showSlime = false; // and the layer of the slime (ADR 0055)
+    s.showSlime = false; // and the film of the slime (ADR 0055)
     s.gelColor = 'strong'; // and the colour of the gel (ADR 0009)
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);

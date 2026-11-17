@@ -67,6 +67,7 @@ import histogramWgsl from './shaders/histogram.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
+import amountWgsl from './shaders/amount.wgsl?raw';
 import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
 import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
@@ -152,8 +153,9 @@ describe('WGSL', () => {
       diffuse: common + diffuseWgsl,
       // The brush on the environment and the brush on the slime field share the segment of brush.wgsl (ADR 0055).
       paint: common + brushWgsl + paintWgsl,
-      slime: common + slimeWgsl,
-      slimePaint: common + brushWgsl + slimePaintWgsl,
+      // The passes of the slime field come with the amount of slime (amount.wgsl, ADR 0057), as sim.ts builds them.
+      slime: common + amountWgsl + slimeWgsl,
+      slimePaint: common + brushWgsl + amountWgsl + slimePaintWgsl,
       sort: common + sortWgsl,
       walls: common + wallsWgsl,
       render: renderWgsl,

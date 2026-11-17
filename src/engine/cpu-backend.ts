@@ -6,7 +6,7 @@ import type { AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { NO_SITES, type FlowSites } from './sites';
 import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
-import { slimeModel } from './slime';
+import { slimeModel, slimeSteps } from './slime';
 import { slimePaint } from './slime-reference';
 import { changesSlime, isPole, paintsEnv, type Backend, type Sim, type Stroke } from './types';
 
@@ -25,6 +25,8 @@ export class CpuSim implements Sim {
    * colony.
    */
   slime: Uint32Array | undefined;
+  /** The amount of slime of every cell (ADR 0057), held with the stamps. */
+  amount: Uint32Array | undefined;
 
   constructor(
     private settings: Settings,
@@ -39,13 +41,14 @@ export class CpuSim implements Sim {
   update(s: Settings) {
     this.settings = s;
     // The Jones model has no slime: a switch to it frees the field with its stamps.
-    if (!slimeModel(s)) this.slime = undefined;
+    if (!slimeModel(s)) [this.slime, this.amount] = [undefined, undefined];
   }
   reset() {
     this.revision++;
     this.step = 0;
-    // A reset clears every stamp.
+    // A reset clears every stamp, and the amounts with them.
     this.slime?.fill(0);
+    this.amount?.fill(0);
     this.calls.push('reset');
   }
   /** The agent tools of the steps that ran, in order (the start layout 'food' places its colonies with one). */
@@ -80,14 +83,20 @@ export class CpuSim implements Sim {
     if (!slimeModel(this.settings) || !changesSlime(s.kind)) return;
     if (s.kind === 'slime') this.slime ??= new Uint32Array(this.width * this.height);
     if (!this.slime) return;
+    this.amount ??= new Uint32Array(this.width * this.height);
     const { width, height, env } = this;
-    slimePaint({ width, height, boundary: this.settings.boundary, env }, this.settings, this.step, this.slime, s);
+    const grid = { width, height, boundary: this.settings.boundary, env };
+    slimePaint(grid, this.settings, this.step, this.slime, s, undefined, {
+      amounts: this.amount,
+      life: slimeSteps(this.settings),
+    });
   }
   clearEnvironment() {
     this.revision++;
     this.calls.push('clear');
     this.env.fill(0);
     this.slime?.fill(0);
+    this.amount?.fill(0);
     this.hasEnvironment = false;
     this.hasElectrodes = false;
   }
@@ -104,6 +113,9 @@ export class CpuSim implements Sim {
   }
   readSlime() {
     return Promise.resolve(this.slime?.slice() ?? new Uint32Array(this.width * this.height));
+  }
+  readSlimeAmount() {
+    return Promise.resolve(this.amount?.slice() ?? new Uint32Array(this.width * this.height));
   }
   writeFlow() {
     // nothing to write

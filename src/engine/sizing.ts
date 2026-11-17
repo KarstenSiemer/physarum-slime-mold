@@ -158,10 +158,17 @@ export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>, map = 0) 
   flowOn(s) ? TUBES_BYTES_PER_CELL + map : 0;
 
 /**
- * More bytes per cell for the slime field (ADR 0055, decision 9): the stamp of each cell, 4 B (sim.ts `slime`, a
- * buffer; gl/sim.ts `slime`, a target of unsigned integers). Both backends hold the same.
+ * More bytes per cell for the slime field and its picture (ADR 0055, decision 9; ADR 0057). Both backends hold the
+ * same.
+ * - The stamp of each cell, 4 B (sim.ts `slime`, a buffer; gl/sim.ts `slime`, a target of unsigned integers).
+ * - The amount of slime of each cell, 4 B (sim.ts `amount`, a buffer; gl/sim.ts `amount`, two targets of 2 B, because
+ *   its pass reads the amounts of before a step).
+ * - The maps of the film of the renderer: 2 B per cell, and 2 B per texel of the coarse map for a view zoomed out, a
+ *   quarter of a texel per cell (render.ts, gl/backend.ts). The user turns Show slime on or zooms out without a new
+ *   grid, so the fit holds both maps from the start, as it holds the coarse maps of the trail and of the scent.
+ * That is 10.5 B, counted as 11.
  */
-export const SLIME_BYTES_PER_CELL = 4;
+export const SLIME_BYTES_PER_CELL = 11;
 
 /**
  * The bytes per cell of the slime field: counted in the extended model, with a Slime life time above 0 or with 0. The

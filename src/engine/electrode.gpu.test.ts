@@ -601,7 +601,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
 
   // A pole lies over everything, and it covers all of it (ADR 0058: an opacity of 1). Agents with their trail, food,
   // light and a wall below a wide cathode and a thick anode. The picture is the picture without the poles with the
-  // poles over it, and where a pole covers a pixel, the pixel has the colour of the pole alone.
+  // poles over it, and where a pole covers a pixel, the pixel has the colour of the pole alone. The Slime tool coats
+  // all ground first: the bare ground of the agents style is black, and a pixel with a channel at 0 does not compare
+  // in the shadow of a pole (PART.skip). The slime of 40 steps has no film yet (ADR 0057).
   it.each(STYLES)(
     'covers all of what lies below it: the trail, the agents, the food, the light and a wall (%s)',
     async (style) => {
@@ -618,7 +620,12 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
       };
       const sim = await make(settings, (W * H) / 2);
       // The wall crosses the place of the cathode, and the anode lies on a part of the light.
-      sim.paint([dab('food', 18, 16, 5), dab('light', 44, 30, 7), line('wall', [6, 24], [30, 30], 1.5)]);
+      sim.paint([
+        dab('slime', W / 2, H / 2, W),
+        dab('food', 18, 16, 5),
+        dab('light', 44, 30, 7),
+        line('wall', [6, 24], [30, 30], 1.5),
+      ]);
       sim.run(40);
       const below = await backend.capture(sim, settings, CLOSE, ...CLOSE_SIZE);
       sim.paint([dab('cathode', 20, 22, 9), line('anode', [36, 28], [56, 34], 4)]);
