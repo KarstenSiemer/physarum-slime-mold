@@ -10,6 +10,7 @@
     modelHelp,
     stepOrderHelp,
     scentViewHelp,
+    slimeViewHelp,
     strainSpec,
     tubeViewHelp,
   } from '../model/params';
@@ -63,6 +64,7 @@
     globalSpec.flowStrength,
     // The view switches last: they change only the picture.
     tubeViewHelp,
+    slimeViewHelp,
     scentViewHelp,
   ];
 
@@ -254,6 +256,11 @@
         steers it more. Compare a scene in Jones with the same scene in Extended at a low Scent decay: the glow reaches
         much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does not steer
         from farther away. The view changes only the picture, not the simulation.
+      </p>
+      <p>
+        The pale layer on the ground is slime. A slime mold leaves slime where it was, and the extended model marks that
+        ground: the layer fades as the slime gets older, and it is gone after the Slime life time. No rule of the model
+        reads the slime yet. The switch Show slime, in the panel under Flow, hides the layer.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { slimeSteps } from '../engine/slime';
   import {
     BOUNDARIES,
     capacityOf,
@@ -18,6 +19,7 @@
     sameLattice,
     scentReach,
     scentReachSpec,
+    slimeViewHelp,
     snap,
     STEP_ORDERS,
     stepOrderHelp,
@@ -126,6 +128,9 @@
   let growthHelpOpen = $state(false);
   let flowHelpOpen = $state(false);
   let tubeHelpOpen = $state(false);
+  let slimeHelpOpen = $state(false);
+  /** The model has slime (ADR 0055): the extended model with a Slime life time above 0. */
+  const slimy = $derived(slimeSteps(s) > 0);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
   const canGrow = $derived(app.canCollide && s.collisions);
   /** The most Capacity can be: one agent per cell with the rule (capacityOf()). */
@@ -323,6 +328,8 @@
         />
       {/if}
       <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
+      <!-- How long the slime stays where the colony was (ADR 0055). Its switch of the view is under Flow. -->
+      <Slider spec={globalSpec.slimeLife} bind:value={s.slimeLife} id="slime-life" />
     {/if}
   </Section>
 
@@ -508,6 +515,31 @@
         </div>
         {#if tubeHelpOpen}
           <p class="helptext" id="tube-help">{tubeViewHelp.help}</p>
+        {/if}
+      {/if}
+      {#if slimy}
+        <!-- The layer of the slime changes the view only (ADR 0055, decision 8). The slime needs no flow: the switch
+        is here beside the other switch of the view, with the flow on or off. -->
+        <div class="check">
+          <label>
+            <input
+              type="checkbox"
+              bind:checked={s.showSlime}
+              aria-describedby={slimeHelpOpen ? 'slime-help' : undefined}
+            />
+            <span>{slimeViewHelp.label}</span>
+          </label>
+          <button
+            class="help"
+            type="button"
+            aria-expanded={slimeHelpOpen}
+            aria-controls="slime-help"
+            aria-label="About {slimeViewHelp.label}"
+            onclick={() => (slimeHelpOpen = !slimeHelpOpen)}>?</button
+          >
+        </div>
+        {#if slimeHelpOpen}
+          <p class="helptext" id="slime-help">{slimeViewHelp.help}</p>
         {/if}
       {/if}
     </Section>

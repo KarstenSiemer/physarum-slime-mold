@@ -424,6 +424,9 @@ describe('Slime life time (ADR 0055)', () => {
     expect(globalSpec.slimeLife).toMatchObject({ label: 'Slime life time', min: 0, max: 240, step: 1 });
     // The help says what 0 means, and what the time does with the flow.
     expect(globalSpec.slimeLife.help).toContain('At 0 the model has no slime.');
+    // The picture draws the slime (decision 8), and still no rule reads it.
+    expect(globalSpec.slimeLife.help).toContain('as a pale layer on the ground');
+    expect(globalSpec.slimeLife.help).toContain('No rule reads the slime yet');
     expect(globalSpec.slimeLife.help).toContain('With Flow in the tubes');
   });
 
