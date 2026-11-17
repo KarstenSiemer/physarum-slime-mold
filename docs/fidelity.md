@@ -59,7 +59,7 @@ project read.
 | 20  | Two plasmodia that do not fuse stay two bodies   | Partly                                  | Rival networks, Tokyo, two networks   |
 | 21  | Growth toward the cathode of a current           | Partly: the direction only              | Electrotaxis                          |
 | 22  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
-| 23  | Avoidance of its own slime                       | Not modelled                            | none                                  |
+| 23  | Avoidance of its own slime                       | Not modelled: the slime changes no run  | none                                  |
 | 24  | Veins form a tree that follows Murray's law      | Not measured; no tree toward a front    | none                                  |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
@@ -382,7 +382,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Organism** [V]: tubes take apart and form again within a few hours (Tero et al. 2007, Sec. 1).
 - **Model**: a tube without flux starves in about 33 min, and new tubes form on fresh ground by growth and respawn.
   Ground where a tube starved stays closed to growth until its flow memory is back at 0.01: 3.7 days of model time,
-  and 6 days until it is fresh ground again (ADR 0054; `docs/model.md`, 8.4). A starved tube that vanishes leaves its
+  and 6 days until it is fresh ground again (ADR 0054; `docs/model.md`, 8.4). These are the times at the default of
+  the setting Slime life time, 144 hours; they change in proportion to it (ADR 0055). A starved tube that vanishes leaves its
   ground at the lowest flow memory, so all such ground is closed for the same time. Before ADR 0054 the times were up
   to 11 h and 18 h, and most starved ground opened much sooner (ADR 0029, decision 7; ADR 0053). A tube that is taken
   off while its flow memory is above that of fresh ground leaves fresh ground at once.
@@ -506,25 +507,36 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
 - **Organism**: the plasmodium leaves slime where it was, and it avoids ground with slime. In a Y-maze with food at
   both ends, 39 of 40 plasmodia chose the arm without slime; with slime on both arms they showed no preference
   (n = 23). Through a U-shaped trap 96 % of 24 reached the goal within 120 h on blank agar, and 33 % on agar coated
-  with slime (Reid et al. 2012, PNAS 109: 17490; a research helper read the full text, and nobody checked it again).
+  with slime, and the mean speed did not differ (Reid et al. 2012, PNAS 109: 17490 [V]; the coordinator read the
+  full text on 2026-11-17).
   Plasmodia on plain agar usually do not cross their own path, and they often turn away at a distance from the trail.
   Plasmodia below 0.65 mm² do not avoid, and they cross their trail from 3 h on (Tröger, Goirand and Alim 2024, PNAS
   121: e2312611121, p. 3 to 6 [V]). Slime is a cue for "no food here", and a plasmodium that perceives food enters
-  ground with slime (Reid et al. 2013, Behav. Ecol. 24: 812 [A]). Ground that a starved clone mate explored is
-  avoided (16 % chose it), ground of a well-fed one attracts (88 %), and the own strain and another make no
-  difference (Briard et al. 2020; read and not checked again, as Reid et al. 2012). Against it: fed plasmodia on plain
+  ground with slime (Reid et al. 2013, Behav. Ecol. 24: 812 [A]). A second cue stays in ground that was rinsed to
+  remove the slime: ground that a starved plasmodium explored is avoided (16 % chose it), ground of a well-fed one
+  attracts (88 %), and three strains showed no difference between their own ground and that of another strain
+  (Briard et al. 2020, Phil. Trans. R. Soc. B 375: 20190470 [V]; the coordinator read the full text on 2026-11-17,
+  without the supplement). Against it: fed plasmodia on plain
   agar grew over ground that they had left as often as chance gives it (Patino-Ramirez et al. 2019, Sci. Rep. 9:
   15444, p. 4 [V]). Nobody measured how long slime lasts: 3 h to 6 days are reported. The sources:
   [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "Slime".
-- **Model**: none. The model has no slime: a cell keeps no mark of an agent that left it, and an agent enters any
-  open cell. The nearest rule is starved ground, with the flow on: where a tube starved, the flow memory D stays low
-  for 6 days of model time (ADR 0054; up to 18 h before). No agent divides on a cell with D below 0.01, and no child
-  is born onto one, for 3.7 days (`docs/model.md`, 8.4, 8.5 and 9; ADR 0053; row 16). The 6 days are the longest
-  avoidance of slime that a source reports. The mark is on ground where a tube starved only, not on every cell that
-  the colony left, and it stops no move.
-- **Measured**: no slime. Since ADR 0054 the mark of starved ground keeps a colony with growth out of ground that it
-  left: in the Snail maze the blind branches stay empty until the mark has faded (row 2). Agents still walk onto such
-  ground. A slime field is stage 2 of the plan of 2026-11-16 (`TODO.md`; ADR 0052).
+- **Model**: a slime field, and no rule that reads it yet (ADR 0055; `docs/model.md`, 6.9). In the extended model a
+  cell gets a stamp in every step in which it holds plasm, and it has slime for the Slime life time after the last
+  such step. The field is one for all strains (the owner's decision of 2026-11-16, ADR 0052). A brush paints slime,
+  as Reid et al. 2012 coat their agar with it, and the picture shows the slime as a pale layer on the ground. The
+  default of the life time, 144 hours, is the longest avoidance of slime that a source reports; no source measured
+  the life time. An agent still enters any open cell, and a child is born onto ground with slime as onto blank
+  ground. The nearest rule that acts is starved ground, with the flow on: where a tube starved, the flow memory D
+  stays low for about the Slime life time (ADR 0054; ADR 0055, decision 5). No agent divides on a cell with D below
+  0.01, and no child is born onto one, for 0.62 times the life time: 3.7 days at the default (`docs/model.md`, 8.4,
+  8.5 and 9; ADR 0053; row 16). This mark fits the second cue of the organism, the one of Briard et al. 2020. It is
+  on ground where a tube starved only, not on every cell that the colony left, and it stops no move. It is a mark of
+  each strain, where Briard et al. found no difference between strains.
+- **Measured**: the slime changes no run: every scene keeps its bytes (ADR 0055, Results). No Y-maze is measured yet.
+  The rule of avoidance and its measurement in a Y-maze after Reid et al. 2012 are the second part of stage 2 of the
+  plan of 2026-11-16 (`TODO.md`; ADR 0055, "What the second pull request must measure first"). Since ADR 0054 the
+  mark of starved ground keeps a colony with growth out of ground that it left: in the Snail maze the blind branches
+  stay empty until the mark has faded (row 2). Agents still walk onto such ground.
 
 ### 24. Veins form a tree that follows Murray's law
 
@@ -565,7 +577,7 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   growing colony run off, so the radius stays (same amendment).
 - The growth front has no sheet and no zones by age, and no vein forms toward it: the flux runs only between foods
   (rows 6 and 24).
-- No slime: a cell keeps no mark of an agent that left it (row 23).
+- The slime acts on nothing: a cell keeps the step at which a colony was there last, and no rule reads it (row 23).
 - Light is a repellent source, the rule of Jones' papers for repellents such as salt. The light rule of Jones'
   papers, weaker sensors on a lit agent, is not built (row 13). Dryness is not modelled.
 - Two strains never fuse: no flux passes between strains (row 20; [ADR 0031](adr/0031-a-flow-for-every-strain.md),
