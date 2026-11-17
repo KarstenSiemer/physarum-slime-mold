@@ -155,8 +155,9 @@ Measured on 2026-11-17 on an M3 Pro, in headless Chromium. The commands and the 
 ### No run changes
 
 - **Every scene keeps its bytes.** The digests of the agents, the trail, the scent, the environment, the flow
-  memory and the pressure equal those of `main` at `3825266`: 54 of 54 runs after 500 steps (every scene, both
-  backends), and 16 of 16 after 3,000 steps (the eight scenes with the flow, both backends).
+  memory and the pressure equal the record of ADR 0054, which is the state of `main` at `3825266`: 54 of 54 runs
+  after 500 steps (every scene, both backends), and 16 of 16 after 3,000 steps (the eight scenes with the flow,
+  both backends).
 - **A Slime life time of 18 hours gives the runs of ADR 0054 with 18 hours.** The Snail maze ran to step 80,000
   with the setting at 18, seeds 1 to 3, with a sample every 500 steps. All 484 lines of `measure-mazes.ts` equal the
   record `analysis-snail-maze-floor.txt` of ADR 0054, which set the share 0.00023 by hand. So the setting gives the
