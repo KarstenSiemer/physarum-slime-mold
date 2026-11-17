@@ -8,9 +8,14 @@
 // eraser. 3 writes every channel without blending from a copy of the target (`old`), after the boundary changed. Color masks pick the channels. Every byte is held to what `env` holds around its
 // cell, and a segment's distance to the cells it paints itself, so a cell is inside exactly when `env` holds the
 // wall or food there. Cells outside the arena keep their bytes. Prepended with common.glsl and brush.glsl.
+//
+// With POLES defined the program writes the outlines of the electrodes into a target of their own (see POLES in
+// paint.wgsl): R the distance to the outline of the cathodes, G the one to the outline of the anodes, B and A 0. The
+// two layers are then the cathode and the anode. A cathode is a union in R and a subtraction in G, an anode the
+// mirror, and an erase and a wall a subtraction in both (gl/sim.ts POLE_DRAWS).
 
 uniform int op;
-uniform ivec2 layers;  // ops 0, 1 and 4: the layers (wall, food) the color mask writes
+uniform ivec2 layers;  // ops 0, 1 and 4: the layers (wall and food, or the two poles) the color mask writes
 uniform int hold;      // op 1: also the hold of op 4, except where the subtraction writes 0
 uniform int core;      // op 2 for one eraser (`from`, `to`, `radius`): the cells deep inside it hold no light or shadow
 uniform sampler2D env; // after the stroke
@@ -23,6 +28,7 @@ const float SHAPE_RANGE = 4.0; // cells; SHAPE_RANGE in ../../types.ts and rende
 const int HOLD_RINGS = 5;      // cells: how far a byte looks for a cell of its layer
 const float WALL_BEVEL = 1.5;  // cells: the lit slope of a wall (render.frag `walls`)
 const float FOOD_RIM = 2.0;    // cells: the lit rim of food (render.frag `flakeAt`)
+const float POLE_RIM = 1.5;    // cells: the lit slope of an electrode (render.frag `studAt`)
 const vec2 SHADOW = vec2(1.08, 1.44);
 const float SHADOW_SOFT = 1.5;
 
@@ -51,11 +57,31 @@ ivec2 gridCell(ivec2 c, ivec2 d) {
   return q;
 }
 
-// Whether `env` holds a layer (0 wall, 1 food) in cell c + d of the grid: a byte of 128 or more, the threshold
-// of isWall() in common.glsl, for food too (see `holds` in paint.wgsl).
+// Whether a cell `e` of `env` holds a layer (see layersOf in paint.wgsl). Walls (0) and food (1): a byte of 128 or
+// more, the threshold of isWall() in common.glsl, for food too. With POLES the cathode (0) and the anode (1), by the
+// electrode byte: above 191 the cathode, any other byte above 0 the anode.
+bool layerOf(vec4 e, int layer) {
+#ifdef POLES
+  float pole = e.a * 255.0;
+  return layer == 0 ? pole > 191.5 : pole > 0.5 && pole <= 191.5;
+#else
+  return e[layer] * 255.0 >= 127.5;
+#endif
+}
+
+// The slope that the renderer lights inside the outline of a layer, cells: a union is rounded off for it.
+float slopeOf(int layer) {
+#ifdef POLES
+  return POLE_RIM;
+#else
+  return layer == 0 ? WALL_BEVEL : FOOD_RIM;
+#endif
+}
+
+// Whether `env` holds a layer in cell c + d of the grid (see `holds` in paint.wgsl).
 bool holds(ivec2 c, ivec2 d, int layer) {
   ivec2 q = gridCell(c, d);
-  return q.x >= 0 && texelFetch(env, q, 0)[layer] * 255.0 >= 127.5;
+  return q.x >= 0 && layerOf(texelFetch(env, q, 0), layer);
 }
 
 // The largest byte a cell may hold for a layer `env` does not hold there (see holdByte in paint.wgsl).
@@ -128,7 +154,7 @@ float floorByte(float n) {
   return n == NONE ? 0.0 : distanceByte(-sqrt(n));
 }
 
-// The squared distances (wall, food) from cell c to the nearest cell of each layer that `env` holds in the arena, up
+// The squared distances from cell c to the nearest cell of each of the two layers that `env` holds in the arena, up
 // to 3 rings away (see `nearestCells` in paint.wgsl).
 vec2 nearestCells(ivec2 c) {
   vec2 middle = 0.5 * vec2(W(), H());
@@ -140,10 +166,10 @@ vec2 nearestCells(ivec2 c) {
       for (int dx = -k; dx <= k; dx += stride) {
         ivec2 q = gridCell(c, ivec2(dx, dy));
         if (q.x < 0 || (P.cfg.z == 2u && distance(vec2(c + ivec2(dx, dy)) + 0.5, middle) > dishRadius())) continue;
-        vec4 e = texelFetch(env, q, 0) * 255.0;
+        vec4 e = texelFetch(env, q, 0);
         float r = float(dx * dx + dy * dy);
-        if (e.r >= 127.5) m.x = min(m.x, r);
-        if (e.g >= 127.5) m.y = min(m.y, r);
+        if (layerOf(e, 0)) m.x = min(m.x, r);
+        if (layerOf(e, 1)) m.y = min(m.y, r);
       }
     }
     n = mix(n, m, equal(n, vec2(NONE)));
@@ -182,7 +208,12 @@ void main() {
     vec4 o = texelFetch(old, c - tile, 0) * 255.0;
     vec2 n = nearestCells(c);
     vec2 v = max(vec2(held(round(o.r), c, 0), held(round(o.g), c, 1)), vec2(floorByte(n.x), floorByte(n.y)));
+#ifdef POLES
+    // The outlines of the electrodes are the two distances alone.
+    result = vec4(v, 0.0, 0.0) / 255.0;
+#else
     result = vec4(v, round(e.b * 255.0), shadowByte(c)) / 255.0;
+#endif
     return;
   }
   if (op == 2) {
@@ -213,7 +244,7 @@ void main() {
     if (op == 0) {
       // A union adds the stroke rounded off near its middle line, held to the cells it paints; MAX blending keeps
       // the old byte, which keeps its hold (see `united` in paint.wgsl).
-      float u = distanceByte(radius - rounded(d, radius, layer == 0 ? WALL_BEVEL : FOOD_RIM));
+      float u = distanceByte(radius - rounded(d, radius, slopeOf(layer)));
       v = holds(c, ivec2(0), layer) ? max(u, 128.0) : ownByte(min(u, 127.0), c, p);
     } else {
       // MIN blending of the complement: a byte that `env` still holds was outside the stroke, so at least 128

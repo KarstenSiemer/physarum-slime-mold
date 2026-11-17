@@ -115,7 +115,7 @@ export function packView(
   // STREAM.swing steps.
   const phases = (step: number) => [(step % STREAM.period) / STREAM.period, (step % STREAM.swing) / STREAM.swing];
   // The last value is not of the stream: the electrodes are drawn only while one may be painted (ADR 0047), so other
-  // scenes do not read their cells.
+  // scenes do not read their outline distances.
   fl.set(stream === undefined ? [0, 0, 0, 0] : [1, ...phases(stream), 0], 36);
   fl[39] = electrodes ? 1 : 0;
   fl.set([...GEL_FX[settings.gelColor], 0, 0], 40);
@@ -147,6 +147,8 @@ interface Groups {
   sampler: GPUSampler;
   /** The buffer at the binding of the slime field (encode()). */
   stamps: GPUBuffer;
+  /** The buffer at the binding of the outline distances of the electrodes (encode()). */
+  poles: GPUBuffer;
 }
 
 /** The scent view: the render pass with it, without (index 0) or with (1) the food, light and walls, and `scentDown`. */
@@ -231,7 +233,8 @@ export class Renderer {
    * By trail texture, then by scent texture, then by occupancy buffer. The trail and the scent of the view alternate
    * between two textures together, but the picture of the tubes is one trail texture for both (ADR 0034), so the trail
    * does not name the scent. The textures are weak keys: a texture that its simulation freed leaves no group behind.
-   * A group is made anew when the bloom, its sampler or the slime field is another one (encode()).
+   * A group is made anew when the bloom, its sampler, the slime field or the outline distances of the electrodes are
+   * another one (encode()).
    */
   private groups = new WeakMap<GPUTexture, WeakMap<GPUTexture, Map<GPUBuffer, Groups>>>();
   /** Gel height field: one texel per cell plus a one-cell border (render.wgsl `heightField`). */
@@ -273,8 +276,8 @@ export class Renderer {
         { binding: 10, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 12, visibility: F, texture: { sampleType: 'unfilterable-float' } },
-        storage(13),
         storage(14),
+        storage(16),
       ],
     });
     this.downLayout = device.createBindGroupLayout({
@@ -413,7 +416,15 @@ export class Renderer {
     let cached = byOcc.get(occ);
     // The Jones model has no slime field, and no pass reads its binding then: the cells of the simulation stand in.
     const stamps = sim.slimeField ?? sim.env;
-    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.stamps !== stamps) {
+    // Without a pole the simulation holds no outline distances of the electrodes (ADR 0047), and no pass reads their
+    // binding then: those of walls and food stand in.
+    const poles = sim.poleField ?? sim.shape;
+    if (
+      cached?.bloom !== f.bloom ||
+      cached.sampler !== f.sampler ||
+      cached.stamps !== stamps ||
+      cached.poles !== poles
+    ) {
       const trailView = trail.createView();
       const scentView = scent.createView();
       const group = this.device.createBindGroup({
@@ -434,10 +445,10 @@ export class Renderer {
           { binding: 11, resource: this.trailCoarse?.view ?? this.noCoarse.createView() },
           // The stream belongs to the picture of the tubes, which is the trail here: one texture for each trail.
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
-          // The cells of the simulation, for the electrodes (ADR 0047).
-          { binding: 13, resource: { buffer: sim.env } },
           // The slime field, for the layer of the slime (ADR 0055).
           { binding: 14, resource: { buffer: stamps } },
+          // The outline distances of the electrodes (ADR 0047).
+          { binding: 16, resource: { buffer: poles } },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -458,7 +469,7 @@ export class Renderer {
           { binding: 9, resource: scentView },
         ],
       });
-      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, stamps };
+      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, stamps, poles };
       byOcc.set(occ, cached);
     }
     // Without food, light or walls the environment code would only cost time: the variant without it

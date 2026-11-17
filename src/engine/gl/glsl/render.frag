@@ -266,15 +266,15 @@ void around(ivec2 c, out ivec3 xs, out ivec3 ys) {
   }
 }
 
-// The 3 × 3 cells of `shape` around c, row by row (see shapeCells in render.wgsl).
-void shapeCells(ivec2 c, out vec4 cells[9]) {
+// The texels of the 3 × 3 cells around c, row by row, each as shapeTexel() gives it (see cellsAround in render.wgsl).
+void cellsAround(ivec2 c, out ivec2 texels[9]) {
   ivec2 s = gridSize();
   if (V.boundary == 2u) {
     vec2 m = vec2(c) + 0.5 - 0.5 * vec2(s);
     float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
     if (dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
       for (int j = 0; j < 3; j++) {
-        for (int i = 0; i < 3; i++) cells[j * 3 + i] = shapeAt(c + ivec2(i - 1, j - 1));
+        for (int i = 0; i < 3; i++) texels[j * 3 + i] = shapeTexel(c + ivec2(i - 1, j - 1));
       }
       return;
     }
@@ -285,8 +285,15 @@ void shapeCells(ivec2 c, out vec4 cells[9]) {
   xs = clamp(xs, ivec3(0), ivec3(s.x - 1));
   ys = clamp(ys, ivec3(0), ivec3(s.y - 1));
   for (int j = 0; j < 3; j++) {
-    for (int i = 0; i < 3; i++) cells[j * 3 + i] = texelFetch(shape, ivec2(xs[i], ys[j]), 0);
+    for (int i = 0; i < 3; i++) texels[j * 3 + i] = ivec2(xs[i], ys[j]);
   }
+}
+
+// The 3 × 3 cells of `shape` around c (see shapeCells in render.wgsl).
+void shapeCells(ivec2 c, out vec4 cells[9]) {
+  ivec2 texels[9];
+  cellsAround(c, texels);
+  for (int i = 0; i < 9; i++) cells[i] = texelFetch(shape, texels[i], 0);
 }
 
 // `cells`: the 3 × 3 cells of `shape` around the cell under p, row by row (see envAt in render.wgsl).
@@ -453,42 +460,59 @@ vec3 walls(vec3 c, Env e) {
 
 #if ENV
 // ---- Electrodes (see render.wgsl, ADR 0047) ----
-uniform sampler2D env; // the cells of the simulation; read for the electrodes only
+uniform sampler2D poles; // the outline distances of the electrodes (shape.frag POLES); read for the electrodes only
 
 const vec3 CATHODE = vec3(0.05, 0.32, 1.0);
 const vec3 ANODE = vec3(1.0, 0.08, 0.04);
-const float POLE_OPACITY = 0.9;
+const float POLE_RIM = 1.5;    // cells: the slope of a pole, from its outline to its flat top (shape.frag POLE_RIM)
+const float POLE_SHADOW = 2.0; // cells that the shadow of a pole reaches beside its outline
 
-// The pole of grid cell c as (cathode, anode), each 0 or 1 (poleOf in render.wgsl). The cell as shapeAt() takes it.
-vec2 poleOf(ivec2 c) {
-  ivec2 s = gridSize();
-  ivec2 q = clamp(c, ivec2(0), s - 1);
-  if (V.boundary == 0u) {
-    q = wrapCell(c, s);
-  } else if (V.boundary == 2u) {
-    vec2 o = 0.5 * vec2(s);
-    vec2 m = vec2(c) + 0.5 - o;
-    float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
-    if (dot(m, m) > rim * rim) q = ivec2(floor(o + m * ((rim - 0.75) * inversesqrt(dot(m, m)))));
-  }
-  float b = texelFetch(env, q, 0).a * 255.0;
-  return vec2(b > 191.5 ? 1.0 : 0.0, b > 0.5 && b <= 191.5 ? 1.0 : 0.0);
+// The 3 × 3 cells of `poles` around c (see poleCells in render.wgsl).
+void poleCells(ivec2 c, out vec4 cells[9]) {
+  ivec2 texels[9];
+  cellsAround(c, texels);
+  for (int i = 0; i < 9; i++) cells[i] = texelFetch(poles, texels[i], 0);
 }
 
-// The picture c with the electrodes at p over it (electrodes in render.wgsl).
+// A pole at a point: its lit surface, how much of the pixel it covers, and its shadow (see Stud in render.wgsl).
+struct Stud {
+  vec3 color;
+  float cover;
+  float shadow;
+};
+
+// The stud of the colour `base` at the distance `sd` to its outline (see studAt in render.wgsl).
+Stud studAt(vec3 base, float sd, float coverSd, vec2 grad) {
+  Stud s = Stud(vec3(0.0), cover(coverSd), 0.0);
+  float toLight = clamp(dot(grad, normalize(SUN.xy)), 0.0, 1.0);
+  s.shadow = smoothstep(-POLE_SHADOW, 0.0, sd) * toLight * (1.0 - s.cover);
+  if (s.cover <= 0.0) return s;
+  float t = clamp(sd / POLE_RIM, 0.0, 1.0);
+  vec3 n = normalize(vec3(-grad * (2.0 * (1.0 - t) / POLE_RIM), 1.0));
+  float diffuse = max(dot(n, SUN), 0.0);
+  float spec = pow(max(dot(n, normalize(SUN + vec3(0.0, 0.0, 1.0))), 0.0), 60.0);
+  vec3 lit = base * (0.5 + 0.7 * diffuse) + 0.6 * spec;
+  float line = 1.0 - smoothstep(0.0, clamp(1.5 * V.scale, 0.35, 0.75), sd);
+  s.color = mix(lit, 0.25 * base, 0.6 * line);
+  return s;
+}
+
+// The picture c with the electrodes at p over it (see electrodes in render.wgsl).
 vec3 electrodes(vec3 c, vec2 p) {
-  vec2 q = p - 0.5;
-  ivec2 i = ivec2(floor(q));
-  vec2 f = q - floor(q);
-  vec2 cover = vec2(0.0);
-  for (int dy = 0; dy < 2; dy++) {
-    for (int dx = 0; dx < 2; dx++) {
-      float w = (dx == 1 ? f.x : 1.0 - f.x) * (dy == 1 ? f.y : 1.0 - f.y);
-      cover += w * poleOf(i + ivec2(dx, dy));
-    }
-  }
-  vec2 a = POLE_OPACITY * smoothstep(vec2(0.4), vec2(0.6), cover);
-  return mix(mix(c, CATHODE, a.x), ANODE, a.y);
+  vec4 cells[9];
+  poleCells(ivec2(floor(p)), cells);
+  bool near = false;
+  for (int k = 0; k < 9; k++) near = near || cells[k] != vec4(0.0);
+  // No pole within the reach of the outline distances.
+  if (!near) return c;
+  Env e = envAt(p, cells);
+  Stud cathode = studAt(CATHODE, e.wall, e.wallCover, e.wallGrad);
+  Stud anode = studAt(ANODE, e.food, e.foodCover, e.foodGrad);
+  vec3 ground = c * (1.0 - byStyle(vec3(0.75), vec3(0.6), vec3(0.3)).x * max(cathode.shadow, anode.shadow));
+  float both = cathode.cover + anode.cover;
+  if (both <= 0.0) return ground;
+  vec3 surface = (cathode.cover * cathode.color + anode.cover * anode.color) / both;
+  return mix(ground, surface, min(both, 1.0));
 }
 #endif
 

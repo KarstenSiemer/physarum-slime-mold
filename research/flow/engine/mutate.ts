@@ -2047,8 +2047,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'EL8 wgsl: the view draws the anode in the colour of the cathode',
     RENDER_WGSL,
-    'return mix(mix(c, CATHODE, a.x), ANODE, a.y);',
-    'return mix(mix(c, CATHODE, a.x), CATHODE, a.y);',
+    'let anode = studAt(ANODE, e.food, e.foodCover, e.foodGrad);',
+    'let anode = studAt(CATHODE, e.food, e.foodCover, e.foodGrad);',
     ELECTRODE_GPU,
     SIM_SPEC,
   ],
@@ -2111,8 +2111,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'EL16 glsl: the view draws the anode in the colour of the cathode',
     RENDER_FRAG,
-    'return mix(mix(c, CATHODE, a.x), ANODE, a.y);',
-    'return mix(mix(c, CATHODE, a.x), CATHODE, a.y);',
+    'Stud anode = studAt(ANODE, e.food, e.foodCover, e.foodGrad);',
+    'Stud anode = studAt(CATHODE, e.food, e.foodCover, e.foodGrad);',
     ELECTRODE_GL,
     SIM_SPEC,
   ],
@@ -3272,8 +3272,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'SL109 webgpu: the picture keeps the bind group of a field that the simulation freed',
     RENDER_TS,
-    '    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.stamps !== stamps) {',
-    '    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {',
+    '      cached.sampler !== f.sampler ||\n      cached.stamps !== stamps ||\n',
+    '      cached.sampler !== f.sampler ||\n',
     PICTURE_GPU,
     SLIME_SPEC,
   ],
