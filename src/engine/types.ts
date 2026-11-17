@@ -240,7 +240,8 @@ export interface Backend<S extends Sim = Sim> {
   createSim(settings: Settings, width: number, height: number, agents: number, start?: number): Promise<S>;
   /**
    * Draws a frame; `measure` lets auto levels sample the trail. False while a part of the picture is still being
-   * built, as the scent view's pipelines at its first frames: the same call then draws another picture later.
+   * built, as the pipelines of the scent view or of the layer of the slime at their first frames: the same call then
+   * draws another picture later.
    */
   draw(sim: S, settings: Settings, view: View, measure: boolean): boolean;
   /** `levels`: levels for this picture alone (measured()), in place of those of the frames. */
