@@ -2,6 +2,11 @@
 // completely on the grid on screen leave the list, so an erased food stays gone on every screen shape. Deleting them
 // changes no byte on that grid: an erase writes all four bytes of a cell and a wall writes [255, 0, 0, 0], so after
 // the stroke that cleared a cell, it holds what that stroke and later ones wrote, and none of them reads the edit.
+//
+// Painted slime (ADR 0055, decision 7) is an edit that paints, as food is: a stroke of the Slime tool clears nothing,
+// and an erase and a wall clear the stamp of their cells, so it goes when later strokes cleared all of its cells. It
+// stamps only cells without a wall, so it reads the walls of the edits before it. Deleting one of those changes no
+// stamp either: a wall goes only when later erases cover its cells, and they clear the stamps there too.
 import { dishRadius, joinRuns, paintedAsIs, reachOf, Rows, segmentDistance, SLACK, someCell } from './brush';
 import { strokeOn, type EnvEdit, type Painted } from './environment';
 import type { EnvTool } from './types';
@@ -77,7 +82,10 @@ class Tile {
   }
 }
 
-/** Whether a stroke of kind `by` resets what one of kind `kind` painted: an erase everything, a wall food and light. */
+/**
+ * Whether a stroke of kind `by` resets what one of kind `kind` painted: an erase everything, a wall everything but a
+ * wall (food, light, electrodes and painted slime). A stroke of another kind clears nothing.
+ */
 const clears = (by: EnvTool, kind: EnvTool) => by === 'erase' || (by === 'wall' && kind !== 'wall');
 
 /**
@@ -102,7 +110,7 @@ export class Placement {
   private readonly cols: number;
   /** Per tile, the clearing strokes (erase, wall) whose box reaches it. */
   private clearing: (Tile | undefined)[] = [];
-  /** The same for the strokes that paint (food, light, wall). */
+  /** The same for the strokes that paint: every kind but the erase. */
   private painting: (Tile | undefined)[] = [];
   /** Entries in the tiles, and those of edits that left (skipped until the tiles are built again). */
   private entries = 0;
