@@ -2,11 +2,11 @@
 // tubes (ADR 0034), of an agent under a painted wall (ADR 0038), of the cut and a wall while growth runs (ADR 0039) and
 // of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046), of the
 // Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
-// (ADR 0053), of the mark that a starved tube leaves (ADR 0054) and of the slime field (ADR 0055). The script puts one
-// wrong rule at a time into a source file of the app,
+// (ADR 0053), of the mark that a starved tube leaves (ADR 0054) and of the slime field and its brush (ADR 0055). The
+// script puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
-// A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file. Every wrong rule
-// must fail at least one test.
+// A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
+// the engine, the sweep, the link or the tool for painted slime. Every wrong rule must fail at least one test.
 // Usage: node --import ./research/flow/register.mjs research/flow/engine/mutate.ts [W1 F3 ...]
 // It changes files below src/ while it runs, and it writes each one back as it was. It stops if a file has changed
 // since the mutations were written: then the text of a mutation no longer fits. With the argument `check` it only
@@ -83,6 +83,21 @@ const [SLIME_GPU, SLIME_GL] = [`${SLIME} webgpu`, `${SLIME} webgl2`];
 /** The time of the mark of starved ground, which the Slime life time sets (ADR 0055, decision 5). */
 const FLOW_TS = 'src/engine/flow.ts';
 const LIFE = 'Slime life time';
+/**
+ * The brush on the slime field (ADR 0055, decision 7): its pass on each backend, the kinds that change the field, the
+ * engine that paints the slime of its list again, the sweep, the link and the tool, each with the tests of it.
+ */
+const SLIME_PAINT_WGSL = 'src/engine/shaders/slime-paint.wgsl';
+const SLIME_PAINT_FRAG = 'src/engine/gl/glsl/slime-paint.frag';
+const TYPES_TS = 'src/engine/types.ts';
+const ENGINE_TS = 'src/engine/engine.ts';
+const SWEEP_TS = 'src/engine/sweep.ts';
+const SWEEP_SPEC = 'src/engine/sweep.test.ts';
+const LINK_TS = 'src/model/link.ts';
+const LINK_SPEC = 'src/model/link.test.ts';
+const STATE_TS = 'src/ui/state.svelte.ts';
+const STATE_SPEC = 'src/ui/state.test.ts';
+const PAINTED = 'painted slime';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -2617,6 +2632,382 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : FLOW.recover;',
     'return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : 0;',
     LIFE,
+  ],
+  // The brush on the slime field (ADR 0055, decision 7). A stroke of the Slime tool gives the open cells of its
+  // footprint the stamp of the current step, an erase and a wall clear the stamp of their cells, and Clear clears every
+  // stamp. Against the GPU tests of the brush on the backend of the file.
+  [
+    'SL32 wgsl: the brush stamps a wall',
+    SLIME_PAINT_WGSL,
+    'if (inArena(q) && !isWall(env[c])) { slime[c] = P.grid.w + 1u; }',
+    'if (inArena(q)) { slime[c] = P.grid.w + 1u; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL33 wgsl: the brush stamps a cell outside the arena of the simulation',
+    SLIME_PAINT_WGSL,
+    'if (inArena(q) && !isWall(env[c])) { slime[c] = P.grid.w + 1u; }',
+    'if (!isWall(env[c])) { slime[c] = P.grid.w + 1u; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL34 wgsl: the brush writes the stamp of the step after the current one',
+    SLIME_PAINT_WGSL,
+    'if (inArena(q) && !isWall(env[c])) { slime[c] = P.grid.w + 1u; }',
+    'if (inArena(q) && !isWall(env[c])) { slime[c] = P.grid.w + 2u; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL35 wgsl: the brush writes the stamp of the first step at every step',
+    SLIME_PAINT_WGSL,
+    'if (inArena(q) && !isWall(env[c])) { slime[c] = P.grid.w + 1u; }',
+    'if (inArena(q) && !isWall(env[c])) { slime[c] = 1u; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL36 wgsl: an erase leaves the stamp',
+    SLIME_PAINT_WGSL,
+    'case 0u: { slime[c] = 0u; }',
+    'case 0u: {}',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL37 wgsl: a wall leaves the stamp',
+    SLIME_PAINT_WGSL,
+    'case 1u: { slime[c] = 0u; }',
+    'case 1u: {}',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL38 wgsl: the brush on the field is one cell wider than the brush on the environment',
+    SLIME_PAINT_WGSL,
+    'if (strokeDistance(q, B.radius) > B.radius) { return; }',
+    'if (strokeDistance(q, B.radius) > B.radius + 1.0) { return; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL39 wgsl: the brush on the field ends at nine tenths of its radius, like a soft edge',
+    SLIME_PAINT_WGSL,
+    'if (strokeDistance(q, B.radius) > B.radius) { return; }',
+    'if (strokeDistance(q, B.radius) > 0.9 * B.radius) { return; }',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL40 webgpu: a stroke of the Slime tool also paints the environment',
+    GPU_SIM,
+    'const env = strokes.filter((s) => paintsEnv(s.kind));',
+    'const env = strokes;',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL41 webgpu: paint() changes the field before the environment of its strokes',
+    GPU_SIM,
+    '    if (env.length > 0) this.paintEnv(env);\n    this.brushSlime(strokes);',
+    '    this.brushSlime(strokes);\n    if (env.length > 0) this.paintEnv(env);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL42 webgpu: Clear leaves the stamps',
+    GPU_SIM,
+    'if (stamps) enc.clearBuffer(stamps);',
+    'if (stamps && this.step < 0) enc.clearBuffer(stamps);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL43 webgpu: an erase runs no pass over the slime of a colony',
+    GPU_SIM,
+    '    this.stamped = true;\n    const stamp = this.kernels.slime();',
+    '    const stamp = this.kernels.slime();',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL44 webgpu: paintSlime() keeps the parameters of the paint before, with the step of that time',
+    GPU_SIM,
+    '    this.writePaintParams();\n    this.brushSlime(strokes);',
+    '    this.brushSlime(strokes);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL45 webgpu: the brush takes every simulation for a periodic grid',
+    GPU_SIM,
+    'u[o + 12] = arena;',
+    'u[o + 12] = 0;',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL46 webgpu: the Jones model paints slime',
+    GPU_SIM,
+    '    if (!slimeModel(this.settings)) return;\n    const segments: Stroke[] = [];',
+    '    const segments: Stroke[] = [];',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL47 webgpu: the segments past the first 4096 of a call get the boxes of the first',
+    GPU_SIM,
+    'this.writeBrushes(chunk, (j) => boxes[first + j] ?? [0, 0, 0, 0]);',
+    'this.writeBrushes(chunk, (j) => boxes[j] ?? [0, 0, 0, 0]);',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'SL48 glsl: the brush stamps a wall',
+    SLIME_PAINT_FRAG,
+    'else if (kind == 6 && inArena(q) && !isWall(texelFetch(env, q, 0))) result = P.grid.w + 1u;',
+    'else if (kind == 6 && inArena(q)) result = P.grid.w + 1u;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL49 glsl: the brush stamps a cell outside the arena of the simulation',
+    SLIME_PAINT_FRAG,
+    'else if (kind == 6 && inArena(q) && !isWall(texelFetch(env, q, 0))) result = P.grid.w + 1u;',
+    'else if (kind == 6 && !isWall(texelFetch(env, q, 0))) result = P.grid.w + 1u;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL50 glsl: the brush writes the stamp of the step after the current one',
+    SLIME_PAINT_FRAG,
+    'else if (kind == 6 && inArena(q) && !isWall(texelFetch(env, q, 0))) result = P.grid.w + 1u;',
+    'else if (kind == 6 && inArena(q) && !isWall(texelFetch(env, q, 0))) result = P.grid.w + 2u;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL51 glsl: the brush writes the stamp of the first step at every step',
+    SLIME_PAINT_FRAG,
+    'else if (kind == 6 && inArena(q) && !isWall(texelFetch(env, q, 0))) result = P.grid.w + 1u;',
+    'else if (kind == 6 && inArena(q) && !isWall(texelFetch(env, q, 0))) result = 1u;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL52 glsl: an erase leaves the stamp',
+    SLIME_PAINT_FRAG,
+    'if (kind == 0) result = 0u;',
+    'if (kind == 0) discard;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL53 glsl: a wall leaves the stamp',
+    SLIME_PAINT_FRAG,
+    'else if (kind == 1) result = 0u;',
+    'else if (kind == 1) discard;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL54 glsl: the brush on the field is one cell wider than the brush on the environment',
+    SLIME_PAINT_FRAG,
+    'if (strokeDistance(p, radius) > radius || cellAt(q) < 0) discard;',
+    'if (strokeDistance(p, radius) > radius + 1.0 || cellAt(q) < 0) discard;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL55 glsl: the brush on the field ends at nine tenths of its radius, like a soft edge',
+    SLIME_PAINT_FRAG,
+    'if (strokeDistance(p, radius) > radius || cellAt(q) < 0) discard;',
+    'if (strokeDistance(p, radius) > 0.9 * radius || cellAt(q) < 0) discard;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL56 glsl: a stroke does not end at the arena that it was painted in',
+    SLIME_PAINT_FRAG,
+    'if (strokeDistance(p, radius) > radius || cellAt(q) < 0) discard;',
+    'if (strokeDistance(p, radius) > radius) discard;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL57 webgl2: a stroke of the Slime tool also paints the environment',
+    GL_SIM,
+    'const env = strokes.filter((s) => paintsEnv(s.kind));',
+    'const env = strokes;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL58 webgl2: paint() changes the field before the environment of its strokes',
+    GL_SIM,
+    '    if (env.length > 0) this.paintEnv(env);\n    this.brushSlime(strokes);',
+    '    this.brushSlime(strokes);\n    if (env.length > 0) this.paintEnv(env);',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL59 webgl2: Clear leaves the stamps',
+    GL_SIM,
+    'if (stamps) clearUint(this.gl, stamps);',
+    'if (stamps && this.step < 0) clearUint(this.gl, stamps);',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL60 webgl2: an erase draws nothing over the slime of a colony',
+    GL_SIM,
+    '      this.stamped = true;\n      this.pass(this.prog.slime(),',
+    '      this.pass(this.prog.slime(),',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL61 webgl2: the brush keeps the parameters of the pass before, with the step of that pass',
+    GL_SIM,
+    "    let boundary: Boundary | undefined;\n    let kind = -1;\n    for (const stroke of strokes) {\n      if (stroke.kind === 'slime') this.stamped = true;",
+    "    let boundary: Boundary | undefined = this.settings.boundary;\n    let kind = -1;\n    for (const stroke of strokes) {\n      if (stroke.kind === 'slime') this.stamped = true;",
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL62 webgl2: the brush takes every simulation for a periodic grid',
+    GL_SIM,
+    "gl.uniform1i(p.loc('arena'), BOUNDARIES.indexOf(this.settings.boundary));",
+    "gl.uniform1i(p.loc('arena'), 0);",
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL63 webgl2: the brush paints a stroke in the arena of the simulation, not in its own',
+    GL_SIM,
+    '        if (b !== boundary) {\n          this.writeParams(undefined, 0, b);',
+    '        if (b !== boundary) {\n          this.writeParams();',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  [
+    'SL64 webgl2: the Jones model paints slime',
+    GL_SIM,
+    '    if (!slimeModel(this.settings)) return;\n    const gl = this.gl;\n    let p: Program | undefined;',
+    '    const gl = this.gl;\n    let p: Program | undefined;',
+    SLIME_GL,
+    SLIME_SPEC,
+  ],
+  // The kinds that change the field, for both backends.
+  [
+    'SL65 types.ts: a wall does not change the field',
+    TYPES_TS,
+    "kind === 'slime' || kind === 'erase' || kind === 'wall';",
+    "kind === 'slime' || kind === 'erase';",
+    SLIME,
+    SLIME_SPEC,
+  ],
+  [
+    'SL66 types.ts: an erase does not change the field',
+    TYPES_TS,
+    "kind === 'slime' || kind === 'erase' || kind === 'wall';",
+    "kind === 'slime' || kind === 'wall';",
+    SLIME,
+    SLIME_SPEC,
+  ],
+  // The engine paints the slime of its list again after a reset, and the sweep swallows no erase (decision 7).
+  // Against the tests of the engine in Node, whose CPU backend paints with the reference of the brush.
+  [
+    'SL67 engine: no slime after the reset of a run',
+    ENGINE_TS,
+    '    this.sim.reset();\n    this.repaintSlime();\n    this.seedAtFood();',
+    '    this.sim.reset();\n    this.seedAtFood();',
+    PAINTED,
+    ENGINE_SPEC,
+  ],
+  [
+    'SL68 engine: no slime on a new simulation',
+    ENGINE_TS,
+    '      this.sim.reset();\n      this.repaintSlime();',
+    '      this.sim.reset();',
+    PAINTED,
+    ENGINE_SPEC,
+  ],
+  [
+    'SL69 engine: the slime after the first steps of the colonies of the start layout Food',
+    ENGINE_TS,
+    '    this.repaintSlime();\n    this.seedAtFood();\n    this.backend.forget();',
+    '    this.seedAtFood();\n    this.repaintSlime();\n    this.backend.forget();',
+    PAINTED,
+    ENGINE_SPEC,
+  ],
+  [
+    'SL70 engine: no slime when the model gets its field again',
+    ENGINE_TS,
+    'else if (slimeModel(now) && !slimeModel(prev)) this.repaintSlime();',
+    'else if (slimeModel(now) && slimeModel(prev)) this.repaintSlime();',
+    PAINTED,
+    ENGINE_SPEC,
+  ],
+  [
+    'SL71 engine: the sweep deletes an erase before the simulation painted it',
+    ENGINE_TS,
+    'if (this.live && (slimeModel(this.settings) || [...gone].some((i) => i < this.painted))) this.flushEnv();',
+    'if (this.live && [...gone].some((i) => i < this.painted)) this.flushEnv();',
+    PAINTED,
+    ENGINE_SPEC,
+  ],
+  [
+    'SL72 engine: only the strokes of the Slime tool are painted again, without the erases and walls after them',
+    ENGINE_TS,
+    'this.sim.paintSlime(held.slice(first).flatMap((e) => strokeOn(e, width, height) ?? []));',
+    "this.sim.paintSlime(held.filter((e) => e.kind === 'slime').flatMap((e) => strokeOn(e, width, height) ?? []));",
+    PAINTED,
+    ENGINE_SPEC,
+  ],
+  // The sweep: an erase and a wall clear painted slime.
+  [
+    'SL73 sweep: a wall does not clear painted slime',
+    SWEEP_TS,
+    "const clears = (by: EnvTool, kind: EnvTool) => by === 'erase' || (by === 'wall' && kind !== 'wall');",
+    "const clears = (by: EnvTool, kind: EnvTool) =>\n  by === 'erase' || (by === 'wall' && kind !== 'wall' && kind !== 'slime');",
+    PAINTED,
+    SWEEP_SPEC,
+  ],
+  [
+    'SL74 sweep: an erase does not clear painted slime',
+    SWEEP_TS,
+    "const clears = (by: EnvTool, kind: EnvTool) => by === 'erase' || (by === 'wall' && kind !== 'wall');",
+    "const clears = (by: EnvTool, kind: EnvTool) =>\n  (by === 'erase' && kind !== 'slime') || (by === 'wall' && kind !== 'wall');",
+    PAINTED,
+    SWEEP_SPEC,
+  ],
+  // The link and the tool.
+  [
+    'SL75 link: a link reads no stroke of the Slime tool',
+    LINK_TS,
+    "  [EnvKind.slime]: 'slime',\n",
+    '',
+    'Slime tool',
+    LINK_SPEC,
+  ],
+  [
+    'SL76 state: the Slime tool is there without slime',
+    STATE_TS,
+    "const tools = slimeSteps(s) > 0 ? TOOLS : TOOLS.filter((t) => t.id !== 'slime');",
+    'const tools = TOOLS;',
+    'Slime',
+    STATE_SPEC,
+  ],
+  [
+    'SL77 state: the Slime tool stays selected when the model loses its slime',
+    STATE_TS,
+    'if (!toolsFor(s).some((t) => t.id === app.tool)) app.tool = TOOLS[0].id;',
+    'if (toolsFor(s).length === 0) app.tool = TOOLS[0].id;',
+    'Slime',
+    STATE_SPEC,
   ],
 ];
 

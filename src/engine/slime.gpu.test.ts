@@ -9,7 +9,7 @@ import { WebGl2Backend } from './gl/backend';
 import { paintReference } from './paint-reference';
 import { NO_STAMP, stampOf } from './slime';
 import { slimePaint, slimeStep } from './slime-reference';
-import type { Backend, EnvTool, Sim, Stroke } from './types';
+import { changesSlime, type Backend, type EnvTool, type Sim, type Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const BACKENDS = {
@@ -733,10 +733,12 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
       },
     );
 
-    // WebGPU paints 4096 segments per submission: 5000 strokes cross that edge.
-    it('paints 5000 strokes in one call as the CPU reference does', async () => {
+    // WebGPU paints 4096 segments per submission. Of 6400 strokes, more than 4096 change the field: the brush on the
+    // field crosses that edge, as the brush on the environment does.
+    it('paints 6400 strokes in one call as the CPU reference does', async () => {
       const s = slimy({ boundary: 'wrap' });
-      const strokes = randomStrokes(5, 5000, 'wrap');
+      const strokes = randomStrokes(5, 6400, 'wrap');
+      expect(strokes.filter((stroke) => changesSlime(stroke.kind)).length).toBeGreaterThan(4096);
       const ref = reference(s, [BW, BH], strokes);
       const sim = await make(s, BW, BH);
       sim.paint(strokes);
