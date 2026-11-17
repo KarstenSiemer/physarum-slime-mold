@@ -57,6 +57,7 @@ import {
 } from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
+import brushWgsl from './shaders/brush.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
 import flowWgsl from './shaders/flow.wgsl?raw';
@@ -65,6 +66,8 @@ import histogramWgsl from './shaders/histogram.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
+import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
+import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
@@ -153,7 +156,10 @@ describe('WGSL', () => {
       flow: common + flowWgsl,
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
-      paint: common + paintWgsl,
+      // The brush on the environment and the brush on the slime field share the segment of brush.wgsl (ADR 0055).
+      paint: common + brushWgsl + paintWgsl,
+      slime: common + slimeWgsl,
+      slimePaint: common + brushWgsl + slimePaintWgsl,
       sort: common + sortWgsl,
       walls: common + wallsWgsl,
       render: renderWgsl,

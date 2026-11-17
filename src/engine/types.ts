@@ -2,8 +2,20 @@ import type { Boundary, Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import type { FlowSites } from './sites';
 
-export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5 } as const;
+export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5, slime: 6 } as const;
 export type EnvTool = keyof typeof EnvKind;
+
+/**
+ * Whether a stroke of `kind` changes the environment and its outlines. A stroke of the Slime tool changes neither: it
+ * writes only into the slime field (ADR 0055, decision 7).
+ */
+export const paintsEnv = (kind: EnvTool) => kind !== 'slime';
+/**
+ * Whether a stroke of `kind` changes the slime field (ADR 0055, decision 7). The Slime tool gives the open cells of its
+ * stroke the stamp of the current step. An erase and a wall clear the stamp of their cells. Every other kind leaves the
+ * field as it is.
+ */
+export const changesSlime = (kind: EnvTool) => kind === 'slime' || kind === 'erase' || kind === 'wall';
 
 /**
  * The two poles of the Electrode tool (ADR 0047), as Tsuda, Jones et al. 2011 (p. 10) model a current: the cathode is
@@ -77,8 +89,20 @@ export interface Sim {
    * less in the frame. The sort changes no result (ADR 0005).
    */
   sortNow?(): void;
-  /** Paints brush strokes in order: the only way food, light, walls and electrodes reach a simulation. */
+  /**
+   * Paints brush strokes in order: the only way food, light, walls, electrodes and painted slime reach a simulation.
+   * Each stroke changes the environment first, and then the slime field as paintSlime() does.
+   */
   paint(strokes: readonly Stroke[]): void;
+  /**
+   * Paints only what the strokes do with the slime field (ADR 0055, decision 7), in their order: a stroke of the Slime
+   * tool gives each open cell of its footprint the stamp of the current step, an erase and a wall clear the stamp of
+   * their cells, and every other kind does nothing. The footprint of a slime stroke is the one of a food stroke. A cell
+   * is open when it lies inside the arena of the simulation and holds no wall. The environment stays as it is. The
+   * engine calls this after a reset, which clears every stamp. Nothing in the Jones model, which has no slime.
+   */
+  paintSlime(strokes: readonly Stroke[]): void;
+  /** Removes food, light, walls and electrodes, and clears every stamp of the slime field (ADR 0055, decision 7). */
   clearEnvironment(): void;
   /**
    * The food sites on this grid, each one a food stroke with its cells: the sites that give and take the flux of the
@@ -130,8 +154,9 @@ export interface Sim {
   readPressure(strain?: number): Promise<Float32Array>;
   /**
    * For tests and measurements: the slime field (ADR 0055), one value per cell, rows from y = 0: 0 for a cell without
-   * a stamp, else the number of the step in which the cell last held plasm, plus 1 (slime.ts). Only zeros in the Jones
-   * model, which has no slime.
+   * a stamp, else the number of the step in which the cell last held plasm, plus 1 (slime.ts). A cell that the Slime
+   * tool painted since then holds `step` of the time of the stroke, plus 1: the number of the step that ran next. Only
+   * zeros in the Jones model, which has no slime.
    */
   readSlime(): Promise<Uint32Array>;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */

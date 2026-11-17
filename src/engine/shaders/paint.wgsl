@@ -1,56 +1,7 @@
-// Brush strokes on the environment (walls, food, light, electrodes). Prepended with common.wgsl.
-
-struct Brush {
-  a: vec2f,      // segment start (cells), inside the grid on the periodic grid (brush.ts paintSegments)
-  b: vec2f,      // segment end (cells)
-  origin: vec2i, // first cell of the paint box (brush.ts paintBox; on the periodic grid it wraps)
-  radius: f32,
-  kind: u32,     // 0 erase, 1 wall, 2 food, 3 light, 4 anode, 5 cathode
-  reach: vec2i,  // first cell of the outline box: the paint box grown by SHAPE_RANGE (sim.ts paint())
-  extent: vec2u, // the size of the outline box in cells
-}
+// Brush strokes on the environment (walls, food, light, electrodes). Prepended with common.wgsl and brush.wgsl, which
+// holds the slot of a segment (`B`), its distance to a cell (strokeDistance) and the cells of its box (boxCell).
 
 @group(0) @binding(1) var<storage, read_write> env: array<u32>;
-@group(0) @binding(2) var<uniform> B: Brush;
-
-// The point of the segment nearest to p.
-fn nearestPoint(p: vec2f) -> vec2f {
-  let ab = B.b - B.a;
-  let t = clamp(dot(p - B.a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
-  return B.a + t * ab;
-}
-
-fn segmentDistance(p: vec2f) -> f32 {
-  return distance(p, nearestPoint(p));
-}
-
-// Distance from the centre of cell q to the segment; on the periodic grid to its nearest copy, which lies at most
-// one period away for a segment from paintSegments(), as in paint.frag. `reach` is the largest distance the caller
-// needs: where the segment grown by it stays inside the grid, no copy is that near a cell of the grid, so the copies
-// are skipped. Both `paint` and `outline` measure with it, so the outline sees the cells that `paint` painted.
-fn strokeDistance(q: vec2i, reach: f32) -> f32 {
-  let p = vec2f(q) + 0.5;
-  var d = segmentDistance(p);
-  let size = vec2f(f32(W()), f32(H()));
-  let inside = all(min(B.a, B.b) - reach >= vec2f(0.0)) && all(max(B.a, B.b) + reach <= size);
-  if (P.cfg.z == 0u && !inside) {
-    for (var oy = -1; oy <= 1; oy++) {
-      for (var ox = -1; ox <= 1; ox++) { d = min(d, segmentDistance(p + vec2f(f32(ox), f32(oy)) * size)); }
-    }
-  }
-  return d;
-}
-
-// The index of cell q of a box, and q wrapped into the grid: on the periodic grid every cell of a box wraps (a box
-// spans at most one period), in a closed arena the cells outside it are −1.
-fn boxCell(cell: vec2i) -> vec3i {
-  let size = vec2i(i32(W()), i32(H()));
-  if (P.cfg.z == 0u) {
-    let q = ((cell % size) + size) % size;
-    return vec3i(q, q.y * size.x + q.x);
-  }
-  return vec3i(cell, cellAt(cell));
-}
 
 // The soft edge of light: 1 within 0.3 of the radius, 0 at the radius, Hermite between. Written out, because
 // smoothstep with its first edge above its second is undefined in GLSL ES 3.00; the same steps as lightByte() in
@@ -70,6 +21,7 @@ fn paint(@builtin(global_invocation_id) gid: vec3u) {
   let d = strokeDistance(q, B.radius);
   if (d > B.radius) { return; }
   var e = envOf(env[c]);
+  // A stroke of the Slime tool (kind 6) never comes here: it changes only the slime field (slime-paint.wgsl).
   switch B.kind {
     case 0u: { e = vec4f(0.0); }
     case 1u: { e = vec4f(1.0, 0.0, 0.0, 0.0); }

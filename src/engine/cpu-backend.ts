@@ -1,11 +1,14 @@
 // A backend for the engine tests in Node, for tests only: it paints with paint-reference.ts, the CPU mirror of the
-// paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and simulates nothing else.
+// paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and with the brush of
+// slime-reference.ts on the slime field (slime.gpu.test.ts compares it with both). It simulates nothing else.
 import type { Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { NO_SITES, type FlowSites } from './sites';
 import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
-import { isPole, type Backend, type Sim, type Stroke } from './types';
+import { slimeModel } from './slime';
+import { slimePaint } from './slime-reference';
+import { changesSlime, isPole, paintsEnv, type Backend, type Sim, type Stroke } from './types';
 
 export class CpuSim implements Sim {
   step = 0;
@@ -16,6 +19,12 @@ export class CpuSim implements Sim {
   hasElectrodes = false;
   /** Calls in order, to check that the environment is painted before the agents are placed. */
   readonly calls: string[] = [];
+  /**
+   * The slime field as on both GPU backends (ADR 0055): the stamp of every cell, held while the model has slime. No
+   * step writes a stamp here: only the brush does (slime-reference.ts slimePaint()), and a test that stands for the
+   * colony.
+   */
+  slime: Uint32Array | undefined;
 
   constructor(
     private settings: Settings,
@@ -29,9 +38,14 @@ export class CpuSim implements Sim {
   }
   update(s: Settings) {
     this.settings = s;
+    // The Jones model has no slime: a switch to it frees the field with its stamps.
+    if (!slimeModel(s)) this.slime = undefined;
   }
   reset() {
     this.revision++;
+    this.step = 0;
+    // A reset clears every stamp.
+    this.slime?.fill(0);
     this.calls.push('reset');
   }
   /** The agent tools of the steps that ran, in order (the start layout 'food' places its colonies with one). */
@@ -44,15 +58,36 @@ export class CpuSim implements Sim {
     if (strokes.length > 0) this.revision++;
     for (const s of strokes) {
       this.calls.push('paint');
-      if (s.kind !== 'erase') this.hasEnvironment = true;
-      if (isPole(s.kind)) this.hasElectrodes = true;
-      paintReference(this.env, this.width, this.height, s, this.settings.boundary);
+      if (paintsEnv(s.kind)) {
+        if (s.kind !== 'erase') this.hasEnvironment = true;
+        if (isPole(s.kind)) this.hasElectrodes = true;
+        paintReference(this.env, this.width, this.height, s, this.settings.boundary);
+      }
+      this.slimeOf(s);
     }
+  }
+  paintSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings) || !strokes.some((s) => changesSlime(s.kind))) return;
+    this.revision++;
+    this.calls.push('slime');
+    for (const s of strokes) this.slimeOf(s);
+  }
+  /**
+   * What a stroke does with the slime field, against the environment as it is now. The field is made at the first
+   * stroke of the Slime tool: before it no cell holds a stamp, and an erase or a wall has nothing to clear.
+   */
+  private slimeOf(s: Stroke) {
+    if (!slimeModel(this.settings) || !changesSlime(s.kind)) return;
+    if (s.kind === 'slime') this.slime ??= new Uint32Array(this.width * this.height);
+    if (!this.slime) return;
+    const { width, height, env } = this;
+    slimePaint({ width, height, boundary: this.settings.boundary, env }, this.settings, this.step, this.slime, s);
   }
   clearEnvironment() {
     this.revision++;
     this.calls.push('clear');
     this.env.fill(0);
+    this.slime?.fill(0);
     this.hasEnvironment = false;
     this.hasElectrodes = false;
   }
@@ -68,7 +103,7 @@ export class CpuSim implements Sim {
     return Promise.resolve(new Float32Array(0));
   }
   readSlime() {
-    return Promise.resolve(new Uint32Array(0));
+    return Promise.resolve(this.slime?.slice() ?? new Uint32Array(this.width * this.height));
   }
   writeFlow() {
     // nothing to write

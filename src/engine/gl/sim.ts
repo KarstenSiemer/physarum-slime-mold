@@ -1,4 +1,4 @@
-import type { Boundary, Settings } from '../../model/params';
+import { BOUNDARIES, type Boundary, type Settings } from '../../model/params';
 import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
 import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from '../flow';
@@ -17,7 +17,18 @@ import {
 } from '../pack';
 import { diffusePlanOf, viewTrailOn } from '../sizing';
 import { TUBE_TILE, tubesShown } from '../tubes';
-import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
+import {
+  changesSlime,
+  EnvKind,
+  isPole,
+  paintsEnv,
+  releases,
+  SHAPE_RANGE,
+  type AgentState,
+  type EnvTool,
+  type Sim,
+  type Stroke,
+} from '../types';
 import {
   allOrNothing,
   clear,
@@ -146,6 +157,8 @@ const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDra
   // An electrode changes no byte of the outline target: the renderer reads its byte from `env` (render.frag poleAt).
   anode: { segment: [], run: [] },
   cathode: { segment: [], run: [] },
+  // A stroke of the Slime tool joins no run: it changes only the slime field (brushSlime()).
+  slime: { segment: [], run: [] },
 };
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
@@ -243,6 +256,11 @@ export class GlSim implements Sim {
    * it then (sizing.ts slimeBytesPerCell()).
    */
   private slime: Target | undefined;
+  /**
+   * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
+   * was last empty (`stamped` in ../sim.ts). Only then does an erase or a wall clear stamps (brushSlime()).
+   */
+  private stamped = false;
   /**
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
    * (diffuse.frag COVERED). Allocated at its first use.
@@ -741,6 +759,7 @@ export class GlSim implements Sim {
     if (!this.slime) return;
     destroyTarget(this.gl, this.slime);
     this.slime = undefined;
+    this.stamped = false;
   }
 
   /**
@@ -832,6 +851,7 @@ export class GlSim implements Sim {
     this.clearFlow();
     // A reset clears every stamp (ADR 0055, decision 3).
     if (this.slime) clearUint(gl, this.slime);
+    this.stamped = false;
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
@@ -978,11 +998,22 @@ export class GlSim implements Sim {
    * segment. A run ends where the boundary changes or a segment of another kind meets it (brush.ts
    * PendingOutlines). Within a run the outlines give the bytes of one segment after another (ADR 0009), so one call
    * paints what one call per stroke paints.
+   *
+   * A stroke of the Slime tool changes no byte of `env` or of the outline target. What the strokes do with the slime
+   * field follows after the environment of all of them (brushSlime(), as paint() in ../sim.ts).
    */
   paint(strokes: readonly Stroke[]) {
-    if (strokes.length === 0) return;
-    this.changed();
+    const env = strokes.filter((s) => paintsEnv(s.kind));
+    const slime = slimeModel(this.settings) && strokes.some((s) => changesSlime(s.kind));
+    if (env.length === 0 && !slime) return;
     this.revision++;
+    if (env.length > 0) this.paintEnv(env);
+    this.brushSlime(strokes);
+  }
+
+  /** The strokes of paint() that change the environment, with their outlines. */
+  private paintEnv(strokes: readonly Stroke[]) {
+    this.changed();
     // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
     // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
@@ -1057,6 +1088,67 @@ export class GlSim implements Sim {
   }
 
   /**
+   * Paints only what the strokes do with the slime field (Sim.paintSlime(), ADR 0055, decision 7): the engine paints
+   * the slime of its edit list again after a reset, which clears every stamp. Nothing in the Jones model.
+   */
+  paintSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings) || !strokes.some((s) => changesSlime(s.kind))) return;
+    this.revision++;
+    this.brushSlime(strokes);
+  }
+
+  /**
+   * What strokes do with the slime field (slime-paint.frag; brushSlime() in ../sim.ts), in their order, against `env`
+   * as it is now: one draw per segment into the target of the stamps, scissored to the cells that the segment can
+   * reach. A stroke of the Slime tool gives the open cells of its footprint the stamp of the current step, and an erase
+   * and a wall clear the stamp of their cells. Every other kind draws nothing, and so do an erase and a wall while no
+   * cell holds a stamp (`stamped`). Nothing in the Jones model, which has no field.
+   */
+  private brushSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings)) return;
+    const gl = this.gl;
+    let p: Program | undefined;
+    let boundary: Boundary | undefined;
+    let kind = -1;
+    for (const stroke of strokes) {
+      if (stroke.kind === 'slime') this.stamped = true;
+      if (!changesSlime(stroke.kind) || !this.stamped) continue;
+      const b = stroke.boundary ?? this.settings.boundary;
+      const wrap = b === 'wrap';
+      const k = EnvKind[stroke.kind];
+      for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
+        const rects = scissorRects(segment, this.width, this.height, wrap);
+        if (rects.length === 0) continue; // outside a closed arena: no cell to paint
+        if (!p) {
+          p = this.prog.slimeBrush();
+          gl.bindFramebuffer(gl.FRAMEBUFFER, this.ensureSlime().fbo);
+          gl.viewport(0, 0, this.width, this.height);
+          gl.useProgram(p.program);
+          textures(gl, p.program, { env: this.env.texture });
+          gl.uniform1i(p.loc('arena'), BOUNDARIES.indexOf(this.settings.boundary));
+          gl.enable(gl.SCISSOR_TEST);
+        }
+        if (b !== boundary) {
+          this.writeParams(undefined, 0, b);
+          boundary = b;
+        }
+        if (k !== kind) {
+          gl.uniform1i(p.loc('kind'), k);
+          kind = k;
+        }
+        gl.uniform1f(p.loc('radius'), segment.radius);
+        gl.uniform2f(p.loc('from'), ...segment.from);
+        gl.uniform2f(p.loc('to'), ...segment.to);
+        for (const r of rects) {
+          gl.scissor(...r);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+      }
+    }
+    if (p) gl.disable(gl.SCISSOR_TEST);
+  }
+
+  /**
    * The clearance of every tile from the walls in `env` (walls.frag), which the agent pass reads to skip walks that
    * cannot meet a wall; needed again after every change of the walls (Simulation.updateClearance in sim.ts). The
    * first pass marks the tiles with a wall cell; its unused sampler `walled` gets another texture than the target.
@@ -1073,6 +1165,10 @@ export class GlSim implements Sim {
     this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
+    // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
+    const stamps = this.slime;
+    if (stamps) clearUint(this.gl, stamps);
+    this.stamped = false;
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
     this.hasElectrodes = false;
@@ -1443,8 +1539,10 @@ export class GlSim implements Sim {
     // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time
     // (slime.frag; encodeSlime in ../sim.ts, ADR 0055): a cell that holds plasm gets the stamp of the step, and the
     // pass discards the fragment of every other cell.
-    if (slimeSteps(this.settings) > 0)
+    if (slimeSteps(this.settings) > 0) {
+      this.stamped = true;
       this.pass(this.prog.slime(), this.ensureSlime(), { trail: this.trail[this.p].texture }, {});
+    }
     if (flow) this.encodeFlow(flow);
   }
 

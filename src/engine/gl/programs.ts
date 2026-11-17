@@ -20,6 +20,7 @@ import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
 import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
+import slimePaintFrag from './glsl/slime-paint.frag?raw';
 import slimeFrag from './glsl/slime.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import trailDownFrag from './glsl/trail-down.frag?raw';
@@ -167,6 +168,11 @@ export interface Programs {
    */
   slime: () => Program;
   /**
+   * The brush on the slime field (slime-paint.frag, ADR 0055, decision 7), compiled at its first use: a stroke of the
+   * Slime tool, or an erase or a wall over a field with stamps.
+   */
+  slimeBrush: () => Program;
+  /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
    * growth.frag, ADR 0029 and ADR 0053), compiled at its first use: only a scene with growth and the flow needs it.
    */
@@ -279,6 +285,7 @@ export function compile(gl: GL): Programs {
   let flow: FlowPrograms | undefined;
   let tubes: TubePrograms | undefined;
   let slime: Program | undefined;
+  let slimeBrush: Program | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
@@ -326,6 +333,7 @@ export function compile(gl: GL): Programs {
         stream: sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`),
       }),
     slime: () => (slime ??= sim(slimeFrag)),
+    slimeBrush: () => (slimeBrush ??= sim(brushGlsl + slimePaintFrag)),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;
       let p = flowing.get(key);

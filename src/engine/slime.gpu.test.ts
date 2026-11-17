@@ -1,13 +1,15 @@
-// The slime field on both backends (ADR 0055), in Chromium with real GPU APIs (ADR 0010): the pass of the stamps
-// against the CPU reference, and the rule in plain cases.
+// The slime field on both backends (ADR 0055), in Chromium with real GPU APIs (ADR 0010): the pass of the stamps and
+// the brush on the field against the CPU reference, and the rules in plain cases.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain, type Settings } from '../model/params';
+import { BOUNDARIES, defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
+import { cellIndex, dishRadius } from './brush';
 import { trailLevels } from './flow';
 import { openCell, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
+import { paintReference } from './paint-reference';
 import { NO_STAMP, stampOf } from './slime';
-import { slimeStep } from './slime-reference';
-import type { Backend, Sim } from './types';
+import { slimePaint, slimeStep } from './slime-reference';
+import type { Backend, EnvTool, Sim, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const BACKENDS = {
@@ -76,9 +78,11 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
 
   beforeAll(async () => {
     backend = await create(document.createElement('canvas'));
-    // The first step with slime compiles the pass of the stamps: here, under a long timeout (ADR 0010).
+    // The first step with slime compiles the pass of the stamps, and the first stroke of the Slime tool the brush on
+    // the field: here, under a long timeout (ADR 0010).
     const sim = await backend.createSim(slimy(), 16, 16, 8);
     sim.run(1);
+    sim.paint([{ kind: 'slime', from: [8, 8], to: [8, 8], radius: 2 }]);
     await sim.finish();
     sim.destroy();
   }, 600_000);
@@ -363,4 +367,441 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
       expect(field[(h - 1) * w + 11]).toBeGreaterThan(NO_STAMP);
     },
   );
+
+  // ADR 0055, decision 7: the brush on the slime field (slime-paint.wgsl, slime-paint.frag). The Slime tool gives the
+  // open cells of its stroke the stamp of the current step, with the footprint of a food stroke. An erase and a wall
+  // clear the stamp of their cells. Clear clears every stamp. Sim.paintSlime() paints only that, after a reset.
+  describe('the brush', () => {
+    // No side is a multiple of 16 cells, the side of a workgroup of the brush on WebGPU.
+    const [BW, BH] = [50, 37];
+
+    /**
+     * Stroke after stroke on the CPU: each stroke changes the environment first (paint-reference.ts), then the field
+     * (slime-reference.ts slimePaint()). `step`: the steps that ran so far. `margin`: the smallest distance of a cell
+     * centre from the edge of a brush.
+     */
+    function reference(
+      s: Settings,
+      [w, h]: readonly [number, number],
+      strokes: readonly Stroke[],
+      step = 0,
+      from?: { env: Uint8Array; stamps: Uint32Array },
+    ) {
+      const env = from?.env.slice() ?? new Uint8Array(w * h * 4);
+      const stamps = from?.stamps.slice() ?? new Uint32Array(w * h);
+      const margin = { min: Infinity };
+      for (const stroke of strokes) {
+        paintReference(env, w, h, stroke, s.boundary, margin);
+        slimePaint({ width: w, height: h, boundary: s.boundary, env }, s, step, stamps, stroke);
+      }
+      return { env, stamps, margin: margin.min };
+    }
+
+    /** The smallest distance of a cell centre from the rim of the dish: float32 may put a cell that close outside. */
+    function rimMargin(w: number, h: number) {
+      let min = Infinity;
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++)
+          min = Math.min(min, Math.abs(Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) - dishRadius(w, h)));
+      return min;
+    }
+
+    const wallAt = (env: Uint8Array, c: number) => (env[c * 4] ?? 0) >= 128;
+    const foodAt = (env: Uint8Array, c: number) => (env[c * 4 + 1] ?? 0) === 255;
+    const inside = (c: number, w: number, h: number, boundary: Boundary) =>
+      cellIndex(c % w, Math.floor(c / w), w, h, boundary) >= 0;
+    const as = (kind: EnvTool, strokes: readonly Stroke[]): Stroke[] => strokes.map((stroke) => ({ ...stroke, kind }));
+
+    /** A wall down the middle, and strokes beside it, across it, across two edges of the grid and into a corner. */
+    const WALL: Stroke = { kind: 'wall', from: [24.3, 6.2], to: [24.3, 30.4], radius: 1.1 };
+    const COAT: Stroke[] = [
+      { kind: 'slime', from: [12.37, 18.21], to: [12.37, 18.21], radius: 4.33 },
+      { kind: 'slime', from: [18.23, 12.41], to: [31.61, 14.17], radius: 2.27 }, // across the wall
+      { kind: 'slime', from: [47.63, 20.31], to: [53.17, 22.43], radius: 3.21 }, // across the right edge
+      { kind: 'slime', from: [30.29, 35.61], to: [30.29, 35.61], radius: 3.77 }, // across the bottom edge
+      { kind: 'slime', from: [0.37, 0.41], to: [0.37, 0.41], radius: 2.83 }, // into the four corners of a periodic grid
+    ];
+
+    it.each(BOUNDARIES)(
+      'gives the open cells in the footprint of a food stroke the stamp of the current step, in the arena %s',
+      async (boundary) => {
+        const s = slimy({ boundary });
+        const size = [BW, BH] as const;
+        const ref = reference(s, size, [WALL, ...COAT]);
+        expect(ref.margin).toBeGreaterThan(1e-3);
+        expect(rimMargin(BW, BH)).toBeGreaterThan(1e-3);
+        const sim = await make(s, BW, BH);
+        sim.paint([WALL]);
+        const [env, shape, revision] = [await sim.readEnv(), await sim.readShape(), sim.revision];
+        sim.paint(COAT);
+        const field = await sim.readSlime();
+        expect(field).toEqual(ref.stamps);
+        // The first stroke of the run: every stamp is the one of step 0.
+        expect(new Set(field)).toEqual(new Set([NO_STAMP, stampOf(0)]));
+        expect(sim.step).toBe(0);
+        // The picture will show the slime: the stroke counts as a change of the state.
+        expect(sim.revision).toBeGreaterThan(revision);
+        // The stroke changes no byte of the environment and of its outlines.
+        expect(await sim.readEnv()).toEqual(env);
+        expect(await sim.readShape()).toEqual(shape);
+        expect(env).toEqual(ref.env);
+
+        // The cells that food strokes with the same numbers paint, less the walls.
+        const other = await make(s, BW, BH);
+        other.paint([WALL, ...as('food', COAT)]);
+        const food = await other.readEnv();
+        const cells = [...field.keys()];
+        const expected = cells.filter((c) => foodAt(food, c) && !wallAt(food, c));
+        expect(stamped(field).map(([c]) => c)).toEqual(expected);
+        // Food lies on cells of the wall, and no stamp does. No stamp lies outside the arena.
+        expect(cells.filter((c) => foodAt(food, c) && wallAt(food, c)).length).toBeGreaterThan(5);
+        expect(stamped(field).filter(([c]) => wallAt(env, c) || !inside(c, BW, BH, boundary))).toEqual([]);
+        // The strokes across the edges: on the periodic grid they come back on the other side, in a box they end at the
+        // edge, and in the dish every one of these cells lies outside.
+        const at = (x: number, y: number) => field[y * BW + x];
+        const edges = [at(49, 21), at(1, 22), at(30, BH - 1), at(30, 1), at(0, 0), at(BW - 1, BH - 1)];
+        const none = NO_STAMP;
+        const one = stampOf(0);
+        if (boundary === 'wrap') expect(edges).toEqual([one, one, one, one, one, one]);
+        if (boundary === 'box') expect(edges).toEqual([one, none, one, none, one, none]);
+        if (boundary === 'dish') expect(edges).toEqual([none, none, none, none, none, none]);
+        // In every arena the dab beside the wall is whole, and the drag across the wall has a gap of the wall's cells.
+        expect([at(12, 18), at(20, 12), at(24, 13), at(29, 14)]).toEqual([one, one, none, one]);
+
+        // Three steps later a stroke gives its cells the stamp of the fourth step, and the others keep theirs. The
+        // run has no agent and no trail, so no step writes a stamp.
+        sim.run(3);
+        expect(await sim.readSlime()).toEqual(ref.stamps);
+        const later: Stroke = { kind: 'slime', from: [14.21, 20.33], to: [22.47, 24.19], radius: 2.41 };
+        const next = reference(s, size, [later], 3, ref);
+        expect(next.margin).toBeGreaterThan(1e-3);
+        sim.paint([later]);
+        const after = await sim.readSlime();
+        expect(after).toEqual(next.stamps);
+        expect([after[18 * BW + 12], after[20 * BW + 14], after[24 * BW + 22]]).toEqual([one, stampOf(3), stampOf(3)]);
+        expect(stampOf(3)).toBe(4);
+      },
+    );
+
+    it('lets an erase and a wall clear the stamps of their cells, and no other kind of stroke', async () => {
+      const s = slimy({ boundary: 'box' });
+      const size = [BW, BH] as const;
+      const sim = await make(s, BW, BH);
+      // The slime of a colony: plasm on a block of cells in the first step.
+      const block: number[] = [];
+      for (let y = 22; y < 32; y++) for (let x = 30; x < 44; x++) block.push(y * BW + x);
+      sim.writeTrail(
+        trailOf(
+          block.map((c) => [c, 0, 9000] as const),
+          BW * BH,
+        ),
+      );
+      sim.run(1);
+      const colony = await sim.readSlime();
+      expect(stamped(colony)).toEqual(block.map((c) => [c, stampOf(0)]));
+      // Painted slime beside it, one step later, and a stroke of every other kind over both.
+      const strokes: Stroke[] = [
+        { kind: 'slime', from: [6.31, 9.43], to: [44.67, 9.43], radius: 5.61 },
+        { kind: 'erase', from: [10.23, 9.37], to: [10.23, 9.37], radius: 2.87 },
+        { kind: 'wall', from: [17.41, 3.23], to: [17.41, 15.61], radius: 0.93 },
+        { kind: 'food', from: [23.37, 9.29], to: [23.37, 9.29], radius: 2.21 },
+        { kind: 'light', from: [29.43, 9.31], to: [29.43, 9.31], radius: 2.63 },
+        { kind: 'cathode', from: [35.29, 9.47], to: [35.29, 9.47], radius: 2.17 },
+        { kind: 'anode', from: [41.37, 9.23], to: [41.37, 9.23], radius: 2.31 },
+        { kind: 'erase', from: [32.31, 24.43], to: [32.31, 24.43], radius: 2.21 },
+        { kind: 'wall', from: [36.43, 20.37], to: [36.43, 33.29], radius: 0.87 },
+        { kind: 'food', from: [40.31, 24.37], to: [40.31, 24.37], radius: 1.83 },
+        { kind: 'light', from: [40.29, 29.41], to: [40.29, 29.41], radius: 1.91 },
+        { kind: 'cathode', from: [32.37, 29.43], to: [32.37, 29.43], radius: 1.37 },
+        { kind: 'anode', from: [43.21, 27.31], to: [43.21, 27.31], radius: 1.29 },
+      ];
+      const ref = reference(s, size, strokes, 1, { env: new Uint8Array(BW * BH * 4), stamps: colony });
+      expect(ref.margin).toBeGreaterThan(1e-3);
+      sim.paint(strokes);
+      const field = await sim.readSlime();
+      expect(field).toEqual(ref.stamps);
+      const env = await sim.readEnv();
+      const at = (x: number, y: number) => field[y * BW + x];
+      const [brush, plasm, none] = [stampOf(1), stampOf(0), NO_STAMP];
+      // The painted strip: erased, under the wall, and under food, light and the two poles.
+      expect([at(10, 9), at(17, 9), at(23, 9), at(29, 9), at(35, 9), at(41, 9)]).toEqual([
+        none,
+        none,
+        brush,
+        brush,
+        brush,
+        brush,
+      ]);
+      // The slime of the colony: erased, under the wall, and under food, light and the two poles.
+      expect([at(32, 24), at(36, 26), at(40, 24), at(40, 29), at(32, 29), at(43, 27)]).toEqual([
+        none,
+        none,
+        plasm,
+        plasm,
+        plasm,
+        plasm,
+      ]);
+      // No wall holds a stamp, and the other kinds lie on cells with a stamp.
+      const cells = [...field.keys()];
+      expect(cells.filter((c) => wallAt(env, c)).length).toBeGreaterThan(20);
+      expect(cells.filter((c) => wallAt(env, c) && field[c] !== NO_STAMP)).toEqual([]);
+      for (const byte of [1, 2, 3])
+        expect(cells.filter((c) => (env[c * 4 + byte] ?? 0) > 0 && field[c] !== NO_STAMP).length).toBeGreaterThan(8);
+    });
+
+    it('clears every stamp with Clear, of the brush and of the colony, and stamps again after it', async () => {
+      const s = slimy({ boundary: 'wrap' });
+      const size = [BW, BH] as const;
+      const sim = await make(s, BW, BH);
+      const block = [5 * BW + 5, 5 * BW + 6, 30 * BW + 44];
+      const plasm = trailOf(
+        block.map((c) => [c, 0, 9000] as const),
+        BW * BH,
+      );
+      sim.writeTrail(plasm);
+      sim.run(2);
+      sim.paint([WALL, ...COAT]);
+      expect(stamped(await sim.readSlime()).length).toBeGreaterThan(100);
+      sim.clearEnvironment();
+      expect(stamped(await sim.readSlime())).toEqual([]);
+      expect((await sim.readEnv()).every((v) => v === 0)).toBe(true);
+      // An erase and a wall on the empty field, then slime: the stamp of the third step.
+      const strokes: Stroke[] = [
+        { kind: 'erase', from: [12.31, 18.27], to: [12.31, 18.27], radius: 2.13 },
+        WALL,
+        ...COAT,
+      ];
+      const ref = reference(s, size, strokes, 2);
+      sim.paint(strokes);
+      expect(await sim.readSlime()).toEqual(ref.stamps);
+      expect(new Set(ref.stamps)).toEqual(new Set([NO_STAMP, stampOf(2)]));
+      // Clear again, and the colony stamps its cells in the next step: an erase over one of them clears it.
+      sim.clearEnvironment();
+      sim.writeTrail(plasm);
+      sim.run(1);
+      expect(stamped(await sim.readSlime())).toEqual(block.map((c) => [c, stampOf(2)]));
+      sim.paint([{ kind: 'erase', from: [5.41, 5.37], to: [5.41, 5.37], radius: 0.75 }]);
+      expect(stamped(await sim.readSlime())).toEqual(block.slice(1).map((c) => [c, stampOf(2)]));
+    });
+
+    // A stroke keeps the arena that it was painted in (Stroke.boundary), and the simulation can run in another one.
+    it.each([
+      ['dish', 'wrap'],
+      ['dish', 'box'],
+      ['box', 'dish'],
+      ['box', 'wrap'],
+      ['wrap', 'dish'],
+      ['wrap', 'box'],
+    ] as const)(
+      'stamps no cell outside the arena %s of the simulation, with strokes painted in the arena %s',
+      async (boundary, painted) => {
+        const s = slimy({ boundary });
+        const size = [BW, BH] as const;
+        const strokes = [WALL, ...COAT, { ...WALL, kind: 'slime' as const, radius: 9.37 }].map((stroke): Stroke => ({
+          ...stroke,
+          boundary: painted,
+        }));
+        const ref = reference(s, size, strokes);
+        expect(ref.margin).toBeGreaterThan(1e-3);
+        const sim = await make(s, BW, BH);
+        sim.paint(strokes);
+        const field = await sim.readSlime();
+        expect(field).toEqual(ref.stamps);
+        // The cells that food strokes with the same numbers paint in their arena, less the walls and the cells outside
+        // the arena of the simulation.
+        const other = await make(s, BW, BH);
+        other.paint(strokes.map((stroke) => (stroke.kind === 'slime' ? { ...stroke, kind: 'food' as const } : stroke)));
+        const food = await other.readEnv();
+        const cells = [...field.keys()];
+        const open = (c: number) => !wallAt(food, c) && inside(c, BW, BH, boundary);
+        expect(stamped(field).map(([c]) => c)).toEqual(cells.filter((c) => foodAt(food, c) && open(c)));
+        const lost = cells.filter((c) => foodAt(food, c) && !inside(c, BW, BH, boundary)).length;
+        const cut = cells.filter((c) => !inside(c, BW, BH, painted) && inside(c, BW, BH, boundary));
+        // A dish is the only arena that is smaller than the grid: food lies outside it, and no stamp does.
+        if (boundary === 'dish') expect(lost).toBeGreaterThan(30);
+        else expect(lost).toBe(0);
+        // A stroke of a dish ends at the rim of its dish, also in a larger arena.
+        if (painted === 'dish') expect(cut.length).toBeGreaterThan(300);
+        expect(cut.filter((c) => field[c] !== NO_STAMP)).toEqual([]);
+        expect(stamped(field).length).toBeGreaterThan(150);
+      },
+    );
+
+    it('paints strokes that are longer than a periodic grid, and a brush that is larger than it', async () => {
+      const s = slimy({ boundary: 'wrap' });
+      const size = [BW, BH] as const;
+      const sim = await make(s, BW, BH);
+      const strokes: Stroke[] = [
+        WALL,
+        { kind: 'slime', from: [-70.31, 10.63], to: [140.77, -60.41], radius: 0.98 }, // over four periods
+        { kind: 'slime', from: [2 * BW + 40.23, 3 * BH + 5.43], to: [2 * BW + 40.23, 3 * BH + 5.43], radius: 2.71 },
+        { kind: 'erase', from: [-20.17, 30.29], to: [100.43, 31.61], radius: 1.21 }, // longer than the grid
+      ];
+      const ref = reference(s, size, strokes);
+      expect(ref.margin).toBeGreaterThan(1e-3);
+      sim.paint(strokes);
+      expect(await sim.readSlime()).toEqual(ref.stamps);
+      const some = stamped(ref.stamps).length;
+      expect(some).toBeGreaterThan(150);
+      expect(some).toBeLessThan((BW * BH) / 2);
+      // A brush wider than the grid stamps every cell but those of the wall.
+      const wide: Stroke = { kind: 'slime', from: [5.31, 30.37], to: [5.31, 30.37], radius: 41.22 };
+      const all = reference(s, size, [wide], 0, ref);
+      expect(all.margin).toBeGreaterThan(1e-3);
+      sim.paint([wide]);
+      const field = await sim.readSlime();
+      expect(field).toEqual(all.stamps);
+      const walls = [...field.keys()].filter((c) => wallAt(ref.env, c));
+      expect(walls.length).toBeGreaterThan(40);
+      expect(stamped(field).length).toBe(BW * BH - walls.length);
+    });
+
+    /** mulberry32: a seeded random source, so a failure repeats. */
+    const random = (seed: number) => () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+    };
+
+    /**
+     * `count` random strokes on the grid of the brush and beside it: slime, walls and erases most of all, and the
+     * other kinds between them. No cell centre lies within 0.001 cells of the edge of a brush.
+     */
+    function randomStrokes(seed: number, count: number, boundary: Boundary): Stroke[] {
+      const r = random(seed);
+      const kinds: EnvTool[] = ['slime', 'slime', 'slime', 'wall', 'wall', 'erase', 'erase', 'food', 'light', 'anode'];
+      const strokes: Stroke[] = [];
+      while (strokes.length < count) {
+        const from: [number, number] = [r() * (BW + 8) - 4, r() * (BH + 8) - 4];
+        const to: [number, number] = r() < 0.4 ? from : [from[0] + (r() - 0.5) * 16, from[1] + (r() - 0.5) * 16];
+        const kind = kinds[Math.floor(r() * kinds.length)] ?? 'slime';
+        const stroke: Stroke = { kind, from, to, radius: 0.75 + r() * (kind === 'wall' ? 1.5 : 4) };
+        const margin = { min: Infinity };
+        paintReference(new Uint8Array(BW * BH * 4), BW, BH, stroke, boundary, margin);
+        if (margin.min >= 1e-3) strokes.push(stroke);
+      }
+      return strokes;
+    }
+
+    // Decision 7: after a reset the engine paints the slime of its edit list again, against the walls of now
+    // (Sim.paintSlime()). That gives the field of the strokes in their order. paint() itself changes the environment of
+    // all its strokes first, and then the field.
+    it.each(BOUNDARIES)(
+      'paints the field of one stroke after another, in one call and after a reset, in the arena %s',
+      async (boundary) => {
+        const s = slimy({ boundary });
+        const size = [BW, BH] as const;
+        const strokes = randomStrokes(17 + BOUNDARIES.indexOf(boundary), 160, boundary);
+        const ref = reference(s, size, strokes);
+        // The strokes leave slime, walls, and cells whose slime a later stroke cleared.
+        const walls = [...ref.stamps.keys()].filter((c) => wallAt(ref.env, c));
+        expect(stamped(ref.stamps).length).toBeGreaterThan(100);
+        expect(walls.length).toBeGreaterThan(30);
+        expect(walls.filter((c) => ref.stamps[c] !== NO_STAMP)).toEqual([]);
+        // One call per stroke.
+        const one = await make(s, BW, BH);
+        for (const stroke of strokes) one.paint([stroke]);
+        expect(await one.readSlime()).toEqual(ref.stamps);
+        // One call with every stroke.
+        const all = await make(s, BW, BH);
+        all.paint(strokes);
+        expect(await all.readSlime()).toEqual(ref.stamps);
+        expect(await all.readEnv()).toEqual(await one.readEnv());
+
+        // A reset clears every stamp and keeps the environment. The slime of the strokes from the first slime stroke
+        // on, painted against the walls of now, is the field of before.
+        const first = strokes.findIndex((stroke) => stroke.kind === 'slime');
+        for (const sim of [one, all]) {
+          const [env, revision] = [await sim.readEnv(), sim.revision];
+          sim.reset();
+          expect(stamped(await sim.readSlime())).toEqual([]);
+          sim.paintSlime(strokes.slice(first));
+          expect(await sim.readSlime()).toEqual(ref.stamps);
+          expect(await sim.readEnv()).toEqual(env);
+          expect(sim.revision).toBeGreaterThan(revision + 1);
+        }
+        // Painted again two steps later, every stamp is the one of the third step.
+        all.run(2);
+        all.paintSlime(strokes);
+        expect(await all.readSlime()).toEqual(ref.stamps.map((v) => (v === NO_STAMP ? NO_STAMP : stampOf(2))));
+        // Strokes that hold no slime, no erase and no wall paint nothing, and count as no change.
+        const revision = all.revision;
+        all.paintSlime(strokes.filter((stroke) => ['food', 'light', 'anode'].includes(stroke.kind)));
+        all.paintSlime([]);
+        expect(all.revision).toBe(revision);
+      },
+    );
+
+    // WebGPU paints 4096 segments per submission: 5000 strokes cross that edge.
+    it('paints 5000 strokes in one call as the CPU reference does', async () => {
+      const s = slimy({ boundary: 'wrap' });
+      const strokes = randomStrokes(5, 5000, 'wrap');
+      const ref = reference(s, [BW, BH], strokes);
+      const sim = await make(s, BW, BH);
+      sim.paint(strokes);
+      expect(await sim.readSlime()).toEqual(ref.stamps);
+      expect(stamped(ref.stamps).length).toBeGreaterThan(100);
+    }, 120_000);
+
+    it('paints with a life time of 0 too: the field keeps the stamp for a later life time', async () => {
+      const s = slimy({ boundary: 'box', slimeLife: 0 });
+      const sim = await make(s, BW, BH);
+      const ref = reference(s, [BW, BH], [WALL, ...COAT]);
+      sim.paint([WALL, ...COAT]);
+      expect(await sim.readSlime()).toEqual(ref.stamps);
+      expect(stamped(ref.stamps).length).toBeGreaterThan(100);
+      sim.update({ ...s, slimeLife: 144 });
+      sim.run(1);
+      expect(await sim.readSlime()).toEqual(ref.stamps);
+    });
+
+    it('paints no slime in the Jones model, and paints it when the model has its field again', async () => {
+      const jones: Settings = {
+        ...defaultSettings(),
+        model: 'jones',
+        boundary: 'box',
+        layout: 'empty',
+        collisions: true,
+        density: 0.1,
+        seed: 3,
+        strains: [defaultStrain(0)],
+      };
+      const extended: Settings = { ...jones, model: 'extended' };
+      const size = [BW, BH] as const;
+      const strokes: Stroke[] = [
+        WALL,
+        ...COAT,
+        { kind: 'erase', from: [12.43, 16.31], to: [12.43, 16.31], radius: 1.87 },
+        { kind: 'food', from: [30.31, 20.43], to: [30.31, 20.43], radius: 2.37 },
+      ];
+      const sim = await make(jones, BW, BH, 40);
+      sim.paint(strokes);
+      // The environment of the strokes, as in the extended model, and no stamp.
+      const ref = reference(extended, size, strokes);
+      expect(await sim.readEnv()).toEqual(ref.env);
+      expect(stamped(await sim.readSlime())).toEqual([]);
+      const revision = sim.revision;
+      sim.paintSlime(strokes);
+      sim.paint(COAT);
+      expect(sim.revision).toBe(revision);
+      expect(stamped(await sim.readSlime())).toEqual([]);
+      expect(sim.hasEnvironment).toBe(true);
+      // The extended model on the same simulation starts without a stamp. The engine then paints the slime of its
+      // list again.
+      sim.update(extended);
+      expect(stamped(await sim.readSlime())).toEqual([]);
+      sim.paintSlime(strokes);
+      expect(await sim.readSlime()).toEqual(ref.stamps);
+      expect(await sim.readEnv()).toEqual(ref.env);
+      // Back in the Jones model the field is gone, with the painted slime.
+      sim.update(jones);
+      expect(stamped(await sim.readSlime())).toEqual([]);
+      // Slime alone is no environment: the picture has no food, light or wall to draw.
+      const bare = await make(extended, BW, BH, 40);
+      bare.paint(COAT);
+      expect(bare.hasEnvironment).toBe(false);
+      expect(stamped(await bare.readSlime()).length).toBeGreaterThan(100);
+    });
+  });
 });

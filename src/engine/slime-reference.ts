@@ -1,11 +1,14 @@
-// CPU mirror of the slime field (shaders/slime.wgsl, gl/glsl/slime.frag; ADR 0055, decision 3), for tests only:
-// slime.gpu.test.ts checks both backends against it. It states the rule from the settings, without the code that packs
-// them for the passes: the level of a strain is the low level of its trail (flow.ts trailLevels()), as a 32-bit float,
-// because the passes compare 32-bit floats.
+// CPU mirror of the slime field (shaders/slime.wgsl, gl/glsl/slime.frag; ADR 0055, decision 3) and of the brush on it
+// (shaders/slime-paint.wgsl, gl/glsl/slime-paint.frag; decision 7), for tests only: slime.gpu.test.ts checks both
+// backends against it, and the engine tests in Node paint with it (cpu-backend.ts). It states the rule from the
+// settings, without the code that packs them for the passes: the level of a strain is the low level of its trail
+// (flow.ts trailLevels()), as a 32-bit float, because the passes compare 32-bit floats.
 import type { Settings } from '../model/params';
 import { trailLevels } from './flow';
 import { openCell, type FlowGrid } from './flow-reference';
-import { slimeSteps } from './slime';
+import { strokeCells } from './paint-reference';
+import { NO_STAMP, slimeModel, slimeSteps, stampOf } from './slime';
+import type { Stroke } from './types';
 
 /** The settings that the rule reads. */
 export type SlimeSettings = Pick<Settings, 'model' | 'slimeLife' | 'strains' | 'stepOrder'>;
@@ -53,4 +56,35 @@ export function slimeStep(
  */
 export function hasSlime(held: number, step: number, life: number): boolean {
   return held !== 0 && (step + 1 - held) >>> 0 < life;
+}
+
+/**
+ * What a brush stroke does with the slime field (ADR 0055, decision 7), in place in `stamps`. `grid`: the grid of the
+ * simulation with its boundary and its environment as they are when the stroke comes. `step`: the steps that ran so
+ * far, as Sim.step; the next step has this number, and a stamp of it has the age 0 (hasSlime()). `model`: the model of
+ * the settings. The Jones model has no slime, and a stroke does nothing there.
+ *
+ * The footprint of the stroke is the one of a food stroke with the same numbers (paint-reference.ts strokeCells()):
+ * the cells inside the arena of the stroke's own boundary whose centre lies within the radius, with a hard edge.
+ *  - A stroke of the Slime tool gives each open cell of its footprint the stamp of `step`. A cell is open when it lies
+ *    inside the arena of the simulation and holds no wall (flow-reference.ts openCell()).
+ *  - An erase and a wall clear the stamp of every cell of their footprint: no wall ever holds a stamp.
+ *  - Every other kind leaves the field as it is.
+ * `margin`: as for strokeCells().
+ */
+export function slimePaint(
+  grid: FlowGrid,
+  model: Pick<Settings, 'model'>,
+  step: number,
+  stamps: Uint32Array,
+  stroke: Stroke,
+  margin?: { min: number },
+) {
+  if (!slimeModel(model)) return;
+  const { width: w, height: h } = grid;
+  const visit = (c: number) => {
+    if (stroke.kind === 'erase' || stroke.kind === 'wall') stamps[c] = NO_STAMP;
+    else if (stroke.kind === 'slime' && openCell(grid, c % w, Math.floor(c / w)) >= 0) stamps[c] = stampOf(step);
+  };
+  strokeCells(w, h, stroke, grid.boundary, visit, margin);
 }
