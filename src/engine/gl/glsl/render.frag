@@ -385,8 +385,7 @@ Flake flakeAt(vec2 p, Env e) {
   return f;
 }
 
-vec3 substrate(Flake f) {
-  vec3 bg = V.background.rgb;
+vec3 substrate(Flake f, vec3 bg) {
   if (f.cover <= 0.0) return bg;
   return mix(mix(bg, f.body, f.cover * 0.95), f.edge, f.cover * f.rim * 0.85);
 }
@@ -490,6 +489,81 @@ vec3 electrodes(vec3 c, vec2 p) {
   }
   vec2 a = POLE_OPACITY * smoothstep(vec2(0.4), vec2(0.6), cover);
   return mix(mix(c, CATHODE, a.x), ANODE, a.y);
+}
+#endif
+
+#ifdef SLIME
+// ---- The slime (SLIME; see render.wgsl, ADR 0055) ----
+uniform highp usampler2D stamps; // the slime field (slime.frag); read for the slime only
+
+// The strength of the slime of a cell that holds the stamp `held`, 0 to 1 (slimeOf in render.wgsl).
+float slimeOf(uint held) {
+  uint age = V.slime.x + 1u - held;
+  if (held == 0u || age >= V.slime.y) return 0.0;
+  return 1.0 - float(age) / float(V.slime.y);
+}
+
+// The strength of the slime of grid cell c, and none outside the arena.
+float slimeCell(ivec2 c) {
+  ivec2 q = cellXY(c);
+  return q.x < 0 ? 0.0 : slimeOf(texelFetch(stamps, q, 0).r);
+}
+
+// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear (slimeBilinear in render.wgsl).
+float slimeBilinear(vec2 p) {
+  vec2 q = p - 0.5;
+  ivec2 i = ivec2(floor(q));
+  vec2 f = q - floor(q);
+  float a = mix(slimeCell(i), slimeCell(i + ivec2(1, 0)), f.x);
+  float b = mix(slimeCell(i + ivec2(0, 1)), slimeCell(i + ivec2(1, 1)), f.x);
+  return mix(a, b, f.y);
+}
+
+// Zoomed out: the mean of the strength over the square of the pixel, with the weights of trailArea(); above 2 cells per
+// pixel the cell in the middle of a texel stands for the texel (slimeArea in render.wgsl).
+float slimeArea(vec2 p) {
+  ivec2 s = gridSize();
+  int k = int(V.fx.w);
+  ivec2 n = (s + ((1 << k) - 1)) >> k; // levelSize(k), and the grid itself at level 0
+  vec2 ratio = vec2(n) / vec2(s);
+  vec2 half_ = 0.5 * V.scale * ratio;
+  vec2 lo = p * ratio - half_;
+  vec2 hi = p * ratio + half_;
+  ivec2 i = ivec2(floor(lo));
+  ivec3 xs = ivec3(i.x, i.x + 1, i.x + 2);
+  ivec3 ys = ivec3(i.y, i.y + 1, i.y + 2);
+  if (V.boundary == 0u) {
+    // One wrap for the 3 × 3 texels, as in trailArea().
+    ivec2 w = wrapCell(i, n);
+    int x1 = w.x == n.x - 1 ? 0 : w.x + 1;
+    int y1 = w.y == n.y - 1 ? 0 : w.y + 1;
+    xs = ivec3(w.x, x1, x1 == n.x - 1 ? 0 : x1 + 1);
+    ys = ivec3(w.y, y1, y1 == n.y - 1 ? 0 : y1 + 1);
+  }
+  float sum = 0.0;
+  vec2 area = vec2(0.0);
+  for (int j = 0; j < 3; j++) {
+    float wy = max(min(hi.y, float(i.y + j + 1)) - max(lo.y, float(i.y + j)), 0.0);
+    area.y += wy;
+    float row = 0.0;
+    for (int c = 0; c < 3; c++) {
+      float wx = max(min(hi.x, float(i.x + c + 1)) - max(lo.x, float(i.x + c)), 0.0);
+      if (j == 0) area.x += wx;
+      ivec2 t = ivec2(xs[c], ys[j]);
+      if (any(lessThan(t, ivec2(0))) || any(greaterThanEqual(t, n))) continue;
+      // The cell in the middle of the texel, in whole numbers. At level 0 it is the cell.
+      ivec2 cell = k > 0 ? ((2 * t + 1) * s) / (2 * n) : t;
+      row += wx * slimeOf(texelFetch(stamps, cell, 0).r);
+    }
+    sum += wy * row;
+  }
+  return sum / (area.x * area.y);
+}
+
+// The ground `bg` at p with the slime on it (slimed in render.wgsl).
+vec3 slimed(vec3 bg, vec2 p) {
+  float strength = V.scale <= 1.0 ? slimeBilinear(p) : slimeArea(p);
+  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);
 }
 #endif
 
@@ -724,13 +798,17 @@ vec3 scene(vec2 p, vec2 s) {
   v *= 1.0 + STREAM_GAIN * grain;
   vec4 halo = texture(bloom, p / s);
   vec3 base = V.background.rgb;
+#ifdef SLIME
+  // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).
+  base = slimed(base, p);
+#endif
   Flake f = Flake(vec3(0.0), vec3(0.0), 0.0, 0.0);
 #if ENV
   Env e;
   if (near) {
     e = envAt(p, cells);
     f = flakeAt(p, e);
-    base = substrate(f);
+    base = substrate(f, base);
     if (V.frame.w != 0u) v += presence(e, cells, raw);
   }
 #endif

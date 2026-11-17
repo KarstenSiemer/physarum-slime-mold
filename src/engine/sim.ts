@@ -916,6 +916,15 @@ export class Simulation implements Sim {
     return this.slime;
   }
 
+  /**
+   * For the renderer: the slime field, which the picture reads for the layer of the slime (render.wgsl `stamps`), or
+   * undefined while the simulation holds none: in the Jones model, and after a switch to the extended model until the
+   * first step or stroke that writes a stamp. No cell has a stamp then.
+   */
+  get slimeField(): GPUBuffer | undefined {
+    return this.slime;
+  }
+
   /** Frees the slime field, and every bind group that holds it. */
   private dropSlime() {
     if (!this.slime) return;

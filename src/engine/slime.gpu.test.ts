@@ -1,15 +1,22 @@
-// The slime field on both backends (ADR 0055), in Chromium with real GPU APIs (ADR 0010): the pass of the stamps and
-// the brush on the field against the CPU reference, and the rules in plain cases.
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { BOUNDARIES, defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
+// The slime field on both backends (ADR 0055), in Chromium with real GPU APIs (ADR 0010): the pass of the stamps, the
+// brush on the field and the picture of the slime against the CPU reference, and the rules in plain cases.
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { hexToLinear } from '../model/color';
+import { BOUNDARIES, defaultSettings, defaultStrain, STYLES, type Boundary, type Settings } from '../model/params';
+import { at } from './at';
 import { cellIndex, dishRadius } from './brush';
 import { trailLevels } from './flow';
 import { openCell, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
+import renderFrag from './gl/glsl/render.frag?raw';
+import { compile } from './gl/programs';
 import { paintReference } from './paint-reference';
-import { NO_STAMP, stampOf } from './slime';
-import { slimePaint, slimeStep } from './slime-reference';
-import { changesSlime, type Backend, type EnvTool, type Sim, type Stroke } from './types';
+import { BACKGROUND, LATTICE_COPIES, SLIME_LOOK, trailLevel } from './render';
+import renderWgsl from './shaders/render.wgsl?raw';
+import { equilibrium } from './sizing';
+import { NO_STAMP, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
+import { slimeLayer, slimePaint, slimeStep, slimeStrength } from './slime-reference';
+import { changesSlime, type Backend, type EnvTool, type Sim, type Stroke, type View } from './types';
 import { WebGpuBackend } from './webgpu';
 
 const BACKENDS = {
@@ -72,7 +79,167 @@ function trailOf(at: readonly (readonly [number, number, number])[], cells = W *
 /** The cells that hold a stamp, with what they hold. */
 const stamped = (field: Uint32Array) => [...field].flatMap((v, c) => (v === NO_STAMP ? [] : [[c, v] as const]));
 
-describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create) => {
+/** `source` with the one match of `from` replaced by `to`, for each pair of `edits` in turn. */
+function rewrite(source: string, edits: readonly (readonly [from: string, to: string])[]) {
+  return edits.reduce((text, [from, to]) => {
+    if (text.split(from).length !== 2) throw new Error(`Not found once: ${from}`);
+    return text.replace(from, to);
+  }, source);
+}
+
+/** `source` without the text from the one match of `start` up to the next match of `end`. */
+function cutSpan(source: string, start: string, end: string) {
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
+  if (a < 0 || b < 0 || source.includes(start, a + 1)) throw new Error(`Not found once: ${start}`);
+  return source.slice(0, a) + source.slice(b);
+}
+
+/**
+ * The render shaders without the layer of the slime (ADR 0055, decision 8). These give the files of the commit before
+ * the layer (460ea68) byte for byte, on both backends; view.glsl differs from that commit only by the two fields of
+ * the slime at the end of its block, which no code of that commit reads.
+ */
+const WITHOUT_SLIME = {
+  wgsl: cutSpan(
+    rewrite(renderWgsl, [
+      [
+        '// The layer of the slime (ADR 0055, decision 8), compiled in only while a frame draws it (render.ts).\noverride SLIME: bool = false;\n',
+        '',
+      ],
+      [
+        '  slime: vec4u,       // the slime: the steps that ran so far, the life time of the slime in steps, 2 unused\n' +
+          '  slimeFx: vec4f,     // the slime: the colour of its layer, linear RGB, and the full strength of the layer\n',
+        '',
+      ],
+      [
+        '@group(0) @binding(14) var<storage, read> stamps: array<u32>; // the slime field (slime.wgsl); read for the slime only\n',
+        '',
+      ],
+      [
+        '// What lies below the trail: the ground `bg`, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake, bg: vec3f) -> vec3f {\n',
+        '// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake) -> vec3f {\n  let bg = V.background.rgb;\n',
+      ],
+      [
+        '  // The slime tints the ground: the flake of food, the trail and all else lie on it.\n  if (SLIME) { base = slimed(base, p); }\n',
+        '',
+      ],
+      ['    base = substrate(f, base);\n', '    base = substrate(f);\n'],
+    ]),
+    '// ---- The slime (SLIME) ---',
+    '// The arena at grid position p:',
+  ),
+  glsl: cutSpan(
+    rewrite(renderFrag, [
+      ['vec3 substrate(Flake f, vec3 bg) {\n', 'vec3 substrate(Flake f) {\n  vec3 bg = V.background.rgb;\n'],
+      [
+        '#ifdef SLIME\n  // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).\n  base = slimed(base, p);\n#endif\n',
+        '',
+      ],
+      ['    base = substrate(f, base);\n', '    base = substrate(f);\n'],
+    ]),
+    '#ifdef SLIME\n// ---- The slime',
+    '#ifdef SCENT\n// ---- Scent view',
+  ),
+};
+
+/** sRGB byte → linear light. */
+const fromByte = (b: number) => {
+  const x = b / 255;
+  return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+};
+/** Linear light → sRGB byte, without the dither (render.wgsl `srgb`). */
+const toByte = (c: number) => {
+  const x = Math.min(1, Math.max(0, c));
+  return Math.round((x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055) * 255);
+};
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+type Rgb = [number, number, number];
+const mix = (a: Rgb, b: Rgb, t: number) => a.map((v, k) => v + ((b[k] ?? 0) - v) * t) as Rgb;
+
+/**
+ * The ground of a style with slime of the strength `share` on it, linear RGB (render.wgsl `slimed`): the colour of the
+ * layer over the background, with the share `share` of the full strength of the style.
+ */
+function slimedGround(style: Settings['style'], share: number): Rgb {
+  const look = SLIME_LOOK[style];
+  return mix(hexToLinear(BACKGROUND[style]), hexToLinear(look.color), look.strength * share);
+}
+
+/**
+ * The picture of a simulation without trail, food, light and walls on the CPU, as render.wgsl `fs` draws it, 3 bytes
+ * per pixel: inside the arena the ground, with the layer of the slime on it while `layer` is true (slimeLayer() in
+ * slime-reference.ts), and outside it the free space, with a ramp one pixel wide between them. Around a periodic
+ * lattice the copies of the grid show dimmed (ADR 0026). `stamps`: the slime field of the simulation; `step`: the
+ * steps that ran so far.
+ */
+function groundPicture(
+  stamps: Uint32Array,
+  [w, h]: readonly [number, number],
+  settings: Settings,
+  step: number,
+  view: View,
+  [cw, ch]: readonly [number, number],
+  layer = true,
+): Uint8Array {
+  const out = new Uint8Array(cw * ch * 3);
+  const bg = hexToLinear(BACKGROUND[settings.style]);
+  const space = bg.map((v) => v * (settings.style === 'paper' ? 0.92 : 0.55)) as Rgb;
+  const life = slimeSteps(settings);
+  const level = trailLevel(view.scale);
+  const grid = { width: w, height: h, boundary: settings.boundary };
+  const ramp = (sd: number) => smoothstep(-0.5 * view.scale, 0.5 * view.scale, sd);
+  const copies = settings.lattice && settings.boundary === 'wrap' ? LATTICE_COPIES : 1;
+  for (let y = 0; y < ch; y++)
+    for (let x = 0; x < cw; x++) {
+      const p = [
+        (x + 0.5 - cw / 2) * view.scale + view.center[0],
+        (y + 0.5 - ch / 2) * view.scale + view.center[1],
+      ] as const;
+      const box = ramp(Math.min(p[0], p[1], w - p[0], h - p[1]));
+      const inside =
+        settings.boundary === 'wrap'
+          ? 1
+          : settings.boundary === 'box'
+            ? box
+            : ramp(dishRadius(w, h) - Math.hypot(p[0] - w / 2, p[1] - h / 2));
+      let c = space;
+      if (inside > 0) {
+        const share = layer ? slimeLayer(stamps, grid, step, life, p, view.scale, level) : 0;
+        const inner = slimedGround(settings.style, share);
+        c = inside >= 1 ? inner : mix(space, inner, inside);
+      }
+      if (copies < 1) c = mix(mix(space, c, copies), c, box);
+      for (let k = 0; k < 3; k++) out[(y * cw + x) * 3 + k] = toByte(c[k] ?? 0);
+    }
+  return out;
+}
+
+/** The largest difference of a channel between a capture and a picture of 3 bytes per pixel. */
+function worst(img: ImageData, want: Uint8Array) {
+  let max = 0;
+  for (let i = 0; i < img.width * img.height; i++)
+    for (let k = 0; k < 3; k++) max = Math.max(max, Math.abs((img.data[i * 4 + k] ?? 0) - (want[i * 3 + k] ?? 0)));
+  return max;
+}
+
+/** The largest difference of one channel between two captures. */
+function maxDiff(a: ImageData, b: ImageData) {
+  let max = 0;
+  for (let i = 0; i < a.data.length; i++)
+    if (i % 4 !== 3) max = Math.max(max, Math.abs((a.data[i] ?? 0) - (b.data[i] ?? 0)));
+  return max;
+}
+
+/** The colour of the pixel (x, y) of a capture, as bytes. */
+const pixel = (img: ImageData, x: number, y: number) => [
+  ...img.data.slice((y * img.width + x) * 4, (y * img.width + x) * 4 + 3),
+];
+
+describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) => {
   let backend: Backend;
   const live: Sim[] = [];
 
@@ -857,6 +1024,555 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
       bare.paint(COAT);
       expect(bare.hasEnvironment).toBe(false);
       expect(stamped(await bare.readSlime()).length).toBeGreaterThan(100);
+    });
+  });
+
+  // ADR 0055, decision 8: the picture draws the slime as a pale layer on the ground (`slimed` in render.wgsl and
+  // render.frag). The layer is as strong as the slime is young, and it is gone at the life time. The food, the trail,
+  // the light, the walls and the electrodes lie on it. Without the layer every pixel is the one of the code before.
+  describe('the picture', () => {
+    beforeEach(() => {
+      // No levels of an earlier test: a frame without them draws the trail with the same gain on every run.
+      backend.forget();
+    });
+    const [PW, PH] = [64, 48];
+    /** The life time of the slime in these tests, in steps: a part of an hour, past sanitize(). */
+    const LIFE = 12;
+    const pictured = (patch: Partial<Settings> = {}): Settings =>
+      slimy({ boundary: 'box', bloom: 0, slimeLife: LIFE / STEPS_PER_HOUR, ...patch });
+    const dab = (x: number, y: number, radius: number): Stroke => ({ kind: 'slime', from: [x, y], to: [x, y], radius });
+    /** 8 pixels per cell on a canvas of 512 × 384 pixels: the pixel (8 c, 8 r) has its centre on that of cell (c, r). */
+    const CLOSE: View = { center: [32.4375, 24.4375], scale: 1 / 8 };
+    const close = (sim: Sim, settings: Settings) => backend.capture(sim, settings, CLOSE, 512, 384);
+    const bytes = (c: Rgb) => c.map(toByte);
+    /** The largest difference of a channel between two colours in bytes. */
+    const off = (a: number[], b: number[]) => Math.max(...a.map((v, k) => Math.abs(v - (b[k] ?? 0))));
+
+    it('has a life time of 12 steps here, and no living agent leaves a trail', async () => {
+      const s = pictured();
+      expect(slimeSteps(s)).toBe(LIFE);
+      const sim = await make(s, PW, PH);
+      sim.run(3);
+      expect((await sim.readTrail()).some((v) => v !== 0)).toBe(false);
+      expect(stamped(await sim.readSlime())).toEqual([]);
+    });
+
+    // Four dabs, painted 9, 6, 3 and 0 steps before the picture. The pixel on the centre of a cell shows the strength
+    // of that cell alone: A · (1 − age / life time) of the colour of the style over the ground.
+    it.each(STYLES)(
+      'draws slime of the age 0 at the full strength of the style, older slime weaker in a straight line (%s)',
+      async (style) => {
+        const s = pictured({ style });
+        const sim = await make(s, PW, PH);
+        const [old, mid, young, fresh, bare] = [10, 20, 30, 40, 52];
+        for (const x of [old, mid, young, fresh]) {
+          sim.paint([dab(x + 0.5, 10.5, 2.2)]);
+          if (x !== fresh) sim.run(3);
+        }
+        expect(sim.step).toBe(9);
+        const field = await sim.readSlime();
+        expect([old, mid, young, fresh, bare].map((x) => field[10 * PW + x])).toEqual([1, 4, 7, 10, NO_STAMP]);
+        const img = await close(sim, s);
+        const at = (x: number) => pixel(img, 8 * x, 80);
+        const ground = bytes(slimedGround(style, 0));
+        expect(ground).toEqual(bytes(hexToLinear(BACKGROUND[style])));
+        // The dither moves a channel by 1 at most.
+        expect(off(at(bare), ground)).toBeLessThanOrEqual(1);
+        [1, 0.75, 0.5, 0.25].forEach((share, i) => {
+          const x = [fresh, young, mid, old][i] ?? 0;
+          expect(slimeStrength(field[10 * PW + x] ?? 0, sim.step, LIFE)).toBe(share);
+          expect(
+            off(at(x), bytes(slimedGround(style, share))),
+            `${style}: the share ${String(share)}`,
+          ).toBeLessThanOrEqual(1);
+        });
+        // The layer is clear on plain ground at the age 0, and still there at half the life time.
+        expect(off(at(fresh), ground), `${style}: new slime`).toBeGreaterThanOrEqual(12);
+        expect(off(at(mid), ground), `${style}: slime at half its life time`).toBeGreaterThanOrEqual(6);
+        expect(off(at(fresh), at(mid))).toBeGreaterThanOrEqual(4);
+        // Every cell of a dab has the stamp of the dab: its middle is flat, between the cell centres too.
+        expect(off(pixel(img, 8 * fresh + 4, 84), at(fresh))).toBeLessThanOrEqual(2);
+      },
+    );
+
+    it('shows no slime at the life time and after it, and all slime follows a new life time at once', async () => {
+      const s = pictured();
+      const sim = await make(s, PW, PH);
+      sim.paint([dab(10.5, 10.5, 2.2)]);
+      const ground = bytes(slimedGround(s.style, 0));
+      const shown = async (settings: Settings) => pixel(await close(sim, settings), 80, 80);
+      // The last step with slime: the age life − 1.
+      sim.run(LIFE - 1);
+      expect(off(await shown(s), bytes(slimedGround(s.style, 1 / LIFE)))).toBeLessThanOrEqual(1);
+      expect(slimeStrength(1, sim.step, LIFE)).toBeCloseTo(1 / LIFE, 12);
+      for (const more of [1, 1, 30]) {
+        sim.run(more);
+        expect(slimeStrength(1, sim.step, LIFE)).toBe(0);
+        const img = await close(sim, s);
+        // No pixel of the picture differs from the bare ground: the stamp stays, and the picture draws none of it.
+        expect(
+          worst(img, groundPicture(new Uint32Array(PW * PH), [PW, PH], s, sim.step, CLOSE, [512, 384])),
+        ).toBeLessThanOrEqual(1);
+      }
+      expect((await sim.readSlime())[10 * PW + 10]).toBe(1);
+      // A life time of 4 times the age: the same stamp shows again, at three quarters of the full strength.
+      const longer = { ...s, slimeLife: (4 * sim.step) / STEPS_PER_HOUR };
+      expect(off(await shown(longer), bytes(slimedGround(s.style, 0.75)))).toBeLessThanOrEqual(1);
+      expect(off(await shown(longer), ground)).toBeGreaterThanOrEqual(8);
+    });
+
+    // Between two cell centres the picture blends the strengths of the cells. A blend of the stamps would give the
+    // ground beside new slime a stamp of half the step count: after many steps that is old slime, and after few
+    // steps slime that is almost new.
+    it('blends the strengths of the cells and never their stamps', async () => {
+      // The default life time, 259,200 steps: slime of 40 steps is almost new.
+      const s = pictured({ slimeLife: 144 });
+      const sim = await make(s, PW, PH);
+      sim.run(40);
+      sim.paint([dab(40.5, 10.5, 2.2)]);
+      const field = await sim.readSlime();
+      // The last cell of the dab in its row, and the cell beside it.
+      expect([field[10 * PW + 42], field[10 * PW + 43]]).toEqual([stampOf(40), NO_STAMP]);
+      const img = await close(sim, s);
+      const [full, none] = [bytes(slimedGround(s.style, 1)), bytes(slimedGround(s.style, 0))];
+      expect(off(pixel(img, 8 * 42, 80), full)).toBeLessThanOrEqual(1);
+      expect(off(pixel(img, 8 * 43, 80), none)).toBeLessThanOrEqual(1);
+      // Half way between the two cell centres: half the strength, and a quarter and three quarters beside it.
+      expect(off(pixel(img, 8 * 42 + 4, 80), bytes(slimedGround(s.style, 0.5)))).toBeLessThanOrEqual(1);
+      expect(off(pixel(img, 8 * 42 + 2, 80), bytes(slimedGround(s.style, 0.75)))).toBeLessThanOrEqual(1);
+      expect(off(pixel(img, 8 * 42 + 6, 80), bytes(slimedGround(s.style, 0.25)))).toBeLessThanOrEqual(1);
+      expect(off(bytes(slimedGround(s.style, 0.5)), full)).toBeGreaterThanOrEqual(6);
+    });
+
+    /**
+     * Slime of four ages on a grid of 64 × 48 cells, painted between steps: after its 9 steps the strokes are 9, 6, 3
+     * and 0 steps old. Dabs and lines across the edges of the grid and into a corner, a line one cell wide, and single
+     * cells: what a view zoomed out can lose.
+     */
+    function coat(sim: Sim) {
+      const line = (from: [number, number], to: [number, number], radius: number): Stroke => ({
+        kind: 'slime',
+        from,
+        to,
+        radius,
+      });
+      sim.paint([line([3.3, 11.2], [-5.4, 14.6], 5.3), line([22, 20], [30, 20], 6.5)]);
+      sim.run(3);
+      sim.paint([line([31.5, 45.2], [33.1, 51.7], 4.2), dab(63.2, 0.4, 3.1), line([30, 22], [38, 26], 4.5)]);
+      sim.run(3);
+      sim.paint([line([8.5, 30.5], [56.5, 37.5], 0.5), dab(50.5, 10.5, 0.6), dab(52.5, 12.5, 0.6), dab(44, 20, 5)]);
+      sim.run(3);
+      sim.paint([dab(12, 24, 4), line([40, 40], [60, 44], 2.2), dab(46, 21, 2.5), dab(2.5, 8.5, 1.6)]);
+    }
+
+    /**
+     * Views of a grid of 64 × 48 cells on a canvas of 96 × 72 pixels: zoomed in at the left edge (in the dish at its
+     * rim) and at the bottom edge, at 1 cell per pixel, up to 2 cells per pixel, where the picture takes the exact
+     * mean over a pixel, and zoomed out onto the levels 1 to 4 of the trail's map, where one cell stands for a texel.
+     */
+    const views = (boundary: Boundary): View[] => [
+      { center: boundary === 'dish' ? [10.37, 24.21] : [1.37, 11.21], scale: 1 / 8 },
+      { center: [32.3, 45.7], scale: 0.6 },
+      { center: [32, 24], scale: 1 },
+      { center: [32.21, 24.13], scale: 1.5 },
+      { center: [32, 24], scale: 2 },
+      { center: [30.9, 23.3], scale: 2.5 },
+      { center: [33.1, 22.9], scale: 6 },
+      { center: [32.4, 24.6], scale: 11 },
+      { center: [31.2, 25.1], scale: 20 },
+    ];
+    const SIZE = [96, 72] as const;
+
+    /**
+     * Every pixel of a capture against the picture of the CPU, with the layer and without it. Returns the largest
+     * difference of a channel, and the pixels that the layer changes by more than the dither.
+     */
+    async function follows(sim: Sim, settings: Settings, view: View) {
+      const img = await backend.capture(sim, settings, view, SIZE[0], SIZE[1]);
+      const size = [sim.width, sim.height] as const;
+      const stamps = await sim.readSlime();
+      const want = groundPicture(stamps, size, settings, sim.step, view, SIZE);
+      const plain = groundPicture(stamps, size, settings, sim.step, view, SIZE, false);
+      let changed = 0;
+      for (let i = 0; i < want.length; i += 3)
+        if ([0, 1, 2].some((k) => Math.abs((want[i + k] ?? 0) - (plain[i + k] ?? 0)) > 2)) changed++;
+      return { apart: worst(img, want), changed };
+    }
+
+    // The whole picture against the CPU reference: bilinear between the cells, the mean over a pixel zoomed out, and
+    // the copies of the periodic grid. Each view in another style, and with two life times: at 12 steps every stroke
+    // shows, and at 8 steps the oldest is gone.
+    it.each(BOUNDARIES)(
+      'follows the CPU reference at every zoom, in every style and up to the edge of the arena (%s)',
+      async (boundary) => {
+        const s = pictured({ boundary });
+        const sim = await make(s, PW, PH);
+        coat(sim);
+        expect(sim.step).toBe(9);
+        expect(new Set(await sim.readSlime())).toEqual(new Set([NO_STAMP, 1, 4, 7, 10]));
+        const failed: string[] = [];
+        const seen = new Set<number>();
+        let shown = 0;
+        for (const [i, view] of views(boundary).entries())
+          for (const life of [LIFE, 8]) {
+            const style = STYLES[(i + (life === LIFE ? 0 : 2)) % STYLES.length] ?? 'glow';
+            const settings = { ...s, style, slimeLife: life / STEPS_PER_HOUR };
+            const { apart, changed } = await follows(sim, settings, view);
+            const name = `${style} at ${String(view.scale)} cells per pixel, a life time of ${String(life)} steps`;
+            if (apart > 2) failed.push(`${name}: ${String(apart)} apart`);
+            // The layer shows in every view. Zoomed far out, a closed arena is a few pixels wide.
+            if (changed === 0 && view.scale <= 6) failed.push(`${name}: the layer changes no pixel`);
+            shown += changed;
+            seen.add(trailLevel(view.scale));
+          }
+        expect(failed).toEqual([]);
+        expect(shown).toBeGreaterThan(8000);
+        expect([...seen].sort()).toEqual([0, 1, 2, 3, 4]);
+      },
+      120_000,
+    );
+
+    // A grid whose sides no power of 2 divides: the texels of a level have a part of a cell at their end, and the
+    // cell in the middle of a texel is a whole number all the same. As a periodic lattice: its copies show dimmed.
+    it('follows the CPU reference on a grid of 26 × 17 cells and on the copies of a periodic lattice', async () => {
+      const s = pictured({ boundary: 'wrap', lattice: [W, H] });
+      const sim = await make(s);
+      sim.paint([dab(3.3, 4.2, 3.4), dab(25.6, 16.7, 2.3)]);
+      sim.run(4);
+      sim.paint([{ kind: 'slime', from: [7.5, 12.5], to: [20.5, 9.5], radius: 0.5 }, dab(15.5, 2.5, 0.6)]);
+      sim.run(3);
+      sim.paint([dab(13, 8.5, 2.6)]);
+      const zooms: View[] = [0.25, 0.8, 1.3, 2, 3.1, 5.2, 9, 17].map((scale) => ({ center: [13.3, 8.6], scale }));
+      const failed: string[] = [];
+      for (const [i, view] of zooms.entries())
+        for (const lattice of [s.lattice, null]) {
+          const settings = { ...s, lattice, style: STYLES[i % STYLES.length] ?? 'glow' };
+          const { apart, changed } = await follows(sim, settings, view);
+          // The copies around a lattice show at 15 % (ADR 0026), and zoomed out the lattice is a few pixels wide.
+          // Without the lattice the copies are as bright as the grid, and the layer shows on every one of them.
+          const few = lattice ? view.scale <= 2 && changed < 100 : changed < 400;
+          if (apart > 2 || few) failed.push(`${String(view.scale)}: ${String(apart)} apart, ${String(changed)}`);
+        }
+      expect(failed).toEqual([]);
+    });
+
+    // Decision 8: the layer tints the ground. A flake of food covers 95 % of its ground, a wall and a thick trail all
+    // of it, and the light and the trail of the glow lie on the ground with the layer.
+    it.each(['glow', 'gel', 'paper'] as const)(
+      'draws the food, the walls, the light, the electrodes and the trail on the layer (%s)',
+      async (style) => {
+        // The default life time: slime of the age 0 and 1 is at the full strength.
+        const s = pictured({ style, slimeLife: 144 });
+        const sim = await make(s, PW, PH);
+        // Slime everywhere; then a wall, which clears the stamps of its cells, and food, light and an electrode.
+        sim.paint([
+          { kind: 'slime', from: [0, 24], to: [64, 24], radius: 40 },
+          { kind: 'wall', from: [10.5, 6], to: [10.5, 30], radius: 2.5 },
+          { kind: 'food', from: [24.5, 12.5], to: [24.5, 12.5], radius: 6 },
+          { kind: 'light', from: [40.5, 12.5], to: [40.5, 12.5], radius: 6 },
+          { kind: 'cathode', from: [54.5, 12.5], to: [54.5, 12.5], radius: 4 },
+        ]);
+        const field = await sim.readSlime();
+        const env = await sim.readEnv();
+        const cells = [...field.keys()];
+        // Every open cell has slime, also below the food, the light and the electrode. No cell of the wall has.
+        expect(cells.every((c) => (field[c] !== NO_STAMP) === (env[c * 4] ?? 0) < 128)).toBe(true);
+        expect(cells.filter((c) => (env[c * 4] ?? 0) >= 128).length).toBeGreaterThan(100);
+        // A trail in a block of cells, without a step: thin in its left half, thick in its right half.
+        const exposure = 0.4 / equilibrium(s);
+        const trail = new Float32Array(PW * PH * 4);
+        for (let y = 30; y < 44; y++)
+          for (let x = 20; x < 48; x++) trail[(y * PW + x) * 4] = (x < 34 ? 0.5 : 40) / exposure;
+        sim.writeTrail(trail);
+        const [on, plain] = [await close(sim, s), await close(sim, { ...s, showSlime: false })];
+        const [bg, ground] = [slimedGround(style, 0), slimedGround(style, 1)];
+        /** The pixel on the centre of cell (x, y) with the layer, and what it is without the layer, in linear light. */
+        const both = (x: number, y: number) => {
+          const [a, b] = [pixel(on, 8 * x, 8 * y), pixel(plain, 8 * x, 8 * y)];
+          return { on: a, plain: b, linear: b.map(fromByte) as Rgb };
+        };
+        // Plain ground far from all of them: the full strength of the layer.
+        const bare = both(58, 40);
+        expect(off(bare.plain, bytes(bg))).toBeLessThanOrEqual(1);
+        expect(off(bare.on, bytes(ground))).toBeLessThanOrEqual(1);
+        expect(off(bare.on, bare.plain)).toBeGreaterThanOrEqual(12);
+        // The middle of the flake: 5 % of the ground shows through it.
+        const food = both(24, 12);
+        const through = food.linear.map((v, k) => v + 0.05 * ((ground[k] ?? 0) - (bg[k] ?? 0))) as Rgb;
+        expect(off(food.on, bytes(through)), 'food').toBeLessThanOrEqual(2);
+        expect(off(food.on, food.plain), 'food').toBeLessThanOrEqual(3);
+        expect(off(food.plain, bytes(bg))).toBeGreaterThan(40);
+        // The wall: its middle, and its outer cells, whose neighbours have slime.
+        for (const x of [8, 10, 12]) expect(off(both(x, 18).on, both(x, 18).plain), 'wall').toBeLessThanOrEqual(2);
+        expect(off(both(10, 18).plain, bytes(bg))).toBeGreaterThan(20);
+        // The light adds to the ground below it, with the layer or without it.
+        const lit = both(40, 12);
+        const added = lit.linear.map((v, k) => v + (ground[k] ?? 0) - (bg[k] ?? 0)) as Rgb;
+        expect(off(lit.plain, bytes(bg)), 'light').toBeGreaterThan(10);
+        expect(off(lit.on, bytes(added)), 'light').toBeLessThanOrEqual(2);
+        // The electrode covers nine tenths of what lies below it.
+        const pole = both(54, 12);
+        const below = pole.linear.map((v, k) => v + 0.1 * ((ground[k] ?? 0) - (bg[k] ?? 0))) as Rgb;
+        expect(off(pole.plain, bytes(bg)), 'electrode').toBeGreaterThan(40);
+        expect(off(pole.on, bytes(below)), 'electrode').toBeLessThanOrEqual(2);
+        // The trail lies on the ground. Glow adds light to what the ground leaves dark, and the ink of paper takes a
+        // share of the ground away, so the thin trail shows the layer through it by the rule of its style.
+        const thin = both(26, 37);
+        expect(off(thin.plain, bytes(bg)), 'thin trail').toBeGreaterThan(20);
+        if (style === 'glow') {
+          const lightOf = (k: number) => ((thin.linear[k] ?? 0) - (bg[k] ?? 0)) / (1 - (bg[k] ?? 0));
+          const want = ground.map((g, k) => g + (1 - g) * lightOf(k)) as Rgb;
+          expect(off(thin.on, bytes(want)), 'thin trail').toBeLessThanOrEqual(2);
+        }
+        if (style === 'paper') {
+          const want = ground.map((g, k) => (g * (thin.linear[k] ?? 0)) / (bg[k] ?? 1)) as Rgb;
+          expect(off(thin.on, bytes(want)), 'thin trail').toBeLessThanOrEqual(2);
+        }
+        // A thick trail hides the ground in every style: the glow is white, the gel is opaque, the ink is black.
+        const thick = both(41, 37);
+        expect(off(thick.on, thick.plain), 'thick trail').toBeLessThanOrEqual(2);
+      },
+    );
+
+    // Decision 8 and the three ways without the layer: Show slime off, a life time of 0, and the Jones model. Against
+    // the shaders without the code of the layer, with the same state, uniforms and dither: 0 of 255 apart. The field
+    // holds new slime in every case but the Jones model, which has no field.
+    it('draws the pixels of the shaders without the layer while the layer is off, in every style', async () => {
+      const jones: Settings = {
+        ...defaultSettings(),
+        model: 'jones',
+        collisions: true,
+        density: 0.2,
+        seed: 5,
+        bloom: 0,
+        strains: [defaultStrain(0)],
+      };
+      // The first view lies on the painted slime, inside every arena.
+      const looks: View[] = [
+        { center: [21.37, 19.21], scale: 1 / 8 },
+        { center: [32.3, 24.7], scale: 0.6 },
+        { center: [32.4, 24.6], scale: 2.5 },
+        { center: [32.4, 24.6], scale: 6 },
+      ];
+      const cases: { sim: Sim; settings: Settings; view: View; slime: boolean; name: string }[] = [];
+      for (const boundary of BOUNDARIES)
+        for (const painted of [false, true]) {
+          // The default strains and a density of 0.5: agents that leave a trail, and slime where they are.
+          const base = pictured({
+            boundary,
+            layout: 'mixed',
+            density: 0.5,
+            diffusion: 1,
+            slimeLife: 144,
+            strains: [defaultStrain(0), defaultStrain(1)],
+          });
+          const off: [string, Settings][] = [
+            ['the switch', { ...base, showSlime: false }],
+            ['a life time of 0', { ...base, slimeLife: 0 }],
+            ['the Jones model', { ...jones, boundary }],
+          ];
+          for (const [name, settings] of off) {
+            if (settings.model === 'jones' && !backend.supportsCollisions) continue;
+            const sim = await make(settings, PW, PH, (PW * PH) / 2);
+            if (painted)
+              sim.paint([
+                { kind: 'food', from: [20, 12], to: [20, 12], radius: 4 },
+                { kind: 'light', from: [44, 30], to: [44, 30], radius: 5 },
+                { kind: 'wall', from: [20, 30], to: [30, 34], radius: 1.5 },
+              ]);
+            sim.paint([{ kind: 'slime', from: [6, 6], to: [50, 40], radius: 9 }]);
+            sim.run(40);
+            expect(sim.hasEnvironment, name).toBe(painted);
+            // The field holds slime under the switch, and none in the Jones model and at a life time of 0, where no
+            // step writes a stamp: there it holds the painted slime alone.
+            const stamps = stamped(await sim.readSlime());
+            expect(stamps.length > 400, name).toBe(settings.model === 'extended');
+            const lattices = boundary === 'wrap' && painted ? [null, [PW, PH] as [number, number]] : [null];
+            for (const lattice of lattices)
+              for (const style of STYLES)
+                for (const view of looks)
+                  cases.push({
+                    sim,
+                    settings: { ...settings, lattice, style },
+                    view,
+                    slime: stamps.length > 0,
+                    name: `${name}, ${boundary}, ${style} at ${String(view.scale)}${painted ? ', painted' : ''}`,
+                  });
+          }
+        }
+      const captures = async (patch: Partial<Settings> = {}) => {
+        const out: ImageData[] = [];
+        for (const c of cases) out.push(await backend.capture(c.sim, { ...c.settings, ...patch }, c.view, 64, 48));
+        return out;
+      };
+      const hook = backend as WebGpuBackend | WebGl2Backend;
+      onTestFinished(() => {
+        hook.renderFrom();
+      });
+      // A new WebGPU renderer counts frames from 0, so both runs dither alike; WebGL2 captures keep the frame.
+      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      device?.pushErrorScope('validation');
+      hook.renderFrom(kind === 'webgpu' ? WITHOUT_SLIME.wgsl : WITHOUT_SLIME.glsl);
+      const before = await captures();
+      hook.renderFrom();
+      const now = await captures();
+      expect((await device?.popErrorScope())?.message).toBeUndefined();
+      const apart = now.map((img, i) => maxDiff(img, before[i] ?? img));
+      expect(Math.max(...apart), apart.join(' ')).toBe(0);
+      // The same frames with the layer on differ where the field holds slime and the model has slime. Not in the gel
+      // style: these scenes are full of trail, and the gel over a trail hides its ground.
+      hook.renderFrom();
+      const shown = await captures({ showSlime: true, slimeLife: 144 });
+      const differs = shown.map((img, i) => maxDiff(img, before[i] ?? img));
+      const slimed = cases.flatMap((c, i) =>
+        c.slime && c.settings.model === 'extended' && c.settings.style !== 'gel'
+          ? [[c.name, differs[i] ?? 0] as const]
+          : [],
+      );
+      expect(slimed.length).toBeGreaterThan(cases.length / 3);
+      // Both runs dither alike, so every difference is one of the picture. Below a bright trail it is small.
+      expect(slimed.filter(([, d]) => d < 2)).toEqual([]);
+      const jonesFrames = cases.flatMap((c, i) => (c.settings.model === 'jones' ? [differs[i] ?? 0] : []));
+      expect(Math.max(0, ...jonesFrames)).toBe(0);
+    }, 240_000);
+
+    // The scent view draws no slime (decision 8): its picture is the one without the layer, with slime in the field.
+    it('draws no slime below the scent view', async () => {
+      const s = pictured({ slimeLife: 144 });
+      const sim = await make(s, PW, PH);
+      sim.paint([dab(32, 24, 12), { kind: 'food', from: [50, 24], to: [50, 24], radius: 3 }]);
+      sim.run(5);
+      const view: View = { center: [32, 24], scale: 0.5 };
+      const scent = { ...s, showScent: true };
+      const [withSlime, without] = [
+        await backend.capture(sim, scent, view, 128, 96),
+        await backend.capture(sim, { ...scent, showSlime: false }, view, 128, 96),
+      ];
+      // Two captures dither apart by 2 at most.
+      expect(maxDiff(withSlime, without)).toBeLessThanOrEqual(2);
+      // The same frame without the scent view shows the layer.
+      const layer = await backend.capture(sim, s, view, 128, 96);
+      expect(maxDiff(layer, await backend.capture(sim, { ...s, showSlime: false }, view, 128, 96))).toBeGreaterThan(8);
+    });
+
+    // The Jones model frees the field, and a switch back makes a new one at the first stamp: the picture reads the
+    // field that the simulation holds now. On WebGPU a bind group with a freed buffer is an error of the device.
+    it('reads the field that the simulation holds after a switch of the model and back', async () => {
+      if (!backend.supportsCollisions) return; // the Jones model needs one agent per cell
+      const extended = pictured({
+        slimeLife: 144,
+        collisions: true,
+        diffusion: 1,
+        density: 0.1,
+        strains: [defaultStrain(0)],
+      });
+      const jones: Settings = { ...extended, model: 'jones' };
+      const sim = await make(extended, PW, PH, 40);
+      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      device?.pushErrorScope('validation');
+      const view: View = { center: [32, 24], scale: 0.5 };
+      const shot = (settings: Settings) => backend.capture(sim, settings, view, 128, 96);
+      const ground = bytes(slimedGround(extended.style, 0));
+      const slimed = bytes(slimedGround(extended.style, 1));
+      sim.paint([dab(32, 24, 10)]);
+      expect(off(pixel(await shot(extended), 64, 48), slimed)).toBeLessThanOrEqual(1);
+      sim.update(jones);
+      expect(off(pixel(await shot(jones), 64, 48), ground)).toBeLessThanOrEqual(1);
+      // Back in the extended model: no field until a stroke or a step writes a stamp, and no layer.
+      sim.update(extended);
+      expect(off(pixel(await shot(extended), 64, 48), ground)).toBeLessThanOrEqual(1);
+      sim.paint([dab(32, 24, 10)]);
+      expect(off(pixel(await shot(extended), 64, 48), slimed)).toBeLessThanOrEqual(1);
+      expect((await device?.popErrorScope())?.message).toBeUndefined();
+    });
+
+    // The layer is a part of the picture alone. Two simulations from one seed, one drawn with the layer after every
+    // few steps and one never drawn: the same bytes everywhere.
+    it('changes no byte of the simulation', async () => {
+      const s = pictured({
+        layout: 'mixed',
+        density: 0.5,
+        diffusion: 1,
+        slimeLife: 144,
+        seed: 11,
+        strains: [defaultStrain(0), defaultStrain(1)],
+      });
+      const [viewed, plain] = [await make(s, PW, PH, 800), await make(s, PW, PH, 800)];
+      for (const sim of [viewed, plain])
+        sim.paint([dab(20, 20, 6), { kind: 'wall', from: [40, 10], to: [44, 30], radius: 1.5 }]);
+      for (let k = 0; k < 6; k++) {
+        viewed.run(5);
+        plain.run(5);
+        backend.draw(viewed, s, { center: [32, 24], scale: 0.5 }, true);
+        for (const style of STYLES) await backend.capture(viewed, { ...s, style }, at(views('box'), k), 32, 24);
+      }
+      const state = async (sim: Sim) => ({
+        agents: await sim.readAgents(),
+        trail: Array.from(await sim.readTrail()),
+        scent: Array.from(await sim.readScent()),
+        env: Array.from(await sim.readEnv()),
+        slime: Array.from(await sim.readSlime()),
+        step: sim.step,
+      });
+      const [a, b] = [await state(viewed), await state(plain)];
+      expect(a.slime.filter((v) => v !== NO_STAMP).length).toBeGreaterThan(400);
+      expect(a).toEqual(b);
+    }, 120_000);
+
+    // The pipelines (WebGPU) and programs (WebGL2) of the layer are built once, from the first frame that draws the
+    // layer and without blocking it, as those of the scent view: a frame of a scene without slime builds none.
+    it('builds the pipelines or programs of the layer once, and none for a frame without the layer', async () => {
+      const s = pictured({ slimeLife: 144 });
+      const sim = await make(s, PW, PH);
+      sim.paint([dab(32, 24, 10)]);
+      const view: View = { center: [32, 24], scale: 0.5 };
+      let builds: { mock: { calls: unknown[] } };
+      let ready: () => Promise<unknown>;
+      let frame: (settings: Settings) => void;
+      if (kind === 'webgpu') {
+        const gpu = backend as WebGpuBackend;
+        onTestFinished(() => {
+          vi.restoreAllMocks();
+          gpu.renderFrom();
+        });
+        gpu.renderFrom(); // a new renderer: nothing of the layer is built yet
+        builds = vi.spyOn(gpu.gpu.device, 'createRenderPipelineAsync');
+        ready = () => backend.capture(sim, s, view, 8, 8);
+        frame = (settings) => {
+          backend.draw(sim, settings, view, false);
+        };
+      } else {
+        // Programs of their own, on the backend's context: the backend may have built its own in earlier tests.
+        const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
+        const programs = compile(gl);
+        onTestFinished(() => {
+          vi.restoreAllMocks();
+        });
+        builds = vi.spyOn(gl, 'createProgram');
+        ready = async () => {
+          while (!programs.slimed()) await new Promise((r) => setTimeout(r, 1));
+        };
+        // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
+        frame = (settings) => {
+          if (slimeShown(settings)) programs.slimed();
+        };
+      }
+      for (const settings of [
+        { ...s, showSlime: false },
+        { ...s, slimeLife: 0 },
+      ])
+        for (let k = 0; k < 3; k++) frame(settings);
+      expect(builds.mock.calls.length).toBe(0);
+      for (let k = 0; k < 3; k++) frame(s);
+      await ready();
+      const first = builds.mock.calls.length;
+      for (let k = 0; k < 5; k++) {
+        frame(s);
+        await ready();
+      }
+      // The layer without and with food, light and walls.
+      expect(first).toBe(2);
+      expect(builds.mock.calls.length).toBe(first);
     });
   });
 });

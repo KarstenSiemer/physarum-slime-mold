@@ -754,6 +754,14 @@ export class GlSim implements Sim {
     return this.slime;
   }
 
+  /**
+   * For the renderer: the texture of the slime field, which the picture reads for the layer of the slime (render.frag
+   * `stamps`), or undefined while the simulation holds none (`slimeField` in ../sim.ts).
+   */
+  get slimeTexture(): WebGLTexture | undefined {
+    return this.slime?.texture;
+  }
+
   /** Frees the slime field. */
   private dropSlime() {
     if (!this.slime) return;
