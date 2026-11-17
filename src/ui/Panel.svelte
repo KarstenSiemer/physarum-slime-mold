@@ -45,10 +45,10 @@
     addStrain,
     app,
     clearEnvironment,
+    clearLabel,
     getEngine,
     latticeLeft,
     latticeValue,
-    lightName,
     loadPreset,
     pickGrid,
     removeStrain,
@@ -386,7 +386,7 @@
       <Slider spec={globalSpec.coveredFoodFactor} bind:value={s.coveredFoodFactor} id="covered-factor" />
     {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
-    <button type="button" onclick={clearEnvironment}>Clear food, {lightName(s.model)}, walls and electrodes</button>
+    <button type="button" onclick={clearEnvironment}>{clearLabel(s)}</button>
   </Section>
 
   <Section title="Growth">

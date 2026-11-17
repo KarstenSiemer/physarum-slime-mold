@@ -145,7 +145,7 @@ test('Reload scene restores food, light and walls, and keeps the focus in the ca
   await expect(changed).toBeHidden();
   // A Clear changes the scene too, and Reload scene brings its walls and food back.
   await page.locator('summary', { hasText: 'Environment' }).click();
-  await page.getByRole('button', { name: 'Clear food, light, walls and electrodes' }).click();
+  await page.getByRole('button', { name: 'Clear food, light, walls, electrodes and slime' }).click();
   await expect.poll(async () => (await environment(page)).slice(0, 3), { timeout: 30_000 }).toEqual([0, 0, 0]);
   await expect(changed).toBeVisible();
   await card(page).getByRole('button', { name: 'Reload scene' }).click();
@@ -331,7 +331,7 @@ test('a boundary or a Clear chosen while the engine starts reaches the scene', a
   await page.goto('/');
   await preset(page).selectOption('maze');
   await page.locator('summary', { hasText: 'Environment' }).click();
-  await page.getByRole('button', { name: 'Clear food, light, walls and electrodes' }).click();
+  await page.getByRole('button', { name: 'Clear food, light, walls, electrodes and slime' }).click();
   expect(await page.evaluate(() => globalThis.physarum === undefined)).toBe(true);
   await ready('box');
   await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 0, undefined, { timeout: 60_000 });

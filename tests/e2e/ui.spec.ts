@@ -162,7 +162,8 @@ test('the Jones model names light a repellent, and drawn light acts as a repelle
   await expect(legend).toContainText('no food, no repellent and no electrode');
   await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
   await expect(page.getByLabel('Light strength', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Clear food, light, walls and electrodes' })).toBeVisible();
+  // The extended model has slime, and Clear removes it too (ADR 0055).
+  await expect(page.getByRole('button', { name: 'Clear food, light, walls, electrodes and slime' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -291,8 +292,67 @@ test('the Electrode tool paints a cathode and an anode, and the link holds them'
   expect(scent.repel).toBeGreaterThan(10);
   // Clear takes the poles away.
   await page.locator('summary', { hasText: 'Environment' }).click();
-  await page.getByRole('button', { name: 'Clear food, light, walls and electrodes' }).click();
+  await page.getByRole('button', { name: 'Clear food, light, walls, electrodes and slime' }).click();
   expect(await page.evaluate(() => globalThis.physarum?.sim.hasElectrodes)).toBe(false);
+});
+
+// ADR 0055, decision 7: the Slime tool coats ground with slime. It is in the toolbar while the model has slime, in the
+// extended model with a Slime life time above 0. The page address holds its strokes.
+test('the Slime tool paints slime, the link holds it, and the tool goes with the slime of the model', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // Paused, no step writes a stamp: a cell with the stamp of the next step is one that the tool painted.
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await page.keyboard.press('9');
+  const slime = page.getByRole('radio', { name: 'Slime' });
+  await expect(slime).toHaveAttribute('aria-checked', 'true');
+  await expect(slime).toHaveAttribute('title', /Slime life time/);
+  const painted = () =>
+    page.evaluate(async () => {
+      const sim = globalThis.physarum?.sim;
+      if (!sim) throw new Error('no engine');
+      const [field, stamp] = [await sim.readSlime(), sim.step + 1];
+      return field.reduce((n, v) => n + (v === stamp ? 1 : 0), 0);
+    });
+  expect(await painted()).toBe(0);
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('no canvas');
+  const drag = async () => {
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.5, { steps: 5 });
+    await page.mouse.up();
+  };
+  await drag();
+  // Strokes are painted in the next frame, and on SwiftShader a frame can take a second.
+  await expect.poll(painted, { timeout: 30_000 }).toBeGreaterThan(50);
+  // Slime is no food, light or wall: the environment stays empty.
+  expect(await page.evaluate(() => globalThis.physarum?.sim.hasEnvironment)).toBe(false);
+  const kinds = async () => {
+    const link = await decodeLink(await page.evaluate(() => location.hash.slice(1)));
+    return [...new Set(link?.drawing?.strokes.map((e) => e.kind))].sort();
+  };
+  await expect.poll(kinds).toEqual(['slime']);
+  // The eraser on the same path clears the painted slime.
+  await page.keyboard.press('6');
+  await drag();
+  await expect.poll(painted, { timeout: 30_000 }).toBe(0);
+  // The Jones model has no slime and no Slime tool: the first tool is selected, and the key selects nothing.
+  await page.keyboard.press('9');
+  await expect(slime).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
+  await expect(slime).toHaveCount(0);
+  const move = page.getByRole('radio', { name: 'Move' });
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  await page.locator('canvas').click();
+  await page.keyboard.press('9');
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  // Back in the extended model the tool is there again, and the selection stays.
+  await page.getByRole('combobox', { name: 'Model' }).selectOption('extended');
+  await expect(slime).toHaveAttribute('aria-checked', 'false');
+  await expect(move).toHaveAttribute('aria-checked', 'true');
+  expect(errors).toEqual([]);
 });
 
 // Every new grid paints all recorded strokes again (ADR 0019): a slow drag must not record one per pointer event.
