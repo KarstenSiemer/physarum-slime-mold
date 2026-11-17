@@ -203,6 +203,19 @@ describe('the flow in the tubes', () => {
   });
 });
 
+// ADR 0058: the outline distances of the electrodes are 4 B per cell on both backends. The fit counts them from the
+// start, with a pole or without one, so that a stroke of a pole never changes the grid.
+describe('the outline distances of the electrodes', () => {
+  it('are 4 of the bytes per cell of every backend', () => {
+    // 98 and 118 before them (ADR 0047).
+    expect(BYTES_PER_CELL).toBe(102);
+    expect(BYTES_PER_CELL_HALF_FLOAT).toBe(122);
+    // On 2048 × 1280 cells they are 10 MiB.
+    const [w, h] = gridSize(2048, 1.6);
+    expect(estimateBytes(w, h, 1000, BYTES_PER_CELL) - estimateBytes(w, h, 1000, 98)).toBe(10 * 2 ** 20);
+  });
+});
+
 // ADR 0055, decision 9: the slime field holds one stamp of 4 B per cell, on both backends.
 describe('the slime field', () => {
   it('holds 4 B per cell, which the memory estimate counts per cell', () => {

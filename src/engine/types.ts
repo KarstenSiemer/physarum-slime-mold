@@ -26,9 +26,10 @@ export const POLES = ['cathode', 'anode'] as const;
 export type Pole = (typeof POLES)[number];
 export const isPole = (kind: EnvTool): kind is Pole => kind === 'anode' || kind === 'cathode';
 /**
- * Whether a stroke of `kind` changes the outline distances of the electrodes (Sim.readPoles()). A pole unites with the
- * outline of its kind and takes its cells from the other pole. An erase and a wall clear both poles of their cells:
- * only where a pole may lie in the environment (`poled`, Sim.hasElectrodes). Food, light and slime leave the poles.
+ * Whether a stroke of `kind` changes the outline distances of the electrodes (Sim.readPoles(), ADR 0058). A pole
+ * unites with the outline of its kind and takes its cells from the other pole. An erase and a wall clear both poles of
+ * their cells: only where a pole may lie in the environment (`poled`, Sim.hasElectrodes). Food, light and slime leave
+ * the poles.
  */
 export const polesOutlined = (kind: EnvTool, poled: boolean) =>
   isPole(kind) || (poled && (kind === 'erase' || kind === 'wall'));

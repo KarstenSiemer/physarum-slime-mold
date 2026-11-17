@@ -136,8 +136,11 @@ type Channels = [boolean, boolean, boolean, boolean];
 const FIRST: Channels = [true, false, false, false];
 const SECOND: Channels = [false, true, false, false];
 const BOTH: Channels = [true, true, false, false];
-/** A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation. */
-type OutlineDraw = [number, Channels, 'MAX' | 'MIN' | null];
+/**
+ * A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation, and
+ * for a subtraction how it is rounded off (`cut` in shape.frag): as the union of a pole (1) or of a wall (2).
+ */
+type OutlineDraw = [op: number, channels: Channels, blend: 'MAX' | 'MIN' | null, cut?: 0 | 1 | 2];
 /** The draws of the segments of a kind: per segment, the hold of the subtracted layers, and once per cell of a run. */
 type OutlineDraws = Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDraw; run: OutlineDraw[] }>;
 /**
@@ -168,17 +171,18 @@ const OUTLINE_DRAWS: OutlineDraws = {
  * The same for the target of the outlines of the electrodes (POLES in shape.frag): R the cathodes, G the anodes. A
  * cell holds one pole, the one painted last. So a cathode is a union in R and a subtraction in G, as a wall is for
  * walls and food, and an anode is the mirror. An erase and a wall clear both poles of their cells. Food, light and
- * slime leave the poles.
+ * slime leave the poles. A pole and a wall fill the cells that they take: their subtraction is rounded off as their
+ * union is, so the pole below ends where the stroke begins (ADR 0058). An erase takes the plain distance.
  */
 const POLE_DRAWS: OutlineDraws = {
   erase: { segment: [[1, BOTH, 'MIN']], hold: [4, BOTH, 'MIN'], run: [] },
-  wall: { segment: [[1, BOTH, 'MIN']], hold: [4, BOTH, 'MIN'], run: [] },
+  wall: { segment: [[1, BOTH, 'MIN', 2]], hold: [4, BOTH, 'MIN'], run: [] },
   food: { segment: [], run: [] },
   light: { segment: [], run: [] },
   anode: {
     segment: [
       [0, SECOND, 'MAX'],
-      [1, FIRST, 'MIN'],
+      [1, FIRST, 'MIN', 1],
     ],
     hold: [4, FIRST, 'MIN'],
     run: [],
@@ -186,7 +190,7 @@ const POLE_DRAWS: OutlineDraws = {
   cathode: {
     segment: [
       [0, FIRST, 'MAX'],
-      [1, SECOND, 'MIN'],
+      [1, SECOND, 'MIN', 1],
     ],
     hold: [4, SECOND, 'MIN'],
     run: [],
@@ -247,10 +251,10 @@ export class GlSim implements Sim {
   /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
   hasElectrodes = false;
   /**
-   * The outline distances of the electrodes, for the renderer only (shape.frag with POLES; `poles` in ../sim.ts): R
-   * the distance to the outline of the cathodes, G the one to the outline of the anodes, as `shape` holds those of
-   * walls and food. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and freed by
-   * a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL).
+   * The outline distances of the electrodes, for the renderer only (shape.frag with POLES; `poles` in ../sim.ts;
+   * ADR 0058): R the distance to the outline of the cathodes, G the one to the outline of the anodes, as `shape` holds
+   * those of walls and food. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and
+   * freed by a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL).
    */
   private poles: Target | undefined;
   /**
@@ -1463,7 +1467,7 @@ export class GlSim implements Sim {
     gl.enable(gl.SCISSOR_TEST);
     // `poles` holds no light and no shadow.
     const [walls, food, light] = poles ? [...this.poleLayers, false] : this.layers;
-    const draw = ([op, all, equation]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
+    const draw = ([op, all, equation, cut = 0]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
       // Only the layers that hold anything: a subtraction of food or walls (or of a pole), the light and the shadow.
       const mask: [boolean, boolean, boolean, boolean] =
         op === 1 || op === 4
@@ -1475,6 +1479,7 @@ export class GlSim implements Sim {
       else gl.disable(gl.BLEND);
       gl.uniform1i(sp.loc('op'), op);
       gl.uniform1i(sp.loc('hold'), Number(hold));
+      gl.uniform1i(sp.loc('cut'), cut);
       gl.uniform1i(sp.loc('core'), Number(core));
       gl.uniform2i(sp.loc('layers'), Number(mask[0]), Number(mask[1]));
       for (const r of rects) {

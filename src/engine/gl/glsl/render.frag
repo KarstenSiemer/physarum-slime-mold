@@ -459,7 +459,7 @@ vec3 walls(vec3 c, Env e) {
 #endif
 
 #if ENV
-// ---- Electrodes (see render.wgsl, ADR 0047) ----
+// ---- Electrodes (see render.wgsl, ADR 0047 and ADR 0058) ----
 uniform sampler2D poles; // the outline distances of the electrodes (shape.frag POLES); read for the electrodes only
 
 const vec3 CATHODE = vec3(0.05, 0.32, 1.0);

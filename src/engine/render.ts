@@ -416,7 +416,7 @@ export class Renderer {
     let cached = byOcc.get(occ);
     // The Jones model has no slime field, and no pass reads its binding then: the cells of the simulation stand in.
     const stamps = sim.slimeField ?? sim.env;
-    // Without a pole the simulation holds no outline distances of the electrodes (ADR 0047), and no pass reads their
+    // Without a pole the simulation holds no outline distances of the electrodes (ADR 0058), and no pass reads their
     // binding then: those of walls and food stand in.
     const poles = sim.poleField ?? sim.shape;
     if (
@@ -447,7 +447,7 @@ export class Renderer {
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
           // The slime field, for the layer of the slime (ADR 0055).
           { binding: 14, resource: { buffer: stamps } },
-          // The outline distances of the electrodes (ADR 0047).
+          // The outline distances of the electrodes (ADR 0058).
           { binding: 16, resource: { buffer: poles } },
         ],
       });

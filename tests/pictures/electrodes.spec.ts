@@ -1,4 +1,4 @@
-// The pictures of the electrodes (ADR 0047, decision 8, and the ADR of their outlines): the poles of the Electrode tool
+// The pictures of the electrodes (ADR 0058): the poles of the Electrode tool
 // in each style, fitted and zoomed in, from the app's own renderer. Not part of CI. It writes PNG files to
 // test-results/pictures/, which git ignores:
 //
@@ -46,7 +46,7 @@ const STYLES: Style[] = ['glow', 'gel', 'paper', 'agents'];
 /**
  * Strokes of both poles on a lattice of 160 × 120 cells: wide dabs, the dabs of the scene Electrotaxis (1.5 cells),
  * thin and thicker lines, a cathode over a part of an anode and the other way round, an erase and a wall through a
- * pole, and a pole on food and in the light.
+ * pole, a pole on food and in the light, and thin poles and a thin wall over a wide pole.
  */
 const STROKES: Dab[] = [
   { kind: 'cathode', from: [26, 24], radius: 10 },
@@ -88,6 +88,12 @@ const STROKES: Dab[] = [
   { kind: 'cathode', from: [100, 104], radius: 4 },
   { kind: 'anode', from: [107.5, 104], radius: 4 },
   { kind: 'anode', from: [130, 88], radius: 3 },
+  // Thin poles over a wide pole, and a thin wall through it: a pole ends where the stroke over it begins (ADR 0058).
+  { kind: 'cathode', from: [148, 64], radius: 9 },
+  { kind: 'anode', from: [142, 60], to: [154, 62], radius: 0.75 },
+  { kind: 'anode', from: [145, 66], radius: 1.5 },
+  { kind: 'anode', from: [151, 67], radius: 1 },
+  { kind: 'wall', from: [143, 70], to: [153, 58.5], radius: 0.75 },
 ];
 
 const CASES: Case[] = [
@@ -126,6 +132,7 @@ const CASES: Case[] = [
       { name: 'overlap', at: [128, 27], factor: 4 },
       { name: 'cut', at: [44, 100], factor: 4 },
       { name: 'beside', at: [104, 100], factor: 6 },
+      { name: 'seam', at: [148, 64], factor: 8 },
       { name: 'far', at: [80, 60], factor: 0.3 },
     ],
   },
@@ -137,7 +144,12 @@ const CASES: Case[] = [
     steps: 0,
     strokes: STROKES,
     styles: ['glow', 'paper'],
-    shots: [{ name: 'fit' }, { name: 'dabs', at: [85, 21], factor: 6 }, { name: 'overlap', at: [128, 27], factor: 4 }],
+    shots: [
+      { name: 'fit' },
+      { name: 'dabs', at: [85, 21], factor: 6 },
+      { name: 'overlap', at: [128, 27], factor: 4 },
+      { name: 'seam', at: [148, 64], factor: 8 },
+    ],
   },
   // The same strokes without the poles: this change of the view leaves walls, food and light as they were, so the
   // pictures of two builds agree but for the dither.

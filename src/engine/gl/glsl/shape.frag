@@ -9,14 +9,16 @@
 // cell, and a segment's distance to the cells it paints itself, so a cell is inside exactly when `env` holds the
 // wall or food there. Cells outside the arena keep their bytes. Prepended with common.glsl and brush.glsl.
 //
-// With POLES defined the program writes the outlines of the electrodes into a target of their own (see POLES in
-// paint.wgsl): R the distance to the outline of the cathodes, G the one to the outline of the anodes, B and A 0. The
+// With POLES defined the program writes the outlines of the electrodes into a target of their own (ADR 0058; see POLES
+// in paint.wgsl): R the distance to the outline of the cathodes, G the one to the outline of the anodes, B and A 0. The
 // two layers are then the cathode and the anode. A cathode is a union in R and a subtraction in G, an anode the
-// mirror, and an erase and a wall a subtraction in both (gl/sim.ts POLE_DRAWS).
+// mirror, and an erase and a wall a subtraction in both (gl/sim.ts POLE_DRAWS). The subtraction of a pole and of a
+// wall takes the complement of the rounded byte of their union (`cut`), so the pole below ends where the stroke begins.
 
 uniform int op;
 uniform ivec2 layers;  // ops 0, 1 and 4: the layers (wall and food, or the two poles) the color mask writes
 uniform int hold;      // op 1: also the hold of op 4, except where the subtraction writes 0
+uniform int cut;       // op 1: the subtraction is rounded off as the union of a pole (1) or of a wall (2); 0: not
 uniform int core;      // op 2 for one eraser (`from`, `to`, `radius`): the cells deep inside it hold no light or shadow
 uniform sampler2D env; // after the stroke
 uniform sampler2D old; // op 3: the target before, one tile of it
@@ -235,8 +237,11 @@ void main() {
   }
   // Ops 0 and 1 run over the whole outline box, as paint.wgsl applies them.
   float d = strokeDistance(p, radius + SHAPE_RANGE);
-  // A subtraction's byte, held to the cells the segment paints (see `ownByte` in paint.wgsl).
-  float t = op == 1 ? ownByte(distanceByte(radius - d), c, p) : 0.0;
+  // A subtraction's byte, held to the cells the segment paints (see `ownByte` in paint.wgsl). A stroke that fills
+  // its cells, a pole or a wall on the outlines of the electrodes, takes the complement of the rounded byte of its
+  // union (see POLES in `outline` in paint.wgsl). With a slope of 0 the distance stays as it is.
+  float carve = cut == 1 ? POLE_RIM : cut == 2 ? WALL_BEVEL : 0.0;
+  float t = op == 1 ? ownByte(distanceByte(radius - rounded(d, radius, carve)), c, p) : 0.0;
   vec2 out2 = vec2(0.0);
   for (int layer = 0; layer < 2; layer++) {
     if (layers[layer] == 0) continue;

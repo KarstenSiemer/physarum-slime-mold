@@ -45,7 +45,7 @@ const DISH_FILL = 0.945;
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
 @group(0) @binding(14) var<storage, read> stamps: array<u32>; // the slime field (slime.wgsl); read for the slime only
-// The outline distances of the electrodes (paint.wgsl POLES); read for the electrodes only.
+// The outline distances of the electrodes (paint.wgsl POLES, ADR 0058); read for the electrodes only.
 @group(0) @binding(16) var<storage, read> poles: array<u32>;
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
@@ -906,7 +906,7 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   return c;
 }
 
-// ---- Electrodes (ADR 0047) ----------------------------------------------------------------------------
+// ---- Electrodes (ADR 0047, ADR 0058) ------------------------------------------------------------------
 // The poles of the Electrode tool, on top of the picture. Display only. `poles` holds their outlines as `shape` holds
 // those of walls and food (paint.wgsl POLES): the distance to the outline of the cathodes in the first byte of a cell
 // and to the outline of the anodes in the second. So a pole has the outline of its strokes at every zoom, as food and

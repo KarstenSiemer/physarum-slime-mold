@@ -85,10 +85,11 @@ export const diffusePlanOf = (s: Pick<Settings, 'diffusion' | 'model' | 'meanWin
  * height field about 2, the walls' clearance 0.125 (8 B per tile of 8 × 8 cells, ADR 0020), and the two coarse maps
  * of the view, 4 each: the trail's for a view zoomed out and the scent view's (16 B per texel, a quarter of a texel
  * per cell; render.ts, gl/backend.ts). The user zooms out or turns the scent view on without a new grid, so the fit
- * holds both maps from the start (ADR 0028). So with the outline distances of the electrodes (sim.ts `poles`,
- * gl/sim.ts `poles`): a simulation makes them at its first pole, and a stroke must not change the grid. WebGL2
- * without float blending has no collision buffers but 32 B of counting panels with a stencil (gl/sim.ts deposit());
- * its coarse maps are the same. The electrodes themselves (ADR 0047) lie in the fourth byte of the environment's 4.
+ * holds both maps from the start (ADR 0028). So with the outline distances of the electrodes (ADR 0058; sim.ts
+ * `poles`, gl/sim.ts `poles`): a simulation makes them at its first pole, and a stroke must not change the grid.
+ * WebGL2 without float blending has no collision buffers but 32 B of counting panels with a stencil (gl/sim.ts
+ * deposit()); its coarse maps are the same. The electrodes themselves (ADR 0047) lie in the fourth byte of the
+ * environment's 4.
  */
 export const BYTES_PER_CELL = 102;
 export const BYTES_PER_CELL_HALF_FLOAT = 122;

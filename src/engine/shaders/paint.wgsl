@@ -49,11 +49,12 @@ fn paint(@builtin(global_invocation_id) gid: vec3u) {
 // `env` allow. Cells outside the arena keep their bytes: `paint` leaves their `env` alone, and a later
 // boundary may count them again.
 //
-// The electrodes have a buffer of their own in the same format (POLES): `shape` has no byte left for them. Its first
-// byte holds the distance to the outline of the cathodes and its second byte the one to the outline of the anodes; the
-// other two stay 0. A cell of `env` holds one pole, the one painted last (`paint`). So a cathode stroke is for the two
-// poles what a wall stroke is for walls and food: a union with the cathodes and a subtraction from the anodes. An anode
-// stroke is the mirror, and an erase and a wall subtract from both. The same code writes both buffers.
+// The electrodes have a buffer of their own in the same format (POLES, ADR 0058): `shape` has no byte left for them.
+// Its first byte holds the distance to the outline of the cathodes and its second byte the one to the outline of the
+// anodes; the other two stay 0. A cell of `env` holds one pole, the one painted last (`paint`). So a cathode stroke is
+// for the two poles what a wall stroke is for walls and food: a union with the cathodes and a subtraction from the
+// anodes. An anode stroke is the mirror, and an erase and a wall subtract from both. The same code writes both
+// buffers; `outline` says where the subtraction of a pole and of a wall differs.
 
 @group(0) @binding(3) var<storage, read_write> shape: array<u32>;
 
@@ -408,20 +409,28 @@ fn outline(
   if (POLES) {
     // The outlines of the electrodes: `wall` is the cathode here and `food` the anode. A pole unites with its own
     // layer as a wall does with the walls, rounded for the slope that the renderer lights, and it subtracts from the
-    // other pole as a wall does from food. An erase and a wall subtract from both, as an erase does below. Food and
-    // light leave the poles, and their strokes run no pass here. The other two bytes stay 0.
+    // other pole. An erase and a wall subtract from both. Food and light leave the poles, and their strokes run no
+    // pass here. The other two bytes stay 0.
+    //
+    // A pole and a wall fill the cells that they take, and the renderer draws them from the rounded byte of their
+    // union. So their subtraction takes the complement of that byte, not of the plain distance: the pole below then
+    // ends exactly where the stroke begins, and no ground shows between the two. With the plain distance a stroke
+    // thinner than 2 cells was drawn up to 0.14 cells narrower than the gap that it cut (ADR 0058). An erase fills
+    // nothing: it takes the plain distance, which gives the straighter edge.
     let own = distanceByte(B.radius - rounded(d, B.radius, POLE_RIM));
     switch B.kind {
       case 5u: {
         wall = united(wall, own, here.x, q);
-        food = heldBy(min(food, 255u - ownByte(s, q, 255u - food)), here.y, hold.y);
+        food = heldBy(min(food, 255u - ownByte(own, q, 255u - food)), here.y, hold.y);
       }
       case 4u: {
         food = united(food, own, here.y, q);
-        wall = heldBy(min(wall, 255u - ownByte(s, q, 255u - wall)), here.x, hold.x);
+        wall = heldBy(min(wall, 255u - ownByte(own, q, 255u - wall)), here.x, hold.x);
       }
       case 0u, 1u: {
-        let t = ownByte(s, q, 255u - max(wall, food));
+        // The union of a wall lies in `shape`, rounded for its bevel (below).
+        let byte = select(s, distanceByte(B.radius - rounded(d, B.radius, WALL_BEVEL)), B.kind == 1u);
+        let t = ownByte(byte, q, 255u - max(wall, food));
         wall = heldBy(min(wall, 255u - t), here.x, hold.x);
         food = heldBy(min(food, 255u - t), here.y, hold.y);
       }

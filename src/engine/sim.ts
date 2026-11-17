@@ -190,11 +190,11 @@ export class Simulation implements Sim {
   /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
   hasElectrodes = false;
   /**
-   * The outline distances of the electrodes, for the renderer only (paint.wgsl `outline` with POLES): per cell the
-   * distance to the outline of the cathodes and to the outline of the anodes, as `shape` holds those of walls and
-   * food, 4 B each. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and freed by
-   * a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL), so a stroke never changes the
-   * grid.
+   * The outline distances of the electrodes, for the renderer only (paint.wgsl `outline` with POLES, ADR 0058): per
+   * cell the distance to the outline of the cathodes and to the outline of the anodes, as `shape` holds those of walls
+   * and food, 4 B each. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and
+   * freed by a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL), so a stroke never
+   * changes the grid.
    */
   private poles?: GPUBuffer | undefined;
   /** The bind group of the outline pass on `poles`, in the layout of the paint pass. */
