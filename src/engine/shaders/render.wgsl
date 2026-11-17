@@ -44,8 +44,9 @@ const DISH_FILL = 0.945;
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
-@group(0) @binding(13) var<storage, read> env: array<u32>; // the cells of the simulation; read for the electrodes only
 @group(0) @binding(14) var<storage, read> stamps: array<u32>; // the slime field (slime.wgsl); read for the slime only
+// The outline distances of the electrodes (paint.wgsl POLES, ADR 0058); read for the electrodes only.
+@group(0) @binding(16) var<storage, read> poles: array<u32>;
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
@@ -443,20 +444,20 @@ fn shapeIndex(c: vec2i) -> i32 {
   return q.y * s.x + q.x;
 }
 
-// The 3 × 3 cells of `shape` around cell c, row by row: the cells the spline reads at a point in c. As
-// shapeIndex(), but the columns and rows are wrapped or clamped once.
-fn shapeCells(c: vec2i) -> array<u32, 9> {
+// The 3 × 3 cells around cell c, row by row, each as shapeIndex() gives it: the cells the spline reads at a point in
+// c. The columns and rows are wrapped or clamped once.
+fn cellsAround(c: vec2i) -> array<i32, 9> {
   let s = size();
-  var w: array<u32, 9>;
+  var k: array<i32, 9>;
   if (V.boundary == 2u) {
     let m = vec2f(c) + 0.5 - 0.5 * vec2f(s);
     let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y));
     if (dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
       // Near the rim: some of the 3 × 3 cells may lie outside the dish.
       for (var j = 0; j < 3; j++) {
-        for (var i = 0; i < 3; i++) { w[j * 3 + i] = shape[shapeIndex(c + vec2i(i - 1, j - 1))]; }
+        for (var i = 0; i < 3; i++) { k[j * 3 + i] = shapeIndex(c + vec2i(i - 1, j - 1)); }
       }
-      return w;
+      return k;
     }
   }
   var xs = clamp(vec3i(c.x - 1, c.x, c.x + 1), vec3i(0), vec3i(s.x - 1));
@@ -467,8 +468,16 @@ fn shapeCells(c: vec2i) -> array<u32, 9> {
     ys = vec3i(select(q.y - 1, s.y - 1, q.y == 0), q.y, select(q.y + 1, 0, q.y == s.y - 1));
   }
   for (var j = 0; j < 3; j++) {
-    for (var i = 0; i < 3; i++) { w[j * 3 + i] = shape[ys[j] * s.x + xs[i]]; }
+    for (var i = 0; i < 3; i++) { k[j * 3 + i] = ys[j] * s.x + xs[i]; }
   }
+  return k;
+}
+
+// The 3 × 3 cells of `shape` around cell c (cellsAround()).
+fn shapeCells(c: vec2i) -> array<u32, 9> {
+  let k = cellsAround(c);
+  var w: array<u32, 9>;
+  for (var i = 0; i < 9; i++) { w[i] = shape[k[i]]; }
   return w;
 }
 
@@ -897,35 +906,75 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   return c;
 }
 
-// ---- Electrodes (ADR 0047) ----------------------------------------------------------------------------
-// The poles of the Electrode tool, on top of the picture. Display only. They lie in the fourth byte of a cell of
-// `env` (paint.wgsl): above 191 the cathode, any other byte above 0 the anode. `shape` has no byte for them.
+// ---- Electrodes (ADR 0047, ADR 0058) ------------------------------------------------------------------
+// The poles of the Electrode tool, on top of the picture. Display only. `poles` holds their outlines as `shape` holds
+// those of walls and food (paint.wgsl POLES): the distance to the outline of the cathodes in the first byte of a cell
+// and to the outline of the anodes in the second. So a pole has the outline of its strokes at every zoom, as food and
+// walls have, and a surface: a stud whose rim slopes up from the outline, lit by the light of the picture, with a
+// highlight, a thin dark line along its outline and a shadow on the side away from the light.
 
 const CATHODE = vec3f(0.05, 0.32, 1.0);  // linear RGB: blue, the pole that attracts
 const ANODE = vec3f(1.0, 0.08, 0.04);    // red, the pole that repels
-const POLE_OPACITY = 0.9;
+const POLE_RIM = 1.5;      // cells: the slope of a pole, from its outline to its flat top (POLE_RIM in paint.wgsl)
+const POLE_SHADOW = 2.0;   // cells that the shadow of a pole reaches beside its outline
 
-// The pole of grid cell c as (cathode, anode), each 0 or 1. The cell as shapeIndex() takes it.
-fn poleOf(c: vec2i) -> vec2f {
-  let b = env[shapeIndex(c)] >> 24u;
-  return vec2f(select(0.0, 1.0, b > 191u), select(0.0, 1.0, b > 0u && b <= 191u));
+// The 3 × 3 cells of `poles` around cell c (cellsAround()).
+fn poleCells(c: vec2i) -> array<u32, 9> {
+  let k = cellsAround(c);
+  var w: array<u32, 9>;
+  for (var i = 0; i < 9; i++) { w[i] = poles[k[i]]; }
+  return w;
 }
 
-// The picture c with the electrodes at p over it: each pole covers where the bilinear mix of its 4 cells around p
-// passes one half, so the outline of a round dab is round at every zoom.
+// A pole at a point: its lit surface, how much of the pixel it covers, and its shadow on what lies beside it.
+struct Stud {
+  color: vec3f,
+  cover: f32,
+  shadow: f32,
+}
+
+// The stud of the colour `base` where the distance to its outline is `sd` cells (positive inside), `coverSd` for the
+// coverage (envAt()) and `grad` the gradient of the distance.
+// - The surface is a dome over the outer POLE_RIM cells: its height rises as t (2 − t) with t the share of the rim
+//   that lies behind, so it is steepest at the outline and flat from the rim on. The light is the one of the walls.
+// - The line: the colour gets darker toward the outline, over a pixel and a half: a third of a cell at least, and
+//   three quarters of a cell at most, so that a small pole keeps its colour in a view zoomed out.
+// - The shadow lies outside the outline, where the pole stands between the point and the light: the gradient points
+//   to the pole there, and so toward the light. It fades over POLE_SHADOW cells. The gradient is about 1 long beside
+//   an outline and shorter where two outlines are as near (the middle of a gap): the shadow fades there with it.
+fn studAt(base: vec3f, sd: f32, coverSd: f32, grad: vec2f) -> Stud {
+  var s: Stud;
+  s.cover = cover(coverSd);
+  let toLight = clamp(dot(grad, normalize(SUN.xy)), 0.0, 1.0);
+  s.shadow = smoothstep(-POLE_SHADOW, 0.0, sd) * toLight * (1.0 - s.cover);
+  if (s.cover <= 0.0) { return s; }
+  let t = clamp(sd / POLE_RIM, 0.0, 1.0);
+  let n = normalize(vec3f(-grad * (2.0 * (1.0 - t) / POLE_RIM), 1.0));
+  let diffuse = max(dot(n, SUN), 0.0);
+  let spec = pow(max(dot(n, normalize(SUN + vec3f(0.0, 0.0, 1.0))), 0.0), 60.0);
+  let lit = base * (0.5 + 0.7 * diffuse) + 0.6 * spec;
+  let line = 1.0 - smoothstep(0.0, clamp(1.5 * V.scale, 0.35, 0.75), sd);
+  s.color = mix(lit, 0.25 * base, 0.6 * line);
+  return s;
+}
+
+// The picture c with the electrodes at p over it. A cell holds one pole, so the two outlines never cross: where they
+// meet, each pole covers its share of the pixel.
 fn electrodes(c: vec3f, p: vec2f) -> vec3f {
-  let q = p - 0.5;
-  let i = vec2i(floor(q));
-  let f = q - floor(q);
-  var cover = vec2f(0.0);
-  for (var dy = 0; dy < 2; dy++) {
-    for (var dx = 0; dx < 2; dx++) {
-      let w = select(1.0 - f.x, f.x, dx == 1) * select(1.0 - f.y, f.y, dy == 1);
-      cover += w * poleOf(i + vec2i(dx, dy));
-    }
-  }
-  let a = POLE_OPACITY * smoothstep(vec2f(0.4), vec2f(0.6), cover);
-  return mix(mix(c, CATHODE, a.x), ANODE, a.y);
+  let cells = poleCells(vec2i(floor(p)));
+  var any = 0u;
+  for (var k = 0; k < 9; k++) { any |= cells[k]; }
+  // No pole within the reach of the outline distances.
+  if (any == 0u) { return c; }
+  let e = envAt(p, cells);
+  let cathode = studAt(CATHODE, e.wall, e.wallCover, e.wallGrad);
+  let anode = studAt(ANODE, e.food, e.foodCover, e.foodGrad);
+  // The shadow is as dark as the one of a wall in each style (walls()).
+  let ground = c * (1.0 - byStyle(vec3f(0.75), vec3f(0.6), vec3f(0.3)).x * max(cathode.shadow, anode.shadow));
+  let both = cathode.cover + anode.cover;
+  if (both <= 0.0) { return ground; }
+  let surface = (cathode.cover * cathode.color + anode.cover * anode.color) / both;
+  return mix(ground, surface, min(both, 1.0));
 }
 
 // ---- Scent view (SCENT) -------------------------------------------------------------------------------

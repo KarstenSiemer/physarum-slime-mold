@@ -22,6 +22,7 @@ import {
   EnvKind,
   isPole,
   paintsEnv,
+  polesOutlined,
   releases,
   SHAPE_RANGE,
   type AgentState,
@@ -130,36 +131,79 @@ function core({ from: a, to: b, radius }: Stroke) {
   return 2 * rho * Math.hypot(b[0] - a[0], b[1] - a[1]) + Math.PI * rho * rho;
 }
 
-/** A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation. */
-type OutlineDraw = [number, [boolean, boolean, boolean, boolean], 'MAX' | 'MIN' | null];
+/** The channels of the first layer of an outline target, of the second, and of both. */
+type Channels = [boolean, boolean, boolean, boolean];
+const FIRST: Channels = [true, false, false, false];
+const SECOND: Channels = [false, true, false, false];
+const BOTH: Channels = [true, true, false, false];
+/**
+ * A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation, and
+ * for a subtraction how it is rounded off (`cut` in shape.frag): as the union of a pole (1) or of a wall (2).
+ */
+type OutlineDraw = [op: number, channels: Channels, blend: 'MAX' | 'MIN' | null, cut?: 0 | 1 | 2];
+/** The draws of the segments of a kind: per segment, the hold of the subtracted layers, and once per cell of a run. */
+type OutlineDraws = Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDraw; run: OutlineDraw[] }>;
 /**
  * How shape.frag applies a run's segments of a kind to the outline target: per segment over its outline box the
  * union (op 0, MAX blending) or the subtraction (op 1, MIN blending); then, once per cell of the union of the
  * segments' boxes, the hold of the subtracted layers (op 4, MIN blending) and the light and the shadow (op 2). The
  * hold, the light and the shadow depend only on `env` after the run, so overlapping boxes need them once.
  */
-const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDraw; run: OutlineDraw[] }> = {
-  erase: {
-    segment: [[1, [true, true, false, false], 'MIN']],
-    hold: [4, [true, true, false, false], 'MIN'],
-    run: [[2, [false, false, true, true], null]],
-  },
+const OUTLINE_DRAWS: OutlineDraws = {
+  erase: { segment: [[1, BOTH, 'MIN']], hold: [4, BOTH, 'MIN'], run: [[2, [false, false, true, true], null]] },
   wall: {
     segment: [
-      [0, [true, false, false, false], 'MAX'],
-      [1, [false, true, false, false], 'MIN'],
+      [0, FIRST, 'MAX'],
+      [1, SECOND, 'MIN'],
     ],
-    hold: [4, [false, true, false, false], 'MIN'],
+    hold: [4, SECOND, 'MIN'],
     run: [[2, [false, false, true, true], null]],
   },
-  food: { segment: [[0, [false, true, false, false], 'MAX']], run: [] },
+  food: { segment: [[0, SECOND, 'MAX']], run: [] },
   light: { segment: [], run: [[2, [false, false, true, false], null]] },
-  // An electrode changes no byte of the outline target: the renderer reads its byte from `env` (render.frag poleAt).
+  // An electrode changes no byte of the outline target: its outline lies in `poles` (POLE_DRAWS).
   anode: { segment: [], run: [] },
   cathode: { segment: [], run: [] },
   // A stroke of the Slime tool joins no run: it changes only the slime field (brushSlime()).
   slime: { segment: [], run: [] },
 };
+/**
+ * The same for the target of the outlines of the electrodes (POLES in shape.frag): R the cathodes, G the anodes. A
+ * cell holds one pole, the one painted last. So a cathode is a union in R and a subtraction in G, as a wall is for
+ * walls and food, and an anode is the mirror. An erase and a wall clear both poles of their cells. Food, light and
+ * slime leave the poles. A pole and a wall fill the cells that they take: their subtraction is rounded off as their
+ * union is, so the pole below ends where the stroke begins (ADR 0058). An erase takes the plain distance.
+ */
+const POLE_DRAWS: OutlineDraws = {
+  erase: { segment: [[1, BOTH, 'MIN']], hold: [4, BOTH, 'MIN'], run: [] },
+  wall: { segment: [[1, BOTH, 'MIN', 2]], hold: [4, BOTH, 'MIN'], run: [] },
+  food: { segment: [], run: [] },
+  light: { segment: [], run: [] },
+  anode: {
+    segment: [
+      [0, SECOND, 'MAX'],
+      [1, FIRST, 'MIN', 1],
+    ],
+    hold: [4, FIRST, 'MIN'],
+    run: [],
+  },
+  cathode: {
+    segment: [
+      [0, FIRST, 'MAX'],
+      [1, SECOND, 'MIN', 1],
+    ],
+    hold: [4, SECOND, 'MIN'],
+    run: [],
+  },
+  slime: { segment: [], run: [] },
+};
+/** A segment of a run of paint(): its kind, its outline rectangles, and whether `poles` takes its outline too. */
+interface RunItem {
+  segment: Stroke;
+  kind: EnvTool;
+  rects: readonly Rect[];
+  poles: boolean;
+}
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -207,8 +251,21 @@ export class GlSim implements Sim {
   /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
   hasElectrodes = false;
   /**
-   * The boundary under which every byte of the outline target is held to `env`. After a change of boundary, or after
-   * strokes painted under another boundary (then undefined), syncShape() holds it again before its next use.
+   * The outline distances of the electrodes, for the renderer only (shape.frag with POLES; `poles` in ../sim.ts;
+   * ADR 0058): R the distance to the outline of the cathodes, G the one to the outline of the anodes, as `shape` holds
+   * those of walls and food. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and
+   * freed by a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL).
+   */
+  private poles: Target | undefined;
+  /**
+   * Whether a cathode and an anode were painted since the last clear: without them their bytes are all 0, and a
+   * subtraction from them draws nothing (`layers`).
+   */
+  private readonly poleLayers = [false, false];
+  /**
+   * The boundary under which every byte of the outline target and of `poles` is held to `env`. After a change of
+   * boundary, or after strokes painted under another boundary (then undefined), syncShape() holds them again before
+   * their next use.
    */
   private shapeHeld: Boundary | undefined;
   /** Where the outlines of the run that paint() draws next lie (brush.ts). */
@@ -602,9 +659,25 @@ export class GlSim implements Sim {
     return this.shape.texture;
   }
 
-  /** The cells of the simulation, 4 bytes each as readEnv() returns them: the renderer reads the electrodes. */
-  get envTexture(): WebGLTexture {
-    return this.env.texture;
+  /**
+   * For the renderer: the outline distances of the electrodes (`poles`), or undefined while no pole may lie in `env`
+   * (`hasElectrodes`). Call syncShape() before reading it.
+   */
+  get poleTexture(): WebGLTexture | undefined {
+    return this.poles?.texture;
+  }
+
+  /** The outline distances of the electrodes, made at the first pole. A new texture holds zeros: no pole is near. */
+  private ensurePoles(): Target {
+    this.poles ??= target(this.gl, this.width, this.height, this.gl.RGBA8);
+    return this.poles;
+  }
+
+  /** Frees the outline distances of the electrodes: `env` holds no pole. */
+  private dropPoles() {
+    if (this.poles) destroyTarget(this.gl, this.poles);
+    this.poles = undefined;
+    this.poleLayers.fill(false);
   }
 
   /** Agents per cell after the last step, kept in collision mode only; none without float blending. */
@@ -1005,7 +1078,8 @@ export class GlSim implements Sim {
    * of a run of segments, then their outline draws, so the render target changes twice per run and not twice per
    * segment. A run ends where the boundary changes or a segment of another kind meets it (brush.ts
    * PendingOutlines). Within a run the outlines give the bytes of one segment after another (ADR 0009), so one call
-   * paints what one call per stroke paints.
+   * paints what one call per stroke paints. A stroke of a pole has its outline in `poles` in place of the outline
+   * target, and an erase and a wall have one in both while a pole may lie in `env` (drawOutlines()).
    *
    * A stroke of the Slime tool changes no byte of `env` or of the outline target. What the strokes do with the slime
    * field follows after the environment of all of them (brushSlime(), as paint() in ../sim.ts).
@@ -1027,13 +1101,18 @@ export class GlSim implements Sim {
     if (this.shapeHeld !== undefined) this.syncShape();
     const gl = this.gl;
     const p = this.prog.paint;
-    const run: { segment: Stroke; kind: EnvTool; rects: Rect[] }[] = [];
+    // The target of the outlines of the electrodes, before any target is bound: the strokes paint a pole.
+    if (strokes.some((s) => isPole(s.kind))) this.ensurePoles();
+    const run: RunItem[] = [];
     let boundary: Boundary | undefined;
     let kind = -1; // the kind the paint state is set for; -1: the env target is not bound
     let foreign = false;
     const drawRun = () => {
       if (run.length === 0) return;
       this.drawOutlines(run);
+      // The same segments on the outlines of the electrodes, with the poles as the two layers.
+      const poled = run.filter((item) => item.poles);
+      if (this.poles && poled.length > 0) this.drawOutlines(poled, this.poles);
       run.length = 0;
       this.pending.clear();
       kind = -1;
@@ -1048,12 +1127,15 @@ export class GlSim implements Sim {
       if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];
       if (k !== EnvKind.erase) this.hasEnvironment = true;
       if (pole) this.hasElectrodes = true;
+      if (pole) this.poleLayers[k === EnvKind.cathode ? 0 : 1] = true;
       if (k !== EnvKind.erase && !pole) this.layers[k - 1] = true;
+      // By the poles that the strokes before left: before the first pole no cell holds one.
+      const poles = polesOutlined(stroke.kind, this.hasElectrodes);
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const rects = scissorRects(segment, this.width, this.height, wrap);
         if (rects.length === 0) continue; // outside a closed arena: no cell to paint or outline
         const reach = outlineRects(segment, this.width, this.height, wrap);
-        if (b !== boundary || (!pole && this.pending.meets(reach, k, wrap))) {
+        if (b !== boundary || this.pending.meets(reach, k, wrap)) {
           drawRun(); // with the parameters of its own boundary
           if (b !== boundary) {
             this.writeParams(undefined, 0, b);
@@ -1080,9 +1162,7 @@ export class GlSim implements Sim {
           gl.scissor(...r);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
-        // An electrode has no outline, so it joins no run: its paint changes no byte that an outline reads.
-        if (pole) continue;
-        run.push({ segment, kind: stroke.kind, rects: reach });
+        run.push({ segment, kind: stroke.kind, rects: reach, poles });
         this.pending.add(reach, k, wrap);
       }
     }
@@ -1173,6 +1253,8 @@ export class GlSim implements Sim {
     this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
+    // No pole is left: the simulation holds their outlines again from the next pole on.
+    this.dropPoles();
     // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
     const stamps = this.slime;
     if (stamps) clearUint(this.gl, stamps);
@@ -1189,7 +1271,8 @@ export class GlSim implements Sim {
   /**
    * Holds the outline target to `env` under the current boundary (shape.frag op 3, see Simulation.syncShape()), once
    * after the boundary changed or after strokes under another boundary. Op 3 reads the bytes before from a copy,
-   * made one tile at a time so the copy stays small.
+   * made one tile at a time so the copy stays small. The outline distances of the electrodes follow in the same way,
+   * while the simulation holds them.
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
@@ -1201,17 +1284,20 @@ export class GlSim implements Sim {
     const [tw, th] = [Math.min(this.width, REFRESH_TILE), Math.min(this.height, REFRESH_TILE)];
     const copy = target(gl, tw, th, gl.RGBA8);
     gl.enable(gl.SCISSOR_TEST);
-    for (let y = 0; y < this.height; y += th)
-      for (let x = 0; x < this.width; x += tw) {
-        const [w, h] = [Math.min(tw, this.width - x), Math.min(th, this.height - y)];
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.shape.fbo);
-        gl.bindTexture(gl.TEXTURE_2D, copy.texture);
-        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, x, y, w, h);
-        gl.scissor(x, y, w, h);
-        this.pass(this.prog.shape, this.shape, { env: this.env.texture, old: copy.texture }, { op: 3 }, (p) => {
-          gl.uniform2i(p.loc('tile'), x, y);
-        });
-      }
+    const held: [Program, Target][] = [[this.prog.shape, this.shape]];
+    if (this.poles) held.push([this.prog.poleShape(), this.poles]);
+    for (const [program, outlines] of held)
+      for (let y = 0; y < this.height; y += th)
+        for (let x = 0; x < this.width; x += tw) {
+          const [w, h] = [Math.min(tw, this.width - x), Math.min(th, this.height - y)];
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, outlines.fbo);
+          gl.bindTexture(gl.TEXTURE_2D, copy.texture);
+          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, x, y, w, h);
+          gl.scissor(x, y, w, h);
+          this.pass(program, outlines, { env: this.env.texture, old: copy.texture }, { op: 3 }, (p) => {
+            gl.uniform2i(p.loc('tile'), x, y);
+          });
+        }
     gl.disable(gl.SCISSOR_TEST);
     destroyTarget(gl, copy);
   }
@@ -1282,6 +1368,12 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.shape) as Uint8Array);
   }
 
+  readPoles(): Promise<Uint8Array> {
+    this.syncShape();
+    if (!this.poles) return Promise.resolve(new Uint8Array(this.width * this.height * 4));
+    return Promise.resolve(readTarget(this.gl, this.poles) as Uint8Array);
+  }
+
   /** Agent `index` is its texel: WebGL2 never reorders agents, so the slot is the id (ADR 0005). */
   writeAgent(index: number, a: AgentState) {
     if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
@@ -1308,7 +1400,7 @@ export class GlSim implements Sim {
   /**
    * For tests. The outline target cannot know the distances of an environment written as bytes: it is cleared, and
    * its next use holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow
-   * `env`.
+   * `env`. So with the outline distances of the electrodes, which the simulation holds while the bytes hold a pole.
    */
   writeEnv(data: Uint8Array) {
     this.changed();
@@ -1320,6 +1412,12 @@ export class GlSim implements Sim {
     this.wallOverAgents = this.walls;
     [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
     this.hasElectrodes = any(3);
+    this.dropPoles();
+    if (this.hasElectrodes) {
+      // A new target holds zeros. Either pole may lie in the bytes.
+      this.ensurePoles();
+      this.poleLayers.fill(true);
+    }
     this.hasEnvironment = this.layers.some(Boolean) || this.hasElectrodes;
     this.sources = any(1) || any(2) || any(3);
     if (this.sources) this.scentless = false;
@@ -1340,6 +1438,7 @@ export class GlSim implements Sim {
     if (this.presence) all.push(this.presence);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     all.push(...this.growthTargets());
+    if (this.poles) all.push(this.poles);
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
     this.dropViewThird();
@@ -1353,20 +1452,23 @@ export class GlSim implements Sim {
    * Draws the outlines of a run of segments that paint() has applied to `env` (shape.frag), kind by kind
    * (OUTLINE_DRAWS): in a run, segments of different kinds have boxes that do not meet (PendingOutlines), so their
    * draws touch other cells. Scissors cut every draw to the grid in a closed arena and split it where it crosses the
-   * edge of the periodic grid. The Params block holds the run's boundary.
+   * edge of the periodic grid. The Params block holds the run's boundary. `poles`: the target of the outlines of the
+   * electrodes, to draw into it in place of the outline target (POLE_DRAWS), with the poles as the two layers.
    */
-  private drawOutlines(run: readonly { segment: Stroke; kind: EnvTool; rects: readonly Rect[] }[]) {
+  private drawOutlines(run: readonly RunItem[], poles?: Target) {
     const gl = this.gl;
-    const sp = this.prog.shape;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shape.fbo);
+    const sp = poles ? this.prog.poleShape() : this.prog.shape;
+    const draws = poles ? POLE_DRAWS : OUTLINE_DRAWS;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, (poles ?? this.shape).fbo);
     gl.viewport(0, 0, this.width, this.height);
     gl.useProgram(sp.program);
     // `old` (op 3) is never read here, but its unit must not hold the target: a frame binds it there.
     textures(gl, sp.program, { env: this.env.texture, old: this.env.texture });
     gl.enable(gl.SCISSOR_TEST);
-    const [walls, food, light] = this.layers;
-    const draw = ([op, all, equation]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
-      // Only the layers that hold anything: a subtraction of food or walls, the light and the shadow.
+    // `poles` holds no light and no shadow.
+    const [walls, food, light] = poles ? [...this.poleLayers, false] : this.layers;
+    const draw = ([op, all, equation, cut = 0]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
+      // Only the layers that hold anything: a subtraction of food or walls (or of a pole), the light and the shadow.
       const mask: [boolean, boolean, boolean, boolean] =
         op === 1 || op === 4
           ? [all[0] && !!walls, all[1] && !!food, false, false]
@@ -1377,6 +1479,7 @@ export class GlSim implements Sim {
       else gl.disable(gl.BLEND);
       gl.uniform1i(sp.loc('op'), op);
       gl.uniform1i(sp.loc('hold'), Number(hold));
+      gl.uniform1i(sp.loc('cut'), cut);
       gl.uniform1i(sp.loc('core'), Number(core));
       gl.uniform2i(sp.loc('layers'), Number(mask[0]), Number(mask[1]));
       for (const r of rects) {
@@ -1384,10 +1487,10 @@ export class GlSim implements Sim {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
     };
-    const byKind: Partial<Record<EnvTool, (typeof run)[number][]>> = {};
+    const byKind: Partial<Record<EnvTool, RunItem[]>> = {};
     for (const item of run) (byKind[item.kind] ??= []).push(item);
-    for (const [kind, items] of Object.entries(byKind) as [EnvTool, (typeof run)[number][]][]) {
-      const { segment, hold, run: after } = OUTLINE_DRAWS[kind];
+    for (const [kind, items] of Object.entries(byKind) as [EnvTool, RunItem[]][]) {
+      const { segment, hold, run: after } = draws[kind];
       // The rectangles of one segment do not overlap (outlineRects): they are their own union.
       const union = () => (items.length === 1 ? (items[0]?.rects ?? []) : unionRects(items.flatMap((i) => i.rects)));
       const cells = hold || after.length > 0 ? union() : [];

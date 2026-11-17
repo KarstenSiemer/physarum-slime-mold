@@ -42,6 +42,7 @@ import {
 import { GlSim } from './gl/sim';
 import { grid, growthStep, occupancy, rngSeed, stream } from './growth-reference';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
+import { outlineModel, POLE_SCHEME, refreshModel } from './outline-reference';
 import { paintReference } from './paint-reference';
 import { readBuffer } from './readback';
 import { BACKGROUND, GEL_FX, LATTICE_COPIES, TRAIL_LEVELS_MAX, trailLevel } from './render';
@@ -114,13 +115,6 @@ function below(x: number) {
   const bits = new Uint32Array(Float32Array.of(x).buffer);
   bits.set([(bits[0] ?? 1) - 1]);
   return new Float32Array(bits.buffer)[0] ?? x;
-}
-
-/** Distance from a point to a segment. */
-function segmentDistance([px, py]: [number, number], [ax, ay]: [number, number], [bx, by]: [number, number]) {
-  const [abx, aby] = [bx - ax, by - ay];
-  const t = Math.min(1, Math.max(0, ((px - ax) * abx + (py - ay) * aby) / Math.max(abx * abx + aby * aby, 1e-6)));
-  return Math.hypot(px - ax - t * abx, py - ay - t * aby);
 }
 
 /**
@@ -1683,8 +1677,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       }
     }, 120_000);
 
-    // The poles have no outline: the bytes that the renderer reads for walls, food and light stay as they are without
-    // the poles, whether the poles come in one call with the other strokes or in calls of their own.
+    // The poles have their outlines in a buffer of their own: the bytes that the renderer reads for walls, food and
+    // light stay as they are without the poles, whether the poles come in one call with the other strokes or in calls
+    // of their own.
     it('leaves the outlines of walls, food and light as they are without the poles', async () => {
       const [w, h] = [48, 40];
       const without = await make({ layout: 'empty', boundary: 'box' }, w, h, 1);
@@ -2002,8 +1997,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       120_000,
     );
 
-    // The view: a cathode is blue and an anode red, over the bare ground, in every style. A pixel on the middle of a
-    // cell deep inside a pole has the colour of the pole at its opacity, and one far from it the ground.
+    // The view: a pole is a stud over everything else, the cathode blue and the anode red, in every style. Its top is
+    // flat from 1.5 cells inside its outline on (POLE_RIM in render.wgsl): there the light of the picture falls on it
+    // from above, as on the flat top of a wall. A pixel on the middle of a cell deep inside a pole has that colour, and
+    // one far from every pole the ground.
     it.each(['glow', 'gel', 'paper'] as const)(
       'draws the cathode blue and the anode red (%s)',
       async (style) => {
@@ -2031,16 +2028,31 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           return [of.data[i] ?? 0, of.data[i + 1] ?? 0, of.data[i + 2] ?? 0];
         };
         const near = (got: number[], want: number[]) => got.every((v, i) => Math.abs(v - (want[i] ?? 0)) <= 2);
-        // The ground of the style, from the picture without the poles: the pole lies over it with its opacity of 0.9.
-        const ground = pixel(bare, 16, 24).map((v) => fromByte(v));
-        const mix = (pole: number[]) => ground.map((b, i) => toByte(b + 0.9 * ((pole[i] ?? 0) - b)));
-        expect(near(pixel(img, 16, 24), mix([0.05, 0.32, 1])), `cathode ${String(pixel(img, 16, 24))}`).toBe(true);
-        expect(near(pixel(img, 48, 24), mix([1, 0.08, 0.04])), `anode ${String(pixel(img, 48, 24))}`).toBe(true);
+        // The flat top of a stud (studAt() in render.wgsl): the light from above, and what is left of the highlight.
+        const sun = Math.hypot(-0.45, -0.6, 0.65);
+        const half = Math.hypot(-0.45 / sun, -0.6 / sun, 0.65 / sun + 1);
+        const top = (pole: number[]) =>
+          pole.map((v) => toByte(v * (0.5 + 0.7 * (0.65 / sun)) + 0.6 * ((0.65 / sun + 1) / half) ** 60));
+        // The pole covers the ground: the cells 12 to 19 and 44 to 51 of the row lie 1.5 cells or more inside.
+        for (const c of [13, 16, 18]) {
+          expect(near(pixel(img, c, 24), top([0.05, 0.32, 1])), `cathode ${String(pixel(img, c, 24))}`).toBe(true);
+          expect(near(pixel(img, c + 32, 24), top([1, 0.08, 0.04])), `anode ${String(pixel(img, c + 32, 24))}`).toBe(
+            true,
+          );
+        }
         expect(near(pixel(img, 32, 24), pixel(bare, 32, 24))).toBe(true);
         // Blue has the most blue and red the most red.
         const [cathode, anode] = [pixel(img, 16, 24), pixel(img, 48, 24)];
         expect((cathode[2] ?? 0) - (cathode[0] ?? 0)).toBeGreaterThan(100);
         expect((anode[0] ?? 0) - (anode[2] ?? 0)).toBeGreaterThan(100);
+        // The slope of the stud: its side toward the light (top left) is brighter than its top, and its side away
+        // from the light is darker. On the diagonal of the light, 0.9 cells inside the outline; the middle of the
+        // cathode, the grid position 16, 24, lies in the pixel 124, 92.
+        const lumaAt = (cells: number) =>
+          luma(img, 124 + Math.round(8 * 0.6 * cells), 92 + Math.round(8 * 0.8 * cells));
+        const [lit, flat, shaded] = [lumaAt(-4.1), lumaAt(0), lumaAt(4.1)];
+        expect(lit - flat, `the lit side ${String(lit)} against the top ${String(flat)}`).toBeGreaterThan(8);
+        expect(flat - shaded, `the top ${String(flat)} against the shaded side ${String(shaded)}`).toBeGreaterThan(10);
         // Far from the poles the picture is the picture without them, but for the dither of each frame.
         let far = 0;
         for (let y = 0; y < ch; y++)
@@ -2052,6 +2064,67 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         expect(far).toBeLessThanOrEqual(2);
       },
       120_000,
+    );
+
+    // The outline of a pole comes from the distance to its strokes (paint.wgsl POLES), as the outlines of food and
+    // walls: a dab is a disc, at any zoom. Before, the outline followed the cells of `env`: a block of 2 × 2 or 3 × 3
+    // cells for the dabs of the scene Electrotaxis, and flat sides several cells long on a wide dab. Walking in from
+    // outside along 72 directions, the first pixel that the pole covers lies on a circle. Measured on Metal on
+    // 2026-11-17, as the distance from the brush circle in cells, inside it below 0: −0.17 to +0.01 for the dabs of the
+    // scene (1.5 cells) at three places against the grid, −0.07 to −0.04 at 2.5 cells, −0.05 to −0.02 at 4 and −0.07
+    // to +0.01 at 10. The spline of the view draws a small dab a little smaller than its brush, as it draws food and
+    // walls. The rule of before, the bilinear mix of the cells of a pole, gives −0.50 to +0.33 for the same dabs of 1.5
+    // cells, −0.50 to +0.03 at 2.5, −0.40 to +0.43 at 4 and −0.44 to +0.44 at 10 (computed on the CPU). The limits
+    // leave a pixel for another GPU. In the glow style: its ground is dark, so the shadow of the pole changes no pixel
+    // as much as the pole does.
+    it.each(['cathode', 'anode'] as const)(
+      'draws a dab of the %s as a disc on the circle of its brush',
+      async (kind) => {
+        const settings: Settings = {
+          ...defaultSettings(),
+          style: 'glow',
+          layout: 'empty',
+          strains: [defaultStrain(0)],
+          bloom: 0,
+        };
+        const size = 512;
+        const rows: string[] = [];
+        // The centre on a corner of four cells (the scene), on the centre of a cell, and between; pixels per cell.
+        for (const [cx, cy, r, px, off] of [
+          [32, 24, 1.5, 32, 0.22],
+          [32.5, 24.5, 1.5, 32, 0.22],
+          [32.3, 24.2, 1.5, 32, 0.22],
+          [32, 24, 2.5, 32, 0.12],
+          [32.4, 24.2, 4, 32, 0.12],
+          [32.4, 24.2, 10, 20, 0.12],
+        ] as const) {
+          backend.forget();
+          const sim = await make(settings, 64, 48, 1);
+          const view = { center: [cx, cy] as [number, number], scale: 1 / px };
+          const bare = await backend.capture(sim, settings, view, size, size);
+          sim.paint([{ kind, from: [cx, cy], to: [cx, cy], radius: r }]);
+          const img = await backend.capture(sim, settings, view, size, size);
+          const changed = (x: number, y: number) => {
+            const i = (y * size + x) * 4;
+            return [0, 1, 2].some((k) => Math.abs((img.data[i + k] ?? 0) - (bare.data[i + k] ?? 0)) > 24);
+          };
+          const found: number[] = [];
+          for (let k = 0; k < 72; k++) {
+            const [dx, dy] = [Math.cos((k / 72) * 2 * Math.PI), Math.sin((k / 72) * 2 * Math.PI)];
+            let at = NaN;
+            for (let t = size / 2 - 2; t > 0 && Number.isNaN(at); t -= 0.25) {
+              const [x, y] = [Math.round(size / 2 + dx * t - 0.5), Math.round(size / 2 + dy * t - 0.5)];
+              if (changed(x, y)) at = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / px;
+            }
+            found.push(at - r);
+          }
+          const [least, most] = [Math.min(...found), Math.max(...found)];
+          if (!(least >= -off && most <= 0.06))
+            rows.push(`r ${String(r)} at ${String(cx)}, ${String(cy)}: ${least.toFixed(3)} to ${most.toFixed(3)}`);
+        }
+        expect(rows).toEqual([]);
+      },
+      240_000,
     );
   });
 
@@ -3870,120 +3943,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       expect(food).toBeGreaterThan(20);
     });
 
-    /**
-     * The outline bytes on the CPU: per stroke, the clamped signed distance as a byte, unions by the maximum,
-     * a wall over food and the eraser by the minimum with the complement. Every byte is then held to the
-     * environment after the stroke: at least 128 where it holds the layer, else at most 127 and at most the byte
-     * of k − 1.5 cells outside, with the nearest cell of the layer k cells away (Chebyshev, up to 5 cells; none:
-     * 0), after subtractions at every cell of the stroke's outline box (brush.ts outlineBox). The stroke's own byte,
-     * of a union and of a subtraction, is held in the same way to the cells the stroke paints itself, at every cell it
-     * does not paint: the shaders skip that search where it cannot lower the byte (paint.wgsl `ownHeld`), and this
-     * model never does. A cell is painted when its centre lies within the radius; cells outside the arena keep their
-     * bytes, and a stroke outside a closed arena changes nothing.
-     */
-    function outlineModel(list: Stroke[], boundary: string, w: number, h: number) {
-      const bytes = new Uint8Array(w * h * 2);
-      const painted = new Uint8Array(w * h * 2);
-      const own = new Uint8Array(w * h);
-      const images = boundary === 'wrap' ? [-1, 0, 1] : [0];
-      const toByte = (sd: number) => Math.round((Math.min(1, Math.max(-1, sd / SHAPE_RANGE)) * 0.5 + 0.5) * 255);
-      // The nearest cell k rings from x, y (Chebyshev, up to 5 cells) for which `is` holds, as the byte of k − 1.5
-      // cells outside; none: 0. The grid, wrapped on the periodic one; the dish does not count (paint.wgsl `holds`).
-      const ringHold = (x: number, y: number, is: (i: number) => boolean) => {
-        for (let k = 1; k <= 5; k++)
-          for (let dy = -k; dy <= k; dy++)
-            for (let dx = -k; dx <= k; dx++) {
-              if (Math.max(Math.abs(dx), Math.abs(dy)) !== k) continue;
-              let [cx, cy] = [x + dx, y + dy];
-              if (boundary === 'wrap') [cx, cy] = [((cx % w) + w) % w, ((cy % h) + h) % h];
-              else if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
-              if (is(cy * w + cx)) return toByte(1.5 - k);
-            }
-        return 0;
-      };
-      const holds = (x: number, y: number, layer: number) => painted[(y * w + x) * 2 + layer] === 1;
-      const held = (b: number, x: number, y: number, layer: number) => {
-        if (holds(x, y, layer)) return Math.max(b, 128);
-        const v = Math.min(b, 127);
-        return v === 0
-          ? 0
-          : Math.min(
-              v,
-              ringHold(x, y, (i) => painted[i * 2 + layer] === 1),
-            );
-      };
-      const united = (old: number, s: number, x: number, y: number, layer: number) => {
-        if (holds(x, y, layer)) return Math.max(old, s, 128);
-        const u = Math.min(s, 127);
-        return u <= old
-          ? old
-          : Math.max(
-              old,
-              Math.min(
-                u,
-                ringHold(x, y, (i) => own[i] === 1),
-              ),
-            );
-      };
-      for (const stroke of list) {
-        const { kind, from, to, radius } = stroke;
-        // A stroke outside a closed arena paints no cell and gets no outline (sim.ts and gl/sim.ts paint()).
-        if (!paintBox(stroke, w, h, boundary === 'wrap')) continue;
-        // The cells the outline pass visits (brush.ts outlineBox), wrapped on the periodic grid.
-        const [bx, by, bw, bh] = outlineBox(stroke, w, h, boundary === 'wrap') ?? [0, 0, 0, 0];
-        const inBox = (x: number, y: number) =>
-          boundary === 'wrap'
-            ? (((x - bx) % w) + w) % w < bw && (((y - by) % h) + h) % h < bh
-            : x >= bx && x < bx + bw && y >= by && y < by + bh;
-        const distances = new Float64Array(w * h);
-        own.fill(0);
-        for (let y = 0; y < h; y++)
-          for (let x = 0; x < w; x++) {
-            let d = Infinity;
-            for (const ox of images)
-              for (const oy of images) d = Math.min(d, segmentDistance([x + 0.5 + ox * w, y + 0.5 + oy * h], from, to));
-            distances[y * w + x] = d;
-            const i = (y * w + x) * 2;
-            if (inArena(boundary, w, h, x, y) && d <= radius && kind !== 'light') {
-              painted[i] = kind === 'wall' ? 1 : kind === 'erase' ? 0 : (painted[i] ?? 0);
-              painted[i + 1] = kind === 'food' ? 1 : 0;
-              own[y * w + x] = 1;
-            }
-          }
-        for (let y = 0; y < h; y++)
-          for (let x = 0; x < w; x++) {
-            if (!inArena(boundary, w, h, x, y)) continue;
-            const d = distances[y * w + x] ?? Infinity;
-            const s = toByte(radius - d);
-            // Unions round the distance off near the middle line of the stroke (paint.wgsl `rounded`).
-            const rounded = (slope: number) => {
-              const rho = Math.min(radius, Math.max(2 * slope - radius, 0));
-              return toByte(radius - (d >= rho ? d : (d * d + rho * rho) / (2 * rho)));
-            };
-            const i = (y * w + x) * 2;
-            const reach = inBox(x, y);
-            let [wall, food] = [bytes[i] ?? 0, bytes[i + 1] ?? 0];
-            // A subtraction's byte, held to the cells the stroke paints where it does not paint this one.
-            const t =
-              own[y * w + x] === 1
-                ? s
-                : Math.min(
-                    s,
-                    ringHold(x, y, (c) => own[c] === 1),
-                  );
-            if (kind === 'erase' && reach)
-              [wall, food] = [held(Math.min(wall, 255 - t), x, y, 0), held(Math.min(food, 255 - t), x, y, 1)];
-            if (kind === 'wall') {
-              wall = united(wall, rounded(1.5), x, y, 0);
-              if (reach) food = held(Math.min(food, 255 - t), x, y, 1);
-            }
-            if (kind === 'food') food = united(food, rounded(2), x, y, 1);
-            [bytes[i], bytes[i + 1]] = [wall, food];
-          }
-      }
-      return bytes;
-    }
-
+    // The outline bytes on the CPU: outlineModel() in outline-reference.ts.
     it.each(BOUNDARIES)('hold the distances of all strokes, as unions and subtractions (%s)', async (boundary) => {
       const sim = await make({ layout: 'empty', boundary }, W, H, 1);
       for (const stroke of strokes) sim.paint([stroke]);
@@ -4419,18 +4379,24 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     /**
      * Random strokes for the batched paint: drags of one kind (runs whose outlines overlap), kinds that change at the
      * same place (food, then a wall or an eraser over it, light under walls), strokes across the edges of the grid and
-     * longer than half of it (cut into segments on the periodic grid), dabs and thin brushes.
+     * longer than half of it (cut into segments on the periodic grid), dabs and thin brushes. `kinds`: the kinds of
+     * the strokes, the first one at the start.
      */
-    function mixedStrokes(seed: number, w: number, h: number, n: number): Stroke[] {
+    function mixedStrokes(
+      seed: number,
+      w: number,
+      h: number,
+      n: number,
+      kinds: readonly Stroke['kind'][] = ['food', 'wall', 'erase', 'light'],
+    ): Stroke[] {
       let state = seed;
       const rnd = () => (state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32;
-      const kinds = ['food', 'wall', 'erase', 'light'] as const;
       const out: Stroke[] = [];
       let [x, y] = [rnd() * w, rnd() * h];
-      let kind: Stroke['kind'] = 'food';
+      let kind: Stroke['kind'] = kinds[0] ?? 'food';
       while (out.length < n) {
         const roll = rnd();
-        if (roll < 0.25) kind = kinds[Math.floor(rnd() * 4)] ?? 'food';
+        if (roll < 0.25) kind = kinds[Math.floor(rnd() * kinds.length)] ?? 'food';
         if (roll > 0.9) [x, y] = [rnd() * w, rnd() * h];
         const radius = 0.75 + 7 * rnd() ** 2;
         const a = rnd() * 2 * Math.PI;
@@ -4547,6 +4513,486 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       sim.clearEnvironment();
       expect(sim.hasEnvironment).toBe(false);
       expect(await nonzero()).toBe(0);
+    });
+
+    // The outlines of the electrodes (paint.wgsl POLES, Sim.readPoles(); ADR 0058): a buffer of their own in the format
+    // of the outlines of walls and food, the cathodes in its first byte and the anodes in its second. A cell holds one
+    // pole, the one painted last. A pole unites with its own layer and takes its cells from the other one, an erase and
+    // a wall take them from both, and food and light change no byte. A pole and a wall fill the cells that they take:
+    // the pole below them ends where their rounded union begins. The CPU model of the pass has this rule as
+    // POLE_SCHEME (outline-reference.ts).
+    describe('of the electrode tool (ADR 0047)', () => {
+      type Pole = 'cathode' | 'anode';
+      const POLE_KINDS = ['cathode', 'anode', 'erase', 'wall', 'cathode', 'anode', 'food', 'light'] as const;
+      /** Whether cell i of `env` holds the pole: its byte above 191 is the cathode, any other above 0 the anode. */
+      const holdsPole = (env: Uint8Array, i: number, pole: Pole) => {
+        const b = env[i * 4 + 3] ?? 0;
+        return pole === 'cathode' ? b > 191 : b > 0 && b <= 191;
+      };
+      /** Whether cell c of `env` holds a layer of the poles: 0 the cathode, 1 the anode. */
+      const holdsLayer = (env: Uint8Array) => (c: number, layer: number) =>
+        holdsPole(env, c, layer === 0 ? 'cathode' : 'anode');
+      /** The two layers of the outlines of the electrodes, 2 bytes per cell, as the CPU model holds them. */
+      const layersOf = (poles: Uint8Array) => poles.filter((_, i) => i % 4 < 2);
+      /**
+       * The cells of the arena that lie on another side of an outline than `env` says, and the cells whose other two
+       * bytes are not 0. With a `model` (2 bytes per cell): also the cells whose bytes are more than `slack` from it.
+       * And the number of cells of each pole.
+       */
+      async function apart(sim: Sim, boundary: Boundary, model?: Uint8Array, slack = 0) {
+        const [env, poles] = [await sim.readEnv(), await sim.readPoles()];
+        const { width: w, height: h } = sim;
+        const wrong: string[] = [];
+        const cells = [0, 0];
+        for (let i = 0; i < w * h; i++) {
+          const at = `${String(i % w)},${String(Math.floor(i / w))}`;
+          for (const layer of [0, 1]) {
+            const gpu = poles[i * 4 + layer] ?? 0;
+            if (model && Math.abs(gpu - (model[i * 2 + layer] ?? 0)) > slack)
+              wrong.push(`layer ${String(layer)} at ${at}: ${String(gpu)}, not ${String(model[i * 2 + layer])}`);
+            if (!inArena(boundary, w, h, i % w, Math.floor(i / w))) continue;
+            const held = holdsLayer(env)(i, layer);
+            if (held) cells[layer] = (cells[layer] ?? 0) + 1;
+            if (held !== gpu >= 128)
+              wrong.push(`layer ${String(layer)} at ${at}: env ${String(env[i * 4 + 3])}, ${String(gpu)}`);
+          }
+          if (poles[i * 4 + 2] !== 0 || poles[i * 4 + 3] !== 0) wrong.push(`bytes 2 and 3 at ${at}`);
+        }
+        return { wrong, cathode: cells[0] ?? 0, anode: cells[1] ?? 0, poles };
+      }
+
+      // WebGPU outlines every segment right after its paint, WebGL2 in runs (gl/sim.ts paint()): one call gives the
+      // bytes of one call per stroke. Then the boundary changes, and the bytes of both follow `env` under the new one
+      // (paint.wgsl `refresh`).
+      it.each(BOUNDARIES)(
+        'give one call the bytes of one call per stroke, also after a change of boundary (%s)',
+        async (boundary) => {
+          const [w, h] = [64, 48];
+          const list = mixedStrokes(31, w, h, 400, POLE_KINDS);
+          for (const kind of new Set(POLE_KINDS))
+            expect(list.filter((s) => s.kind === kind).length, kind).toBeGreaterThan(15);
+          const settings = (b: Boundary) => ({ ...defaultSettings(), layout: 'empty' as const, boundary: b });
+          const [all, one] = [await make(settings(boundary), w, h, 1), await make(settings(boundary), w, h, 1)];
+          all.paint(list);
+          for (const s of list) one.paint([s]);
+          expect(all.hasElectrodes).toBe(true);
+          const first = await apart(all, boundary);
+          expect(first.wrong).toEqual([]);
+          expect(first.cathode).toBeGreaterThan(50);
+          expect(first.anode).toBeGreaterThan(50);
+          expect(differing(await one.readPoles(), first.poles), 'one call per stroke').toBe(0);
+          for (const to of BOUNDARIES.filter((b) => b !== boundary)) {
+            for (const sim of [all, one]) sim.update(settings(to));
+            const then = await apart(all, to);
+            expect(then.wrong, `${boundary} to ${to}`).toEqual([]);
+            expect(differing(await one.readPoles(), then.poles), `${boundary} to ${to}`).toBe(0);
+          }
+        },
+        120_000,
+      );
+
+      // A replay paints every edit under the boundary it was painted under (ADR 0019): the bytes follow `env` under
+      // the boundary on screen at the next readback, after one call and after one call per stroke alike.
+      it.each(BOUNDARIES)(
+        'give one call the bytes of one call per stroke under mixed boundaries (%s)',
+        async (boundary) => {
+          const [w, h] = [64, 48];
+          let state = 7;
+          const rnd = () => (state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+          const list = mixedStrokes(37, w, h, 300, POLE_KINDS).map((s): Stroke => ({
+            ...s,
+            boundary: BOUNDARIES[Math.floor(rnd() * 3)] ?? 'box',
+          }));
+          const results: Uint8Array[] = [];
+          for (const split of [false, true]) {
+            const sim = await make({ layout: 'empty', boundary }, w, h, 1);
+            if (split) for (const s of list) sim.paint([s]);
+            else sim.paint(list);
+            const { wrong, poles, cathode, anode } = await apart(sim, boundary);
+            expect(wrong).toEqual([]);
+            expect(cathode + anode).toBeGreaterThan(100);
+            results.push(poles);
+          }
+          const [together, split] = results;
+          if (!together || !split) throw new Error('no result');
+          expect(differing(split, together)).toBe(0);
+        },
+        120_000,
+      );
+
+      // The rule that the outlines of the electrodes do not share with those of walls and food. A pole and a wall fill
+      // the cells that they take from a pole, and the view draws them from the rounded byte of their union. So the pole
+      // below gets the complement of that byte: it ends where the stroke begins, and no ground shows between the two.
+      // An erase fills nothing: the pole below gets the complement of the plain distance of the stroke. A thin line
+      // through the middle of a wide cathode, and the cells within 3 cells of the middle part of the line.
+      it.each(BOUNDARIES)(
+        'end the pole below a pole or a wall where the union of that stroke begins (%s)',
+        async (boundary) => {
+          const wide: Stroke = { kind: 'cathode', from: [32, 24], to: [32, 24], radius: 19 };
+          const [from, to]: [[number, number], [number, number]] = [
+            [22.3, 19.2],
+            [41.7, 27.9],
+          ];
+          const toByte = (sd: number) => Math.round((Math.min(1, Math.max(-1, sd / SHAPE_RANGE)) * 0.5 + 0.5) * 255);
+          for (const radius of [0.75, 1, 1.5, 2])
+            for (const kind of ['anode', 'wall', 'erase'] as const) {
+              const sim = await make({ layout: 'empty', boundary }, W, H, 1);
+              sim.paint([wide, { kind, from, to, radius }]);
+              const [poles, shape] = [await sim.readPoles(), await sim.readShape()];
+              const wrong: string[] = [];
+              let [cells, rounded] = [0, 0];
+              for (let y = 0; y < H; y++)
+                for (let x = 0; x < W; x++) {
+                  const [px, py] = [x + 0.5, y + 0.5];
+                  const [dx, dy] = [to[0] - from[0], to[1] - from[1]];
+                  const t = ((px - from[0]) * dx + (py - from[1]) * dy) / (dx * dx + dy * dy);
+                  const d = Math.hypot(px - from[0] - t * dx, py - from[1] - t * dy);
+                  if (t < 0.2 || t > 0.8 || d > radius + 3) continue;
+                  cells++;
+                  const i = (y * W + x) * 4;
+                  const below = poles[i] ?? 0;
+                  const plain = 255 - toByte(radius - d);
+                  // The byte of the union of the stroke: of the anode in the second layer, of the wall in `shape`.
+                  const union = kind === 'anode' ? (poles[i + 1] ?? 0) : kind === 'wall' ? (shape[i] ?? 0) : undefined;
+                  const want = union === undefined ? plain : 255 - union;
+                  if (Math.abs(below - want) > (union === undefined ? 1 : 0))
+                    wrong.push(
+                      `${kind} of ${String(radius)} at ${String(x)},${String(y)}: ${String(below)}, not ${String(want)}`,
+                    );
+                  if (Math.abs(want - plain) > 1) rounded++;
+                }
+              expect(wrong).toEqual([]);
+              expect(cells).toBeGreaterThan(60);
+              // Below 2.25 cells the rounded byte of a union is another one than the plain byte near its outline.
+              if (kind !== 'erase') expect(rounded > 10, `${kind} of ${String(radius)}`).toBe(true);
+            }
+        },
+        120_000,
+      );
+
+      // The simulation holds the outlines from the first pole on, and a clear frees them. Before the first pole an
+      // erase and a wall have nothing to take from them.
+      it('hold no byte before the first pole and after a clear', async () => {
+        const sim = await make({ layout: 'empty', boundary: 'box' }, W, H, 1);
+        const nonzero = async () => (await sim.readPoles()).filter((v) => v !== 0).length;
+        const others: Stroke[] = [
+          { kind: 'wall', from: [10, 10], to: [30, 12], radius: 2 },
+          { kind: 'food', from: [40, 30], to: [40, 30], radius: 5 },
+          { kind: 'light', from: [20, 30], to: [20, 30], radius: 6 },
+          { kind: 'erase', from: [12, 10], to: [12, 10], radius: 3 },
+        ];
+        sim.paint(others);
+        expect([sim.hasEnvironment, sim.hasElectrodes]).toEqual([true, false]);
+        expect(await nonzero()).toBe(0);
+        const poles: Stroke[] = [
+          { kind: 'cathode', from: [20, 11], to: [20, 11], radius: 4 },
+          { kind: 'anode', from: [44, 28], to: [50, 28], radius: 3 },
+        ];
+        sim.paint(poles);
+        expect(sim.hasElectrodes).toBe(true);
+        const held = await sim.readPoles();
+        expect(held.filter((v) => v !== 0).length).toBeGreaterThan(200);
+        // The strokes before the first pole change nothing: the poles alone give the same bytes.
+        const alone = await make({ layout: 'empty', boundary: 'box' }, W, H, 1);
+        alone.paint(poles);
+        expect(differing(await alone.readPoles(), held)).toBe(0);
+        // An erase and a wall take their cells from the poles.
+        sim.paint([
+          { kind: 'erase', from: [20, 11], to: [20, 11], radius: 2 },
+          { kind: 'wall', from: [47, 20], to: [47, 36], radius: 1 },
+        ]);
+        const cut = await sim.readPoles();
+        expect(cut[(11 * W + 20) * 4]).toBeLessThan(128);
+        expect(held[(11 * W + 20) * 4]).toBeGreaterThanOrEqual(128);
+        expect(cut[(28 * W + 47) * 4 + 1]).toBeLessThan(128);
+        expect(held[(28 * W + 47) * 4 + 1]).toBeGreaterThanOrEqual(128);
+        sim.clearEnvironment();
+        expect([sim.hasEnvironment, sim.hasElectrodes]).toEqual([false, false]);
+        expect(await nonzero()).toBe(0);
+        sim.paint(others);
+        expect(await nonzero()).toBe(0);
+        sim.paint(poles);
+        expect(differing(await sim.readPoles(), held)).toBe(0);
+      });
+
+      // The tests below hold the bytes to the CPU model itself (outline-reference.ts), with the rule of the two poles
+      // (POLE_SCHEME).
+
+      /**
+       * Random strokes of the kinds of POLE_KINDS, also thin, across the edges and beside the rim. Strokes with a cell
+       * centre within 0.001 cells of the brush edge are left out, where float32 could paint it the other way.
+       */
+      function poleStrokes(seed: number, w: number, h: number, n: number, boundary: Boundary): Stroke[] {
+        let state = seed;
+        const rnd = () => (state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+        const list: Stroke[] = [];
+        while (list.length < n) {
+          const [x, y] = [-6 + (w + 12) * rnd(), -6 + (h + 12) * rnd()];
+          const a = 2 * Math.PI * rnd();
+          const length = 6 * rnd();
+          const s: Stroke = {
+            kind: POLE_KINDS[Math.floor(rnd() * POLE_KINDS.length)] ?? 'cathode',
+            from: [x, y],
+            to: [x + length * Math.cos(a), y + length * Math.sin(a)],
+            radius: 0.75 + 6 * rnd() ** 2,
+          };
+          const margin = { min: Infinity };
+          paintReference(new Uint8Array(w * h * 4), w, h, s, boundary, margin);
+          if (margin.min >= 1e-3) list.push(s);
+        }
+        return list;
+      }
+
+      // Unions and subtractions of both poles next to each other, so that holds come from every ring and direction. The
+      // bytes may differ from the model by 1, as those of walls and food: float32 rounds a distance at a half otherwise.
+      it.each(BOUNDARIES)(
+        'hold the distances of random strokes as the CPU model of the two poles does (%s)',
+        async (boundary) => {
+          const [w, h] = [64, 48];
+          const list = poleStrokes(43, w, h, 200, boundary);
+          for (const kind of new Set(POLE_KINDS))
+            expect(list.filter((s) => s.kind === kind).length, kind).toBeGreaterThan(8);
+          const sim = await make({ layout: 'empty', boundary }, w, h, 1);
+          sim.paint(list);
+          const { wrong, cathode, anode } = await apart(
+            sim,
+            boundary,
+            outlineModel(list, boundary, w, h, POLE_SCHEME),
+            1,
+          );
+          expect(wrong).toEqual([]);
+          expect(cathode).toBeGreaterThan(40);
+          expect(anode).toBeGreaterThan(40);
+          // The rule of walls and food on the same strokes gives other bytes: the model tells the two rules apart.
+          const other = outlineModel(list, boundary, w, h);
+          expect((await apart(sim, boundary, other, 1)).wrong.length).toBeGreaterThan(100);
+        },
+      );
+
+      // Wide strokes: an erase wide enough that whole workgroups of the outline pass lie deep inside it writes zeros
+      // there (paint.wgsl `eraserCore`), and a wide pole takes every cell of the other pole below it.
+      it.each(BOUNDARIES)(
+        'hold the distances under wide strokes as the CPU model of the two poles does (%s)',
+        async (boundary) => {
+          const [w, h] = [96, 64];
+          let state = 47;
+          const rnd = () => (state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+          const wrong: string[] = [];
+          let [cells, erasers] = [0, 0];
+          for (let round = 0; round < 4; round++) {
+            const list: Stroke[] = [{ kind: 'cathode', from: [0.31, 0.37], to: [95.63, 63.71], radius: 60.17 }];
+            for (let i = 0; i < 8; i++) {
+              const [x, y] = [rnd() * w - 10, rnd() * h - 10];
+              const kind = (['anode', 'erase', 'cathode', 'wall'] as const)[(i + round) % 4] ?? 'erase';
+              list.push({ kind, from: [x, y], to: [x + 20 * rnd(), y + 20 * rnd()], radius: 18 + 16 * rnd() });
+              const [u, v, a] = [rnd() * w, rnd() * h, 2 * Math.PI * rnd()];
+              list.push({
+                kind: i % 2 ? 'cathode' : 'anode',
+                from: [u, v],
+                to: [u + 30 * Math.cos(a), v + 30 * Math.sin(a)],
+                radius: 1 + 4 * rnd(),
+              });
+            }
+            const kept = list.filter((s) => {
+              const margin = { min: Infinity };
+              paintReference(new Uint8Array(w * h * 4), w, h, s, boundary, margin);
+              return margin.min >= 1e-3;
+            });
+            // An eraser from 14.66 cells on has such workgroups (CORE_RADIUS in sim.ts).
+            erasers += kept.filter((s) => s.kind === 'erase' && s.radius > 14.66).length;
+            const sim = await make({ layout: 'empty', boundary }, w, h, 1);
+            sim.paint(kept);
+            const found = await apart(sim, boundary, outlineModel(kept, boundary, w, h, POLE_SCHEME), 1);
+            wrong.push(...found.wrong.map((s) => `round ${String(round)}: ${s}`));
+            cells += found.cathode + found.anode;
+          }
+          expect(wrong).toEqual([]);
+          expect(cells).toBeGreaterThan(300);
+          expect(erasers).toBeGreaterThan(2);
+        },
+      );
+
+      // The boundary can change while `env` stays. The bytes are then held to `env` under the new boundary (paint.wgsl
+      // `refresh` with POLES): the model of that pass from the bytes before, byte for byte. Three boundaries in a row,
+      // so that the second change starts from bytes that a change left.
+      it.each([
+        ['wrap', 'box', 'dish'],
+        ['box', 'dish', 'wrap'],
+        ['dish', 'wrap', 'box'],
+      ] as const)(
+        'follow the environment after the boundary changes from %s to %s to %s, as the CPU model does',
+        async (...order) => {
+          const [w, h] = [64, 48];
+          const [first] = order;
+          const settings = (boundary: Boundary): Settings => ({ ...defaultSettings(), layout: 'empty', boundary });
+          const list = poleStrokes(53, w, h, 120, first);
+          const sim = await make(settings(first), w, h, 1);
+          sim.paint(list);
+          const start = await apart(sim, first, outlineModel(list, first, w, h, POLE_SCHEME), 1);
+          expect(start.wrong).toEqual([]);
+          const env = await sim.readEnv();
+          let bytes = layersOf(start.poles);
+          let changed = 0;
+          for (const to of order.slice(1)) {
+            sim.update(settings(to));
+            sim.reset();
+            const want = refreshModel(bytes, holdsLayer(env), to, w, h);
+            changed += differing(want, bytes);
+            const found = await apart(sim, to, want, 0);
+            expect(found.wrong, `to ${to}`).toEqual([]);
+            bytes = layersOf(found.poles);
+          }
+          // The pass has work to do: bytes change with the boundary.
+          expect(changed).toBeGreaterThan(20);
+          expect(differing(await sim.readEnv(), env)).toBe(0);
+        },
+      );
+
+      // Sim.writeEnv (tests only) writes bytes, whose outline distances nobody knows. The outlines of the poles are
+      // cleared and held to the bytes: the model of that pass from zeros, byte for byte. With the bytes around the
+      // threshold between the two poles: up to 191 an anode, above it a cathode.
+      it.each(BOUNDARIES)('follow an environment written as bytes as the CPU model does (%s)', async (boundary) => {
+        const sim = await make({ layout: 'empty', boundary }, W, H, 1);
+        sim.paint([{ kind: 'cathode', from: [30, 20], to: [36, 22], radius: 6 }]);
+        const env = new Uint8Array(W * H * 4);
+        for (let y = 0; y < H; y++)
+          for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 4;
+            if (x >= 8 && x < 40 && y >= 10 && y < 13) env[i + 3] = 255;
+            if (x >= 8 && x < 40 && y === 20) env[i + 3] = [1, 128, 191, 192][x % 4] ?? 0;
+            if (Math.hypot(x - 50, y - 30) < 6) env[i + 3] = 128;
+            if (x === 20 && y >= 30) env[i] = 255;
+            if (Math.hypot(x - 15, y - 35) < 5) env[i + 1] = 255;
+          }
+        sim.writeEnv(env);
+        const want = refreshModel(new Uint8Array(W * H * 2), holdsLayer(env), boundary, W, H);
+        const { wrong, cathode, anode } = await apart(sim, boundary, want, 0);
+        expect(wrong).toEqual([]);
+        expect(cathode).toBeGreaterThan(50);
+        expect(anode).toBeGreaterThan(50);
+        // The bytes 1, 128 and 191 are an anode, and 192 is a cathode.
+        const row = (x: number) => Array.from(want.subarray((20 * W + x) * 2, (20 * W + x) * 2 + 2), (b) => b >= 128);
+        expect([row(12), row(13), row(14), row(15)]).toEqual([
+          [false, true],
+          [false, true],
+          [false, true],
+          [true, false],
+        ]);
+        // Bytes without a pole: the simulation holds no outlines of poles.
+        sim.writeEnv(Uint8Array.from(env, (v, k) => (k % 4 === 3 ? 0 : v)));
+        expect([sim.hasEnvironment, sim.hasElectrodes]).toEqual([true, false]);
+        expect((await sim.readPoles()).every((v) => v === 0)).toBe(true);
+      });
+
+      // A reset, steps and a switch of the model leave `env`, and both models have the electrodes: the outlines stay
+      // as they are, byte for byte.
+      it('keep every byte over a reset, over steps and over a switch of the model', async () => {
+        const [w, h] = [64, 48];
+        const extended: Settings = { ...defaultSettings(), layout: 'mixed', density: 0.05, boundary: 'box', seed: 3 };
+        const jones: Settings = { ...extended, model: 'jones', collisions: true, strains: [defaultStrain(0)] };
+        const list = poleStrokes(59, w, h, 60, 'box');
+        const sim = await make(extended, w, h, Math.round(0.05 * w * h));
+        sim.paint(list);
+        const held = await sim.readPoles();
+        expect((await apart(sim, 'box', outlineModel(list, 'box', w, h, POLE_SCHEME), 1)).wrong).toEqual([]);
+        const same = async (after: string) => {
+          expect(sim.hasElectrodes, after).toBe(true);
+          expect(differing(await sim.readPoles(), held), after).toBe(0);
+        };
+        sim.reset();
+        await same('a reset');
+        sim.run(20);
+        await same('20 steps');
+        if (backend.supportsCollisions) {
+          sim.update(jones);
+          sim.reset();
+          sim.run(5);
+          await same('a switch to the Jones model');
+          sim.update(extended);
+          sim.reset();
+          await same('a switch back');
+        }
+      });
+
+      // The work of a stroke, as the number of passes that the GPU runs for it: dispatches on WebGPU, draws on WebGL2.
+      // A stroke before the first pole of a simulation runs no pass on the outlines of the poles, so a long list with
+      // one pole at its end does not pay twice for every wall and erase before it. From the first pole on, an erase
+      // and a wall run one more pass each on WebGPU.
+      it('run no pass on the outlines of the poles for a stroke before the first pole', async () => {
+        const count = (work: () => void) => {
+          const spy =
+            kind === 'webgpu'
+              ? vi.spyOn(GPUComputePassEncoder.prototype, 'dispatchWorkgroups')
+              : vi.spyOn((backend as unknown as { gl: WebGL2RenderingContext }).gl, 'drawArrays');
+          try {
+            work();
+            return spy.mock.calls.length;
+          } finally {
+            spy.mockRestore();
+          }
+        };
+        const fresh = () => make({ layout: 'empty', boundary: 'box' }, W, H, 1);
+        // Far from each other: no outline box of one kind meets one of another kind, so WebGL2 draws them as one run.
+        const others: Stroke[] = [
+          { kind: 'food', from: [40, 36], to: [40, 36], radius: 3 },
+          { kind: 'wall', from: [8, 36], to: [14, 36], radius: 1.5 },
+          { kind: 'erase', from: [10, 10], to: [12, 10], radius: 2 },
+        ];
+        const pole: Stroke = { kind: 'cathode', from: [54, 9], to: [54, 9], radius: 2 };
+        const [alone, before, both] = [await fresh(), await fresh(), await fresh()];
+        const [ofOthers, ofPole] = [
+          count(() => {
+            before.paint(others);
+          }),
+          count(() => {
+            alone.paint([pole]);
+          }),
+        ];
+        expect(ofOthers).toBeGreaterThan(3);
+        expect(ofPole).toBeGreaterThan(1);
+        expect(
+          count(() => {
+            both.paint([...others, pole]);
+          }),
+          'the others, then the first pole',
+        ).toBe(ofOthers + ofPole);
+        expect(differing(await both.readPoles(), await alone.readPoles())).toBe(0);
+        // After the first pole the erase and the wall take their cells from the poles: more passes than before it.
+        expect(
+          count(() => {
+            both.paint(others);
+          }),
+          'the others after the first pole',
+        ).toBeGreaterThan(ofOthers);
+      });
+
+      // WebGL2 draws a subtraction from a pole only after a stroke of that pole (gl/sim.ts `poleLayers`): its bytes
+      // are all 0 until then. So the first cathode draws its cells and its union, and a cathode after an anode also
+      // draws the subtraction from the anodes and its hold.
+      it.runIf(kind === 'webgl2')('draw no subtraction from a pole that no stroke painted', async () => {
+        const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
+        const draws = (sim: Sim, strokes: Stroke[]) => {
+          const spy = vi.spyOn(gl, 'drawArrays');
+          try {
+            sim.paint(strokes);
+            return spy.mock.calls.length;
+          } finally {
+            spy.mockRestore();
+          }
+        };
+        const cathode: Stroke = { kind: 'cathode', from: [20, 20], to: [20, 20], radius: 3 };
+        const anode: Stroke = { kind: 'anode', from: [44, 20], to: [44, 20], radius: 3 };
+        const [first, second] = [
+          await make({ layout: 'empty', boundary: 'box' }, W, H, 1),
+          await make({ layout: 'empty', boundary: 'box' }, W, H, 1),
+        ];
+        expect(draws(first, [cathode])).toBe(2);
+        second.paint([anode]);
+        expect(draws(second, [cathode])).toBe(4);
+        // The bytes of the cathode are the same in both: the anode lies far from it.
+        const [a, b] = [await first.readPoles(), await second.readPoles()];
+        expect(a.filter((_, i) => i % 4 === 0)).toEqual(b.filter((_, i) => i % 4 === 0));
+      });
     });
   });
 

@@ -255,6 +255,10 @@ food, and leaves the other bytes. So a cell holds one pole at most, and the pole
 the byte to 0. The passes read a byte above 191 as a cathode and any other byte above 0 as an anode (`POLE_BYTE` in
 `src/engine/types.ts`; CPU reference `paint-reference.ts`).
 
+The view does not draw a pole from this byte. The brush also writes the distance to the outline of the cathodes and
+of the anodes into a buffer of the renderer, and the view draws each pole from these distances as a lit stud
+(ADR 0058; [design.md](design.md), sections 3 and 5). No rule reads that buffer.
+
 ### 6.8 Trail saturation K
 
 In the extended model with K ≥ 1, a sensor reads each trail lane as σ_K(t) = t / (1 + t / K) before it weighs it. K
@@ -685,6 +689,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The slime field (6.9)                   | `slime.gpu.test.ts`: the stamps against the CPU copy; the life time; a reset; the Jones model; `slime-reference.test.ts`        |
 | The Slime tool (6.9)                    | `slime.gpu.test.ts`, "the brush": against the CPU copy; erase, wall and Clear; `engine-env.test.ts`: the repaint, the link      |
 | The layer of the slime (design.md, 5)   | `slime.gpu.test.ts`, "the picture": against the CPU copy; no pixel changes with the layer off; no byte of the simulation        |
+| The look of the electrodes (design.md)  | `electrode.gpu.test.ts`: the picture against the CPU copy; "of the electrode tool": the bytes of the outlines against it        |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |

@@ -2119,7 +2119,7 @@ Notes on the record:
 
 | File                      | What it is                                                                                        |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| `register.mjs`            | lets Node run the TypeScript files                                                                |
+| `register.mjs`            | lets Node run the TypeScript files, and read the shaders that the engine imports as text          |
 | `logs.tar.gz`, `logs.ts`  | the logs of the runs as one archive, and the script that unpacks and packs it                     |
 | `prototype/world.ts`      | the grid of a scene as the app paints it, distances along the maze, pictures                      |
 | `prototype/jones.ts`      | a CPU copy of the agent model (not bit-equal to the GPU)                                          |
@@ -2143,7 +2143,7 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 417 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
+| `engine/mutate.ts`        | 504 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
 | `engine/variant.ts`       | other rules in the passes for one run, for the measurements of ADR 0053, ADR 0054 and ADR 0056    |
 | `engine/y-maze.*`         | the Y-maze of Reid et al. 2012: its layout, its runs, and `measure-y-maze.ts` for its tables      |

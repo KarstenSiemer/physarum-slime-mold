@@ -71,7 +71,7 @@ describe('memory budget', () => {
   it('counts the bytes per cell of the backend', () => {
     const s = defaultSettings();
     const [w, h] = gridSize(s.resolution, 16 / 10);
-    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at BYTES_PER_CELL (98 B)
+    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at BYTES_PER_CELL (102 B)
     expect(fitResolution(s, 16 / 10, { ...roomy, budget })).toBe(s.resolution);
     const halfFloat = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL_HALF_FLOAT };
     expect(fitResolution(s, 16 / 10, halfFloat)).toBeLessThan(s.resolution);
@@ -200,6 +200,19 @@ describe('the flow in the tubes', () => {
     expect(tubesBytesPerCell({ ...on, flow: false }, TUBE_MAP_BYTES_PER_CELL_GL)).toBe(0);
     expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
     expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
+  });
+});
+
+// ADR 0058: the outline distances of the electrodes are 4 B per cell on both backends. The fit counts them from the
+// start, with a pole or without one, so that a stroke of a pole never changes the grid.
+describe('the outline distances of the electrodes', () => {
+  it('are 4 of the bytes per cell of every backend', () => {
+    // 98 and 118 before them (ADR 0047).
+    expect(BYTES_PER_CELL).toBe(102);
+    expect(BYTES_PER_CELL_HALF_FLOAT).toBe(122);
+    // On 2048 × 1280 cells they are 10 MiB.
+    const [w, h] = gridSize(2048, 1.6);
+    expect(estimateBytes(w, h, 1000, BYTES_PER_CELL) - estimateBytes(w, h, 1000, 98)).toBe(10 * 2 ** 20);
   });
 });
 

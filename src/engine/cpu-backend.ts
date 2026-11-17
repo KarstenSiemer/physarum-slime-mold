@@ -166,6 +166,16 @@ export class CpuSim implements Sim {
     }
     return Promise.resolve(shape);
   }
+  /** As readShape(): 128 in the first byte where `env` holds a cathode, and in the second where it holds an anode. */
+  readPoles() {
+    const poles = new Uint8Array(this.env.length);
+    for (let i = 0; i < this.env.length; i += 4) {
+      const pole = this.env[i + 3] ?? 0;
+      poles[i] = pole > 191 ? 128 : 0;
+      poles[i + 1] = pole > 0 && pole <= 191 ? 128 : 0;
+    }
+    return Promise.resolve(poles);
+  }
   writeAgent() {
     // agents are not simulated here
   }
