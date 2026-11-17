@@ -5,6 +5,8 @@
 - Date: 2026-11-17
 - Changes [ADR 0055](0055-the-slime-field.md), decision 8 (the picture of the slime) and decision 9 (its memory).
   The stamp of ADR 0055, its life time and its brush stay.
+- Extended by [ADR 0059](0059-the-film-of-the-slime-keeps-its-cost.md) (2026-11-17): the owner leaves the cost of
+  the film as it is (the first open point).
 - In short: the rule of the amount is in `docs/model.md`, section 6.9, and the rule of the picture in
   `docs/design.md`, section 5. [`research/flow/README.md`](../../research/flow/README.md), part 21, has the commands
   and the records.
