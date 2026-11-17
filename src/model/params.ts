@@ -328,6 +328,17 @@ export const globalSpec = {
     step: 1,
     ref: 'Jones 2011, Sec. 5.1',
   },
+  // The slime field (ADR 0055): the extended model only. The default is the time that ADR 0054 took for the mark of
+  // starved ground, 6 days. The same setting gives that mark its time (engine/flow.ts recoverShare()).
+  slimeLife: {
+    label: 'Slime life time',
+    unit: 'hours',
+    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain is then at least as strong there as where a tube starts. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. No rule reads the slime yet, so it changes no run. With Flow in the tubes, the same time says how long ground that a starved tube left stays marked: the ground is fresh again after about this time, and children can be born onto it after about six tenths of this time. At the default of 144 hours that is 6 days and 3.7 days. At 0 the mark keeps the times of 144 hours. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
+    min: 0,
+    max: 240,
+    step: 1,
+    ref: 'Reid et al. 2012, PNAS 109: 17490; Reid et al. 2013, Behav. Ecol. 24: 812, as Tröger et al. 2024 cite it',
+  },
   // Flow in the tubes (ADR 0029): the extended model only. Tero et al. 2010 call the total flux between a source
   // and a sink I0, in units of the flux at which a tube grows at half its top rate.
   flowStrength: {
@@ -607,6 +618,8 @@ export function defaultSettings(): Settings {
     shrinkWindow: 5,
     shrinkMin: 0,
     shrinkMax: 20,
+    // 6 days (ADR 0055): the time of the mark of starved ground of ADR 0054.
+    slimeLife: 144,
     // Tero et al. 2010 use I0 = 2 per tube (Fig. 4); a tube of this app is about 4 cells wide (ADR 0029).
     flowStrength: 8,
     speed: 120,
@@ -697,6 +710,11 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // without it runs with 0: a link made before the rule runs as it was made, with growth that does not read light
   // (ADR 0050). A link of the Jones model gets the default back below (asJones() in constrain()).
   if (typeof raw.lightGrowth !== 'number') out.lightGrowth = 0;
+  // So with Slime life time (ADR 0055, decision 10): a link without it, or with a value that is no number, has no
+  // slime, and its starved ground keeps the time of ADR 0054, so the link runs as it was made. Whole hours, the step of
+  // the setting: a time such as 1e-300 would be above 0 and give the mark of starved ground a share that f32 cannot
+  // hold (engine/flow.ts recoverShare()).
+  out.slimeLife = Number.isFinite(raw.slimeLife) ? Math.round(out.slimeLife) : 0;
   // Growth and shrinkage (ADR 0025): whole steps and counts, and windows of an odd side, so that the agent sits in the
   // middle of its window. A link without them keeps growth off.
   out.growth = raw.growth === true;
@@ -837,8 +855,8 @@ export function jonesFits(s: Settings): boolean {
  * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. A
  * repellent source goes into the same map with a value below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the
  * strain weighs it as its own trail too, and its strength stays the user's. Jones' papers have neither trail
- * saturation, nor a flow in the tubes, nor light that stops growth, so their values return to the defaults, and a link holds none of them. Returns
- * `s` itself when it holds these values already.
+ * saturation, nor a flow in the tubes, nor light that stops growth, nor slime, so their values return to the defaults,
+ * and a link holds none of them. Returns `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
   const d = defaultSettings();
@@ -850,7 +868,9 @@ function asJones(s: Settings): Settings {
   const bound = s.scentDecay === st.decay && s.trailSaturation === 0;
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
-  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && s.lightGrowth === d.lightGrowth;
+  // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
+  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife;
+  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && own;
   if (ok) return s;
   return {
     ...s,
@@ -859,6 +879,7 @@ function asJones(s: Settings): Settings {
     flow: false,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
+    slimeLife: d.slimeLife,
     strains: strainOk ? s.strains : [{ ...st, food: self, light: self, share: 1 }],
   };
 }
