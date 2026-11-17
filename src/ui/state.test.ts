@@ -82,6 +82,22 @@ describe('the current scene', () => {
     expect(app.settings.showTubes).toBe(true);
   });
 
+  // So is the layer of the slime (ADR 0055, decision 8).
+  it('keeps the layer of the slime on a new scene, and does not count it as a change', async () => {
+    const { app, loadPreset, sceneChanged } = await fresh();
+    loadPreset('snail-maze');
+    expect(app.settings.showSlime).toBe(true);
+    app.settings.showSlime = false;
+    expect(sceneChanged()).toBe(false);
+    loadPreset('maze');
+    expect(app.settings.showSlime).toBe(false);
+    expect(app.sceneBase?.showSlime).toBe(false);
+    expect(sceneChanged()).toBe(false);
+    app.settings.showSlime = true;
+    loadPreset('snail-maze');
+    expect(app.settings.showSlime).toBe(true);
+  });
+
   it('does not count a grid the device lowered as a change', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
     loadPreset('three-strains');
@@ -707,20 +723,65 @@ describe('dead agents for the inoculate tool', () => {
 // and says what went, a switch to Extended keeps Jones' values, and the tools offered follow the model.
 describe('the model switch', () => {
   const BASE = 'The Jones model has only Jones’ rules.';
+  /** The settings that decide the tools: the model and the Slime life time, as a scene has them. */
+  const EXTENDED = { model: 'extended', slimeLife: 144 } as const;
+  const JONES = { model: 'jones', slimeLife: 144 } as const;
 
   // ADR 0044: Jones' papers have repellent sources, and no light that releases a repellent. Both models offer every
-  // tool with its key; the Jones model names the Light tool Repellent, and no text of it says light.
-  it('offers every tool in both models, and names light a repellent in the Jones model', async () => {
+  // tool with its key, but for the Slime tool, which the Jones model does not have (ADR 0055). The Jones model names the
+  // Light tool Repellent, and no text of it says light.
+  it('offers every tool but Slime in both models, and names light a repellent in the Jones model', async () => {
     const { TOOLS, lightName, toolsFor } = await fresh();
-    expect(toolsFor('extended')).toEqual(TOOLS);
-    const jones = toolsFor('jones');
-    expect(jones.map((t) => [t.id, t.key])).toEqual(TOOLS.map((t) => [t.id, t.key]));
+    expect(toolsFor(EXTENDED)).toEqual(TOOLS);
+    const jones = toolsFor(JONES);
+    const shared = TOOLS.filter((t) => t.id !== 'slime');
+    expect(jones.map((t) => [t.id, t.key])).toEqual(shared.map((t) => [t.id, t.key]));
     expect(jones.find((t) => t.id === 'light')?.label).toBe('Repellent');
-    expect(jones.filter((t) => /light/i.test(`${t.label} ${t.help}`))).toEqual([]);
+    expect(jones.filter((t) => /light|slime/i.test(`${t.label} ${t.help}`))).toEqual([]);
     expect(jones.filter((t) => t.id !== 'light' && t.id !== 'erase')).toEqual(
-      TOOLS.filter((t) => t.id !== 'light' && t.id !== 'erase'),
+      shared.filter((t) => t.id !== 'light' && t.id !== 'erase'),
     );
     expect([lightName('jones'), lightName('extended')]).toEqual(['repellent', 'light']);
+  });
+
+  // ADR 0055, decision 7: the Slime tool is there while the model has slime, in the extended model with a Slime life
+  // time above 0. It paints strokes of its own kind, and Clear and Erase name the slime that they remove.
+  it('offers the Slime tool only while the model has slime', async () => {
+    const { TOOLS, clearLabel, strokeKind, toolsFor } = await fresh();
+    const slime = toolsFor(EXTENDED).find((t) => t.id === 'slime');
+    expect([slime?.key, slime?.label]).toEqual(['9', 'Slime']);
+    expect(slime?.help).toContain('Slime life time');
+    expect(TOOLS.at(-1)).toEqual(slime);
+    for (const s of [JONES, { ...EXTENDED, slimeLife: 0 }, { ...JONES, slimeLife: 0 }]) {
+      expect(toolsFor(s).map((t) => t.id)).toEqual(TOOLS.filter((t) => t.id !== 'slime').map((t) => t.id));
+      expect(clearLabel(s)).toBe(`Clear food, ${s.model === 'jones' ? 'repellent' : 'light'}, walls and electrodes`);
+    }
+    for (const slimeLife of [1, 18, 240]) expect(toolsFor({ ...EXTENDED, slimeLife })).toEqual(TOOLS);
+    // Every key selects one tool.
+    expect(new Set(TOOLS.map((t) => t.key)).size).toBe(TOOLS.length);
+    expect(strokeKind('slime', 'anode')).toBe('slime');
+    expect(clearLabel(EXTENDED)).toBe('Clear food, light, walls, electrodes and slime');
+    expect(toolsFor(EXTENDED).find((t) => t.id === 'erase')?.help).toContain('electrodes and slime');
+  });
+
+  // When the model loses its slime, the first tool is selected: the toolbar has no Slime tool then. Every other tool
+  // stays selected.
+  it('selects the first tool when the model loses its slime while the Slime tool is selected', async () => {
+    const { TOOLS, app, keepTool } = await fresh();
+    for (const tool of TOOLS.map((t) => t.id)) {
+      app.tool = tool;
+      keepTool(EXTENDED);
+      expect(app.tool).toBe(tool);
+      for (const s of [JONES, { ...EXTENDED, slimeLife: 0 }]) {
+        app.tool = tool;
+        keepTool(s);
+        expect(app.tool, tool).toBe(tool === 'slime' ? 'pan' : tool);
+      }
+    }
+    expect(TOOLS[0].id).toBe('pan');
+    // The slime comes back, and the selection stays where it is.
+    keepTool(EXTENDED);
+    expect(app.tool).toBe('pan');
   });
 
   // ADR 0047: the Electrode tool paints the pole that the toolbar selects; the other brush tools paint their own
@@ -738,11 +799,12 @@ describe('the model switch', () => {
       'erase',
       undefined,
       'anode',
+      'slime',
     ]);
-    for (const model of ['jones', 'extended'] as const) {
-      const tool = toolsFor(model).find((t) => t.id === 'electrode');
+    for (const settings of [JONES, EXTENDED]) {
+      const tool = toolsFor(settings).find((t) => t.id === 'electrode');
       expect([tool?.key, tool?.label]).toEqual(['8', 'Electrode']);
-      expect(toolsFor(model).find((t) => t.id === 'erase')?.help).toContain('electrodes');
+      expect(toolsFor(settings).find((t) => t.id === 'erase')?.help).toContain('electrodes');
     }
   });
 
@@ -830,6 +892,25 @@ describe('the model switch', () => {
     expect(app.notice).toBe(
       `${BASE} The walls stop agents, but they do not block sensors. It removed the flow in the tubes.`,
     );
+  });
+
+  // The Jones model has no slime (ADR 0055, decision 10): painted slime stays in the drawing, and the notice says that
+  // it is gone until the extended model runs again.
+  it('to Jones says that painted slime is gone until the extended model runs again', async () => {
+    const { app, drawn, loadPreset, setEngine, setModel, startScene } = await fresh();
+    loadPreset('network');
+    setModel('extended');
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    engine.paint({ kind: 'slime', from: [100, 100], to: [140, 100], radius: 5 });
+    expect(drawn('slime')).toBe(true);
+    setModel('jones');
+    expect(app.notice).toBe(`${BASE} The painted slime is gone until you switch back to the extended model.`);
+    // The stroke stays in the drawing, so a link holds it.
+    expect(drawn('slime')).toBe(true);
+    setEngine(undefined);
   });
 
   it('to Jones is not possible without the rule, and changes nothing then', async () => {
@@ -924,7 +1005,8 @@ describe('the model switch', () => {
 });
 
 describe('the tools of the model', () => {
-  // Both models have every tool (ADR 0044), so no load and no switch of the model changes the selected tool.
+  // Both models have every tool but Slime (ADR 0044, ADR 0055), so no load and no switch of the model changes the
+  // selected tool. The Slime tool goes with the slime of the model (keepTool(), above).
   it('stay selected when a scene loads, the model switches or a link opens', async () => {
     const { app, loadPreset, openLink, setModel } = await fresh();
     for (const tool of ['light', 'food'] as const) {

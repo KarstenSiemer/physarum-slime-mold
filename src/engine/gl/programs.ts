@@ -20,6 +20,8 @@ import renderFrag from './glsl/render.frag?raw';
 import sampleFrag from './glsl/sample.frag?raw';
 import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
+import slimePaintFrag from './glsl/slime-paint.frag?raw';
+import slimeFrag from './glsl/slime.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import trailDownFrag from './glsl/trail-down.frag?raw';
 import tubesFrag from './glsl/tubes.frag?raw';
@@ -161,6 +163,16 @@ export interface Programs {
   /** The passes of the picture of the tubes, compiled at their first use, with the numbers of tubes.ts. */
   tubes: () => TubePrograms;
   /**
+   * The pass of the stamps of the slime field (slime.frag, ADR 0055), compiled at its first use: a scene of the Jones
+   * model never runs it.
+   */
+  slime: () => Program;
+  /**
+   * The brush on the slime field (slime-paint.frag, ADR 0055, decision 7), compiled at its first use: a stroke of the
+   * Slime tool, or an erase or a wall over a field with stamps.
+   */
+  slimeBrush: () => Program;
+  /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
    * growth.frag, ADR 0029 and ADR 0053), compiled at its first use: only a scene with growth and the flow needs it.
    */
@@ -190,6 +202,12 @@ export interface Programs {
    * Most frames never draw it.
    */
   scent: () => ScentPrograms | undefined;
+  /**
+   * The render pass with the layer of the slime (SLIME in render.frag, ADR 0055, decision 8), without (index 0) and
+   * with (1) the food, light and walls, once the programs are built, else undefined. The first call starts their
+   * build, as scent() does: the frames draw without the layer until then. A scene of the Jones model never draws it.
+   */
+  slimed: () => [Program, Program] | undefined;
   /** The pass that fills the trail's coarse map for a view zoomed out (trail-down.frag), compiled at its first use. */
   trailDown: () => Program;
   height: [Program, Program];
@@ -268,10 +286,14 @@ export function compile(gl: GL): Programs {
   const boxes = new Map<string, Program>();
   let scentStarted: ReturnType<typeof startProgram>[] | undefined;
   let scent: ScentPrograms | undefined;
+  let slimedStarted: ReturnType<typeof startProgram>[] | undefined;
+  let slimed: [Program, Program] | undefined;
   let capacity: Program | undefined;
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
   let tubes: TubePrograms | undefined;
+  let slime: Program | undefined;
+  let slimeBrush: Program | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
@@ -318,6 +340,8 @@ export function compile(gl: GL): Programs {
         picture: sim(`#define PASS 1\n${TUBE_DEFINES}${tubesFrag}`),
         stream: sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`),
       }),
+    slime: () => (slime ??= sim(slimeFrag)),
+    slimeBrush: () => (slimeBrush ??= sim(brushGlsl + slimePaintFrag)),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;
       let p = flowing.get(key);
@@ -361,6 +385,20 @@ export function compile(gl: GL): Programs {
       const [off, on, down, sum] = scentStarted.map((p) => wrap(gl, p.program));
       if (!off || !on || !down || !sum) return undefined;
       return (scent = { render: [off, on], down, sum });
+    },
+    slimed: () => {
+      // A lost context builds nothing: the frames draw without the layer, and the app reports the loss.
+      if (slimed || gl.isContextLost()) return slimed;
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      slimedStarted ??= [
+        startProgram(gl, vertex, V + '#define SLIME 1\n#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define SLIME 1\n#define ENV 1\n' + viewGlsl + renderFrag),
+      ];
+      if (!slimedStarted.every((p) => p.done())) return undefined;
+      for (const p of slimedStarted) p.check();
+      const [off, on] = slimedStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on) return undefined;
+      return (slimed = [off, on]);
     },
     trailDown: () => (trailDown ??= plain('#define ENV 0\n' + viewGlsl + trailDownFrag)),
     height: view(heightFrag),

@@ -328,6 +328,17 @@ export const globalSpec = {
     step: 1,
     ref: 'Jones 2011, Sec. 5.1',
   },
+  // The slime field (ADR 0055): the extended model only. The default is the time that ADR 0054 took for the mark of
+  // starved ground, 6 days. The same setting gives that mark its time (engine/flow.ts recoverShare()).
+  slimeLife: {
+    label: 'Slime life time',
+    unit: 'hours',
+    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain there is strong enough for a tube to grow. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. The picture shows the slime as a pale layer on the ground, which fades until this time is over (the switch Show slime). No rule reads the slime yet, so the slime changes no run. With Flow in the tubes the setting does one more thing: it says how long the ground that a starved tube left stays marked. That ground is fresh again after about this time, and children can be born onto it after about six tenths of this time: after 6 days and 3.7 days at the default of 144 hours. At 0 the mark keeps these times. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
+    min: 0,
+    max: 240,
+    step: 1,
+    ref: 'Reid et al. 2012, PNAS 109: 17490; Reid et al. 2013, Behav. Ecol. 24: 812, as Tröger et al. 2024 cite it',
+  },
   // Flow in the tubes (ADR 0029): the extended model only. Tero et al. 2010 call the total flux between a source
   // and a sink I0, in units of the flux at which a tube grows at half its top rate.
   flowStrength: {
@@ -439,7 +450,7 @@ export const coveredFoodHelp = {
 /** Help for the switch "Flow in the tubes" (ADR 0029); Learn → Controls lists it with the sliders. */
 export const flowHelp = {
   label: 'Flow in the tubes',
-  help: 'Only the extended model has this rule. It follows the slime mold: a tube that carries much flow gets thicker, and a tube with little flow decays. Each food that the colony covers gives or takes a fixed flux, and as many foods give as take. The flux runs through the tubes from the foods that give to the foods that take (Kirchhoff’s law, as in the model of Tero, Kobayashi and Nakagaki). Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. With two foods, the first one gives and the other takes. With more, the app draws again every ten minutes of model time which foods give and which take. Each cell remembers the flux that passed it. Where that memory is low, the tube starves: its agents die. With Growth and shrinkage they do not divide there, and no child is born there. A tube without any flux starves after about half an hour of model time. The ground that it leaves stays closed for children for 3.7 days of model time. Where the memory is high, dead agents come back to life, so the tube gets wider. Thirty steps are one minute of model time. With two foods, one thick tube along a short route remains. With many foods, a network with loops remains. While the colony covers fewer than two foods, no flux runs between foods, and the memory stays as it is. On fresh ground few agents starve: without Growth and shrinkage, half of a colony is gone after about 8 hours of model time. The rule costs time: the app solves the pressure in the tubes with 16 passes over the grid at each step, for each strain.',
+  help: 'Only the extended model has this rule. It follows the slime mold: a tube that carries much flow gets thicker, and a tube with little flow decays. Each food that the colony covers gives or takes a fixed flux, and as many foods give as take. The flux runs through the tubes from the foods that give to the foods that take (Kirchhoff’s law, as in the model of Tero, Kobayashi and Nakagaki). Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. With two foods, the first one gives and the other takes. With more, the app draws again every ten minutes of model time which foods give and which take. Each cell remembers the flux that passed it. Where that memory is low, the tube starves: its agents die. With Growth and shrinkage they do not divide there, and no child is born there. A tube without any flux starves after about half an hour of model time. The ground that it leaves stays closed for children for about six tenths of the Slime life time: for 3.7 days of model time at 144 hours. Where the memory is high, dead agents come back to life, so the tube gets wider. Thirty steps are one minute of model time. With two foods, one thick tube along a short route remains. With many foods, a network with loops remains. While the colony covers fewer than two foods, no flux runs between foods, and the memory stays as it is. On fresh ground few agents starve: without Growth and shrinkage, half of a colony is gone after about 8 hours of model time. The rule costs time: the app solves the pressure in the tubes with 16 passes over the grid at each step, for each strain.',
   ref: 'Tero, Kobayashi and Nakagaki 2007, J. Theor. Biol. 244: 553; Tero et al. 2010, Science 327: 439; Marbach et al. 2023, eLife 12: e78100',
 } as const;
 
@@ -453,6 +464,12 @@ export const tubeViewHelp = {
 export const scentViewHelp = {
   label: 'Scent',
   help: 'Shows the scent of food as a green glow and the repellent as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where food steers an agent as strongly as a strand of trail holds it: inside the line, food steers it more. The simulation does not change.',
+} as const;
+
+/** Help for the view switch "Show slime" (ADR 0055, decision 8); Learn → Controls lists it. */
+export const slimeViewHelp = {
+  label: 'Show slime',
+  help: 'Changes only the picture, not the simulation. The picture shows the slime as a pale layer on the ground: where the colony was, and where you painted slime. The food, the trail, the tubes, the light, the walls and the electrodes lie on the layer. The layer is strongest where the slime is new. It fades in a straight line as the slime gets older, and it is gone after the Slime life time. The Scent view does not draw it. Without the switch the ground is plain.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
@@ -525,6 +542,11 @@ export interface Settings extends Record<GlobalKey, number> {
    * grains that move with the flow (tubeViewHelp, ADR 0034). Display only.
    */
   showTubes: boolean;
+  /**
+   * The view draws the slime as a pale layer on the ground, while the model has slime (slimeViewHelp, ADR 0055,
+   * decision 8). Display only.
+   */
+  showSlime: boolean;
   strains: Strain[];
 }
 
@@ -582,6 +604,7 @@ export function defaultSettings(): Settings {
     gelColor: 'mild',
     showScent: false,
     showTubes: true,
+    showSlime: true,
     density: 1,
     diffusion: 1,
     meanWindow: 3,
@@ -607,6 +630,8 @@ export function defaultSettings(): Settings {
     shrinkWindow: 5,
     shrinkMin: 0,
     shrinkMax: 20,
+    // 6 days (ADR 0055): the time of the mark of starved ground of ADR 0054.
+    slimeLife: 144,
     // Tero et al. 2010 use I0 = 2 per tube (Fig. 4); a tube of this app is about 4 cells wide (ADR 0029).
     flowStrength: 8,
     speed: 120,
@@ -685,6 +710,9 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // A link from before the picture of the tubes holds no switch for it: the picture is on, as for a new scene. It
   // changes no result (ADR 0034).
   out.showTubes = raw.showTubes !== false;
+  // So with the layer of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the layer
+  // is on. It changes no result.
+  out.showSlime = raw.showSlime !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
   // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).
@@ -697,6 +725,11 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // without it runs with 0: a link made before the rule runs as it was made, with growth that does not read light
   // (ADR 0050). A link of the Jones model gets the default back below (asJones() in constrain()).
   if (typeof raw.lightGrowth !== 'number') out.lightGrowth = 0;
+  // So with Slime life time (ADR 0055, decision 10): a link without it, or with a value that is no number, has no
+  // slime, and its starved ground keeps the time of ADR 0054, so the link runs as it was made. Whole hours, the step of
+  // the setting: a time such as 1e-300 would be above 0 and give the mark of starved ground a share that f32 cannot
+  // hold (engine/flow.ts recoverShare()).
+  out.slimeLife = Number.isFinite(raw.slimeLife) ? Math.round(out.slimeLife) : 0;
   // Growth and shrinkage (ADR 0025): whole steps and counts, and windows of an odd side, so that the agent sits in the
   // middle of its window. A link without them keeps growth off.
   out.growth = raw.growth === true;
@@ -837,8 +870,8 @@ export function jonesFits(s: Settings): boolean {
  * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. A
  * repellent source goes into the same map with a value below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the
  * strain weighs it as its own trail too, and its strength stays the user's. Jones' papers have neither trail
- * saturation, nor a flow in the tubes, nor light that stops growth, so their values return to the defaults, and a link holds none of them. Returns
- * `s` itself when it holds these values already.
+ * saturation, nor a flow in the tubes, nor light that stops growth, nor slime, so their values return to the defaults,
+ * and a link holds none of them. Returns `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
   const d = defaultSettings();
@@ -850,7 +883,9 @@ function asJones(s: Settings): Settings {
   const bound = s.scentDecay === st.decay && s.trailSaturation === 0;
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
-  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && s.lightGrowth === d.lightGrowth;
+  // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
+  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife;
+  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && own;
   if (ok) return s;
   return {
     ...s,
@@ -859,6 +894,7 @@ function asJones(s: Settings): Settings {
     flow: false,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
+    slimeLife: d.slimeLife,
     strains: strainOk ? s.strains : [{ ...st, food: self, light: self, share: 1 }],
   };
 }

@@ -27,6 +27,8 @@ export const STEPS_PER_MINUTE = 30;
  * - `recover`: the flow memory of ground without a tube grows by this share per step, up to `fresh`: from `floor` to
  *   `fresh` in 6 days, and to `half`, where ground is open for births again, in 3.7 days (ADR 0054; an eighth of the
  *   share of ADR 0029, decision 19). A starved tube that vanishes leaves its ground at `floor` (flow.wgsl update).
+ *   This is the share at the default of the setting Slime life time, 144 hours; recoverShare() gives the share of the
+ *   settings (ADR 0055, decision 5).
  * - `base`: conductivity of a tube without flow memory; `food`: conductivity of a food cell.
  * - `ghost`: a conductivity that every open cell has for the pressure only, so that a cell beside the network holds
  *   the pressure of its neighbours before it joins.
@@ -157,6 +159,24 @@ export function trailLevels(
 }
 
 /**
+ * The Slime life time in hours for which `FLOW.recover` is the share of the mark of starved ground: 144, the 6 days of
+ * ADR 0054. It is the default of the setting (a test checks it), but the rule holds the number: another default must
+ * not change the time that a life time gives the mark.
+ */
+const RECOVER_LIFE = 144;
+
+/**
+ * The share by which the flow memory of ground without a tube grows per step (ADR 0055, decision 5): the setting Slime
+ * life time gives the mark of starved ground its time. `FLOW.recover` times 144 / the life time in hours, so the mark
+ * fades in about the life time. The division comes first: at 144 hours it gives 1, and the share is `FLOW.recover`
+ * bit for bit, so a scene keeps its bytes; at 18 hours it gives 8, the share of ADR 0029, decision 19 (0.00023).
+ * Without slime, at a life time of 0, the mark keeps the share of ADR 0054, `FLOW.recover`.
+ */
+export function recoverShare(s: Pick<Settings, 'slimeLife'>): number {
+  return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : FLOW.recover;
+}
+
+/**
  * The uniform block of the flow passes of the strain `strain` (ADR 0031): the constants, the first cell of the first
  * site (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain,
  * the blocks of the list of cells, and the sites: per site its first cell and the run of its cells in the list of
@@ -166,7 +186,7 @@ export function trailLevels(
  * constants from the block of any strain, and the pass of the ports reads the sites from the block of the first.
  */
 export function packFlow(
-  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder'>,
+  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder' | 'slimeLife'>,
   sites: FlowSites,
   buf = new ArrayBuffer(FLOW_BYTES),
   strain = 0,
@@ -177,7 +197,7 @@ export function packFlow(
   const omega = 2 / (1 + Math.sqrt(1 - FLOW.radius * FLOW.radius));
   const n = Math.min(sites.list.length, FLOW_SITES);
   const limit = FLOW.head * s.flowStrength;
-  f.set([s.flowStrength, FLOW.gamma, FLOW.rate, FLOW.recover], 0);
+  f.set([s.flowStrength, FLOW.gamma, FLOW.rate, recoverShare(s)], 0);
   f.set([FLOW.base, FLOW.food, FLOW.ghost, omega], 4);
   f.set([FLOW.weight, FLOW.bodyRate, FLOW.bodyLow, FLOW.fresh], 8);
   f.set([FLOW.floor, low, 1 / (full - low), n], 12);

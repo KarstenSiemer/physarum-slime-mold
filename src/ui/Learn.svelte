@@ -10,6 +10,7 @@
     modelHelp,
     stepOrderHelp,
     scentViewHelp,
+    slimeViewHelp,
     strainSpec,
     tubeViewHelp,
   } from '../model/params';
@@ -63,6 +64,7 @@
     globalSpec.flowStrength,
     // The view switches last: they change only the picture.
     tubeViewHelp,
+    slimeViewHelp,
     scentViewHelp,
   ];
 
@@ -255,6 +257,11 @@
         much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does not steer
         from farther away. The view changes only the picture, not the simulation.
       </p>
+      <p>
+        The pale layer on the ground is slime. A slime mold leaves slime where it was, and the extended model marks that
+        ground: the layer fades as the slime gets older, and it is gone after the Slime life time. No rule of the model
+        reads the slime yet. The switch Show slime, in the panel under Slime, hides the layer.
+      </p>
     {:else if app.learnTab === 'Controls'}
       <dl>
         {#each specs as spec (spec.label)}
@@ -265,21 +272,22 @@
         {/each}
       </dl>
       <p>
-        Keys: Space play/pause, . step, R reset, 1–8 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
+        Keys: Space play/pause, . step, R reset, 1–9 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
         this dialog.
       </p>
       <p>
-        Food, Light, Wall, Erase and Electrode paint where you drag. For a straight line, hold Shift, click the start
-        and then click the end. A preview shows the line as wide as the brush until the second click. While you hold
-        Shift, each further click adds a line from the last end, so you can draw a wall with corners. Press Escape or
-        let go of Shift to stop. A touch screen without a keyboard has no straight lines.
+        Food, Light, Wall, Erase, Electrode and Slime paint where you drag. The Slime tool is there in the extended
+        model while Slime life time is above 0. For a straight line, hold Shift, click the start and then click the end.
+        A preview shows the line as wide as the brush until the second click. While you hold Shift, each further click
+        adds a line from the last end, so you can draw a wall with corners. Press Escape or let go of Shift to stop. A
+        touch screen without a keyboard has no straight lines.
       </p>
       <p>
-        The page address is a link to what you see: the settings, the scene, and the food, light, walls and electrodes
-        you painted. Copy it to share the scene or to come back to it. The agents and their trails start again when the
-        link opens. If the drawing is too large for a link, a notice says so. The link then opens the scene as it loads,
-        without the drawing. If this app cannot read the drawing in a link, a notice says so, and only the settings
-        load.
+        The page address is a link to what you see: the settings, the scene, and the food, light, walls, electrodes and
+        slime you painted. Copy it to share the scene or to come back to it. The agents and their trails start again
+        when the link opens. If the drawing is too large for a link, a notice says so. The link then opens the scene as
+        it loads, without the drawing. If this app cannot read the drawing in a link, a notice says so, and only the
+        settings load.
       </p>
     {:else if app.learnTab === 'Scenes'}
       <p>

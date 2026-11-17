@@ -27,10 +27,12 @@ import {
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
+  slimeBytesPerCell,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
 } from './sizing';
+import { slimeModel } from './slime';
 import { compact, Placement, sweeping } from './sweep';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 
@@ -168,8 +170,8 @@ export class Engine {
   /** Steps of a tool held while paused not run yet (PAUSED_TOOL_STEPS), as the budget counts steps. */
   private pausedSteps = 0;
   /**
-   * Every food, light, wall and erase edit since the last clear or preset load, less those the sweep deleted
-   * (sweep.ts): each new simulation paints them.
+   * Every food, light, wall, electrode, slime and erase edit since the last clear or preset load, less those the
+   * sweep deleted (sweep.ts): each new simulation paints them.
    */
   private edits: EnvEdit[] = [];
   /** How many of `edits` the current simulation holds; the next frame paints the rest. */
@@ -233,7 +235,10 @@ export class Engine {
     const now = this.settings;
     // The flow was off, so nobody kept the food sites (syncSites()).
     if (flowOn(now) && !flowOn(prev)) this.syncSites();
+    // The Jones model has no slime field (ADR 0055, decision 10): a switch back gives the model a new field, which
+    // starts with the painted slime only. A reset paints it too (reset()).
     if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
+    else if (slimeModel(now) && !slimeModel(prev)) this.repaintSlime();
   }
 
   /**
@@ -309,6 +314,9 @@ export class Engine {
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
       flowBytesPerCell(s) +
       tubesBytesPerCell(s, tubeMapBytesPerCell) +
+      // The slime field by the model that runs (ADR 0055): on a backend without the rule, a scene of the Jones model
+      // runs on the extended model (constrain()).
+      slimeBytesPerCell(constrain({ ...s, collisions })) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
@@ -389,6 +397,7 @@ export class Engine {
       this.sim.update(this.settings);
       this.flushEnv();
       this.sim.reset();
+      this.repaintSlime();
       this.seedAtFood();
       this.backend.forget();
       this.restarts++;
@@ -442,9 +451,31 @@ export class Engine {
   reset() {
     if (this.rebuilding) return; // the new simulation starts fresh anyway
     this.sim.reset();
+    this.repaintSlime();
     this.seedAtFood();
     this.backend.forget();
     this.restarts++;
+  }
+
+  /**
+   * Paints the slime of the edit list again (ADR 0055, decision 7): after a reset of the simulation, which clears
+   * every stamp, and when a switch of the model gives the model its field again. The simulation gets the edits that it
+   * holds from the first slime edit on, in their order: a stroke of the Slime tool stamps its open cells, and an erase
+   * and a wall clear the stamp of theirs (Sim.paintSlime()). An erase or a wall before the first slime edit clears
+   * nothing in a field without a stamp. The stamp is the one of the current step: 0 after a reset, before the colonies
+   * of the start layout Food take their steps (seedAtFood()).
+   *
+   * The field is then the one that the strokes painted one after another, cell for cell. After the last stroke that
+   * reaches a cell and changes the field there, no stroke changes whether the cell is a wall. So the walls of now say
+   * for that stroke what the walls said when it was painted.
+   */
+  private repaintSlime() {
+    if (!slimeModel(this.settings)) return;
+    const held = this.edits.slice(0, this.painted);
+    const first = held.findIndex((e) => e.kind === 'slime');
+    if (first < 0) return;
+    const { width, height } = this.sim;
+    this.sim.paintSlime(held.slice(first).flatMap((e) => strokeOn(e, width, height) ?? []));
   }
 
   /**
@@ -473,7 +504,10 @@ export class Engine {
     });
   }
 
-  /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */
+  /**
+   * Removes food, light, walls, electrodes and painted slime, also from simulations built later. Strokes not painted
+   * yet go too. The simulation also clears the slime that the colony left (Sim.clearEnvironment()).
+   */
   clearEnvironment() {
     this.edits = [];
     this.painted = 0;
@@ -601,7 +635,9 @@ export class Engine {
     if (gone.size === 0) return false;
     // The simulation holds the first `painted` edits. One of them that goes keeps its cells there until the strokes
     // that cleared them are painted, also when those go too: so the simulation gets every stroke recorded so far.
-    if (this.live && [...gone].some((i) => i < this.painted)) this.flushEnv();
+    // With a slime field it gets them in every case (ADR 0055, decision 7): an erase that clears no edit still clears
+    // the slime that the colony left, and the sweep can delete it before a frame painted it.
+    if (this.live && (slimeModel(this.settings) || [...gone].some((i) => i < this.painted))) this.flushEnv();
     this.painted -= [...gone].filter((i) => i < this.painted).length;
     compact(this.edits, gone);
     this.placement?.remove(gone);

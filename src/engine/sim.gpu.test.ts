@@ -57,6 +57,7 @@ import {
 } from './scent';
 import agentsWgsl from './shaders/agents.wgsl?raw';
 import bloomWgsl from './shaders/bloom.wgsl?raw';
+import brushWgsl from './shaders/brush.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
 import flowWgsl from './shaders/flow.wgsl?raw';
@@ -65,6 +66,8 @@ import histogramWgsl from './shaders/histogram.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
 import renderWgsl from './shaders/render.wgsl?raw';
+import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
+import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
@@ -153,7 +156,10 @@ describe('WGSL', () => {
       flow: common + flowWgsl,
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
-      paint: common + paintWgsl,
+      // The brush on the environment and the brush on the slime field share the segment of brush.wgsl (ADR 0055).
+      paint: common + brushWgsl + paintWgsl,
+      slime: common + slimeWgsl,
+      slimePaint: common + brushWgsl + slimePaintWgsl,
       sort: common + sortWgsl,
       walls: common + wallsWgsl,
       render: renderWgsl,
@@ -6627,7 +6633,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     // Painted and erased again, the environment pass runs (hasEnvironment) but must draw what the pass without
     // it draws: at most the dither apart. Both bilinear paths (fit and zoomed out), every style, collisions on and
-    // off. Erasing everything leaves no byte: with no cell of a layer within 5 cells, its bytes go to 0.
+    // off. Erasing everything leaves no byte: with no cell of a layer within 5 cells, its bytes go to 0. A wall and
+    // an erase also clear the slime of their cells (ADR 0055, decision 7), which the picture would show: the layer
+    // of the slime is off here.
     it.each(BOUNDARIES)('draw an erased environment like none at all (%s)', async (boundary) => {
       for (const collisions of backend.supportsCollisions ? [false, true] : [false]) {
         const settings: Settings = {
@@ -6635,6 +6643,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           boundary,
           collisions,
           density: 0.5,
+          showSlime: false,
           strains: [defaultStrain(0), defaultStrain(1)],
         };
         const sim = await make(settings, W, H, (W * H) / 2);
@@ -6872,7 +6881,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     });
     const [W, H] = [64, 48];
     const [CW, CH] = [96, 72];
-    // Food strong enough that its pull across the sensors passes the hold of a strand, so the line shows.
+    // Food strong enough that its pull across the sensors passes the hold of a strand, so the line shows. The view
+    // draws no slime (ADR 0055, decision 8; slime.gpu.test.ts), so the picture below it has none here: these tests
+    // compare the picture with the view against the view over the picture without it.
     const extended = (patch: Partial<Settings>): Settings => ({
       ...defaultSettings(),
       model: 'extended',
@@ -6880,6 +6891,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       scentDecay: 0.02,
       lightStrength: 0.2,
       density: 0.5,
+      showSlime: false,
       ...patch,
     });
     /** Food across the seam or the edge, or at the rim of the dish, and light inside: what each view looks at. */

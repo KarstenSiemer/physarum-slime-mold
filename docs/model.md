@@ -62,8 +62,8 @@ moves the agents of its wound only while growth does not run; while growth runs 
 
 - Lengths are in cells, times in steps. Jones gives his lengths in cells too, so his scenes run on the lattice of their
   figure (ADR 0026).
-- Only the flow defines a physical time: 30 steps are one minute, so a step is 2 s (ADR 0029, decision 10). The rules
-  outside the flow have no time scale.
+- The flow defines a physical time: 30 steps are one minute, so a step is 2 s (ADR 0029, decision 10). The life time
+  of the slime has the same scale, with the flow and without it (section 6.9). The other rules have no time scale.
 - Only the Tokyo scene defines a physical length: 0.537 mm per cell (17 cm on 316 cells, `src/model/tokyo.ts`).
 - The trail and the scent are in units of deposit: an agent adds depT per successful move.
 
@@ -89,6 +89,7 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 | B_s     | tube body of strain s (flow only, section 8)                                           | [0, 1]    |
 | G_s     | conductivity of the flow of strain s (flow only)                                       | [0, 4]    |
 | P_s,k   | pressure of the flow of strain s in lane k = 0 … 3 (flow only)                         | float     |
+| S       | stamp of the slime, one for all strains (extended model only, section 6.9)             | integers  |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step. The flow has its fields for each strain
 of the settings, at most 4 (`flowStrains()` in `src/engine/flow.ts`). Settings with another number of strains get a new
@@ -106,7 +107,9 @@ A step runs these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl
    and the flow memory of the last step, each agent the flow memory of its own strain.
 2. **Growth and shrinkage**, only on the steps of their intervals, only with one agent per cell (section 9).
 3. **Diffusion**, one or more passes over the grid (section 6). It adds the deposits n_l of this step.
-4. **Flow**, only while it is on (section 8). It runs once per strain and reads the trail of that strain after the
+4. **Stamps of the slime**, only in the extended model while the Slime life time is above 0 (section 6.9). It reads the
+   trail of every strain after the diffusion.
+5. **Flow**, only while it is on (section 8). It runs once per strain and reads the trail of that strain after the
    diffusion.
 
 The two orders differ in when the agents sense, and in where the diffusion adds the sources:
@@ -240,7 +243,8 @@ steps of 1/16 cell). Wall: the wall byte 255, food and light 0. Food: the food b
 t² (3 − 2t)) rounded to a byte, with t = clamp((d − r) / (0.3 r − r), 0, 1) at the distance d from the stroke: 255
 within 0.3 r, 0 at r. The shaders write this step out, because GLSL ES 3.00 leaves smoothstep undefined with its first
 edge above its second (ADR 0007, amendment of 2026-11-13). Erase: all bytes 0 (`shaders/paint.wgsl`,
-`gl/glsl/paint.frag`, CPU reference `lightByte()` in `brush.ts`).
+`gl/glsl/paint.frag`, CPU reference `lightByte()` in `brush.ts`). The Slime tool writes no byte of `env`: it paints the
+slime field, and an erase and a wall also clear that field in their cells (6.9).
 
 A dab of light with a radius of 2.5 cells on the centre of a cell holds bytes that sum to 2,243: 0.977 of 3 × 3 cells
 of the full byte. The scene Voronoi diagram paints its repellent dots so, in place of the hard dots of 3 × 3 cells of
@@ -256,6 +260,44 @@ the byte to 0. The passes read a byte above 191 as a cathode and any other byte 
 In the extended model with K ≥ 1, a sensor reads each trail lane as σ_K(t) = t / (1 + t / K) before it weighs it. K
 acts on the sensors only: not on the deposit, the diffusion or the scent (ADR 0022, decisions 15 to 17). K is 0 in
 every scene.
+
+### 6.9 The slime field
+
+ADR 0055. Code: `shaders/slime.wgsl`, `gl/glsl/slime.frag`, `src/engine/slime.ts`; the brush in
+`shaders/slime-paint.wgsl` and `gl/glsl/slime-paint.frag`; CPU reference `src/engine/slime-reference.ts`.
+
+Slime is the layer that a plasmodium leaves on its ground. Only the extended model has the slime field. It is one field
+for all strains. It says where a colony was, and when it was there last. No rule of the model reads the field yet, so
+it changes no run (ADR 0055, decision 1). Only the picture reads it.
+
+- **A cell holds plasm** in a step when the trail of at least one strain of the settings, as the diffusion of that
+  step leaves it, is at or above the low level of that strain: T_s ≥ 0.2 · u_s (section 8.1). The test is the same
+  with the flow and without it.
+- **The stamp.** The field holds one unsigned 32-bit integer S per cell: 0 for a cell without a stamp, else the number
+  of a step plus 1. The first step of a run has the number 0. In step k every cell that holds plasm gets S ← k + 1.
+  Every other cell keeps its S. A wall and a cell outside the arena never get a stamp: the diffusion leaves no trail
+  there (6.3), and every low level is above 0.
+- **The life time** L is the setting Slime life time in hours times 1,800 steps, as a whole number (section 3). With
+  L = 0 the model has no slime: the pass of the stamps does not run, and the field keeps what it holds.
+- **A cell has slime** for a reader in step k while S ≠ 0 and k + 1 − S < L. The age of the slime is k + 1 − S: 1 for
+  a cell that held plasm in step k − 1, and 0 for a stamp that the Slime tool wrote since that step. A change of the
+  setting acts on all slime at once.
+- **The Slime tool** paints the field, not `env`. Its stroke has the cells of a food stroke (6.7), with the hard edge
+  of food. Before step k it gives each open cell of the stroke S ← k + 1. A cell is open when it lies inside the arena
+  and holds no wall. Painted slime ages as the slime of a colony does. An erase and a wall set S of their cells to 0,
+  so no wall holds a stamp. Clear sets every S to 0. The toolbar has the tool while L > 0.
+- **A reset** sets every S to 0. The engine then paints again the strokes of the list that change the field (slime,
+  erase, wall), from the first stroke of slime on and in their order, as before the step that comes next: S = 1 after
+  a reset. A switch from the Jones model to the extended model does the same. So the painted slime of a scene is new
+  at the start of a run (`repaintSlime()` in `src/engine/engine.ts`).
+- **The Jones model** has no slime field: a switch to it frees the field with its stamps.
+- **Memory**: 4 B per cell, a storage buffer on WebGPU and a texture of unsigned integers on WebGL2. The fit of the
+  grid counts them in the extended model with any life time, so the setting changes no grid.
+- **A link** made before the setting holds no Slime life time and opens with 0: it has no slime, and it runs as it
+  was made (`sanitize()`).
+
+The same setting gives the mark of starved ground its time (8.4). The picture draws the slime as a pale layer on the
+ground; the rule of the layer is in [design.md](design.md), section 5.
 
 ## 7. The agents
 
@@ -449,12 +491,15 @@ shifts the whole history and changes no difference.
 - f(Q) = Q^1.8 / (1 + Q^1.8) (Tero et al. 2010, γ = 1.8), averaged over the 4 lanes.
 - On a tube, while at least 2 sites had a role in the flow of the strain in the last step (at their ports of that step):
   D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles
-  D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · 1.00002875), so starved ground comes back to 0.2 in
-  about 264,000 steps (ADR 0054; the factor was 1.00023 before, ADR 0029, decision 19).
+  D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · (1 + r)). The share r follows the setting Slime
+  life time (6.9; ADR 0055, decision 5): r = 0.00002875 · 144 / (the life time in hours), and r = 0.00002875 at a life
+  time of 0 (`recoverShare()` in `src/engine/flow.ts`). At the default of 144 hours the factor is 1.00002875, so
+  starved ground comes back to 0.2 in about 264,000 steps (ADR 0054). At 18 hours it is 1.00023, the factor of before
+  (ADR 0029, decision 19).
 - **A starved tube that vanishes leaves starved ground** (ADR 0054). A cell loses its tube in the step in which its
   tube body falls below 0.05. If D < 0.01 after the update of that step, D ← 1e-4. So every cell of ground that a
   starved tube left holds the same mark, the floor of the flow memory, and it is open for births again (D ≥ 0.01,
-  section 9) after ln(100) / ln(1.00002875) = 160,182 steps. A tube that vanishes with D ≥ 0.01 keeps its D, and a D
+  section 9) after ln(100) / ln(1 + r) steps: 160,182 at the default. A tube that vanishes with D ≥ 0.01 keeps its D, and a D
   above 0.2 falls to 0.2 in the next step. Before ADR 0054 a starved tube kept its D when it vanished: each cell then
   held a mark of its own depth, and most of the ground opened again after some thousand steps (ADR 0053).
 
@@ -478,7 +523,9 @@ An agent follows the flow of its own strain: D and B below are those of the agen
 falls from D = 0.2 to 0.01 in 998 steps (33 min) while the flow of its strain has two sites with a role, roles 300 steps
 (10 min), recovery of starved ground about 264,000 steps (6 days) from the floor to fresh ground, and about 160,000
 steps (3.7 days) from the floor to the level 0.01 of the births (8.4; ADR 0054: slime of a large culture is avoided
-for up to 6 days, Reid et al. 2013 as Tröger et al. 2024 cite it). The time scale, 30 steps per minute, was set so that
+for up to 6 days, Reid et al. 2013 as Tröger et al. 2024 cite it). These two times are those of the default Slime
+life time of 144 hours. They change in proportion to the setting: fresh ground after 1.02 times the life time, and
+births after 0.62 times (ADR 0055, decision 5). The time scale, 30 steps per minute, was set so that
 these constants give the organism's times (ADR 0029, decision 10; Marbach et al. 2023); see [fidelity.md](fidelity.md),
 row 4.
 
@@ -574,6 +621,7 @@ checks that this table names every key.
 | `shrinkMin`         | Smin     | agents, 0 to 225                                                     | 0                 | both     | 9       |
 | `shrinkMax`         | Smax     | agents, 1 to 225                                                     | 20                | both     | 9       |
 | `flowStrength`      | I0       | the flux of each strain at a site, 0.1 to 32                         | 8                 | extended | 8.2     |
+| `slimeLife`         | L        | hours of model time, 0 to 240; 0 is no slime                         | 144               | extended | 6.9     |
 | `model`             |          | jones, extended                                                      | extended          |          | 2       |
 | `stepOrder`         |          | move-first, sense-first                                              | sense-first       | both     | 5       |
 | `boundary`          |          | wrap, box, dish                                                      | wrap              | both     | 1, 6.3  |
@@ -591,9 +639,13 @@ strain, one agent per cell, one diffusion pass and the own weight ±1 (`jonesFit
 light weight to the own weight, the scent decay to the strain's decay, the share to 1, and K and the flow to off
 (`asJones()`). "Model: jones" means only the Jones model has the parameter: the extended model binds it to its default
 (`asExtended()`). A Jones link made before ADR 0044 that holds drawn light opens with `lightStrength` 0: until then drawn
-light had no effect in the Jones model (`sanitize()`, the mark `rules` of a link). `speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent` and `showTubes` change only the view and
+light had no effect in the Jones model (`sanitize()`, the mark `rules` of a link). The Jones model has no slime: it binds
+the Slime life time to its default, and its passes get a life time of 0 (`slimeSteps()` in `src/engine/slime.ts`).
+
+`speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent`, `showTubes` and `showSlime` change only the view and
 the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
 and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
+`showSlime` draws the slime field as a pale layer on the ground; its rule is in the same section, and in ADR 0055.
 
 ## 12. The two backends
 
@@ -630,6 +682,9 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Covered food (6.5)                      | the covered food tests, also WebGL2 without float blending                                                                      |
 | Cut in the fields (6.6)                 | the cut clears the chemicals in the extended model only                                                                         |
 | K (6.8)                                 | turns with saturation against a CPU reference                                                                                   |
+| The slime field (6.9)                   | `slime.gpu.test.ts`: the stamps against the CPU copy; the life time; a reset; the Jones model; `slime-reference.test.ts`        |
+| The Slime tool (6.9)                    | `slime.gpu.test.ts`, "the brush": against the CPU copy; erase, wall and Clear; `engine-env.test.ts`: the repaint, the link      |
+| The layer of the slime (design.md, 5)   | `slime.gpu.test.ts`, "the picture": against the CPU copy; no pixel changes with the layer off; no byte of the simulation        |
 | One agent per cell (7.6)                | at most one agent per cell, none lost; determinism                                                                              |
 | Tools (7.2)                             | inoculate onto free cells; dead agents only; cut to free cells                                                                  |
 | An agent under a wall (7.2, 7.5)        | "agents under a painted wall": each one off the wall at its first open point, with its heading; outside a held cut; beside it   |
@@ -638,6 +693,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |
+| The time of the mark (8.4)              | `flow.gpu.test.ts`: eight times the share at a Slime life time of 18 hours; `flow.test.ts`: the share of each life time         |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
 | Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
 | The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |

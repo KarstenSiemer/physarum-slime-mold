@@ -385,8 +385,7 @@ Flake flakeAt(vec2 p, Env e) {
   return f;
 }
 
-vec3 substrate(Flake f) {
-  vec3 bg = V.background.rgb;
+vec3 substrate(Flake f, vec3 bg) {
   if (f.cover <= 0.0) return bg;
   return mix(mix(bg, f.body, f.cover * 0.95), f.edge, f.cover * f.rim * 0.85);
 }
@@ -490,6 +489,119 @@ vec3 electrodes(vec3 c, vec2 p) {
   }
   vec2 a = POLE_OPACITY * smoothstep(vec2(0.4), vec2(0.6), cover);
   return mix(mix(c, CATHODE, a.x), ANODE, a.y);
+}
+#endif
+
+#ifdef SLIME
+// ---- The slime (SLIME; see render.wgsl, ADR 0055) ----
+uniform highp usampler2D stamps; // the slime field (slime.frag); read for the slime only
+
+// The strength of the slime of a cell that holds the stamp `held`, 0 to 1 (slimeOf in render.wgsl).
+float slimeOf(uint held) {
+  uint age = V.slime.x + 1u - held;
+  if (held == 0u || age >= V.slime.y) return 0.0;
+  return 1.0 - float(age) / float(V.slime.y);
+}
+
+// Whether grid cell c lies in the arena (slimeArena in render.wgsl).
+bool slimeArena(ivec2 c) {
+  if (V.boundary == 0u) return true;
+  ivec2 s = gridSize();
+  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, s))) return false;
+  return V.boundary != 2u || distance(vec2(c) + 0.5, 0.5 * vec2(s)) <= DISH_FILL * 0.5 * float(min(s.x, s.y));
+}
+
+#if ENV
+// Which of the 4 cells around p hold no wall: 1 open, 0 wall, in the order of the blend (unwalled in render.wgsl).
+vec4 unwalled(vec2 p, vec4 cells[9]) {
+  ivec2 o = ivec2(floor(p - 0.5)) - ivec2(floor(p)) + 1;
+  return vec4(lessThan(vec4(cells[o.y * 3 + o.x].r, cells[o.y * 3 + o.x + 1].r, cells[(o.y + 1) * 3 + o.x].r,
+                            cells[(o.y + 1) * 3 + o.x + 1].r), vec4(0.5)));
+}
+#endif
+
+// Up to 1 cell per pixel: the strengths of the 4 cells around p, bilinear over the open ones, with their weights
+// scaled up to 1 (slimeBilinear in render.wgsl). `open`: from unwalled().
+float slimeBilinear(vec2 p, vec4 open) {
+  vec2 q = p - 0.5;
+  ivec2 i = ivec2(floor(q));
+  vec2 f = q - floor(q);
+  ivec2 s = gridSize();
+  ivec2 x = ivec2(i.x, i.x + 1);
+  ivec2 y = ivec2(i.y, i.y + 1);
+  if (V.boundary == 0u) {
+    // One wrap for the 4 cells, as in bilinear().
+    ivec2 w = wrapCell(i, s);
+    x = ivec2(w.x, w.x == s.x - 1 ? 0 : w.x + 1);
+    y = ivec2(w.y, w.y == s.y - 1 ? 0 : w.y + 1);
+  }
+  float sum = 0.0;
+  float total = 0.0;
+  for (int dy = 0; dy < 2; dy++) {
+    for (int dx = 0; dx < 2; dx++) {
+      ivec2 c = ivec2(x[dx], y[dy]);
+      if (open[dy * 2 + dx] == 0.0 || !slimeArena(c)) continue;
+      float w = (dx == 1 ? f.x : 1.0 - f.x) * (dy == 1 ? f.y : 1.0 - f.y);
+      sum += w * slimeOf(texelFetch(stamps, c, 0).r);
+      total += w;
+    }
+  }
+  return total > 0.0 ? sum / total : 0.0;
+}
+
+// Zoomed out: the mean of the strength over the square of the pixel, with the weights of trailArea(); above 2 cells per
+// pixel the cell in the middle of a texel stands for the texel (slimeArea in render.wgsl).
+float slimeArea(vec2 p) {
+  ivec2 s = gridSize();
+  int k = int(V.fx.w);
+  ivec2 n = (s + ((1 << k) - 1)) >> k; // levelSize(k), and the grid itself at level 0
+  vec2 ratio = vec2(n) / vec2(s);
+  vec2 half_ = 0.5 * V.scale * ratio;
+  vec2 lo = p * ratio - half_;
+  vec2 hi = p * ratio + half_;
+  ivec2 i = ivec2(floor(lo));
+  ivec3 xs = ivec3(i.x, i.x + 1, i.x + 2);
+  ivec3 ys = ivec3(i.y, i.y + 1, i.y + 2);
+  if (V.boundary == 0u) {
+    // One wrap for the 3 × 3 texels, as in trailArea().
+    ivec2 w = wrapCell(i, n);
+    int x1 = w.x == n.x - 1 ? 0 : w.x + 1;
+    int y1 = w.y == n.y - 1 ? 0 : w.y + 1;
+    xs = ivec3(w.x, x1, x1 == n.x - 1 ? 0 : x1 + 1);
+    ys = ivec3(w.y, y1, y1 == n.y - 1 ? 0 : y1 + 1);
+  }
+  // The share of each column and row of texels that lies under the pixel.
+  vec3 at = vec3(0.0, 1.0, 2.0);
+  vec3 wx = max(min(vec3(hi.x), float(i.x) + at + 1.0) - max(vec3(lo.x), float(i.x) + at), vec3(0.0));
+  vec3 wy = max(min(vec3(hi.y), float(i.y) + at + 1.0) - max(vec3(lo.y), float(i.y) + at), vec3(0.0));
+  // The cell in the middle of each texel, in whole numbers; with no division on a side that 2^k divides.
+  ivec3 cx = xs;
+  ivec3 cy = ys;
+  if (k > 0) {
+    int middle = 1 << (k - 1);
+    if ((n.x << k) == s.x) cx = (xs << k) + middle;
+    else cx = ((2 * xs + 1) * s.x) / (2 * n.x);
+    if ((n.y << k) == s.y) cy = (ys << k) + middle;
+    else cy = ((2 * ys + 1) * s.y) / (2 * n.y);
+  }
+  float sum = 0.0;
+  for (int j = 0; j < 3; j++) {
+    // A row that the pixel does not reach, or outside a closed arena: nothing to read.
+    if (wy[j] <= 0.0 || ys[j] < 0 || ys[j] >= n.y) continue;
+    float row = 0.0;
+    for (int c = 0; c < 3; c++) {
+      if (wx[c] <= 0.0 || xs[c] < 0 || xs[c] >= n.x) continue;
+      row += wx[c] * slimeOf(texelFetch(stamps, ivec2(cx[c], cy[j]), 0).r);
+    }
+    sum += wy[j] * row;
+  }
+  return sum / ((wx.x + wx.y + wx.z) * (wy.x + wy.y + wy.z));
+}
+
+// The ground `bg` at p with the slime on it (slimed in render.wgsl). `open`: as for slimeBilinear().
+vec3 slimed(vec3 bg, vec2 p, vec4 open) {
+  float strength = V.scale <= 1.0 ? slimeBilinear(p, open) : slimeArea(p);
+  return mix(bg, V.slimeFx.rgb, V.slimeFx.a * strength);
 }
 #endif
 
@@ -724,13 +836,21 @@ vec3 scene(vec2 p, vec2 s) {
   v *= 1.0 + STREAM_GAIN * grain;
   vec4 halo = texture(bloom, p / s);
   vec3 base = V.background.rgb;
+#ifdef SLIME
+  // The slime tints the ground: the flake of food, the trail and all else lie on it (see scene in render.wgsl).
+  vec4 open = vec4(1.0);
+#if ENV
+  if (near) open = unwalled(p, cells);
+#endif
+  base = slimed(base, p, open);
+#endif
   Flake f = Flake(vec3(0.0), vec3(0.0), 0.0, 0.0);
 #if ENV
   Env e;
   if (near) {
     e = envAt(p, cells);
     f = flakeAt(p, e);
-    base = substrate(f);
+    base = substrate(f, base);
     if (V.frame.w != 0u) v += presence(e, cells, raw);
   }
 #endif

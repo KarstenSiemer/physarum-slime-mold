@@ -1,4 +1,5 @@
-// Food, light and walls as a list of edits that every new simulation paints again (docs/adr/0019).
+// Food, light, walls, electrodes and painted slime as a list of edits that every new simulation paints again
+// (docs/adr/0019).
 import type { Boundary } from '../model/params';
 import type { EnvShape } from '../model/presets';
 import type { EnvTool, Stroke } from './types';
@@ -25,7 +26,7 @@ type Point = [number, number];
 /** A stroke as an edit paints it on a grid: always with the boundary of the arena it was painted in. */
 export type Painted = Stroke & { boundary: Boundary };
 
-/** One food, light, wall or erase edit, kept so that a new simulation can paint it again. */
+/** One food, light, wall, electrode, slime or erase edit, kept so that a new simulation can paint it again. */
 export interface EnvEdit {
   kind: EnvTool;
   from: Point;

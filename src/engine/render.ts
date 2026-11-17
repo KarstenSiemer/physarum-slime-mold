@@ -4,6 +4,7 @@ import { readPixels } from './readback';
 import { levelSize, scentLevel, scentLevelSize, scentSensors } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Simulation } from './sim';
+import { slimeShown, slimeSteps } from './slime';
 import { STREAM } from './tubes';
 import type { View } from './types';
 
@@ -37,7 +38,20 @@ export interface Frame {
  */
 export const GEL_FX: Record<GelColor, [pale: number, film: number]> = { mild: [0.35, 0.5], strong: [0.6, 0.35] };
 
-export const VIEW_BYTES = 224;
+/**
+ * The layer of the slime in each style (ADR 0055, decision 8): its colour, and its full strength A. The ground under
+ * slime of the age 0 holds the share A of that colour, and under older slime the share A · (1 − age / life time)
+ * (slimeStrength() in slime-reference.ts). One pale colour for all strains. It is lighter than the ground of the dark
+ * styles and darker than paper.
+ */
+export const SLIME_LOOK: Record<Settings['style'], { color: string; strength: number }> = {
+  glow: { color: '#d8dccf', strength: 0.02 },
+  gel: { color: '#e4dfcc', strength: 0.024 },
+  paper: { color: '#8f8a78', strength: 0.22 },
+  agents: { color: '#d8dccf', strength: 0.02 },
+};
+
+export const VIEW_BYTES = 256;
 /** Filterable everywhere, unlike 32-bit floats. */
 const HEIGHT_FORMAT: GPUTextureFormat = 'r16float';
 /** The scent view's coarse map: the scent of both layers times the share that holds scent, and that share. */
@@ -65,7 +79,8 @@ export function trailLevel(scale: number): number {
  * Fills `struct View` (render.wgsl), which is also the std140 `View` block of the WebGL2 renderer. `occupancy`:
  * the simulation keeps agents per cell (collision mode), for the agents style and for agents on food. `stream`: the
  * step of the state, while the view draws the stream of the plasm (tubes.ts, point 6). `electrodes`: an electrode may
- * be painted (Sim.hasElectrodes).
+ * be painted (Sim.hasElectrodes). `slime`: the steps that ran so far (Sim.step), while the frame draws the layer of
+ * the slime (ADR 0055, decision 8).
  */
 export function packView(
   data: ArrayBuffer,
@@ -81,6 +96,7 @@ export function packView(
   strand: number,
   stream?: number,
   electrodes = false,
+  slime?: number,
 ) {
   const fl = new Float32Array(data);
   const u = new Uint32Array(data);
@@ -110,6 +126,12 @@ export function packView(
   const sensors = scentSensors(settings, strand);
   fl.set(sensors.half, 48);
   fl.set(sensors.holds, 52);
+  // The layer of the slime: the steps that ran so far and the life time in steps, both as unsigned integers, so that
+  // the pass takes the age of a stamp as the passes of the simulation do. Then the colour and the full strength of
+  // the style. A frame without the layer reads none of them.
+  u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), 0, 0], 56);
+  const look = SLIME_LOOK[settings.style];
+  fl.set([...hexToLinear(look.color), look.strength], 60);
 }
 
 /** How much of the scene the copies around a periodic lattice show (packView). */
@@ -123,6 +145,8 @@ interface Groups {
   down: GPUBindGroup;
   bloom: GPUTextureView;
   sampler: GPUSampler;
+  /** The buffer at the binding of the slime field (encode()). */
+  stamps: GPUBuffer;
 }
 
 /** The scent view: the render pass with it, without (index 0) or with (1) the food, light and walls, and `scentDown`. */
@@ -138,8 +162,9 @@ interface ScentPipelines {
 type Variants = [GPURenderPipeline, GPURenderPipeline];
 
 /**
- * The descriptor of the render pass from `module` without or with the food, light and walls (`env`), with or without
- * the scent view (`scent`). Without it the pipeline sets only `ENV`, as before the view existed.
+ * The descriptor of the render pass from `module` without or with the food, light and walls (`env`), and with one
+ * part more or none (`part`): the scent view (`SCENT`) or the layer of the slime (`SLIME`). Without a part the
+ * pipeline sets only `ENV`, as before the parts existed.
  */
 function renderPipeline(
   device: GPUDevice,
@@ -147,7 +172,7 @@ function renderPipeline(
   layout: GPUBindGroupLayout,
   format: GPUTextureFormat,
   env: boolean,
-  scent: boolean,
+  part?: 'SCENT' | 'SLIME',
 ): GPURenderPipelineDescriptor {
   return {
     layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
@@ -156,7 +181,7 @@ function renderPipeline(
       module,
       entryPoint: 'fs',
       targets: [{ format }],
-      constants: { ENV: Number(env), ...(scent ? { SCENT: 1 } : {}) },
+      constants: { ENV: Number(env), ...(part ? { [part]: 1 } : {}) },
     },
   };
 }
@@ -171,6 +196,13 @@ export class Renderer {
    */
   private scent: ScentPipelines | undefined;
   private scentBuild: Promise<ScentPipelines> | undefined;
+  /**
+   * The render pass with the layer of the slime (SLIME in render.wgsl, ADR 0055), built without blocking from the
+   * first frame that draws the layer (slimeNow()): a scene of the Jones model never does. Until they are built, frames
+   * draw without the layer.
+   */
+  private slime: Variants | undefined;
+  private slimeBuild: Promise<Variants> | undefined;
   private readonly downLayout: GPUBindGroupLayout;
   /** The scent view's coarse map (scentDown), made at the first frame that draws the view. */
   private coarse: { texture: GPUTexture; view: GPUTextureView } | undefined;
@@ -199,6 +231,7 @@ export class Renderer {
    * By trail texture, then by scent texture, then by occupancy buffer. The trail and the scent of the view alternate
    * between two textures together, but the picture of the tubes is one trail texture for both (ADR 0034), so the trail
    * does not name the scent. The textures are weak keys: a texture that its simulation freed leaves no group behind.
+   * A group is made anew when the bloom, its sampler or the slime field is another one (encode()).
    */
   private groups = new WeakMap<GPUTexture, WeakMap<GPUTexture, Map<GPUBuffer, Groups>>>();
   /** Gel height field: one texel per cell plus a one-cell border (render.wgsl `heightField`). */
@@ -241,6 +274,7 @@ export class Renderer {
         { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 12, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         storage(13),
+        storage(14),
       ],
     });
     this.downLayout = device.createBindGroupLayout({
@@ -278,7 +312,7 @@ export class Renderer {
         }),
       ) as Variants;
     this.pipelines = [false, true].map((env) =>
-      device.createRenderPipeline(renderPipeline(device, module, this.layout, format, env, false)),
+      device.createRenderPipeline(renderPipeline(device, module, this.layout, format, env)),
     ) as Variants;
     this.heightPipelines = heightVariants(this.heightLayout, HEIGHT_FORMAT);
     this.heightSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
@@ -291,9 +325,14 @@ export class Renderer {
     return this.encode(this.context.getCurrentTexture(), width, height, f);
   }
 
-  /** Waits until a frame with these settings shows the view as asked: the pipelines of the scent view are built. */
+  /**
+   * Waits until a frame with these settings shows the view as asked: the pipelines of the scent view or of the layer
+   * of the slime are built.
+   */
   async ready(settings: Settings): Promise<void> {
-    if (settings.showScent && this.fixed === undefined) await this.scentNow(true);
+    if (this.fixed !== undefined) return;
+    if (settings.showScent) await this.scentNow(true);
+    if (slimeShown(settings)) await this.slimeNow(true);
   }
 
   /**
@@ -316,7 +355,10 @@ export class Renderer {
     return new ImageData(pixels, width, height);
   }
 
-  /** False while the frame draws without the scent view that it asks for: its pipelines are still being built. */
+  /**
+   * False while the frame draws without the scent view or without the layer of the slime that it asks for: their
+   * pipelines are still being built.
+   */
   private encode(target: GPUTexture, width: number, height: number, f: Frame): boolean {
     const { sim } = f;
     sim.syncShape();
@@ -325,6 +367,10 @@ export class Renderer {
     const { exposure, black, strand } = f;
     // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
     const stream = sim.streamTexture;
+    // The layer of the slime (ADR 0055, decision 8), while the settings show it and the simulation holds the field:
+    // without a field no cell has a stamp, and the picture is the one without the layer.
+    const slimy = this.fixed === undefined && slimeShown(f.settings) && sim.slimeField !== undefined;
+    const layer = slimy ? this.slimeNow() : undefined;
     packView(
       this.data,
       width,
@@ -339,6 +385,7 @@ export class Renderer {
       strand,
       stream ? sim.step : undefined,
       sim.hasElectrodes,
+      layer ? sim.step : undefined,
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
@@ -364,7 +411,9 @@ export class Renderer {
       byScent.set(scent, byOcc);
     }
     let cached = byOcc.get(occ);
-    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {
+    // The Jones model has no slime field, and no pass reads its binding then: the cells of the simulation stand in.
+    const stamps = sim.slimeField ?? sim.env;
+    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.stamps !== stamps) {
       const trailView = trail.createView();
       const scentView = scent.createView();
       const group = this.device.createBindGroup({
@@ -387,6 +436,8 @@ export class Renderer {
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
           // The cells of the simulation, for the electrodes (ADR 0047).
           { binding: 13, resource: { buffer: sim.env } },
+          // The slime field, for the layer of the slime (ADR 0055).
+          { binding: 14, resource: { buffer: stamps } },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -407,7 +458,7 @@ export class Renderer {
           { binding: 9, resource: scentView },
         ],
       });
-      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler };
+      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, stamps };
       byOcc.set(occ, cached);
     }
     // Without food, light or walls the environment code would only cost time: the variant without it
@@ -472,12 +523,13 @@ export class Renderer {
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
-    pass.setPipeline((view?.render ?? this.pipelines)[variant]);
+    // The scent view draws no slime (slimeShown()), so a frame has one of the two parts at most.
+    pass.setPipeline((view?.render ?? layer ?? this.pipelines)[variant]);
     pass.setBindGroup(0, cached.group);
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    return !(f.settings.showScent && this.fixed === undefined && !view);
+    return !(f.settings.showScent && this.fixed === undefined && !view) && !(slimy && !layer);
   }
 
   /**
@@ -490,7 +542,7 @@ export class Renderer {
     if (!this.scentBuild) {
       const { device, module, layout, format } = this;
       const render = (env: boolean) =>
-        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, true));
+        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, 'SCENT'));
       const fill = (sum: boolean) =>
         device.createRenderPipelineAsync({
           layout: device.createPipelineLayout({ bindGroupLayouts: [this.downLayout] }),
@@ -516,6 +568,27 @@ export class Renderer {
   }
 
   private scentError: Error | undefined;
+
+  /**
+   * The pipelines of the layer of the slime once they are built, else undefined; the first call starts their build,
+   * without blocking, as scentNow() does. `wait`: resolves when they are built (exports and tests).
+   */
+  private slimeNow(): Variants | undefined;
+  private slimeNow(wait: true): Promise<Variants>;
+  private slimeNow(wait = false): Variants | undefined | Promise<Variants> {
+    if (!this.slimeBuild) {
+      const { device, module, layout, format } = this;
+      const render = (env: boolean) =>
+        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, 'SLIME'));
+      this.slimeBuild = Promise.all([render(false), render(true)]).then((built) => (this.slime = built));
+      // A failed build shows in the next frame that asks for the layer.
+      this.slimeBuild.catch((err: unknown) => (this.slimeError = err instanceof Error ? err : new Error(String(err))));
+    }
+    if (this.slimeError) throw this.slimeError;
+    return wait ? this.slimeBuild : this.slime;
+  }
+
+  private slimeError: Error | undefined;
 
   /** The scent view's coarse map for a trail of this size (half its sides, rounded up), made anew with the size. */
   private coarseFor(trail: GPUTexture): GPUTextureView {

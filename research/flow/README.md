@@ -213,6 +213,16 @@ the tube are short twigs: agents walk onto closed ground and starve there, becau
 births and no moves. The long mark makes the Tokyo network leaner, so its flow strength was chosen
 again, as ADR 0029 chose it: 2.8 in place of 1.4 gives the total length of the organism at the
 time of its experiment. Both are choices of the coordinator, and the owner can change them.
+**The slime field** ([ADR 0055](../../docs/adr/0055-the-slime-field.md), part 19). The plasmodium
+leaves slime where it was, and the plan gives the model a field for it. The extended model now
+keeps, for every cell, the step in which the cell last held plasm. A cell has slime for the
+setting Slime life time after that step, 144 hours at the start. A brush paints slime, and the
+picture shows the slime as a pale layer on the ground. The slime and the mark of starved ground
+are two fields, as the organism has two cues, and the same setting gives the mark its time. No
+rule reads the slime yet: every scene keeps its bytes, and with 18 hours the Snail maze gives the
+runs of ADR 0054 with 18 h, line for line. The rule of avoidance comes next, after a measurement
+in a Y-maze: a lower weight in the pick of a birth acts only where blank ground meets slime, so
+its design is not safe without that measurement.
 
 ## What is in this folder, and what you need to read
 
@@ -220,10 +230,10 @@ time of its experiment. Both are choices of the coordinator, and the owner can c
 | -------------------------------------------------- | ----------- | ------------------------------------------------------- |
 | This page, up to here                              | 1 page      | yes: it is the whole story                              |
 | The ADR, section "The solvers and the mathematics" | 300 lines   | if you want the formulas                                |
-| The rest of this page                              | 1,150 lines | only to run a step again: it is a list of commands      |
+| The rest of this page                              | 1,830 lines | only to run a step again: it is a list of commands      |
 | `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
 | `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 3,200 lines | no: the scripts that made the other numbers of the ADR  |
-| `logs.tar.gz`                                      | 0.5 MB      | never: the raw output of the runs, which a script reads |
+| `logs.tar.gz`                                      | 1.1 MB      | never: the raw output of the runs, which a script reads |
 | `summary.ts`                                       | 470 lines   | no: it makes the tables of the ADR from the logs        |
 | `research.test.ts`                                 | 300 lines   | no: it checks that the scripts still give the same rows |
 
@@ -1858,9 +1868,112 @@ colony comes back once. ADR 0054 has the tables. The records are in `logs/engine
 | `digest-3000-branch.jsonl`, `digest-3000-main.jsonl` | the same after 3,000 steps for the eight scenes with the flow                   |
 | `mutations.txt`                                      | the wrong rules FL1 to FL10 and D1 to D6, and the tests that fail               |
 
+### 19. Does the slime field change a run, and what does it cost? [ADR 0055]
+
+Since ADR 0055 the extended model has a slime field: a stamp per cell, the step in which the cell
+last held plasm. No rule reads it yet. The setting Slime life time also gives the mark of starved
+ground its time: `recoverShare()` in `src/engine/flow.ts` scales `FLOW.recover` by 144 over the
+hours of the setting.
+
+**The tests of the rule** (Node 1 s, headless browser 20 s, and the built app):
+
+```bash
+npx vitest run --project unit src/engine/slime.test.ts src/engine/slime-reference.test.ts src/engine/render.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/slime.gpu.test.ts
+```
+
+```bash
+npm run build && npx playwright test --project=e2e tests/e2e/ui.spec.ts -g "Slime tool"
+```
+
+You must see 36, 96 and 1 tests pass. `slime.gpu.test.ts` holds both backends to the CPU copy
+`slime-reference.ts`: the stamps step by step, the brush, and the picture of the layer.
+
+**The bytes of the scenes.** The digests as in part 17, with the names `g55-digest-branch` and
+`g55-digest-3000-branch`, after 500 steps for every scene and after 3,000 steps for the eight
+scenes with the flow (the list of part 18). The digests of `main` for it are those of the branch
+of ADR 0054:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g55-digest-branch.jsonl research/flow/logs/engine/mark/digest-branch.jsonl
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g55-digest-3000-branch.jsonl research/flow/logs/engine/mark/digest-3000-branch.jsonl
+```
+
+They must print that all 54 runs and all 16 runs are equal.
+
+**A life time of 18 hours gives the runs of ADR 0054 with 18 hours.** The Snail maze to step
+80,000, seeds 1 to 3, with the setting in place of `VITE_RECOVER` (2 minutes per run):
+
+```bash
+STEPS=$(seq -s, 500 500 80000 | sed 's/,$//'); for seed in 1 2 3; do VITE_PATCH='{"slimeLife":18}' VITE_SCENE=snail-maze VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g55-snail-maze-life18-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts snail-maze g55-snail-maze-life18-s1 g55-snail-maze-life18-s2 g55-snail-maze-life18-s3 > research/flow/out/g55-life18-snail-maze.txt
+```
+
+Every line of that file must equal its line in `logs/engine/mark/analysis-snail-maze-floor.txt`,
+but for the name of the run at its start and the time of the run, `ms`, at its end.
+
+**The time of a step** with the pass of the stamps and without it. A life time of 0 runs no pass.
+The two cases run in turns (with, without, without, with), 2 minutes per run, and nothing else
+may use the GPU then:
+
+```bash
+run() { VITE_NAME=$1 VITE_SCENES=maze,tokyo,cyclones VITE_WARM=1000 VITE_PATCH="$2" npx vitest run --config research/vitest.config.ts research/flow/engine/bench.gpu.test.ts; }; run g55-bench-slime-r1 '{}' && run g55-bench-none-r1 '{"slimeLife":0}' && run g55-bench-none-r2 '{"slimeLife":0}' && run g55-bench-slime-r2 '{}'
+```
+
+**The time of a draw** with the layer of the slime and without it, on a canvas of 2,560 × 1,600
+pixels. `slime-draw.gpu.test.ts` draws one state 21 × 50 times with the switch off and on in
+turns. The first command draws the Snail maze and Three strains in the glow and gel styles at
+four views, the second Three strains in the glow style at six views from 0.15 to 4.8 cells per
+pixel:
+
+```bash
+VITE_NAME=g55-draw npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+```bash
+VITE_SCENES=three-strains VITE_STYLES=glow VITE_ZOOMS=0.25,1,2,3,4,8 VITE_NAME=g55-draw-zooms npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+**The wrong rules** SL1 to SL119: 31 of the stamps and of the time of the mark, 46 of the brush
+and 42 of the picture:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for i in $(seq 1 119); do echo SL$i; done)
+```
+
+**The pictures** of the layer in each style, from the built app (`test-results/pictures/`):
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/slime.spec.ts
+```
+
+Result: no scene changes a byte, and a life time of 18 hours gives the runs of ADR 0054 line
+for line. The pass of the stamps costs 0.01 to 0.23 ms of a step on WebGPU. The layer costs about
+a tenth of a draw in a view that fits the grid, and up to 2.5 ms on WebGL2 in a view that is
+zoomed far out. Each of the 119 wrong rules fails at least one test. ADR 0055 has the tables. The
+records are in `logs/engine/slime/`:
+
+| Record                                         | Runs                                                                   |
+| ---------------------------------------------- | ---------------------------------------------------------------------- |
+| `digest-branch.jsonl`, `digest-3000-branch`    | the digests of every scene after 500 steps, and of eight after 3,000   |
+| `life18-snail-maze.txt`                        | the lines of `measure-mazes.ts` with a life time of 18 h, seeds 1 to 3 |
+| `bench-with-pass-r*.jsonl`, `bench-without-*`  | the time of a step with the pass of the stamps and without it          |
+| `draw.jsonl`, `draw-zooms.jsonl`               | the time of a draw with the layer and without it                       |
+| `draw-before.jsonl`, `draw-before-zooms.jsonl` | the same before the reads of the layer got cheaper (commit `f353ee8`)  |
+| `mutations.txt`, `-brush.txt`, `-picture.txt`  | the wrong rules SL1 to SL31, SL32 to SL77 and SL78 to SL119            |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 321 files, 5.8 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 335 files, 6.1 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1892,6 +2005,7 @@ asks for the new digest.
 | `logs/engine/mazes/`                                 | the runs of part 16 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
 | `logs/engine/starved-ground/`                        | the runs of part 17 (ADR 0053): where children are born, the two mazes and the Tokyo scenes with the rule, the other rules, the digests and the wrong rules SG1 to SG10                                                         | 2026-11-16, M3 Pro                                    |
 | `logs/engine/mark/`                                  | the runs of part 18 (ADR 0054): the analysis of the mark and its time, the campaign with the app, the runs past the fade of the mark, the digests and the wrong rules FL1 to FL10                                               | 2026-11-17, M3 Pro                                    |
+| `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1948,7 +2062,7 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 298 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/mutate.ts`        | 417 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
 | `engine/variant.ts`       | other rules in the WGSL passes for one run, for the measurements of ADR 0053 and ADR 0054         |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |

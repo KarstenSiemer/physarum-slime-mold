@@ -1,6 +1,7 @@
 import type { Engine } from '../engine/engine';
 import type { EnvTool, Pole } from '../engine/types';
 import { strainAgents } from '../engine/pack';
+import { slimeSteps } from '../engine/slime';
 import { drawingOf, kindsOf, type Drawing } from '../model/link';
 import {
   constrain,
@@ -52,7 +53,7 @@ export const TOOLS = [
     id: 'erase',
     key: '6',
     label: 'Erase',
-    help: 'Remove food, light, walls and electrodes. Hold Shift and click two points for a straight line.',
+    help: 'Remove food, light, walls, electrodes and slime. Hold Shift and click two points for a straight line.',
   },
   {
     id: 'cut',
@@ -65,6 +66,12 @@ export const TOOLS = [
     key: '8',
     label: 'Electrode',
     help: 'Place the poles of an electric current. Physarum grows toward the cathode. The cathode releases an attractant and the anode a repellent, both with Electrode strength. Choose the pole beside the brush. Hold Shift and click two points for a straight line.',
+  },
+  {
+    id: 'slime',
+    key: '9',
+    label: 'Slime',
+    help: 'Coat the ground with slime, as a colony leaves it where it was. Painted slime ages as the slime of a colony does: it is gone after the Slime life time. Hold Shift and click two points for a straight line.',
   },
 ] as const;
 
@@ -86,18 +93,43 @@ const JONES_TOOLS: Partial<Record<Tool, { label?: string; help: string }>> = {
   },
 };
 
-/** The tools as a model names them: the same tools and keys in both models, with the names of JONES_TOOLS in Jones. */
-export const toolsFor = (model: Model): readonly { id: Tool; key: string; label: string; help: string }[] =>
-  model === 'jones' ? TOOLS.map((t) => ({ ...t, ...JONES_TOOLS[t.id] })) : TOOLS;
+/** The settings that decide which tools there are (toolsFor()). */
+type ToolSettings = Pick<Settings, 'model' | 'slimeLife'>;
 
-/** "light" as a model names it in a sentence: Jones' repellent (ADR 0044), or this app's light. */
+/**
+ * The tools as the settings have them: the same tools and keys in both models, with the names of JONES_TOOLS in Jones.
+ * The Slime tool is there only while the model has slime (ADR 0055, decision 7): in the extended model with a Slime
+ * life time above 0.
+ */
+export const toolsFor = (s: ToolSettings): readonly { id: Tool; key: string; label: string; help: string }[] => {
+  const tools = slimeSteps(s) > 0 ? TOOLS : TOOLS.filter((t) => t.id !== 'slime');
+  return s.model === 'jones' ? tools.map((t) => ({ ...t, ...JONES_TOOLS[t.id] })) : tools;
+};
+
+/**
+ * Selects the first tool when the settings do not have the selected one (toolsFor()): the Slime tool goes with the
+ * slime of the model. Every other tool is there with every setting. App.svelte calls this when the settings change.
+ */
+export function keepTool(s: ToolSettings) {
+  if (!toolsFor(s).some((t) => t.id === app.tool)) app.tool = TOOLS[0].id;
+}
+
 /** The kind of stroke that a tool paints, or undefined for a tool that paints none: the Electrode tool paints its pole. */
 export function strokeKind(tool: Tool, pole: Pole): EnvTool | undefined {
   if (tool === 'electrode') return pole;
-  return tool === 'food' || tool === 'light' || tool === 'wall' || tool === 'erase' ? tool : undefined;
+  const paints = tool === 'food' || tool === 'light' || tool === 'wall' || tool === 'erase' || tool === 'slime';
+  return paints ? tool : undefined;
 }
 
+/** "light" as a model names it in a sentence: Jones' repellent (ADR 0044), or this app's light. */
 export const lightName = (model: Model) => (model === 'jones' ? 'repellent' : 'light');
+
+/**
+ * The label of Clear, with what it removes as the settings name it: light is Jones' repellent, and slime is there only
+ * while the model has it (ADR 0055, decision 7: Clear clears every stamp).
+ */
+export const clearLabel = (s: ToolSettings) =>
+  `Clear food, ${lightName(s.model)}, walls${slimeSteps(s) > 0 ? ', electrodes and slime' : ' and electrodes'}`;
 
 export const LEARN_TABS = ['Physarum', 'The model', 'Controls', 'Scenes', 'About'] as const;
 
@@ -217,6 +249,8 @@ export function setScene(p: Preset) {
   s.showScent = app.settings.showScent;
   // So is the picture of the tubes (ADR 0034).
   s.showTubes = app.settings.showTubes;
+  // And the layer of the slime (ADR 0055, decision 8).
+  s.showSlime = app.settings.showSlime;
   // And the colour of the gel: the style is the scene's, the colour of its gel is the user's (ADR 0009).
   s.gelColor = app.settings.gelColor;
   // Without the rule a scene of Jones runs on the extended model: the Jones model always has it (constrain()).
@@ -410,7 +444,10 @@ export function setModel(model: Model) {
   const walls = kinds.has('wall') ? ' The walls stop agents, but they do not block sensors.' : '';
   // Drawn light stays and acts: the Jones model reads it as a repellent source of its trail map (ADR 0044).
   const light = kinds.has('light') ? ' The light acts as a repellent source in Jones’ trail map.' : '';
-  const text = `The Jones model has only Jones’ rules.${light}${walls}${jonesChanges(s, next)}`;
+  // The Jones model has no slime (ADR 0055, decision 10): painted slime stays in the drawing and is painted again in
+  // the extended model.
+  const slime = kinds.has('slime') ? ' The painted slime is gone until you switch back to the extended model.' : '';
+  const text = `The Jones model has only Jones’ rules.${light}${walls}${slime}${jonesChanges(s, next)}`;
   // About 3.3 words per second, as for the other long notices.
   showNotice(text, Math.max(10_000, text.split(' ').length * 300));
 }

@@ -4,6 +4,7 @@ import { levels, STRAND_BLEND, strandLevel } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { packView, trailLevel, VIEW_BYTES } from '../render';
 import { levelSize, scentLevel, scentLevelSize } from '../scent';
+import { slimeShown } from '../slime';
 import {
   BYTES_PER_AGENT_GL,
   BYTES_PER_CELL,
@@ -156,9 +157,10 @@ export class WebGl2Backend implements Backend<GlSim> {
     levels?: Levels,
   ): Promise<ImageData> {
     const gl = this.gl;
-    // An export shows the scent view as asked: wait for its programs, unless the context is lost.
-    while (settings.showScent && !this.fixed && !this.prog.scent() && !gl.isContextLost())
-      await new Promise((r) => setTimeout(r, 2));
+    // An export shows the scent view and the layer of the slime as asked: wait for their programs, unless the context
+    // is lost.
+    const built = () => (!settings.showScent || this.prog.scent()) && (!slimeShown(settings) || this.prog.slimed());
+    while (!this.fixed && !built() && !gl.isContextLost()) await new Promise((r) => setTimeout(r, 2));
     // A rebuild can destroy the simulation during that wait. Then nothing is left to draw, and the engine asks
     // again for the new one (Engine.ofRun()).
     if (sim.destroyed) return new ImageData(width, height);
@@ -296,7 +298,8 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   /**
    * `given`: levels measured for this frame alone (an export), in place of those of the frames. False while the frame
-   * draws without the scent view that it asks for: its programs are still being built.
+   * draws without the scent view or without the layer of the slime that it asks for: their programs are still being
+   * built.
    */
   private encode(
     sim: GlSim,
@@ -325,6 +328,11 @@ export class WebGl2Backend implements Backend<GlSim> {
     // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
     const stream = sim.streamTarget()?.texture;
     const streamStep = stream ? sim.step : undefined;
+    // The layer of the slime (ADR 0055, decision 8), while the settings show it and the simulation holds the field:
+    // without a field no cell has a stamp, and the picture is the one without the layer. Its programs are built from
+    // the first frame that asks for them, as those of the scent view.
+    const stamps = !this.fixed && slimeShown(s) ? sim.slimeTexture : undefined;
+    const layer = stamps ? this.prog.slimed() : undefined;
     packView(
       this.viewData,
       width,
@@ -339,6 +347,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       l.strand,
       streamStep,
       sim.hasElectrodes,
+      layer ? sim.step : undefined,
     );
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
@@ -403,7 +412,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    const p = (this.fixed ?? scent?.render ?? this.prog.render)[variant];
+    // The scent view draws no slime (slimeShown()), so a frame has one of the two at most.
+    const p = (this.fixed ?? scent?.render ?? layer ?? this.prog.render)[variant];
     gl.useProgram(p.program);
     // A sampler that the frame does not read still needs a texture: the trail stands in for its coarse map.
     const trailLevels = trailCoarse?.texture ?? trail;
@@ -419,9 +429,12 @@ export class WebGl2Backend implements Backend<GlSim> {
       env: sim.envTexture,
     };
     const scentLevels = coarse?.texture ?? viewScent;
-    textures(gl, p.program, scent ? { ...all, scent: viewScent, scentLevels } : all);
+    // Only the programs of the layer have the sampler of the slime field: it reads unsigned integers, so no other
+    // texture can stand in for it.
+    const more = scent ? { scent: viewScent, scentLevels } : layer && stamps ? { stamps } : {};
+    textures(gl, p.program, { ...all, ...more });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    return !(s.showScent && !this.fixed && !scent);
+    return !(s.showScent && !this.fixed && !scent) && !(stamps && !layer);
   }
 
   /** The scent view's coarse map for this grid size, made anew when the size changes. */

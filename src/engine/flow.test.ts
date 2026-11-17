@@ -14,6 +14,7 @@ import {
   heldTrail,
   JONES_DECAY,
   packFlow,
+  recoverShare,
   STEPS_PER_MINUTE,
   trailLevels,
 } from './flow';
@@ -280,6 +281,61 @@ describe('packFlow', () => {
     const none = new Float32Array(packFlow(settings, NO_SITES, buf));
     expect(none[15]).toBe(0);
     expect(none.subarray(28).every((v) => v === 0)).toBe(true);
+  });
+});
+
+// ADR 0055, decision 5: the setting Slime life time gives the mark of starved ground its time.
+describe('the time of the mark of starved ground (ADR 0055)', () => {
+  const settings = { ...defaultSettings(), flowStrength: 6, seed: 77 };
+  /** The share that the passes get: the fourth value of the uniform block (flow.wgsl U.a.w). */
+  const packed = (slimeLife: number) => new Float32Array(packFlow({ ...settings, slimeLife }, NO_SITES))[3];
+  /** Hours of model time from the floor of the flow memory up to `level`, at the share of a life time. */
+  const hours = (slimeLife: number, level: number) =>
+    Math.log(level / FLOW.floor) / Math.log(1 + recoverShare({ slimeLife })) / STEPS_PER_MINUTE / 60;
+
+  it('keeps the share of ADR 0054 at the default of 144 hours, bit for bit', () => {
+    expect(defaultSettings().slimeLife).toBe(144);
+    expect(recoverShare({ slimeLife: 144 })).toBe(FLOW.recover);
+    expect(recoverShare(defaultSettings())).toBe(0.00002875);
+    expect(packed(144)).toBe(Math.fround(FLOW.recover));
+    // Every byte of the uniform block is the one of the code before, which packed FLOW.recover.
+    const block = new Float32Array(packFlow(settings, NO_SITES));
+    const before = block.slice();
+    before[3] = FLOW.recover;
+    expect(new Uint8Array(block.buffer)).toEqual(new Uint8Array(before.buffer));
+  });
+
+  it('gives the share of ADR 0029 at 18 hours: eight times the share of 144 hours', () => {
+    expect(recoverShare({ slimeLife: 18 })).toBe(0.00023);
+    expect(recoverShare({ slimeLife: 18 })).toBe(FLOW.recover * 8);
+    expect(packed(18)).toBe(Math.fround(0.00023));
+  });
+
+  it('keeps the share of ADR 0054 without slime, at a life time of 0', () => {
+    expect(recoverShare({ slimeLife: 0 })).toBe(FLOW.recover);
+    expect(packed(0)).toBe(Math.fround(FLOW.recover));
+    expect(packed(0)).toBe(packed(144));
+  });
+
+  it('lets the mark fade in about the life time, and opens the ground for births after about six tenths of it', () => {
+    for (const slimeLife of [1, 18, 72, 144, 240]) {
+      // From the floor to fresh ground, and to the level from which a child is born onto the ground.
+      expect(hours(slimeLife, FLOW.fresh) / slimeLife, `${slimeLife} h`).toBeCloseTo(1.02, 2);
+      expect(hours(slimeLife, FLOW.half) / slimeLife, `${slimeLife} h`).toBeCloseTo(0.618, 2);
+    }
+    // 6 days and 3.7 days at the default, as the help of the setting says.
+    expect(hours(144, FLOW.fresh) / 24).toBeCloseTo(6.12, 2);
+    expect(hours(144, FLOW.half) / 24).toBeCloseTo(3.71, 2);
+    // A shorter life time gives a larger share, in the inverse ratio.
+    expect(recoverShare({ slimeLife: 72 })).toBe(2 * FLOW.recover);
+    expect(recoverShare({ slimeLife: 240 })).toBeCloseTo(0.6 * FLOW.recover, 15);
+    expect(recoverShare({ slimeLife: 240 })).toBeLessThan(recoverShare({ slimeLife: 144 }));
+  });
+
+  it('changes no other value of the uniform block', () => {
+    const [a, b] = [144, 18].map((slimeLife) => new Float32Array(packFlow({ ...settings, slimeLife }, NO_SITES)));
+    const differing = [...(a ?? [])].flatMap((v, i) => (v === b?.[i] ? [] : [i]));
+    expect(differing).toEqual([3]);
   });
 });
 

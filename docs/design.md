@@ -116,6 +116,7 @@ strains (one `vec4` lane each).
 | view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 | flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
 | tubes (with flow)  | `rgba32float` textures: radius, picture, stream  | 48 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
+| slime (extended)   | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the stamp of the slime of each cell (ADR 0055)        |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -167,7 +168,11 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
    last pass, the mean, the order of the step, covered food and the view. WebGL2 uses uniforms for the first and the
    last pass, the mean and the order (`P.model.w`), and separate programs for covered food and the view. The cut is a
    uniform on both.
-6. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
+6. **Stamp pass of the slime**, only in the extended model while the Slime life time is above 0 (model.md,
+   section 6.9; ADR 0055): a cell that holds plasm after the diffusion gets the stamp of the step. WebGPU writes
+   the stamp into a storage buffer. WebGL2 draws into a target of unsigned integers and discards the fragment of
+   every other cell, so that cell keeps its stamp.
+7. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
    iterations, once per strain (ADR 0031). On WebGPU each texture of the flow has a layer per strain, and the agent and
    growth passes read the layer of the agent's strain from a `texture_2d_array`; on WebGL2 each strain has its own
    targets. On WebGPU each strain has its own uniform buffer; on WebGL2 one uniform buffer holds the block of one strain
@@ -200,7 +205,8 @@ periodic grid over all its cells.
 | Environment         | food strength, light strength (Jones: repellent strength), covered food, random shrinkage; extended: diffusion passes                        |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
 | Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
-| Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode; brush; lines (Shift)             |
+| Slime               | slime life time, show slime (extended model only)                                                                                            |
+| Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode, slime; brush; lines (Shift)      |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
 | Share               | the page address as a link: settings, scene and the drawing (ADR 0021, ADR 0047); PNG export                                                 |
@@ -220,12 +226,12 @@ its edges (ADR 0026). Cut moves the agents of its wound to open cells outside it
 painted onto agents moves them off it (ADR 0038). While growth runs, both kill these agents
 instead, and growth fills the wound from its margin (model.md, section 7.1; ADR 0039).
 
-With Shift held, the brush tools Food, Light, Wall, Erase and Electrode draw straight lines (ADR 0035): a click sets the start,
+With Shift held, the brush tools Food, Light, Wall, Erase, Electrode and Slime draw straight lines (ADR 0035): a click sets the start,
 and the next click paints the line from it as one stroke, as wide as the brush. The end of a line is the start of the
 next while Shift is held. A preview over the canvas shows the line until the second click. Escape, letting go of
 Shift, a click without Shift or another tool ends a start that waits. The agent tools ignore Shift.
 
-Keyboard: Space pause, `.` step, R reset, 1–8 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn,
+Keyboard: Space pause, `.` step, R reset, 1–9 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn,
 Shift and two clicks a straight line, Escape ends it.
 A key is a shortcut unless the focused element uses it: a field takes every key, a button Space and Enter, a slider
 the arrows.
@@ -288,6 +294,21 @@ the arrows.
   draws grains that go back and forth along the stream, 12 cells to each side in 60 steps where the speed is 1, and
   go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
   switch on or off, so the switch never changes the grid. The simulation never reads the picture.
+- Layer of the slime (ADR 0055, decision 8): while the model has slime, the view tints the ground where a cell has
+  slime, with a switch below the Slime life time that is on at the start. The flake of food, the trail, the tubes,
+  the light, the walls and the electrodes lie on the layer. Its strength at a cell is A · (1 − age / life time): A
+  at the age 0, and nothing at the life time (model.md, section 6.9, has the age). The layer has one pale colour for
+  all strains, lighter than the ground of the dark styles and darker than paper: `#d8dccf` with A = 0.02 in the glow
+  and agents styles, `#e4dfcc` with 0.024 in the gel style, `#8f8a78` with 0.22 in the paper style (`SLIME_LOOK` in
+  `src/engine/render.ts`). Up to 1 cell per pixel a pixel blends the strengths of the 4 cells around it, over the
+  cells that can hold slime: those inside the arena without a wall. So the layer goes on up to a wall and to the rim
+  of the dish. Zoomed out, a pixel shows the mean of the strength over its square, with the weights that the trail
+  has there. Up to 2 cells per pixel that mean is exact. Above, the cell in the middle of each texel of the trail's
+  coarse map stands for the texel: the slime has no coarse map, and a thin line of slime can drop out. The view
+  blends strengths and never stamps. The scent view draws no layer. The switch changes nothing in the simulation,
+  goes into the link like the style and stays as it is when a scene loads. Without the layer the render pass draws
+  the pixels of before at the same cost: the code of the layer is compiled in only for a frame that draws it. A CPU
+  copy of the rule is `slimeStrength()` and `slimeLayer()` in `src/engine/slime-reference.ts`.
 - Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
   `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).
 - Dither before 8-bit output against banding. An HDR canvas is not built (`TODO.md`).

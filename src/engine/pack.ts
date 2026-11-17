@@ -1,4 +1,5 @@
 import { BOUNDARIES, emissionScale, LAYOUTS, MAX_STRAINS, type Settings, type Strain } from '../model/params';
+import { plasmLevels, slimeSteps } from './slime';
 
 // Slot order of `struct Params` in shaders/common.wgsl (16 bytes each); a test checks it.
 export const PARAM_SLOTS = [
@@ -24,6 +25,8 @@ export const PARAM_SLOTS = [
   'shrinkage',
   'startEnd',
   'electrode',
+  'slimeLow',
+  'slime',
 ] as const;
 export const PARAMS_BYTES = (PARAM_SLOTS.length + 3) * 16;
 
@@ -256,5 +259,10 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   // electrode.y: Light stops growth (ADR 0050), a rule of the extended model, so 0 in the Jones model: a birth onto a lit cell fails with the
   // chance of this value times the light byte / 255 (growth.wgsl lightStops()).
   f.set([255 * s.electrodeStrength * g, jones ? 0 : s.lightGrowth, 0, 0], slot('electrode'));
+  // The slime field (ADR 0055). slimeLow: per strain the trail from which a cell holds plasm, the low level of the
+  // strain. slime.x: the life time of the slime in steps, 0 in the Jones model and for a life time of 0; then the pass
+  // of the stamps does not run (slime.wgsl).
+  f.set(plasmLevels(s), slot('slimeLow'));
+  u[slot('slime')] = slimeSteps(s);
   return buf;
 }

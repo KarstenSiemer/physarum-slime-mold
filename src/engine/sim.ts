@@ -15,28 +15,45 @@ import {
 } from './pack';
 import { readBuffer, readTexture } from './readback';
 import { NO_SITES, SITE_BLOCK, type FlowSites } from './sites';
+import { slimeModel, slimeSteps } from './slime';
 import agentsWgsl from './shaders/agents.wgsl?raw';
+import brushWgsl from './shaders/brush.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
 import flowWgsl from './shaders/flow.wgsl?raw';
 import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
+import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
+import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
+import {
+  changesSlime,
+  EnvKind,
+  isPole,
+  paintsEnv,
+  releases,
+  SHAPE_RANGE,
+  type AgentState,
+  type Sim,
+  type Stroke,
+} from './types';
 
 const AGENT_BYTES = 16;
 const GROUP = 256;
 const TILE = 16;
 /** Brush segments per submission (paint()): 4096 slots of 256 bytes. */
 const BRUSH_CHUNK = 4096;
-/** One brush slot as paint.wgsl `Brush` reads it: the segment, its paint box and its outline box. */
-const BRUSH_BYTES = 48;
+/**
+ * One brush slot as brush.wgsl `Brush` reads it: the segment, its paint box, its outline box and the boundary of the
+ * simulation.
+ */
+const BRUSH_BYTES = 56;
 /** The narrowest eraser with a workgroup of 16 × 16 cells more than 4.05 cells inside it (paint.wgsl eraserCore). */
 const CORE_RADIUS = 10.61 + SHAPE_RANGE + 0.05;
 /** Steps between two spatial sorts of the agents. Measured: their locality halves about 150 steps after a sort. */
@@ -45,6 +62,8 @@ const SORT_INTERVAL = 32;
 const SORT_TILE = 8;
 /** Cells per side of a workgroup of the flow passes (flow.wgsl). */
 const FLOW_GROUP = 8;
+/** Cells per side of a workgroup of the pass of the stamps (slime.wgsl). */
+const SLIME_GROUP = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -186,6 +205,18 @@ export class Simulation implements Sim {
   /** The food sites that give and take the flux, with their cells (foodSites()). */
   private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
+  /**
+   * The slime field (slime.wgsl, ADR 0055): the stamp of every cell, 4 B each (slime.ts). Held while the model of the
+   * settings has slime, with a life time above 0 or with 0 (slimeModel()); the fit of the grid counts it then
+   * (sizing.ts slimeBytesPerCell()).
+   */
+  private slime?: GPUBuffer | undefined;
+  /**
+   * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
+   * was last empty (a new field, a reset, a clear of the environment). Only then does an erase or a wall clear stamps
+   * (brushSlime()): a scene that paints its walls before its first step runs no pass for them.
+   */
+  private stamped = false;
   private paintGroup?: GPUBindGroup;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.wgsl
@@ -280,6 +311,8 @@ export class Simulation implements Sim {
     this.groups = [x, Math.ceil(n / x)];
     // Now, inside the caller's out-of-memory scope, even while collisions are off: the budget counts them.
     this.ensureCollision();
+    // So with the slime field, while the model has it.
+    if (slimeModel(settings)) this.ensureSlime();
   }
 
   /**
@@ -601,6 +634,8 @@ export class Simulation implements Sim {
     if (!tubesShown(settings)) this.dropTubes();
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
     if (!flowOn(settings)) this.dropFlow();
+    // The memory fit counts the slime field only in the model that has it (sizing.ts): the Jones model has no slime.
+    if (!slimeModel(settings)) this.dropSlime();
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -632,6 +667,9 @@ export class Simulation implements Sim {
     }
     enc.clearBuffer(this.counts);
     if (this.flow) this.clearFlow(enc, this.flow);
+    // A reset clears every stamp (ADR 0055, decision 3).
+    if (this.slime) enc.clearBuffer(this.slime);
+    this.stamped = false;
     const pass = enc.beginComputePass();
     const init = this.starts().init;
     pass.setPipeline(init);
@@ -866,6 +904,46 @@ export class Simulation implements Sim {
     return readTexture(this.device, at(this.flow.pressure, this.flowP), 4, strain);
   }
 
+  /**
+   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it). A new buffer holds zeros: no
+   * cell has a stamp.
+   */
+  private ensureSlime(): GPUBuffer {
+    this.slime ??= this.device.createBuffer({
+      size: this.width * this.height * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    return this.slime;
+  }
+
+  /**
+   * For the renderer: the slime field, which the picture reads for the layer of the slime (render.wgsl `stamps`), or
+   * undefined while the simulation holds none: in the Jones model, and after a switch to the extended model until the
+   * first step or stroke that writes a stamp. No cell has a stamp then.
+   */
+  get slimeField(): GPUBuffer | undefined {
+    return this.slime;
+  }
+
+  /** Frees the slime field, and every bind group that holds it. */
+  private dropSlime() {
+    if (!this.slime) return;
+    this.slime.destroy();
+    this.slime = undefined;
+    this.stamped = false;
+    for (const key of [...this.bindCache.keys()]) if (key.startsWith('slime')) this.bindCache.delete(key);
+  }
+
+  /**
+   * For tests and measurements: the stamp of every cell as the field holds it (slime.ts), one value per cell, rows
+   * from y = 0: 0 for a cell without a stamp, else the number of the step in which the cell last held plasm, plus 1.
+   * Only zeros in the Jones model, which has no slime.
+   */
+  async readSlime(): Promise<Uint32Array> {
+    if (!this.slime) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.slime));
+  }
+
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
   run(steps: number, tool?: AgentTool) {
     if (steps > 0) this.changed();
@@ -912,20 +990,10 @@ export class Simulation implements Sim {
   }
 
   /**
-   * Paints brush strokes in order, BRUSH_CHUNK segments per submission. Each dispatch picks its brush and its
-   * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
-   * Every segment's paint dispatch is followed by its outline dispatch over its outline box (brush.ts outlineBox),
-   * in the same compute pass: each dispatch sees the writes of the one before, so the outline reads `env` as it is
-   * after its segment (paint.wgsl `outline`), as one call per stroke does.
+   * The parameters once per boundary into `paintParams`, for the brush strokes of this call: a stroke picks its
+   * boundary by offset, and the stamp of a stroke of the Slime tool is the one of the current step (`P.grid.w`).
    */
-  paint(strokes: readonly Stroke[]) {
-    if (strokes.length === 0) return;
-    this.changed();
-    this.revision++;
-    // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
-    // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
-    if (this.shapeHeld !== undefined) this.syncShape();
-    const step = this.offsetStep;
+  private writePaintParams() {
     const params = new ArrayBuffer(BOUNDARIES.length * this.paramsStep);
     BOUNDARIES.forEach((boundary, i) => {
       const rt = { width: this.width, height: this.height, agents: this.agents, step: this.step };
@@ -934,6 +1002,61 @@ export class Simulation implements Sim {
       );
     });
     this.device.queue.writeBuffer(this.paintParams, 0, params);
+  }
+
+  /**
+   * Writes the brush slots of some segments (brush.wgsl `Brush`), one per offset step: slot j holds segment j with
+   * its paint box, its outline box (none for the brush on the slime field) and the boundary of the simulation.
+   */
+  private writeBrushes(chunk: readonly Stroke[], boxOf: (j: number) => Rect, reachOf?: (j: number) => Rect) {
+    const step = this.offsetStep;
+    const data = new ArrayBuffer(chunk.length * step);
+    const f = new Float32Array(data);
+    const i32 = new Int32Array(data);
+    const u = new Uint32Array(data);
+    const arena = BOUNDARIES.indexOf(this.settings.boundary);
+    chunk.forEach(({ from, to, radius, kind }, j) => {
+      const [x, y] = boxOf(j);
+      const [rx, ry, rw, rh] = reachOf?.(j) ?? [0, 0, 0, 0];
+      const o = (j * step) / 4;
+      [f[o], f[o + 1], f[o + 2], f[o + 3]] = [from[0], from[1], to[0], to[1]];
+      [i32[o + 4], i32[o + 5]] = [x, y];
+      f[o + 6] = radius;
+      u[o + 7] = EnvKind[kind];
+      [i32[o + 8], i32[o + 9], u[o + 10], u[o + 11]] = [rx, ry, rw, rh];
+      u[o + 12] = arena;
+    });
+    this.device.queue.writeBuffer(this.brushes, 0, data);
+  }
+
+  /**
+   * Paints brush strokes in order, BRUSH_CHUNK segments per submission. Each dispatch picks its brush and its
+   * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
+   * Every segment's paint dispatch is followed by its outline dispatch over its outline box (brush.ts outlineBox),
+   * in the same compute pass: each dispatch sees the writes of the one before, so the outline reads `env` as it is
+   * after its segment (paint.wgsl `outline`), as one call per stroke does.
+   *
+   * A stroke of the Slime tool changes no byte of `env` or `shape`. What the strokes do with the slime field follows
+   * after the environment of all of them (brushSlime()). That gives the field of one stroke after another: an erase or
+   * a wall that changes whether a cell is a wall also clears the stamp of that cell, after every stroke before it.
+   */
+  paint(strokes: readonly Stroke[]) {
+    const env = strokes.filter((s) => paintsEnv(s.kind));
+    const slime = slimeModel(this.settings) && strokes.some((s) => changesSlime(s.kind));
+    if (env.length === 0 && !slime) return;
+    this.revision++;
+    this.writePaintParams();
+    if (env.length > 0) this.paintEnv(env);
+    this.brushSlime(strokes);
+  }
+
+  /** The strokes of paint() that change the environment, with their outlines. */
+  private paintEnv(strokes: readonly Stroke[]) {
+    this.changed();
+    // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
+    // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
+    if (this.shapeHeld !== undefined) this.syncShape();
+    const step = this.offsetStep;
     this.paintGroup ??= this.device.createBindGroup({
       layout: this.kernels.paintLayout,
       entries: [
@@ -971,21 +1094,11 @@ export class Simulation implements Sim {
     }
     for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
       const chunk = segments.slice(first, first + BRUSH_CHUNK);
-      const data = new ArrayBuffer(chunk.length * step);
-      const f = new Float32Array(data);
-      const i32 = new Int32Array(data);
-      const u = new Uint32Array(data);
-      chunk.forEach(({ from, to, radius, kind }, j) => {
-        const [x, y] = boxes[first + j] ?? [0, 0];
-        const [rx, ry, rw, rh] = reaches[first + j] ?? [0, 0, 0, 0];
-        const o = (j * step) / 4;
-        [f[o], f[o + 1], f[o + 2], f[o + 3]] = [from[0], from[1], to[0], to[1]];
-        [i32[o + 4], i32[o + 5]] = [x, y];
-        f[o + 6] = radius;
-        u[o + 7] = EnvKind[kind];
-        [i32[o + 8], i32[o + 9], u[o + 10], u[o + 11]] = [rx, ry, rw, rh];
-      });
-      this.device.queue.writeBuffer(this.brushes, 0, data);
+      this.writeBrushes(
+        chunk,
+        (j) => boxes[first + j] ?? [0, 0, 0, 0],
+        (j) => reaches[first + j] ?? [0, 0, 0, 0],
+      );
       const enc = this.device.createCommandEncoder();
       const pass = enc.beginComputePass();
       chunk.forEach((_, j) => {
@@ -1007,6 +1120,84 @@ export class Simulation implements Sim {
     if (foreign) this.shapeHeld = undefined;
     // Without walls no pass reads the clearance: an erase then needs none, and builds no pass for walls.
     if (this.walls && strokes.some((s) => s.kind === 'wall' || s.kind === 'erase')) this.updateClearance();
+  }
+
+  /**
+   * Paints only what the strokes do with the slime field (Sim.paintSlime(), ADR 0055, decision 7): the engine paints
+   * the slime of its edit list again after a reset, which clears every stamp. Nothing in the Jones model.
+   */
+  paintSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings) || !strokes.some((s) => changesSlime(s.kind))) return;
+    this.revision++;
+    this.writePaintParams();
+    this.brushSlime(strokes);
+  }
+
+  /**
+   * What strokes do with the slime field (slime-paint.wgsl), in their order, against `env` as it is now; the
+   * parameters of the call are in `paintParams` (writePaintParams()). A stroke of the Slime tool gives the open cells of
+   * its footprint the stamp of the current step, and an erase and a wall clear the stamp of their cells. Every other
+   * kind runs no pass, and so do an erase and a wall while no cell holds a stamp (`stamped`). BRUSH_CHUNK segments per
+   * submission, each over its paint box, as paint() does. Nothing in the Jones model, which has no field.
+   *
+   * paint() calls this after the environment of all its strokes. The field is still the one of one stroke after
+   * another. After the last stroke of the list that reaches a cell and changes the field there (slime, erase or wall),
+   * no stroke changes whether the cell is a wall. So `env` as it is now says for that stroke what `env` said when the
+   * stroke came, and an earlier stroke on that cell is written over.
+   */
+  private brushSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings)) return;
+    const segments: Stroke[] = [];
+    const boxes: Rect[] = [];
+    const offsets: number[] = [];
+    for (const stroke of strokes) {
+      if (stroke.kind === 'slime') this.stamped = true;
+      if (!changesSlime(stroke.kind) || !this.stamped) continue;
+      const boundary = stroke.boundary ?? this.settings.boundary;
+      const wrap = boundary === 'wrap';
+      for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
+        const box = paintBox(segment, this.width, this.height, wrap);
+        if (!box) continue;
+        segments.push(segment);
+        boxes.push(box);
+        offsets.push(BOUNDARIES.indexOf(boundary) * this.paramsStep);
+      }
+    }
+    if (segments.length === 0) return;
+    const brush = this.kernels.slimeBrush();
+    const group = this.bindCache.get('slimeBrush') ?? this.slimeBrushGroup(brush.layout);
+    for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
+      const chunk = segments.slice(first, first + BRUSH_CHUNK);
+      this.writeBrushes(chunk, (j) => boxes[first + j] ?? [0, 0, 0, 0]);
+      const enc = this.device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      pass.setPipeline(brush.pipeline);
+      chunk.forEach((_, j) => {
+        const [, , w, h] = boxes[first + j] ?? [0, 0, 0, 0];
+        pass.setBindGroup(0, group, [offsets[first + j] ?? 0, j * this.offsetStep]);
+        pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
+      });
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+    }
+  }
+
+  /**
+   * The bind group of the brush on the slime field, in the layout of the paint pass: the parameters of the stroke's
+   * boundary and the brush slot by dynamic offset, `env` to read, and the field. dropSlime() frees it with the field.
+   */
+  private slimeBrushGroup(layout: GPUBindGroupLayout): GPUBindGroup {
+    const group = this.device.createBindGroup({
+      layout,
+      entries: [
+        { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
+        { binding: 1, resource: { buffer: this.env } },
+        { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
+        { binding: 3, resource: { buffer: this.ensureSlime() } },
+      ],
+    });
+    this.bindCache.set('slimeBrush', group);
+    return group;
   }
 
   /**
@@ -1036,6 +1227,10 @@ export class Simulation implements Sim {
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
     enc.clearBuffer(this.shapeBuffer);
+    // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
+    const stamps = this.slime;
+    if (stamps) enc.clearBuffer(stamps);
+    this.stamped = false;
     this.device.queue.submit([enc.finish()]);
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
@@ -1170,6 +1365,7 @@ export class Simulation implements Sim {
     this.viewThird?.scent.destroy();
     this.dropFlow();
     this.dropTubes();
+    this.dropSlime();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -1337,9 +1533,23 @@ export class Simulation implements Sim {
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
     }
+    // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time.
+    if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);
     if (flow) this.encodeFlow(pass, flow, d);
     pass.end();
     this.parity = d;
+  }
+
+  /**
+   * The pass of the stamps after the diffusion of a step (slime.wgsl, ADR 0055): a cell that holds plasm gets the
+   * stamp of the step. `trail`: the texture that holds the trail after the step, as the flow reads it (encodeFlow()).
+   */
+  private encodeSlime(pass: GPUComputePassEncoder, trail: Bit) {
+    this.stamped = true;
+    const stamp = this.kernels.slime();
+    pass.setPipeline(stamp);
+    pass.setBindGroup(0, this.bind(`slime${trail}`, stamp, [this.params, this.trailViews[trail], this.ensureSlime()]));
+    pass.dispatchWorkgroups(Math.ceil(this.width / SLIME_GROUP), Math.ceil(this.height / SLIME_GROUP));
   }
 
   /**
@@ -1745,6 +1955,8 @@ class Kernels {
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
   private tubePipelines?: TubeKernels;
+  private slimePipeline?: GPUComputePipeline;
+  private slimeBrushPipeline?: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout };
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -1805,6 +2017,47 @@ class Kernels {
       };
     }
     return this.flowPipelines;
+  }
+
+  /**
+   * The pass of the stamps of the slime field (slime.wgsl, ADR 0055), built at its first use: a scene of the Jones
+   * model never runs it.
+   */
+  slime(): GPUComputePipeline {
+    this.slimePipeline ??= this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this.device.createShaderModule({ code: common + slimeWgsl }), entryPoint: 'stamp' },
+    });
+    return this.slimePipeline;
+  }
+
+  /**
+   * The brush on the slime field (slime-paint.wgsl, ADR 0055, decision 7) with the layout of its bind group, built at
+   * its first use: a stroke of the Slime tool, or an erase or a wall over a field with stamps. As in the paint pass, a
+   * dispatch picks its brush and its boundary's parameters by dynamic offset; this pass only reads `env`, and it
+   * writes the field in place of `shape`.
+   */
+  slimeBrush(): { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout } {
+    if (!this.slimeBrushPipeline) {
+      const C = GPUShaderStage.COMPUTE;
+      const layout = this.device.createBindGroupLayout({
+        entries: [
+          { binding: 0, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+          { binding: 1, visibility: C, buffer: { type: 'read-only-storage' } },
+          { binding: 2, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+          { binding: 3, visibility: C, buffer: { type: 'storage' } },
+        ],
+      });
+      const pipeline = this.device.createComputePipeline({
+        layout: this.device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+        compute: {
+          module: this.device.createShaderModule({ code: common + brushWgsl + slimePaintWgsl }),
+          entryPoint: 'paintSlime',
+        },
+      });
+      this.slimeBrushPipeline = { pipeline, layout };
+    }
+    return this.slimeBrushPipeline;
   }
 
   /** The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. */
@@ -2078,7 +2331,7 @@ class Kernels {
     // outline()).
     const sort = module(sortWgsl);
     const start = module(initSource);
-    const brush = module(paintWgsl);
+    const brush = module(brushWgsl + paintWgsl);
     const [
       init,
       claimStart,

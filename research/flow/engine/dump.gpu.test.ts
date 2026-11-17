@@ -16,7 +16,10 @@
 //   specification of 2026-11-11 drew it (ADR 0042).
 // - VITE_RECOVER: the share by which the flow memory of ground without a tube grows per step (FLOW.recover in
 //   src/engine/flow.ts), in place of the app's, for the measurement of decision 19 of ADR 0029. Each line of the log
-//   names the share of the run.
+//   names the share of the run: the one that the passes get, which the Slime life time of the run scales (ADR 0055,
+//   recoverShare()).
+// - VITE_SLIME: 1 also writes the slime field (ADR 0055): the stamp of every cell as an unsigned 32-bit integer, 0 for
+//   a cell without one, else the number of the step in which the cell last held plasm, plus 1 (`-slime-`).
 // - VITE_GROUND: 1 also writes the flow memory of every cell, with the ground that holds no tube (`-ground-`;
 //   strands.ts reads it).
 // - VITE_CUT: the Cut tool held over a disc, as JSON [x, y, r, from, to]: the centre and the radius in the frame of the
@@ -35,7 +38,7 @@ import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../../src/engine/engine';
 import { fromShape, strokeOn } from '../../../src/engine/environment';
-import { FLOW as RULE } from '../../../src/engine/flow';
+import { FLOW as RULE, recoverShare } from '../../../src/engine/flow';
 import { WebGl2Backend } from '../../../src/engine/gl/backend';
 import { AgentToolKind } from '../../../src/engine/pack';
 import type { Backend, EnvTool } from '../../../src/engine/types';
@@ -167,6 +170,10 @@ it('dumps a run of a scene', async () => {
       const d = Float32Array.from({ length: flow.length / 4 }, (_, i) => flow[i * 4] ?? 0);
       await commands.writeFile(`${OUT}${NAME}-ground-${String(target)}.f32.b64`, b64(new Uint8Array(d.buffer)));
     }
+    if (env.VITE_SLIME === '1') {
+      const slime = await sim.readSlime();
+      await commands.writeFile(`${OUT}${NAME}-slime-${String(target)}.u32.b64`, b64(new Uint8Array(slime.buffer)));
+    }
     if (env.VITE_DUMP_P === '1' && flow.length > 0) {
       const envBytes = await sim.readEnv();
       await commands.writeFile(`${OUT}${NAME}-env.u8.b64`, b64(envBytes));
@@ -187,7 +194,7 @@ it('dumps a run of a scene', async () => {
         agents: sim.agents,
         alive,
         radius: RULE.radius,
-        recover: RULE.recover,
+        recover: recoverShare(settings),
         ms: Math.round(performance.now() - t0),
       }),
     );

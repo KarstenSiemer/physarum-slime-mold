@@ -23,6 +23,7 @@ describe('URL settings', () => {
     Object.assign(s, { model: 'extended', coveredFood: true, coveredFoodFactor: 0.01, trailSaturation: 40 });
     s.showScent = true; // a setting of the look, as the style: the link shows what the sender sees
     s.showTubes = false; // so is the picture of the tubes (ADR 0034)
+    s.showSlime = false; // and the layer of the slime (ADR 0055)
     s.gelColor = 'strong'; // and the colour of the gel (ADR 0009)
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);
@@ -35,8 +36,9 @@ describe('URL settings', () => {
     const network = presetById('network')?.settings() ?? defaultSettings();
     for (const s of [defaultSettings(), network]) {
       const { meanWindow: _, electrodeStrength: _e, ...held } = s;
-      // Light stops growth is in a link of the extended model, and in none of the Jones model (ADR 0050).
-      const { lightGrowth: _l, ...none } = held;
+      // Light stops growth is in a link of the extended model, and in none of the Jones model (ADR 0050). So is Slime
+      // life time (ADR 0055).
+      const { lightGrowth: _l, slimeLife: _s, ...none } = held;
       const before = s.model === 'jones' ? none : held;
       // A link made now also holds the mark `rules` of ADR 0044.
       expect(await encodeSettings(s)).toBe(await hashPart(JSON.stringify({ ...before, rules: LINK_RULES })));
@@ -76,9 +78,9 @@ describe('URL settings', () => {
     }
     const { lightGrowth: _, ...old } = s;
     expect(sanitize(old).lightGrowth).toBe(0);
-    // A link with 0 has the bytes of a link made before the rule.
-    const { meanWindow: _m, electrodeStrength: _e, ...made } = old;
-    expect(await encodeSettings({ ...s, lightGrowth: 0 })).toBe(
+    // A link with 0, and with a Slime life time of 0 (ADR 0055), has the bytes of a link made before the rule.
+    const { meanWindow: _m, electrodeStrength: _e, slimeLife: _s, ...made } = old;
+    expect(await encodeSettings({ ...s, lightGrowth: 0, slimeLife: 0 })).toBe(
       await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
     );
     expect(sanitize({ lightGrowth: 7 }).lightGrowth).toBe(1);
@@ -87,6 +89,41 @@ describe('URL settings', () => {
     expect(network.model).toBe('jones');
     expect(sanitize({ ...network, lightGrowth: 0.75 }).lightGrowth).toBe(1);
     expect(await encodeSettings({ ...network, lightGrowth: 0.75 })).toBe(await encodeSettings(network));
+  });
+
+  // ADR 0055, decision 10: a link of the extended model holds Slime life time when it is not 0, so a link made now
+  // holds the default of 144 hours. A link without it, as every link made before the slime field, opens with 0: it has
+  // no slime, and its starved ground keeps the time of ADR 0054, so it runs as it was made. The Jones model has no
+  // slime: its link holds none, and it opens with the default.
+  it('holds Slime life time in a link of the extended model, and opens a link without it with 0', async () => {
+    const s = defaultSettings();
+    expect(s.slimeLife).toBe(144);
+    for (const slimeLife of [144, 18, 240, 1, 0]) {
+      const slimy = { ...s, slimeLife };
+      expect(await decodeSettings(await encodeSettings(slimy))).toEqual(slimy);
+    }
+    expect(await encodeSettings({ ...s, slimeLife: 18 })).not.toBe(await encodeSettings(s));
+    const { slimeLife: _, ...old } = s;
+    expect(sanitize(old).slimeLife).toBe(0);
+    // A link with 0 has the bytes of a link made before the slime field.
+    const { meanWindow: _m, electrodeStrength: _e, ...made } = old;
+    expect(await encodeSettings({ ...s, slimeLife: 0 })).toBe(
+      await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
+    );
+    // Whole hours from 0 to 240, and 0 for anything that is no number.
+    expect(sanitize({ slimeLife: 700 }).slimeLife).toBe(240);
+    expect(sanitize({ slimeLife: -1 }).slimeLife).toBe(0);
+    expect(sanitize({ slimeLife: 17.6 }).slimeLife).toBe(18);
+    expect(sanitize({ slimeLife: 1e-300 }).slimeLife).toBe(0);
+    for (const junk of ['144', null, true, [144], {}, Number.NaN, Infinity])
+      expect(sanitize({ slimeLife: junk }).slimeLife, JSON.stringify(junk)).toBe(0);
+    const network = presetById('network')?.settings() ?? s;
+    expect(network.model).toBe('jones');
+    expect(sanitize({ ...network, slimeLife: 18 }).slimeLife).toBe(144);
+    expect(await encodeSettings({ ...network, slimeLife: 18 })).toBe(await encodeSettings(network));
+    const { slimeLife: __, ...jonesLink } = network;
+    expect(await decodeSettings(await encodeSettings(network))).toEqual(network);
+    expect(sanitize(jonesLink)).toEqual(network);
   });
 
   // ADR 0025: growth, its values and the capacity travel with the link.

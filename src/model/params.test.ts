@@ -151,6 +151,23 @@ describe('sanitize (untrusted input)', () => {
     for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showTubes: v }).showTubes).toBe(true);
   });
 
+  // So is the layer of the slime (ADR 0055, decision 8): on for a new scene and for a link from before it, in both
+  // models. The switch changes no other setting.
+  it('keeps the layer of the slime on unless a link says false', () => {
+    expect(defaultSettings().showSlime).toBe(true);
+    expect(sanitize({}).showSlime).toBe(true);
+    expect(sanitize({ showSlime: false }).showSlime).toBe(false);
+    for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showSlime: v }).showSlime).toBe(true);
+    for (const model of ['jones', 'extended'] as const) {
+      const on = sanitize({ model, collisions: true, slimeLife: 24 });
+      expect(sanitize({ model, collisions: true, slimeLife: 24, showSlime: false })).toEqual({
+        ...on,
+        showSlime: false,
+      });
+      expect(constrain({ ...on, showSlime: false })).toEqual({ ...constrain(on), showSlime: false });
+    }
+  });
+
   it('takes the model, covered food and trail saturation', () => {
     const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
     expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);
@@ -397,6 +414,55 @@ describe('flow in the tubes (ADR 0029)', () => {
     // Without the rule and with several strains too: the flow needs neither.
     const free = sanitize({ ...presetById('three-strains')?.settings(), flow: true });
     expect([free.flow, free.collisions, free.strains.length]).toEqual([true, false, 3]);
+  });
+});
+
+// ADR 0055: the slime field has one setting, its life time in hours of model time.
+describe('Slime life time (ADR 0055)', () => {
+  it('is 144 hours by default, the time of the mark of starved ground of ADR 0054, in whole hours up to 240', () => {
+    expect(defaultSettings().slimeLife).toBe(144);
+    expect(globalSpec.slimeLife).toMatchObject({ label: 'Slime life time', min: 0, max: 240, step: 1 });
+    // The help says what 0 means, and what the time does with the flow.
+    expect(globalSpec.slimeLife.help).toContain('At 0 the model has no slime.');
+    // The picture draws the slime (decision 8), and still no rule reads it.
+    expect(globalSpec.slimeLife.help).toContain('as a pale layer on the ground');
+    expect(globalSpec.slimeLife.help).toContain('No rule reads the slime yet');
+    expect(globalSpec.slimeLife.help).toContain('With Flow in the tubes');
+  });
+
+  it('is the default in every scene, so a scene keeps the time of its starved ground', () => {
+    for (const p of PRESETS) expect(p.settings().slimeLife, p.id).toBe(144);
+  });
+
+  it('is 0 for a link from before the slime field, in the extended model', () => {
+    for (const p of PRESETS) {
+      const { slimeLife: _, ...before } = p.settings();
+      const s = sanitize(before);
+      // The Jones model has no slime: it holds the default, which acts on nothing there.
+      expect(s.slimeLife, p.id).toBe(s.model === 'jones' ? 144 : 0);
+    }
+  });
+
+  it('keeps a life time in the extended model through constrain(), also 0', () => {
+    for (const slimeLife of [0, 1, 18, 144, 240]) {
+      const s = sanitize({ model: 'extended', slimeLife });
+      expect([s.model, s.slimeLife]).toEqual(['extended', slimeLife]);
+      expect(constrain(s)).toBe(s);
+    }
+  });
+
+  it('is no setting of the Jones model: the model binds it to its default', () => {
+    const s = sanitize({ ...presetById('network')?.settings(), slimeLife: 18 });
+    expect([s.model, s.slimeLife]).toEqual(['jones', 144]);
+    expect(constrain(s)).toBe(s);
+    // The switch to Jones takes the life time of a scene back to the default.
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    const t = toJones({ ...maze, slimeLife: 0 });
+    expect([t.model, t.slimeLife]).toEqual(['jones', 144]);
+    // A Jones model that becomes the extended model keeps what it holds.
+    const off = constrain({ ...s, collisions: false });
+    expect([off.model, off.slimeLife]).toEqual(['extended', 144]);
   });
 });
 

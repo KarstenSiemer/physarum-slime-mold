@@ -8,6 +8,8 @@
   12 (the flow strength of the Tokyo scene) and decision 19 (the time until starved ground is fresh again).
 - Extends [ADR 0053](0053-no-child-onto-starved-ground.md), which found the cause. It is stage 1b of the plan of
   [ADR 0052](0052-the-sources-on-slime-mazes-and-the-growth-front.md).
+- Extended by [ADR 0055](0055-the-slime-field.md) (2026-11-17): the time of the mark (decision 4) follows the setting
+  Slime life time; at its default of 144 hours the mark keeps the six days.
 - In short: [`research/flow/README.md`](../../research/flow/README.md), part 18, has the commands and the records.
 
 ## Context
