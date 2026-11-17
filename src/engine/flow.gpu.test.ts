@@ -731,6 +731,43 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(expected[8]).toBe(fresh);
   }, 240_000);
 
+  it('lets starved ground recover in the Slime life time: with eight times the share at 18 hours', async () => {
+    // ADR 0055, decision 5: the setting gives the mark of starved ground its time. The ground of the test before, with
+    // the share of each life time: FLOW.recover at 144 hours, 0.00023 at 18 hours, and FLOW.recover without slime.
+    const [w, h] = [20, 8];
+    const starts = [0, FLOW.floor, 0.001, FLOW.half, 0.05, 0.1, 0.19, FLOW.fresh, 0.5, 1];
+    const f = Math.fround;
+    const [fresh, floor] = [f(FLOW.fresh), f(FLOW.floor)];
+    for (const [slimeLife, share] of [
+      [18, 0.00023],
+      [72, 2 * FLOW.recover],
+      [144, FLOW.recover],
+      [0, FLOW.recover],
+    ] as const) {
+      const sim = await make(flowing({ slimeLife }), w, h, 32, 0);
+      const memory = new Float32Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) memory.set([starts[c % starts.length] ?? 0, 0, 0, 0], c * 4);
+      sim.writeFlow(memory);
+      sim.run(300);
+      const factor = f(1 + f(share));
+      const expected = starts.map(f);
+      for (let s = 0; s < 300; s++)
+        expected.forEach((d, i) => {
+          expected[i] = f(Math.min(fresh, f(Math.max(d, floor) * factor)));
+        });
+      const got = await sim.readFlow();
+      for (let c = 0; c < w * h; c++) {
+        const want = expected[c % starts.length] ?? 0;
+        const what = `column ${String(c % w)}, ${String(slimeLife)} hours`;
+        expect(Math.abs((got[c * 4] ?? 0) - want) / want, what).toBeLessThan(1e-4);
+      }
+      // The floor after 300 steps: 7 % above itself at 18 hours, and 0.9 % at 144 hours.
+      expect((expected[1] ?? 0) / FLOW.floor, `${String(slimeLife)} hours`).toBeCloseTo((1 + share) ** 300, 3);
+    }
+    expect(1.00023 ** 300).toBeGreaterThan(1.07);
+    expect((1 + FLOW.recover) ** 300).toBeLessThan(1.009);
+  }, 240_000);
+
   it('leaves the ground of a starved tube that vanishes at the floor of the flow memory', async () => {
     // ADR 0054. No agent lives, so no trail: the tube body of a cell falls by the share FLOW.bodyRate per step, and a
     // cell loses its tube in the step in which its body falls below FLOW.bodyLow. No food: no tube adapts. The column of

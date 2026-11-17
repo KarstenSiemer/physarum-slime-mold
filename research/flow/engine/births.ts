@@ -14,10 +14,11 @@
 //   and births are allowed again) and fresh (D = 0.2).
 // - opens: the steps until the closed ground of the zone is open again, as its first quartile, its median and its
 //   third quartile: ln(h / D) / ln(1 + r), the time in which the flow memory D of ground without a tube grows back
-//   to h. r is FLOW.recover of src/engine/flow.ts; RECOVER=0.00023 gives the time of the runs before ADR 0054.
+//   to h. r is the share of the settings of the scene (recoverShare() of src/engine/flow.ts, ADR 0055): FLOW.recover
+//   at the Slime life time of every scene. RECOVER=0.00023 gives the time of the runs before ADR 0054.
 // - trail: the mean trail of the zone.
 import { readdirSync, readFileSync } from 'node:fs';
-import { FLOW } from '../../../src/engine/flow.ts';
+import { recoverShare } from '../../../src/engine/flow.ts';
 import { PRESETS } from '../../../src/model/presets.ts';
 import { zones } from '../prototype/maze.ts';
 import { outDir } from '../prototype/out.ts';
@@ -31,7 +32,7 @@ const settings = preset.settings();
 const H = 0.01;
 const FRESH = 0.2;
 const BODY = 0.05;
-const RECOVER = Number(process.env.RECOVER ?? FLOW.recover);
+const RECOVER = Number(process.env.RECOVER ?? recoverShare(settings));
 
 const read = (file: string) =>
   new Float32Array(new Uint8Array(Buffer.from(readFileSync(DIR + file, 'utf8'), 'base64')).buffer);
