@@ -45,10 +45,10 @@ export const GEL_FX: Record<GelColor, [pale: number, film: number]> = { mild: [0
  * styles and darker than paper.
  */
 export const SLIME_LOOK: Record<Settings['style'], { color: string; strength: number }> = {
-  glow: { color: '#d8dccf', strength: 0.03 },
-  gel: { color: '#e4dfcc', strength: 0.06 },
-  paper: { color: '#8f8a78', strength: 0.3 },
-  agents: { color: '#d8dccf', strength: 0.03 },
+  glow: { color: '#d8dccf', strength: 0.02 },
+  gel: { color: '#e4dfcc', strength: 0.024 },
+  paper: { color: '#8f8a78', strength: 0.22 },
+  agents: { color: '#d8dccf', strength: 0.02 },
 };
 
 export const VIEW_BYTES = 256;
