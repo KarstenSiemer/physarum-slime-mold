@@ -194,12 +194,13 @@ periodic grid over all its cells.
 | Area                | Controls                                                                                                                                     |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Playback            | play/pause, single step, reset (toolbar)                                                                                                     |
-| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model, step order; extended: scent decay and reach, K, slime life time   |
+| Scene               | presets, scene card, agent count, grid, layout, boundary, the rule, model, step order; extended: scent decay and its reach in cells, K       |
 | Strains (1–4 cards) | color, SA, SO, RA, SS, deposit, decay, random turn, sensor diagram; extended: share, food and light weight                                   |
 | Interactions        | strain × strain attraction matrix (−2 … +2) with quick presets (extended model, several strains)                                             |
 | Environment         | food strength, light strength (Jones: repellent strength), covered food, random shrinkage; extended: diffusion passes                        |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
-| Flow                | flow in the tubes, flow strength, draw the tubes by their flow, show slime (extended model only)                                             |
+| Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
+| Slime               | slime life time, show slime (extended model only)                                                                                            |
 | Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode, slime; brush; lines (Shift)      |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |

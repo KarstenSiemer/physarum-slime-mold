@@ -260,7 +260,7 @@
       <p>
         The pale layer on the ground is slime. A slime mold leaves slime where it was, and the extended model marks that
         ground: the layer fades as the slime gets older, and it is gone after the Slime life time. No rule of the model
-        reads the slime yet. The switch Show slime, in the panel under Flow, hides the layer.
+        reads the slime yet. The switch Show slime, in the panel under Slime, hides the layer.
       </p>
     {:else if app.learnTab === 'Controls'}
       <dl>

@@ -351,9 +351,10 @@ test('the Slime tool paints slime, the picture shows it, the link holds it, and 
       return sum / ((shown.data.length / 4) * 3);
     });
   expect(await layer()).toBeGreaterThan(1);
+  // The section Slime of the panel has the life time and the switch of the layer.
+  await page.locator('summary', { hasText: /^Slime$/ }).click();
   await expect(page.getByLabel('Slime life time', { exact: true })).toHaveValue('144');
   // The switch Show slime hides the layer, and the field keeps its stamps.
-  await page.locator('summary', { hasText: 'Flow' }).click();
   const show = page.getByRole('checkbox', { name: 'Show slime', exact: true });
   await expect(show).toBeChecked();
   await show.uncheck();
@@ -370,7 +371,8 @@ test('the Slime tool paints slime, the picture shows it, the link holds it, and 
   await expect(slime).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
   await expect(slime).toHaveCount(0);
-  // Its panel has no row for the life time of the slime, and no switch for the layer.
+  // Its panel has no section Slime: no row for the life time of the slime, and no switch for the layer.
+  await expect(page.locator('summary', { hasText: /^Slime$/ })).toHaveCount(0);
   await expect(page.getByLabel('Slime life time', { exact: true })).toHaveCount(0);
   await expect(show).toHaveCount(0);
   const move = page.getByRole('radio', { name: 'Move' });

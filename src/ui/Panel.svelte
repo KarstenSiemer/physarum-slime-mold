@@ -328,8 +328,6 @@
         />
       {/if}
       <Slider spec={globalSpec.trailSaturation} bind:value={s.trailSaturation} id="saturation" />
-      <!-- How long the slime stays where the colony was (ADR 0055). Its switch of the view is under Flow. -->
-      <Slider spec={globalSpec.slimeLife} bind:value={s.slimeLife} id="slime-life" />
     {/if}
   </Section>
 
@@ -517,9 +515,14 @@
           <p class="helptext" id="tube-help">{tubeViewHelp.help}</p>
         {/if}
       {/if}
+    </Section>
+
+    <!-- The slime is a part of the extended model only (ADR 0055). It needs no flow, so it has a section of its own. -->
+    <Section title="Slime">
+      <!-- How long the slime stays where the colony was. At 0 the model has no slime, and the switch below goes. -->
+      <Slider spec={globalSpec.slimeLife} bind:value={s.slimeLife} id="slime-life" />
       {#if slimy}
-        <!-- The layer of the slime changes the view only (ADR 0055, decision 8). The slime needs no flow: the switch
-        is here beside the other switch of the view, with the flow on or off. -->
+        <!-- The layer of the slime changes the view only (decision 8). -->
         <div class="check">
           <label>
             <input
