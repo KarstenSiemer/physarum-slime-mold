@@ -297,8 +297,9 @@ test('the Electrode tool paints a cathode and an anode, and the link holds them'
 });
 
 // ADR 0055, decision 7: the Slime tool coats ground with slime. It is in the toolbar while the model has slime, in the
-// extended model with a Slime life time above 0. The page address holds its strokes.
-test('the Slime tool paints slime, the link holds it, and the tool goes with the slime of the model', async ({
+// extended model with a Slime life time above 0. The page address holds its strokes. Decision 8: the picture shows
+// the slime as a pale layer, and the switch Show slime hides it.
+test('the Slime tool paints slime, the picture shows it, the link holds it, and the tool goes with the slime of the model', async ({
   page,
 }) => {
   const errors = watchErrors(page);
@@ -334,6 +335,32 @@ test('the Slime tool paints slime, the link holds it, and the tool goes with the
     return [...new Set(link?.drawing?.strokes.map((e) => e.kind))].sort();
   };
   await expect.poll(kinds).toEqual(['slime']);
+  // The picture draws the slime as a pale layer on the ground (decision 8). What the layer adds to the picture that
+  // the app draws: the mean of a channel, of 255, less that of the same picture without the layer. Both pictures have
+  // the levels of the frames, which still settle after a pause.
+  const layer = () =>
+    page.evaluate(async () => {
+      const e = globalThis.physarum;
+      if (!e) throw new Error('no engine');
+      const levels = e.backend.levels();
+      const { width, height } = e.canvas;
+      const shot = (settings: typeof e.settings) => e.backend.capture(e.sim, settings, e.view, width, height, levels);
+      const [shown, bare] = [await shot(e.settings), await shot({ ...e.settings, showSlime: false })];
+      let sum = 0;
+      for (let i = 0; i < shown.data.length; i++) if (i % 4 !== 3) sum += (shown.data[i] ?? 0) - (bare.data[i] ?? 0);
+      return sum / ((shown.data.length / 4) * 3);
+    });
+  expect(await layer()).toBeGreaterThan(1);
+  await expect(page.getByLabel('Slime life time', { exact: true })).toHaveValue('144');
+  // The switch Show slime hides the layer, and the field keeps its stamps.
+  await page.locator('summary', { hasText: 'Flow' }).click();
+  const show = page.getByRole('checkbox', { name: 'Show slime', exact: true });
+  await expect(show).toBeChecked();
+  await show.uncheck();
+  await expect.poll(layer, { timeout: 30_000 }).toBeLessThan(0.5);
+  expect(await painted()).toBeGreaterThan(50);
+  await show.check();
+  await expect.poll(layer, { timeout: 30_000 }).toBeGreaterThan(1);
   // The eraser on the same path clears the painted slime.
   await page.keyboard.press('6');
   await drag();
@@ -343,6 +370,9 @@ test('the Slime tool paints slime, the link holds it, and the tool goes with the
   await expect(slime).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('combobox', { name: 'Model' }).selectOption('jones');
   await expect(slime).toHaveCount(0);
+  // Its panel has no row for the life time of the slime, and no switch for the layer.
+  await expect(page.getByLabel('Slime life time', { exact: true })).toHaveCount(0);
+  await expect(show).toHaveCount(0);
   const move = page.getByRole('radio', { name: 'Move' });
   await expect(move).toHaveAttribute('aria-checked', 'true');
   await page.locator('canvas').click();
