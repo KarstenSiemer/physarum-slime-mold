@@ -574,6 +574,7 @@ checks that this table names every key.
 | `shrinkMin`         | Smin     | agents, 0 to 225                                                     | 0                 | both     | 9       |
 | `shrinkMax`         | Smax     | agents, 1 to 225                                                     | 20                | both     | 9       |
 | `flowStrength`      | I0       | the flux of each strain at a site, 0.1 to 32                         | 8                 | extended | 8.2     |
+| `slimeLife`         | L        | hours of model time, 0 to 240; 0 is no slime                         | 144               | extended | 6.9     |
 | `model`             |          | jones, extended                                                      | extended          |          | 2       |
 | `stepOrder`         |          | move-first, sense-first                                              | sense-first       | both     | 5       |
 | `boundary`          |          | wrap, box, dish                                                      | wrap              | both     | 1, 6.3  |

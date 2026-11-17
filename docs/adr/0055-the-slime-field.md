@@ -104,9 +104,11 @@ name for ground with a flow memory of 0.2 (ADR 0053), so this record uses the wo
      switch of the model gives the model its field again. The field is then the one that the strokes painted, cell
      for cell: after the last stroke that covers a cell, no stroke makes the cell a wall or opens it.
    - The tool is there while the model has slime: in the extended model, with a life time above 0.
-8. **The app draws the slime** as a pale layer where a cell has slime, below the trail and the tubes. The layer
-   fades with the age of the slime and is gone at the life time. A switch of the view turns it off; the switch
-   changes no run.
+8. **The app draws the slime** as a pale layer where a cell has slime. The layer tints the ground. The food, the
+   trail, the tubes, the light, the walls and the electrodes lie on it. Its strength falls in a straight line with
+   the age of the slime, from full at the age 0 to nothing at the life time. Every style draws it, and the scent
+   view does not. The setting Show slime of the view turns it off; it changes no run. Reason for the ground: the
+   slime lies on the agar and below the plasmodium, and the picture must still show where the colony is now.
 9. **Memory**: the stamp is 4 B per cell, on both backends. The fit of the grid counts them in the extended model,
    with slime or without it, so that the setting does not change the grid.
 10. **Links and the Jones model.** A link without the setting has a life time of 0: it has no slime, and it runs as
