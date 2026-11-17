@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import { trailLevels } from './flow';
-import type { FlowGrid } from './flow-reference';
+import { openCell, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { NO_STAMP, stampOf } from './slime';
 import { slimeStep } from './slime-reference';
@@ -15,7 +15,9 @@ const BACKENDS = {
   webgl2: (c: HTMLCanvasElement): Promise<Backend> => Promise.resolve(WebGl2Backend.create(c)),
 };
 
-const [W, H] = [24, 16];
+// No side is a multiple of 8 cells, the side of a workgroup of the pass on WebGPU: the last workgroups of a row and of
+// a column reach past the grid.
+const [W, H] = [26, 17];
 const cell = (x: number, y: number) => y * W + x;
 const f32 = Math.fround;
 
@@ -117,7 +119,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
     async (_what, patch) => {
       const s = slimy(patch);
       const sim = await make(s);
-      // A wall along row 4, inside the dish of 24 × 16 cells: its radius is 0.945 · 8 cells around (12, 8).
+      // A wall along row 4, inside the dish of 26 × 17 cells: its radius is 0.945 · 8.5 cells around (13, 8.5).
       sim.paint([{ kind: 'wall', from: [9.5, 4.5], to: [14.5, 4.5], radius: 0.75 }]);
       const grid = await gridOf(sim, s);
       const [lowA, lowB] = strains.map((strain) => f32(trailLevels(strain, s.stepOrder)[0])) as [number, number];
@@ -227,7 +229,9 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
   it('writes no stamp while the life time is 0, keeps the stamps over a new setting, and clears them at a reset', async () => {
     const s = slimy({ boundary: 'box' });
     const sim = await make(s);
-    const block = [cell(4, 4), cell(5, 4), cell(4, 5), cell(5, 5)];
+    // A block of four cells, and three corners of the box: the last cell of the first row, the first cell of the last
+    // row, and the last cell of the grid.
+    const block = [cell(W - 1, 0), cell(4, 4), cell(5, 4), cell(4, 5), cell(5, 5), cell(0, H - 1), cell(W - 1, H - 1)];
     const plasm = (cells: readonly number[]) => trailOf(cells.map((c) => [c, 0, 9000] as const));
     const stamps = (of: (c: number) => number) => block.map((c) => [c, of(c)]);
     sim.writeTrail(plasm(block));
@@ -245,6 +249,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
     sim.writeTrail(plasm(block.slice(0, 2)));
     sim.run(1);
     expect(stamped(await sim.readSlime())).toEqual(stamps((c) => (block.indexOf(c) < 2 ? stampOf(5) : stampOf(1))));
+    expect(block.length).toBe(7);
 
     // A reset clears every stamp, and the steps count from 0 again.
     sim.reset();
@@ -301,18 +306,19 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
   });
 
   it.each([
-    ['one diffusion pass, sensing first', { diffusion: 1, stepOrder: 'sense-first' }],
-    ['two diffusion passes, moving first', { diffusion: 2, stepOrder: 'move-first' }],
+    ['one diffusion pass, sensing first, in a dish', [48, 40], { diffusion: 1, stepOrder: 'sense-first' }],
+    // A periodic grid whose sides are no multiples of 8 cells: the trail crosses its edges.
+    ['two diffusion passes, moving first, on a periodic grid', [50, 37], { diffusion: 2, boundary: 'wrap' }],
   ] as const)(
     'follows the CPU reference step by step under living agents that leave a trail, with %s',
-    async (_what, patch) => {
-      // Few agents of two strains in a dish with a wall. One deposit of the first strain spreads to less than its
+    async (_what, [w, h], patch) => {
+      // Few agents of two strains on a grid with a wall. One deposit of the first strain spreads to less than its
       // level, so only a cell that agents pass again holds its plasm; one deposit of the second strain is enough.
-      const [w, h] = [48, 40];
       const s: Settings = {
         ...defaultSettings(),
         model: 'extended',
         boundary: 'dish',
+        stepOrder: 'move-first',
         collisions: false,
         seed: 9,
         strains: [
@@ -324,6 +330,12 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
       const sim = await make(s, w, h, 24);
       sim.paint([{ kind: 'wall', from: [24, 6], to: [24, 30], radius: 1 }]);
       sim.reset();
+      // On the periodic grid two agents of the second strain walk along the last column and along the last row: their
+      // first move leaves a trail there.
+      if (s.boundary === 'wrap') {
+        sim.writeAgent(12, { x: w - 0.5, y: 10.5, heading: Math.PI / 2, bits: 5 });
+        sim.writeAgent(13, { x: 10.5, y: h - 0.5, heading: 0, bits: 5 });
+      }
       const grid = await gridOf(sim, s);
       let expected: Uint32Array = new Uint32Array(w * h);
       const counts: number[] = [];
@@ -341,12 +353,14 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
       // Stamps of several steps: where the plasm left, the stamp of an earlier step stays.
       const field = await sim.readSlime();
       expect(new Set(field).size).toBeGreaterThan(3);
-      // No stamp in the wall and outside the dish.
-      const env = await sim.readEnv();
-      const closed = (c: number) =>
-        (env[c * 4] ?? 0) >= 128 || Math.hypot((c % w) + 0.5 - w / 2, Math.floor(c / w) + 0.5 - h / 2) > 0.945 * 20;
+      // No stamp in the wall and outside the arena.
+      const closed = (c: number) => openCell(grid, c % w, Math.floor(c / w)) < 0;
       expect(stamped(field).filter(([c]) => closed(c))).toEqual([]);
-      expect([...field.keys()].filter(closed).length).toBeGreaterThan(400);
+      expect([...field.keys()].filter(closed).length).toBeGreaterThan(40);
+      // On the periodic grid cells of the last column and of the last row hold stamps: the two agents went there.
+      if (s.boundary !== 'wrap') return;
+      expect(field[11 * w + w - 1]).toBeGreaterThan(NO_STAMP);
+      expect(field[(h - 1) * w + 11]).toBeGreaterThan(NO_STAMP);
     },
   );
 });

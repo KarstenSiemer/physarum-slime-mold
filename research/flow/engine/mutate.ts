@@ -2466,6 +2466,14 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     SLIME_SPEC,
   ],
   [
+    'SL31 webgpu: the pass leaves out the cells past the last whole workgroup of a row and of a column',
+    GPU_SIM,
+    'pass.dispatchWorkgroups(Math.ceil(this.width / SLIME_GROUP), Math.ceil(this.height / SLIME_GROUP));',
+    'pass.dispatchWorkgroups(Math.floor(this.width / SLIME_GROUP), Math.floor(this.height / SLIME_GROUP));',
+    SLIME_GPU,
+    SLIME_SPEC,
+  ],
+  [
     'SL13 glsl: only the first strain leaves slime',
     SLIME_FRAG,
     'for (int s = 0; s < int(P.cfg.y); s++) {',
