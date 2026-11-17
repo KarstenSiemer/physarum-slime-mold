@@ -733,6 +733,59 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (_kind, create)
       },
     );
 
+    // The brush on the field and the brush on the environment take one copy of the segment of a stroke (brush.wgsl,
+    // brush.glsl). So they reach the same cells, also where a cell centre lies at the edge of a brush and float32
+    // decides. The CPU reference cannot tell such a cell, so the two brushes are compared with each other: food and
+    // slime of the same strokes lie on the same cells, and an erase and a wall clear both on the same cells.
+    it.each(BOUNDARIES)(
+      'reaches the cells that the brush on the environment reaches, at the edge of a brush too, in the arena %s',
+      async (boundary) => {
+        const s = slimy({ boundary });
+        const sim = await make(s, BW, BH);
+        const r = random(41 + BOUNDARIES.indexOf(boundary));
+        /** Strokes between cell centres and cell corners, with radii of whole and half cells, on the grid and beside it. */
+        const strokesOf = (kind: EnvTool, count: number): Stroke[] =>
+          Array.from({ length: count }, () => {
+            const at = (n: number) => Math.floor(r() * (n + 4)) - 2 + (r() < 0.5 ? 0.5 : 0);
+            const from: [number, number] = [at(BW), at(BH)];
+            const step = () => Math.floor(r() * 13) - 6;
+            const to: [number, number] = r() < 0.4 ? from : [from[0] + step(), from[1] + step()];
+            return { kind, from, to, radius: 1 + Math.floor(r() * 8) / 2 };
+          });
+        /** The cells with food, which must be the cells with a stamp. */
+        const both = async (what: string) => {
+          const [env, field] = [await sim.readEnv(), await sim.readSlime()];
+          const food = [...field.keys()].filter((c) => foodAt(env, c));
+          expect(
+            stamped(field).map(([c]) => c),
+            what,
+          ).toEqual(food);
+          return food.length;
+        };
+        const coats = strokesOf('slime', 40);
+        const erases = strokesOf('erase', 12);
+        const walls = strokesOf('wall', 12);
+        // Of the 64 strokes, more than 10 have a cell centre of the arena at the edge of their brush, by the CPU reference
+        // in float64.
+        const atEdge = [...coats, ...erases, ...walls].filter((stroke) => {
+          const margin = { min: Infinity };
+          paintReference(new Uint8Array(BW * BH * 4), BW, BH, stroke, boundary, margin);
+          return margin.min < 1e-9;
+        });
+        expect(atEdge.length).toBeGreaterThan(10);
+        sim.paint([...as('food', coats), ...coats]);
+        const painted = await both('food and slime of the same strokes');
+        expect(painted).toBeGreaterThan(300);
+        sim.paint(erases);
+        const erased = await both('after the erases');
+        expect(erased).toBeLessThan(painted - 50);
+        sim.paint(walls);
+        const walled = await both('after the walls');
+        expect(walled).toBeLessThan(erased - 20);
+        expect(walled).toBeGreaterThan(50);
+      },
+    );
+
     // WebGPU paints 4096 segments per submission. Of 6400 strokes, more than 4096 change the field: the brush on the
     // field crosses that edge, as the brush on the environment does.
     it('paints 6400 strokes in one call as the CPU reference does', async () => {
