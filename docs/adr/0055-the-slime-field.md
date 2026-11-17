@@ -1,7 +1,7 @@
 # 0055: The slime field: where the colony was, for how long, and how the app shows it
 
 - Status: accepted (decisions of the coordinator of 2026-11-17, under the owner's delegation of 2026-11-12; "one slime
-  for all strains" is the owner's decision of 2026-11-16, ADR 0052)
+  for all strains" is the owner's decision of 2026-11-16, ADR 0052), built 2026-11-17
 - Date: 2026-11-17
 - Extends [ADR 0052](0052-the-sources-on-slime-mazes-and-the-growth-front.md): the first part of stage 2 of its plan.
 - Changes [ADR 0054](0054-a-starved-tube-leaves-starved-ground.md), decision 4: the time of the mark of starved ground
@@ -109,6 +109,17 @@ name for ground with a flow memory of 0.2 (ADR 0053), so this record uses the wo
    the age of the slime, from full at the age 0 to nothing at the life time. Every style draws it, and the scent
    view does not. The setting Show slime of the view turns it off; it changes no run. Reason for the ground: the
    slime lies on the agar and below the plasmodium, and the picture must still show where the colony is now.
+   - The layer has one pale colour for all strains. Its full strength is 0.02 in the glow and agents styles, 0.024
+     in the gel style and 0.22 in the paper style (`SLIME_LOOK` in `src/engine/render.ts`). Reason: stronger
+     layers washed out the walls in the pictures of each style.
+   - Between the cells the view blends the strengths, never the stamps, and only over the cells that can hold
+     slime. Reason: with the walls in the blend the layer faded towards a wall and towards the rim of the dish, in
+     steps of whole cells.
+   - Zoomed out, a pixel shows the mean of the strength over its square. Above 2 cells per pixel one cell stands
+     for each texel of the coarse map of the trail. Reason: the layer then needs no texture and no pass of its own.
+     A thin line of slime can drop out there.
+   - The render pass holds the code of the layer only for a frame that draws it. A frame without the layer has the
+     pixels and the cost of before.
 9. **Memory**: the stamp is 4 B per cell, on both backends. The fit of the grid counts them in the extended model,
    with slime or without it, so that the setting does not change the grid.
 10. **Links and the Jones model.** A link without the setting has a life time of 0: it has no slime, and it runs as
@@ -116,6 +127,135 @@ name for ground with a flow memory of 0.2 (ADR 0053), so this record uses the wo
     a switch back starts with the painted slime only (decision 7).
 11. **Not in this record**: a rule that reads the slime (the avoidance, the moves), the scene Y-maze, and the
     U-shaped trap. The owner's wish that the slime is "perfused" stays an open question (ADR 0052).
+12. **The panel has a section Slime**, in the extended model: the Slime life time and, while the model has slime,
+    the switch Show slime. Reason: the slime needs no flow, so its switch does not belong in the section Flow, and
+    the second pull request puts its settings there too.
+
+## How the build reads the decisions
+
+The helpers that built the three parts made these choices, and the coordinator took them over:
+
+- The pass of the stamps tests no wall and no arena (decision 3). The diffusion leaves no trail on a wall or outside
+  the arena, and every low level is above 0, so such a cell never holds plasm.
+- A stroke keeps the arena of its painting, as a stroke of food does (decision 7). So a cell gets a stamp only if it
+  lies inside the arena of the stroke and inside the arena of the simulation.
+- With a life time of 0 the extended model still has the field, and a stroke of slime still stamps it (decisions 4
+  and 9). Only the tool is hidden. So the painted slime of a scene is there again when the life time comes back.
+- A frame draws no layer while the simulation holds no field: after a switch to the extended model, until the
+  first stamp (decisions 8 and 10). No cell has slime then.
+- The rule of the mark holds the 144 hours as a number of its own (`RECOVER_LIFE` in `src/engine/flow.ts`), not
+  the default of the setting (decision 5). Another default must not change the time that a life time gives.
+- Erase, Clear and the notice of a switch to the Jones model name the slime in their texts.
+
+## Results
+
+Measured on 2026-11-17 on an M3 Pro, in headless Chromium. The commands and the records are in
+[`research/flow/README.md`](../../research/flow/README.md), part 19.
+
+### No run changes
+
+- **Every scene keeps its bytes.** The digests of the agents, the trail, the scent, the environment, the flow
+  memory and the pressure equal those of `main` at `3825266`: 54 of 54 runs after 500 steps (every scene, both
+  backends), and 16 of 16 after 3,000 steps (the eight scenes with the flow, both backends).
+- **A Slime life time of 18 hours gives the runs of ADR 0054 with 18 hours.** The Snail maze ran to step 80,000
+  with the setting at 18, seeds 1 to 3, with a sample every 500 steps. All 484 lines of `measure-mazes.ts` equal the
+  record `analysis-snail-maze-floor.txt` of ADR 0054, which set the share 0.00023 by hand. So the setting gives the
+  mark its time (decision 5), and the stamps of a run with another life time change no measure.
+
+### The time of a step
+
+The pass of the stamps, with the default life time against a life time of 0, which runs no pass. Milliseconds per
+step, the mean of the medians of two rounds in turns (a third round was disturbed and is left out):
+
+| Scene, grid           | Backend | Without the flow       | With the flow         |
+| --------------------- | ------- | ---------------------- | --------------------- |
+| Maze, 512 × 320       | WebGPU  | 0.129 → 0.140 (+ 9 %)  | 1.49 → 1.55 (+ 4 %)   |
+| Tokyo, 512 × 512      | WebGPU  | 0.363 → 0.404 (+ 11 %) | 2.56 → 2.58 (+ 1 %)   |
+| Cyclones, 1,024 × 640 | WebGPU  | 2.89 → 3.00 (+ 4 %)    | 16.80 → 17.03 (+ 1 %) |
+| Maze, 512 × 320       | WebGL2  | 0.347 → 0.366 (+ 6 %)  | 2.03 → 1.98 (− 2 %)   |
+| Tokyo, 512 × 512      | WebGL2  | 0.540 → 0.637 (+ 18 %) | 3.08 → 3.00 (− 3 %)   |
+| Cyclones, 1,024 × 640 | WebGL2  | 10.10 → 10.17 (+ 1 %)  | 24.79 → 26.30 (+ 6 %) |
+
+On WebGPU the pass costs 0.01 to 0.23 ms per step. On WebGL2 two rounds of the same case differ by up to 15 %.
+That is more than the pass costs in most cases, so the table does not resolve its cost there.
+
+### The time of a draw
+
+The layer of the slime on a canvas of 2,560 × 1,600 pixels, switch off against switch on in turns on the same
+state, medians of 21 batches of 50 draws. The scene Three strains (1,536 × 960 cells), glow style, milliseconds:
+
+| Cells per pixel | WebGPU               | WebGL2               |
+| --------------- | -------------------- | -------------------- |
+| 0.15            | 1.59 → 1.81 (+ 14 %) | 4.51 → 4.56 (+ 1 %)  |
+| 0.6 (fitted)    | 1.60 → 1.80 (+ 12 %) | 4.53 → 4.56 (+ 1 %)  |
+| 1.2             | 2.73 → 2.99 (+ 10 %) | 5.09 → 5.94 (+ 17 %) |
+| 1.8             | 3.60 → 3.91 (+ 9 %)  | 6.00 → 7.05 (+ 18 %) |
+| 2.4             | 2.32 → 2.96 (+ 27 %) | 5.17 → 6.43 (+ 24 %) |
+| 4.8             | 2.23 → 2.84 (+ 27 %) | 4.69 → 6.94 (+ 48 %) |
+
+The gel style and the Snail maze give the same picture: 0.01 to 0.9 ms more up to 1 cell per pixel, and up to
+2.5 ms more on WebGL2 at 4.8 cells per pixel. So the layer costs about a tenth of a draw on WebGPU in a view that
+fits the grid, and up to half of a draw on WebGL2 in a view that is zoomed far out (Open points).
+
+### The picture
+
+`tests/pictures/slime.spec.ts` makes the pictures again: the Snail maze after 22,000 steps with a life time of 144
+and of 6 hours in each style, a stroke of the Slime tool on plain ground, and the start scene. With 6 hours the
+ground that the colony left first is blank again, and the ground that it left later is paler than new slime. The
+layer shows in every style: clearly in the gel and paper styles, and faintly in the glow style.
+
+### Tests
+
+- **The stamps** (`slime.gpu.test.ts`, both backends against the CPU reference `slime-reference.ts`): the stamps
+  step by step under living agents, in each order of a step, in a dish, with the flow and with two strains; no
+  stamp with a life time of 0; a reset; the Jones model.
+- **The brush** (the same file, "the brush"): the Slime tool, an erase, a wall and Clear against the CPU reference,
+  at the edge of a brush, with strokes that are longer than a periodic grid, and with 6,400 strokes in one call.
+- **The picture** (the same file, "the picture"): the layer against the CPU reference `slimeLayer()`, also on the
+  copies of a periodic grid. With the layer off every pixel equals that of the shaders of before, in every style.
+  The scent view draws no layer. A draw changes no byte of the simulation.
+- **The engine** (`engine-env.test.ts`): the engine paints the slime again after a reset and after a switch of the
+  model, a link holds the strokes, and the fit of the grid counts the field.
+- **The time of the mark** (`flow.test.ts`, `flow.gpu.test.ts`): at 144 hours the passes get the share of ADR 0054
+  bit for bit, and at 18 hours starved ground recovers with eight times that share.
+- **Wrong rules**: SL1 to SL119. 31 are wrong forms of the stamps and of the time of the mark, 46 of the brush and
+  42 of the picture. Each fails at least one test. The list has 417 wrong rules.
+- **All tests at the head of the branch**: 791 unit tests with the research tests, 1,213 GPU tests on both backends
+  (7 more run on one backend only), and 84 tests of the built app.
+
+## Consequences
+
+- The extended model needs 4 B more per cell. A grid at the limit of the memory of a GPU gets a little smaller.
+- A step of the extended model runs one pass more, and a start of the app builds one pipeline more for it. The
+  layer of the slime builds two render pipelines more at the first frame that draws it.
+- A scene and a link can hold strokes of slime. A link with them keeps the version 4: an older build refuses the
+  kind of the stroke, as it refuses a later version.
+- A new link of the extended model holds the Slime life time. A link made before has none: it has no slime, and
+  its mark of starved ground keeps the time of ADR 0054.
+- The time of the mark of starved ground follows the setting. A scene that sets a shorter life time lets a colony
+  come back sooner to ground that it left.
+- The help of Flow in the tubes names the Slime life time for the time that starved ground stays closed.
+- The panel has one section more, and the toolbar one tool more (key 9).
+- The build prints the notice of Vite that its main chunk is larger than 500 kB: 504 kB, 494 kB before. The build
+  passes.
+
+## Open points
+
+- **No rule reads the slime.** The second pull request of stage 2 measures the Y-maze and builds the avoidance
+  (below).
+- **The mark of starved ground is a mark of each strain.** Briard et al. 2020 found no difference between the
+  ground of the own strain and of another one. A colony of one strain grows onto ground that another strain
+  starved on. Not measured, and not changed here.
+- **A draw that is zoomed far out is slow on WebGL2** with the layer: up to 2.5 ms more at 4.8 cells per pixel.
+  Two ways to make it cheaper are not built: 4 reads in place of 9 above 1 cell per pixel, or a coarse map of the
+  strength as the trail has one, which costs a texture and a pass.
+- **The pass of the stamps is a pass of its own.** The last pass of the diffusion could write the stamp, on WebGL2
+  into a second target. That saves the pass, and it ties the two rules together. Not tried.
+- **The main chunk of the build is above 500 kB.** A split by backend would load only the shaders of the backend
+  that runs. Not tried.
+- **Tests in the image of CI**: `slime.gpu.test.ts` and the e2e test of the Slime tool ran there (SwiftShader) and
+  pass. The other tests of this pull request ran on the M3 Pro only before the push; CI runs them all.
+- **The supplement of Briard et al. 2020** (S9, the three strains) is not read.
 
 ## What the second pull request must measure first
 
