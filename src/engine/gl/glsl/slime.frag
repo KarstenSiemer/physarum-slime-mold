@@ -14,7 +14,7 @@
 // of the plasm. Every other cell keeps its amount: this backend reads the amounts from one target and writes all of
 // them into the other, where slime.wgsl changes its buffer in place.
 //
-// PASS 2, into the target of the front field (R32UI, ADR 0059): the step, plus 1, at which the growth front reached
+// PASS 2, into the target of the front field (R32UI, ADR 0060): the step, plus 1, at which the growth front reached
 // the cell. It runs before PASS 0 too. A cell that holds plasm and had no slime before the step gets the stamp of the
 // step. The fragment of every other cell is discarded: a cell keeps its front stamp while it has slime.
 

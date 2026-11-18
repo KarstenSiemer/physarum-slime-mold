@@ -35,7 +35,7 @@ export const SLIME_FULL = 4095;
 export const SLIME_RIM = 4;
 
 /**
- * How fast the plasm hides the film of the slime below it (ADR 0059): a trail with the light x, its sum above the
+ * How fast the plasm hides the film of the slime below it (ADR 0060): a trail with the light x, its sum above the
  * black level times the exposure, hides the share 1 − e^(−FILM_HIDE · x) of the film in the glow, paper and agents
  * styles. In the gel style the film ends where the gel begins. `FILM_HIDE` in render.wgsl and render.frag.
  */
@@ -81,7 +81,7 @@ export const slimeShown = (s: Pick<Settings, 'showSlime' | 'showScent' | 'model'
   s.showSlime && !s.showScent && slimeSteps(s) > 0;
 
 /**
- * Whether the view draws young ground as the fan of a growth front (ADR 0059): the switch Show growth front is on,
+ * Whether the view draws young ground as the fan of a growth front (ADR 0060): the switch Show growth front is on,
  * the colony grows (growth is on, with its rule of one agent per cell: pack.ts growthOn()), the model has slime with
  * a life time above 0 (the front field is a part of the slime field), and the view is neither the scent view nor the
  * agents style, which draws the agents and not the plasm. A scene without growth has no growth front: its agents

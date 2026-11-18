@@ -71,7 +71,7 @@ vec4 trailAt(ivec2 c) {
 ivec2 levelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
 
 const float SHAPE_RANGE = 4.0; // cells; outline distances in `shape` are clamped to ± this (shape.frag)
-const int FRONT_LEVEL = 3;         // the map of the growth front has texels of 2^3 = 8 cells per side (ADR 0059)
+const int FRONT_LEVEL = 3;         // the map of the growth front has texels of 2^3 = 8 cells per side (ADR 0060)
 const float FRONT_STEPS = 1500.0;  // steps after the front in which the main vein appears: the fan ends there
 const float PRESENCE = 0.9;      // tone-curve input of an occupied food cell (render.frag presence())
 const float PRESENCE_RAMP = 1.5; // cells inside the food outline over which presence fades in

@@ -126,7 +126,7 @@ const AMOUNT_WGSL = 'src/engine/shaders/amount.wgsl';
 const AMOUNT_GLSL = 'src/engine/gl/glsl/amount.glsl';
 const [AMOUNT_GPU, AMOUNT_GL] = [`${SLIME} webgpu > the amount of slime`, `${SLIME} webgl2 > the amount of slime`];
 /**
- * The growth front (ADR 0059): the front field in the passes of the slime field and of its brush, the fan in the render
+ * The growth front (ADR 0060): the front field in the passes of the slime field and of its brush, the fan in the render
  * pass of each backend with its map, and the tests of the field on each backend and of the fan on both.
  */
 const FRONT_MAP_FRAG = 'src/engine/gl/glsl/front-map.frag';
@@ -4888,8 +4888,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'SL220 webgl2: the simulation goes on with the amounts of before the step',
     GL_SIM,
-    '      this.am = flip(this.am);\n      // The front field (ADR 0059) reads the stamps of before the step too.',
-    '      // The front field (ADR 0059) reads the stamps of before the step too.',
+    '      this.am = flip(this.am);\n      // The front field (ADR 0060) reads the stamps of before the step too.',
+    '      // The front field (ADR 0060) reads the stamps of before the step too.',
     AMOUNT_GL,
     SLIME_SPEC,
   ],

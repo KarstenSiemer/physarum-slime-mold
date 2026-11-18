@@ -116,7 +116,7 @@ describe('the record of the look of the electrodes (ADR 0058)', () => {
     expect(wall[1]?.split('|')[1]).toBe('0.98');
   }, 120_000);
 
-  // One grid when ADR 0058 was built. Since then the slime counts 11 B more per cell (ADR 0057, ADR 0059), and the fit
+  // One grid when ADR 0058 was built. Since then the slime counts 11 B more per cell (ADR 0057, ADR 0060), and the fit
   // stands at other limits.
   it('changes two grids of 2,916 cases with the 4 B per cell of the outlines of the poles', async () => {
     const lines = await fitReport();

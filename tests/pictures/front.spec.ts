@@ -1,4 +1,4 @@
-// The pictures of ADR 0059: the growth front in each style, from the app's own renderer. Not part of CI. It writes PNG
+// The pictures of ADR 0060: the growth front in each style, from the app's own renderer. Not part of CI. It writes PNG
 // files to test-results/pictures/, which git ignores:
 //
 //   npm run build && npx playwright test --project=pictures tests/pictures/front.spec.ts

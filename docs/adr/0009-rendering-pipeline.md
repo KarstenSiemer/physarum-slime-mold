@@ -5,7 +5,7 @@
   amended for the lattices of ADR 0026 and for the panels without a backdrop blur of ADR 0028; amended 2026-11-12
   after the second review of the glow and the mark, and for the line where food steers as hard as a strand holds)
 - Date: 2026-11-08
-- Extended by ADR 0059 (2026-11-17): the gel reads its height as a quadratic B-spline while the view is zoomed in, so
+- Extended by ADR 0060 (2026-11-17): the gel reads its height as a quadratic B-spline while the view is zoomed in, so
   that its edge has no tooth for each cell, and the sheet of the growth front adds to its height.
 
 ## Context

@@ -18,7 +18,7 @@
 // level of the plasm. So the slime gets thick where a tube stays, a tube that stays for 4,095 steps leaves the full
 // amount, and the slime is never thicker than the plasm was.
 //
-// The same pass keeps the front field (ADR 0059), for the picture and for measurements. `front` holds the step, plus
+// The same pass keeps the front field (ADR 0060), for the picture and for measurements. `front` holds the step, plus
 // 1, at which the growth front reached the cell: the step in which plasm came onto the cell while it had no slime. So
 // a cell keeps its front stamp while it has slime, with plasm or without, and plasm that comes back onto slime is no
 // front. The stamp of a cell without slime has no meaning: the pass writes it again when plasm comes.

@@ -216,7 +216,7 @@ describe('the outline distances of the electrodes', () => {
   });
 });
 
-// ADR 0055, decision 9, ADR 0057 and ADR 0059: per cell the slime field holds a stamp, an amount and a front stamp of
+// ADR 0055, decision 9, ADR 0057 and ADR 0060: per cell the slime field holds a stamp, an amount and a front stamp of
 // 4 B each, and the renderer holds the maps of the film, 2.5 B, and the map of the growth front, 16 B per texel of
 // 64 cells, on both backends: 14.75 B, counted as 15.
 describe('the slime field', () => {

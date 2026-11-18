@@ -120,8 +120,8 @@ strains (one `vec4` lane each).
 | slime (extended)   | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the stamp of the slime of each cell (ADR 0055)        |
 | slime amount       | storage `u32` per cell (WebGL2: `R16UI` × 2)     | 4 B × W × H      | how much slime each cell holds, the view only (0057)  |
 | film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
-| front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0059) |
-| map of the front   | `rgba32float` texture, texels of 8 × 8 cells     | 0.25 B × W × H   | renderer only: young plasm and its age (ADR 0059)     |
+| front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0060) |
+| map of the front   | `rgba32float` texture, texels of 8 × 8 cells     | 0.25 B × W × H   | renderer only: young plasm and its age (ADR 0060)     |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -185,7 +185,7 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
    section 6.9; ADR 0055): a cell that holds plasm after the diffusion gets the stamp of the step. WebGPU writes
    the stamp into a storage buffer. WebGL2 draws into a target of unsigned integers and discards the fragment of
    every other cell, so that cell keeps its stamp. The same pass on WebGPU, and a pass before it on WebGL2, writes
-   the front stamp of a cell that gets plasm on ground without slime (ADR 0059).
+   the front stamp of a cell that gets plasm on ground without slime (ADR 0060).
 7. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
    iterations, once per strain (ADR 0031). On WebGPU each texture of the flow has a layer per strain, and the agent and
    growth passes read the layer of the agent's strain from a `texture_2d_array`; on WebGL2 each strain has its own
@@ -350,7 +350,7 @@ the arrows.
     patterns repeat with a periodic grid. Detail that is smaller than a
     pixel fades out from 1 cell per pixel on and is gone at 1.5.
 
-  The plasm lies on the film (ADR 0059; `plasmCover`): the film does not show through a tube. In the gel style the
+  The plasm lies on the film (ADR 0060; `plasmCover`): the film does not show through a tube. In the gel style the
   film ends where the gel begins. In the glow, paper and agents styles the plasm hides the share 1 − e^(−3 x) of the
   film, with x the light of the plasm: its summed trail above the black level times the exposure.
 
@@ -359,7 +359,7 @@ the arrows.
   pass draws the pixels of before at the same cost: the code of the film is compiled in only for a frame that draws
   it. A CPU copy of the rules is in `src/engine/slime-reference.ts`.
 
-- Fan of the growth front (ADR 0059): while the model has slime and growth is on, the view draws young ground as the growth front of
+- Fan of the growth front (ADR 0060): while the model has slime and growth is on, the view draws young ground as the growth front of
   a plasmodium, with the switch Show growth front below Show slime, on at the start. The front is the plasm that comes
   onto ground without slime; the front stamp of a cell holds the step of that (model.md, section 6.9). The organism
   has a sheet at its front, then fine veins in a sheet that gets thinner, then one main vein
@@ -389,7 +389,7 @@ the arrows.
     are the constants `FRONT_…` of `render.wgsl` and `render.frag`; the 350 steps, the width of the sheet and the
     look of the veins are choices made on pictures.
 - The gel reads its height as a quadratic B-spline of the cells while the view shows a cell on a pixel or more
-  (`heightSmooth`, ADR 0059): four bilinear lookups in place of one. The line at which the gel ends has no tooth at
+  (`heightSmooth`, ADR 0060): four bilinear lookups in place of one. The line at which the gel ends has no tooth at
   the edge of a cell.
 - Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
   `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).

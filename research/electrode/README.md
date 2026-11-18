@@ -253,7 +253,7 @@ maze on WebGL2, a memory hint of 0.5 GB, a canvas of 1000 × 1000: 512 before, 2
 So Three strains goes from 1024 to 768 cells on the long side there and the Maze from 512 to 256, and every other
 case keeps its grid. When ADR 0058 was built, one other grid changed: Cyclones on WebGL2 without float blending, with
 a hint of 2 GB on a canvas of 390 × 844 pixels, went from 1024 to 768 cells. The slime counts 11 B more per cell
-since then (ADR 0057, ADR 0059), so the fit stands at other limits.
+since then (ADR 0057, ADR 0060), so the fit stands at other limits.
 
 **The tests.** The CPU copies in Node, then both backends against them in a headless browser:
 

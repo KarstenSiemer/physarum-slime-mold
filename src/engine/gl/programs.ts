@@ -173,7 +173,7 @@ export interface Programs {
   slime: () => Program;
   /** The pass of the amounts of slime (PASS 1 of slime.frag, ADR 0057), compiled at its first use. */
   slimeAmount: () => Program;
-  /** The pass of the front field (PASS 2 of slime.frag, ADR 0059), compiled at its first use. */
+  /** The pass of the front field (PASS 2 of slime.frag, ADR 0060), compiled at its first use. */
   slimeFront: () => Program;
   /**
    * The brush on the slime field (slime-paint.frag, ADR 0055, decision 7), compiled at its first use: a stroke of the
@@ -182,7 +182,7 @@ export interface Programs {
   slimeBrush: () => Program;
   /** The brush on the amounts of slime (PASS 1 of slime-paint.frag, ADR 0057), compiled at its first use. */
   slimeBrushAmount: () => Program;
-  /** The brush on the front field (PASS 2 of slime-paint.frag, ADR 0059), compiled at its first use. */
+  /** The brush on the front field (PASS 2 of slime-paint.frag, ADR 0060), compiled at its first use. */
   slimeBrushFront: () => Program;
   /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
@@ -226,7 +226,7 @@ export interface Programs {
    */
   slimed: () => SlimePrograms | undefined;
   /**
-   * The programs of the fan of the growth front (ADR 0059) once they are built, else undefined, as `slimed`. A scene
+   * The programs of the fan of the growth front (ADR 0060) once they are built, else undefined, as `slimed`. A scene
    * without growth never builds them.
    */
   fronted: () => FrontPrograms | undefined;
@@ -306,7 +306,7 @@ export interface SlimePrograms {
   down: Program;
 }
 
-/** The fan of the growth front (ADR 0059): the render pass with the fan and the film, and the pass of its map. */
+/** The fan of the growth front (ADR 0060): the render pass with the fan and the film, and the pass of its map. */
 export interface FrontPrograms {
   /** The render pass with the fan and the film (FRONT and SLIME in render.frag), without and with food, light, walls. */
   render: [Program, Program];

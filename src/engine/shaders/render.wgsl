@@ -7,7 +7,7 @@ override ENV: bool = true;
 override SCENT: bool = false;
 // The film of the slime (ADR 0055, decision 8; ADR 0057), compiled in only while a frame draws it (render.ts).
 override SLIME: bool = false;
-// The fan of the growth front (ADR 0059), compiled in only while a frame draws it, together with SLIME (render.ts).
+// The fan of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).
 override FRONT: bool = false;
 
 struct View {
@@ -347,7 +347,7 @@ fn thick(y: f32) -> f32 {
   return h / (1.0 + 0.25 * h);
 }
 
-// How thick the gel is at p + d with the sheet of the growth front on it (ADR 0059). `lift`: the sheet at p in units
+// How thick the gel is at p + d with the sheet of the growth front on it (ADR 0060). `lift`: the sheet at p in units
 // of the trail and its gradient per cell (scene()); the sheet beside p follows its slope at p. Without a sheet this is
 // thick() of the height.
 fn raised(p: vec2f, d: vec2f, lift: vec3f) -> f32 {
@@ -1012,7 +1012,7 @@ fn slimed(bg: vec3f, p: vec2f) -> vec3f {
 }
 
 
-// ---- The growth front (ADR 0059) --------------------------------------------------------------------------------
+// ---- The growth front (ADR 0060) --------------------------------------------------------------------------------
 // Display only. The front field holds the step at which plasm first came onto each cell (slime.wgsl `front`). The
 // picture draws young ground as the fan of a plasmodium: a sheet at the front, then fine veins in a sheet that gets
 // thinner, then the tubes of the model alone.
@@ -1245,7 +1245,7 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   }
   // The sheet of the growth front at p in units of the trail, and its gradient per cell: none without the front.
   var lift = vec3f(0.0);
-  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
+  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
   if (FRONT && (V.slime.z & 2u) != 0u && V.style != 3u) {
     let under = plasmCover(v);

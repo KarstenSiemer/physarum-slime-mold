@@ -1,4 +1,4 @@
-// The growth front on both backends (ADR 0059), in Chromium with real GPU APIs (ADR 0010): the front field against
+// The growth front on both backends (ADR 0060), in Chromium with real GPU APIs (ADR 0010): the front field against
 // the CPU reference, and the fan of the front in the picture. The picture has no CPU reference: the two backends must
 // draw the same pixels, and the fan must be where the rules say (slime.gpu.test.ts has the frames without it).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

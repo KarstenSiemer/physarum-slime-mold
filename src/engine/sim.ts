@@ -229,7 +229,7 @@ export class Simulation implements Sim {
    */
   private amount?: GPUBuffer | undefined;
   /**
-   * The front field (ADR 0059; slime.wgsl `front`), 4 B per cell: the step, plus 1, at which the growth front reached
+   * The front field (ADR 0060; slime.wgsl `front`), 4 B per cell: the step, plus 1, at which the growth front reached
    * the cell. It has a meaning only while the cell has slime. Made and freed with the stamps, and counted with them.
    */
   private front?: GPUBuffer | undefined;
@@ -996,7 +996,7 @@ export class Simulation implements Sim {
   }
 
   /**
-   * For the renderer: the front field (ADR 0059), which the picture reads for the sheet of the growth front, or
+   * For the renderer: the front field (ADR 0060), which the picture reads for the sheet of the growth front, or
    * undefined while the simulation holds no slime field.
    */
   get slimeFront(): GPUBuffer | undefined {
@@ -1036,7 +1036,7 @@ export class Simulation implements Sim {
   }
 
   /**
-   * For tests and measurements: the front stamp of every cell as the field holds it (ADR 0059), one value per cell,
+   * For tests and measurements: the front stamp of every cell as the field holds it (ADR 0060), one value per cell,
    * rows from y = 0. It has a meaning only in a cell that has slime. Only zeros in the Jones model.
    */
   async readSlimeFront(): Promise<Uint32Array> {

@@ -303,7 +303,7 @@ model reads the field yet, so it changes no run (ADR 0055, decision 1). Only the
   that only passes leaves little slime, and a tube that stays leaves much. No source gives the rate at which a
   plasmodium builds its slime: the 4,095 steps are a choice of this app, made on pictures (ADR 0057).
 
-- **The front stamp** F of a cell (ADR 0059) is a third whole number, for the picture and for measurements: the
+- **The front stamp** F of a cell (ADR 0060) is a third whole number, for the picture and for measurements: the
   step, plus 1, at which the growth front reached the cell. In step k a cell that holds plasm and has no slime before
   the step (S = 0, or k + 1 − S ≥ L) gets F ← k + 1. Every other cell keeps its F. So the growth front is the plasm
   that comes onto ground without slime. A cell keeps its front stamp while it has slime, with plasm or without it, and
@@ -683,7 +683,7 @@ the view and the playback, not the model. `showTubes` draws the picture of the t
 and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
 `showSlime` draws the slime field as a wet film on the ground; its rule is in the same section, and in ADR 0057.
 `showFront` draws young ground as the fan of a growth front while growth is on, from the front stamps of section
-6.9; its rule is in the same section of design.md, and in ADR 0059.
+6.9; its rule is in the same section of design.md, and in ADR 0060.
 
 ## 12. The two backends
 

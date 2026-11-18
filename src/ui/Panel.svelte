@@ -546,7 +546,7 @@
         {#if slimeHelpOpen}
           <p class="helptext" id="slime-help">{slimeViewHelp.help}</p>
         {/if}
-        <!-- The fan of the growth front changes the view only (ADR 0059). The front field is a part of the slime. -->
+        <!-- The fan of the growth front changes the view only (ADR 0060). The front field is a part of the slime. -->
         {#if s.growth && s.collisions}
           <div class="check">
             <label>

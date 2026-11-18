@@ -165,7 +165,7 @@ struct Flake {
 const float GEL_CLEAR = 0.6; // how much of a flake of food shows through the gel style's trail
 const float GEL_HIGH = 4.0;  // cells of height for one unit of the gel's thickness
 
-// How thick the gel is at p + d with the sheet of the growth front on it (see raised in render.wgsl; ADR 0059).
+// How thick the gel is at p + d with the sheet of the growth front on it (see raised in render.wgsl; ADR 0060).
 // `lift`: the sheet at p in units of the trail and its gradient per cell.
 float raised(vec2 p, vec2 d, vec3 lift) {
   return thick(max(heightFiltered(p + d), 0.0) + max(lift.x + dot(lift.yz, d), 0.0) * V.exposure);
@@ -690,7 +690,7 @@ vec3 slimed(vec3 bg, vec2 p) {
 const float FILM_HIDE = 3.0; // how fast the plasm hides the film below it, per unit of its light (plasmCover)
 
 #ifdef FRONT
-// ---- The growth front (see render.wgsl, ADR 0059) ----
+// ---- The growth front (see render.wgsl, ADR 0060) ----
 // Display only. The picture draws young ground as the fan of a plasmodium: a sheet at the front, then fine veins in a
 // sheet that gets thinner, then the tubes of the model alone. front-map.frag writes a coarse map of the plasm and the
 // age of the ground; this pass reads the 3 × 3 texels around a pixel as a smooth surface.
@@ -1083,7 +1083,7 @@ vec3 scene(vec2 p, vec2 s) {
   // The sheet of the growth front at p in units of the trail, and its gradient per cell: none without the front.
   vec3 lift = vec3(0.0);
 #ifdef FRONT
-  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
+  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
   if ((V.slime.z & 2u) != 0u && V.style != 3u) {
     float under = plasmCover(v);

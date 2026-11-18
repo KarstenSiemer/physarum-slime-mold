@@ -14,7 +14,7 @@
 // is left of its amount where that is more: `old` holds the amounts of the cells of the segment as they were, and
 // `stamps` their stamps. An erase and a wall clear the amount.
 //
-// PASS 2, into the target of the front field (R32UI, ADR 0059), before PASS 0 of the same segment. No front reached
+// PASS 2, into the target of the front field (R32UI, ADR 0060), before PASS 0 of the same segment. No front reached
 // painted slime: a stroke of the Slime tool clears the front stamp of each open cell of its footprint that had no
 // slime (`stamps`: the stamps before the segment). Every other fragment is discarded.
 

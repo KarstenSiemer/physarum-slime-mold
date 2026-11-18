@@ -285,7 +285,7 @@ function styleReference(
     });
   /**
    * The trail at (px, py) as a quadratic B-spline of the 3 × 3 cells around it (heightSmooth() in render.wgsl, ADR
-   * 0059): the height of the gel while a cell is a pixel wide or more.
+   * 0060): the height of the gel while a cell is a pixel wide or more.
    */
   const smooth = (px: number, py: number) => {
     const [cx, cy] = [Math.floor(px), Math.floor(py)];

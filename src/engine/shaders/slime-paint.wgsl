@@ -56,7 +56,7 @@ fn paintSlime(@builtin(global_invocation_id) gid: vec3u) {
     case 6u: {
       if (inArena(q) && !isWall(env[c])) {
         amount[c] = max(amountLeft(amount[c], slime[c]), paintedAmount(d));
-        // No front reached painted slime (ADR 0059): a cell that had no slime loses its front stamp.
+        // No front reached painted slime (ADR 0060): a cell that had no slime loses its front stamp.
         if (!hasSlime(slime[c])) { front[c] = 0u; }
         slime[c] = P.grid.w + 1u;
       }

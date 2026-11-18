@@ -243,7 +243,7 @@ high where a tube stayed, and the picture draws a wet film that keeps the shape 
 organism leaves the coat of slime of a tube behind in the same way. An amount that grows fast is
 flat, as the stamp is: with a sum that is full after 500 steps, 96.5 % of the cells with slime
 are above 0.9 after 22,000 steps of the Snail maze. With the rule, 16.4 % are. No run changes.
-**The growth front in the picture** ([ADR 0059](../../docs/adr/0059-the-growth-front-in-the-picture.md),
+**The growth front in the picture** ([ADR 0060](../../docs/adr/0060-the-growth-front-in-the-picture.md),
 part 22). A real slime mold has a sheet at its front, then fine veins, then one tube. The model
 grows arms of full plasm with blunt ends, so its picture had none of that. The slime field now
 holds a front stamp per cell: the step at which plasm came onto ground without slime. Plasm that
@@ -2181,7 +2181,7 @@ fails at least one test. ADR 0057 has the tables. The records are in `logs/engin
 | `mutations-stamps-brush.txt`, `-picture-*.txt`   | the wrong rules SL1 to SL77 and SL78 to SL179                         |
 | `mutations-amount.txt`                           | the wrong rules SL180 to SL222                                        |
 
-### 22. Does the picture show the growth front, and does a run change? [ADR 0059]
+### 22. Does the picture show the growth front, and does a run change? [ADR 0060]
 
 The slime field holds a front stamp per cell, and the picture draws young ground as a sheet and
 fine veins. This part has no measurement of the model: no rule reads the front stamp.
@@ -2207,7 +2207,7 @@ npx vitest run --project gpu src/engine/slime.gpu.test.ts
 ```
 
 **In the image of CI.** The first run of CI failed in `front.gpu.test.ts`: SwiftShader, the GPU
-of CI, drew a black tube where the M3 Pro drew a normal picture (ADR 0059, Results). To run the
+of CI, drew a black tube where the M3 Pro drew a normal picture (ADR 0060, Results). To run the
 file as CI does, copy the commit into an empty folder with `git archive HEAD | tar -x -C <folder>`
 and run it there in the image that `.github/workflows/ci.yml` pins (1 minute after `npm ci`):
 
@@ -2242,7 +2242,7 @@ names `g59-bench-front-r1` and `-r2` here and `g59-bench-main-r1` and `-r2` in a
 Result: no scene changes a byte. Each of the 31 wrong rules fails at least one test. Two rounds do
 not resolve the cost of the front stamp in a step: the means of the medians differ by −0.2 to
 +0.02 ms on WebGPU and by −0.1 to +0.4 ms on WebGL2, and two rounds of one case differ by as
-much. Not measured: the time of a draw with the fan. ADR 0059 has the rest. The records are in
+much. Not measured: the time of a draw with the fan. ADR 0060 has the rest. The records are in
 `logs/engine/front/`:
 
 | Record                                      | Runs                                                                 |
@@ -2288,7 +2288,7 @@ asks for the new digest.
 | `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
 | `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
 | `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
-| `logs/engine/front/`                                 | the runs of part 22 (ADR 0059): the digests of every scene, and the wrong rules of the growth front                                                                                                                             |
+| `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, and the wrong rules of the growth front                                                                                                                             |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

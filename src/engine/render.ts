@@ -70,7 +70,7 @@ const TRAIL_FORMAT: GPUTextureFormat = 'rgba32float';
 /** The map of the film of the slime and its coarse map (ADR 0057): one thickness per texel, 2 B. */
 const FILM_FORMAT: GPUTextureFormat = 'r16float';
 /**
- * The map of the growth front (ADR 0059): the plasm of a texel, that times the age of its ground, its strain. 32-bit
+ * The map of the growth front (ADR 0060): the plasm of a texel, that times the age of its ground, its strain. 32-bit
  * floats, as the trail has: a strong trail is above the largest 16-bit float, and the map then held no number.
  */
 const FRONT_FORMAT: GPUTextureFormat = 'rgba32float';
@@ -148,7 +148,7 @@ export function packView(
   // the pass takes the age of a stamp as the passes of the simulation do. Then the numbers of the style: the colour
   // and the share of its body, its highlight, its wide light, the height of its relief and of its beads. A frame
   // without the film reads none of them.
-  // What the frame draws of the slime field: 1 the film of the slime, 2 the fan of the growth front (ADR 0059).
+  // What the frame draws of the slime field: 1 the film of the slime, 2 the fan of the growth front (ADR 0060).
   const parts = (slimeShown(settings) ? 1 : 0) | (frontShown(settings) ? 2 : 0);
   u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), parts, 0], 56);
   const look = SLIME_LOOK[settings.style];
@@ -206,7 +206,7 @@ interface SlimePipelines {
 }
 
 /**
- * The fan of the growth front (ADR 0059): the render pass with the fan and the film (`FRONT` and `SLIME`), and the
+ * The fan of the growth front (ADR 0060): the render pass with the fan and the film (`FRONT` and `SLIME`), and the
  * pass of the map of the front. A frame without the fan runs the pipelines without its code.
  */
 interface FrontPipelines {
@@ -271,7 +271,7 @@ export class Renderer {
   private slime: SlimePipelines | undefined;
   private slimeBuild: Promise<SlimePipelines> | undefined;
   /**
-   * The passes of the fan of the growth front (FRONT in render.wgsl, ADR 0059), built without blocking from the first
+   * The passes of the fan of the growth front (FRONT in render.wgsl, ADR 0060), built without blocking from the first
    * frame that draws the fan (frontNow()): a scene without growth never does.
    */
   private fanPasses: FrontPipelines | undefined;
@@ -487,7 +487,7 @@ export class Renderer {
     const [stamps, amounts, fronts] = [sim.slimeField, sim.slimeAmount, sim.slimeFront];
     const held = this.fixed === undefined && stamps !== undefined && amounts !== undefined;
     const filmy = held && slimeShown(f.settings);
-    // The fan of the growth front (ADR 0059) has pipelines of its own, with the code of the film in them: a frame
+    // The fan of the growth front (ADR 0060) has pipelines of its own, with the code of the film in them: a frame
     // without the fan pays nothing for it. With the film it waits for the passes of the maps of the film.
     const fanned = held && fronts !== undefined && frontShown(f.settings);
     const wet = filmy ? this.slimeNow() : undefined;
@@ -566,7 +566,7 @@ export class Renderer {
           // The maps of the film of the slime (ADR 0057). A frame without the film reads none of them.
           { binding: 15, resource: this.film?.view ?? this.noCoarse.createView() },
           { binding: 17, resource: this.filmCoarse?.view ?? this.noCoarse.createView() },
-          // The map of the growth front (ADR 0059).
+          // The map of the growth front (ADR 0060).
           { binding: 20, resource: this.fan?.view ?? this.noCoarse.createView() },
         ],
       });

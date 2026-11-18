@@ -554,7 +554,7 @@ export interface Settings extends Record<GlobalKey, number> {
   showSlime: boolean;
   /**
    * The view draws young ground as the fan of a growth front: a sheet at the front, then fine veins, then the tubes
-   * alone, while the model has slime (frontViewHelp, ADR 0059). Display only.
+   * alone, while the model has slime (frontViewHelp, ADR 0060). Display only.
    */
   showFront: boolean;
   strains: Strain[];
@@ -724,7 +724,7 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // So with the film of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the film
   // is on. It changes no result.
   out.showSlime = raw.showSlime !== false;
-  // So with the fan of the growth front (ADR 0059): on without a switch in the link. It changes no result.
+  // So with the fan of the growth front (ADR 0060): on without a switch in the link. It changes no result.
   out.showFront = raw.showFront !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the

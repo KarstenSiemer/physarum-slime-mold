@@ -5,7 +5,7 @@
 - Date: 2026-11-17
 - Changes [ADR 0055](0055-the-slime-field.md), decision 8 (the picture of the slime) and decision 9 (its memory).
   The stamp of ADR 0055, its life time and its brush stay.
-- Extended by [ADR 0059](0059-the-growth-front-in-the-picture.md) (2026-11-17): the plasm hides the film below it
+- Extended by [ADR 0060](0060-the-growth-front-in-the-picture.md) (2026-11-17): the plasm hides the film below it
   (decision 9 here said that the trail lies on the film), and the edge of the gel has no teeth (an open point here).
 - In short: the rule of the amount is in `docs/model.md`, section 6.9, and the rule of the picture in
   `docs/design.md`, section 5. [`research/flow/README.md`](../../research/flow/README.md), part 21, has the commands

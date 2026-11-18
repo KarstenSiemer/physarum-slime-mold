@@ -1,4 +1,4 @@
-// The map of the growth front (see frontMap in ../../shaders/render.wgsl; ADR 0059), one texel per fragment: texels
+// The map of the growth front (see frontMap in ../../shaders/render.wgsl; ADR 0060), one texel per fragment: texels
 // of 2^FRONT_LEVEL cells per side. (the mean of the summed trail over the cells of the texel; that mean times the age
 // of the ground, 0 at the front to 1 at FRONT_STEPS; the strain with the most trail; 1). The age of the ground of a
 // texel is the age of its oldest front stamp among the cells with slime: the step at which the front first reached

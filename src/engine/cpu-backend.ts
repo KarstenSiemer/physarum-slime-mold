@@ -27,7 +27,7 @@ export class CpuSim implements Sim {
   slime: Uint32Array | undefined;
   /** The amount of slime of every cell (ADR 0057), held with the stamps. */
   amount: Uint32Array | undefined;
-  /** The front stamp of every cell (ADR 0059), held with the stamps. */
+  /** The front stamp of every cell (ADR 0060), held with the stamps. */
   front: Uint32Array | undefined;
 
   constructor(

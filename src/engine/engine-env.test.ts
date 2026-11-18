@@ -222,7 +222,7 @@ describe('food, light and walls on a new simulation', () => {
 
   // ADR 0031: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
   it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
-    // 1305 B per cell, 15 for the slime field and its picture (ADR 0055, ADR 0057, ADR 0059) and 80 for the flow of
+    // 1305 B per cell, 15 for the slime field and its picture (ADR 0055, ADR 0057, ADR 0060) and 80 for the flow of
     // one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
     const backend = new CpuBackend();
     backend.bytesPerCell = 1305;
@@ -1689,7 +1689,7 @@ describe('the memory fit of the view', () => {
   });
 });
 
-// ADR 0055, decision 9, ADR 0057 and ADR 0059: the slime field and its picture hold 15 B per cell on both backends. The fit of
+// ADR 0055, decision 9, ADR 0057 and ADR 0060: the slime field and its picture hold 15 B per cell on both backends. The fit of
 // the grid counts them in the extended model, with a Slime life time above 0 and with 0, so that the setting changes
 // no grid.
 describe('the memory fit of the slime field', () => {

@@ -1,4 +1,4 @@
-# 0059: The picture shows the growth front: a sheet, fine veins, then the tube
+# 0060: The picture shows the growth front: a sheet, fine veins, then the tube
 
 - Status: accepted. Decisions 8 and 9 are requests of the owner of 2026-11-17. The look of decision 4 waits for the
   owner's word on pictures of two looks (sent 2026-11-17). The other decisions are of an agent under the owner's

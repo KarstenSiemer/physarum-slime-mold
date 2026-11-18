@@ -19,7 +19,7 @@ fn amountLeft(a: u32, held: u32) -> u32 {
 }
 
 // Whether a cell that holds the stamp `held` has slime before the step or the stroke that comes: it has a stamp, and
-// the age of the stamp is below the life time. The front field reads this (ADR 0059, slime.wgsl).
+// the age of the stamp is below the life time. The front field reads this (ADR 0060, slime.wgsl).
 fn hasSlime(held: u32) -> bool {
   return held != 0u && P.grid.w + 1u - held < P.slime.x;
 }

@@ -11,7 +11,7 @@
 - Extended by [ADR 0057](0057-the-film-of-the-slime.md) (2026-11-17): the picture of the slime (decision 8) is a wet
   film that is thick where a tube stayed, from an amount of slime per cell, and the slime counts 11 B per cell
   (decision 9).
-- Extended by [ADR 0059](0059-the-growth-front-in-the-picture.md) (2026-11-17): the field holds a front stamp per
+- Extended by [ADR 0060](0060-the-growth-front-in-the-picture.md) (2026-11-17): the field holds a front stamp per
   cell, the step at which plasm came onto ground without slime, and the picture draws the growth front from it.
 - In short: the facts are in
   [`docs/knowledge-base/slime-mazes-and-the-front.md`](../knowledge-base/slime-mazes-and-the-front.md), "Slime", and

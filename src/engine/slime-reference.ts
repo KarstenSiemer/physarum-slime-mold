@@ -118,7 +118,7 @@ export function amountStep(
 }
 
 /**
- * The front field after step `step` (ADR 0059; the pass of the stamps, shaders/slime.wgsl): the step, plus 1, at
+ * The front field after step `step` (ADR 0060; the pass of the stamps, shaders/slime.wgsl): the step, plus 1, at
  * which the growth front reached each cell. `stamps` and `fronts`: what the fields hold before the step. `trail`: the
  * trail after the diffusion of the step. A cell that holds plasm and has no slime before the step gets the front
  * stamp of the step: the front reaches ground without slime. Every other cell keeps what it holds, so a cell keeps
@@ -184,7 +184,7 @@ export function slimeStrength(held: number, step: number, life: number): number 
  * `slime` (optional): the amount of slime of every cell (ADR 0057), which the stroke changes with the stamps, and the
  * life time in steps. The Slime tool gives a cell the larger of what is left of its amount (amountLeft()) and the
  * amount of the stroke at the cell (paintedAmount()). An erase and a wall clear the amount. With `fronts`, the front
- * field (ADR 0059): no front reached painted slime, so the Slime tool clears the front stamp of a cell that had no
+ * field (ADR 0060): no front reached painted slime, so the Slime tool clears the front stamp of a cell that had no
  * slime. An erase and a wall leave the front stamps: they have no meaning in a cell without slime.
  */
 export function slimePaint(

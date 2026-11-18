@@ -116,8 +116,8 @@ function cutSpan(source: string, start: string, end: string) {
   return source.slice(0, a) + source.slice(b);
 }
 
-/** The lines of `scene` in render.wgsl that add the sheet of the growth front to the trail (ADR 0059). */
-const WGSL_FAN = `  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
+/** The lines of `scene` in render.wgsl that add the sheet of the growth front to the trail (ADR 0060). */
+const WGSL_FAN = `  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
   if (FRONT && (V.slime.z & 2u) != 0u && V.style != 3u) {
     let under = plasmCover(v);
@@ -142,7 +142,7 @@ const WGSL_FILM = `  // The film of the slime lies on the ground, and the plasm 
 `;
 /** The same lines of `scene` in render.frag. */
 const GLSL_FAN = `#ifdef FRONT
-  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
+  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
   if ((V.slime.z & 2u) != 0u && V.style != 3u) {
     float under = plasmCover(v);
@@ -181,7 +181,7 @@ const GLSL_FILM = `#ifdef SLIME
  * program with them holds the same text in another place: both draw the pixels of that commit. view.glsl differs
  * from that commit only by the three fields of the slime at the end of its block, which no code of that commit reads.
  *
- * Since ADR 0059 the texts also hold no line of the fan of the growth front, and they differ from that commit in three
+ * Since ADR 0060 the texts also hold no line of the fan of the growth front, and they differ from that commit in three
  * more ways. The gel reads its height as a smooth spline (heightSmooth), which changes its picture. The gel takes the
  * sheet of the growth front, which is none here: thick(max(y, 0) + 0) is thick(y). And `scene` reads the food before
  * the ground, in another order of the same lines.
@@ -215,7 +215,7 @@ const WITHOUT_SLIME = {
         '// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake) -> vec3f {\n  let bg = V.background.rgb;\n',
       ],
       [
-        '// The fan of the growth front (ADR 0059), compiled in only while a frame draws it, together with SLIME (render.ts).\noverride FRONT: bool = false;\n',
+        '// The fan of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).\noverride FRONT: bool = false;\n',
         '',
       ],
       [WGSL_FAN, ''],
@@ -2371,7 +2371,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         const pole = both(54, 12);
         expect(off(pole.plain, bytes(bg)), 'electrode').toBeGreaterThan(40);
         expect(off(pole.on, pole.plain), 'electrode').toBeLessThanOrEqual(TWO);
-        // The trail lies on the film (ADR 0059): the plasm hides the film below it, by the share 1 − e^(−3 x) for the
+        // The trail lies on the film (ADR 0060): the plasm hides the film below it, by the share 1 − e^(−3 x) for the
         // light x of the plasm, 0.5 here. On the ground that is left, glow adds light to what the ground leaves dark,
         // and the ink of paper takes a share of the ground away.
         const thin = both(26, 37);
@@ -2489,7 +2489,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       );
       expect(slimed.length).toBeGreaterThan(cases.length / 3);
       // Both runs dither alike, so every difference is one of the picture. The plasm hides the film below it (ADR
-      // 0059): a close view below a strong trail shows little of the film, 1 of 255 in 8 of the 84 frames.
+      // 0060): a close view below a strong trail shows little of the film, 1 of 255 in 8 of the 84 frames.
       expect(slimed.filter(([, d]) => d < 1)).toEqual([]);
       expect(slimed.filter(([, d]) => d < 2).length).toBeLessThan(slimed.length / 5);
       const jonesFrames = cases.flatMap((c, i) => (c.settings.model === 'jones' ? [differs[i] ?? 0] : []));
@@ -2642,7 +2642,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         await ready();
       }
       // The render pass with the film and the pass of its map, each without and with food, light and walls, and the
-      // pass of its coarse map. The fan of the growth front has pipelines of its own (ADR 0059), which a scene
+      // pass of its coarse map. The fan of the growth front has pipelines of its own (ADR 0060), which a scene
       // without growth never builds.
       expect(first).toBe(5);
       expect(builds.mock.calls.length).toBe(first);

@@ -76,7 +76,7 @@ export class WebGl2Backend implements Backend<GlSim> {
   private film: Target | undefined;
   /** What the map of the film holds: it is filled again only when one of these changed. */
   private filmHolds: FilmState | undefined;
-  /** The map of the growth front (front-map.frag, ADR 0059), and what it holds. */
+  /** The map of the growth front (front-map.frag, ADR 0060), and what it holds. */
   private fan: Target | undefined;
   private fanHolds: { sim: GlSim; stamps: WebGLTexture; step: number; revision: number; life: number } | undefined;
   /** The coarse map of the film (slime-down.frag) for a view zoomed out: half the grid's sides, rounded up. */
@@ -365,7 +365,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     const amounts = stamps ? sim.slimeAmountTexture : undefined;
     const fronts = stamps && fanned ? sim.slimeFrontTexture : undefined;
     const wet = stamps && amounts && filmy ? this.prog.slimed() : undefined;
-    // The fan of the growth front (ADR 0059) has programs of its own, with the code of the film in them: a frame
+    // The fan of the growth front (ADR 0060) has programs of its own, with the code of the film in them: a frame
     // without the fan pays nothing for it. With the film it waits for the programs of the maps of the film.
     const fanReady = stamps && amounts && fronts ? this.prog.fronted() : undefined;
     const grown = fanReady && (!filmy || wet) ? fanReady : undefined;
@@ -461,7 +461,7 @@ export class WebGl2Backend implements Backend<GlSim> {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
     }
-    // The map of the growth front (front-map.frag, ADR 0059), filled once for each state that a frame draws.
+    // The map of the growth front (front-map.frag, ADR 0060), filled once for each state that a frame draws.
     const fan = grown && fronts ? this.fanFor(sim) : undefined;
     if (grown && fan && stamps && fronts) {
       const now = { sim, stamps, step: sim.step, revision: sim.revision, life: slimeSteps(s) };

@@ -320,7 +320,7 @@ export class GlSim implements Sim {
    */
   private amount: [Target, Target] | undefined;
   /**
-   * The front field (ADR 0059; PASS 2 of slime.frag; `front` in ../sim.ts): the step, plus 1, at which the growth
+   * The front field (ADR 0060; PASS 2 of slime.frag; `front` in ../sim.ts): the step, plus 1, at which the growth
    * front reached each cell, in a target of unsigned integers, 4 B per cell. Made and freed with the stamps.
    */
   private front: Target | undefined;
@@ -866,7 +866,7 @@ export class GlSim implements Sim {
   }
 
   /**
-   * For the renderer: the texture of the front field (ADR 0059), which the picture reads for the sheet of the growth
+   * For the renderer: the texture of the front field (ADR 0060), which the picture reads for the sheet of the growth
    * front, or undefined while the simulation holds no slime field (`slimeFront` in ../sim.ts).
    */
   get slimeFrontTexture(): WebGLTexture | undefined {
@@ -894,7 +894,7 @@ export class GlSim implements Sim {
     return Promise.resolve(readUintTarget(this.gl, this.slime));
   }
 
-  /** For tests and measurements: the front stamp of every cell (ADR 0059; ../sim.ts readSlimeFront()). */
+  /** For tests and measurements: the front stamp of every cell (ADR 0060; ../sim.ts readSlimeFront()). */
   readSlimeFront(): Promise<Uint32Array> {
     if (!this.front) return Promise.resolve(new Uint32Array(this.width * this.height));
     return Promise.resolve(readUintTarget(this.gl, this.front));
@@ -1277,7 +1277,7 @@ export class GlSim implements Sim {
         // the free target. Then the stamps (PASS 0).
         const passes: [Program, Target, Record<string, WebGLTexture>][] = [
           [this.prog.slimeBrushAmount(), now, { stamps: field.stamps.texture, old: free.texture }],
-          // The front field (PASS 2, ADR 0059) reads the stamps of before the segment too.
+          // The front field (PASS 2, ADR 0060) reads the stamps of before the segment too.
           [this.prog.slimeBrushFront(), field.fronts, { stamps: field.stamps.texture }],
           [this.prog.slimeBrush(), field.stamps, {}],
         ];
@@ -1733,7 +1733,7 @@ export class GlSim implements Sim {
       const held = { trail, stamps: stamps.texture, amounts: amounts[this.am].texture };
       this.pass(this.prog.slimeAmount(), amounts[flip(this.am)], held, {});
       this.am = flip(this.am);
-      // The front field (ADR 0059) reads the stamps of before the step too.
+      // The front field (ADR 0060) reads the stamps of before the step too.
       this.pass(this.prog.slimeFront(), fronts, { trail, stamps: stamps.texture }, {});
       this.pass(this.prog.slime(), stamps, { trail }, {});
     }

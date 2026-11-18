@@ -174,7 +174,7 @@ export interface Sim {
    */
   readSlimeAmount(): Promise<Uint32Array>;
   /**
-   * For tests and measurements: the front stamp of every cell (ADR 0059), one value per cell, rows from y = 0: the
+   * For tests and measurements: the front stamp of every cell (ADR 0060), one value per cell, rows from y = 0: the
    * step, plus 1, at which the growth front reached the cell, which is the step in which plasm came onto the cell
    * while it had no slime. It has a meaning only in a cell that has slime; 0 there is slime that no front reached
    * (painted slime). Only zeros in the Jones model, which has no slime.
