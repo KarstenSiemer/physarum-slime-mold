@@ -57,7 +57,9 @@ tests) 13.9 min. The five tests of `tubes.spec.ts` took 8.6 to 9.1 min on GitHub
 | 5      | 17 others; 17 others; 7 others, 5 of `tubes` and 5 of `ui`; 17 of `ui`; 16 of `ui` | 7, 7, 15, 10, 9                    |
 
 - The linters of the workflows pass (`actionlint`, `zizmor`, `check-github-workflows` of the commit hooks).
-- Not measured before the pull request: the times of four shards on GitHub. The run of the pull request shows them.
+- On GitHub the four shards of the pull request took 12.8, 8.1, 10.6 and 11.3 min with the start (run 44333749052), and
+  every test passed. The first shard took 5 min more than the estimate and the third 6 min less: one run, and the
+  runners differ. The longest shard took less than half of its limit.
 
 ## Consequences
 
