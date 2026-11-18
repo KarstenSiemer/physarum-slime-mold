@@ -1,10 +1,10 @@
-# 0061: The e2e tests run in four shards
+# 0061: The tests of CI run in eight jobs: four e2e shards and four GPU parts
 
 - Status: proposed. It changes `.github/workflows/ci.yml`, which needs the owner's review (ADR 0014). Decision of an
   agent under the owner's delegation of 2026-11-12.
 - Date: 2026-11-18
-- Extends [ADR 0014](0014-ci-hardening.md), which made two shards, and
-  [ADR 0049](0049-build-the-diffusion-and-outline-passes-at-their-first-use.md), which balanced them.
+- Extends [ADR 0014](0014-ci-hardening.md), which made two e2e shards and two GPU parts, and
+  [ADR 0049](0049-build-the-diffusion-and-outline-passes-at-their-first-use.md), which balanced the shards.
 
 ## Context
 
@@ -20,6 +20,13 @@
   attempts (runs 44196494552, 44247952871 and 44257790978; in the last one a test of the branch failed too).
 - ADR 0049 moved a file from one shard to the other. It said that the split tips again with new tests, and that
   more shards leave more room.
+- The two GPU jobs have the same limit and are as close to it. In the same five runs of `main` the WebGPU part took
+  20.5 to 28.5 min and the other part 13.6 to 28.7 min. At one commit of PR #108 the WebGPU part was cancelled at
+  30 min with every test passed until then (run 44337465044). In the same hour that part took 23.7 min with the code
+  of `main` (run 44337639190 of this pull request).
+- In CI the files of the GPU project run one after the other (`fileParallelism` in `vitest.config.ts`). One file,
+  `src/engine/sim.gpu.test.ts`, takes 44 % of the time of all of them: 582 of 1,334 s in the image of CI, with the
+  code of PR #108 on 2026-11-18.
 - Playwright shares the tests out by their count, in the order of the files. The five tests of `tubes.spec.ts` run
   many steps: about 3 min in the image and about 9 min on GitHub. No split makes a shard shorter than that.
 
@@ -36,10 +43,15 @@
 
 ## Decision
 
-Option 5: four shards. The longest shard takes a little more than half of its limit, so a slow runner and the tests
-of the next weeks fit. A fifth shard gains 2 min. The limit stays 30 min. The workflow takes the number of the shards
-from its matrix (`strategy.job-total`), so the list `shard` is the one place that holds it. With a number in two
-places, a change of one of them would run a part of the tests twice or not at all.
+- **The e2e tests: option 5, four shards.** The longest shard takes a little more than half of its limit, so a slow
+  runner and the tests of the next weeks fit. A fifth shard gains 2 min. The workflow takes the number of the shards
+  from its matrix (`strategy.job-total`), so the list `shard` is the one place that holds it. With a number in two
+  places, a change of one of them would run a part of the tests twice or not at all.
+- **The GPU tests: four parts.** The two halves by the backend in the name of a test stay (ADR 0014). Each half
+  splits by the file again: `src/engine/sim.gpu.test.ts` alone, and the other files. A test has one name and lies in
+  one file, so each test runs exactly once. Lint, the type check and the unit tests stay in the part `rest`. A
+  longer limit was the other way: it keeps a run as long as its longest job, 25 to 30 min.
+- The limit stays 30 min for every job.
 
 ## Results
 
@@ -57,16 +69,20 @@ tests) 13.9 min. The five tests of `tubes.spec.ts` took 8.6 to 9.1 min on GitHub
 | 5      | 17 others; 17 others; 7 others, 5 of `tubes` and 5 of `ui`; 17 of `ui`; 16 of `ui` | 7, 7, 15, 10, 9                    |
 
 - The linters of the workflows pass (`actionlint`, `zizmor`, `check-github-workflows` of the commit hooks).
+- The GPU parts by the file: `vitest list --project gpu` names 347 tests, 184 of them in `src/engine/sim.gpu.test.ts`
+  and 163 in the other files (the list does not fill in the names of the backends, so it cannot check the halves).
 - On GitHub the four shards of the pull request took 12.8, 8.1, 10.6 and 11.3 min with the start (run 44333749052), and
   every test passed. The first shard took 5 min more than the estimate and the third 6 min less: one run, and the
   runners differ. The longest shard took less than half of its limit.
 
 ## Consequences
 
-- A run of CI starts two more runners. Each takes 1 to 2 min to start (`npm ci`, the built site). The result of the
-  e2e tests comes after about 15 min, not after 25 to 30.
+- A run of CI starts four more runners. Each takes 1 to 2 min to start (`npm ci`, the built site). The result of
+  the e2e tests comes after about 15 min, not after 25 to 30.
+- A GPU test in a new file runs in the parts for the other files. A file that grows as large as
+  `src/engine/sim.gpu.test.ts` needs a part of its own.
 - The check `verify` needs every shard, as before: it reads the result of the whole matrix job. The ruleset requires
   `verify` alone (ADR 0014), so the new names of the shards change nothing there.
-- `AGENTS.md` says four shards.
+- `AGENTS.md` says four shards and four GPU parts.
 - To watch (ADR 0049): the split is still by count in the order of the files. A new file of slow tests beside
   `tubes.spec.ts` makes its shard longer.

@@ -3,7 +3,7 @@
 - Status: accepted (decision of a helper, 2026-11-16, under the owner's delegation of 2026-11-12), built 2026-11-16
 - Date: 2026-11-16
 - Extends ADR 0010 (the time of the e2e tests in CI) and ADR 0020 (passes built at their first use).
-- Extended by ADR 0061 (2026-11-18): the e2e tests run in four shards.
+- Extended by ADR 0061 (2026-11-18): the e2e tests run in four shards and the GPU tests in four parts.
 
 ## Context
 

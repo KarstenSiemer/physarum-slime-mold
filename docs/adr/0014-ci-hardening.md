@@ -3,7 +3,7 @@
 - Status: accepted; revised 2026-11-08 after the GitHub Actions and supply-chain audits, and
   2026-11-09 (ruleset `code owners`, CodeQL languages)
 - Date: 2026-11-08
-- Extended by ADR 0061 (2026-11-18): the e2e tests run in four shards.
+- Extended by ADR 0061 (2026-11-18): the e2e tests run in four shards and the GPU tests in four parts.
 
 ## Context
 
