@@ -1179,7 +1179,7 @@ void main() {
   // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it (see render.wgsl).
   if (V.fx.z < 1.0) {
     float edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
-    c = mix(mix(space, c, V.fx.z), c, edge);
+    c = mix(mix(space, clamp(c, vec3(0.0), vec3(1.0)), V.fx.z), c, edge);
   }
   uvec2 px = uvec2(gl_FragCoord.xy);
   float n = hash(px) - hash(px + uvec2(7919u, 104729u));

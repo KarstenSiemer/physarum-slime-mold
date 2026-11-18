@@ -80,6 +80,8 @@ const strains = [
 ];
 const slimy = (patch: Partial<Settings> = {}): Settings => ({
   ...defaultSettings(),
+  // The tests of the picture draw the glow style unless they name another one: it has no pass of its own.
+  style: 'glow',
   model: 'extended',
   boundary: 'dish',
   layout: 'empty',
@@ -293,7 +295,8 @@ function groundPicture(
         const inner = map ? slimeColour(settings.style, grid, map, p, view.scale) : bg;
         c = inside >= 1 ? inner : mix(space, inner, inside);
       }
-      if (copies < 1) c = mix(mix(space, c, copies), c, box);
+      // A copy dims the light that the screen shows: the light ends at 1 first.
+      if (copies < 1) c = mix(mix(space, c.map((v) => Math.min(Math.max(v, 0), 1)) as Rgb, copies), c, box);
       for (let k = 0; k < 3; k++) out[(y * cw + x) * 3 + k] = toByte(c[k] ?? 0);
     }
   return out;
@@ -2509,8 +2512,8 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       expect(Math.max(0, ...jonesFrames)).toBe(0);
     }, 240_000);
 
-    // The scent view draws no slime (decision 8): its picture is the one without the film, with slime in the field.
-    it('draws no film below the scent view', async () => {
+    // The scent view lies over the picture and hides nothing of it (ADR 0060, decision 11): it shows the film too.
+    it('draws the film below the scent view', async () => {
       const s = pictured({ slimeLife: 144 });
       const sim = await make(s, PW, PH);
       sim.paint([dab(32, 24, 12), { kind: 'food', from: [50, 24], to: [50, 24], radius: 3 }]);
@@ -2521,11 +2524,15 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         await backend.capture(sim, scent, view, 128, 96),
         await backend.capture(sim, { ...scent, showSlime: false }, view, 128, 96),
       ];
-      // Two captures dither apart by 2 at most.
-      expect(maxDiff(withSlime, without)).toBeLessThanOrEqual(2);
-      // The same frame without the scent view shows the film.
-      const film = await backend.capture(sim, s, view, 128, 96);
-      expect(maxDiff(film, await backend.capture(sim, { ...s, showSlime: false }, view, 128, 96))).toBeGreaterThan(8);
+      // The film shows in the scent view, as much as without the view: two captures dither apart by 2 at most.
+      const [film, bare] = [
+        await backend.capture(sim, s, view, 128, 96),
+        await backend.capture(sim, { ...s, showSlime: false }, view, 128, 96),
+      ];
+      expect(maxDiff(film, bare)).toBeGreaterThan(8);
+      expect(maxDiff(withSlime, without)).toBeGreaterThan(8);
+      // And the scent view shows over the film: its frame is not the frame without the view.
+      expect(maxDiff(withSlime, film)).toBeGreaterThan(8);
     });
 
     // The Jones model frees the field, and a switch back makes a new one at the first stamp: the picture reads the
@@ -2605,13 +2612,15 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
 
     // The pipelines (WebGPU) and programs (WebGL2) of the film are built once, from the first frame that draws the
     // film and without blocking it, as those of the scent view: a frame of a scene without slime builds none.
+    // The scent view over the film (ADR 0060, decision 11) builds the passes of its maps and the one render pass that
+    // the frame draws, the pass with the view and the film: never the pass with the view alone.
     it('builds the pipelines or programs of the film once, and none for a frame without the film', async () => {
       const s = pictured({ slimeLife: 144 });
       const sim = await make(s, PW, PH);
       sim.paint([dab(32, 24, 10)]);
       const view: View = { center: [32, 24], scale: 0.5 };
       let builds: { mock: { calls: unknown[] } };
-      let ready: () => Promise<unknown>;
+      let ready: (settings?: Settings) => Promise<unknown>;
       let frameOf: (settings: Settings) => void;
       if (kind === 'webgpu') {
         const gpu = backend as WebGpuBackend;
@@ -2621,7 +2630,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         });
         gpu.renderFrom(); // a new renderer: nothing of the film is built yet
         builds = vi.spyOn(gpu.gpu.device, 'createRenderPipelineAsync');
-        ready = () => backend.capture(sim, s, view, 8, 8);
+        ready = (settings = s) => backend.capture(sim, settings, view, 8, 8);
         frameOf = (settings) => {
           backend.draw(sim, settings, view, false);
         };
@@ -2633,12 +2642,16 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
           vi.restoreAllMocks();
         });
         builds = vi.spyOn(gl, 'createProgram');
-        ready = async () => {
-          while (!programs.slimed()) await new Promise((r) => setTimeout(r, 1));
-        };
         // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
+        const asked = (settings: Settings) => [
+          ...(slimeShown(settings) ? [programs.slimed()] : []),
+          ...(settings.showScent ? [programs.scent(), programs.viewed(slimeShown(settings) ? 1 : 0)] : []),
+        ];
+        ready = async (settings = s) => {
+          while (!asked(settings).every(Boolean)) await new Promise((r) => setTimeout(r, 1));
+        };
         frameOf = (settings) => {
-          if (slimeShown(settings)) programs.slimed();
+          asked(settings);
         };
       }
       for (const settings of [
@@ -2659,6 +2672,14 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       // without growth never builds.
       expect(first).toBe(5);
       expect(builds.mock.calls.length).toBe(first);
+      // With the scent view: the two passes of its maps, and its render pass over the film, without and with food,
+      // light and walls. The render pass with the view alone is not built: no frame with the film draws it.
+      const scented = { ...s, showScent: true };
+      for (let k = 0; k < 3; k++) {
+        frameOf(scented);
+        await ready(scented);
+      }
+      expect(builds.mock.calls.length).toBe(first + 4);
     });
   });
 });

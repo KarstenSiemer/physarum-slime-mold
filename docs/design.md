@@ -254,7 +254,8 @@ the arrows.
 
 - The view fits the grid into the canvas, centred. Beside a closed arena the free space shows a
   dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
-  on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
+  on a copy paints where the copy shows it (ADR 0026). The light is that which the screen shows:
+  a highlight of the gel ends at 1 first (ADR 0060). A grid shaped like the screen shows its
   copies as they are when zoomed out.
 - Zoomed out, above 1 cell per pixel, a pixel shows the mean of the trail over its square: from the
   trail itself up to 2 cells per pixel, above from a coarser map of the mean over 2, 4, 8 or 16 cells
@@ -355,7 +356,8 @@ the arrows.
   light of the plasm is its summed trail above the black level times the exposure. So a dim tube hides the film too,
   and the film comes back only where the light of a tube fades out at its edge.
 
-  The film has one colour for all strains. The scent view draws no film. The switch changes nothing in the
+  The film has one colour for all strains. The scent view lies over the picture and hides nothing of it, so it shows
+  the film too (ADR 0060, decision 11). The switch changes nothing in the
   simulation, goes into the link like the style and stays as it is when a scene loads. Without the film the render
   pass draws the pixels of before at the same cost: the code of the film is compiled in only for a frame that draws
   it. A CPU copy of the rules is in `src/engine/slime-reference.ts`.
@@ -389,7 +391,7 @@ the arrows.
   - **Walls** (`fanOpen`): the fan reaches up to 16 cells from its plasm, more than a wall is thick. So the pass walks from the pixel toward the plasm,
     up the slope of the plasm, cell by cell, and the sheet shows nothing where a wall lies on the way.
   - The sheet is more plasm: it adds to the trail of its strain before the style draws it. In the gel style it adds
-    to the height and to the slope of the gel. The agents style and the scent view draw no fan. The code of the fan
+    to the height and to the slope of the gel. The agents style draws no fan, and the scent view lies over it as over the film. The code of the fan
     is compiled in only for a frame that draws it, in pipelines of its own that also hold the film: a frame without
     the fan runs the shader without it. The switch changes
     nothing in the simulation, goes into the link like the style and stays as it is when a scene loads. The numbers

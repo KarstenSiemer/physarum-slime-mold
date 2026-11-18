@@ -133,6 +133,8 @@ const FRONT_MAP_FRAG = 'src/engine/gl/glsl/front-map.frag';
 const FRONT_SPEC = 'src/engine/front.gpu.test.ts';
 const [FRONT_GPU, FRONT_GL] = ['the front field on webgpu', 'the front field on webgl2'];
 const FAN = 'the fan of the growth front in the picture';
+/** The copies around a periodic lattice (ADR 0026, ADR 0060): the tests of the lattices in the default style. */
+const LATTICE_SPEC = 'src/engine/lattice.gpu.test.ts';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -4532,26 +4534,26 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     SLIME_SPEC,
   ],
   [
-    'SL176 slime.ts: the scent view draws the slime too',
+    'SL176 slime.ts: the scent view hides the slime',
     SLIME_TS,
-    '  s.showSlime && !s.showScent && slimeSteps(s) > 0;',
-    '  s.showSlime && slimeSteps(s) > 0;',
+    '=> s.showSlime && slimeSteps(s) > 0;',
+    '=> s.showSlime && !(s as Settings).showScent && slimeSteps(s) > 0;',
     'is drawn in every style',
     SLIME_UNIT,
   ],
   [
     'SL177 slime.ts: the film shows while Show slime is off',
     SLIME_TS,
-    '  s.showSlime && !s.showScent && slimeSteps(s) > 0;',
-    '  !s.showScent && slimeSteps(s) > 0;',
+    '=> s.showSlime && slimeSteps(s) > 0;',
+    '=> slimeSteps(s) > 0;',
     'is drawn in every style',
     SLIME_UNIT,
   ],
   [
     'SL178 slime.ts: the view draws the film without slime in the model',
     SLIME_TS,
-    '  s.showSlime && !s.showScent && slimeSteps(s) > 0;',
-    '  s.showSlime && !s.showScent;',
+    '=> s.showSlime && slimeSteps(s) > 0;',
+    '=> s.showSlime;',
     'is drawn in every style',
     SLIME_UNIT,
   ],
@@ -5052,6 +5054,38 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '  if (V.scale <= 1.0) return heightAt(p);',
     FAN,
     FRONT_SPEC,
+  ],
+  [
+    'GF19 wgsl: a copy of a periodic lattice dims light that the screen does not show',
+    RENDER_WGSL,
+    '    c = mix(mix(space, clamp(c, vec3f(0.0), vec3f(1.0)), V.fx.z), c, edge);',
+    '    c = mix(mix(space, c, V.fx.z), c, edge);',
+    'lattices on webgpu > dim the copies',
+    LATTICE_SPEC,
+  ],
+  [
+    'GF20 glsl: a copy of a periodic lattice dims light that the screen does not show',
+    RENDER_FRAG,
+    '    c = mix(mix(space, clamp(c, vec3(0.0), vec3(1.0)), V.fx.z), c, edge);',
+    '    c = mix(mix(space, c, V.fx.z), c, edge);',
+    'lattices on webgl2 > dim the copies',
+    LATTICE_SPEC,
+  ],
+  [
+    'GF21 webgpu: the scent view draws its pass without the film and the fan',
+    RENDER_TS,
+    '    const below: Below = fanned ? 2 : filmy ? 1 : 0;',
+    '    const below: Below = 0;',
+    PICTURE_GPU,
+    SLIME_SPEC,
+  ],
+  [
+    'GF22 webgl2: the scent view draws its pass without the film and the fan',
+    GL_BACKEND,
+    '    return fanned && sim.slimeFrontTexture ? 2 : filmy ? 1 : 0;',
+    '    return 0;',
+    PICTURE_GL,
+    SLIME_SPEC,
   ],
 ];
 

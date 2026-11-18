@@ -1,12 +1,14 @@
 # 0060: The picture shows the growth front: a sheet, fine veins, then the tube
 
-- Status: accepted. Decisions 8 and 9 are requests of the owner of 2026-11-17. The look of decision 4 waits for the
-  owner's word on pictures of two looks (sent 2026-11-17). The other decisions are of an agent under the owner's
-  delegation of 2026-11-12. Built 2026-11-17 and 2026-11-18.
+- Status: accepted, with one part open. Decisions 8 and 9 are requests of the owner of 2026-11-17, and decisions 11
+  and 12 of 2026-11-18. The other decisions are of an agent under the owner's delegation of 2026-11-12. On
+  2026-11-18 the owner looked at the fan of decision 4 in the app and judged that it disturbs the realism (Open
+  points): whether the drawn fan stays is the owner's decision. Built 2026-11-17 and 2026-11-18.
 - Date: 2026-11-17
 - Extends [ADR 0055](0055-the-slime-field.md): the slime field holds a front stamp per cell. Changes
   [ADR 0057](0057-the-film-of-the-slime.md), decision 9: the plasm hides the film. Changes
-  [ADR 0009](0009-rendering-pipeline.md): the gel reads its height as a spline.
+  [ADR 0009](0009-rendering-pipeline.md): the gel reads its height as a spline. Extends
+  [ADR 0026](0026-scenes-of-jones-on-their-lattices.md): a copy of a lattice dims the light that the screen shows.
 - In short: the rule of the front stamp is in `docs/model.md`, section 6.9, and the rule of the picture in
   `docs/design.md`, section 5. [`research/flow/README.md`](../../research/flow/README.md), part 22, has the commands
   and the records.
@@ -110,6 +112,18 @@ counter needs no memory on WebGPU, but every pass that writes a stamp of the sli
     both backends against the CPU reference. The fan has no CPU reference: the two backends must draw the same
     pixels, the fan must be on young ground and not behind a wall or after 1,500 steps, and with both switches off
     the pixels are those of the shaders without the code.
+11. **The scent view lies over the picture and hides nothing of it** (the owner, 2026-11-18: with Scent on, the slime
+    went away, "that should not be so"). The scent view shows the film of the slime and the fan. ADR 0055, decision
+    8, drew no film below the scent view, so that its picture was the same with slime and without it. The scent view
+    has one render pass for each picture that lies below it: the picture alone, the film, or the fan with the film.
+    A frame builds only the pass that it draws. It draws the view once that pass, the maps of the view and the
+    passes of what lies below are built; until then it draws the picture without the view.
+12. **Gel relief is the default style** (the owner, 2026-11-18: "it looks much better", also in the scenes of
+    Jones). Every scene starts in it but Electrotaxis, which keeps the agents style of its figure. A link holds its
+    own style. The style changes no run.
+13. **A copy around a periodic lattice dims the light that the screen shows of the lattice.** The light of a pixel
+    ends at 1 before the copy dims it to 0.15 (ADR 0026). A highlight of the gel has more light than the screen
+    shows, up to 2. Without this rule the highlights of a copy stay brighter than the rest of the copy.
 
 ## Results
 
@@ -136,6 +150,26 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
   B-spline of the map times 2.4: close to a young tip its outline lay at the far end of the reach of a texel and was
   a block with straight edges, 8 cells wide. The pictures of the looks did not show it, because their zoom was too
   small. Decisions 4 and 8 have the rules of now.
+- **A fault that the new default style showed**, fixed (decision 13). The test of the copies around a periodic
+  lattice ran in the glow style alone, which has no light above 1. In the gel style a highlight on a copy was up to
+  39 of 255 brighter than 0.15 of the highlight on the lattice, on both backends. The test runs in the default style
+  now.
+- **A test that only CI failed** (2026-11-18). The e2e test of the Slime tool read the film with the levels of the
+  frames. These follow a new picture over about 60 frames: a second on the M3 Pro, a minute on SwiftShader. Until
+  then the haze of a start counts as plasm, and the plasm hides all of the film (decision 8). So the test saw no
+  film in CI, failed twice, and the job ran into its limit of 30 minutes with 27 tests not run. The test measures
+  the levels first now, and the 42 tests of that half pass in the image of CI.
+- **Two passes that no frame drew.** The first build of decision 11 built the render pass with the scent view
+  alone, without and with food, light and walls, beside the pass with the view and the film. No frame with the film
+  draws it. Now a frame builds only the pass that it draws, and a test counts the passes (`slime.gpu.test.ts`,
+  "builds the pipelines or programs of the film once"): two for the maps of the view and two for its render pass.
+  Not measured: the time that this saves.
+- **The time of the e2e tests in the image of CI** (M3 Pro, the second shard of two, 42 tests, one run each in turn
+  on 2026-11-18, before the change of the passes above): 11.1 min on `main` and 12.4 min here. The four tests of
+  `tubes.spec.ts` in it take 24 s more together: they draw the fan. The 38 tests of `ui.spec.ts` take 58 s more,
+  1.25 s in the median: the default style draws more, and the scent view has the film below it. On GitHub this
+  shard of `main` took 24.8 to 28.3 min of its limit of 30 in the last five runs of `main`. So it does not fit there
+  with this change, and PR #109 (ADR 0061) makes four shards of the two.
 - **A fault that only CI found.** The map of the front held 16-bit floats. A trail above 65,504 gave it a value that
   is no number, and on SwiftShader, the GPU of CI, the tube and the walls were black. On the M3 Pro the picture
   showed nothing of it, and both backends drew the same black, so the test of the two backends passed. The map holds
@@ -147,8 +181,8 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
 - **The film below the plasm and the switches** (`slime.gpu.test.ts`): the tests of the film hold with new numbers
   where the plasm hides the film. With both switches off every pixel equals that of the shaders without the film and
   the fan.
-- **Wrong rules**: 18 new ones (GF1 to GF18) and 13 of the slime with a new text, because their lines changed.
-  Each of the 31 fails at least one test. The list has 625 wrong rules.
+- **Wrong rules**: 22 new ones (GF1 to GF22) and 16 of the slime with a new text, because their lines changed.
+  Each of the 38 fails at least one test. The list has 629 wrong rules.
 - **All tests**: 875 unit tests with the research tests, 1,345 GPU tests on both backends (8 more run on one
   backend only), and 84 tests of the built app.
 - **The pictures**: `tests/pictures/front.spec.ts` makes them again: Tokyo at the steps 600, 1,500 and 4,000, the
@@ -190,6 +224,16 @@ walks up to 13 cells toward its plasm in a scene with walls.
 
 ## Open points
 
+- **The owner does not like the drawn fan** (2026-11-18, in the running app, with two photos of the organism): it
+  "disturbs the realism", and the shader is "too far from the real look". In the photos a front is a whole sheet
+  with a lobed rim, and the veins behind it run toward the rim and fork there, as a tree does. The fan of this
+  record is a skirt and a net around an arm of the model. The owner asks whether the veins must be grown by the
+  model, and whether the front that moves ahead of the tubes must come first. The agent's answer: yes. That is
+  stage 4 of the plan, the front as a sink of the flow. The agent recommends to take the drawn fan out again and to
+  keep the front stamp, the film below the plasm, the edge of the gel and decisions 11 and 12. Not decided.
+
+- **The second shard of the e2e tests can reach its limit of 30 minutes on GitHub** until PR #109 is merged
+  (Results). Then the check `verify` is red with a cancelled shard and no failed test.
 - **The look is the owner's choice.** Look A, the sheet alone, is look B without the veins and with a sheet that
   lasts three times as long.
 - **The fan is a picture.** The model grows arms, not a sheet, and no vein forms toward a front (`docs/fidelity.md`,

@@ -70,10 +70,8 @@ export interface Walled {
   walls: Program;
 }
 
-/** The programs of the scent view (ADR 0009, amendment 2026-11-11). */
+/** The programs of the maps of the scent view (ADR 0009, amendment 2026-11-11). Its render passes: `viewed`. */
 export interface ScentPrograms {
-  /** The render pass with the view (SCENT in render.frag), without (index 0) and with (1) the food, light and walls. */
-  render: [Program, Program];
   /** The pass that fills its coarse map (scent-down.frag): the scent of its texels and the share that holds scent. */
   down: Program;
   /** The pass that refreshes the scent of its texels after steps and keeps their share (SUM_ONLY). */
@@ -214,9 +212,9 @@ export interface Programs {
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
   render: [Program, Program];
   /**
-   * The programs of the scent view once they are built, else undefined. The first call starts their build, and with
-   * KHR_parallel_shader_compile the driver builds them beside the frames, which draw without the view until then.
-   * Most frames never draw it.
+   * The programs of the maps of the scent view once they are built, else undefined. The first call starts their
+   * build, and with KHR_parallel_shader_compile the driver builds them beside the frames, which draw without the view
+   * until then. Most frames never draw it.
    */
   scent: () => ScentPrograms | undefined;
   /**
@@ -230,6 +228,12 @@ export interface Programs {
    * without growth never builds them.
    */
   fronted: () => FrontPrograms | undefined;
+  /**
+   * The render pass with the scent view (SCENT in render.frag) over what lies below it: 0 the picture alone, 1 the
+   * film of the slime, 2 the fan of the growth front with the film (ADR 0060). Without (index 0) and with (1) the
+   * food, light and walls, once it is built, else undefined, as `slimed`. A frame builds only the one that it draws.
+   */
+  viewed: (below: 0 | 1 | 2) => [Program, Program] | undefined;
   /** The pass that fills the trail's coarse map for a view zoomed out (trail-down.frag), compiled at its first use. */
   trailDown: () => Program;
   height: [Program, Program];
@@ -330,6 +334,8 @@ export function compile(gl: GL): Programs {
   let slimed: SlimePrograms | undefined;
   let frontedStarted: ReturnType<typeof startProgram>[] | undefined;
   let fronted: FrontPrograms | undefined;
+  const viewedStarted: (ReturnType<typeof startProgram>[] | undefined)[] = [undefined, undefined, undefined];
+  const viewed: ([Program, Program] | undefined)[] = [undefined, undefined, undefined];
   let capacity: Program | undefined;
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
@@ -427,16 +433,14 @@ export function compile(gl: GL): Programs {
       if (scent || gl.isContextLost()) return scent;
       const vertex = V + 'precision highp float;\n' + fullscreen;
       scentStarted ??= [
-        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 0\n' + viewGlsl + renderFrag),
-        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 1\n' + viewGlsl + renderFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + scentDownFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n#define SUM_ONLY 1\n' + viewGlsl + scentDownFrag),
       ];
       if (!scentStarted.every((p) => p.done())) return undefined;
       for (const p of scentStarted) p.check();
-      const [off, on, down, sum] = scentStarted.map((p) => wrap(gl, p.program));
-      if (!off || !on || !down || !sum) return undefined;
-      return (scent = { render: [off, on], down, sum });
+      const [down, sum] = scentStarted.map((p) => wrap(gl, p.program));
+      if (!down || !sum) return undefined;
+      return (scent = { down, sum });
     },
     slimed: () => {
       // A lost context builds nothing: the frames draw without the film, and the app reports the loss.
@@ -470,6 +474,21 @@ export function compile(gl: GL): Programs {
       const [off, on, map] = frontedStarted.map((p) => wrap(gl, p.program));
       if (!off || !on || !map) return undefined;
       return (fronted = { render: [off, on], map });
+    },
+    viewed: (below) => {
+      if (viewed[below] || gl.isContextLost()) return viewed[below];
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      const parts =
+        '#define SCENT 1\n' + (below > 0 ? '#define SLIME 1\n' : '') + (below > 1 ? '#define FRONT 1\n' : '');
+      const started = (viewedStarted[below] ??= [
+        startProgram(gl, vertex, V + parts + '#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + parts + '#define ENV 1\n' + viewGlsl + renderFrag),
+      ]);
+      if (!started.every((p) => p.done())) return undefined;
+      for (const p of started) p.check();
+      const [off, on] = started.map((p) => wrap(gl, p.program));
+      if (!off || !on) return undefined;
+      return (viewed[below] = [off, on]);
     },
     trailDown: () => (trailDown ??= plain('#define ENV 0\n' + viewGlsl + trailDownFrag)),
     height: view(heightFrag),

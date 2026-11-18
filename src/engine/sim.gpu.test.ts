@@ -7541,12 +7541,14 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           vi.restoreAllMocks();
         });
         builds = vi.spyOn(gl, 'createProgram');
+        // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()): the maps of the view, and
+        // its render pass over the picture alone, since these settings show no film of the slime.
+        const asked = () => [programs.scent(), programs.viewed(0)];
         ready = async () => {
-          while (!programs.scent()) await new Promise((r) => setTimeout(r, 1));
+          while (!asked().every(Boolean)) await new Promise((r) => setTimeout(r, 1));
         };
-        // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
         frame = () => {
-          programs.scent();
+          asked();
         };
       }
       for (let k = 0; k < 3; k++) frame();

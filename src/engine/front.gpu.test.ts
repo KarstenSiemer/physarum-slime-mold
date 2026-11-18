@@ -215,11 +215,15 @@ describe('the fan of the growth front in the picture', () => {
           expect(darker(on[1], off[1]), name).toBeLessThanOrEqual(3);
         }
       }
-    // The agents style, the scent view and a scene without growth draw no fan.
-    for (const patch of [{ style: 'agents' }, { showScent: true }, { growth: false }] as Partial<Settings>[])
+    // The agents style and a scene without growth draw no fan.
+    for (const patch of [{ style: 'agents' }, { growth: false }] as Partial<Settings>[])
       expect(
         maxDiff(await shot(gpu, a, patch), await shot(gpu, a, { ...patch, showFront: false })),
       ).toBeLessThanOrEqual(2);
+    // The scent view lies over the picture and hides nothing of it: it shows the fan, on both backends.
+    const scent: Partial<Settings> = { style: 'gel', showScent: true };
+    expect(maxDiff(await shot(gpu, a, scent), await shot(gpu, a, { ...scent, showFront: false }))).toBeGreaterThan(25);
+    expect(maxDiff(await shot(gpu, a, scent), await shot(gl, b, scent))).toBeLessThanOrEqual(3);
   });
 
   it.each(Object.keys(BACKENDS))(

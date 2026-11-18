@@ -73,25 +73,23 @@ export function slimeSteps(s: Pick<Settings, 'model' | 'slimeLife'>): number {
 
 /**
  * Whether the view draws the slime as a film on the ground (ADR 0055, decision 8; ADR 0057): the switch Show slime is
- * on, the
- * model has slime with a life time above 0, and the scent view is off. Every style draws the film. The scent view
- * draws none, so that its picture is the same with slime and without it. Display only: no pass of the simulation
- * reads the switch.
+ * on, and the model has slime with a life time above 0. Every style draws the film, and so does the scent view, which
+ * lies over the picture and hides nothing of it (the owner, 2026-11-18; ADR 0060, decision 11). Display only: no pass
+ * of the simulation reads the switch.
  */
-export const slimeShown = (s: Pick<Settings, 'showSlime' | 'showScent' | 'model' | 'slimeLife'>) =>
-  s.showSlime && !s.showScent && slimeSteps(s) > 0;
+export const slimeShown = (s: Pick<Settings, 'showSlime' | 'model' | 'slimeLife'>) => s.showSlime && slimeSteps(s) > 0;
 
 /**
  * Whether the view draws young ground as the fan of a growth front (ADR 0060): the switch Show growth front is on,
  * the colony grows (growth is on, with its rule of one agent per cell: pack.ts growthOn()), the model has slime with
- * a life time above 0 (the front field is a part of the slime field), and the view is neither the scent view nor the
- * agents style, which draws the agents and not the plasm. A scene without growth has no growth front: its agents
- * start all over the ground, and a fan would lie on all of it in the first steps. Display only: no pass of the
- * simulation reads the switch.
+ * a life time above 0 (the front field is a part of the slime field), and the style is not the agents style, which
+ * draws the agents and not the plasm. A scene without growth has no growth front: its agents start all over the
+ * ground, and a fan would lie on all of it in the first steps. The scent view lies over the fan, as over the film.
+ * Display only: no pass of the simulation reads the switch.
  */
 export const frontShown = (
-  s: Pick<Settings, 'showFront' | 'showScent' | 'style' | 'model' | 'slimeLife' | 'growth' | 'collisions'>,
-) => s.showFront && s.growth && s.collisions && !s.showScent && s.style !== 'agents' && slimeSteps(s) > 0;
+  s: Pick<Settings, 'showFront' | 'style' | 'model' | 'slimeLife' | 'growth' | 'collisions'>,
+) => s.showFront && s.growth && s.collisions && s.style !== 'agents' && slimeSteps(s) > 0;
 
 /**
  * The trail of each strain from which a cell holds plasm (ADR 0055, decision 3): the low level of the strain, the

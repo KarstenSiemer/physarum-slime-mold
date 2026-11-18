@@ -1664,10 +1664,12 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     c = select(mix(c, inner, inside), inner, inside >= 1.0);
   }
   // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it, with a ramp one pixel wide
-  // across its edge. A grid shaped like the screen shows them as they are (copies 1).
+  // across its edge. A grid shaped like the screen shows them as they are (copies 1). A copy dims the light that the
+  // screen shows of the lattice, so the light ends at 1 first: a highlight of the gel has more light than that, and
+  // the highlights of a copy would stay brighter than the rest of the copy (ADR 0060).
   if (V.fx.z < 1.0) {
     let edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
-    c = mix(mix(space, c, V.fx.z), c, edge);
+    c = mix(mix(space, clamp(c, vec3f(0.0), vec3f(1.0)), V.fx.z), c, edge);
   }
   // Triangular dither of ±1 LSB against banding in dark gradients.
   let n = hash(vec2u(frag.xy)) - hash(vec2u(frag.xy) + vec2u(7919u, 104729u));

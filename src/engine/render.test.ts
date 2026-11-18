@@ -79,9 +79,9 @@ describe('the film of the slime in the uniform of the view', () => {
     expect(parts({ collisions: false })).toBe(1);
     expect(parts({ showSlime: false })).toBe(2);
     expect(parts({ showFront: false })).toBe(1);
-    // The agents style draws the agents and not the plasm: no fan. The scent view draws neither.
+    // The agents style draws the agents and not the plasm: no fan. The scent view lies over both.
     expect(parts({ style: 'agents' })).toBe(1);
-    expect(parts({ showScent: true })).toBe(0);
+    expect(parts({ showScent: true })).toBe(3);
     expect(parts({ slimeLife: 0 })).toBe(0);
     expect(parts({ model: 'jones' })).toBe(0);
   });

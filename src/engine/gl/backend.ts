@@ -161,6 +161,16 @@ export class WebGl2Backend implements Backend<GlSim> {
     return sim;
   }
 
+  /**
+   * What lies below the scent view in a frame of `sim`: 2 the fan of the growth front with the film of the slime, 1
+   * the film, 0 the picture alone. The film and the fan need the fields of the simulation (see the frame).
+   */
+  private below(sim: GlSim, s: Settings): 0 | 1 | 2 {
+    const [filmy, fanned] = [slimeShown(s), frontShown(s)];
+    if (this.fixed || !(filmy || fanned) || !sim.slimeTexture || !sim.slimeAmountTexture) return 0;
+    return fanned && sim.slimeFrontTexture ? 2 : filmy ? 1 : 0;
+  }
+
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
     if (measure && this.frame % 15 === 0 && !this.measuring) void this.measure(sim, this.gain === 0 ? 1 : 0.25);
@@ -181,9 +191,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     // An export shows the scent view and the film of the slime as asked: wait for their programs, unless the context
     // is lost.
     const built = () =>
-      (!settings.showScent || this.prog.scent()) &&
       (!slimeShown(settings) || this.prog.slimed()) &&
-      (!frontShown(settings) || this.prog.fronted());
+      (!frontShown(settings) || this.prog.fronted()) &&
+      (!settings.showScent || (this.prog.scent() && this.prog.viewed(this.below(sim, settings))));
     while (!this.fixed && !built() && !gl.isContextLost()) await new Promise((r) => setTimeout(r, 2));
     // A rebuild can destroy the simulation during that wait. Then nothing is left to draw, and the engine asks
     // again for the new one (Engine.ofRun()).
@@ -477,6 +487,9 @@ export class WebGl2Backend implements Backend<GlSim> {
     }
     // The scent view once its programs are built; zoomed out it reads a coarser map, filled here.
     const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
+    // The render pass with the scent view is built for what lies below the view in this frame (ADR 0060).
+    const below = this.below(sim, s);
+    const over = s.showScent && !this.fixed ? this.prog.viewed(below) : undefined;
     const level = scentLevel(view.scale);
     const coarse = scent ? this.coarseFor(sim) : undefined;
     const holds = this.coarseHolds;
@@ -497,8 +510,12 @@ export class WebGl2Backend implements Backend<GlSim> {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    // The scent view draws no slime (slimeShown()), so a frame has one of the two at most.
-    const p = (this.fixed ?? scent?.render ?? grown?.render ?? wet?.render ?? this.prog.render)[variant];
+    // The scent view lies over the film and the fan (ADR 0060). The frame draws the view once its maps, its render
+    // pass and the programs of what lies below it are built. Until then the frame draws without the view, and nothing
+    // below it goes.
+    const lies = below === 2 ? grown !== undefined : below === 1 ? wet !== undefined : true;
+    const top = scent && lies ? over : undefined;
+    const p = (this.fixed ?? top ?? grown?.render ?? wet?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
     // A sampler that the frame does not read still needs a texture: the trail stands in for its coarse map.
     const trailLevels = trailCoarse?.texture ?? trail;
@@ -526,10 +543,10 @@ export class WebGl2Backend implements Backend<GlSim> {
             ...(grown ? { fanMap: fan?.texture ?? trail } : {}),
           }
         : {};
-    const more = scent ? { scent: viewScent, scentLevels } : maps;
+    const more = { ...(top ? { scent: viewScent, scentLevels } : {}), ...maps };
     textures(gl, p.program, { ...all, ...more });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    return !(s.showScent && !this.fixed && !scent) && !(stamps && filmy && !wet) && !(fronts && !grown);
+    return !(s.showScent && !this.fixed && !top) && !(stamps && filmy && !wet) && !(fronts && !grown);
   }
 
   /** The scent view's coarse map for this grid size, made anew when the size changes. */

@@ -8,7 +8,8 @@
 - Extended by [ADR 0059](0059-the-film-of-the-slime-keeps-its-cost.md) (2026-11-17): the owner leaves the cost of
   the film as it is (the first open point).
 - Extended by [ADR 0060](0060-the-growth-front-in-the-picture.md) (2026-11-17): the plasm hides the film below it
-  (decision 9 here said that the trail lies on the film), and the edge of the gel has no teeth (an open point here).
+  (decision 9 here said that the trail lies on the film), the edge of the gel has no teeth (an open point here), and
+  the scent view shows the film (decision 9 here said that it does not).
 - In short: the rule of the amount is in `docs/model.md`, section 6.9, and the rule of the picture in
   `docs/design.md`, section 5. [`research/flow/README.md`](../../research/flow/README.md), part 21, has the commands
   and the records.

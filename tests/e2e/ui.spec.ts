@@ -337,13 +337,15 @@ test('the Slime tool paints slime, the picture shows it, the link holds it, and 
   await expect.poll(kinds).toEqual(['slime']);
   // The picture draws the slime as a wet film on the ground (decision 8; ADR 0057). The film is translucent, so the
   // measure is the area that it changes: the pixels of the picture that the app draws with a channel 3 or more of 255
-  // away from the same picture without the film. Both pictures have the levels of the frames, which still settle
-  // after a pause, and the same dither.
+  // away from the same picture without the film. Both pictures have the same levels and the same dither. The levels
+  // are measured now: the plasm hides the film (ADR 0060), and the levels say how much plasm the picture shows. The
+  // levels of the frames follow a new picture over about 60 frames. That is a minute on SwiftShader, and until then
+  // the haze of the start counts as plasm and hides the film everywhere.
   const film = () =>
     page.evaluate(async () => {
       const e = globalThis.physarum;
       if (!e) throw new Error('no engine');
-      const levels = e.backend.levels();
+      const levels = await e.settle();
       const { width, height } = e.canvas;
       const shot = (settings: typeof e.settings) => e.backend.capture(e.sim, settings, e.view, width, height, levels);
       const [shown, bare] = [await shot(e.settings), await shot({ ...e.settings, showSlime: false })];
@@ -789,6 +791,9 @@ test('the gel color is a choice of the look in the gel style', async ({ page }) 
   const changed = page.getByRole('region', { name: 'Scene', exact: true }).getByText('changed', { exact: true });
   await page.locator('summary', { hasText: 'Look' }).click();
   const color = page.getByRole('combobox', { name: 'Gel color' });
+  // A scene starts in the gel style (ADR 0060, decision 12). Another style has no gel color.
+  await expect(color).toHaveValue('mild');
+  await page.getByRole('combobox', { name: 'Style' }).selectOption('glow');
   await expect(color).toHaveCount(0);
   await page.getByRole('combobox', { name: 'Style' }).selectOption('gel');
   await expect(color).toHaveValue('mild');

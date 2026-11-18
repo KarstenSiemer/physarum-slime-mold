@@ -2215,6 +2215,13 @@ and run it there in the image that `.github/workflows/ci.yml` pins (1 minute aft
 docker run --rm -v <folder>:/work -w /work -e CI=1 <image> bash -lc "npm ci && npx vitest run --project gpu src/engine/front.gpu.test.ts"
 ```
 
+**The time of the e2e tests** of the second shard in the image of CI, here and in a checkout of
+`main`, one after the other with nothing else on the machine (12 minutes each, after `npm ci`):
+
+```bash
+docker run --rm --ipc=host -v <folder>:/work -w /work -e CI=1 <image> bash -lc "npm run build && npx playwright test --project=e2e --reporter=list --shard=2/2"
+```
+
 **The bytes of the scenes.** The digests as in part 17, with the names `g59-digest-branch` and
 `g59-digest-3000-branch`. The digests of `main` for it are those of part 21:
 
@@ -2228,32 +2235,36 @@ node --import ./research/flow/register.mjs research/flow/summary.ts digests rese
 
 They must print that all 54 runs and all 16 runs are equal.
 
-**The wrong rules** of the front stamp, of the fan and of the film below the plasm (GF1 to GF18),
-and the 13 wrong rules of the slime whose lines changed (part 7 has the tool):
+**The wrong rules** of the front stamp, of the fan, of the film below the plasm, of the copies of a
+lattice and of the scent view over the film (GF1 to GF22), and the 16 wrong rules of the slime whose
+lines changed (part 7 has the tool):
 
 ```bash
-node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SL17 SL20 SL60 SL92 SL94 SL132 SL134 SL159 SL162 SL170 SL219 SL220 SL222 GF1 GF2 GF3 GF4 GF5 GF6 GF7 GF8 GF9 GF10 GF11 GF12 GF13 GF14 GF15 GF16 GF17 GF18
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SL17 SL20 SL60 SL92 SL94 SL132 SL134 SL159 SL162 SL170 SL176 SL177 SL178 SL219 SL220 SL222 GF1 GF2 GF3 GF4 GF5 GF6 GF7 GF8 GF9 GF10 GF11 GF12 GF13 GF14 GF15 GF16 GF17 GF18 GF19 GF20 GF21 GF22
 ```
 
 **The time of a step** with the front stamp, against `main`: the command of part 21 with the
 names `g59-bench-front-r1` and `-r2` here and `g59-bench-main-r1` and `-r2` in a checkout of
 `main` at `07b295e`, two rounds in turns, 2.7 minutes per run, with nothing else on the GPU.
 
-Result: no scene changes a byte. Each of the 31 wrong rules fails at least one test. Two rounds do
+Result: no scene changes a byte. Each of the 38 wrong rules fails at least one test (GF21 and GF22
+ran after the last change of the passes of the scent view, the other 36 before it). Two rounds do
 not resolve the cost of the front stamp in a step: the means of the medians differ by −0.2 to
 +0.02 ms on WebGPU and by −0.1 to +0.4 ms on WebGL2, and two rounds of one case differ by as
-much. Not measured: the time of a draw with the fan. ADR 0060 has the rest. The records are in
+much. The second shard of the e2e tests takes 12.4 min here and 11.1 min on `main` in the image of
+CI. Not measured: the time of a draw with the fan. ADR 0060 has the rest. The records are in
 `logs/engine/front/`:
 
 | Record                                      | Runs                                                                 |
 | ------------------------------------------- | -------------------------------------------------------------------- |
 | `digest-branch.jsonl`, `digest-3000-branch` | the digests of every scene after 500 steps, and of eight after 3,000 |
-| `mutations.txt`                             | the 31 wrong rules of the command above                              |
+| `mutations.txt`                             | the 38 wrong rules of the command above                              |
+| `e2e-half2-main.txt`, `e2e-half2-branch`    | the second shard of the e2e tests in the image of CI, `main`, here   |
 | `bench-front-r*`, `bench-main-r*`           | the time of a step with the front stamp, and on `main`               |
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 406 files, 8.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 408 files, 8.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2288,7 +2299,7 @@ asks for the new digest.
 | `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
 | `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
 | `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
-| `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, and the wrong rules of the growth front                                                                                                                             |
+| `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, the wrong rules, and the e2e times                                                                                                                                  |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -2345,7 +2356,7 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 607 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
+| `engine/mutate.ts`        | 629 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
 | `engine/variant.ts`       | other rules in the passes for one run, for the measurements of ADR 0053, ADR 0054 and ADR 0056    |
 | `engine/y-maze.*`         | the Y-maze of Reid et al. 2012: its layout, its runs, and `measure-y-maze.ts` for its tables      |

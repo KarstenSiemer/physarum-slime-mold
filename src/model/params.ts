@@ -610,7 +610,7 @@ export function defaultSettings(): Settings {
     growth: false,
     stepOrder: 'sense-first',
     flow: false,
-    style: 'glow',
+    style: 'gel',
     gelColor: 'mild',
     showScent: false,
     showTubes: true,
