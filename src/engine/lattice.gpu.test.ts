@@ -185,7 +185,8 @@ describe.each(['webgpu', 'webgl2'] as const)('lattices on %s', (kind) => {
   it(
     'draw only the free space beside a closed lattice and in its corners outside the dish',
     async () => {
-      const space = hexToLinear(BACKGROUND.glow).map((v) => srgb8(v * 0.55));
+      // The scenes draw the default style.
+      const space = hexToLinear(BACKGROUND[defaultSettings().style]).map((v) => srgb8(v * 0.55));
       // Two dishes with few agents keep this cheap on SwiftShader (CI).
       for (const [id, [w, h]] of [
         ['steiner', SCREENS[0]],
@@ -320,7 +321,7 @@ describe.each(['webgpu', 'webgl2'] as const)('lattices on %s', (kind) => {
         const img = await engine.capture();
         const period = Math.round(engine.sim.width / engine.view.scale);
         expect(Math.abs(period - engine.sim.width / engine.view.scale)).toBeLessThan(1e-6);
-        const space = hexToLinear(BACKGROUND.glow).map((v) => v * 0.55);
+        const space = hexToLinear(BACKGROUND[engine.settings.style]).map((v) => v * 0.55);
         const dark = Math.max(...space.map(srgb8));
         let [error, lit] = [0, 0];
         for (let y = 4; y < img.height - 4; y += 3)

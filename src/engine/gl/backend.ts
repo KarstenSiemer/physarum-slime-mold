@@ -2,9 +2,9 @@ import type { Settings } from '../../model/params';
 import { at } from '../at';
 import { levels, STRAND_BLEND, strandLevel } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
-import { packView, trailLevel, VIEW_BYTES } from '../render';
+import { FRONT_LEVEL, packView, trailLevel, VIEW_BYTES } from '../render';
 import { levelSize, scentLevel, scentLevelSize } from '../scent';
-import { slimeShown, slimeSteps } from '../slime';
+import { frontShown, slimeShown, slimeSteps } from '../slime';
 import {
   BYTES_PER_AGENT_GL,
   BYTES_PER_CELL,
@@ -76,6 +76,9 @@ export class WebGl2Backend implements Backend<GlSim> {
   private film: Target | undefined;
   /** What the map of the film holds: it is filled again only when one of these changed. */
   private filmHolds: FilmState | undefined;
+  /** The map of the growth front (front-map.frag, ADR 0060), and what it holds. */
+  private young: Target | undefined;
+  private youngHolds: { sim: GlSim; stamps: WebGLTexture; step: number; revision: number; life: number } | undefined;
   /** The coarse map of the film (slime-down.frag) for a view zoomed out: half the grid's sides, rounded up. */
   private filmCoarse: Target | undefined;
   private filmCoarseHolds: (FilmState & { level: number }) | undefined;
@@ -158,6 +161,16 @@ export class WebGl2Backend implements Backend<GlSim> {
     return sim;
   }
 
+  /**
+   * What lies below the scent view in a frame of `sim`: 2 the skirt of the growth front with the film of the slime, 1
+   * the film, 0 the picture alone. The film and the skirt need the fields of the simulation (see the frame).
+   */
+  private below(sim: GlSim, s: Settings): 0 | 1 | 2 {
+    const [filmy, fanned] = [slimeShown(s), frontShown(s)];
+    if (this.fixed || !(filmy || fanned) || !sim.slimeTexture || !sim.slimeAmountTexture) return 0;
+    return fanned && sim.slimeFrontTexture ? 2 : filmy ? 1 : 0;
+  }
+
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
     if (measure && this.frame % 15 === 0 && !this.measuring) void this.measure(sim, this.gain === 0 ? 1 : 0.25);
@@ -177,7 +190,10 @@ export class WebGl2Backend implements Backend<GlSim> {
     const gl = this.gl;
     // An export shows the scent view and the film of the slime as asked: wait for their programs, unless the context
     // is lost.
-    const built = () => (!settings.showScent || this.prog.scent()) && (!slimeShown(settings) || this.prog.slimed());
+    const built = () =>
+      (!slimeShown(settings) || this.prog.slimed()) &&
+      (!frontShown(settings) || this.prog.fronted()) &&
+      (!settings.showScent || (this.prog.scent() && this.prog.viewed(this.below(sim, settings))));
     while (!this.fixed && !built() && !gl.isContextLost()) await new Promise((r) => setTimeout(r, 2));
     // A rebuild can destroy the simulation during that wait. Then nothing is left to draw, and the engine asks
     // again for the new one (Engine.ofRun()).
@@ -219,6 +235,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.coarseHolds = undefined;
     this.trailHolds = undefined;
     [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
+    this.youngHolds = undefined;
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
@@ -233,6 +250,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     if (this.trailCoarse) destroyTarget(this.gl, this.trailCoarse);
     if (this.film) destroyTarget(this.gl, this.film);
     if (this.filmCoarse) destroyTarget(this.gl, this.filmCoarse);
+    if (this.young) destroyTarget(this.gl, this.young);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
@@ -352,9 +370,15 @@ export class WebGl2Backend implements Backend<GlSim> {
     // The film of the slime (ADR 0055, decision 8), while the settings show it and the simulation holds the field:
     // without a field no cell has a stamp, and the picture is the one without the film. Its programs are built from
     // the first frame that asks for them, as those of the scent view.
-    const stamps = !this.fixed && slimeShown(s) ? sim.slimeTexture : undefined;
+    const [filmy, fanned] = [slimeShown(s), frontShown(s)];
+    const stamps = !this.fixed && (filmy || fanned) ? sim.slimeTexture : undefined;
     const amounts = stamps ? sim.slimeAmountTexture : undefined;
-    const wet = stamps && amounts ? this.prog.slimed() : undefined;
+    const fronts = stamps && fanned ? sim.slimeFrontTexture : undefined;
+    const wet = stamps && amounts && filmy ? this.prog.slimed() : undefined;
+    // The skirt of the growth front (ADR 0060) has programs of its own, with the code of the film in them: a frame
+    // without the skirt pays nothing for it. With the film it waits for the programs of the maps of the film.
+    const frontReady = stamps && amounts && fronts ? this.prog.fronted() : undefined;
+    const grown = frontReady && (!filmy || wet) ? frontReady : undefined;
     packView(
       this.viewData,
       width,
@@ -369,7 +393,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       l.strand,
       streamStep,
       sim.hasElectrodes,
-      wet ? sim.step : undefined,
+      (wet ?? grown) ? sim.step : undefined,
     );
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
@@ -447,8 +471,25 @@ export class WebGl2Backend implements Backend<GlSim> {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
     }
+    // The map of the growth front (front-map.frag, ADR 0060), filled once for each state that a frame draws.
+    const young = grown && fronts ? this.youngFor(sim) : undefined;
+    if (grown && young && stamps && fronts) {
+      const now = { sim, stamps, step: sim.step, revision: sim.revision, life: slimeSteps(s) };
+      const held = this.youngHolds;
+      if (!(held && (Object.keys(now) as (keyof typeof now)[]).every((k) => held[k] === now[k]))) {
+        this.youngHolds = now;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, young.fbo);
+        gl.viewport(0, 0, young.width, young.height);
+        gl.useProgram(grown.map.program);
+        textures(gl, grown.map.program, { trail, stamps, fronts });
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+    }
     // The scent view once its programs are built; zoomed out it reads a coarser map, filled here.
     const scent = s.showScent && !this.fixed ? this.prog.scent() : undefined;
+    // The render pass with the scent view is built for what lies below the view in this frame (ADR 0060).
+    const below = this.below(sim, s);
+    const over = s.showScent && !this.fixed ? this.prog.viewed(below) : undefined;
     const level = scentLevel(view.scale);
     const coarse = scent ? this.coarseFor(sim) : undefined;
     const holds = this.coarseHolds;
@@ -469,8 +510,12 @@ export class WebGl2Backend implements Backend<GlSim> {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    // The scent view draws no slime (slimeShown()), so a frame has one of the two at most.
-    const p = (this.fixed ?? scent?.render ?? wet?.render ?? this.prog.render)[variant];
+    // The scent view lies over the film and the skirt (ADR 0060). The frame draws the view once its maps, its render
+    // pass and the programs of what lies below it are built. Until then the frame draws without the view, and nothing
+    // below it goes.
+    const lies = below === 2 ? grown !== undefined : below === 1 ? wet !== undefined : true;
+    const top = scent && lies ? over : undefined;
+    const p = (this.fixed ?? top ?? grown?.render ?? wet?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
     // A sampler that the frame does not read still needs a texture: the trail stands in for its coarse map.
     const trailLevels = trailCoarse?.texture ?? trail;
@@ -489,11 +534,19 @@ export class WebGl2Backend implements Backend<GlSim> {
     const scentLevels = coarse?.texture ?? viewScent;
     // The maps of the film of the slime: up to 2 cells per pixel no frame reads the coarse one, and the map of the
     // cells stands in for it.
-    const maps = wet && film ? { film: film.texture, filmLevels: filmCoarse?.texture ?? film.texture } : {};
-    const more = scent ? { scent: viewScent, scentLevels } : maps;
+    // A sampler that the frame does not read still needs a texture: the trail stands in for a map that is not shown.
+    const maps =
+      wet || grown
+        ? {
+            film: film?.texture ?? trail,
+            filmLevels: filmCoarse?.texture ?? film?.texture ?? trail,
+            ...(grown ? { youngMap: young?.texture ?? trail } : {}),
+          }
+        : {};
+    const more = { ...(top ? { scent: viewScent, scentLevels } : {}), ...maps };
     textures(gl, p.program, { ...all, ...more });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    return !(s.showScent && !this.fixed && !scent) && !(stamps && !wet);
+    return !(s.showScent && !this.fixed && !top) && !(stamps && filmy && !wet) && !(fronts && !grown);
   }
 
   /** The scent view's coarse map for this grid size, made anew when the size changes. */
@@ -505,6 +558,17 @@ export class WebGl2Backend implements Backend<GlSim> {
       this.coarseHolds = undefined;
     }
     return this.coarse;
+  }
+
+  /** The map of the growth front for this grid size (texels of 2^FRONT_LEVEL cells), made anew with the size. */
+  private youngFor(sim: GlSim): Target {
+    const [w, h] = [levelSize(sim.width, FRONT_LEVEL), levelSize(sim.height, FRONT_LEVEL)];
+    if (this.young?.width !== w || this.young.height !== h) {
+      if (this.young) destroyTarget(this.gl, this.young);
+      this.young = target(this.gl, w, h, this.gl.RGBA8);
+      this.youngHolds = undefined;
+    }
+    return this.young;
   }
 
   /** The trail's coarse map for this grid size, made anew when the size changes. */
@@ -524,6 +588,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       if (this.film) destroyTarget(this.gl, this.film);
       this.film = target(this.gl, sim.width, sim.height, this.gl.R16F);
       [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
+      this.youngHolds = undefined;
     }
     return this.film;
   }

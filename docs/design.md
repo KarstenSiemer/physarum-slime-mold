@@ -120,6 +120,8 @@ strains (one `vec4` lane each).
 | slime (extended)   | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the stamp of the slime of each cell (ADR 0055)        |
 | slime amount       | storage `u32` per cell (WebGL2: `R16UI` × 2)     | 4 B × W × H      | how much slime each cell holds, the view only (0057)  |
 | film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
+| front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0060) |
+| map of the front   | `rgba32float` texture, texels of 8 × 8 cells     | 0.25 B × W × H   | renderer only: young plasm and its age (ADR 0060)     |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -182,7 +184,8 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
 6. **Stamp pass of the slime**, only in the extended model while the Slime life time is above 0 (model.md,
    section 6.9; ADR 0055): a cell that holds plasm after the diffusion gets the stamp of the step. WebGPU writes
    the stamp into a storage buffer. WebGL2 draws into a target of unsigned integers and discards the fragment of
-   every other cell, so that cell keeps its stamp.
+   every other cell, so that cell keeps its stamp. The same pass on WebGPU, and a pass before it on WebGL2, writes
+   the front stamp of a cell that gets plasm on ground without slime (ADR 0060).
 7. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
    iterations, once per strain (ADR 0031). On WebGPU each texture of the flow has a layer per strain, and the agent and
    growth passes read the layer of the agent's strain from a `texture_2d_array`; on WebGL2 each strain has its own
@@ -216,7 +219,7 @@ periodic grid over all its cells.
 | Environment         | food strength, light strength (Jones: repellent strength), covered food, random shrinkage; extended: diffusion passes                        |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
 | Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
-| Slime               | slime life time, show slime (extended model only)                                                                                            |
+| Slime               | slime life time, show slime, show growth front (extended model only)                                                                         |
 | Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode, slime; brush; lines (Shift)      |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
@@ -251,7 +254,8 @@ the arrows.
 
 - The view fits the grid into the canvas, centred. Beside a closed arena the free space shows a
   dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
-  on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
+  on a copy paints where the copy shows it (ADR 0026). The light is that which the screen shows:
+  a highlight of the gel ends at 1 first (ADR 0060). A grid shaped like the screen shows its
   copies as they are when zoomed out.
 - Zoomed out, above 1 cell per pixel, a pixel shows the mean of the trail over its square: from the
   trail itself up to 2 cells per pixel, above from a coarser map of the mean over 2, 4, 8 or 16 cells
@@ -347,11 +351,51 @@ the arrows.
     patterns repeat with a periodic grid. Detail that is smaller than a
     pixel fades out from 1 cell per pixel on and is gone at 1.5.
 
-  The film has one colour for all strains. The scent view draws no film. The switch changes nothing in the
+  The plasm lies on the film (ADR 0060; `plasmCover`): the film does not show through a tube, in any style. The
+  plasm hides its ground from the light 0.02 on, and all of it from 0.14 on, the levels at which the gel begins. The
+  light of the plasm is its summed trail above the black level times the exposure. So a dim tube hides the film too,
+  and the film comes back only where the light of a tube fades out at its edge.
+
+  The film has one colour for all strains. The scent view lies over the picture and hides nothing of it, so it shows
+  the film too (ADR 0060, decision 11). The switch changes nothing in the
   simulation, goes into the link like the style and stays as it is when a scene loads. Without the film the render
   pass draws the pixels of before at the same cost: the code of the film is compiled in only for a frame that draws
   it. A CPU copy of the rules is in `src/engine/slime-reference.ts`.
 
+- Fan of the growth front (ADR 0060): while the model has slime and growth is on, the view draws young ground as the growth front of
+  a plasmodium, with the switch Show growth front below Show slime, on at the start. The front is the plasm that comes
+  onto ground without slime; the front stamp of a cell holds the step of that (model.md, section 6.9). The organism
+  has a sheet at its front, then fine veins in a sheet that gets thinner, then one main vein
+  (`docs/knowledge-base/slime-mazes-and-the-front.md`, "The front"). The model grows arms of full plasm, so the
+  picture adds a skirt around the young arms, a thin clear veil of slime; the tube of the model is drawn as before.
+  - **The map of the front** (`frontMap` in `render.wgsl`, `front-map.frag`): one texel for 4 × 4 cells, filled once
+    for each state. For each strain it holds the share of the texel that is young ground. A cell is young ground
+    while it has slime and a front stamp, and it counts (1 − e^(−a / 8)) · e^(−a / 150) for the age a of its stamp in
+    steps: it comes into the skirt over about 20 steps and leaves it with 150. So one cell changes the skirt by a
+    small amount in a step, and the skirt does not jump. Slime without a front stamp is old ground.
+  - **The young ground around a pixel** (`skirtAt`): the render pass takes the mean of the texels of the map within
+    2 texels of the pixel, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance
+    alone and ends without a step, so the young ground around a texel is a round, smooth hill at any zoom, and the
+    skirt shows no texel. The skirt begins where that mean is 0.04 and is whole from 0.3 on. It depends on the
+    stamps alone, not on the levels of the picture.
+  - **The veil** (`skirtOn`): the skirt adds a little light in the colour of the slime and of its strain, with the
+    waves of the film in its surface, a soft light and a small highlight. It only adds light, and on paper it is a
+    faint stain, so it has no dark rim. It lies on the film and below the plasm: the plasm hides it as it hides the
+    film, and the head of a tube is no thicker with it.
+  - **Walls** (`skirtOpen`): the skirt reaches up to 8 cells from young ground, more than a wall is thick. So the
+    pass walks from the pixel toward that ground, up its slope, cell by cell, and the skirt shows nothing where a
+    wall lies on the way.
+  - The skirt adds nothing to the trail and nothing to the gel. The agents style draws no skirt, and the scent view
+    lies over it as over the film. The code of the skirt is compiled in only for a frame that draws it, in pipelines
+    of its own that also hold the film: a frame without the skirt runs the shader without it. The switch changes
+    nothing in the simulation, goes into the link like the style and stays as it is when a scene loads. The numbers
+    are the constants `SKIRT_…` of `render.wgsl`, `render.frag` and `view.glsl`: choices made on pictures.
+  - The picture draws no veins. The first build drew a net of veins from a pattern; the owner took it out on
+    2026-11-18, because veins must come from the crown at the head of a tube, which the model does not grow yet
+    (ADR 0060, decision 14; stage 4 in `TODO.md`).
+- The gel reads its height as a quadratic B-spline of the cells while the view shows a cell on a pixel or more
+  (`heightSmooth`, ADR 0060): four bilinear lookups in place of one. The line at which the gel ends has no tooth at
+  the edge of a cell.
 - Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
   `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).
 - Dither before 8-bit output against banding. An HDR canvas is not built (`TODO.md`).

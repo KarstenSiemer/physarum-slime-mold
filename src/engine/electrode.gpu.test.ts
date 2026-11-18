@@ -270,7 +270,8 @@ function pictureOf(
         // The cell whose bytes the view reads as the cell under the pixel.
         if (ties?.has(outlineCell(grid, Math.floor(px), Math.floor(py)))) part[i] = PART.skip;
       }
-      if (copies < 1) c = mix(mix(space, c, copies), c, box);
+      // A copy dims the light that the screen shows: the light ends at 1 first.
+      if (copies < 1) c = mix(mix(space, c.map((v) => Math.min(Math.max(v, 0), 1)) as Rgb, copies), c, box);
       for (let k = 0; k < 3; k++) want[i * 3 + k] = toByte(c[k] ?? 0);
     }
   return { want, part, cover };
@@ -890,8 +891,9 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
           bloom: 0,
           seed: 5,
           strains: [defaultStrain(0), defaultStrain(1)],
-          // The renderer of a test draws no layer of the slime (render.ts `fixed`).
+          // The renderer of a test draws no layer of the slime and no skirt of the growth front (render.ts `fixed`).
           showSlime: false,
+          showFront: false,
         };
         const sim = await make(base, (W * H) / 2);
         if (painted)

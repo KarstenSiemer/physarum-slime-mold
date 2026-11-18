@@ -4,7 +4,7 @@ import { readPixels } from './readback';
 import { levelSize, scentLevel, scentLevelSize, scentSensors } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import type { Simulation } from './sim';
-import { slimeShown, slimeSteps } from './slime';
+import { frontShown, slimeShown, slimeSteps } from './slime';
 import { STREAM } from './tubes';
 import type { View } from './types';
 
@@ -69,6 +69,13 @@ const COARSE_FORMAT: GPUTextureFormat = 'rgba32float';
 const TRAIL_FORMAT: GPUTextureFormat = 'rgba32float';
 /** The map of the film of the slime and its coarse map (ADR 0057): one thickness per texel, 2 B. */
 const FILM_FORMAT: GPUTextureFormat = 'r16float';
+/**
+ * The map of the growth front (ADR 0060): for each strain, the share of a texel that is young ground, 0 to 1. One
+ * byte each is enough: the render pass takes the mean of the texels around a pixel.
+ */
+const FRONT_FORMAT: GPUTextureFormat = 'rgba8unorm';
+/** The map of the growth front has texels of 2^FRONT_LEVEL cells per side (render.wgsl FRONT_LEVEL). */
+export const FRONT_LEVEL = 2;
 
 /**
  * The coarsest map of the trail that a view zoomed out reads (trailLevel()): texels of 16 cells, for up to 32 cells
@@ -141,7 +148,9 @@ export function packView(
   // the pass takes the age of a stamp as the passes of the simulation do. Then the numbers of the style: the colour
   // and the share of its body, its highlight, its wide light, the height of its relief and of its beads. A frame
   // without the film reads none of them.
-  u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), 0, 0], 56);
+  // What the frame draws of the slime field: 1 the film of the slime, 2 the skirt of the growth front (ADR 0060).
+  const parts = (slimeShown(settings) ? 1 : 0) | (frontShown(settings) ? 2 : 0);
+  u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), parts, 0], 56);
   const look = SLIME_LOOK[settings.style];
   fl.set([...hexToLinear(look.color), look.body], 60);
   fl.set([look.gloss, look.wide, SLIME_RELIEF, SLIME_BEAD], 64);
@@ -169,13 +178,14 @@ interface Groups {
    * picture of the tubes while it lives, and a pass with a freed texture is an error of the device.
    */
   filmDown?: GPUBindGroup;
+  /** The pass that fills the map of the growth front (`frontMap` in render.wgsl) with the slime field that it reads. */
+  front?: { group: GPUBindGroup; stamps: GPUBuffer };
   /** The buffer at the binding of the outline distances of the electrodes (encode()). */
   poles: GPUBuffer;
 }
 
-/** The scent view: the render pass with it, without (index 0) or with (1) the food, light and walls, and `scentDown`. */
+/** The maps of the scent view: `scentDown`. The render passes with the view are apart (Renderer.viewNow()). */
 interface ScentPipelines {
-  render: Variants;
   /** Fills the coarse map: the scent of its texels and the share of them that holds scent. */
   down: GPURenderPipeline;
   /** Refreshes the scent of its texels after steps and keeps their share (SUM_ONLY in render.wgsl). */
@@ -194,6 +204,29 @@ interface SlimePipelines {
   down: GPURenderPipeline;
 }
 
+/**
+ * The skirt of the growth front (ADR 0060): the render pass with the skirt and the film (`FRONT` and `SLIME`), and the
+ * pass of the map of the front. A frame without the skirt runs the pipelines without its code.
+ */
+interface FrontPipelines {
+  render: Variants;
+  map: GPURenderPipeline;
+}
+
+/**
+ * What lies below the scent view in a frame: 0 the picture alone, 1 the film of the slime, 2 the skirt of the growth
+ * front with the film.
+ */
+type Below = 0 | 1 | 2;
+const VIEW_PARTS = ['SCENT', 'SCENT+SLIME', 'SCENT+FRONT'] as const;
+
+/** The render passes with the scent view over one kind of picture: built at their first use (Renderer.viewNow()). */
+interface Viewed {
+  ready?: Variants;
+  build?: Promise<Variants>;
+  error?: Error;
+}
+
 /** What a map of the film holds: it is filled again only when one of these changed. */
 interface FilmState {
   sim: Simulation;
@@ -208,7 +241,8 @@ interface FilmState {
 
 /**
  * The descriptor of the render pass from `module` without or with the food, light and walls (`env`), and with one
- * part more or none (`part`): the scent view (`SCENT`) or the film of the slime (`SLIME`). Without a part the
+ * part more or none (`part`): the scent view (`SCENT`), the film of the slime (`SLIME`), the skirt of the growth
+ * front with the film (`FRONT`, which also sets `SLIME`), or the scent view over one of the two. Without a part the
  * pipeline sets only `ENV`, as before the parts existed.
  */
 function renderPipeline(
@@ -217,8 +251,14 @@ function renderPipeline(
   layout: GPUBindGroupLayout,
   format: GPUTextureFormat,
   env: boolean,
-  part?: 'SCENT' | 'SLIME',
+  part?: 'SCENT' | 'SLIME' | 'FRONT' | 'SCENT+SLIME' | 'SCENT+FRONT',
 ): GPURenderPipelineDescriptor {
+  // The skirt of the growth front needs the code of the film (`FRONT` sets `SLIME`), and the scent view can lie over
+  // both.
+  const parts: Record<string, number> = {};
+  if (part?.includes('SCENT')) parts.SCENT = 1;
+  if (part?.includes('SLIME') || part?.includes('FRONT')) parts.SLIME = 1;
+  if (part?.includes('FRONT')) parts.FRONT = 1;
   return {
     layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
     vertex: { module, entryPoint: 'vs' },
@@ -226,7 +266,7 @@ function renderPipeline(
       module,
       entryPoint: 'fs',
       targets: [{ format }],
-      constants: { ENV: Number(env), ...(part ? { [part]: 1 } : {}) },
+      constants: { ENV: Number(env), ...parts },
     },
   };
 }
@@ -236,8 +276,9 @@ export class Renderer {
   private readonly heightLayout: GPUBindGroupLayout;
   private readonly pipelines: Variants;
   /**
-   * The pipelines of the scent view, built without blocking from the first frame that asks for the view (scentNow()):
-   * most frames never draw it. Until they are built, frames draw without it.
+   * The passes of the maps of the scent view, built without blocking from the first frame that asks for the view
+   * (scentNow()): most frames never draw it. Until they and its render pass (`viewed`) are built, frames draw without
+   * it.
    */
   private scent: ScentPipelines | undefined;
   private scentBuild: Promise<ScentPipelines> | undefined;
@@ -248,8 +289,24 @@ export class Renderer {
    */
   private slime: SlimePipelines | undefined;
   private slimeBuild: Promise<SlimePipelines> | undefined;
+  /**
+   * The passes of the skirt of the growth front (FRONT in render.wgsl, ADR 0060), built without blocking from the first
+   * frame that draws the skirt (frontNow()): a scene without growth never does.
+   */
+  private frontPasses: FrontPipelines | undefined;
+  private frontBuild: Promise<FrontPipelines> | undefined;
+  /**
+   * The render passes with the scent view, by what lies below the view (`Below`). Each is built without blocking from
+   * the first frame that draws it (viewNow()), and no other: a frame with the film never builds the pass without it.
+   * The scent view lies over the picture and hides nothing of it (ADR 0060, decision 11).
+   */
+  private readonly viewed: [Viewed, Viewed, Viewed] = [{}, {}, {}];
   private readonly filmLayout: GPUBindGroupLayout;
   private readonly filmDownLayout: GPUBindGroupLayout;
+  private readonly frontLayout: GPUBindGroupLayout;
+  /** The map of the growth front (frontMap), made at the first frame that draws the skirt. */
+  private young: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  private youngHolds: Omit<FilmState, 'variant' | 'overlays' | 'boundary'> | undefined;
   /** The map of the film of the slime (slimeFilm), one texel per cell, made at the first frame that draws the film. */
   private film: { texture: GPUTexture; view: GPUTextureView } | undefined;
   private filmHolds: FilmState | undefined;
@@ -330,6 +387,16 @@ export class Renderer {
         storage(16),
         { binding: 15, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 17, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 20, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+      ],
+    });
+    // The pass of the map of the growth front: the view, the trail, the stamps and the front field.
+    this.frontLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: F, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        storage(14),
+        storage(19),
       ],
     });
     // The pass of the map of the film: the view, the trail for the size of the grid, the walls and the slime field.
@@ -398,13 +465,31 @@ export class Renderer {
   }
 
   /**
-   * Waits until a frame with these settings shows the view as asked: the pipelines of the scent view or of the film
-   * of the slime are built.
+   * Waits until a frame of `sim` with these settings shows the view as asked: the pipelines of the film of the slime,
+   * of the skirt and of the scent view that the frame draws are built.
    */
-  async ready(settings: Settings): Promise<void> {
+  async ready(sim: Simulation, settings: Settings): Promise<void> {
     if (this.fixed !== undefined) return;
-    if (settings.showScent) await this.scentNow(true);
-    if (slimeShown(settings)) await this.slimeNow(true);
+    const { filmy, fanned } = this.slimeParts(sim, settings);
+    if (filmy) await this.slimeNow(true);
+    if (fanned) await this.frontNow(true);
+    if (settings.showScent) {
+      await this.scentNow(true);
+      await this.viewNow(fanned ? 2 : filmy ? 1 : 0, true);
+    }
+  }
+
+  /**
+   * What a frame of `sim` draws of the slime with these settings: the film (ADR 0055, decision 8; ADR 0057) and the
+   * skirt of the growth front (ADR 0060), each while the settings show it and the simulation holds the field. Without a
+   * field no cell has a stamp, and the picture is the one without them.
+   */
+  private slimeParts(sim: Simulation, settings: Settings): { filmy: boolean; fanned: boolean } {
+    const held = this.fixed === undefined && sim.slimeField !== undefined && sim.slimeAmount !== undefined;
+    return {
+      filmy: held && slimeShown(settings),
+      fanned: held && sim.slimeFront !== undefined && frontShown(settings),
+    };
   }
 
   /**
@@ -439,11 +524,15 @@ export class Renderer {
     const { exposure, black, strand } = f;
     // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
     const stream = sim.streamTexture;
-    // The film of the slime (ADR 0055, decision 8; ADR 0057), while the settings show it and the simulation holds the
-    // field: without a field no cell has a stamp, and the picture is the one without the film.
-    const [stamps, amounts] = [sim.slimeField, sim.slimeAmount];
-    const slimy = this.fixed === undefined && slimeShown(f.settings) && stamps !== undefined && amounts !== undefined;
-    const wet = slimy ? this.slimeNow() : undefined;
+    // The film of the slime and the skirt of the growth front, while the settings show them and the simulation holds
+    // the field (slimeParts()).
+    const [stamps, amounts, fronts] = [sim.slimeField, sim.slimeAmount, sim.slimeFront];
+    const { filmy, fanned } = this.slimeParts(sim, f.settings);
+    // The skirt of the growth front (ADR 0060) has pipelines of its own, with the code of the film in them: a frame
+    // without the skirt pays nothing for it. With the film it waits for the passes of the maps of the film.
+    const wet = filmy ? this.slimeNow() : undefined;
+    const frontReady = fanned ? this.frontNow() : undefined;
+    const grown = frontReady && (!filmy || wet) ? frontReady : undefined;
     packView(
       this.data,
       width,
@@ -458,7 +547,7 @@ export class Renderer {
       strand,
       stream ? sim.step : undefined,
       sim.hasElectrodes,
-      wet ? sim.step : undefined,
+      (wet ?? grown) ? sim.step : undefined,
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
@@ -468,7 +557,12 @@ export class Renderer {
     const trail = sim.pictureTexture;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
-    const view = f.settings.showScent && this.fixed === undefined ? this.scentNow() : undefined;
+    const scented = f.settings.showScent && this.fixed === undefined;
+    const view = scented ? this.scentNow() : undefined;
+    // The render pass with the scent view is built for what lies below the view in this frame (ADR 0060, decision
+    // 11): the skirt with the film, the film, or the picture alone.
+    const below: Below = fanned ? 2 : filmy ? 1 : 0;
+    const over = scented ? this.viewNow(below) : undefined;
     const coarse = view ? this.coarseFor(trail) : undefined;
     // Zoomed out, a pixel reads the trail from a coarser map, filled below (trailDown in render.wgsl).
     const trailMap = trailLevel(f.view.scale);
@@ -476,6 +570,7 @@ export class Renderer {
     // The maps of the film, made before the bind group that holds them.
     const film = wet ? this.filmFor(trail) : undefined;
     const filmCoarse = wet && trailMap > 0 ? this.filmCoarseFor(trail) : undefined;
+    const young = grown ? this.youngFor(trail) : undefined;
     let byScent = this.groups.get(trail);
     if (!byScent) {
       byScent = new WeakMap();
@@ -516,6 +611,8 @@ export class Renderer {
           // The maps of the film of the slime (ADR 0057). A frame without the film reads none of them.
           { binding: 15, resource: this.film?.view ?? this.noCoarse.createView() },
           { binding: 17, resource: this.filmCoarse?.view ?? this.noCoarse.createView() },
+          // The map of the growth front (ADR 0060).
+          { binding: 20, resource: this.young?.view ?? this.noCoarse.createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -551,6 +648,18 @@ export class Renderer {
         ],
       });
       cached.film = { group, stamps };
+    }
+    if (grown && young && stamps && fronts && cached.front?.stamps !== stamps) {
+      const group = this.device.createBindGroup({
+        layout: this.frontLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.uniform } },
+          { binding: 1, resource: trail.createView() },
+          { binding: 14, resource: { buffer: stamps } },
+          { binding: 19, resource: { buffer: fronts } },
+        ],
+      });
+      cached.front = { group, stamps };
     }
     // Without food, light or walls the environment code would only cost time: the variant without it
     // draws the same pixels.
@@ -637,6 +746,19 @@ export class Renderer {
         down.end();
       }
     }
+    // The map of the growth front, filled once for each state that a frame draws (frontMap in render.wgsl).
+    if (grown && young && stamps && cached.front) {
+      const now = { sim, stamps, step: sim.step, revision: sim.revision, life: slimeSteps(f.settings) };
+      const held = this.youngHolds;
+      if (!(held && (Object.keys(now) as (keyof typeof now)[]).every((k) => held[k] === now[k]))) {
+        this.youngHolds = now;
+        const fill = enc.beginRenderPass({ colorAttachments: [{ view: young, loadOp: 'clear', storeOp: 'store' }] });
+        fill.setPipeline(grown.map);
+        fill.setBindGroup(0, cached.front.group);
+        fill.draw(3);
+        fill.end();
+      }
+    }
     // Zoomed out, the scent view reads a coarser map of the scent, filled here (scentDown in render.wgsl).
     const level = scentLevel(f.view.scale);
     const holds = this.coarseHolds;
@@ -658,13 +780,16 @@ export class Renderer {
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
-    // The scent view draws no slime (slimeShown()), so a frame has one of the two parts at most.
-    pass.setPipeline((view?.render ?? wet?.render ?? this.pipelines)[variant]);
+    // The scent view lies over the film and the skirt. The frame draws the view once its maps, its render pass and the
+    // passes of what lies below it are built. Until then the frame draws without the view, and nothing below it goes.
+    const lies = below === 2 ? grown !== undefined : below === 1 ? wet !== undefined : true;
+    const top = view && lies ? over : undefined;
+    pass.setPipeline((top ?? grown?.render ?? wet?.render ?? this.pipelines)[variant]);
     pass.setBindGroup(0, cached.group);
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    return !(f.settings.showScent && this.fixed === undefined && !view) && !(slimy && !wet);
+    return !(scented && !top) && !(filmy && !wet) && !(fanned && !grown);
   }
 
   /**
@@ -675,9 +800,7 @@ export class Renderer {
   private scentNow(wait: true): Promise<ScentPipelines>;
   private scentNow(wait = false): ScentPipelines | undefined | Promise<ScentPipelines> {
     if (!this.scentBuild) {
-      const { device, module, layout, format } = this;
-      const render = (env: boolean) =>
-        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, 'SCENT'));
+      const { device, module } = this;
       const fill = (sum: boolean) =>
         device.createRenderPipelineAsync({
           layout: device.createPipelineLayout({ bindGroupLayouts: [this.downLayout] }),
@@ -692,9 +815,7 @@ export class Renderer {
             ],
           },
         });
-      this.scentBuild = Promise.all([render(false), render(true), fill(false), fill(true)]).then(
-        ([off, on, down, sum]) => (this.scent = { render: [off, on], down, sum }),
-      );
+      this.scentBuild = Promise.all([fill(false), fill(true)]).then(([down, sum]) => (this.scent = { down, sum }));
       // A failed build shows in the next frame that asks for the view.
       this.scentBuild.catch((err: unknown) => (this.scentError = err instanceof Error ? err : new Error(String(err))));
     }
@@ -741,6 +862,54 @@ export class Renderer {
   }
 
   private slimeError: Error | undefined;
+
+  /**
+   * The pipelines of the skirt of the growth front once they are built, else undefined; the first call starts their
+   * build, without blocking, as slimeNow() does. `wait`: resolves when they are built (exports and tests).
+   */
+  private frontNow(): FrontPipelines | undefined;
+  private frontNow(wait: true): Promise<FrontPipelines>;
+  private frontNow(wait = false): FrontPipelines | undefined | Promise<FrontPipelines> {
+    if (!this.frontBuild) {
+      const { device, module, layout, format } = this;
+      const render = (env: boolean) =>
+        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, 'FRONT'));
+      const map = device.createRenderPipelineAsync({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [this.frontLayout] }),
+        vertex: { module, entryPoint: 'vs' },
+        fragment: { module, entryPoint: 'frontMap', targets: [{ format: FRONT_FORMAT }] },
+      });
+      this.frontBuild = Promise.all([render(false), render(true), map]).then(
+        ([off, on, filled]) => (this.frontPasses = { render: [off, on], map: filled }),
+      );
+      // A failed build shows in the next frame that asks for the skirt.
+      this.frontBuild.catch((err: unknown) => (this.fanError = err instanceof Error ? err : new Error(String(err))));
+    }
+    if (this.fanError) throw this.fanError;
+    return wait ? this.frontBuild : this.frontPasses;
+  }
+
+  private fanError: Error | undefined;
+
+  /**
+   * The render passes with the scent view over what lies below it (`below`), once they are built, else undefined; the
+   * first call starts their build, without blocking. `wait`: resolves when they are built.
+   */
+  private viewNow(below: Below): Variants | undefined;
+  private viewNow(below: Below, wait: true): Promise<Variants>;
+  private viewNow(below: Below, wait = false): Variants | undefined | Promise<Variants> {
+    const set = this.viewed[below];
+    if (!set.build) {
+      const { device, module, layout, format } = this;
+      const part = VIEW_PARTS[below];
+      const render = (env: boolean) =>
+        device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, part));
+      set.build = Promise.all([render(false), render(true)]).then(([off, on]) => (set.ready = [off, on]));
+      set.build.catch((err: unknown) => (set.error = err instanceof Error ? err : new Error(String(err))));
+    }
+    if (set.error) throw set.error;
+    return wait ? set.build : set.ready;
+  }
 
   /** The scent view's coarse map for a trail of this size (half its sides, rounded up), made anew with the size. */
   private coarseFor(trail: GPUTexture): GPUTextureView {
@@ -792,6 +961,23 @@ export class Renderer {
     return this.film.view;
   }
 
+  /** The map of the growth front for a trail of this size (texels of 2^FRONT_LEVEL cells), made anew with the size. */
+  private youngFor(trail: GPUTexture): GPUTextureView {
+    const [width, height] = [levelSize(trail.width, FRONT_LEVEL), levelSize(trail.height, FRONT_LEVEL)];
+    if (this.young?.texture.width !== width || this.young.texture.height !== height) {
+      this.young?.texture.destroy();
+      const texture = this.device.createTexture({
+        size: [width, height],
+        format: FRONT_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.young = { texture, view: texture.createView() };
+      this.youngHolds = undefined;
+      this.groups = new WeakMap();
+    }
+    return this.young.view;
+  }
+
   /** The coarse map of the film for a trail of this size (half its sides, rounded up), made anew with the size. */
   private filmCoarseFor(trail: GPUTexture): GPUTextureView {
     const [width, height] = [levelSize(trail.width, 1), levelSize(trail.height, 1)];
@@ -831,6 +1017,7 @@ export class Renderer {
     this.coarseHolds = undefined;
     this.trailHolds = undefined;
     [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
+    this.youngHolds = undefined;
   }
 
   destroy() {
@@ -840,6 +1027,7 @@ export class Renderer {
     this.trailCoarse?.texture.destroy();
     this.film?.texture.destroy();
     this.filmCoarse?.texture.destroy();
+    this.young?.texture.destroy();
     this.noCoarse.destroy();
   }
 }

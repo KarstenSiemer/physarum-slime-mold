@@ -283,8 +283,24 @@ function styleReference(
       const absorb = colors.reduce((sum, col, s) => sum + (v[s] ?? 0) * (0.15 + 0.85 * (1 - (col[k] ?? 0))), 0);
       return b * Math.exp(-absorb * exposure);
     });
+  /**
+   * The trail at (px, py) as a quadratic B-spline of the 3 × 3 cells around it (heightSmooth() in render.wgsl, ADR
+   * 0060): the height of the gel while a cell is a pixel wide or more.
+   */
+  const smooth = (px: number, py: number) => {
+    const [cx, cy] = [Math.floor(px), Math.floor(py)];
+    const weights = (u: number) => [0.5 * (0.5 - u) ** 2, 0.75 - u * u, 0.5 * (0.5 + u) ** 2];
+    const [wx, wy] = [weights(px - cx - 0.5), weights(py - cy - 0.5)];
+    return [0, 1, 2, 3].map((s) => {
+      let sum = 0;
+      for (let j = 0; j < 3; j++)
+        for (let i = 0; i < 3; i++) sum += (wx[i] ?? 0) * (wy[j] ?? 0) * trailAt(cx + i - 1, cy + j - 1, s);
+      return sum;
+    });
+  };
   /** The height field at (px, py), at least 0. */
-  const heightOf = (px: number, py: number) => levels(tapped(px, py)).reduce((a, b) => a + b, 0) * exposure;
+  const heightOf = (px: number, py: number) =>
+    levels(view.scale <= 1 ? smooth(px, py) : tapped(px, py)).reduce((a, b) => a + b, 0) * exposure;
   /** thick() over the height field in render.wgsl, at two points. */
   const thick = (ax: number, ay: number, bx: number, by: number): [number, number] => {
     const [ya, yb] = [heightOf(ax, ay), heightOf(bx, by)];
@@ -7092,6 +7108,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           collisions,
           density: 0.5,
           showSlime: false,
+          showFront: false,
           strains: [defaultStrain(0), defaultStrain(1)],
         };
         const sim = await make(settings, W, H, (W * H) / 2);
@@ -7340,6 +7357,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       lightStrength: 0.2,
       density: 0.5,
       showSlime: false,
+      showFront: false,
       ...patch,
     });
     /** Food across the seam or the edge, or at the rim of the dish, and light inside: what each view looks at. */
@@ -7523,12 +7541,14 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           vi.restoreAllMocks();
         });
         builds = vi.spyOn(gl, 'createProgram');
+        // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()): the maps of the view, and
+        // its render pass over the picture alone, since these settings show no film of the slime.
+        const asked = () => [programs.scent(), programs.viewed(0)];
         ready = async () => {
-          while (!programs.scent()) await new Promise((r) => setTimeout(r, 1));
+          while (!asked().every(Boolean)) await new Promise((r) => setTimeout(r, 1));
         };
-        // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
         frame = () => {
-          programs.scent();
+          asked();
         };
       }
       for (let k = 0; k < 3; k++) frame();

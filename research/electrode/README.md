@@ -242,20 +242,18 @@ node --import ./research/flow/register.mjs research/electrode/fit.ts
 
 The second command fits the default settings and the 26 scenes with the 4 B and without them, on three backends, six
 hints of the memory of the device and six canvases: 2,916 cases. It runs the fit of the engine itself on the CPU
-backend of the engine tests. Four grids change, and the command must print:
+backend of the engine tests. Two grids change, and the command must print:
 
 ```text
-2916 cases: 4 with another grid
-three-strains on WebGL2 without float blending, no memory hint, a canvas of 1000 × 1000: 1536 before, 1024 now
-two-strains on WebGL2 without float blending, no memory hint, a canvas of 1000 × 1000: 1536 before, 1024 now
-three-strains on WebGL2 without float blending, a memory hint of 4 GB, a canvas of 1000 × 1000: 1536 before, 1024 now
-two-strains on WebGL2 without float blending, a memory hint of 4 GB, a canvas of 1000 × 1000: 1536 before, 1024 now
+2916 cases: 2 with another grid
+three-strains on WebGL2, a memory hint of 1 GB, a canvas of 390 × 844: 1024 before, 768 now
+maze on WebGL2, a memory hint of 0.5 GB, a canvas of 1000 × 1000: 512 before, 256 now
 ```
 
-So these two scenes go from 1536 to 1024 cells on the long side there, and every other case keeps its grid. When
-ADR 0058 was built, one other grid changed: Cyclones on WebGL2 without float blending, with a hint of 2 GB on a
-canvas of 390 × 844 pixels, went from 1024 to 768 cells. The film of the slime (ADR 0057) counts 7 B more per cell
-since then, so the fit stands at other limits.
+So Three strains goes from 1024 to 768 cells on the long side there and the Maze from 512 to 256, and every other
+case keeps its grid. When ADR 0058 was built, one other grid changed: Cyclones on WebGL2 without float blending, with
+a hint of 2 GB on a canvas of 390 × 844 pixels, went from 1024 to 768 cells. The slime counts 11 B more per cell
+since then (ADR 0057, ADR 0060), so the fit stands at other limits.
 
 **The tests.** The CPU copies in Node, then both backends against them in a headless browser:
 

@@ -1,7 +1,8 @@
 # 0061: The tests of CI run in eight jobs: four e2e shards and four GPU parts
 
-- Status: proposed. It changes `.github/workflows/ci.yml`, which needs the owner's review (ADR 0014). Decision of an
-  agent under the owner's delegation of 2026-11-12.
+- Status: accepted. Decision of an agent under the owner's delegation of 2026-11-12. It changes
+  `.github/workflows/ci.yml`, so it needed the owner's review (ADR 0014): the owner approved it on 2026-11-18, and
+  it went into `main` with PR #109 on that day.
 - Date: 2026-11-18
 - Extends [ADR 0014](0014-ci-hardening.md), which made two e2e shards and two GPU parts, and
   [ADR 0049](0049-build-the-diffusion-and-outline-passes-at-their-first-use.md), which balanced the shards.

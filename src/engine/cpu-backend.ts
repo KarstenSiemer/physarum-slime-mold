@@ -27,6 +27,8 @@ export class CpuSim implements Sim {
   slime: Uint32Array | undefined;
   /** The amount of slime of every cell (ADR 0057), held with the stamps. */
   amount: Uint32Array | undefined;
+  /** The front stamp of every cell (ADR 0060), held with the stamps. */
+  front: Uint32Array | undefined;
 
   constructor(
     private settings: Settings,
@@ -41,7 +43,7 @@ export class CpuSim implements Sim {
   update(s: Settings) {
     this.settings = s;
     // The Jones model has no slime: a switch to it frees the field with its stamps.
-    if (!slimeModel(s)) [this.slime, this.amount] = [undefined, undefined];
+    if (!slimeModel(s)) [this.slime, this.amount, this.front] = [undefined, undefined, undefined];
   }
   reset() {
     this.revision++;
@@ -49,6 +51,7 @@ export class CpuSim implements Sim {
     // A reset clears every stamp, and the amounts with them.
     this.slime?.fill(0);
     this.amount?.fill(0);
+    this.front?.fill(0);
     this.calls.push('reset');
   }
   /** The agent tools of the steps that ran, in order (the start layout 'food' places its colonies with one). */
@@ -84,11 +87,13 @@ export class CpuSim implements Sim {
     if (s.kind === 'slime') this.slime ??= new Uint32Array(this.width * this.height);
     if (!this.slime) return;
     this.amount ??= new Uint32Array(this.width * this.height);
+    this.front ??= new Uint32Array(this.width * this.height);
     const { width, height, env } = this;
     const grid = { width, height, boundary: this.settings.boundary, env };
     slimePaint(grid, this.settings, this.step, this.slime, s, undefined, {
       amounts: this.amount,
       life: slimeSteps(this.settings),
+      fronts: this.front,
     });
   }
   clearEnvironment() {
@@ -97,6 +102,7 @@ export class CpuSim implements Sim {
     this.env.fill(0);
     this.slime?.fill(0);
     this.amount?.fill(0);
+    this.front?.fill(0);
     this.hasEnvironment = false;
     this.hasElectrodes = false;
   }
@@ -116,6 +122,9 @@ export class CpuSim implements Sim {
   }
   readSlimeAmount() {
     return Promise.resolve(this.amount?.slice() ?? new Uint32Array(this.width * this.height));
+  }
+  readSlimeFront() {
+    return Promise.resolve(this.front?.slice() ?? new Uint32Array(this.width * this.height));
   }
   writeFlow() {
     // nothing to write

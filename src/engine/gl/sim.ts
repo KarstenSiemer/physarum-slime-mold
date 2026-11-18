@@ -319,6 +319,11 @@ export class GlSim implements Sim {
    * amounts. Made and freed with the stamps (ensureSlime(), dropSlime()), and counted with them.
    */
   private amount: [Target, Target] | undefined;
+  /**
+   * The front field (ADR 0060; PASS 2 of slime.frag; `front` in ../sim.ts): the step, plus 1, at which the growth
+   * front reached each cell, in a target of unsigned integers, 4 B per cell. Made and freed with the stamps.
+   */
+  private front: Target | undefined;
   private am: Bit = 0;
   /**
    * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
@@ -434,6 +439,7 @@ export class GlSim implements Sim {
       if (slimeModel(settings)) {
         this.slime = t(width, height, gl.R32UI);
         this.amount = [t(width, height, gl.R16UI), t(width, height, gl.R16UI)];
+        this.front = t(width, height, gl.R32UI);
       }
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
@@ -835,11 +841,12 @@ export class GlSim implements Sim {
    * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): the stamps, and the amounts
    * with them. No cell has a stamp, and no cell has slime.
    */
-  private ensureSlime(): { stamps: Target; amounts: [Target, Target] } {
+  private ensureSlime(): { stamps: Target; amounts: [Target, Target]; fronts: Target } {
     const { gl, width, height } = this;
     this.slime ??= target(gl, width, height, gl.R32UI);
     this.amount ??= [target(gl, width, height, gl.R16UI), target(gl, width, height, gl.R16UI)];
-    return { stamps: this.slime, amounts: this.amount };
+    this.front ??= target(gl, width, height, gl.R32UI);
+    return { stamps: this.slime, amounts: this.amount, fronts: this.front };
   }
 
   /**
@@ -858,6 +865,14 @@ export class GlSim implements Sim {
     return this.amount?.[this.am].texture;
   }
 
+  /**
+   * For the renderer: the texture of the front field (ADR 0060), which the picture reads for the sheet of the growth
+   * front, or undefined while the simulation holds no slime field (`slimeFront` in ../sim.ts).
+   */
+  get slimeFrontTexture(): WebGLTexture | undefined {
+    return this.front?.texture;
+  }
+
   /** Frees the slime field. */
   private dropSlime() {
     if (!this.slime) return;
@@ -865,6 +880,8 @@ export class GlSim implements Sim {
     this.slime = undefined;
     for (const t of this.amount ?? []) destroyTarget(this.gl, t);
     this.amount = undefined;
+    if (this.front) destroyTarget(this.gl, this.front);
+    this.front = undefined;
     this.stamped = false;
   }
 
@@ -875,6 +892,12 @@ export class GlSim implements Sim {
   readSlime(): Promise<Uint32Array> {
     if (!this.slime) return Promise.resolve(new Uint32Array(this.width * this.height));
     return Promise.resolve(readUintTarget(this.gl, this.slime));
+  }
+
+  /** For tests and measurements: the front stamp of every cell (ADR 0060; ../sim.ts readSlimeFront()). */
+  readSlimeFront(): Promise<Uint32Array> {
+    if (!this.front) return Promise.resolve(new Uint32Array(this.width * this.height));
+    return Promise.resolve(readUintTarget(this.gl, this.front));
   }
 
   /** For tests and measurements: the amount of slime of every cell (ADR 0057; ../sim.ts readSlimeAmount()). */
@@ -964,6 +987,7 @@ export class GlSim implements Sim {
     // A reset clears every stamp (ADR 0055, decision 3), and the amounts with them.
     if (this.slime) clearUint(gl, this.slime);
     for (const t of this.amount ?? []) clearUint(gl, t);
+    if (this.front) clearUint(gl, this.front);
     this.stamped = false;
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
@@ -1227,7 +1251,7 @@ export class GlSim implements Sim {
   private brushSlime(strokes: readonly Stroke[]) {
     if (!slimeModel(this.settings)) return;
     const gl = this.gl;
-    let field: { stamps: Target; amounts: [Target, Target] } | undefined;
+    let field: { stamps: Target; amounts: [Target, Target]; fronts: Target } | undefined;
     let boundary: Boundary | undefined;
     for (const stroke of strokes) {
       if (stroke.kind === 'slime') this.stamped = true;
@@ -1253,6 +1277,8 @@ export class GlSim implements Sim {
         // the free target. Then the stamps (PASS 0).
         const passes: [Program, Target, Record<string, WebGLTexture>][] = [
           [this.prog.slimeBrushAmount(), now, { stamps: field.stamps.texture, old: free.texture }],
+          // The front field (PASS 2, ADR 0060) reads the stamps of before the segment too.
+          [this.prog.slimeBrushFront(), field.fronts, { stamps: field.stamps.texture }],
           [this.prog.slimeBrush(), field.stamps, {}],
         ];
         for (const [p, to, more] of passes) {
@@ -1305,6 +1331,7 @@ export class GlSim implements Sim {
     const stamps = this.slime;
     if (stamps) clearUint(this.gl, stamps);
     for (const t of this.amount ?? []) clearUint(this.gl, t);
+    if (this.front) clearUint(this.gl, this.front);
     this.stamped = false;
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
@@ -1699,13 +1726,15 @@ export class GlSim implements Sim {
     // pass discards the fragment of every other cell.
     if (slimeSteps(this.settings) > 0) {
       this.stamped = true;
-      const { stamps, amounts } = this.ensureSlime();
+      const { stamps, amounts, fronts } = this.ensureSlime();
       const trail = this.trail[this.p].texture;
       // The amounts first (ADR 0057): their pass reads the stamps of before the step, and writes every amount into
       // the free target.
       const held = { trail, stamps: stamps.texture, amounts: amounts[this.am].texture };
       this.pass(this.prog.slimeAmount(), amounts[flip(this.am)], held, {});
       this.am = flip(this.am);
+      // The front field (ADR 0060) reads the stamps of before the step too.
+      this.pass(this.prog.slimeFront(), fronts, { trail, stamps: stamps.texture }, {});
       this.pass(this.prog.slime(), stamps, { trail }, {});
     }
     if (flow) this.encodeFlow(flow);

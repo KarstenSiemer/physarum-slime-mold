@@ -303,6 +303,13 @@ model reads the field yet, so it changes no run (ADR 0055, decision 1). Only the
   that only passes leaves little slime, and a tube that stays leaves much. No source gives the rate at which a
   plasmodium builds its slime: the 4,095 steps are a choice of this app, made on pictures (ADR 0057).
 
+- **The front stamp** F of a cell (ADR 0060) is a third whole number, for the picture and for measurements: the
+  step, plus 1, at which the growth front reached the cell. In step k a cell that holds plasm and has no slime before
+  the step (S = 0, or k + 1 − S ≥ L) gets F ← k + 1. Every other cell keeps its F. So the growth front is the plasm
+  that comes onto ground without slime. A cell keeps its front stamp while it has slime, with plasm or without it, and
+  plasm that comes back onto slime is no front. F has a meaning only in a cell that has slime, and no rule of the
+  model reads it. A stroke of the Slime tool sets F ← 0 in a cell that had no slime: no front reached painted slime.
+  An erase and a wall leave F as it is. Clear and a reset set every F to 0.
 - **The Slime tool** paints the field, not `env`. Its stroke has the cells of a food stroke (6.7), with the hard edge
   of food. Before step k it gives each open cell of the stroke S ← k + 1. A cell is open when it lies inside the arena
   and holds no wall. Painted slime ages as the slime of a colony does. An erase and a wall set S of their cells to 0,
@@ -316,15 +323,17 @@ model reads the field yet, so it changes no run (ADR 0055, decision 1). Only the
   a reset. A switch from the Jones model to the extended model does the same. So the painted slime of a scene is new
   at the start of a run (`repaintSlime()` in `src/engine/engine.ts`).
 - **The Jones model** has no slime field: a switch to it frees the field with its stamps and its amounts.
-- **Memory**: 8 B per cell. The stamps are a storage buffer on WebGPU and a texture of unsigned integers on WebGL2,
+- **Memory**: 12 B per cell. The stamps are a storage buffer on WebGPU and a texture of unsigned integers on WebGL2,
   4 B. The amounts are a second buffer on WebGPU, 4 B, and two textures of 2 B on WebGL2, where the pass reads the
-  amounts of before a step from one and writes all of them into the other. The fit of the grid counts them, and
-  3 B more for the maps of the picture, in the extended model with any life time, so the setting changes no grid.
+  amounts of before a step from one and writes all of them into the other. The front stamps are a third buffer on
+  WebGPU and a second texture of unsigned integers on WebGL2, 4 B. The fit of the grid counts them, and 3 B more for
+  the maps of the picture, in the extended model with any life time, so the setting changes no grid.
 - **A link** made before the setting holds no Slime life time and opens with 0: it has no slime, and it runs as it
   was made (`sanitize()`).
 
 The same setting gives the mark of starved ground its time (8.4). The picture draws the slime as a wet film on the
-ground, as thick as the amount says; the rule of the film is in [design.md](design.md), section 5.
+ground, as thick as the amount says, and a skirt around young ground, by the age of the front stamp;
+the rules of both are in [design.md](design.md), section 5.
 
 ## 7. The agents
 
@@ -669,10 +678,12 @@ light weight to the own weight, the scent decay to the strain's decay, the share
 light had no effect in the Jones model (`sanitize()`, the mark `rules` of a link). The Jones model has no slime: it binds
 the Slime life time to its default, and its passes get a life time of 0 (`slimeSteps()` in `src/engine/slime.ts`).
 
-`speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent`, `showTubes` and `showSlime` change only the view and
-the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
+`speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent`, `showTubes`, `showSlime` and `showFront` change only
+the view and the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
 and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
 `showSlime` draws the slime field as a wet film on the ground; its rule is in the same section, and in ADR 0057.
+`showFront` draws a skirt around young ground while growth is on, from the front stamps of section
+6.9; its rule is in the same section of design.md, and in ADR 0060.
 
 ## 12. The two backends
 

@@ -116,23 +116,20 @@ describe('the record of the look of the electrodes (ADR 0058)', () => {
     expect(wall[1]?.split('|')[1]).toBe('0.98');
   }, 120_000);
 
-  // One grid when ADR 0058 was built. Since ADR 0057 the slime counts 7 B more per cell, and the fit stands at other
-  // limits.
-  it('changes four grids of 2,916 cases with the 4 B per cell of the outlines of the poles', async () => {
+  // One grid when ADR 0058 was built. Since then the slime counts 11 B more per cell (ADR 0057, ADR 0060), and the fit
+  // stands at other limits.
+  it('changes two grids of 2,916 cases with the 4 B per cell of the outlines of the poles', async () => {
     const lines = await fitReport();
     const text = [ADR, './README.md'].map((file) => readFileSync(here(file), 'utf8').replace(/\s+/g, ' '));
-    expect(lines[0]).toBe('2916 cases: 4 with another grid');
-    expect(lines).toHaveLength(5);
-    // The four cases, as the ADR and README.md name them.
-    const cases = ['no memory hint', 'a memory hint of 4 GB'].flatMap((hint) =>
-      ['three-strains', 'two-strains'].map(
-        (scene) => `${scene} on WebGL2 without float blending, ${hint}, a canvas of 1000 × 1000: 1536 before, 1024 now`,
-      ),
-    );
-    expect(lines.slice(1)).toEqual(cases);
+    expect(lines[0]).toBe('2916 cases: 2 with another grid');
+    // The two cases, as the ADR and README.md name them.
+    expect(lines.slice(1)).toEqual([
+      'three-strains on WebGL2, a memory hint of 1 GB, a canvas of 390 × 844: 1024 before, 768 now',
+      'maze on WebGL2, a memory hint of 0.5 GB, a canvas of 1000 × 1000: 512 before, 256 now',
+    ]);
     for (const t of text) {
       expect(t).toContain('2,916 cases');
-      expect(t).toContain('from 1536 to 1024');
+      expect(t).toContain('from 512 to 256');
       expect(t).toContain('from 1024 to 768');
     }
   }, 120_000);

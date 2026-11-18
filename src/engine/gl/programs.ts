@@ -21,6 +21,7 @@ import sampleFrag from './glsl/sample.frag?raw';
 import scentDownFrag from './glsl/scent-down.frag?raw';
 import shapeFrag from './glsl/shape.frag?raw';
 import amountGlsl from './glsl/amount.glsl?raw';
+import frontMapFrag from './glsl/front-map.frag?raw';
 import slimeDownFrag from './glsl/slime-down.frag?raw';
 import slimeFilmFrag from './glsl/slime-film.frag?raw';
 import slimePaintFrag from './glsl/slime-paint.frag?raw';
@@ -69,10 +70,8 @@ export interface Walled {
   walls: Program;
 }
 
-/** The programs of the scent view (ADR 0009, amendment 2026-11-11). */
+/** The programs of the maps of the scent view (ADR 0009, amendment 2026-11-11). Its render passes: `viewed`. */
 export interface ScentPrograms {
-  /** The render pass with the view (SCENT in render.frag), without (index 0) and with (1) the food, light and walls. */
-  render: [Program, Program];
   /** The pass that fills its coarse map (scent-down.frag): the scent of its texels and the share that holds scent. */
   down: Program;
   /** The pass that refreshes the scent of its texels after steps and keeps their share (SUM_ONLY). */
@@ -172,6 +171,8 @@ export interface Programs {
   slime: () => Program;
   /** The pass of the amounts of slime (PASS 1 of slime.frag, ADR 0057), compiled at its first use. */
   slimeAmount: () => Program;
+  /** The pass of the front field (PASS 2 of slime.frag, ADR 0060), compiled at its first use. */
+  slimeFront: () => Program;
   /**
    * The brush on the slime field (slime-paint.frag, ADR 0055, decision 7), compiled at its first use: a stroke of the
    * Slime tool, or an erase or a wall over a field with stamps.
@@ -179,6 +180,8 @@ export interface Programs {
   slimeBrush: () => Program;
   /** The brush on the amounts of slime (PASS 1 of slime-paint.frag, ADR 0057), compiled at its first use. */
   slimeBrushAmount: () => Program;
+  /** The brush on the front field (PASS 2 of slime-paint.frag, ADR 0060), compiled at its first use. */
+  slimeBrushFront: () => Program;
   /**
    * PASS 2 of growth.frag in which an agent on a starved cell does not divide and no child is born onto one (FLOW in
    * growth.frag, ADR 0029 and ADR 0053), compiled at its first use: only a scene with growth and the flow needs it.
@@ -209,9 +212,9 @@ export interface Programs {
   /** Without (index 0) and with (1) the food, light and walls (ENV in view.glsl). */
   render: [Program, Program];
   /**
-   * The programs of the scent view once they are built, else undefined. The first call starts their build, and with
-   * KHR_parallel_shader_compile the driver builds them beside the frames, which draw without the view until then.
-   * Most frames never draw it.
+   * The programs of the maps of the scent view once they are built, else undefined. The first call starts their
+   * build, and with KHR_parallel_shader_compile the driver builds them beside the frames, which draw without the view
+   * until then. Most frames never draw it.
    */
   scent: () => ScentPrograms | undefined;
   /**
@@ -220,6 +223,17 @@ export interface Programs {
    * Jones model never draws it.
    */
   slimed: () => SlimePrograms | undefined;
+  /**
+   * The programs of the skirt of the growth front (ADR 0060) once they are built, else undefined, as `slimed`. A scene
+   * without growth never builds them.
+   */
+  fronted: () => FrontPrograms | undefined;
+  /**
+   * The render pass with the scent view (SCENT in render.frag) over what lies below it: 0 the picture alone, 1 the
+   * film of the slime, 2 the skirt of the growth front with the film (ADR 0060). Without (index 0) and with (1) the
+   * food, light and walls, once it is built, else undefined, as `slimed`. A frame builds only the one that it draws.
+   */
+  viewed: (below: 0 | 1 | 2) => [Program, Program] | undefined;
   /** The pass that fills the trail's coarse map for a view zoomed out (trail-down.frag), compiled at its first use. */
   trailDown: () => Program;
   height: [Program, Program];
@@ -296,6 +310,14 @@ export interface SlimePrograms {
   down: Program;
 }
 
+/** The skirt of the growth front (ADR 0060): the render pass with the skirt and the film, and the pass of its map. */
+export interface FrontPrograms {
+  /** The render pass with the skirt and the film (FRONT and SLIME in render.frag), without and with food, light, walls. */
+  render: [Program, Program];
+  /** Fills the map of the growth front (front-map.frag). */
+  map: Program;
+}
+
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
 export function compile(gl: GL): Programs {
   const sim = (frag: string) => simProgram(gl, frag);
@@ -310,6 +332,10 @@ export function compile(gl: GL): Programs {
   let scent: ScentPrograms | undefined;
   let slimedStarted: ReturnType<typeof startProgram>[] | undefined;
   let slimed: SlimePrograms | undefined;
+  let frontedStarted: ReturnType<typeof startProgram>[] | undefined;
+  let fronted: FrontPrograms | undefined;
+  const viewedStarted: (ReturnType<typeof startProgram>[] | undefined)[] = [undefined, undefined, undefined];
+  const viewed: ([Program, Program] | undefined)[] = [undefined, undefined, undefined];
   let capacity: Program | undefined;
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
@@ -318,6 +344,8 @@ export function compile(gl: GL): Programs {
   let slimeAmount: Program | undefined;
   let slimeBrush: Program | undefined;
   let slimeBrushAmount: Program | undefined;
+  let slimeFront: Program | undefined;
+  let slimeBrushFront: Program | undefined;
   let poleShape: Program | undefined;
   let growthFlowing: Program | undefined;
   const flowing = new Map<string, Program>();
@@ -369,6 +397,8 @@ export function compile(gl: GL): Programs {
     slimeAmount: () => (slimeAmount ??= sim(`#define PASS 1\n${amountGlsl}${slimeFrag}`)),
     slimeBrush: () => (slimeBrush ??= sim(`#define PASS 0\n${brushGlsl}${slimePaintFrag}`)),
     slimeBrushAmount: () => (slimeBrushAmount ??= sim(`#define PASS 1\n${brushGlsl}${amountGlsl}${slimePaintFrag}`)),
+    slimeFront: () => (slimeFront ??= sim(`#define PASS 2\n${amountGlsl}${slimeFrag}`)),
+    slimeBrushFront: () => (slimeBrushFront ??= sim(`#define PASS 2\n${brushGlsl}${amountGlsl}${slimePaintFrag}`)),
     flowing: (senseWalls, saturate) => {
       const key = `${String(senseWalls)}${String(saturate)}`;
       let p = flowing.get(key);
@@ -403,16 +433,14 @@ export function compile(gl: GL): Programs {
       if (scent || gl.isContextLost()) return scent;
       const vertex = V + 'precision highp float;\n' + fullscreen;
       scentStarted ??= [
-        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 0\n' + viewGlsl + renderFrag),
-        startProgram(gl, vertex, V + '#define SCENT 1\n#define ENV 1\n' + viewGlsl + renderFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + scentDownFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n#define SUM_ONLY 1\n' + viewGlsl + scentDownFrag),
       ];
       if (!scentStarted.every((p) => p.done())) return undefined;
       for (const p of scentStarted) p.check();
-      const [off, on, down, sum] = scentStarted.map((p) => wrap(gl, p.program));
-      if (!off || !on || !down || !sum) return undefined;
-      return (scent = { render: [off, on], down, sum });
+      const [down, sum] = scentStarted.map((p) => wrap(gl, p.program));
+      if (!down || !sum) return undefined;
+      return (scent = { down, sum });
     },
     slimed: () => {
       // A lost context builds nothing: the frames draw without the film, and the app reports the loss.
@@ -430,6 +458,37 @@ export function compile(gl: GL): Programs {
       const [off, on, bare, walled, down] = slimedStarted.map((p) => wrap(gl, p.program));
       if (!off || !on || !bare || !walled || !down) return undefined;
       return (slimed = { render: [off, on], film: [bare, walled], down });
+    },
+    fronted: () => {
+      // A lost context builds nothing: the frames draw without the skirt, and the app reports the loss.
+      if (fronted || gl.isContextLost()) return fronted;
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      const parts = '#define SLIME 1\n#define FRONT 1\n';
+      frontedStarted ??= [
+        startProgram(gl, vertex, V + parts + '#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + parts + '#define ENV 1\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + frontMapFrag),
+      ];
+      if (!frontedStarted.every((p) => p.done())) return undefined;
+      for (const p of frontedStarted) p.check();
+      const [off, on, map] = frontedStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !map) return undefined;
+      return (fronted = { render: [off, on], map });
+    },
+    viewed: (below) => {
+      if (viewed[below] || gl.isContextLost()) return viewed[below];
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      const parts =
+        '#define SCENT 1\n' + (below > 0 ? '#define SLIME 1\n' : '') + (below > 1 ? '#define FRONT 1\n' : '');
+      const started = (viewedStarted[below] ??= [
+        startProgram(gl, vertex, V + parts + '#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + parts + '#define ENV 1\n' + viewGlsl + renderFrag),
+      ]);
+      if (!started.every((p) => p.done())) return undefined;
+      for (const p of started) p.check();
+      const [off, on] = started.map((p) => wrap(gl, p.program));
+      if (!off || !on) return undefined;
+      return (viewed[below] = [off, on]);
     },
     trailDown: () => (trailDown ??= plain('#define ENV 0\n' + viewGlsl + trailDownFrag)),
     height: view(heightFrag),

@@ -15,3 +15,9 @@ uint amountLeft(uint a, uint held) {
   if (age <= 1u) return a;
   return a * (P.slime.x - age) / P.slime.x;
 }
+
+// Whether a cell that holds the stamp `held` has slime before the step or the stroke that comes (hasSlime in
+// amount.wgsl): it has a stamp, and the age of the stamp is below the life time.
+bool hasSlime(uint held) {
+  return held != 0u && P.grid.w + 1u - held < P.slime.x;
+}

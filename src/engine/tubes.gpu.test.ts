@@ -19,6 +19,8 @@ const BACKENDS = {
 /** An extended scene with the flow on and the picture of the tubes. */
 const flowing = (patch: Partial<Settings> = {}): Settings => ({
   ...defaultSettings(),
+  // The frames of these tests draw the glow style unless they name another one.
+  style: 'glow',
   model: 'extended',
   flow: true,
   boundary: 'box',

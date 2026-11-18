@@ -472,6 +472,11 @@ export const slimeViewHelp = {
   help: 'Changes only the picture, not the simulation. The picture shows the slime as a wet film on the ground: where the colony was, and where you painted slime. The film is thick where a tube stayed for a long time, and thin where the colony only passed. So the film keeps the shape of the tube that made it, as the slime track of a real slime mold does: a tube leaves its coat of slime behind. A tube that stays for 2.3 hours of model time leaves the thickest film. The food, the trail, the tubes, the light, the walls and the electrodes lie on the film. The film gets thinner in a straight line as the slime gets older, and it is gone after the Slime life time. The Scent view does not draw it. Without the switch the ground is plain.',
 } as const;
 
+export const frontViewHelp = {
+  label: 'Show growth front',
+  help: 'Changes only the picture, not the simulation, and only while growth is on. Where the colony grows onto ground without slime, the picture draws a thin, clear veil of slime around the young tube: the skirt of the growth front. The veil lies below the tube and goes within a few minutes of model time. Plasm that comes back onto slime is no growth front.',
+} as const;
+
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
 export const REFERENCE_SCENT_DECAY = 0.1;
 
@@ -547,6 +552,11 @@ export interface Settings extends Record<GlobalKey, number> {
    * decision 8). Display only.
    */
   showSlime: boolean;
+  /**
+   * The view draws a skirt around young ground, a thin clear veil below the tube, while the model has slime
+   * (frontViewHelp, ADR 0060). Display only.
+   */
+  showFront: boolean;
   strains: Strain[];
 }
 
@@ -600,11 +610,12 @@ export function defaultSettings(): Settings {
     growth: false,
     stepOrder: 'sense-first',
     flow: false,
-    style: 'glow',
+    style: 'gel',
     gelColor: 'mild',
     showScent: false,
     showTubes: true,
     showSlime: true,
+    showFront: true,
     density: 1,
     diffusion: 1,
     meanWindow: 3,
@@ -713,6 +724,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // So with the film of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the film
   // is on. It changes no result.
   out.showSlime = raw.showSlime !== false;
+  // So with the skirt of the growth front (ADR 0060): on without a switch in the link. It changes no result.
+  out.showFront = raw.showFront !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
   // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).

@@ -15,6 +15,7 @@
 @group(0) @binding(1) var<storage, read> env: array<u32>;
 @group(0) @binding(3) var<storage, read_write> slime: array<u32>;
 @group(0) @binding(4) var<storage, read_write> amount: array<u32>;
+@group(0) @binding(5) var<storage, read_write> front: array<u32>;
 
 const RIM = 4.0; // cells from the edge of a stroke to its full amount (slime.ts SLIME_RIM)
 
@@ -55,6 +56,8 @@ fn paintSlime(@builtin(global_invocation_id) gid: vec3u) {
     case 6u: {
       if (inArena(q) && !isWall(env[c])) {
         amount[c] = max(amountLeft(amount[c], slime[c]), paintedAmount(d));
+        // No front reached painted slime (ADR 0060): a cell that had no slime loses its front stamp.
+        if (!hasSlime(slime[c])) { front[c] = 0u; }
         slime[c] = P.grid.w + 1u;
       }
     }

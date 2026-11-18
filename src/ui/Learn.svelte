@@ -10,6 +10,7 @@
     modelHelp,
     stepOrderHelp,
     scentViewHelp,
+    frontViewHelp,
     slimeViewHelp,
     strainSpec,
     tubeViewHelp,
@@ -65,6 +66,7 @@
     // The view switches last: they change only the picture.
     tubeViewHelp,
     slimeViewHelp,
+    frontViewHelp,
     scentViewHelp,
   ];
 

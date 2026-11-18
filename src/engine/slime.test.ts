@@ -53,8 +53,9 @@ describe('the slime field (ADR 0055)', () => {
     expect(slimeModel(none)).toBe(true);
   });
 
-  // Decision 8: the view draws the slime while the model has slime and the switch is on. The scent view draws none.
-  it('is drawn in every style while the model has slime and Show slime is on, and never below the scent view', () => {
+  // Decision 8: the view draws the slime while the model has slime and the switch is on. The scent view lies over the
+  // picture and hides nothing of it (ADR 0060, decision 11).
+  it('is drawn in every style while the model has slime and Show slime is on, also below the scent view', () => {
     const d = defaultSettings();
     expect([d.showSlime, d.showScent]).toEqual([true, false]);
     const shown = (patch: Partial<Settings>) => slimeShown({ ...d, ...patch });
@@ -62,7 +63,7 @@ describe('the slime field (ADR 0055)', () => {
     expect(slimeShown({ ...d, showSlime: false })).toBe(false);
     expect(slimeShown({ ...d, slimeLife: 0 })).toBe(false);
     expect(slimeShown({ ...d, model: 'jones' })).toBe(false);
-    expect(slimeShown({ ...d, showScent: true })).toBe(false);
+    expect(shown({ showScent: true })).toBe(true);
     // The flow is no part of it: the slime does not need the flow.
     expect([shown({ flow: true }), shown({ flow: false })]).toEqual([true, true]);
   });

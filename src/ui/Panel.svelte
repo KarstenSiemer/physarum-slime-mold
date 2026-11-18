@@ -19,6 +19,7 @@
     sameLattice,
     scentReach,
     scentReachSpec,
+    frontViewHelp,
     slimeViewHelp,
     snap,
     STEP_ORDERS,
@@ -129,6 +130,7 @@
   let flowHelpOpen = $state(false);
   let tubeHelpOpen = $state(false);
   let slimeHelpOpen = $state(false);
+  let frontHelpOpen = $state(false);
   /** The model has slime (ADR 0055): the extended model with a Slime life time above 0. */
   const slimy = $derived(slimeSteps(s) > 0);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
@@ -543,6 +545,30 @@
         </div>
         {#if slimeHelpOpen}
           <p class="helptext" id="slime-help">{slimeViewHelp.help}</p>
+        {/if}
+        <!-- The skirt of the growth front changes the view only (ADR 0060). The front field is a part of the slime. -->
+        {#if s.growth && s.collisions}
+          <div class="check">
+            <label>
+              <input
+                type="checkbox"
+                bind:checked={s.showFront}
+                aria-describedby={frontHelpOpen ? 'front-help' : undefined}
+              />
+              <span>{frontViewHelp.label}</span>
+            </label>
+            <button
+              class="help"
+              type="button"
+              aria-expanded={frontHelpOpen}
+              aria-controls="front-help"
+              aria-label="About {frontViewHelp.label}"
+              onclick={() => (frontHelpOpen = !frontHelpOpen)}>?</button
+            >
+          </div>
+          {#if frontHelpOpen}
+            <p class="helptext" id="front-help">{frontViewHelp.help}</p>
+          {/if}
         {/if}
       {/if}
     </Section>

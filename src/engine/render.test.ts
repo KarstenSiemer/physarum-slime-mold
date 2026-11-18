@@ -51,7 +51,7 @@ describe('the film of the slime in the uniform of the view', () => {
     packView(data, 64, 48, view, 1, 0, settings, 0, true, false, 0, undefined, false, slime);
     return data;
   };
-  /** `slime`: the steps that ran so far, the life time in steps, 2 unused. */
+  /** `slime`: the steps that ran so far, the life time in steps, what the frame draws, unused. */
   const steps = (data: ArrayBuffer) => [...new Uint32Array(data).slice(56, 60)];
   /** `slimeFx`: the colour of the body of the film and how much of it full slime shows. */
   const body = (data: ArrayBuffer) => [...new Float32Array(data).slice(60, 64)];
@@ -60,14 +60,30 @@ describe('the film of the slime in the uniform of the view', () => {
 
   it('holds the steps that ran so far and the life time in steps as unsigned integers', () => {
     const d = defaultSettings();
-    expect(steps(pack(d, 0))).toEqual([0, 259_200, 0, 0]);
-    expect(steps(pack(d, 12_345))).toEqual([12_345, 259_200, 0, 0]);
-    expect(steps(pack({ ...d, slimeLife: 18 }, 7))).toEqual([7, 32_400, 0, 0]);
+    expect(steps(pack(d, 0))).toEqual([0, 259_200, 1, 0]);
+    expect(steps(pack(d, 12_345))).toEqual([12_345, 259_200, 1, 0]);
+    expect(steps(pack({ ...d, slimeLife: 18 }, 7))).toEqual([7, 32_400, 1, 0]);
     // A float holds whole numbers up to 2^24 only: the count of the steps stays exact above it.
-    expect(steps(pack(d, 2 ** 24 + 1))).toEqual([2 ** 24 + 1, 259_200, 0, 0]);
-    expect(steps(pack(d, 2 ** 32 - 1))).toEqual([2 ** 32 - 1, 259_200, 0, 0]);
+    expect(steps(pack(d, 2 ** 24 + 1))).toEqual([2 ** 24 + 1, 259_200, 1, 0]);
+    expect(steps(pack(d, 2 ** 32 - 1))).toEqual([2 ** 32 - 1, 259_200, 1, 0]);
     // The count wraps as the count of the passes does.
-    expect(steps(pack(d, 2 ** 32 + 5))).toEqual([5, 259_200, 0, 0]);
+    expect(steps(pack(d, 2 ** 32 + 5))).toEqual([5, 259_200, 1, 0]);
+  });
+
+  it('says what the frame draws: 1 the film of the slime, 2 the skirt of the growth front (ADR 0060)', () => {
+    // The skirt needs growth: a scene without growth has no growth front.
+    const d = { ...defaultSettings(), growth: true, collisions: true };
+    const parts = (patch: Partial<typeof d>) => steps(pack({ ...d, ...patch }, 1))[2];
+    expect(parts({})).toBe(3);
+    expect(parts({ growth: false })).toBe(1);
+    expect(parts({ collisions: false })).toBe(1);
+    expect(parts({ showSlime: false })).toBe(2);
+    expect(parts({ showFront: false })).toBe(1);
+    // The agents style draws the agents and not the plasm: no skirt. The scent view lies over both.
+    expect(parts({ style: 'agents' })).toBe(1);
+    expect(parts({ showScent: true })).toBe(3);
+    expect(parts({ slimeLife: 0 })).toBe(0);
+    expect(parts({ model: 'jones' })).toBe(0);
   });
 
   it('holds a life time of 0 for a frame without the film', () => {
