@@ -2,8 +2,8 @@
 
 - Status: accepted. Decisions 8 and 9 are requests of the owner of 2026-11-17, and decisions 11, 12 and 14 of
   2026-11-18. The other decisions are of an agent under the owner's delegation of 2026-11-12. On 2026-11-18 the owner
-  looked at the fan of decision 4 in the app and took its veins out: decision 14 replaces decisions 3 to 7. Built
-  2026-11-17 and 2026-11-18.
+  looked at the fan of decision 4 in the app and took its veins out: decision 14 replaces decisions 3 to 7. The
+  owner accepted the skirt of decision 14 in the running app on the same day. Built 2026-11-17 and 2026-11-18.
 - Date: 2026-11-17
 - Extends [ADR 0055](0055-the-slime-field.md): the slime field holds a front stamp per cell. Changes
   [ADR 0057](0057-the-film-of-the-slime.md), decision 9: the plasm hides the film. Changes
@@ -144,6 +144,8 @@ counter needs no memory on WebGPU, but every pass that writes a stamp of the sli
       The skirt begins where that mean is 0.04 and is whole from 0.3 on. It reaches 8 cells from young ground at
       most, and a wall on the way stops it (decision 6).
     - The map holds one byte per strain and texel: 4 B for 16 cells, the 0.25 B per cell of the first map.
+    - The owner watched the skirt in the running app on 2026-11-18 and accepted it. Its numbers are the constants
+      `SKIRT_…`.
 
 ## Results
 
@@ -248,10 +250,9 @@ toward that ground in a scene with walls.
 
 - **Stage 4 must grow the veins** (decision 14). The skirt shows where a tube grows; it shows no crown and no vein.
   When the model grows the crown of a tube head, the skirt goes, or the picture draws it from that plasm.
-- **The look of the skirt is the owner's choice.** The owner got a first picture on 2026-11-18. Its numbers are the
-  constants `SKIRT_…`.
-- **The second shard of the e2e tests can reach its limit of 30 minutes on GitHub** until PR #109 is merged
-  (Results). Then the check `verify` is red with a cancelled shard and no failed test.
+- **A job of CI can reach its limit of 30 minutes on GitHub** until PR #109 is merged (Results). Then the check
+  `verify` is red with a cancelled job and no failed test. The run of the commit with the skirt of decision 14
+  passed with 29.7 min for the WebGPU part of the GPU tests and 28.5 min for the first e2e shard (run 44347843275).
 - **The skirt has no CPU reference.** A fault that both backends share shows only on pictures, or on another GPU:
   CI found one (Results).
 - **Zoomed out beyond 2 cells per pixel** a pixel is wider than half a texel of the map of the front. Not looked at.
