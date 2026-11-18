@@ -193,7 +193,8 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
   `tubes.spec.ts` in it take 24 s more together: they draw the fan. The 38 tests of `ui.spec.ts` take 58 s more,
   1.25 s in the median: the default style draws more, and the scent view has the film below it. On GitHub this
   shard of `main` took 24.8 to 28.3 min of its limit of 30 in the last five runs of `main`. So it does not fit there
-  with this change, and PR #109 (ADR 0061) makes four shards of the two.
+  with this change. PR #109 (ADR 0061) made eight jobs of the four on 2026-11-18. The last run of this pull
+  request with four jobs passed with 29.7 min for the WebGPU part of the GPU tests (run 44347843275).
 - **A fault that only CI found.** The map of the front held 16-bit floats. A trail above 65,504 gave it a value that
   is no number, and on SwiftShader, the GPU of CI, the tube and the walls were black. On the M3 Pro the picture
   showed nothing of it, and both backends drew the same black, so the test of the two backends passed. The map holds
@@ -250,9 +251,6 @@ toward that ground in a scene with walls.
 
 - **Stage 4 must grow the veins** (decision 14). The skirt shows where a tube grows; it shows no crown and no vein.
   When the model grows the crown of a tube head, the skirt goes, or the picture draws it from that plasm.
-- **A job of CI can reach its limit of 30 minutes on GitHub** until PR #109 is merged (Results). Then the check
-  `verify` is red with a cancelled job and no failed test. The run of the commit with the skirt of decision 14
-  passed with 29.7 min for the WebGPU part of the GPU tests and 28.5 min for the first e2e shard (run 44347843275).
 - **The skirt has no CPU reference.** A fault that both backends share shows only on pictures, or on another GPU:
   CI found one (Results).
 - **Zoomed out beyond 2 cells per pixel** a pixel is wider than half a texel of the map of the front. Not looked at.

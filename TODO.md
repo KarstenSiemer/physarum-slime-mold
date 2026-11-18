@@ -256,7 +256,6 @@ Handover for stage 4: the veins must come from the crown at the head of a tube (
 
 Open, for the owner:
 
-- PR #109 (ADR 0061) runs the tests of CI in eight jobs, four e2e shards and four GPU parts. It changes `.github/`, so it needs the owner's review. Until it is merged, a job can reach its limit of 30 minutes with no failed test: on `main` the second e2e shard took 24.8 to 28.3 min and the two GPU jobs 20.5 to 28.7 min in five runs, and the last run of ADR 0060 passed with 29.7 min for one job
 - The 6 days and the flow strength of 2.8 are choices of the coordinator (ADR 0054, open points). The time is the default of the setting Slime life time since ADR 0055, and the strength is one constant.
 - The strength of the film of the slime: the owner chose the look "wet film" on pictures on 2026-11-17 (ADR 0057). Its colours, its body and its light per style are the numbers of `SLIME_LOOK` in `src/engine/render.ts`, and the 4,095 steps in which a tube builds full slime are `SLIME_FULL` in `src/engine/slime.ts`: say so if one of them should be another.
 - A rule for the moves on slime (ADR 0056, decision 5): it gives the choice of the Y-maze, and a colony that is 3.1 to 3.6 times slower on slime. It is not built. If the owner wants it before stage 4, it is a setting that is off in every scene.
