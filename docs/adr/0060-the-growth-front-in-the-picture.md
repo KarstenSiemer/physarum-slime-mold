@@ -176,6 +176,9 @@ walks up to 13 cells toward its plasm in a scene with walls.
   after the front a tube shows from the front stamps (`Sim.readSlimeFront()`).
 - The numbers of the fan are the constants `FRONT_…` of `render.wgsl` and `render.frag`. The look of the film stays
   in `SLIME_LOOK`.
+- A pixel below plasm that hides all of its ground draws no film. ADR 0057 named this as a way to make the film
+  cheaper, and [ADR 0059](0059-the-film-of-the-slime-keeps-its-cost.md) left the cost of the film as it is. Here it
+  comes with the rule that the plasm lies on the film, and nobody measured the time that it saves.
 
 ## Open points
 
