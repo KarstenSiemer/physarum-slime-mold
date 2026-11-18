@@ -46,7 +46,7 @@ jobs:
   # 2026-11-18: four parts of each, ADR 0061).
   # The GPU tests split by the backend in their names: one half runs every test whose full name holds
   # "webgpu", the other every other test. Each half splits by the file again: src/engine/sim.gpu.test.ts,
-  # which takes 44 % of the time, and the other files (ADR 0061). So each test runs exactly once. With two
+  # which takes a third of the time, and the other files (ADR 0061). So each test runs exactly once. With two
   # parts each took 20.5 to 28.7 min of its 30 on main. In CI the files of the GPU project run one after
   # the other (vitest.config.ts).
   verify-gpu:

@@ -71,6 +71,19 @@ tests) 13.9 min. The five tests of `tubes.spec.ts` took 8.6 to 9.1 min on GitHub
 - The linters of the workflows pass (`actionlint`, `zizmor`, `check-github-workflows` of the commit hooks).
 - The GPU parts by the file: `vitest list --project gpu` names 347 tests, 184 of them in `src/engine/sim.gpu.test.ts`
   and 163 in the other files (the list does not fill in the names of the backends, so it cannot check the halves).
+- On GitHub the four e2e shards took 12.8, 8.1, 10.6 and 11.3 min with the start in the first run of the pull
+  request (run 44333749052), 11.8, 11.0, 17.9 and 9.9 min in the second (run 44337639190) and 12.3, 11.2, 16.4 and
+  11.3 min in the third (run 44348279489). Every test passed. The runners differ: the third shard took 10.6 and
+  17.9 min for the same tests.
+- On GitHub the four GPU parts took 7.2 min (`webgpu-sim`), 14.2 min (`webgpu-rest`), 7.6 min (`rest-sim`) and
+  16.0 min (`rest`, with lint, the type check and the unit tests) in run 44348279489. With two parts the same code
+  took 23.7 and 16.1 min in the run before.
+- In that run `src/engine/sim.gpu.test.ts` took 742 of the 2,195 s of the GPU tests, a third.
+- Each GPU test runs once: the two parts for WebGPU passed 449 and 197 tests, and the WebGPU part of the run before 646. The two other parts passed 444 and 250 tests, and the other part of the run before 694.
+- The longest of the eight jobs took 16.4 min: a little more than half of the limit.
+- The linters of the workflows pass (`actionlint`, `zizmor`, `check-github-workflows` of the commit hooks).
+- The GPU parts by the file: `vitest list --project gpu` names 347 tests, 184 of them in `src/engine/sim.gpu.test.ts`
+  and 163 in the other files (the list does not fill in the names of the backends, so it cannot check the halves).
 - On GitHub the four shards of the pull request took 12.8, 8.1, 10.6 and 11.3 min with the start (run 44333749052), and
   every test passed. The first shard took 5 min more than the estimate and the third 6 min less: one run, and the
   runners differ. The longest shard took less than half of its limit.
