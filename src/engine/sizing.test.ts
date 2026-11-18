@@ -217,12 +217,12 @@ describe('the outline distances of the electrodes', () => {
 });
 
 // ADR 0055, decision 9, ADR 0057 and ADR 0059: per cell the slime field holds a stamp, an amount and a front stamp of
-// 4 B each, and the renderer holds the maps of the film, 2.5 B, and the map of the growth front, 8 B per texel of 64
-// cells, on both backends: 14.6 B, counted as 15.
+// 4 B each, and the renderer holds the maps of the film, 2.5 B, and the map of the growth front, 16 B per texel of
+// 64 cells, on both backends: 14.75 B, counted as 15.
 describe('the slime field', () => {
   it('holds 15 B per cell with its picture, which the memory estimate counts per cell', () => {
     expect(SLIME_BYTES_PER_CELL).toBe(15);
-    expect(SLIME_BYTES_PER_CELL).toBe(Math.ceil(4 + 4 + 4 + 2 + 2 / 4 + 8 / 64));
+    expect(SLIME_BYTES_PER_CELL).toBe(Math.ceil(4 + 4 + 4 + 2 + 2 / 4 + 16 / 64));
     const [w, h] = gridSize(1536, 1.6);
     const without = estimateBytes(w, h, 1000);
     expect(estimateBytes(w, h, 1000, BYTES_PER_CELL + SLIME_BYTES_PER_CELL) - without).toBe(w * h * 15);

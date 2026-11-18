@@ -687,6 +687,9 @@ vec3 slimed(vec3 bg, vec2 p) {
          vec3(min(V.slimeLight.x * spark * cov, 0.8));
 }
 
+const float FILM_HIDE = 3.0; // how fast the plasm hides the film below it, per unit of its light (plasmCover)
+
+#ifdef FRONT
 // ---- The growth front (see render.wgsl, ADR 0059) ----
 // Display only. The picture draws young ground as the fan of a plasmodium: a sheet at the front, then fine veins in a
 // sheet that gets thinner, then the tubes of the model alone. front-map.frag writes a coarse map of the plasm and the
@@ -701,7 +704,6 @@ const float FRONT_RISE = 0.9;    // the plasm of a vein, as light
 const float FRONT_GAIN = 2.4;    // the sheet in units of the mean trail of its texels
 const float FRONT_FADE = 350.0;  // steps in which the fine veins get thinner by the factor e
 const int FRONT_REACH = 13;      // cells that the sheet reaches from its plasm, at most
-const float FILM_HIDE = 3.0;     // how fast the plasm hides the film below it, per unit of its light (plasmCover)
 
 struct Fan {
   vec4 v; // the sheet of each strain at a point, in units of the trail
@@ -777,7 +779,7 @@ Fan fanAt(vec2 p, float under) {
     }
   }
   float total = body.x + body.y + body.z + body.w;
-  if (total <= 1e-6) return f;
+  if (!(total > 1e-6)) return f;
   float t = clamp(aged / total, 0.0, 1.0);
   if (t >= 1.0) return f;
   // The sheet: all of it at the front, and less with the time scale of the sheet.
@@ -827,6 +829,7 @@ float fanOpen(vec2 p, vec2 up) {
   }
   return open;
 }
+#endif
 #endif
 
 // How much of the ground the plasm `v` hides, 0 to 1: the film of the slime does not show through a tube (plasmCover
@@ -1079,7 +1082,7 @@ vec3 scene(vec2 p, vec2 s) {
 #endif
   // The sheet of the growth front at p in units of the trail, and its gradient per cell: none without the front.
   vec3 lift = vec3(0.0);
-#ifdef SLIME
+#ifdef FRONT
   // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
   if ((V.slime.z & 2u) != 0u && V.style != 3u) {

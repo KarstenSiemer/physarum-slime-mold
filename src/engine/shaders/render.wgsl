@@ -7,6 +7,8 @@ override ENV: bool = true;
 override SCENT: bool = false;
 // The film of the slime (ADR 0055, decision 8; ADR 0057), compiled in only while a frame draws it (render.ts).
 override SLIME: bool = false;
+// The fan of the growth front (ADR 0059), compiled in only while a frame draws it, together with SLIME (render.ts).
+override FRONT: bool = false;
 
 struct View {
   canvas: vec2f,      // canvas size, pixels
@@ -1147,7 +1149,7 @@ fn fanAt(p: vec2f, under: f32) -> Fan {
     }
   }
   let total = body.x + body.y + body.z + body.w;
-  if (total <= 1e-6) { return f; }
+  if (!(total > 1e-6)) { return f; }
   let t = clamp(aged / total, 0.0, 1.0);
   if (t >= 1.0) { return f; }
   // The sheet: all of it at the front, and less with the time scale of the sheet.
@@ -1245,7 +1247,7 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   var lift = vec3f(0.0);
   // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
-  if (SLIME && (V.slime.z & 2u) != 0u && V.style != 3u) {
+  if (FRONT && (V.slime.z & 2u) != 0u && V.style != 3u) {
     let under = plasmCover(v);
     var fan = fanAt(p, under);
     if (ENV && V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {

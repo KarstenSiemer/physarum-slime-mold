@@ -37,6 +37,13 @@ function trailOf(cells: readonly number[], value: number, count: number): Float3
   return trail;
 }
 
+/** By how much the darkest channel of a pixel of `a` lies below that of `b`, at most over the picture. */
+function darker(a: ImageData, b: ImageData) {
+  let max = 0;
+  for (let i = 0; i < a.data.length; i++) if (i % 4 !== 3) max = Math.max(max, (b.data[i] ?? 0) - (a.data[i] ?? 0));
+  return max;
+}
+
 /** The largest difference of one channel between two captures, over the pixels that `where` keeps. */
 function maxDiff(a: ImageData, b: ImageData, where: (x: number, y: number) => boolean = () => true) {
   let max = 0;
@@ -196,8 +203,17 @@ describe('the fan of the growth front in the picture', () => {
         // Each backend dithers by 1 of 255 in its own way, and rounds a byte.
         expect(maxDiff(on[0], on[1]), name).toBeLessThanOrEqual(3);
         // The fan is there: the sheet and its veins beside the tube.
-        const off = await shot(gpu, a, { style, showFront: false }, view);
-        expect(maxDiff(on[0], off), name).toBeGreaterThan(25);
+        const off = [
+          await shot(gpu, a, { style, showFront: false }, view),
+          await shot(gl, b, { style, showFront: false }, view),
+        ] as const;
+        expect(maxDiff(on[0], off[0]), name).toBeGreaterThan(25);
+        // The sheet is more plasm: in the glow it only adds light, on both backends. A map of the front that holds
+        // no number gave a black tube on SwiftShader, and the same black on both backends.
+        if (style === 'glow') {
+          expect(darker(on[0], off[0]), name).toBeLessThanOrEqual(3);
+          expect(darker(on[1], off[1]), name).toBeLessThanOrEqual(3);
+        }
       }
     // The agents style, the scent view and a scene without growth draw no fan.
     for (const patch of [{ style: 'agents' }, { showScent: true }, { growth: false }] as Partial<Settings>[])

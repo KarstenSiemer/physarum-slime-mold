@@ -121,7 +121,7 @@ strains (one `vec4` lane each).
 | slime amount       | storage `u32` per cell (WebGL2: `R16UI` × 2)     | 4 B × W × H      | how much slime each cell holds, the view only (0057)  |
 | film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
 | front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0059) |
-| map of the front   | `rgba16float` texture, texels of 8 × 8 cells     | 0.1 B × W × H    | renderer only: young plasm and its age (ADR 0059)     |
+| map of the front   | `rgba32float` texture, texels of 8 × 8 cells     | 0.25 B × W × H   | renderer only: young plasm and its age (ADR 0059)     |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -382,7 +382,9 @@ the arrows.
   - **Walls** (`fanOpen`): the sheet is wider than a wall is thick. So the pass walks from the pixel toward the plasm,
     up the slope of the plasm, cell by cell, and the sheet shows nothing where a wall lies on the way.
   - The sheet is more plasm: it adds to the trail of its strain before the style draws it. In the gel style it adds
-    to the height and to the slope of the gel. The agents style and the scent view draw no fan. The switch changes
+    to the height and to the slope of the gel. The agents style and the scent view draw no fan. The code of the fan
+    is compiled in only for a frame that draws it, in pipelines of its own that also hold the film: a frame without
+    the fan runs the shader without it. The switch changes
     nothing in the simulation, goes into the link like the style and stays as it is when a scene loads. The numbers
     are the constants `FRONT_…` of `render.wgsl` and `render.frag`; the 350 steps, the width of the sheet and the
     look of the veins are choices made on pictures.

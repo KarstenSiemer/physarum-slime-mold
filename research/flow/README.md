@@ -2206,6 +2206,15 @@ npx vitest run --project gpu src/engine/front.gpu.test.ts
 npx vitest run --project gpu src/engine/slime.gpu.test.ts
 ```
 
+**In the image of CI.** The first run of CI failed in `front.gpu.test.ts`: SwiftShader, the GPU
+of CI, drew a black tube where the M3 Pro drew a normal picture (ADR 0059, Results). To run the
+file as CI does, copy the commit into an empty folder with `git archive HEAD | tar -x -C <folder>`
+and run it there in the image that `.github/workflows/ci.yml` pins (1 minute after `npm ci`):
+
+```bash
+docker run --rm -v <folder>:/work -w /work -e CI=1 <image> bash -lc "npm ci && npx vitest run --project gpu src/engine/front.gpu.test.ts"
+```
+
 **The bytes of the scenes.** The digests as in part 17, with the names `g59-digest-branch` and
 `g59-digest-3000-branch`. The digests of `main` for it are those of part 21:
 

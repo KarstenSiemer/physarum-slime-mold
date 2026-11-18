@@ -225,6 +225,11 @@ export interface Programs {
    * Jones model never draws it.
    */
   slimed: () => SlimePrograms | undefined;
+  /**
+   * The programs of the fan of the growth front (ADR 0059) once they are built, else undefined, as `slimed`. A scene
+   * without growth never builds them.
+   */
+  fronted: () => FrontPrograms | undefined;
   /** The pass that fills the trail's coarse map for a view zoomed out (trail-down.frag), compiled at its first use. */
   trailDown: () => Program;
   height: [Program, Program];
@@ -299,8 +304,14 @@ export interface SlimePrograms {
   film: [Program, Program];
   /** Fills the coarse map of the film (slime-down.frag). */
   down: Program;
-  /** Fills the map of the growth front (front-map.frag, ADR 0059). */
-  front: Program;
+}
+
+/** The fan of the growth front (ADR 0059): the render pass with the fan and the film, and the pass of its map. */
+export interface FrontPrograms {
+  /** The render pass with the fan and the film (FRONT and SLIME in render.frag), without and with food, light, walls. */
+  render: [Program, Program];
+  /** Fills the map of the growth front (front-map.frag). */
+  map: Program;
 }
 
 /** Compiles every program once; simulation shaders get the shared prelude (common.glsl). */
@@ -317,6 +328,8 @@ export function compile(gl: GL): Programs {
   let scent: ScentPrograms | undefined;
   let slimedStarted: ReturnType<typeof startProgram>[] | undefined;
   let slimed: SlimePrograms | undefined;
+  let frontedStarted: ReturnType<typeof startProgram>[] | undefined;
+  let fronted: FrontPrograms | undefined;
   let capacity: Program | undefined;
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
@@ -435,13 +448,28 @@ export function compile(gl: GL): Programs {
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + slimeFilmFrag),
         startProgram(gl, vertex, V + '#define ENV 1\n' + viewGlsl + slimeFilmFrag),
         startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + slimeDownFrag),
-        startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + frontMapFrag),
       ];
       if (!slimedStarted.every((p) => p.done())) return undefined;
       for (const p of slimedStarted) p.check();
-      const [off, on, bare, walled, down, front] = slimedStarted.map((p) => wrap(gl, p.program));
-      if (!off || !on || !bare || !walled || !down || !front) return undefined;
-      return (slimed = { render: [off, on], film: [bare, walled], down, front });
+      const [off, on, bare, walled, down] = slimedStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !bare || !walled || !down) return undefined;
+      return (slimed = { render: [off, on], film: [bare, walled], down });
+    },
+    fronted: () => {
+      // A lost context builds nothing: the frames draw without the fan, and the app reports the loss.
+      if (fronted || gl.isContextLost()) return fronted;
+      const vertex = V + 'precision highp float;\n' + fullscreen;
+      const parts = '#define SLIME 1\n#define FRONT 1\n';
+      frontedStarted ??= [
+        startProgram(gl, vertex, V + parts + '#define ENV 0\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + parts + '#define ENV 1\n' + viewGlsl + renderFrag),
+        startProgram(gl, vertex, V + '#define ENV 0\n' + viewGlsl + frontMapFrag),
+      ];
+      if (!frontedStarted.every((p) => p.done())) return undefined;
+      for (const p of frontedStarted) p.check();
+      const [off, on, map] = frontedStarted.map((p) => wrap(gl, p.program));
+      if (!off || !on || !map) return undefined;
+      return (fronted = { render: [off, on], map });
     },
     trailDown: () => (trailDown ??= plain('#define ENV 0\n' + viewGlsl + trailDownFrag)),
     height: view(heightFrag),

@@ -18,17 +18,7 @@ import { BACKGROUND, LATTICE_COPIES, SLIME_LOOK, trailLevel } from './render';
 import { levelSize } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import { equilibrium } from './sizing';
-import {
-  FILM_HIDE,
-  frontShown,
-  NO_STAMP,
-  SLIME_FULL,
-  SLIME_RIM,
-  slimeShown,
-  slimeSteps,
-  stampOf,
-  STEPS_PER_HOUR,
-} from './slime';
+import { FILM_HIDE, NO_STAMP, SLIME_FULL, SLIME_RIM, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
 import {
   amountLeft,
   amountStep,
@@ -129,7 +119,7 @@ function cutSpan(source: string, start: string, end: string) {
 /** The lines of `scene` in render.wgsl that add the sheet of the growth front to the trail (ADR 0059). */
 const WGSL_FAN = `  // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
-  if (SLIME && (V.slime.z & 2u) != 0u && V.style != 3u) {
+  if (FRONT && (V.slime.z & 2u) != 0u && V.style != 3u) {
     let under = plasmCover(v);
     var fan = fanAt(p, under);
     if (ENV && V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
@@ -151,7 +141,7 @@ const WGSL_FILM = `  // The film of the slime lies on the ground, and the plasm 
   }
 `;
 /** The same lines of `scene` in render.frag. */
-const GLSL_FAN = `#ifdef SLIME
+const GLSL_FAN = `#ifdef FRONT
   // The sheet of the growth front is more plasm on young ground (ADR 0059). It stays on the side of a wall on which
   // its plasm lies (fanOpen()).
   if ((V.slime.z & 2u) != 0u && V.style != 3u) {
@@ -223,6 +213,10 @@ const WITHOUT_SLIME = {
       [
         '// What lies below the trail: the ground `bg`, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake, bg: vec3f) -> vec3f {\n',
         '// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake) -> vec3f {\n  let bg = V.background.rgb;\n',
+      ],
+      [
+        '// The fan of the growth front (ADR 0059), compiled in only while a frame draws it, together with SLIME (render.ts).\noverride FRONT: bool = false;\n',
+        '',
       ],
       [WGSL_FAN, ''],
       [WGSL_FILM, ''],
@@ -2631,7 +2625,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         };
         // A frame asks for the programs as the backend's frames do (gl/backend.ts encode()).
         frameOf = (settings) => {
-          if (slimeShown(settings) || frontShown(settings)) programs.slimed();
+          if (slimeShown(settings)) programs.slimed();
         };
       }
       for (const settings of [
@@ -2647,9 +2641,10 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         frameOf(s);
         await ready();
       }
-      // The render pass with the film and the pass of its map, each without and with food, light and walls, the pass
-      // of its coarse map, and the pass of the map of the growth front (ADR 0059).
-      expect(first).toBe(6);
+      // The render pass with the film and the pass of its map, each without and with food, light and walls, and the
+      // pass of its coarse map. The fan of the growth front has pipelines of its own (ADR 0059), which a scene
+      // without growth never builds.
+      expect(first).toBe(5);
       expect(builds.mock.calls.length).toBe(first);
     });
   });

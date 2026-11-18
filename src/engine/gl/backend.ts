@@ -182,7 +182,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     // is lost.
     const built = () =>
       (!settings.showScent || this.prog.scent()) &&
-      (!(slimeShown(settings) || frontShown(settings)) || this.prog.slimed());
+      (!slimeShown(settings) || this.prog.slimed()) &&
+      (!frontShown(settings) || this.prog.fronted());
     while (!this.fixed && !built() && !gl.isContextLost()) await new Promise((r) => setTimeout(r, 2));
     // A rebuild can destroy the simulation during that wait. Then nothing is left to draw, and the engine asks
     // again for the new one (Engine.ofRun()).
@@ -363,7 +364,11 @@ export class WebGl2Backend implements Backend<GlSim> {
     const stamps = !this.fixed && (filmy || fanned) ? sim.slimeTexture : undefined;
     const amounts = stamps ? sim.slimeAmountTexture : undefined;
     const fronts = stamps && fanned ? sim.slimeFrontTexture : undefined;
-    const wet = stamps && amounts ? this.prog.slimed() : undefined;
+    const wet = stamps && amounts && filmy ? this.prog.slimed() : undefined;
+    // The fan of the growth front (ADR 0059) has programs of its own, with the code of the film in them: a frame
+    // without the fan pays nothing for it. With the film it waits for the programs of the maps of the film.
+    const fanReady = stamps && amounts && fronts ? this.prog.fronted() : undefined;
+    const grown = fanReady && (!filmy || wet) ? fanReady : undefined;
     packView(
       this.viewData,
       width,
@@ -378,7 +383,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       l.strand,
       streamStep,
       sim.hasElectrodes,
-      wet ? sim.step : undefined,
+      (wet ?? grown) ? sim.step : undefined,
     );
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
@@ -424,8 +429,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     // The map of the film of the slime, filled once for each state of the slime that a frame draws (slime-film.frag):
     // after a step or a stroke, and when the life time, the arena or the walls are others. Zoomed out, the frame reads
     // a coarser map of it, filled from it (slime-down.frag).
-    const film = wet && filmy ? this.filmFor(sim) : undefined;
-    const filmCoarse = wet && filmy && trailMap > 0 ? this.filmCoarseFor(sim) : undefined;
+    const film = wet ? this.filmFor(sim) : undefined;
+    const filmCoarse = wet && trailMap > 0 ? this.filmCoarseFor(sim) : undefined;
     if (wet && film && stamps && amounts) {
       const now: FilmState = {
         sim,
@@ -457,16 +462,16 @@ export class WebGl2Backend implements Backend<GlSim> {
       }
     }
     // The map of the growth front (front-map.frag, ADR 0059), filled once for each state that a frame draws.
-    const fan = wet && fronts ? this.fanFor(sim) : undefined;
-    if (wet && fan && stamps && fronts) {
+    const fan = grown && fronts ? this.fanFor(sim) : undefined;
+    if (grown && fan && stamps && fronts) {
       const now = { sim, stamps, step: sim.step, revision: sim.revision, life: slimeSteps(s) };
       const held = this.fanHolds;
       if (!(held && (Object.keys(now) as (keyof typeof now)[]).every((k) => held[k] === now[k]))) {
         this.fanHolds = now;
         gl.bindFramebuffer(gl.FRAMEBUFFER, fan.fbo);
         gl.viewport(0, 0, fan.width, fan.height);
-        gl.useProgram(wet.front.program);
-        textures(gl, wet.front.program, { trail, stamps, fronts });
+        gl.useProgram(grown.map.program);
+        textures(gl, grown.map.program, { trail, stamps, fronts });
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
     }
@@ -493,7 +498,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
     // The scent view draws no slime (slimeShown()), so a frame has one of the two at most.
-    const p = (this.fixed ?? scent?.render ?? wet?.render ?? this.prog.render)[variant];
+    const p = (this.fixed ?? scent?.render ?? grown?.render ?? wet?.render ?? this.prog.render)[variant];
     gl.useProgram(p.program);
     // A sampler that the frame does not read still needs a texture: the trail stands in for its coarse map.
     const trailLevels = trailCoarse?.texture ?? trail;
@@ -513,17 +518,18 @@ export class WebGl2Backend implements Backend<GlSim> {
     // The maps of the film of the slime: up to 2 cells per pixel no frame reads the coarse one, and the map of the
     // cells stands in for it.
     // A sampler that the frame does not read still needs a texture: the trail stands in for a map that is not shown.
-    const maps = wet
-      ? {
-          film: film?.texture ?? trail,
-          filmLevels: filmCoarse?.texture ?? film?.texture ?? trail,
-          fanMap: fan?.texture ?? trail,
-        }
-      : {};
+    const maps =
+      wet || grown
+        ? {
+            film: film?.texture ?? trail,
+            filmLevels: filmCoarse?.texture ?? film?.texture ?? trail,
+            ...(grown ? { fanMap: fan?.texture ?? trail } : {}),
+          }
+        : {};
     const more = scent ? { scent: viewScent, scentLevels } : maps;
     textures(gl, p.program, { ...all, ...more });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    return !(s.showScent && !this.fixed && !scent) && !(stamps && !wet);
+    return !(s.showScent && !this.fixed && !scent) && !(stamps && filmy && !wet) && !(fronts && !grown);
   }
 
   /** The scent view's coarse map for this grid size, made anew when the size changes. */
@@ -542,7 +548,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     const [w, h] = [levelSize(sim.width, FRONT_LEVEL), levelSize(sim.height, FRONT_LEVEL)];
     if (this.fan?.width !== w || this.fan.height !== h) {
       if (this.fan) destroyTarget(this.gl, this.fan);
-      this.fan = target(this.gl, w, h, this.gl.RGBA16F);
+      this.fan = target(this.gl, w, h, this.gl.RGBA32F);
       this.fanHolds = undefined;
     }
     return this.fan;

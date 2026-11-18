@@ -92,7 +92,8 @@ counter needs no memory on WebGPU, but every pass that writes a stamp of the sli
    thick. The render pass walks from the pixel toward the plasm, up the slope of the plasm, one cell at a time, and
    shows no sheet where a wall lies on the way. The veins follow the same test.
 7. **The sheet is plasm.** It adds to the trail of its strain before the style draws it, and to the height and the
-   slope of the gel. The agents style and the scent view draw no fan. The switch Show growth front is on at the
+   slope of the gel. Its code is compiled in only for a frame that draws it, in pipelines of its own that also hold
+   the film. The agents style and the scent view draw no fan. The switch Show growth front is on at the
    start, changes no run, and goes into a link like Show slime. A life time of 0 and the Jones model have no slime
    field, so they have no front stamp and no fan. A scene without growth draws no fan either: its agents start all
    over the ground, and the fan lay on the whole picture in its first steps (the e2e tests found this).
@@ -127,6 +128,14 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
   stamp, which no step of the slime field saw, showed a fan: 71 tests of the trail, the tubes and the electrodes
   failed, and such a texel shows none now. In a scene without growth the fan lay on the whole picture in the first
   steps and hid the film (two e2e tests): the fan needs growth now (decision 7).
+- **A fault that only CI found.** The map of the front held 16-bit floats. A trail above 65,504 gave it a value that
+  is no number, and on SwiftShader, the GPU of CI, the tube and the walls were black. On the M3 Pro the picture
+  showed nothing of it, and both backends drew the same black, so the test of the two backends passed. The map holds
+  32-bit floats now, as the trail does, and a test says that the fan only adds light in the glow style. The first run
+  of CI also needed more than its 30 minutes for the second half of the e2e tests (24.5 minutes on `main`). So the
+  fan got pipelines of its own, as the scent view has: a frame without the fan runs the shader without its code. In
+  the image of CI, the tests of the slime and of the tubes on WebGPU take 124 s with that (125 s on `main`, 133 s
+  before it).
 - **The film below the plasm and the switches** (`slime.gpu.test.ts`): the tests of the film hold with new numbers
   where the plasm hides the film. With both switches off every pixel equals that of the shaders without the film and
   the fan.
@@ -175,6 +184,7 @@ walks up to 13 cells toward its plasm in a scene with walls.
 - **The fan is a picture.** The model grows arms, not a sheet, and no vein forms toward a front (`docs/fidelity.md`,
   rows 6 and 24). The crown of a tree that the owner asked for needs the flow of stage 4.
 - **The veins do not follow the direction of the growth.** Their pattern is fixed in the grid.
-- **The fan has no CPU reference.** A fault that both backends share shows only on pictures.
+- **The fan has no CPU reference.** A fault that both backends share shows only on pictures, or on another GPU:
+  CI found one (Results).
 - **Zoomed out beyond 4 cells per pixel** a pixel is wider than half a texel of the map of the front. Not looked at.
 - **The time of a draw with the fan is not measured**, and two rounds do not resolve the cost of a step (Results).
