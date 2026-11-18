@@ -165,20 +165,14 @@ struct Flake {
 const float GEL_CLEAR = 0.6; // how much of a flake of food shows through the gel style's trail
 const float GEL_HIGH = 4.0;  // cells of height for one unit of the gel's thickness
 
-// How thick the gel is at p + d with the sheet of the growth front on it (see raised in render.wgsl; ADR 0060).
-// `lift`: the sheet at p in units of the trail and its gradient per cell.
-float raised(vec2 p, vec2 d, vec3 lift) {
-  return thick(max(heightFiltered(p + d), 0.0) + max(lift.x + dot(lift.yz, d), 0.0) * V.exposure);
-}
-
 // A gel with a wet surface (see gel in render.wgsl). Over a flake of food the gel takes in its colour.
-vec3 gel(vec2 p, vec4 v, vec3 base, Flake f, vec3 lift) {
+vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
   float a = 1.25 * max(V.scale, 1.0);
   float b = 0.5 * max(V.scale, 1.0);
-  vec2 east = vec2(raised(p, vec2(a, b), lift), raised(p, vec2(a, -b), lift));
-  vec2 west = vec2(raised(p, vec2(-a, b), lift), raised(p, vec2(-a, -b), lift));
-  vec2 south = vec2(raised(p, vec2(b, a), lift), raised(p, vec2(-b, a), lift));
-  vec2 north = vec2(raised(p, vec2(b, -a), lift), raised(p, vec2(-b, -a), lift));
+  vec2 east = vec2(thick(heightFiltered(p + vec2(a, b))), thick(heightFiltered(p + vec2(a, -b))));
+  vec2 west = vec2(thick(heightFiltered(p + vec2(-a, b))), thick(heightFiltered(p + vec2(-a, -b))));
+  vec2 south = vec2(thick(heightFiltered(p + vec2(b, a))), thick(heightFiltered(p + vec2(-b, a))));
+  vec2 north = vec2(thick(heightFiltered(p + vec2(b, -a))), thick(heightFiltered(p + vec2(-b, -a))));
   vec2 rise = vec2(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
   vec3 n = normalize(vec3(-GEL_HIGH * rise, 1.0));
   vec3 l = normalize(vec3(-0.45, -0.6, 0.65));
@@ -190,7 +184,7 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f, vec3 lift) {
 #if ENV
   if (f.cover > 0.0) albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover);
 #endif
-  float here = max(heightFiltered(p), 0.0) + lift.x * V.exposure;
+  float here = heightFiltered(p);
   vec2 around = max(max(east, west), max(south, north));
   float full = smoothstep(0.12, 0.85, max(thick(here), max(around.x, around.y)));
   vec3 lit = mix(albedo, vec3(1.0), V.gelFx.x * (1.0 - full)) * (0.3 + 0.8 * diffuse);
@@ -689,132 +683,90 @@ vec3 slimed(vec3 bg, vec2 p) {
 
 #ifdef FRONT
 // ---- The growth front (see render.wgsl, ADR 0060) ----
-// Display only. The picture draws young ground as the fan of a plasmodium: a sheet at the front, then fine veins in a
-// sheet that gets thinner, then the tubes of the model alone. front-map.frag writes a coarse map of the plasm and the
-// age of the ground; this pass reads the 3 × 3 texels around a pixel as a smooth surface.
-uniform sampler2D fanMap; // the map of the growth front (front-map.frag)
+// Display only. The picture draws a skirt around young ground: a thin clear veil of slime on the ground, below the
+// plasm. front-map.frag writes a coarse map of the young ground; this pass reads the texels around a pixel as a smooth
+// hill.
+uniform sampler2D youngMap; // the map of the growth front (front-map.frag)
 
-const float FRONT_SHEET = 100.0; // steps in which the sheet gives its mass to the veins (195 s)
-const float FRONT_CELLS = 6.5;   // cells per step of the lattice of the veins
-const float FRONT_VEIN = 0.16;   // half the width of a full vein, in steps of that lattice
-const float FRONT_FULL = 0.6;    // the plasm around a point, as light, from which the fan is full
-const float FRONT_RISE = 0.9;    // the plasm of a vein, as light
-const float FRONT_SKIRT = 0.5;   // the plasm of the skirt at the front, as light: a thin sheet
-const float FRONT_FADE = 350.0;  // steps in which the fine veins get thinner by the factor e
-const float FAN_RADIUS = 2.0;    // texels of the map from which a point takes the plasm around it
-const float FAN_LOW = 0.25;      // the plasm around a point, as a share of FRONT_FULL, at which the skirt begins
-const float FAN_HIGH = 0.7;      // and at which the skirt has its whole thickness
-const int FRONT_REACH = 17;      // cells that the fan reaches from its plasm, at most: FAN_RADIUS texels and one more
+const float SKIRT_RADIUS = 2.0;  // texels of the map from which a point takes the young ground around it
+const float SKIRT_LOW = 0.04;    // the share of young ground around a point at which the skirt begins
+const float SKIRT_HIGH = 0.3;    // and at which the skirt has its whole thickness
+const float SKIRT_BODY = 0.09;   // the light that the whole skirt adds to the ground, and three times its share on paper
+const float SKIRT_TINT = 0.5;    // how much of the colour of its strain the skirt takes; the rest is that of the slime
+const float SKIRT_RELIEF = 0.35; // the height of the relief of the skirt, as a share of that of the film of the slime
+const int FRONT_REACH = 9;       // cells that the skirt reaches from its plasm, at most: SKIRT_RADIUS texels and one more
 
-struct Fan {
-  vec4 v; // the sheet of each strain at a point, in units of the trail
-  float h; // their sum
-  vec2 g; // the gradient of the sum, per cell
-  vec2 up; // the slope of the plasm around the point, without the veins: the plasm of the sheet lies up this slope
+struct Skirt {
+  float h;   // the thickness of the skirt at a point, 0 to 1
+  vec2 g;    // its gradient, per cell
+  vec2 up;   // the slope of the young ground around the point: its plasm lies up this slope
+  vec3 tint; // the colour of the strains of that young ground
 };
 
-// The veins of the fan (fanVeins in render.wgsl): (how far p is from a wall between two cells of the pattern, 0 on
-// it, in lattice steps; the gradient of that, per cell; the lattice steps per cell).
-vec4 fanVeins(vec2 p) {
-  vec2 n = patternSteps(FRONT_CELLS);
-  vec2 scale = n / vec2(gridSize()); // lattice steps per cell
-  vec2 x0 = p * scale;
-  vec3 bentX = noiseSlope(x0 + vec2(3.1, 8.7), ivec2(n));
-  vec3 bentY = noiseSlope(x0 + vec2(41.3, 17.9), ivec2(n));
-  vec2 x = x0 + 0.7 * (vec2(bentX.x, bentY.x) - 0.5);
-  ivec2 i = ivec2(floor(x));
-  float d1 = 8.0;
-  float d2 = 8.0;
-  vec2 o1 = vec2(0.0);
-  vec2 o2 = vec2(0.0);
-  for (int dy = -1; dy <= 1; dy++) {
-    for (int dx = -1; dx <= 1; dx++) {
-      ivec2 k = i + ivec2(dx, dy);
-      ivec2 w = wrapCell(k, ivec2(n));
-      vec2 o = 0.15 + 0.7 * vec2(lattice(w + ivec2(23, 5)), lattice(w + ivec2(101, 67)));
-      vec2 d = x - (vec2(k) + o);
-      float l = length(d);
-      if (l < d1) {
-        d2 = d1;
-        o2 = o1;
-        d1 = l;
-        o1 = d;
-      } else if (l < d2) {
-        d2 = l;
-        o2 = d;
-      }
-    }
-  }
-  return vec4(d2 - d1, (o2 / max(d2, 1e-6) - o1 / max(d1, 1e-6)) * scale, scale.x);
-}
-
-// The fan of the growth front at p (fanAt in render.wgsl): the plasm around p is the mean of the texels of the map of
-// the front within FAN_RADIUS texels, each with the weight (1 − r² / R²)³, so it is a round, smooth hill at any zoom.
-// The sheet is a thin skirt around young plasm, and fine veins stay when it goes. `under`: how much of the ground the
-// plasm of the model hides at p.
-Fan fanAt(vec2 p, float under) {
-  Fan f = Fan(vec4(0.0), 0.0, vec2(0.0), vec2(0.0));
+// The skirt of the growth front at p (skirtAt in render.wgsl): the young ground around p is the mean of the texels of
+// the map of the front within SKIRT_RADIUS texels, each with the weight (1 − r² / R²)³, so it is a round, smooth hill
+// at any zoom. The skirt begins where the hill has the level SKIRT_LOW and has its whole thickness from SKIRT_HIGH on.
+Skirt skirtAt(vec2 p) {
+  Skirt k = Skirt(0.0, vec2(0.0), vec2(0.0), vec3(0.0));
   ivec2 n = levelSize(FRONT_LEVEL);
   vec2 ratio = vec2(n) / vec2(gridSize()); // texels per cell
   vec2 q = p * ratio - 0.5;                // in texels: texel i has its centre at i
   ivec2 c = ivec2(floor(q));
   float weight = 0.0;
   vec2 slopeW = vec2(0.0);
-  vec4 body = vec4(0.0);
-  vec2 slopeB = vec2(0.0);
-  float aged = 0.0;
+  vec4 young = vec4(0.0);
+  vec2 slopeY = vec2(0.0);
   for (int j = -1; j <= 2; j++) {
     for (int i = -1; i <= 2; i++) {
-      ivec2 k = c + ivec2(i, j);
-      vec2 d = q - vec2(k);
-      float near = 1.0 - dot(d, d) / (FAN_RADIUS * FAN_RADIUS);
+      ivec2 at = c + ivec2(i, j);
+      vec2 d = q - vec2(at);
+      float near = 1.0 - dot(d, d) / (SKIRT_RADIUS * SKIRT_RADIUS);
       if (near <= 0.0) continue;
       float w = near * near * near;
-      vec2 dw = -6.0 * near * near * d / (FAN_RADIUS * FAN_RADIUS);
+      vec2 dw = -6.0 * near * near * d / (SKIRT_RADIUS * SKIRT_RADIUS);
       weight += w;
       slopeW += dw;
-      // A texel outside a closed arena holds no plasm.
-      ivec2 t = k;
+      // A texel outside a closed arena holds no young ground.
+      ivec2 t = at;
       if (V.boundary == 0u) {
-        t = wrapCell(k, n);
-      } else if (any(lessThan(k, ivec2(0))) || any(greaterThanEqual(k, n))) {
+        t = wrapCell(at, n);
+      } else if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, n))) {
         continue;
       }
-      vec4 m = texelFetch(fanMap, t, 0);
-      body[int(m.z)] += w * m.x;
-      aged += w * m.y;
-      slopeB += dw * m.x;
+      vec4 m = texelFetch(youngMap, t, 0);
+      young += w * m;
+      slopeY += dw * (m.x + m.y + m.z + m.w);
     }
   }
-  float total = body.x + body.y + body.z + body.w;
-  if (!(total > 1e-6 * weight)) return f;
-  float age = clamp(aged / total, 0.0, 1.0);
-  if (age >= 1.0) return f;
-  // The plasm around p as light, as a share of the light from which the fan is full, and its slope per cell.
-  float light = max(V.exposure, 1e-12) / FRONT_FULL;
-  float around = total / weight * light;
-  vec2 up = (slopeB * weight - total * slopeW) / (weight * weight) * ratio;
-  // The skirt: all of it at the front, and less with the time scale of the sheet.
-  float sheet = exp(-age * FRONT_STEPS / FRONT_SHEET);
-  float u = clamp((around - FAN_LOW) / (FAN_HIGH - FAN_LOW), 0.0, 1.0);
-  float skirt = FRONT_SKIRT * sheet * u * u * (3.0 - 2.0 * u);
-  vec2 skirtSlope = FRONT_SKIRT * sheet * 6.0 * u * (1.0 - u) / (FAN_HIGH - FAN_LOW) * light * up;
-  // The veins: thinner with the time scale of the veins, and gone when the main vein has formed. Half the width of
-  // a vein, in lattice steps: full where the plasm around p is strong, and none at the outer end of the fan.
-  float stay = exp(-age * FRONT_STEPS / FRONT_FADE) * (1.0 - smoothstep(0.6, 1.0, age));
-  vec4 e = fanVeins(p);
-  float wide = FRONT_VEIN * stay * smoothstep(0.1, 0.45, around);
-  float soft = max(0.75 * V.scale * e.w, 0.03); // the edge of a vein: a pixel wide, or wider
-  float r = clamp((e.x - wide + soft) / (2.0 * soft), 0.0, 1.0);
-  // The veins come as the skirt goes, and they end at the tube of the model. A vein that is thinner than a pixel
-  // shows the share of the pixel that it covers.
-  float seen = (1.0 - sheet) * (1.0 - under) * FRONT_RISE * min(1.0, wide / soft);
-  float h = (skirt + seen * (1.0 - r * r * (3.0 - 2.0 * r))) / max(V.exposure, 1e-12);
-  f.v = body * (h / total);
-  f.h = h;
-  f.g = (skirtSlope - seen * 6.0 * r * (1.0 - r) / (2.0 * soft) * e.yz) / max(V.exposure, 1e-12);
-  f.up = up;
-  return f;
+  float total = young.x + young.y + young.z + young.w;
+  if (!(total > 1e-5 * weight)) return k;
+  float around = total / weight;
+  vec2 up = (slopeY * weight - total * slopeW) / (weight * weight) * ratio;
+  float u = clamp((around - SKIRT_LOW) / (SKIRT_HIGH - SKIRT_LOW), 0.0, 1.0);
+  k.h = u * u * (3.0 - 2.0 * u);
+  k.g = 6.0 * u * (1.0 - u) / (SKIRT_HIGH - SKIRT_LOW) * up;
+  k.up = up;
+  k.tint = tint(young) / total;
+  return k;
+}
+
+// The ground `bg` at p with the skirt `k` on it (skirtOn in render.wgsl): a clear veil in the colour of the slime and
+// of its strain, with the waves of the film of the slime in its surface. The veil only adds light, and on paper it is
+// a faint stain: the skirt has no dark rim.
+vec3 skirtOn(vec3 bg, vec2 p, Skirt k) {
+  float fine = clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
+  vec3 ripple = slimeWaves(p);
+  float swell = 1.0 + SLIME_RIPPLE * (2.0 * ripple.x - 1.0);
+  float h = k.h * swell;
+  vec2 g = k.g * swell + k.h * SLIME_RIPPLE * 2.0 * ripple.yz * fine;
+  vec2 shine = wetShine(normalize(vec3(-SKIRT_RELIEF * V.slimeLight.z * g, 1.0)));
+  vec3 body = mix(V.slimeFx.rgb, k.tint, SKIRT_TINT);
+  float soft = V.slimeLight.y * k.h * max(shine.y, 0.0);
+  float spark = min(V.slimeLight.x * k.h * shine.x, 0.8);
+  if (V.style == 2u) {
+    return mix(mix(bg, body, min(3.0 * SKIRT_BODY * h, 1.0)), vec3(1.0), min(spark + 0.5 * soft, 1.0));
+  }
+  return bg + body * (SKIRT_BODY * h + soft) + vec3(spark);
 }
 
 #if ENV
@@ -823,9 +775,9 @@ float wallAt(ivec2 c) {
   return (texelFetch(shape, shapeTexel(c), 0).r - 0.5) * 2.0 * SHAPE_RANGE;
 }
 
-// How much of the sheet of the growth front shows at p, 0 to 1: nothing where a wall stands between p and the plasm
-// that the sheet comes from, up the slope `up` of the plasm around p (fanOpen in render.wgsl).
-float fanOpen(vec2 p, vec2 up) {
+// How much of the skirt of the growth front shows at p, 0 to 1: nothing where a wall stands between p and the young
+// ground that the skirt comes from, up the slope `up` of the young ground around p (skirtOpen in render.wgsl).
+float skirtOpen(vec2 p, vec2 up) {
   float l = length(up);
   if (l <= 1e-12) return 1.0;
   vec2 dir = up / l;
@@ -1092,41 +1044,46 @@ vec3 scene(vec2 p, vec2 s) {
     if (V.frame.w != 0u) v += presence(e, cells, raw);
   }
 #endif
-  // The sheet of the growth front at p in units of the trail, and its gradient per cell: none without the front.
-  vec3 lift = vec3(0.0);
-#ifdef FRONT
-  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
-  // its plasm lies (fanOpen()).
-  if ((V.slime.z & 2u) != 0u && V.style != 3u) {
-    float under = plasmCover(v);
-    Fan fan = fanAt(p, under);
-#if ENV
-    if (V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
-      float open = fanOpen(p, fan.up);
-      fan.v *= open;
-      fan.h *= open;
-      fan.g *= open;
-    }
-#endif
-    v += fan.v;
-    lift = vec3(fan.h, fan.g);
-  }
-#endif
   vec4 dots = V.style == 3u ? agentsAt(p) : vec4(0.0);
   vec3 base = V.background.rgb;
 #ifdef SLIME
-  // The film of the slime lies on the ground, and the plasm lies on the film: where the plasm covers the ground, the
-  // picture shows no film. The flake of food, the trail and all else lie on it.
-  if ((V.slime.z & 1u) != 0u) {
+  // The film of the slime lies on the ground, the skirt of the growth front on the film, and the plasm on both
+  // (ADR 0060): where the plasm covers the ground, the picture shows nothing of them. The flake of food, the trail and
+  // all else lie on them. The agents style draws no skirt.
+  bool filmy = (V.slime.z & 1u) != 0u;
+#ifdef FRONT
+  bool skirted = (V.slime.z & 2u) != 0u && V.style != 3u;
+#else
+  bool skirted = false;
+#endif
+  if (filmy || skirted) {
     float hidden = plasmCover(V.style == 3u ? dots : v);
-    if (hidden < 1.0) base = mix(slimed(base, p), base, hidden);
+    if (hidden < 1.0) {
+      vec3 under = base;
+      if (filmy) under = slimed(under, p);
+#ifdef FRONT
+      if (skirted) {
+        Skirt k = skirtAt(p);
+#if ENV
+        // The skirt stays on the side of a wall on which its young ground lies (skirtOpen()).
+        if (V.frame.z != 0u && k.h > 0.0) {
+          float open = skirtOpen(p, k.up);
+          k.h *= open;
+          k.g *= open;
+        }
+#endif
+        if (k.h > 0.0) under = skirtOn(under, p, k);
+      }
+#endif
+      base = mix(under, base, hidden);
+    }
   }
 #endif
 #if ENV
   if (near) base = substrate(f, base);
 #endif
   vec3 c;
-  if (V.style == 1u) c = gel(p, v, base, f, lift) * (1.0 - STREAM_DARK * grain);
+  if (V.style == 1u) c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain);
   else if (V.style == 2u) c = paper(v, base);
   else if (V.style == 3u) c = glow(dots, vec4(0.0), base);
   else c = glow(v, halo, base);

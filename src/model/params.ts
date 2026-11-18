@@ -474,7 +474,7 @@ export const slimeViewHelp = {
 
 export const frontViewHelp = {
   label: 'Show growth front',
-  help: 'Changes only the picture, not the simulation, and only while growth is on. Where the colony grows onto ground without slime, the picture shows the young plasm as the growth front of a real slime mold. A sheet lies at the front. Behind it the sheet gets thin within a few minutes of model time, and fine veins stay, thinner outward. They fade, and the tube of the model stays alone. Plasm that comes back onto slime is no growth front.',
+  help: 'Changes only the picture, not the simulation, and only while growth is on. Where the colony grows onto ground without slime, the picture draws a thin, clear veil of slime around the young tube: the skirt of the growth front. The veil lies below the tube and goes within a few minutes of model time. Plasm that comes back onto slime is no growth front.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
@@ -553,8 +553,8 @@ export interface Settings extends Record<GlobalKey, number> {
    */
   showSlime: boolean;
   /**
-   * The view draws young ground as the fan of a growth front: a sheet at the front, then fine veins, then the tubes
-   * alone, while the model has slime (frontViewHelp, ADR 0060). Display only.
+   * The view draws a skirt around young ground, a thin clear veil below the tube, while the model has slime
+   * (frontViewHelp, ADR 0060). Display only.
    */
   showFront: boolean;
   strains: Strain[];
@@ -724,7 +724,7 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // So with the film of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the film
   // is on. It changes no result.
   out.showSlime = raw.showSlime !== false;
-  // So with the fan of the growth front (ADR 0060): on without a switch in the link. It changes no result.
+  // So with the skirt of the growth front (ADR 0060): on without a switch in the link. It changes no result.
   out.showFront = raw.showFront !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the

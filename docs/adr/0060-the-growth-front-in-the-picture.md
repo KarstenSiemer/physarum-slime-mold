@@ -1,9 +1,9 @@
-# 0060: The picture shows the growth front: a sheet, fine veins, then the tube
+# 0060: The picture shows the growth front: a skirt around young ground
 
-- Status: accepted, with one part open. Decisions 8 and 9 are requests of the owner of 2026-11-17, and decisions 11
-  and 12 of 2026-11-18. The other decisions are of an agent under the owner's delegation of 2026-11-12. On
-  2026-11-18 the owner looked at the fan of decision 4 in the app and judged that it disturbs the realism (Open
-  points): whether the drawn fan stays is the owner's decision. Built 2026-11-17 and 2026-11-18.
+- Status: accepted. Decisions 8 and 9 are requests of the owner of 2026-11-17, and decisions 11, 12 and 14 of
+  2026-11-18. The other decisions are of an agent under the owner's delegation of 2026-11-12. On 2026-11-18 the owner
+  looked at the fan of decision 4 in the app and took its veins out: decision 14 replaces decisions 3 to 7. Built
+  2026-11-17 and 2026-11-18.
 - Date: 2026-11-17
 - Extends [ADR 0055](0055-the-slime-field.md): the slime field holds a front stamp per cell. Changes
   [ADR 0057](0057-the-film-of-the-slime.md), decision 9: the plasm hides the film. Changes
@@ -77,25 +77,25 @@ counter needs no memory on WebGPU, but every pass that writes a stamp of the sli
    painted slime. An erase and a wall leave F, which has a meaning only in a cell with slime. A buffer of its own,
    and not a counter in the amount: the rule is one line in one pass, and a tool can read the step of the front as
    the plan says.
-3. **The age of the ground** is taken for texels of 8 × 8 cells, in a map that a pass fills once for each state. The
+3. (Replaced by decision 14.) **The age of the ground** is taken for texels of 8 × 8 cells, in a map that a pass fills once for each state. The
    age of a texel is the age of its oldest front stamp among the cells with slime: the time since the front first
    reached the texel. So a tube that gets wider by a cell shows no new front beside it. A texel without slime has no
    front stamp and shows no fan.
-4. **Look B: a sheet, then fine veins** (the agent's pick; the owner chooses on the pictures and in the app). The
+4. (Replaced by decision 14.) **Look B: a sheet, then fine veins** (the agent's pick; the owner chooses on the pictures and in the app). The
    render pass takes the plasm around a pixel from the texels of the map within 2 texels, each with a weight that
    depends on its distance alone and ends without a step: a round, smooth hill at any zoom. The sheet is a thin
    skirt around young plasm, with an outline in the middle of that hill, and it goes with e^(−age / 100 steps). The
    veins are the walls between the cells of a pattern that is fixed in the grid, bent by soft noise. They come as
    the skirt goes, they are thick near strong plasm and end at the outer end of the fan, and they end at the tube of
    the model. The tube is drawn as before: the picture hides no plasm of the model.
-5. **The times.** The sheet: 100 steps, the 195 s of the source. The end of the veins: 1,500 steps, the 50 min of the
+5. (Replaced by decision 14.) **The times.** The sheet: 100 steps, the 195 s of the source. The end of the veins: 1,500 steps, the 50 min of the
    source. Between them a vein gets thinner by the factor e in 350 steps. This number is a choice made on pictures:
    the front of the model runs ten times too fast, so 1,500 steps are 180 cells in Tokyo, and veins of the full
    width for all that time put a fringe on the whole young network.
-6. **The sheet stays on its side of a wall.** The fan reaches up to 16 cells from its plasm, more than a wall is
+6. (In force for the skirt of decision 14, with 9 cells.) **The sheet stays on its side of a wall.** The fan reaches up to 16 cells from its plasm, more than a wall is
    thick. The render pass walks from the pixel toward the plasm, up the slope of the plasm, one cell at a time, and
    shows no fan where a wall lies on the way.
-7. **The sheet is plasm.** It adds to the trail of its strain before the style draws it, and to the height and the
+7. (The first two sentences are replaced by decision 14.) **The sheet is plasm.** It adds to the trail of its strain before the style draws it, and to the height and the
    slope of the gel. Its code is compiled in only for a frame that draws it, in pipelines of its own that also hold
    the film. The agents style and the scent view draw no fan. The switch Show growth front is on at the
    start, changes no run, and goes into a link like Show slime. A life time of 0 and the Jones model have no slime
@@ -124,6 +124,26 @@ counter needs no memory on WebGPU, but every pass that writes a stamp of the sli
 13. **A copy around a periodic lattice dims the light that the screen shows of the lattice.** The light of a pixel
     ends at 1 before the copy dims it to 0.15 (ADR 0026). A highlight of the gel has more light than the screen
     shows, up to 2. Without this rule the highlights of a copy stay brighter than the rest of the copy.
+14. **No drawn veins, and the skirt is a thin clear veil** (the owner, 2026-11-18, in the running app: "the veins
+    out"; and of the skirt: too fat, not clear enough, and it jumps from place to place).
+    - **Why no veins.** In the organism the veins form in the crown at the head of a tube. The front is a whole
+      sheet with a lobed rim, the veins run toward the rim and fork there, and they stay behind when the front
+      moves on. A pattern that the renderer draws follows neither the growth nor the flow, and the owner saw that
+      at once. The model must grow the veins: that is stage 4, and `TODO.md` has the handover.
+    - **The skirt** is a veil of slime on the ground around young ground. It lies below the plasm, which hides it as
+      it hides the film (decision 8), so the head of a tube is no thicker with it. It adds a little light in the
+      colour of the slime and of its strain, with the waves of the film in its surface, a soft light and a small
+      highlight. It only adds light, and on paper it is a faint stain: no side of it is darker than the ground. It
+      adds nothing to the trail and nothing to the gel.
+    - **No jump.** The first skirt took the age of a texel of 8 × 8 cells from its oldest stamp, so a whole texel
+      joined the skirt at once. And its outline lay at a level of the light, which moves with the levels of the
+      picture, in steps. Now the map holds, for each strain, the share of a texel of 4 × 4 cells that is young
+      ground. A cell counts by its own age a in steps: (1 − e^(−a / 8)) · e^(−a / 150). So a cell comes into the
+      skirt over about 20 steps and leaves it with 150 steps, and the skirt depends on the stamps alone.
+    - The render pass takes the mean of the texels within 2 texels of a pixel, with the round weight of decision 4.
+      The skirt begins where that mean is 0.04 and is whole from 0.3 on. It reaches 8 cells from young ground at
+      most, and a wall on the way stops it (decision 6).
+    - The map holds one byte per strain and texel: 4 B for 16 cells, the 0.25 B per cell of the first map.
 
 ## Results
 
@@ -136,9 +156,11 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
 - **The front stamp** (`front.gpu.test.ts`, both backends against `frontStep()` of `slime-reference.ts`): plasm on
   fresh ground, plasm that comes back onto slime, plasm after the life time is over, the Slime tool on ground with
   and without slime, a reset and the Jones model.
-- **The fan** (the same file): the two backends draw the same pixels in the glow, gel and paper styles, close and
-  fitted, 3 of 255 apart at most. The fan differs from the picture without it by more than 25 of 255 on young
-  ground, by 2 at most behind a wall and 1,500 steps after the front.
+- **The skirt** (the same file): the two backends draw the same pixels in the glow, gel and paper styles, close and
+  fitted, 3 of 255 apart at most. Beside a young tube the skirt moves a byte of the picture by more than 12 of 255
+  (5 on paper), by 2 at most behind a wall and 1,500 steps after the front, and it makes no pixel of a dark ground
+  darker. When a tube gets 4 cells longer in one step, the largest change of the skirt in one step is at most 0.35
+  of its whole change. The first fan of this record differed by more than 25 of 255 on young ground.
 - **Faults that the tests found**, all fixed. The first walk toward the plasm followed the slope of the sheet with
   its veins, so veins showed behind a wall: it follows the slope of the plasm alone now. Trail on ground without a
   stamp, which no step of the slime field saw, showed a fan: 71 tests of the trail, the tubes and the electrodes
@@ -181,9 +203,9 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
 - **The film below the plasm and the switches** (`slime.gpu.test.ts`): the tests of the film hold with new numbers
   where the plasm hides the film. With both switches off every pixel equals that of the shaders without the film and
   the fan.
-- **Wrong rules**: 22 new ones (GF1 to GF22) and 16 of the slime with a new text, because their lines changed.
-  Each of the 38 fails at least one test. The list has 629 wrong rules.
-- **All tests**: 875 unit tests with the research tests, 1,345 GPU tests on both backends (8 more run on one
+- **Wrong rules**: 26 new ones (GF1 to GF26) and 16 of the slime with a new text, because their lines changed.
+  Each of the 42 fails at least one test. The list has 633 wrong rules.
+- **All tests**: 875 unit tests with the research tests, 1,347 GPU tests on both backends (8 more run on one
   backend only), and 84 tests of the built app.
 - **The pictures**: `tests/pictures/front.spec.ts` makes them again: Tokyo at the steps 600, 1,500 and 4,000, the
   Foraging maze, Three strains and Rival networks in each style, fitted and close.
@@ -203,9 +225,9 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
   Two rounds do not resolve the cost of the front stamp: two rounds of one case differ by up to 20 % in the small
   scenes, and half of the cases are faster with it. The largest rise is 0.4 ms, 1 %, on WebGL2 with the flow.
 
-Not measured: the time of a draw with the fan. A step writes one more buffer in the pass of the stamps on WebGPU and
-runs one more pass on WebGL2. A pixel on young ground reads 9 texels of the map and 11 steps of two lattices, and
-walks up to 13 cells toward its plasm in a scene with walls.
+Not measured: the time of a draw with the skirt. A step writes one more buffer in the pass of the stamps on WebGPU
+and runs one more pass on WebGL2. A pixel reads 16 texels of the map, and near young ground it walks up to 9 cells
+toward that ground in a scene with walls.
 
 ## Consequences
 
@@ -216,30 +238,21 @@ walks up to 13 cells toward its plasm in a scene with walls.
   No scene changes a byte of its run.
 - Stage 4 reads "ground without slime" from the stamp of the slime alone, as before. A tool can measure how long
   after the front a tube shows from the front stamps (`Sim.readSlimeFront()`).
-- The numbers of the fan are the constants `FRONT_…` of `render.wgsl` and `render.frag`. The look of the film stays
-  in `SLIME_LOOK`.
+- The numbers of the skirt are the constants `SKIRT_…` of `render.wgsl`, `render.frag` and `view.glsl`. The look of
+  the film stays in `SLIME_LOOK`.
 - A pixel below plasm that hides all of its ground draws no film. ADR 0057 named this as a way to make the film
   cheaper, and [ADR 0059](0059-the-film-of-the-slime-keeps-its-cost.md) left the cost of the film as it is. Here it
   comes with the rule that the plasm lies on the film, and nobody measured the time that it saves.
 
 ## Open points
 
-- **The owner does not like the drawn fan** (2026-11-18, in the running app, with two photos of the organism): it
-  "disturbs the realism", and the shader is "too far from the real look". In the photos a front is a whole sheet
-  with a lobed rim, and the veins behind it run toward the rim and fork there, as a tree does. The fan of this
-  record is a skirt and a net around an arm of the model. The owner asks whether the veins must be grown by the
-  model, and whether the front that moves ahead of the tubes must come first. The agent's answer: yes. That is
-  stage 4 of the plan, the front as a sink of the flow. The agent recommends to take the drawn fan out again and to
-  keep the front stamp, the film below the plasm, the edge of the gel and decisions 11 and 12. Not decided.
-
+- **Stage 4 must grow the veins** (decision 14). The skirt shows where a tube grows; it shows no crown and no vein.
+  When the model grows the crown of a tube head, the skirt goes, or the picture draws it from that plasm.
+- **The look of the skirt is the owner's choice.** The owner got a first picture on 2026-11-18. Its numbers are the
+  constants `SKIRT_…`.
 - **The second shard of the e2e tests can reach its limit of 30 minutes on GitHub** until PR #109 is merged
   (Results). Then the check `verify` is red with a cancelled shard and no failed test.
-- **The look is the owner's choice.** Look A, the sheet alone, is look B without the veins and with a sheet that
-  lasts three times as long.
-- **The fan is a picture.** The model grows arms, not a sheet, and no vein forms toward a front (`docs/fidelity.md`,
-  rows 6 and 24). The crown of a tree that the owner asked for needs the flow of stage 4.
-- **The veins do not follow the direction of the growth.** Their pattern is fixed in the grid.
-- **The fan has no CPU reference.** A fault that both backends share shows only on pictures, or on another GPU:
+- **The skirt has no CPU reference.** A fault that both backends share shows only on pictures, or on another GPU:
   CI found one (Results).
-- **Zoomed out beyond 4 cells per pixel** a pixel is wider than half a texel of the map of the front. Not looked at.
-- **The time of a draw with the fan is not measured**, and two rounds do not resolve the cost of a step (Results).
+- **Zoomed out beyond 2 cells per pixel** a pixel is wider than half a texel of the map of the front. Not looked at.
+- **The time of a draw with the skirt is not measured**, and two rounds do not resolve the cost of a step (Results).

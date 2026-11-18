@@ -70,12 +70,12 @@ const TRAIL_FORMAT: GPUTextureFormat = 'rgba32float';
 /** The map of the film of the slime and its coarse map (ADR 0057): one thickness per texel, 2 B. */
 const FILM_FORMAT: GPUTextureFormat = 'r16float';
 /**
- * The map of the growth front (ADR 0060): the plasm of a texel, that times the age of its ground, its strain. 32-bit
- * floats, as the trail has: a strong trail is above the largest 16-bit float, and the map then held no number.
+ * The map of the growth front (ADR 0060): for each strain, the share of a texel that is young ground, 0 to 1. One
+ * byte each is enough: the render pass takes the mean of the texels around a pixel.
  */
-const FRONT_FORMAT: GPUTextureFormat = 'rgba32float';
+const FRONT_FORMAT: GPUTextureFormat = 'rgba8unorm';
 /** The map of the growth front has texels of 2^FRONT_LEVEL cells per side (render.wgsl FRONT_LEVEL). */
-export const FRONT_LEVEL = 3;
+export const FRONT_LEVEL = 2;
 
 /**
  * The coarsest map of the trail that a view zoomed out reads (trailLevel()): texels of 16 cells, for up to 32 cells
@@ -148,7 +148,7 @@ export function packView(
   // the pass takes the age of a stamp as the passes of the simulation do. Then the numbers of the style: the colour
   // and the share of its body, its highlight, its wide light, the height of its relief and of its beads. A frame
   // without the film reads none of them.
-  // What the frame draws of the slime field: 1 the film of the slime, 2 the fan of the growth front (ADR 0060).
+  // What the frame draws of the slime field: 1 the film of the slime, 2 the skirt of the growth front (ADR 0060).
   const parts = (slimeShown(settings) ? 1 : 0) | (frontShown(settings) ? 2 : 0);
   u.set(slime === undefined ? [0, 0, 0, 0] : [slime, slimeSteps(settings), parts, 0], 56);
   const look = SLIME_LOOK[settings.style];
@@ -205,8 +205,8 @@ interface SlimePipelines {
 }
 
 /**
- * The fan of the growth front (ADR 0060): the render pass with the fan and the film (`FRONT` and `SLIME`), and the
- * pass of the map of the front. A frame without the fan runs the pipelines without its code.
+ * The skirt of the growth front (ADR 0060): the render pass with the skirt and the film (`FRONT` and `SLIME`), and the
+ * pass of the map of the front. A frame without the skirt runs the pipelines without its code.
  */
 interface FrontPipelines {
   render: Variants;
@@ -214,7 +214,7 @@ interface FrontPipelines {
 }
 
 /**
- * What lies below the scent view in a frame: 0 the picture alone, 1 the film of the slime, 2 the fan of the growth
+ * What lies below the scent view in a frame: 0 the picture alone, 1 the film of the slime, 2 the skirt of the growth
  * front with the film.
  */
 type Below = 0 | 1 | 2;
@@ -241,7 +241,7 @@ interface FilmState {
 
 /**
  * The descriptor of the render pass from `module` without or with the food, light and walls (`env`), and with one
- * part more or none (`part`): the scent view (`SCENT`), the film of the slime (`SLIME`), the fan of the growth
+ * part more or none (`part`): the scent view (`SCENT`), the film of the slime (`SLIME`), the skirt of the growth
  * front with the film (`FRONT`, which also sets `SLIME`), or the scent view over one of the two. Without a part the
  * pipeline sets only `ENV`, as before the parts existed.
  */
@@ -253,7 +253,7 @@ function renderPipeline(
   env: boolean,
   part?: 'SCENT' | 'SLIME' | 'FRONT' | 'SCENT+SLIME' | 'SCENT+FRONT',
 ): GPURenderPipelineDescriptor {
-  // The fan of the growth front needs the code of the film (`FRONT` sets `SLIME`), and the scent view can lie over
+  // The skirt of the growth front needs the code of the film (`FRONT` sets `SLIME`), and the scent view can lie over
   // both.
   const parts: Record<string, number> = {};
   if (part?.includes('SCENT')) parts.SCENT = 1;
@@ -290,11 +290,11 @@ export class Renderer {
   private slime: SlimePipelines | undefined;
   private slimeBuild: Promise<SlimePipelines> | undefined;
   /**
-   * The passes of the fan of the growth front (FRONT in render.wgsl, ADR 0060), built without blocking from the first
-   * frame that draws the fan (frontNow()): a scene without growth never does.
+   * The passes of the skirt of the growth front (FRONT in render.wgsl, ADR 0060), built without blocking from the first
+   * frame that draws the skirt (frontNow()): a scene without growth never does.
    */
-  private fanPasses: FrontPipelines | undefined;
-  private fanBuild: Promise<FrontPipelines> | undefined;
+  private frontPasses: FrontPipelines | undefined;
+  private frontBuild: Promise<FrontPipelines> | undefined;
   /**
    * The render passes with the scent view, by what lies below the view (`Below`). Each is built without blocking from
    * the first frame that draws it (viewNow()), and no other: a frame with the film never builds the pass without it.
@@ -304,9 +304,9 @@ export class Renderer {
   private readonly filmLayout: GPUBindGroupLayout;
   private readonly filmDownLayout: GPUBindGroupLayout;
   private readonly frontLayout: GPUBindGroupLayout;
-  /** The map of the growth front (frontMap), made at the first frame that draws the fan. */
-  private fan: { texture: GPUTexture; view: GPUTextureView } | undefined;
-  private fanHolds: Omit<FilmState, 'variant' | 'overlays' | 'boundary'> | undefined;
+  /** The map of the growth front (frontMap), made at the first frame that draws the skirt. */
+  private young: { texture: GPUTexture; view: GPUTextureView } | undefined;
+  private youngHolds: Omit<FilmState, 'variant' | 'overlays' | 'boundary'> | undefined;
   /** The map of the film of the slime (slimeFilm), one texel per cell, made at the first frame that draws the film. */
   private film: { texture: GPUTexture; view: GPUTextureView } | undefined;
   private filmHolds: FilmState | undefined;
@@ -466,7 +466,7 @@ export class Renderer {
 
   /**
    * Waits until a frame of `sim` with these settings shows the view as asked: the pipelines of the film of the slime,
-   * of the fan and of the scent view that the frame draws are built.
+   * of the skirt and of the scent view that the frame draws are built.
    */
   async ready(sim: Simulation, settings: Settings): Promise<void> {
     if (this.fixed !== undefined) return;
@@ -481,7 +481,7 @@ export class Renderer {
 
   /**
    * What a frame of `sim` draws of the slime with these settings: the film (ADR 0055, decision 8; ADR 0057) and the
-   * fan of the growth front (ADR 0060), each while the settings show it and the simulation holds the field. Without a
+   * skirt of the growth front (ADR 0060), each while the settings show it and the simulation holds the field. Without a
    * field no cell has a stamp, and the picture is the one without them.
    */
   private slimeParts(sim: Simulation, settings: Settings): { filmy: boolean; fanned: boolean } {
@@ -524,15 +524,15 @@ export class Renderer {
     const { exposure, black, strand } = f;
     // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
     const stream = sim.streamTexture;
-    // The film of the slime and the fan of the growth front, while the settings show them and the simulation holds
+    // The film of the slime and the skirt of the growth front, while the settings show them and the simulation holds
     // the field (slimeParts()).
     const [stamps, amounts, fronts] = [sim.slimeField, sim.slimeAmount, sim.slimeFront];
     const { filmy, fanned } = this.slimeParts(sim, f.settings);
-    // The fan of the growth front (ADR 0060) has pipelines of its own, with the code of the film in them: a frame
-    // without the fan pays nothing for it. With the film it waits for the passes of the maps of the film.
+    // The skirt of the growth front (ADR 0060) has pipelines of its own, with the code of the film in them: a frame
+    // without the skirt pays nothing for it. With the film it waits for the passes of the maps of the film.
     const wet = filmy ? this.slimeNow() : undefined;
-    const fanReady = fanned ? this.frontNow() : undefined;
-    const grown = fanReady && (!filmy || wet) ? fanReady : undefined;
+    const frontReady = fanned ? this.frontNow() : undefined;
+    const grown = frontReady && (!filmy || wet) ? frontReady : undefined;
     packView(
       this.data,
       width,
@@ -560,7 +560,7 @@ export class Renderer {
     const scented = f.settings.showScent && this.fixed === undefined;
     const view = scented ? this.scentNow() : undefined;
     // The render pass with the scent view is built for what lies below the view in this frame (ADR 0060, decision
-    // 11): the fan with the film, the film, or the picture alone.
+    // 11): the skirt with the film, the film, or the picture alone.
     const below: Below = fanned ? 2 : filmy ? 1 : 0;
     const over = scented ? this.viewNow(below) : undefined;
     const coarse = view ? this.coarseFor(trail) : undefined;
@@ -570,7 +570,7 @@ export class Renderer {
     // The maps of the film, made before the bind group that holds them.
     const film = wet ? this.filmFor(trail) : undefined;
     const filmCoarse = wet && trailMap > 0 ? this.filmCoarseFor(trail) : undefined;
-    const fan = grown ? this.fanFor(trail) : undefined;
+    const young = grown ? this.youngFor(trail) : undefined;
     let byScent = this.groups.get(trail);
     if (!byScent) {
       byScent = new WeakMap();
@@ -612,7 +612,7 @@ export class Renderer {
           { binding: 15, resource: this.film?.view ?? this.noCoarse.createView() },
           { binding: 17, resource: this.filmCoarse?.view ?? this.noCoarse.createView() },
           // The map of the growth front (ADR 0060).
-          { binding: 20, resource: this.fan?.view ?? this.noCoarse.createView() },
+          { binding: 20, resource: this.young?.view ?? this.noCoarse.createView() },
         ],
       });
       const heightGroup = this.device.createBindGroup({
@@ -649,7 +649,7 @@ export class Renderer {
       });
       cached.film = { group, stamps };
     }
-    if (grown && fan && stamps && fronts && cached.front?.stamps !== stamps) {
+    if (grown && young && stamps && fronts && cached.front?.stamps !== stamps) {
       const group = this.device.createBindGroup({
         layout: this.frontLayout,
         entries: [
@@ -747,12 +747,12 @@ export class Renderer {
       }
     }
     // The map of the growth front, filled once for each state that a frame draws (frontMap in render.wgsl).
-    if (grown && fan && stamps && cached.front) {
+    if (grown && young && stamps && cached.front) {
       const now = { sim, stamps, step: sim.step, revision: sim.revision, life: slimeSteps(f.settings) };
-      const held = this.fanHolds;
+      const held = this.youngHolds;
       if (!(held && (Object.keys(now) as (keyof typeof now)[]).every((k) => held[k] === now[k]))) {
-        this.fanHolds = now;
-        const fill = enc.beginRenderPass({ colorAttachments: [{ view: fan, loadOp: 'clear', storeOp: 'store' }] });
+        this.youngHolds = now;
+        const fill = enc.beginRenderPass({ colorAttachments: [{ view: young, loadOp: 'clear', storeOp: 'store' }] });
         fill.setPipeline(grown.map);
         fill.setBindGroup(0, cached.front.group);
         fill.draw(3);
@@ -780,7 +780,7 @@ export class Renderer {
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store' }],
     });
-    // The scent view lies over the film and the fan. The frame draws the view once its maps, its render pass and the
+    // The scent view lies over the film and the skirt. The frame draws the view once its maps, its render pass and the
     // passes of what lies below it are built. Until then the frame draws without the view, and nothing below it goes.
     const lies = below === 2 ? grown !== undefined : below === 1 ? wet !== undefined : true;
     const top = view && lies ? over : undefined;
@@ -864,13 +864,13 @@ export class Renderer {
   private slimeError: Error | undefined;
 
   /**
-   * The pipelines of the fan of the growth front once they are built, else undefined; the first call starts their
+   * The pipelines of the skirt of the growth front once they are built, else undefined; the first call starts their
    * build, without blocking, as slimeNow() does. `wait`: resolves when they are built (exports and tests).
    */
   private frontNow(): FrontPipelines | undefined;
   private frontNow(wait: true): Promise<FrontPipelines>;
   private frontNow(wait = false): FrontPipelines | undefined | Promise<FrontPipelines> {
-    if (!this.fanBuild) {
+    if (!this.frontBuild) {
       const { device, module, layout, format } = this;
       const render = (env: boolean) =>
         device.createRenderPipelineAsync(renderPipeline(device, module, layout, format, env, 'FRONT'));
@@ -879,14 +879,14 @@ export class Renderer {
         vertex: { module, entryPoint: 'vs' },
         fragment: { module, entryPoint: 'frontMap', targets: [{ format: FRONT_FORMAT }] },
       });
-      this.fanBuild = Promise.all([render(false), render(true), map]).then(
-        ([off, on, filled]) => (this.fanPasses = { render: [off, on], map: filled }),
+      this.frontBuild = Promise.all([render(false), render(true), map]).then(
+        ([off, on, filled]) => (this.frontPasses = { render: [off, on], map: filled }),
       );
-      // A failed build shows in the next frame that asks for the fan.
-      this.fanBuild.catch((err: unknown) => (this.fanError = err instanceof Error ? err : new Error(String(err))));
+      // A failed build shows in the next frame that asks for the skirt.
+      this.frontBuild.catch((err: unknown) => (this.fanError = err instanceof Error ? err : new Error(String(err))));
     }
     if (this.fanError) throw this.fanError;
-    return wait ? this.fanBuild : this.fanPasses;
+    return wait ? this.frontBuild : this.frontPasses;
   }
 
   private fanError: Error | undefined;
@@ -962,20 +962,20 @@ export class Renderer {
   }
 
   /** The map of the growth front for a trail of this size (texels of 2^FRONT_LEVEL cells), made anew with the size. */
-  private fanFor(trail: GPUTexture): GPUTextureView {
+  private youngFor(trail: GPUTexture): GPUTextureView {
     const [width, height] = [levelSize(trail.width, FRONT_LEVEL), levelSize(trail.height, FRONT_LEVEL)];
-    if (this.fan?.texture.width !== width || this.fan.texture.height !== height) {
-      this.fan?.texture.destroy();
+    if (this.young?.texture.width !== width || this.young.texture.height !== height) {
+      this.young?.texture.destroy();
       const texture = this.device.createTexture({
         size: [width, height],
         format: FRONT_FORMAT,
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
       });
-      this.fan = { texture, view: texture.createView() };
-      this.fanHolds = undefined;
+      this.young = { texture, view: texture.createView() };
+      this.youngHolds = undefined;
       this.groups = new WeakMap();
     }
-    return this.fan.view;
+    return this.young.view;
   }
 
   /** The coarse map of the film for a trail of this size (half its sides, rounded up), made anew with the size. */
@@ -1017,7 +1017,7 @@ export class Renderer {
     this.coarseHolds = undefined;
     this.trailHolds = undefined;
     [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
-    this.fanHolds = undefined;
+    this.youngHolds = undefined;
   }
 
   destroy() {
@@ -1027,7 +1027,7 @@ export class Renderer {
     this.trailCoarse?.texture.destroy();
     this.film?.texture.destroy();
     this.filmCoarse?.texture.destroy();
-    this.fan?.texture.destroy();
+    this.young?.texture.destroy();
     this.noCoarse.destroy();
   }
 }

@@ -367,36 +367,32 @@ the arrows.
   onto ground without slime; the front stamp of a cell holds the step of that (model.md, section 6.9). The organism
   has a sheet at its front, then fine veins in a sheet that gets thinner, then one main vein
   (`docs/knowledge-base/slime-mazes-and-the-front.md`, "The front"). The model grows arms of full plasm, so the
-  picture adds the sheet and the veins around the young arms; the tube of the model is drawn as before.
-  - **The map of the front** (`frontMap` in `render.wgsl`, `front-map.frag`): one texel for 8 × 8 cells, filled once
-    for each state. It holds the mean of the summed trail of its cells, the strain with the most trail, and the age of
-    its ground: the age of the oldest front stamp among its cells with slime, as a share of 1,500 steps. So the age
-    is the time since the front first reached the texel. Slime without a front stamp is old ground, and so is a
-    texel without slime: trail that no step of the slime field saw shows no fan.
-  - **The plasm around a pixel** (`fanAt`): the render pass takes the mean of the texels of the map within 2 texels
-    of the pixel, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance alone
-    and ends without a step, so the plasm around a texel is a round, smooth hill at any zoom, and the fan shows no
-    texel. The plasm of the texels, weighted by their age, gives the age at the pixel. Each texel gives its plasm to
-    the colour of its strain.
-  - **The sheet**: a thin skirt around young plasm, with the light 0.5 at most. Its outline is the line on which the
-    plasm around a pixel, as light, passes 0.15 (a quarter of 0.6), and it has its whole thickness from 0.42 on. So
-    the outline lies in the middle of the hill and not at the far end of the reach of a texel, where it would show
-    the square of a texel. The skirt goes with e^(−age / 100 steps): whole at the front and gone with the time scale
-    of 195 s, in which a spot of the organism gives its mass to the veins.
-  - **The veins** (`fanVeins`): the walls between the cells of a pattern that is fixed in the grid, one cell for
-    about 6.5 grid cells, bent by soft noise. They come as the skirt goes. A vein is thick near strong plasm and
-    ends at the outer end of the fan, it gets thinner by the factor e in 350 steps, and it is gone 1,500 steps after
-    the front, the 50 minutes in which the main vein of the organism appears. A vein ends at the tube of the model,
-    and one that is thinner than a pixel shows the share of the pixel that it covers.
-  - **Walls** (`fanOpen`): the fan reaches up to 16 cells from its plasm, more than a wall is thick. So the pass walks from the pixel toward the plasm,
-    up the slope of the plasm, cell by cell, and the sheet shows nothing where a wall lies on the way.
-  - The sheet is more plasm: it adds to the trail of its strain before the style draws it. In the gel style it adds
-    to the height and to the slope of the gel. The agents style draws no fan, and the scent view lies over it as over the film. The code of the fan
-    is compiled in only for a frame that draws it, in pipelines of its own that also hold the film: a frame without
-    the fan runs the shader without it. The switch changes
+  picture adds a skirt around the young arms, a thin clear veil of slime; the tube of the model is drawn as before.
+  - **The map of the front** (`frontMap` in `render.wgsl`, `front-map.frag`): one texel for 4 × 4 cells, filled once
+    for each state. For each strain it holds the share of the texel that is young ground. A cell is young ground
+    while it has slime and a front stamp, and it counts (1 − e^(−a / 8)) · e^(−a / 150) for the age a of its stamp in
+    steps: it comes into the skirt over about 20 steps and leaves it with 150. So one cell changes the skirt by a
+    small amount in a step, and the skirt does not jump. Slime without a front stamp is old ground.
+  - **The young ground around a pixel** (`skirtAt`): the render pass takes the mean of the texels of the map within
+    2 texels of the pixel, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance
+    alone and ends without a step, so the young ground around a texel is a round, smooth hill at any zoom, and the
+    skirt shows no texel. The skirt begins where that mean is 0.04 and is whole from 0.3 on. It depends on the
+    stamps alone, not on the levels of the picture.
+  - **The veil** (`skirtOn`): the skirt adds a little light in the colour of the slime and of its strain, with the
+    waves of the film in its surface, a soft light and a small highlight. It only adds light, and on paper it is a
+    faint stain, so it has no dark rim. It lies on the film and below the plasm: the plasm hides it as it hides the
+    film, and the head of a tube is no thicker with it.
+  - **Walls** (`skirtOpen`): the skirt reaches up to 8 cells from young ground, more than a wall is thick. So the
+    pass walks from the pixel toward that ground, up its slope, cell by cell, and the skirt shows nothing where a
+    wall lies on the way.
+  - The skirt adds nothing to the trail and nothing to the gel. The agents style draws no skirt, and the scent view
+    lies over it as over the film. The code of the skirt is compiled in only for a frame that draws it, in pipelines
+    of its own that also hold the film: a frame without the skirt runs the shader without it. The switch changes
     nothing in the simulation, goes into the link like the style and stays as it is when a scene loads. The numbers
-    are the constants `FRONT_…` of `render.wgsl` and `render.frag`; the 350 steps, the width of the sheet and the
-    look of the veins are choices made on pictures.
+    are the constants `SKIRT_…` of `render.wgsl`, `render.frag` and `view.glsl`: choices made on pictures.
+  - The picture draws no veins. The first build drew a net of veins from a pattern; the owner took it out on
+    2026-11-18, because veins must come from the crown at the head of a tube, which the model does not grow yet
+    (ADR 0060, decision 14; stage 4 in `TODO.md`).
 - The gel reads its height as a quadratic B-spline of the cells while the view shows a cell on a pixel or more
   (`heightSmooth`, ADR 0060): four bilinear lookups in place of one. The line at which the gel ends has no tooth at
   the edge of a cell.

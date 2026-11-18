@@ -118,56 +118,63 @@ function cutSpan(source: string, start: string, end: string) {
   return source.slice(0, a) + source.slice(b);
 }
 
-/** The lines of `scene` in render.wgsl that add the sheet of the growth front to the trail (ADR 0060). */
-const WGSL_FAN = `  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
-  // its plasm lies (fanOpen()).
-  if (FRONT && (V.slime.z & 2u) != 0u && V.style != 3u) {
-    let under = plasmCover(v);
-    var fan = fanAt(p, under);
-    if (ENV && V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
-      let open = fanOpen(p, fan.up);
-      fan.v *= open;
-      fan.h *= open;
-      fan.g *= open;
-    }
-    v += fan.v;
-    lift = vec3f(fan.h, fan.g);
-  }
-`;
-/** The lines of `scene` in render.wgsl that lay the film of the slime on the ground. */
-const WGSL_FILM = `  // The film of the slime lies on the ground, and the plasm lies on the film: where the plasm covers the ground, the
-  // picture shows no film. The flake of food, the trail and all else lie on it.
-  if (SLIME && (V.slime.z & 1u) != 0u) {
+/** The lines of `scene` in render.wgsl that lay the film of the slime and the skirt of the growth front on the ground. */
+const WGSL_WET = `  // The film of the slime lies on the ground, the skirt of the growth front on the film, and the plasm on both
+  // (ADR 0060): where the plasm covers the ground, the picture shows nothing of them. The flake of food, the trail and
+  // all else lie on them. The agents style draws no skirt.
+  let filmy = SLIME && (V.slime.z & 1u) != 0u;
+  let skirted = FRONT && (V.slime.z & 2u) != 0u && V.style != 3u;
+  if (filmy || skirted) {
     let hidden = plasmCover(select(v, dots, V.style == 3u));
-    if (hidden < 1.0) { base = mix(slimed(base, p), base, hidden); }
+    if (hidden < 1.0) {
+      var under = base;
+      if (filmy) { under = slimed(under, p); }
+      if (skirted) {
+        var k = skirtAt(p);
+        // The skirt stays on the side of a wall on which its young ground lies (skirtOpen()).
+        if (ENV && V.frame.z != 0u && k.h > 0.0) {
+          let open = skirtOpen(p, k.up);
+          k.h *= open;
+          k.g *= open;
+        }
+        if (k.h > 0.0) { under = skirtOn(under, p, k); }
+      }
+      base = mix(under, base, hidden);
+    }
   }
 `;
 /** The same lines of `scene` in render.frag. */
-const GLSL_FAN = `#ifdef FRONT
-  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
-  // its plasm lies (fanOpen()).
-  if ((V.slime.z & 2u) != 0u && V.style != 3u) {
-    float under = plasmCover(v);
-    Fan fan = fanAt(p, under);
-#if ENV
-    if (V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
-      float open = fanOpen(p, fan.up);
-      fan.v *= open;
-      fan.h *= open;
-      fan.g *= open;
-    }
+const GLSL_WET = `#ifdef SLIME
+  // The film of the slime lies on the ground, the skirt of the growth front on the film, and the plasm on both
+  // (ADR 0060): where the plasm covers the ground, the picture shows nothing of them. The flake of food, the trail and
+  // all else lie on them. The agents style draws no skirt.
+  bool filmy = (V.slime.z & 1u) != 0u;
+#ifdef FRONT
+  bool skirted = (V.slime.z & 2u) != 0u && V.style != 3u;
+#else
+  bool skirted = false;
 #endif
-    v += fan.v;
-    lift = vec3(fan.h, fan.g);
-  }
-#endif
-`;
-const GLSL_FILM = `#ifdef SLIME
-  // The film of the slime lies on the ground, and the plasm lies on the film: where the plasm covers the ground, the
-  // picture shows no film. The flake of food, the trail and all else lie on it.
-  if ((V.slime.z & 1u) != 0u) {
+  if (filmy || skirted) {
     float hidden = plasmCover(V.style == 3u ? dots : v);
-    if (hidden < 1.0) base = mix(slimed(base, p), base, hidden);
+    if (hidden < 1.0) {
+      vec3 under = base;
+      if (filmy) under = slimed(under, p);
+#ifdef FRONT
+      if (skirted) {
+        Skirt k = skirtAt(p);
+#if ENV
+        // The skirt stays on the side of a wall on which its young ground lies (skirtOpen()).
+        if (V.frame.z != 0u && k.h > 0.0) {
+          float open = skirtOpen(p, k.up);
+          k.h *= open;
+          k.g *= open;
+        }
+#endif
+        if (k.h > 0.0) under = skirtOn(under, p, k);
+      }
+#endif
+      base = mix(under, base, hidden);
+    }
   }
 #endif
 `;
@@ -183,10 +190,9 @@ const GLSL_FILM = `#ifdef SLIME
  * program with them holds the same text in another place: both draw the pixels of that commit. view.glsl differs
  * from that commit only by the three fields of the slime at the end of its block, which no code of that commit reads.
  *
- * Since ADR 0060 the texts also hold no line of the fan of the growth front, and they differ from that commit in three
- * more ways. The gel reads its height as a smooth spline (heightSmooth), which changes its picture. The gel takes the
- * sheet of the growth front, which is none here: thick(max(y, 0) + 0) is thick(y). And `scene` reads the food before
- * the ground, in another order of the same lines.
+ * Since ADR 0060 the texts also hold no line of the skirt of the growth front, and they differ from that commit in two
+ * more ways. The gel reads its height as a smooth spline (heightSmooth), which changes its picture. And `scene` reads
+ * the food before the ground, in another order of the same lines.
  */
 const WITHOUT_SLIME = {
   wgsl: cutSpan(
@@ -197,7 +203,7 @@ const WITHOUT_SLIME = {
       ],
       [
         '  // The slime: the steps that ran so far, the life time of the slime in steps, what the frame draws (1 the film of\n' +
-          '  // the slime, 2 the fan of the growth front), unused.\n' +
+          '  // the slime, 2 the skirt of the growth front), unused.\n' +
           '  slime: vec4u,\n' +
           '  slimeFx: vec4f,     // the slime: the colour of its body, linear RGB, and how much of it full slime shows\n' +
           '  slimeLight: vec4f,  // the slime: its highlight, its wide light, the height of its relief, the height of its beads\n',
@@ -209,7 +215,7 @@ const WITHOUT_SLIME = {
           '@group(0) @binding(15) var film: texture_2d<f32>; // the film of the slime, one texel per cell (written by `slimeFilm`)\n' +
           '@group(0) @binding(17) var filmLevels: texture_2d<f32>; // the film on a coarser map (slimeDown), zoomed out\n' +
           '@group(0) @binding(19) var<storage, read> fronts: array<u32>; // the front field (slime.wgsl); read by `frontMap` only\n' +
-          '@group(0) @binding(20) var fanMap: texture_2d<f32>; // the map of the growth front (written by `frontMap`)\n',
+          '@group(0) @binding(20) var youngMap: texture_2d<f32>; // the map of the growth front (written by `frontMap`)\n',
         '',
       ],
       [
@@ -217,11 +223,10 @@ const WITHOUT_SLIME = {
         '// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.\nfn substrate(f: Flake) -> vec3f {\n  let bg = V.background.rgb;\n',
       ],
       [
-        '// The fan of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).\noverride FRONT: bool = false;\n',
+        '// The skirt of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).\noverride FRONT: bool = false;\n',
         '',
       ],
-      [WGSL_FAN, ''],
-      [WGSL_FILM, ''],
+      [WGSL_WET, ''],
       ['  if (ENV && near) { base = substrate(f, base); }\n', '  if (ENV && near) { base = substrate(f); }\n'],
     ]),
     '// ---- The slime (SLIME) ---',
@@ -230,8 +235,7 @@ const WITHOUT_SLIME = {
   glsl: cutSpan(
     rewrite(renderFrag, [
       ['vec3 substrate(Flake f, vec3 bg) {\n', 'vec3 substrate(Flake f) {\n  vec3 bg = V.background.rgb;\n'],
-      [GLSL_FAN, ''],
-      [GLSL_FILM, ''],
+      [GLSL_WET, ''],
       ['  if (near) base = substrate(f, base);\n', '  if (near) base = substrate(f);\n'],
     ]),
     '#ifdef SLIME\n// ---- The slime',
@@ -2046,7 +2050,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
     // simulation draws its film without the pass of the map. A state is over after a step, a stroke, Clear and a
     // reset, and with another life time.
     it('fills the map of the film again after a step, a stroke, Clear and a reset, and not for a second frame of the same state', async () => {
-      // Without the fan of the growth front, which has a map of its own (front.gpu.test.ts).
+      // Without the skirt of the growth front, which has a map of its own (front.gpu.test.ts).
       const s = pictured({ showFront: false });
       const sim = await make(s, PW, PH);
       // The passes of a frame: the render passes of WebGPU, and the draws of WebGL2, which has one per pass.
@@ -2668,7 +2672,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         await ready();
       }
       // The render pass with the film and the pass of its map, each without and with food, light and walls, and the
-      // pass of its coarse map. The fan of the growth front has pipelines of its own (ADR 0060), which a scene
+      // pass of its coarse map. The skirt of the growth front has pipelines of its own (ADR 0060), which a scene
       // without growth never builds.
       expect(first).toBe(5);
       expect(builds.mock.calls.length).toBe(first);

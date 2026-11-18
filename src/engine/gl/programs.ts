@@ -224,13 +224,13 @@ export interface Programs {
    */
   slimed: () => SlimePrograms | undefined;
   /**
-   * The programs of the fan of the growth front (ADR 0060) once they are built, else undefined, as `slimed`. A scene
+   * The programs of the skirt of the growth front (ADR 0060) once they are built, else undefined, as `slimed`. A scene
    * without growth never builds them.
    */
   fronted: () => FrontPrograms | undefined;
   /**
    * The render pass with the scent view (SCENT in render.frag) over what lies below it: 0 the picture alone, 1 the
-   * film of the slime, 2 the fan of the growth front with the film (ADR 0060). Without (index 0) and with (1) the
+   * film of the slime, 2 the skirt of the growth front with the film (ADR 0060). Without (index 0) and with (1) the
    * food, light and walls, once it is built, else undefined, as `slimed`. A frame builds only the one that it draws.
    */
   viewed: (below: 0 | 1 | 2) => [Program, Program] | undefined;
@@ -310,9 +310,9 @@ export interface SlimePrograms {
   down: Program;
 }
 
-/** The fan of the growth front (ADR 0060): the render pass with the fan and the film, and the pass of its map. */
+/** The skirt of the growth front (ADR 0060): the render pass with the skirt and the film, and the pass of its map. */
 export interface FrontPrograms {
-  /** The render pass with the fan and the film (FRONT and SLIME in render.frag), without and with food, light, walls. */
+  /** The render pass with the skirt and the film (FRONT and SLIME in render.frag), without and with food, light, walls. */
   render: [Program, Program];
   /** Fills the map of the growth front (front-map.frag). */
   map: Program;
@@ -460,7 +460,7 @@ export function compile(gl: GL): Programs {
       return (slimed = { render: [off, on], film: [bare, walled], down });
     },
     fronted: () => {
-      // A lost context builds nothing: the frames draw without the fan, and the app reports the loss.
+      // A lost context builds nothing: the frames draw without the skirt, and the app reports the loss.
       if (fronted || gl.isContextLost()) return fronted;
       const vertex = V + 'precision highp float;\n' + fullscreen;
       const parts = '#define SLIME 1\n#define FRONT 1\n';

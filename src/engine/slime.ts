@@ -80,11 +80,11 @@ export function slimeSteps(s: Pick<Settings, 'model' | 'slimeLife'>): number {
 export const slimeShown = (s: Pick<Settings, 'showSlime' | 'model' | 'slimeLife'>) => s.showSlime && slimeSteps(s) > 0;
 
 /**
- * Whether the view draws young ground as the fan of a growth front (ADR 0060): the switch Show growth front is on,
+ * Whether the view draws young ground as the skirt of a growth front (ADR 0060): the switch Show growth front is on,
  * the colony grows (growth is on, with its rule of one agent per cell: pack.ts growthOn()), the model has slime with
  * a life time above 0 (the front field is a part of the slime field), and the style is not the agents style, which
  * draws the agents and not the plasm. A scene without growth has no growth front: its agents start all over the
- * ground, and a fan would lie on all of it in the first steps. The scent view lies over the fan, as over the film.
+ * ground, and a skirt would lie on all of it in the first steps. The scent view lies over the skirt, as over the film.
  * Display only: no pass of the simulation reads the switch.
  */
 export const frontShown = (

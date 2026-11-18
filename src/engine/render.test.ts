@@ -70,8 +70,8 @@ describe('the film of the slime in the uniform of the view', () => {
     expect(steps(pack(d, 2 ** 32 + 5))).toEqual([5, 259_200, 1, 0]);
   });
 
-  it('says what the frame draws: 1 the film of the slime, 2 the fan of the growth front (ADR 0060)', () => {
-    // The fan needs growth: a scene without growth has no growth front.
+  it('says what the frame draws: 1 the film of the slime, 2 the skirt of the growth front (ADR 0060)', () => {
+    // The skirt needs growth: a scene without growth has no growth front.
     const d = { ...defaultSettings(), growth: true, collisions: true };
     const parts = (patch: Partial<typeof d>) => steps(pack({ ...d, ...patch }, 1))[2];
     expect(parts({})).toBe(3);
@@ -79,7 +79,7 @@ describe('the film of the slime in the uniform of the view', () => {
     expect(parts({ collisions: false })).toBe(1);
     expect(parts({ showSlime: false })).toBe(2);
     expect(parts({ showFront: false })).toBe(1);
-    // The agents style draws the agents and not the plasm: no fan. The scent view lies over both.
+    // The agents style draws the agents and not the plasm: no skirt. The scent view lies over both.
     expect(parts({ style: 'agents' })).toBe(1);
     expect(parts({ showScent: true })).toBe(3);
     expect(parts({ slimeLife: 0 })).toBe(0);

@@ -1,6 +1,6 @@
 // The growth front on both backends (ADR 0060), in Chromium with real GPU APIs (ADR 0010): the front field against
-// the CPU reference, and the fan of the front in the picture. The picture has no CPU reference: the two backends must
-// draw the same pixels, and the fan must be where the rules say (slime.gpu.test.ts has the frames without it).
+// the CPU reference, and the skirt of the front in the picture. The picture has no CPU reference: the two backends must
+// draw the same pixels, and the skirt must be where the rules say (slime.gpu.test.ts has the frames without it).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import type { FlowGrid } from './flow-reference';
@@ -143,13 +143,22 @@ describe.each(Object.entries(BACKENDS))('the front field on %s', (_kind, create)
   });
 });
 
-describe('the fan of the growth front in the picture', () => {
+/**
+ * How far the skirt of a tube moves a byte of the picture at least, by style: a veil is faint, and on paper it is a
+ * stain. Two frames of one backend dither apart by 2 at most.
+ */
+const SEEN = { glow: 12, gel: 12, paper: 5 } as const;
+
+describe('the skirt of the growth front in the picture', () => {
   const backends: Backend[] = [];
   const live: Sim[] = [];
   const [PW, PH] = [64, 48];
-  /** A tube of 6 cells across the middle of the grid, 4 cells below a place for a wall. */
+  /** A tube of 6 cells across the middle of the grid, with room for a wall above it. */
   const tube: number[] = [];
   for (let y = 22; y < 28; y++) for (let x = 14; x < 44; x++) tube.push(y * PW + x);
+  /** The tube, 4 cells longer at its right end. */
+  const longer = [...tube];
+  for (let y = 22; y < 28; y++) for (let x = 44; x < 48; x++) longer.push(y * PW + x);
   const s = still({ slimeLife: 144 });
   /** 4 pixels per cell around the right end of the tube, and the whole grid at 2 pixels per cell. */
   const CLOSE: View = { center: [40.3, 23.7], scale: 1 / 4 };
@@ -175,16 +184,17 @@ describe('the fan of the growth front in the picture', () => {
     for (const b of backends) b.destroy();
   });
 
+  // The light of the plasm is 2 in a frame without levels: a tube that hides its ground.
+  const plasm = (cells: number[]) => trailOf(cells, (2 * equilibrium(s)) / 0.4, PW * PH);
   /** A simulation with the tube as plasm, `steps` steps after the front reached its cells. */
   async function grown(backend: Backend, steps: number): Promise<Sim> {
     const sim = await backend.createSim(s, PW, PH, 8);
     live.push(sim);
-    // The light of the plasm is 2 in a frame without levels: a tube that hides its ground.
-    sim.writeTrail(trailOf(tube, (2 * equilibrium(s)) / 0.4, PW * PH));
+    sim.writeTrail(plasm(tube));
     sim.run(steps);
     return sim;
   }
-  // The view draws the fan only while growth is on. The simulation of a test has no living agent, so its growth is
+  // The view draws the skirt only while growth is on. The simulation of a test has no living agent, so its growth is
   // off, and the frame gets the two settings of growth alone.
   const shot = (backend: Backend, sim: Sim, patch: Partial<Settings>, view = CLOSE) =>
     backend.capture(sim, { ...s, growth: true, collisions: true, ...patch }, view, SIZE[0], SIZE[1]);
@@ -202,27 +212,30 @@ describe('the fan of the growth front in the picture', () => {
         const on = [await shot(gpu, a, { style }, view), await shot(gl, b, { style }, view)] as const;
         // Each backend dithers by 1 of 255 in its own way, and rounds a byte.
         expect(maxDiff(on[0], on[1]), name).toBeLessThanOrEqual(3);
-        // The fan is there: the sheet and its veins beside the tube.
+        // The skirt is there: a veil beside the tube.
         const off = [
           await shot(gpu, a, { style, showFront: false }, view),
           await shot(gl, b, { style, showFront: false }, view),
         ] as const;
-        expect(maxDiff(on[0], off[0]), name).toBeGreaterThan(25);
-        // The sheet is more plasm: in the glow it only adds light, on both backends. A map of the front that holds
-        // no number gave a black tube on SwiftShader, and the same black on both backends.
-        if (style === 'glow') {
+        expect(maxDiff(on[0], off[0]), name).toBeGreaterThan(SEEN[style]);
+        // The veil only adds light on a dark ground, on both backends: no side of the skirt is darker than the
+        // ground. A map of the front that holds no number gave a black tube on SwiftShader, and the same black on
+        // both backends.
+        if (style !== 'paper') {
           expect(darker(on[0], off[0]), name).toBeLessThanOrEqual(3);
           expect(darker(on[1], off[1]), name).toBeLessThanOrEqual(3);
         }
       }
-    // The agents style and a scene without growth draw no fan.
+    // The agents style and a scene without growth draw no skirt.
     for (const patch of [{ style: 'agents' }, { growth: false }] as Partial<Settings>[])
       expect(
         maxDiff(await shot(gpu, a, patch), await shot(gpu, a, { ...patch, showFront: false })),
       ).toBeLessThanOrEqual(2);
-    // The scent view lies over the picture and hides nothing of it: it shows the fan, on both backends.
+    // The scent view lies over the picture and hides nothing of it: it shows the skirt, on both backends.
     const scent: Partial<Settings> = { style: 'gel', showScent: true };
-    expect(maxDiff(await shot(gpu, a, scent), await shot(gpu, a, { ...scent, showFront: false }))).toBeGreaterThan(25);
+    expect(maxDiff(await shot(gpu, a, scent), await shot(gpu, a, { ...scent, showFront: false }))).toBeGreaterThan(
+      SEEN.gel,
+    );
     expect(maxDiff(await shot(gpu, a, scent), await shot(gl, b, scent))).toBeLessThanOrEqual(3);
   });
 
@@ -232,22 +245,22 @@ describe('the fan of the growth front in the picture', () => {
       const backend = backends[Object.keys(BACKENDS).indexOf(kind)];
       if (!backend) throw new Error(`no backend ${kind}`);
       const sim = await grown(backend, 40);
-      /** The pixels of the ground above the place of the wall: 6 to 9 cells above the tube. */
+      /** The pixels of the ground above the place of the wall: 2.8 to 4.5 cells above the tube. */
       const beyond = (x: number, y: number) => {
         const [cx, cy] = cellOf(x, y) as [number, number];
-        return cx > 30 && cx < 43 && cy > 13 && cy < 16;
+        return cx > 30 && cx < 43 && cy > 17.5 && cy < 19.2;
       };
       for (const style of ['glow', 'gel'] as const) {
         // Two frames of one backend dither apart by 2 at most.
         const [on, off] = [await shot(backend, sim, { style }), await shot(backend, sim, { style, showFront: false })];
-        expect(maxDiff(on, off, beyond), style).toBeGreaterThan(6);
+        expect(maxDiff(on, off, beyond), style).toBeGreaterThan(5);
       }
-      // A wall 4 to 6 cells above the tube: the sheet stays on the side of its plasm.
-      sim.paint([{ kind: 'wall', from: [10, 17], to: [50, 17], radius: 1 }]);
+      // A thin wall 1 to 2.5 cells above the tube: the skirt stays on the side of its plasm.
+      sim.paint([{ kind: 'wall', from: [10, 20.25], to: [50, 20.25], radius: 0.75 }]);
       for (const style of ['glow', 'gel'] as const) {
         const [on, off] = [await shot(backend, sim, { style }), await shot(backend, sim, { style, showFront: false })];
         expect(maxDiff(on, off, beyond), style).toBeLessThanOrEqual(2);
-        expect(maxDiff(on, off), style).toBeGreaterThan(25);
+        expect(maxDiff(on, off), style).toBeGreaterThan(SEEN[style]);
       }
       // 1,500 steps after the front the tube of the model stays alone.
       sim.run(1500);
@@ -256,6 +269,47 @@ describe('the fan of the growth front in the picture', () => {
         const [on, off] = [await shot(backend, sim, { style }), await shot(backend, sim, { style, showFront: false })];
         expect(maxDiff(on, off), style).toBeLessThanOrEqual(2);
       }
+    },
+    120_000,
+  );
+
+  // The owner saw the first skirt jump (2026-11-18): a texel of the map joined it at once. Now a cell comes into the
+  // skirt over some steps, so the picture of the skirt changes by a small part of its whole change in one step.
+  it.each(Object.keys(BACKENDS))(
+    'comes without a jump when the tube gets longer (%s)',
+    async (kind) => {
+      const backend = backends[Object.keys(BACKENDS).indexOf(kind)];
+      if (!backend) throw new Error(`no backend ${kind}`);
+      const sim = await grown(backend, 40);
+      /** The ground above the new end of the tube, 3 to 5 cells from it: no plasm and no light of it covers it. */
+      const beside = (x: number, y: number) => {
+        const [cx, cy] = cellOf(x, y) as [number, number];
+        return cx > 44 && cx < 48 && cy > 17 && cy < 19;
+      };
+      /** What the skirt adds to each byte of the picture, at the pixels of `beside`. */
+      const veil = async () => {
+        const [on, off] = [await shot(backend, sim, {}), await shot(backend, sim, { showFront: false })];
+        const out: number[] = [];
+        for (let i = 0; i < on.width * on.height; i++)
+          if (beside(i % on.width, Math.floor(i / on.width)))
+            for (let k = 0; k < 3; k++) out.push((on.data[i * 4 + k] ?? 0) - (off.data[i * 4 + k] ?? 0));
+        return out;
+      };
+      const apart = (p: number[], q: number[]) => Math.max(...p.map((v, i) => Math.abs(v - (q[i] ?? 0))));
+      // The picture before the tube grows is the start: the step in which the new cells join counts too.
+      const first = await veil();
+      let [before, worst] = [first, 0];
+      // The tube gets 4 cells longer in one step: 24 cells get a front stamp at once.
+      for (let step = 0; step < 30; step++) {
+        sim.writeTrail(plasm(longer));
+        sim.run(1);
+        const now = await veil();
+        worst = Math.max(worst, apart(now, before));
+        before = now;
+      }
+      const whole = apart(before, first);
+      expect(whole, 'the skirt came').toBeGreaterThan(10);
+      expect(worst, `the largest change in one step, of ${String(whole)}`).toBeLessThanOrEqual(0.35 * whole);
     },
     120_000,
   );

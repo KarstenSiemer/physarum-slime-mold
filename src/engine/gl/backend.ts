@@ -77,8 +77,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   /** What the map of the film holds: it is filled again only when one of these changed. */
   private filmHolds: FilmState | undefined;
   /** The map of the growth front (front-map.frag, ADR 0060), and what it holds. */
-  private fan: Target | undefined;
-  private fanHolds: { sim: GlSim; stamps: WebGLTexture; step: number; revision: number; life: number } | undefined;
+  private young: Target | undefined;
+  private youngHolds: { sim: GlSim; stamps: WebGLTexture; step: number; revision: number; life: number } | undefined;
   /** The coarse map of the film (slime-down.frag) for a view zoomed out: half the grid's sides, rounded up. */
   private filmCoarse: Target | undefined;
   private filmCoarseHolds: (FilmState & { level: number }) | undefined;
@@ -162,8 +162,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   }
 
   /**
-   * What lies below the scent view in a frame of `sim`: 2 the fan of the growth front with the film of the slime, 1
-   * the film, 0 the picture alone. The film and the fan need the fields of the simulation (see the frame).
+   * What lies below the scent view in a frame of `sim`: 2 the skirt of the growth front with the film of the slime, 1
+   * the film, 0 the picture alone. The film and the skirt need the fields of the simulation (see the frame).
    */
   private below(sim: GlSim, s: Settings): 0 | 1 | 2 {
     const [filmy, fanned] = [slimeShown(s), frontShown(s)];
@@ -235,7 +235,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.coarseHolds = undefined;
     this.trailHolds = undefined;
     [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
-    this.fanHolds = undefined;
+    this.youngHolds = undefined;
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
@@ -250,7 +250,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     if (this.trailCoarse) destroyTarget(this.gl, this.trailCoarse);
     if (this.film) destroyTarget(this.gl, this.film);
     if (this.filmCoarse) destroyTarget(this.gl, this.filmCoarse);
-    if (this.fan) destroyTarget(this.gl, this.fan);
+    if (this.young) destroyTarget(this.gl, this.young);
     this.gl.deleteBuffer(this.viewUbo);
   }
 
@@ -375,10 +375,10 @@ export class WebGl2Backend implements Backend<GlSim> {
     const amounts = stamps ? sim.slimeAmountTexture : undefined;
     const fronts = stamps && fanned ? sim.slimeFrontTexture : undefined;
     const wet = stamps && amounts && filmy ? this.prog.slimed() : undefined;
-    // The fan of the growth front (ADR 0060) has programs of its own, with the code of the film in them: a frame
-    // without the fan pays nothing for it. With the film it waits for the programs of the maps of the film.
-    const fanReady = stamps && amounts && fronts ? this.prog.fronted() : undefined;
-    const grown = fanReady && (!filmy || wet) ? fanReady : undefined;
+    // The skirt of the growth front (ADR 0060) has programs of its own, with the code of the film in them: a frame
+    // without the skirt pays nothing for it. With the film it waits for the programs of the maps of the film.
+    const frontReady = stamps && amounts && fronts ? this.prog.fronted() : undefined;
+    const grown = frontReady && (!filmy || wet) ? frontReady : undefined;
     packView(
       this.viewData,
       width,
@@ -472,14 +472,14 @@ export class WebGl2Backend implements Backend<GlSim> {
       }
     }
     // The map of the growth front (front-map.frag, ADR 0060), filled once for each state that a frame draws.
-    const fan = grown && fronts ? this.fanFor(sim) : undefined;
-    if (grown && fan && stamps && fronts) {
+    const young = grown && fronts ? this.youngFor(sim) : undefined;
+    if (grown && young && stamps && fronts) {
       const now = { sim, stamps, step: sim.step, revision: sim.revision, life: slimeSteps(s) };
-      const held = this.fanHolds;
+      const held = this.youngHolds;
       if (!(held && (Object.keys(now) as (keyof typeof now)[]).every((k) => held[k] === now[k]))) {
-        this.fanHolds = now;
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fan.fbo);
-        gl.viewport(0, 0, fan.width, fan.height);
+        this.youngHolds = now;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, young.fbo);
+        gl.viewport(0, 0, young.width, young.height);
         gl.useProgram(grown.map.program);
         textures(gl, grown.map.program, { trail, stamps, fronts });
         gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -510,7 +510,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst?.fbo ?? null);
     gl.viewport(0, 0, width, height);
-    // The scent view lies over the film and the fan (ADR 0060). The frame draws the view once its maps, its render
+    // The scent view lies over the film and the skirt (ADR 0060). The frame draws the view once its maps, its render
     // pass and the programs of what lies below it are built. Until then the frame draws without the view, and nothing
     // below it goes.
     const lies = below === 2 ? grown !== undefined : below === 1 ? wet !== undefined : true;
@@ -540,7 +540,7 @@ export class WebGl2Backend implements Backend<GlSim> {
         ? {
             film: film?.texture ?? trail,
             filmLevels: filmCoarse?.texture ?? film?.texture ?? trail,
-            ...(grown ? { fanMap: fan?.texture ?? trail } : {}),
+            ...(grown ? { youngMap: young?.texture ?? trail } : {}),
           }
         : {};
     const more = { ...(top ? { scent: viewScent, scentLevels } : {}), ...maps };
@@ -561,14 +561,14 @@ export class WebGl2Backend implements Backend<GlSim> {
   }
 
   /** The map of the growth front for this grid size (texels of 2^FRONT_LEVEL cells), made anew with the size. */
-  private fanFor(sim: GlSim): Target {
+  private youngFor(sim: GlSim): Target {
     const [w, h] = [levelSize(sim.width, FRONT_LEVEL), levelSize(sim.height, FRONT_LEVEL)];
-    if (this.fan?.width !== w || this.fan.height !== h) {
-      if (this.fan) destroyTarget(this.gl, this.fan);
-      this.fan = target(this.gl, w, h, this.gl.RGBA32F);
-      this.fanHolds = undefined;
+    if (this.young?.width !== w || this.young.height !== h) {
+      if (this.young) destroyTarget(this.gl, this.young);
+      this.young = target(this.gl, w, h, this.gl.RGBA8);
+      this.youngHolds = undefined;
     }
-    return this.fan;
+    return this.young;
   }
 
   /** The trail's coarse map for this grid size, made anew when the size changes. */
@@ -588,7 +588,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       if (this.film) destroyTarget(this.gl, this.film);
       this.film = target(this.gl, sim.width, sim.height, this.gl.R16F);
       [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
-      this.fanHolds = undefined;
+      this.youngHolds = undefined;
     }
     return this.film;
   }

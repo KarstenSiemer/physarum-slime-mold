@@ -7,7 +7,7 @@ override ENV: bool = true;
 override SCENT: bool = false;
 // The film of the slime (ADR 0055, decision 8; ADR 0057), compiled in only while a frame draws it (render.ts).
 override SLIME: bool = false;
-// The fan of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).
+// The skirt of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).
 override FRONT: bool = false;
 
 struct View {
@@ -29,7 +29,7 @@ struct View {
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
   // The slime: the steps that ran so far, the life time of the slime in steps, what the frame draws (1 the film of
-  // the slime, 2 the fan of the growth front), unused.
+  // the slime, 2 the skirt of the growth front), unused.
   slime: vec4u,
   slimeFx: vec4f,     // the slime: the colour of its body, linear RGB, and how much of it full slime shows
   slimeLight: vec4f,  // the slime: its highlight, its wide light, the height of its relief, the height of its beads
@@ -54,7 +54,7 @@ const DISH_FILL = 0.945;
 @group(0) @binding(15) var film: texture_2d<f32>; // the film of the slime, one texel per cell (written by `slimeFilm`)
 @group(0) @binding(17) var filmLevels: texture_2d<f32>; // the film on a coarser map (slimeDown), zoomed out
 @group(0) @binding(19) var<storage, read> fronts: array<u32>; // the front field (slime.wgsl); read by `frontMap` only
-@group(0) @binding(20) var fanMap: texture_2d<f32>; // the map of the growth front (written by `frontMap`)
+@group(0) @binding(20) var youngMap: texture_2d<f32>; // the map of the growth front (written by `frontMap`)
 // The outline distances of the electrodes (paint.wgsl POLES, ADR 0058); read for the electrodes only.
 @group(0) @binding(16) var<storage, read> poles: array<u32>;
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
@@ -347,25 +347,18 @@ fn thick(y: f32) -> f32 {
   return h / (1.0 + 0.25 * h);
 }
 
-// How thick the gel is at p + d with the sheet of the growth front on it (ADR 0060). `lift`: the sheet at p in units
-// of the trail and its gradient per cell (scene()); the sheet beside p follows its slope at p. Without a sheet this is
-// thick() of the height.
-fn raised(p: vec2f, d: vec2f, lift: vec3f) -> f32 {
-  return thick(max(heightFiltered(p + d), 0.0) + max(lift.x + dot(lift.yz, d), 0.0) * V.exposure);
-}
-
 // Trail as a gel with a wet surface, over `base` (ADR 0009, amendment 2026-11-14). A thick tube is higher than a thin
 // one, has the full colour of its strain and hides the ground. Thin gel is pale and clear, as much as the setting of
 // the gel colour says (V.gelFx, GEL_FX in render.ts). The gel is clear enough to
 // show a flake of food below it (`f`, see flakeAt): over food its colour takes in the flake's, grain and outline.
-fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake, lift: vec3f) -> vec3f {
+fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   // The slope of the thickness from 8 lookups around p, 2 on each side: their mean smooths the cells.
   let a = 1.25 * max(V.scale, 1.0);
   let b = 0.5 * max(V.scale, 1.0);
-  let east = vec2f(raised(p, vec2f(a, b), lift), raised(p, vec2f(a, -b), lift));
-  let west = vec2f(raised(p, vec2f(-a, b), lift), raised(p, vec2f(-a, -b), lift));
-  let south = vec2f(raised(p, vec2f(b, a), lift), raised(p, vec2f(-b, a), lift));
-  let north = vec2f(raised(p, vec2f(b, -a), lift), raised(p, vec2f(-b, -a), lift));
+  let east = vec2f(thick(heightFiltered(p + vec2f(a, b))), thick(heightFiltered(p + vec2f(a, -b))));
+  let west = vec2f(thick(heightFiltered(p + vec2f(-a, b))), thick(heightFiltered(p + vec2f(-a, -b))));
+  let south = vec2f(thick(heightFiltered(p + vec2f(b, a))), thick(heightFiltered(p + vec2f(-b, a))));
+  let north = vec2f(thick(heightFiltered(p + vec2f(b, -a))), thick(heightFiltered(p + vec2f(-b, -a))));
   let rise = vec2f(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
   let n = normalize(vec3f(-GEL_HIGH * rise, 1.0));
   let l = normalize(vec3f(-0.45, -0.6, 0.65));
@@ -377,7 +370,7 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake, lift: vec3f) -> vec3f {
   let total = v.x + v.y + v.z + v.w;
   var albedo = select(V.colors[0].rgb, tint(v) / max(total, 1e-6), total > 1e-6);
   if (ENV && f.cover > 0.0) { albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover); }
-  let here = max(heightFiltered(p), 0.0) + lift.x * V.exposure;
+  let here = heightFiltered(p);
   // The thickness of the tube that p is a part of: the largest around p, so a tube has one colour up to its rim.
   let around = max(max(east, west), max(south, north));
   let full = smoothstep(0.12, 0.85, max(thick(here), max(around.x, around.y)));
@@ -1013,32 +1006,33 @@ fn slimed(bg: vec3f, p: vec2f) -> vec3f {
 
 // ---- The growth front (ADR 0060) --------------------------------------------------------------------------------
 // Display only. The front field holds the step at which plasm first came onto each cell (slime.wgsl `front`). The
-// picture draws young ground as the fan of a plasmodium: a sheet at the front, then fine veins in a sheet that gets
-// thinner, then the tubes of the model alone.
+// picture draws a skirt around young ground: a thin clear veil of slime on the ground, below the plasm. It shows
+// where a tube grows now. The model grows the tube; the skirt adds no plasm to the picture.
 //
-// Two steps. `frontMap` writes a coarse map, once for each state of the simulation: how much plasm a texel holds and
-// how old its ground is. The render pass takes the plasm around a pixel from the texels in reach, as a round and
-// smooth hill, and adds the fan to the trail there.
+// Two steps. `frontMap` writes a coarse map, once for each state of the simulation: how much of each texel is young
+// ground. The render pass takes the young ground around a pixel from the texels in reach, as a round and smooth hill,
+// and draws the skirt where that hill is high enough.
+//
+// The skirt moves without a jump. A cell counts by its own age: its share comes in SKIRT_RISE steps and goes in
+// SKIRT_STEPS steps, so one cell changes the skirt by a small amount in a step. And the skirt depends on the stamps
+// alone, not on the levels of the picture, which move in steps.
 
-const FRONT_LEVEL = 3u;      // the map of the front has texels of 2^3 = 8 cells per side
-const FRONT_STEPS = 1500.0;  // steps after the front in which the main vein appears: the fan ends there (50 min)
-const FRONT_SHEET = 100.0;   // steps in which the sheet gives its mass to the veins (195 s)
-const FRONT_CELLS = 6.5;     // cells per step of the lattice of the veins
-const FRONT_VEIN = 0.16;     // half the width of a full vein, in steps of that lattice
-const FRONT_FULL = 0.6;      // the plasm around a point, as light, from which the fan is full
-const FRONT_RISE = 0.9;      // the plasm of a vein, as light
-const FRONT_SKIRT = 0.5;     // the plasm of the skirt at the front, as light: a thin sheet
-const FRONT_FADE = 350.0;    // steps in which the fine veins get thinner by the factor e
-const FAN_RADIUS = 2.0;      // texels of the map from which a point takes the plasm around it
-const FAN_LOW = 0.25;        // the plasm around a point, as a share of FRONT_FULL, at which the skirt begins
-const FAN_HIGH = 0.7;        // and at which the skirt has its whole thickness
-const FRONT_REACH = 17;      // cells that the fan reaches from its plasm, at most: FAN_RADIUS texels and one more
+const FRONT_LEVEL = 2u;     // the map of the front has texels of 2^2 = 4 cells per side
+const SKIRT_STEPS = 150.0;  // steps in which the skirt of a cell goes, by the factor e (5 min)
+const SKIRT_RISE = 8.0;     // steps in which the skirt of a cell comes
+const SKIRT_RADIUS = 2.0;   // texels of the map from which a point takes the young ground around it
+const SKIRT_LOW = 0.04;     // the share of young ground around a point at which the skirt begins
+const SKIRT_HIGH = 0.3;     // and at which the skirt has its whole thickness
+const SKIRT_BODY = 0.09;    // the light that the whole skirt adds to the ground, and three times its share on paper
+const SKIRT_TINT = 0.5;     // how much of the colour of its strain the skirt takes; the rest is that of the slime
+const SKIRT_RELIEF = 0.35;  // the height of the relief of the skirt, as a share of that of the film of the slime
+const FRONT_REACH = 9;      // cells that the skirt reaches from its plasm, at most: SKIRT_RADIUS texels and one more
 
-// The map of the front, one fragment per texel: (the mean of the summed trail over the cells of the texel; that mean
-// times the age of the ground, 0 at the front to 1 at FRONT_STEPS; the strain with the most trail; 1). The age of the
-// ground of a texel is the age of its oldest front stamp among the cells with slime: the step at which the front first
-// reached the texel. A cell with slime and no front stamp is old ground (painted slime), and so is a texel without
-// slime: trail that no step of the slime field saw.
+// The map of the front, one fragment per texel: for each strain, the share of the texel that is young ground of the
+// strain. A cell is young ground while it has slime and a front stamp. With the age a of the stamp in steps it counts
+// (1 − e^(−a / SKIRT_RISE)) · e^(−a / SKIRT_STEPS): nothing at the step of the stamp, most after about 25 steps, and
+// less and less after that. Its strain is the one with the most trail in it. A cell with slime and no front stamp is
+// old ground (painted slime).
 @fragment
 fn frontMap(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let s = size();
@@ -1046,158 +1040,108 @@ fn frontMap(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let lo = floor(frag.xy) * span;
   let hi = lo + span;
   var sum = vec4f(0.0);
-  var oldest = 0u;
-  var stamped = false;
   for (var y = i32(floor(lo.y)); f32(y) < hi.y && y < s.y; y++) {
     let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
     for (var x = i32(floor(lo.x)); f32(x) < hi.x && x < s.x; x++) {
       let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
-      sum += w * textureLoad(trail, vec2i(x, y), 0);
       let i = y * s.x + x;
       let held = stamps[i];
-      if (held != 0u && V.slime.x + 1u - held < V.slime.y) {
-        let f = fronts[i];
-        stamped = true;
-        oldest = max(oldest, select(V.slime.x + 1u - f, 0xffffffffu, f == 0u));
+      let f = fronts[i];
+      if (f == 0u || held == 0u || V.slime.x + 1u - held >= V.slime.y) { continue; }
+      let a = f32(V.slime.x + 1u - f);
+      let t = textureLoad(trail, vec2i(x, y), 0);
+      var k = 0u;
+      for (var j = 1u; j < V.frame.y; j++) {
+        if (t[j] > t[k]) { k = j; }
       }
+      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE)) * exp(-a / SKIRT_STEPS);
     }
   }
-  let mean = sum / (span.x * span.y);
-  var k = 0u;
-  for (var j = 1u; j < V.frame.y; j++) {
-    if (mean[j] > mean[k]) { k = j; }
-  }
-  let body = mean.x + mean.y + mean.z + mean.w;
-  // A texel without slime holds no front stamp, and it shows no fan: its ground counts as old.
-  let age = select(1.0, min(f32(oldest) / FRONT_STEPS, 1.0), stamped);
-  return vec4f(body, body * age, f32(k), 1.0);
+  return sum / (span.x * span.y);
 }
 
-struct Fan {
-  v: vec4f, // the sheet of each strain at a point, in units of the trail
-  h: f32,   // their sum
-  g: vec2f, // the gradient of the sum, per cell
-  up: vec2f, // the slope of the plasm around the point, without the veins: the plasm of the sheet lies up this slope
+struct Skirt {
+  h: f32,      // the thickness of the skirt at a point, 0 to 1
+  g: vec2f,    // its gradient, per cell
+  up: vec2f,   // the slope of the young ground around the point: its plasm lies up this slope
+  tint: vec3f, // the colour of the strains of that young ground
 }
 
-// The veins of the fan, a pattern that is fixed in the grid: the walls between the cells of a lattice with one point
-// in each step, bent by soft noise so that no wall is straight. (how far p is from a wall, 0 on it, in lattice steps;
-// the gradient of that, per cell; the lattice steps per cell).
-fn fanVeins(p: vec2f) -> vec4f {
-  let n = patternSteps(FRONT_CELLS);
-  let scale = n / vec2f(size()); // lattice steps per cell
-  let x0 = p * scale;
-  let bentX = noiseSlope(x0 + vec2f(3.1, 8.7), vec2i(n));
-  let bentY = noiseSlope(x0 + vec2f(41.3, 17.9), vec2i(n));
-  let x = x0 + 0.7 * (vec2f(bentX.x, bentY.x) - 0.5);
-  let i = vec2i(floor(x));
-  var d1 = 8.0;
-  var d2 = 8.0;
-  var o1 = vec2f(0.0);
-  var o2 = vec2f(0.0);
-  for (var dy = -1; dy <= 1; dy++) {
-    for (var dx = -1; dx <= 1; dx++) {
-      let k = i + vec2i(dx, dy);
-      let w = wrapCell(k, vec2i(n));
-      let o = 0.15 + 0.7 * vec2f(lattice(w + vec2i(23, 5)), lattice(w + vec2i(101, 67)));
-      let d = x - (vec2f(k) + o);
-      let l = length(d);
-      if (l < d1) {
-        d2 = d1;
-        o2 = o1;
-        d1 = l;
-        o1 = d;
-      } else if (l < d2) {
-        d2 = l;
-        o2 = d;
-      }
-    }
-  }
-  return vec4f(d2 - d1, (o2 / max(d2, 1e-6) - o1 / max(d1, 1e-6)) * scale, scale.x);
-}
-
-// The fan of the growth front at p. The plasm around p is the mean of the texels of the map of the front within
-// FAN_RADIUS texels of p, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance
-// alone and ends without a step, so the plasm around a texel is a round, smooth hill at any zoom: the fan shows no
-// texel. The 4 × 4 texels around p hold every texel in reach.
-//
-// The sheet is a thin skirt around young plasm. Its outline is the line on which the plasm around p has a level in the
-// middle of its range (FAN_LOW to FAN_HIGH), not the far end of the reach of a texel. Behind the front the skirt goes
-// with the time scale of the sheet, and fine veins stay: thick near the plasm of the model, thinner outward, and
-// thinner with the age until the main vein has formed. `under`: how much of the ground the plasm of the model hides
-// at p.
-fn fanAt(p: vec2f, under: f32) -> Fan {
-  var f: Fan;
+// The skirt of the growth front at p. The young ground around p is the mean of the texels of the map of the front
+// within SKIRT_RADIUS texels of p, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the
+// distance alone and ends without a step, so the young ground around a texel is a round, smooth hill at any zoom: the
+// skirt shows no texel. The 4 × 4 texels around p hold every texel in reach. The skirt begins where the hill has the
+// level SKIRT_LOW and has its whole thickness from SKIRT_HIGH on.
+fn skirtAt(p: vec2f) -> Skirt {
+  var k: Skirt;
   let s = size();
   let n = levelSize(FRONT_LEVEL);
   let ratio = vec2f(n) / vec2f(s); // texels per cell
-  let q = p * ratio - 0.5;         // in texels: texel i has its centre at i
+  let q = p * ratio - 0.5;
   let c = vec2i(floor(q));
   var weight = 0.0;
   var slopeW = vec2f(0.0);
-  var body = vec4f(0.0);
-  var slopeB = vec2f(0.0);
-  var aged = 0.0;
+  var young = vec4f(0.0);
+  var slopeY = vec2f(0.0);
   for (var j = -1; j <= 2; j++) {
     for (var i = -1; i <= 2; i++) {
-      let k = c + vec2i(i, j);
-      let d = q - vec2f(k);
-      let near = 1.0 - dot(d, d) / (FAN_RADIUS * FAN_RADIUS);
+      let at = c + vec2i(i, j);
+      let d = q - vec2f(at);
+      let near = 1.0 - dot(d, d) / (SKIRT_RADIUS * SKIRT_RADIUS);
       if (near <= 0.0) { continue; }
       let w = near * near * near;
-      let dw = -6.0 * near * near * d / (FAN_RADIUS * FAN_RADIUS);
+      let dw = -6.0 * near * near * d / (SKIRT_RADIUS * SKIRT_RADIUS);
       weight += w;
       slopeW += dw;
-      // A texel outside a closed arena holds no plasm.
-      var t = k;
+      var t = at;
       if (V.boundary == 0u) {
-        t = wrapCell(k, n);
-      } else if (any(k < vec2i(0)) || any(k >= n)) {
+        t = wrapCell(at, n);
+      } else if (any(at < vec2i(0)) || any(at >= n)) {
         continue;
       }
-      let m = textureLoad(fanMap, t, 0);
-      body[u32(m.z)] += w * m.x;
-      aged += w * m.y;
-      slopeB += dw * m.x;
+      let m = textureLoad(youngMap, t, 0);
+      young += w * m;
+      slopeY += dw * (m.x + m.y + m.z + m.w);
     }
   }
-  let total = body.x + body.y + body.z + body.w;
-  if (!(total > 1e-6 * weight)) { return f; }
-  let age = clamp(aged / total, 0.0, 1.0);
-  if (age >= 1.0) { return f; }
-  // The plasm around p as light, as a share of the light from which the fan is full, and its slope per cell.
-  let light = max(V.exposure, 1e-12) / FRONT_FULL;
-  let around = total / weight * light;
-  let up = (slopeB * weight - total * slopeW) / (weight * weight) * ratio;
-  // The skirt: all of it at the front, and less with the time scale of the sheet.
-  let sheet = exp(-age * FRONT_STEPS / FRONT_SHEET);
-  let u = clamp((around - FAN_LOW) / (FAN_HIGH - FAN_LOW), 0.0, 1.0);
-  let skirt = FRONT_SKIRT * sheet * u * u * (3.0 - 2.0 * u);
-  let skirtSlope = FRONT_SKIRT * sheet * 6.0 * u * (1.0 - u) / (FAN_HIGH - FAN_LOW) * light * up;
-  // The veins: thinner with the time scale of the veins, and gone when the main vein has formed. Half the width of
-  // a vein, in lattice steps: full where the plasm around p is strong, and none at the outer end of the fan.
-  let stay = exp(-age * FRONT_STEPS / FRONT_FADE) * (1.0 - smoothstep(0.6, 1.0, age));
-  let e = fanVeins(p);
-  let wide = FRONT_VEIN * stay * smoothstep(0.1, 0.45, around);
-  let soft = max(0.75 * V.scale * e.w, 0.03); // the edge of a vein: a pixel wide, or wider
-  let r = clamp((e.x - wide + soft) / (2.0 * soft), 0.0, 1.0);
-  // The veins come as the skirt goes, and they end at the tube of the model. A vein that is thinner than a pixel
-  // shows the share of the pixel that it covers.
-  let seen = (1.0 - sheet) * (1.0 - under) * FRONT_RISE * min(1.0, wide / soft);
-  let h = (skirt + seen * (1.0 - r * r * (3.0 - 2.0 * r))) / max(V.exposure, 1e-12);
-  f.v = body * (h / total);
-  f.h = h;
-  f.g = (skirtSlope - seen * 6.0 * r * (1.0 - r) / (2.0 * soft) * e.yz) / max(V.exposure, 1e-12);
-  f.up = up;
-  return f;
+  let total = young.x + young.y + young.z + young.w;
+  if (!(total > 1e-5 * weight)) { return k; }
+  let around = total / weight;
+  let up = (slopeY * weight - total * slopeW) / (weight * weight) * ratio;
+  let u = clamp((around - SKIRT_LOW) / (SKIRT_HIGH - SKIRT_LOW), 0.0, 1.0);
+  k.h = u * u * (3.0 - 2.0 * u);
+  k.g = 6.0 * u * (1.0 - u) / (SKIRT_HIGH - SKIRT_LOW) * up;
+  k.up = up;
+  k.tint = tint(young) / total;
+  return k;
 }
 
-// How much of the sheet of the growth front shows at p, 0 to 1: nothing where a wall stands between p and the plasm
-// that the sheet comes from. A wall is thinner than the sheet is wide, and no plasm lies behind it. The plasm lies up
-// the slope `up` of the plasm around p (Fan.up), so the pass walks up the slope, one cell at a time, until it meets
-// plasm that the picture shows or it has gone as far as the sheet reaches. The sheet ends within one cell before the
+// The ground `bg` at p with the skirt `k` on it: a clear veil in the colour of the slime and of its strain, as thick
+// as the skirt, with the waves of the film of the slime in its surface. The lamp puts a soft light and a small
+// highlight on it. The veil only adds light, and on paper it is a faint stain: no side of it is darker than the
+// ground, so the skirt has no dark rim.
+fn skirtOn(bg: vec3f, p: vec2f, k: Skirt) -> vec3f {
+  let fine = clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
+  let ripple = slimeWaves(p);
+  let swell = 1.0 + SLIME_RIPPLE * (2.0 * ripple.x - 1.0);
+  let h = k.h * swell;
+  let g = k.g * swell + k.h * SLIME_RIPPLE * 2.0 * ripple.yz * fine;
+  let shine = wetShine(normalize(vec3f(-SKIRT_RELIEF * V.slimeLight.z * g, 1.0)));
+  let body = mix(V.slimeFx.rgb, k.tint, SKIRT_TINT);
+  let soft = V.slimeLight.y * k.h * max(shine.y, 0.0);
+  let spark = min(V.slimeLight.x * k.h * shine.x, 0.8);
+  if (V.style == 2u) {
+    return mix(mix(bg, body, min(3.0 * SKIRT_BODY * h, 1.0)), vec3f(1.0), min(spark + 0.5 * soft, 1.0));
+  }
+  return bg + body * (SKIRT_BODY * h + soft) + vec3f(spark);
+}
+
+// How much of the skirt of the growth front shows at p, 0 to 1: nothing where a wall stands between p and the young
+// ground that the skirt comes from. A wall is thinner than the skirt is wide, and no plasm lies behind it. The young
+// ground lies up the slope `up` (Skirt.up), so the pass walks up the slope, one cell at a time, until it meets plasm
+// that the picture shows or it has gone as far as the skirt reaches. The skirt ends within one cell before the
 // outline of a wall on the way.
-fn fanOpen(p: vec2f, up: vec2f) -> f32 {
+fn skirtOpen(p: vec2f, up: vec2f) -> f32 {
   let l = length(up);
   if (l <= 1e-12) { return 1.0; }
   let dir = up / l;
@@ -1261,35 +1205,36 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
     f = flakeAt(p, e);
     if (V.frame.w != 0u) { v += presence(e, cells, raw); }
   }
-  // The sheet of the growth front at p in units of the trail, and its gradient per cell: none without the front.
-  var lift = vec3f(0.0);
-  // The sheet of the growth front is more plasm on young ground (ADR 0060). It stays on the side of a wall on which
-  // its plasm lies (fanOpen()).
-  if (FRONT && (V.slime.z & 2u) != 0u && V.style != 3u) {
-    let under = plasmCover(v);
-    var fan = fanAt(p, under);
-    if (ENV && V.frame.z != 0u && fan.h > 0.0 && under < 1.0) {
-      let open = fanOpen(p, fan.up);
-      fan.v *= open;
-      fan.h *= open;
-      fan.g *= open;
-    }
-    v += fan.v;
-    lift = vec3f(fan.h, fan.g);
-  }
   var dots = vec4f(0.0);
   if (V.style == 3u) { dots = agentsAt(p); }
   var base = V.background.rgb;
-  // The film of the slime lies on the ground, and the plasm lies on the film: where the plasm covers the ground, the
-  // picture shows no film. The flake of food, the trail and all else lie on it.
-  if (SLIME && (V.slime.z & 1u) != 0u) {
+  // The film of the slime lies on the ground, the skirt of the growth front on the film, and the plasm on both
+  // (ADR 0060): where the plasm covers the ground, the picture shows nothing of them. The flake of food, the trail and
+  // all else lie on them. The agents style draws no skirt.
+  let filmy = SLIME && (V.slime.z & 1u) != 0u;
+  let skirted = FRONT && (V.slime.z & 2u) != 0u && V.style != 3u;
+  if (filmy || skirted) {
     let hidden = plasmCover(select(v, dots, V.style == 3u));
-    if (hidden < 1.0) { base = mix(slimed(base, p), base, hidden); }
+    if (hidden < 1.0) {
+      var under = base;
+      if (filmy) { under = slimed(under, p); }
+      if (skirted) {
+        var k = skirtAt(p);
+        // The skirt stays on the side of a wall on which its young ground lies (skirtOpen()).
+        if (ENV && V.frame.z != 0u && k.h > 0.0) {
+          let open = skirtOpen(p, k.up);
+          k.h *= open;
+          k.g *= open;
+        }
+        if (k.h > 0.0) { under = skirtOn(under, p, k); }
+      }
+      base = mix(under, base, hidden);
+    }
   }
   if (ENV && near) { base = substrate(f, base); }
   var c: vec3f;
   switch V.style {
-    case 1u: { c = gel(p, v, base, f, lift) * (1.0 - STREAM_DARK * grain); }
+    case 1u: { c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain); }
     case 2u: { c = paper(v, base); }
     case 3u: { c = glow(dots, vec4f(0.0), base); }
     default: { c = glow(v, halo, base); }

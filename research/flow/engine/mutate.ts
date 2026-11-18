@@ -126,13 +126,13 @@ const AMOUNT_WGSL = 'src/engine/shaders/amount.wgsl';
 const AMOUNT_GLSL = 'src/engine/gl/glsl/amount.glsl';
 const [AMOUNT_GPU, AMOUNT_GL] = [`${SLIME} webgpu > the amount of slime`, `${SLIME} webgl2 > the amount of slime`];
 /**
- * The growth front (ADR 0060): the front field in the passes of the slime field and of its brush, the fan in the render
- * pass of each backend with its map, and the tests of the field on each backend and of the fan on both.
+ * The growth front (ADR 0060): the front field in the passes of the slime field and of its brush, the skirt in the render
+ * pass of each backend with its map, and the tests of the field on each backend and of the skirt on both.
  */
 const FRONT_MAP_FRAG = 'src/engine/gl/glsl/front-map.frag';
 const FRONT_SPEC = 'src/engine/front.gpu.test.ts';
 const [FRONT_GPU, FRONT_GL] = ['the front field on webgpu', 'the front field on webgl2'];
-const FAN = 'the fan of the growth front in the picture';
+const FAN = 'the skirt of the growth front in the picture';
 /** The copies around a periodic lattice (ADR 0026, ADR 0060): the tests of the lattices in the default style. */
 const LATTICE_SPEC = 'src/engine/lattice.gpu.test.ts';
 
@@ -4992,34 +4992,34 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     FRONT_SPEC,
   ],
   [
-    'GF11 wgsl: the sheet shows behind a wall',
+    'GF11 wgsl: the skirt shows behind a wall',
     RENDER_WGSL,
-    '      let open = fanOpen(p, fan.up);',
-    '      let open = 1.0;',
+    '          let open = skirtOpen(p, k.up);',
+    '          let open = 1.0;',
     FAN,
     FRONT_SPEC,
   ],
   [
-    'GF12 glsl: the sheet shows behind a wall',
+    'GF12 glsl: the skirt shows behind a wall',
     RENDER_FRAG,
-    '      float open = fanOpen(p, fan.up);',
-    '      float open = 1.0;',
+    '          float open = skirtOpen(p, k.up);',
+    '          float open = 1.0;',
     FAN,
     FRONT_SPEC,
   ],
   [
-    'GF13 wgsl: the ground of the fan never gets old',
+    'GF13 wgsl: the skirt of a cell never goes',
     RENDER_WGSL,
-    '  let age = select(1.0, min(f32(oldest) / FRONT_STEPS, 1.0), stamped);',
-    '  let age = 0.0;',
+    '      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE)) * exp(-a / SKIRT_STEPS);',
+    '      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE));',
     FAN,
     FRONT_SPEC,
   ],
   [
-    'GF14 glsl: the ground of the fan never gets old',
+    'GF14 glsl: the skirt of a cell never goes',
     FRONT_MAP_FRAG,
-    '  float age = stamped ? min(float(oldest) / FRONT_STEPS, 1.0) : 1.0;',
-    '  float age = 0.0;',
+    '      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE)) * exp(-a / SKIRT_STEPS);',
+    '      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE));',
     FAN,
     FRONT_SPEC,
   ],
@@ -5072,7 +5072,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     LATTICE_SPEC,
   ],
   [
-    'GF21 webgpu: the scent view draws its pass without the film and the fan',
+    'GF21 webgpu: the scent view draws its pass without the film and the skirt',
     RENDER_TS,
     '    const below: Below = fanned ? 2 : filmy ? 1 : 0;',
     '    const below: Below = 0;',
@@ -5080,12 +5080,44 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     SLIME_SPEC,
   ],
   [
-    'GF22 webgl2: the scent view draws its pass without the film and the fan',
+    'GF22 webgl2: the scent view draws its pass without the film and the skirt',
     GL_BACKEND,
     '    return fanned && sim.slimeFrontTexture ? 2 : filmy ? 1 : 0;',
     '    return 0;',
     PICTURE_GL,
     SLIME_SPEC,
+  ],
+  [
+    'GF23 wgsl: a cell joins the skirt at once, so the skirt jumps',
+    RENDER_WGSL,
+    '      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE)) * exp(-a / SKIRT_STEPS);',
+    '      sum[k] += w * exp(-a / SKIRT_STEPS);',
+    FAN,
+    FRONT_SPEC,
+  ],
+  [
+    'GF24 glsl: a cell joins the skirt at once, so the skirt jumps',
+    FRONT_MAP_FRAG,
+    '      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE)) * exp(-a / SKIRT_STEPS);',
+    '      sum[k] += w * exp(-a / SKIRT_STEPS);',
+    FAN,
+    FRONT_SPEC,
+  ],
+  [
+    'GF25 wgsl: the skirt is darker than its ground on the side away from the lamp',
+    RENDER_WGSL,
+    '  let soft = V.slimeLight.y * k.h * max(shine.y, 0.0);',
+    '  let soft = V.slimeLight.y * k.h * shine.y;',
+    FAN,
+    FRONT_SPEC,
+  ],
+  [
+    'GF26 glsl: the skirt is darker than its ground on the side away from the lamp',
+    RENDER_FRAG,
+    '  float soft = V.slimeLight.y * k.h * max(shine.y, 0.0);',
+    '  float soft = V.slimeLight.y * k.h * shine.y;',
+    FAN,
+    FRONT_SPEC,
   ],
 ];
 

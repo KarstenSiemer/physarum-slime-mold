@@ -247,10 +247,11 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   0027, Growth after the merge of ADR 0025); it has no length or time scale.
 - **Limits**: the model has no sheet at the front and no zones behind it. Its front is the arms of full plasm that
   the growth rule makes, and no vein forms toward a front, because the flux runs only between foods (row 24). Since
-  ADR 0060 the picture draws a sheet and fine veins on young ground, by the age of the front stamp of each cell, with
-  the 195 s of the sheet and the 50 min of the main vein as its times. That is the picture alone: no run changes, and
-  the veins are a pattern, not a result of the flow. The front stamps hold the step at which the front reached each
-  cell. Nobody measured with them how long after the front a tube between two foods shows, or how a front splits.
+  ADR 0060 the picture draws a skirt around young ground, a thin veil of slime, by the age of the front stamp of each
+  cell. That is the picture alone: no run changes, and the picture draws no vein. In the organism the veins form in
+  the crown at the head of a tube and stay behind the front; the model must grow them (stage 4 in `TODO.md`). The
+  front stamps hold the step at which the front reached each cell. Nobody measured with them how long after the front
+  a tube between two foods shows, or how a front splits.
 
 ### 7. Speed of the flow
 

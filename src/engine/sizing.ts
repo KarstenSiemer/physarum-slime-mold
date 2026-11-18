@@ -167,7 +167,7 @@ export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>, map = 0) 
  *   quarter of a texel per cell (render.ts, gl/backend.ts). The user turns Show slime on or zooms out without a new
  *   grid, so the fit holds both maps from the start, as it holds the coarse maps of the trail and of the scent.
  * - The front stamp of each cell, 4 B (sim.ts `front`, a buffer; gl/sim.ts `front`, a target of unsigned integers),
- *   and the map of the growth front of the renderer: 16 B per texel of 8 × 8 cells (ADR 0060).
+ *   and the map of the growth front of the renderer: 4 B per texel of 4 × 4 cells (ADR 0060).
  * That is 14.75 B, counted as 15.
  */
 export const SLIME_BYTES_PER_CELL = 15;

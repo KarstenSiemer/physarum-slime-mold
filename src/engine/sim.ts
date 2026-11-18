@@ -996,7 +996,7 @@ export class Simulation implements Sim {
   }
 
   /**
-   * For the renderer: the front field (ADR 0060), which the picture reads for the sheet of the growth front, or
+   * For the renderer: the front field (ADR 0060), which the picture reads for the skirt of the growth front, or
    * undefined while the simulation holds no slime field.
    */
   get slimeFront(): GPUBuffer | undefined {
