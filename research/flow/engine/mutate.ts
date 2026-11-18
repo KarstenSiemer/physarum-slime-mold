@@ -5024,7 +5024,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'GF15 wgsl: the film of the slime shows through the plasm',
     RENDER_WGSL,
-    '  return 1.0 - exp(-FILM_HIDE * max(x, 0.0));',
+    '  return smoothstep(0.02, 0.14, (v.x + v.y + v.z + v.w) * V.exposure);',
     '  return 0.0;',
     PICTURE_GPU,
     SLIME_SPEC,
@@ -5032,7 +5032,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'GF16 glsl: the film of the slime shows through the plasm',
     RENDER_FRAG,
-    '  return 1.0 - exp(-FILM_HIDE * max(x, 0.0));',
+    '  return smoothstep(0.02, 0.14, (v.x + v.y + v.z + v.w) * V.exposure);',
     '  return 0.0;',
     PICTURE_GL,
     SLIME_SPEC,

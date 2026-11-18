@@ -687,8 +687,6 @@ vec3 slimed(vec3 bg, vec2 p) {
          vec3(min(V.slimeLight.x * spark * cov, 0.8));
 }
 
-const float FILM_HIDE = 3.0; // how fast the plasm hides the film below it, per unit of its light (plasmCover)
-
 #ifdef FRONT
 // ---- The growth front (see render.wgsl, ADR 0060) ----
 // Display only. The picture draws young ground as the fan of a plasmodium: a sheet at the front, then fine veins in a
@@ -699,11 +697,14 @@ uniform sampler2D fanMap; // the map of the growth front (front-map.frag)
 const float FRONT_SHEET = 100.0; // steps in which the sheet gives its mass to the veins (195 s)
 const float FRONT_CELLS = 6.5;   // cells per step of the lattice of the veins
 const float FRONT_VEIN = 0.16;   // half the width of a full vein, in steps of that lattice
-const float FRONT_FULL = 0.6;    // the plasm around a point, as light, from which a vein has its full width
+const float FRONT_FULL = 0.6;    // the plasm around a point, as light, from which the fan is full
 const float FRONT_RISE = 0.9;    // the plasm of a vein, as light
-const float FRONT_GAIN = 2.4;    // the sheet in units of the mean trail of its texels
+const float FRONT_SKIRT = 0.5;   // the plasm of the skirt at the front, as light: a thin sheet
 const float FRONT_FADE = 350.0;  // steps in which the fine veins get thinner by the factor e
-const int FRONT_REACH = 13;      // cells that the sheet reaches from its plasm, at most
+const float FAN_RADIUS = 2.0;    // texels of the map from which a point takes the plasm around it
+const float FAN_LOW = 0.25;      // the plasm around a point, as a share of FRONT_FULL, at which the skirt begins
+const float FAN_HIGH = 0.7;      // and at which the skirt has its whole thickness
+const int FRONT_REACH = 17;      // cells that the fan reaches from its plasm, at most: FAN_RADIUS texels and one more
 
 struct Fan {
   vec4 v; // the sheet of each strain at a point, in units of the trail
@@ -747,59 +748,72 @@ vec4 fanVeins(vec2 p) {
   return vec4(d2 - d1, (o2 / max(d2, 1e-6) - o1 / max(d1, 1e-6)) * scale, scale.x);
 }
 
-// The sheet of the growth front at p (fanAt in render.wgsl). `under`: how much of the ground the plasm of the model
-// hides at p.
+// The fan of the growth front at p (fanAt in render.wgsl): the plasm around p is the mean of the texels of the map of
+// the front within FAN_RADIUS texels, each with the weight (1 − r² / R²)³, so it is a round, smooth hill at any zoom.
+// The sheet is a thin skirt around young plasm, and fine veins stay when it goes. `under`: how much of the ground the
+// plasm of the model hides at p.
 Fan fanAt(vec2 p, float under) {
   Fan f = Fan(vec4(0.0), 0.0, vec2(0.0), vec2(0.0));
   ivec2 n = levelSize(FRONT_LEVEL);
   vec2 ratio = vec2(n) / vec2(gridSize()); // texels per cell
-  vec2 q = p * ratio - 0.5;
-  ivec2 c = ivec2(floor(q + 0.5));
-  vec2 u = q - vec2(c);
-  vec3 wx = spline(u.x);
-  vec3 wy = spline(u.y);
-  vec3 sx = splineSlope(u.x);
-  vec3 sy = splineSlope(u.y);
-  ivec3 xs = clamp(ivec3(c.x - 1, c.x, c.x + 1), ivec3(0), ivec3(n.x - 1));
-  ivec3 ys = clamp(ivec3(c.y - 1, c.y, c.y + 1), ivec3(0), ivec3(n.y - 1));
-  if (V.boundary == 0u) {
-    ivec2 w = wrapCell(c, n);
-    xs = ivec3(w.x == 0 ? n.x - 1 : w.x - 1, w.x, w.x == n.x - 1 ? 0 : w.x + 1);
-    ys = ivec3(w.y == 0 ? n.y - 1 : w.y - 1, w.y, w.y == n.y - 1 ? 0 : w.y + 1);
-  }
+  vec2 q = p * ratio - 0.5;                // in texels: texel i has its centre at i
+  ivec2 c = ivec2(floor(q));
+  float weight = 0.0;
+  vec2 slopeW = vec2(0.0);
   vec4 body = vec4(0.0);
+  vec2 slopeB = vec2(0.0);
   float aged = 0.0;
-  vec2 slope = vec2(0.0);
-  for (int j = 0; j < 3; j++) {
-    for (int i = 0; i < 3; i++) {
-      vec4 m = texelFetch(fanMap, ivec2(xs[i], ys[j]), 0);
-      body[int(m.z)] += wx[i] * wy[j] * m.x;
-      aged += wx[i] * wy[j] * m.y;
-      slope += vec2(sx[i] * wy[j], wx[i] * sy[j]) * m.x;
+  for (int j = -1; j <= 2; j++) {
+    for (int i = -1; i <= 2; i++) {
+      ivec2 k = c + ivec2(i, j);
+      vec2 d = q - vec2(k);
+      float near = 1.0 - dot(d, d) / (FAN_RADIUS * FAN_RADIUS);
+      if (near <= 0.0) continue;
+      float w = near * near * near;
+      vec2 dw = -6.0 * near * near * d / (FAN_RADIUS * FAN_RADIUS);
+      weight += w;
+      slopeW += dw;
+      // A texel outside a closed arena holds no plasm.
+      ivec2 t = k;
+      if (V.boundary == 0u) {
+        t = wrapCell(k, n);
+      } else if (any(lessThan(k, ivec2(0))) || any(greaterThanEqual(k, n))) {
+        continue;
+      }
+      vec4 m = texelFetch(fanMap, t, 0);
+      body[int(m.z)] += w * m.x;
+      aged += w * m.y;
+      slopeB += dw * m.x;
     }
   }
   float total = body.x + body.y + body.z + body.w;
-  if (!(total > 1e-6)) return f;
-  float t = clamp(aged / total, 0.0, 1.0);
-  if (t >= 1.0) return f;
-  // The sheet: all of it at the front, and less with the time scale of the sheet.
-  float sheet = exp(-t * FRONT_STEPS / FRONT_SHEET);
-  // The veins: thinner with the time scale of the veins, and gone when the main vein has formed.
-  float stay = exp(-t * FRONT_STEPS / FRONT_FADE) * (1.0 - smoothstep(0.6, 1.0, t));
+  if (!(total > 1e-6 * weight)) return f;
+  float age = clamp(aged / total, 0.0, 1.0);
+  if (age >= 1.0) return f;
+  // The plasm around p as light, as a share of the light from which the fan is full, and its slope per cell.
+  float light = max(V.exposure, 1e-12) / FRONT_FULL;
+  float around = total / weight * light;
+  vec2 up = (slopeB * weight - total * slopeW) / (weight * weight) * ratio;
+  // The skirt: all of it at the front, and less with the time scale of the sheet.
+  float sheet = exp(-age * FRONT_STEPS / FRONT_SHEET);
+  float u = clamp((around - FAN_LOW) / (FAN_HIGH - FAN_LOW), 0.0, 1.0);
+  float skirt = FRONT_SKIRT * sheet * u * u * (3.0 - 2.0 * u);
+  vec2 skirtSlope = FRONT_SKIRT * sheet * 6.0 * u * (1.0 - u) / (FAN_HIGH - FAN_LOW) * light * up;
+  // The veins: thinner with the time scale of the veins, and gone when the main vein has formed. Half the width of
+  // a vein, in lattice steps: full where the plasm around p is strong, and none at the outer end of the fan.
+  float stay = exp(-age * FRONT_STEPS / FRONT_FADE) * (1.0 - smoothstep(0.6, 1.0, age));
   vec4 e = fanVeins(p);
-  // Half the width of a vein, in lattice steps: full where the plasm around p is strong, and none far from it.
-  float wide = FRONT_VEIN * stay * clamp(total * V.exposure / FRONT_FULL, 0.0, 1.0);
+  float wide = FRONT_VEIN * stay * smoothstep(0.1, 0.45, around);
   float soft = max(0.75 * V.scale * e.w, 0.03); // the edge of a vein: a pixel wide, or wider
   float r = clamp((e.x - wide + soft) / (2.0 * soft), 0.0, 1.0);
-  // The veins come as the sheet goes, and they end at the tube of the model. A vein that is thinner than a pixel
+  // The veins come as the skirt goes, and they end at the tube of the model. A vein that is thinner than a pixel
   // shows the share of the pixel that it covers.
-  float seen = (1.0 - sheet) * (1.0 - under) * FRONT_RISE / V.exposure * min(1.0, wide / soft);
-  float h = FRONT_GAIN * total * sheet + seen * (1.0 - r * r * (3.0 - 2.0 * r));
-  vec2 g = FRONT_GAIN * sheet * slope * ratio - seen * 6.0 * r * (1.0 - r) / (2.0 * soft) * e.yz;
+  float seen = (1.0 - sheet) * (1.0 - under) * FRONT_RISE * min(1.0, wide / soft);
+  float h = (skirt + seen * (1.0 - r * r * (3.0 - 2.0 * r))) / max(V.exposure, 1e-12);
   f.v = body * (h / total);
   f.h = h;
-  f.g = g;
-  f.up = slope;
+  f.g = (skirtSlope - seen * 6.0 * r * (1.0 - r) / (2.0 * soft) * e.yz) / max(V.exposure, 1e-12);
+  f.up = up;
   return f;
 }
 
@@ -832,12 +846,10 @@ float fanOpen(vec2 p, vec2 up) {
 #endif
 #endif
 
-// How much of the ground the plasm `v` hides, 0 to 1: the film of the slime does not show through a tube (plasmCover
-// in render.wgsl).
+// How much of the ground the plasm `v` hides, 0 to 1 (plasmCover in render.wgsl): the film of the slime does not show
+// through a tube, in any style. The plasm hides its ground from the light 0.02 on, and all of it from 0.14 on.
 float plasmCover(vec4 v) {
-  float x = (v.x + v.y + v.z + v.w) * V.exposure;
-  if (V.style == 1u) return smoothstep(0.02, 0.14, x);
-  return 1.0 - exp(-FILM_HIDE * max(x, 0.0));
+  return smoothstep(0.02, 0.14, (v.x + v.y + v.z + v.w) * V.exposure);
 }
 #endif
 

@@ -79,28 +79,30 @@ counter needs no memory on WebGPU, but every pass that writes a stamp of the sli
    age of a texel is the age of its oldest front stamp among the cells with slime: the time since the front first
    reached the texel. So a tube that gets wider by a cell shows no new front beside it. A texel without slime has no
    front stamp and shows no fan.
-4. **Look B: a sheet, then fine veins** (the agent's pick; the owner chooses on the pictures). The sheet is the plasm
-   around a pixel, read from the map as a smooth surface, times 2.4, times e^(−age / 100 steps). The veins are the
-   walls between the cells of a pattern that is fixed in the grid, bent by soft noise. They come as the sheet goes,
-   they are thick near strong plasm and thinner outward, and they end at the tube of the model. The tube is drawn as
-   before: the picture hides no plasm of the model.
+4. **Look B: a sheet, then fine veins** (the agent's pick; the owner chooses on the pictures and in the app). The
+   render pass takes the plasm around a pixel from the texels of the map within 2 texels, each with a weight that
+   depends on its distance alone and ends without a step: a round, smooth hill at any zoom. The sheet is a thin
+   skirt around young plasm, with an outline in the middle of that hill, and it goes with e^(−age / 100 steps). The
+   veins are the walls between the cells of a pattern that is fixed in the grid, bent by soft noise. They come as
+   the skirt goes, they are thick near strong plasm and end at the outer end of the fan, and they end at the tube of
+   the model. The tube is drawn as before: the picture hides no plasm of the model.
 5. **The times.** The sheet: 100 steps, the 195 s of the source. The end of the veins: 1,500 steps, the 50 min of the
    source. Between them a vein gets thinner by the factor e in 350 steps. This number is a choice made on pictures:
    the front of the model runs ten times too fast, so 1,500 steps are 180 cells in Tokyo, and veins of the full
    width for all that time put a fringe on the whole young network.
-6. **The sheet stays on its side of a wall.** The sheet reaches up to 12 cells from its plasm, more than a wall is
+6. **The sheet stays on its side of a wall.** The fan reaches up to 16 cells from its plasm, more than a wall is
    thick. The render pass walks from the pixel toward the plasm, up the slope of the plasm, one cell at a time, and
-   shows no sheet where a wall lies on the way. The veins follow the same test.
+   shows no fan where a wall lies on the way.
 7. **The sheet is plasm.** It adds to the trail of its strain before the style draws it, and to the height and the
    slope of the gel. Its code is compiled in only for a frame that draws it, in pipelines of its own that also hold
    the film. The agents style and the scent view draw no fan. The switch Show growth front is on at the
    start, changes no run, and goes into a link like Show slime. A life time of 0 and the Jones model have no slime
    field, so they have no front stamp and no fan. A scene without growth draws no fan either: its agents start all
    over the ground, and the fan lay on the whole picture in its first steps (the e2e tests found this).
-8. **The plasm hides the film of the slime** (the owner, 2026-11-17). In the gel style the film ends where the gel
-   begins. In the other styles the plasm hides the share 1 − e^(−3 x) of the film, with x the light of the plasm.
-   Before, the glow added its light to the pale film, a thin gel showed the film through it, and the beads of the
-   film lay on the tubes.
+8. **The plasm hides the film of the slime** (the owner, 2026-11-17 and again 2026-11-18). In every style the plasm
+   hides its ground from the light 0.02 on, and all of it from 0.14 on, the levels at which the gel begins. So a dim
+   tube hides the film too. Before, the glow added its light to the pale film, a thin gel showed the film through
+   it, and the beads of the film lay on the tubes.
 9. **The gel reads its height as a quadratic B-spline** of the cells while a cell is a pixel wide or more, from four
    bilinear lookups in place of one (the owner's hint in `TODO.md`). The line at which the gel ends has no tooth for
    each cell. Zoomed out, the four lookups over the pixel stay.
@@ -128,6 +130,12 @@ Made on 2026-11-17 and 2026-11-18 on an M3 Pro, in headless Chromium. The comman
   stamp, which no step of the slime field saw, showed a fan: 71 tests of the trail, the tubes and the electrodes
   failed, and such a texel shows none now. In a scene without growth the fan lay on the whole picture in the first
   steps and hid the film (two e2e tests): the fan needs growth now (decision 7).
+- **Two faults that the owner found in the running app** (2026-11-18), both fixed. The first rule for the film hid
+  the share 1 − e^(−3 x) of it below plasm of the light x: a dim tube of the scene Three strains still showed a
+  third of the film and its beads, and the owner took the build for `main`. And the first sheet was a quadratic
+  B-spline of the map times 2.4: close to a young tip its outline lay at the far end of the reach of a texel and was
+  a block with straight edges, 8 cells wide. The pictures of the looks did not show it, because their zoom was too
+  small. Decisions 4 and 8 have the rules of now.
 - **A fault that only CI found.** The map of the front held 16-bit floats. A trail above 65,504 gave it a value that
   is no number, and on SwiftShader, the GPU of CI, the tube and the walls were black. On the M3 Pro the picture
   showed nothing of it, and both backends drew the same black, so the test of the two backends passed. The map holds

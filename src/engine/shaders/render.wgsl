@@ -772,7 +772,6 @@ const SLIME_FULL = 4095.0;  // the full amount of slime of a cell (slime.ts SLIM
 const SLIME_WAVES = 12.0;   // cells per step of the lattice of the waves of the film
 const SLIME_BEADS = 7.0;    // cells per step of the lattice of the beads
 const SLIME_RIPPLE = 0.16;  // how much the waves change the thickness of the film, as a share of it
-const FILM_HIDE = 3.0;      // how fast the plasm hides the film below it, per unit of its light (plasmCover)
 
 // The strength of the slime of a cell that holds the stamp `held`, 0 to 1. The age of a stamp is the steps that ran so
 // far plus 1 less the stamp, in unsigned integers as in the passes of the simulation (slime.wgsl). The strength is 1 at
@@ -1018,19 +1017,22 @@ fn slimed(bg: vec3f, p: vec2f) -> vec3f {
 // thinner, then the tubes of the model alone.
 //
 // Two steps. `frontMap` writes a coarse map, once for each state of the simulation: how much plasm a texel holds and
-// how old its ground is. The render pass reads the 3 × 3 texels around a pixel as a smooth surface and adds the sheet
-// to the trail there.
+// how old its ground is. The render pass takes the plasm around a pixel from the texels in reach, as a round and
+// smooth hill, and adds the fan to the trail there.
 
 const FRONT_LEVEL = 3u;      // the map of the front has texels of 2^3 = 8 cells per side
 const FRONT_STEPS = 1500.0;  // steps after the front in which the main vein appears: the fan ends there (50 min)
 const FRONT_SHEET = 100.0;   // steps in which the sheet gives its mass to the veins (195 s)
 const FRONT_CELLS = 6.5;     // cells per step of the lattice of the veins
 const FRONT_VEIN = 0.16;     // half the width of a full vein, in steps of that lattice
-const FRONT_FULL = 0.6;      // the plasm around a point, as light, from which a vein has its full width
+const FRONT_FULL = 0.6;      // the plasm around a point, as light, from which the fan is full
 const FRONT_RISE = 0.9;      // the plasm of a vein, as light
-const FRONT_GAIN = 2.4;      // the sheet in units of the mean trail of its texels
+const FRONT_SKIRT = 0.5;     // the plasm of the skirt at the front, as light: a thin sheet
 const FRONT_FADE = 350.0;    // steps in which the fine veins get thinner by the factor e
-const FRONT_REACH = 13;      // cells that the sheet reaches from its plasm, at most: 1.5 texels of the map and one more
+const FAN_RADIUS = 2.0;      // texels of the map from which a point takes the plasm around it
+const FAN_LOW = 0.25;        // the plasm around a point, as a share of FRONT_FULL, at which the skirt begins
+const FAN_HIGH = 0.7;        // and at which the skirt has its whole thickness
+const FRONT_REACH = 17;      // cells that the fan reaches from its plasm, at most: FAN_RADIUS texels and one more
 
 // The map of the front, one fragment per texel: (the mean of the summed trail over the cells of the texel; that mean
 // times the age of the ground, 0 at the front to 1 at FRONT_STEPS; the strain with the most trail; 1). The age of the
@@ -1114,62 +1116,79 @@ fn fanVeins(p: vec2f) -> vec4f {
   return vec4f(d2 - d1, (o2 / max(d2, 1e-6) - o1 / max(d1, 1e-6)) * scale, scale.x);
 }
 
-// The sheet of the growth front at p: a quadratic B-spline over the 3 × 3 texels of the map of the front around p
-// (filmAt() has the weights). At the front it is a whole sheet. Behind the front the sheet gets thinner with the
-// time scale of the sheet, and fine veins stay in it: thick near the plasm of the model, thinner outward, and
-// thinner with the age until the main vein has formed.
+// The fan of the growth front at p. The plasm around p is the mean of the texels of the map of the front within
+// FAN_RADIUS texels of p, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance
+// alone and ends without a step, so the plasm around a texel is a round, smooth hill at any zoom: the fan shows no
+// texel. The 4 × 4 texels around p hold every texel in reach.
+//
+// The sheet is a thin skirt around young plasm. Its outline is the line on which the plasm around p has a level in the
+// middle of its range (FAN_LOW to FAN_HIGH), not the far end of the reach of a texel. Behind the front the skirt goes
+// with the time scale of the sheet, and fine veins stay: thick near the plasm of the model, thinner outward, and
+// thinner with the age until the main vein has formed. `under`: how much of the ground the plasm of the model hides
+// at p.
 fn fanAt(p: vec2f, under: f32) -> Fan {
   var f: Fan;
   let s = size();
   let n = levelSize(FRONT_LEVEL);
   let ratio = vec2f(n) / vec2f(s); // texels per cell
-  let q = p * ratio - 0.5;
-  let c = vec2i(floor(q + 0.5));
-  let u = q - vec2f(c);
-  let wx = spline(u.x);
-  let wy = spline(u.y);
-  let sx = splineSlope(u.x);
-  let sy = splineSlope(u.y);
-  var xs = clamp(vec3i(c.x - 1, c.x, c.x + 1), vec3i(0), vec3i(n.x - 1));
-  var ys = clamp(vec3i(c.y - 1, c.y, c.y + 1), vec3i(0), vec3i(n.y - 1));
-  if (V.boundary == 0u) {
-    let w = wrapCell(c, n);
-    xs = vec3i(select(w.x - 1, n.x - 1, w.x == 0), w.x, select(w.x + 1, 0, w.x == n.x - 1));
-    ys = vec3i(select(w.y - 1, n.y - 1, w.y == 0), w.y, select(w.y + 1, 0, w.y == n.y - 1));
-  }
+  let q = p * ratio - 0.5;         // in texels: texel i has its centre at i
+  let c = vec2i(floor(q));
+  var weight = 0.0;
+  var slopeW = vec2f(0.0);
   var body = vec4f(0.0);
+  var slopeB = vec2f(0.0);
   var aged = 0.0;
-  var slope = vec2f(0.0);
-  for (var j = 0; j < 3; j++) {
-    for (var i = 0; i < 3; i++) {
-      let m = textureLoad(fanMap, vec2i(xs[i], ys[j]), 0);
-      body[u32(m.z)] += wx[i] * wy[j] * m.x;
-      aged += wx[i] * wy[j] * m.y;
-      slope += vec2f(sx[i] * wy[j], wx[i] * sy[j]) * m.x;
+  for (var j = -1; j <= 2; j++) {
+    for (var i = -1; i <= 2; i++) {
+      let k = c + vec2i(i, j);
+      let d = q - vec2f(k);
+      let near = 1.0 - dot(d, d) / (FAN_RADIUS * FAN_RADIUS);
+      if (near <= 0.0) { continue; }
+      let w = near * near * near;
+      let dw = -6.0 * near * near * d / (FAN_RADIUS * FAN_RADIUS);
+      weight += w;
+      slopeW += dw;
+      // A texel outside a closed arena holds no plasm.
+      var t = k;
+      if (V.boundary == 0u) {
+        t = wrapCell(k, n);
+      } else if (any(k < vec2i(0)) || any(k >= n)) {
+        continue;
+      }
+      let m = textureLoad(fanMap, t, 0);
+      body[u32(m.z)] += w * m.x;
+      aged += w * m.y;
+      slopeB += dw * m.x;
     }
   }
   let total = body.x + body.y + body.z + body.w;
-  if (!(total > 1e-6)) { return f; }
-  let t = clamp(aged / total, 0.0, 1.0);
-  if (t >= 1.0) { return f; }
-  // The sheet: all of it at the front, and less with the time scale of the sheet.
-  let sheet = exp(-t * FRONT_STEPS / FRONT_SHEET);
-  // The veins: thinner with the time scale of the veins, and gone when the main vein has formed.
-  let stay = exp(-t * FRONT_STEPS / FRONT_FADE) * (1.0 - smoothstep(0.6, 1.0, t));
+  if (!(total > 1e-6 * weight)) { return f; }
+  let age = clamp(aged / total, 0.0, 1.0);
+  if (age >= 1.0) { return f; }
+  // The plasm around p as light, as a share of the light from which the fan is full, and its slope per cell.
+  let light = max(V.exposure, 1e-12) / FRONT_FULL;
+  let around = total / weight * light;
+  let up = (slopeB * weight - total * slopeW) / (weight * weight) * ratio;
+  // The skirt: all of it at the front, and less with the time scale of the sheet.
+  let sheet = exp(-age * FRONT_STEPS / FRONT_SHEET);
+  let u = clamp((around - FAN_LOW) / (FAN_HIGH - FAN_LOW), 0.0, 1.0);
+  let skirt = FRONT_SKIRT * sheet * u * u * (3.0 - 2.0 * u);
+  let skirtSlope = FRONT_SKIRT * sheet * 6.0 * u * (1.0 - u) / (FAN_HIGH - FAN_LOW) * light * up;
+  // The veins: thinner with the time scale of the veins, and gone when the main vein has formed. Half the width of
+  // a vein, in lattice steps: full where the plasm around p is strong, and none at the outer end of the fan.
+  let stay = exp(-age * FRONT_STEPS / FRONT_FADE) * (1.0 - smoothstep(0.6, 1.0, age));
   let e = fanVeins(p);
-  // Half the width of a vein, in lattice steps: full where the plasm around p is strong, and none far from it.
-  let wide = FRONT_VEIN * stay * clamp(total * V.exposure / FRONT_FULL, 0.0, 1.0);
+  let wide = FRONT_VEIN * stay * smoothstep(0.1, 0.45, around);
   let soft = max(0.75 * V.scale * e.w, 0.03); // the edge of a vein: a pixel wide, or wider
   let r = clamp((e.x - wide + soft) / (2.0 * soft), 0.0, 1.0);
-  // The veins come as the sheet goes, and they end at the tube of the model (`under`: how much of the ground the
-  // plasm of the model hides at p). A vein that is thinner than a pixel shows the share of the pixel that it covers.
-  let seen = (1.0 - sheet) * (1.0 - under) * FRONT_RISE / V.exposure * min(1.0, wide / soft);
-  let h = FRONT_GAIN * total * sheet + seen * (1.0 - r * r * (3.0 - 2.0 * r));
-  let g = FRONT_GAIN * sheet * slope * ratio - seen * 6.0 * r * (1.0 - r) / (2.0 * soft) * e.yz;
+  // The veins come as the skirt goes, and they end at the tube of the model. A vein that is thinner than a pixel
+  // shows the share of the pixel that it covers.
+  let seen = (1.0 - sheet) * (1.0 - under) * FRONT_RISE * min(1.0, wide / soft);
+  let h = (skirt + seen * (1.0 - r * r * (3.0 - 2.0 * r))) / max(V.exposure, 1e-12);
   f.v = body * (h / total);
   f.h = h;
-  f.g = g;
-  f.up = slope;
+  f.g = (skirtSlope - seen * 6.0 * r * (1.0 - r) / (2.0 * soft) * e.yz) / max(V.exposure, 1e-12);
+  f.up = up;
   return f;
 }
 
@@ -1203,13 +1222,12 @@ fn wallAt(c: vec2i) -> f32 {
   return (f32(shape[shapeIndex(c)] & 0xffu) / 255.0 - 0.5) * 2.0 * SHAPE_RANGE;
 }
 
-// How much of the ground the plasm `v` hides, 0 to 1: the film of the slime does not show through a tube. In the gel
-// style this is the body of the gel (see gel): the gel ends at a line, and the film ends there too. In the other
-// styles the plasm hides the ground as its light or its ink gets strong.
+// How much of the ground the plasm `v` hides, 0 to 1: the film of the slime does not show through a tube, in any
+// style. The plasm hides its ground from the light 0.02 on, and all of it from 0.14 on: the levels at which the gel
+// begins (see gel). So a dim tube hides the film too, and the film comes back only where the light of a tube fades
+// out at its edge.
 fn plasmCover(v: vec4f) -> f32 {
-  let x = (v.x + v.y + v.z + v.w) * V.exposure;
-  if (V.style == 1u) { return smoothstep(0.02, 0.14, x); }
-  return 1.0 - exp(-FILM_HIDE * max(x, 0.0));
+  return smoothstep(0.02, 0.14, (v.x + v.y + v.z + v.w) * V.exposure);
 }
 
 // The arena at grid position p: the styled trail on its substrate, then light and walls on top.

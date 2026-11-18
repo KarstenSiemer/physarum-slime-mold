@@ -350,9 +350,10 @@ the arrows.
     patterns repeat with a periodic grid. Detail that is smaller than a
     pixel fades out from 1 cell per pixel on and is gone at 1.5.
 
-  The plasm lies on the film (ADR 0060; `plasmCover`): the film does not show through a tube. In the gel style the
-  film ends where the gel begins. In the glow, paper and agents styles the plasm hides the share 1 − e^(−3 x) of the
-  film, with x the light of the plasm: its summed trail above the black level times the exposure.
+  The plasm lies on the film (ADR 0060; `plasmCover`): the film does not show through a tube, in any style. The
+  plasm hides its ground from the light 0.02 on, and all of it from 0.14 on, the levels at which the gel begins. The
+  light of the plasm is its summed trail above the black level times the exposure. So a dim tube hides the film too,
+  and the film comes back only where the light of a tube fades out at its edge.
 
   The film has one colour for all strains. The scent view draws no film. The switch changes nothing in the
   simulation, goes into the link like the style and stays as it is when a scene loads. Without the film the render
@@ -370,16 +371,22 @@ the arrows.
     its ground: the age of the oldest front stamp among its cells with slime, as a share of 1,500 steps. So the age
     is the time since the front first reached the texel. Slime without a front stamp is old ground, and so is a
     texel without slime: trail that no step of the slime field saw shows no fan.
-  - **The sheet** (`fanAt`): the render pass reads the 3 × 3 texels around a pixel as the spline of the film. The
-    plasm of the texels, weighted by their age, gives the age t at the pixel. The sheet is 2.4 times the plasm around
-    the pixel times e^(−age / 100 steps): whole at the front and gone with the time scale of 195 s, in which a spot
-    of the organism gives its mass to the veins. Each texel gives its plasm to the colour of its strain.
+  - **The plasm around a pixel** (`fanAt`): the render pass takes the mean of the texels of the map within 2 texels
+    of the pixel, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance alone
+    and ends without a step, so the plasm around a texel is a round, smooth hill at any zoom, and the fan shows no
+    texel. The plasm of the texels, weighted by their age, gives the age at the pixel. Each texel gives its plasm to
+    the colour of its strain.
+  - **The sheet**: a thin skirt around young plasm, with the light 0.5 at most. Its outline is the line on which the
+    plasm around a pixel, as light, passes 0.15 (a quarter of 0.6), and it has its whole thickness from 0.42 on. So
+    the outline lies in the middle of the hill and not at the far end of the reach of a texel, where it would show
+    the square of a texel. The skirt goes with e^(−age / 100 steps): whole at the front and gone with the time scale
+    of 195 s, in which a spot of the organism gives its mass to the veins.
   - **The veins** (`fanVeins`): the walls between the cells of a pattern that is fixed in the grid, one cell for
-    about 6.5 grid cells, bent by soft noise. They come as the sheet goes. A vein is thick near strong plasm and
-    thinner outward, it gets thinner by the factor e in 350 steps, and it is gone 1,500 steps after the front, the
-    50 minutes in which the main vein of the organism appears. A vein ends at the tube of the model, and one that is
-    thinner than a pixel shows the share of the pixel that it covers.
-  - **Walls** (`fanOpen`): the sheet is wider than a wall is thick. So the pass walks from the pixel toward the plasm,
+    about 6.5 grid cells, bent by soft noise. They come as the skirt goes. A vein is thick near strong plasm and
+    ends at the outer end of the fan, it gets thinner by the factor e in 350 steps, and it is gone 1,500 steps after
+    the front, the 50 minutes in which the main vein of the organism appears. A vein ends at the tube of the model,
+    and one that is thinner than a pixel shows the share of the pixel that it covers.
+  - **Walls** (`fanOpen`): the fan reaches up to 16 cells from its plasm, more than a wall is thick. So the pass walks from the pixel toward the plasm,
     up the slope of the plasm, cell by cell, and the sheet shows nothing where a wall lies on the way.
   - The sheet is more plasm: it adds to the trail of its strain before the style draws it. In the gel style it adds
     to the height and to the slope of the gel. The agents style and the scent view draw no fan. The code of the fan

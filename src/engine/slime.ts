@@ -35,11 +35,12 @@ export const SLIME_FULL = 4095;
 export const SLIME_RIM = 4;
 
 /**
- * How fast the plasm hides the film of the slime below it (ADR 0060): a trail with the light x, its sum above the
- * black level times the exposure, hides the share 1 − e^(−FILM_HIDE · x) of the film in the glow, paper and agents
- * styles. In the gel style the film ends where the gel begins. `FILM_HIDE` in render.wgsl and render.frag.
+ * The light of the plasm from which it hides the film of the slime below it, and from which it hides all of it
+ * (ADR 0060): the levels at which the gel begins, in every style. The light of a trail is its sum above the black
+ * level times the exposure. Between the two levels the hidden share rises as smoothstep does. `plasmCover` in
+ * render.wgsl and render.frag.
  */
-export const FILM_HIDE = 3;
+export const FILM_HIDES = [0.02, 0.14] as const;
 
 /**
  * The trail above the low level of a strain, in low levels, at which the plasm of a cell is full (ADR 0057): the full

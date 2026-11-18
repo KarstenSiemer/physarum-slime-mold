@@ -18,7 +18,7 @@ import { BACKGROUND, LATTICE_COPIES, SLIME_LOOK, trailLevel } from './render';
 import { levelSize } from './scent';
 import renderWgsl from './shaders/render.wgsl?raw';
 import { equilibrium } from './sizing';
-import { FILM_HIDE, NO_STAMP, SLIME_FULL, SLIME_RIM, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
+import { FILM_HIDES, NO_STAMP, SLIME_FULL, SLIME_RIM, slimeShown, slimeSteps, stampOf, STEPS_PER_HOUR } from './slime';
 import {
   amountLeft,
   amountStep,
@@ -2303,7 +2303,8 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
     );
 
     // Decision 8: the film lies on the ground. A flake of food covers 95 % of its ground, a wall, an electrode and a
-    // thick trail all of it, and the light lies on the ground with the film. A thin trail hides a share of the film.
+    // trail that the picture shows all of it, and the light lies on the ground with the film. A faint trail hides a
+    // share of the film.
     it.each(['glow', 'gel', 'paper'] as const)(
       'draws the food, the walls, the light, the electrodes and the trail on the film (%s)',
       async (style) => {
@@ -2332,6 +2333,9 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         const trail = new Float32Array(PW * PH * 4);
         for (let y = 30; y < 44; y++)
           for (let x = 20; x < 48; x++) trail[(y * PW + x) * 4] = (x < 34 ? 0.5 : 40) / exposure;
+        // A faint trail in a second block, with a light between the two levels at which the plasm hides the film.
+        const FAINT = 0.08;
+        for (let y = 21; y < 28; y++) for (let x = 22; x < 40; x++) trail[(y * PW + x) * 4] = FAINT / exposure;
         sim.writeTrail(trail);
         const held = await frame(sim, s, CLOSE, BIG);
         expect(await mapsApart(sim, s, held)).toBeLessThanOrEqual(1);
@@ -2371,22 +2375,27 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         const pole = both(54, 12);
         expect(off(pole.plain, bytes(bg)), 'electrode').toBeGreaterThan(40);
         expect(off(pole.on, pole.plain), 'electrode').toBeLessThanOrEqual(TWO);
-        // The trail lies on the film (ADR 0060): the plasm hides the film below it, by the share 1 − e^(−3 x) for the
-        // light x of the plasm, 0.5 here. On the ground that is left, glow adds light to what the ground leaves dark,
-        // and the ink of paper takes a share of the ground away.
-        const thin = both(26, 37);
-        expect(off(thin.plain, bytes(bg)), 'thin trail').toBeGreaterThan(20);
-        const hidden = 1 - Math.exp(-FILM_HIDE * 0.5);
-        const under = thin.ground.map((g, k) => g + ((bg[k] ?? 0) - g) * hidden) as Rgb;
+        // The trail lies on the film (ADR 0060): the plasm hides the film below it. A faint trail hides a share of
+        // it, smoothstep between the two levels of FILM_HIDES for its light: a half here. On the ground that is left,
+        // glow adds light to what the ground leaves dark, and the ink of paper takes a share of the ground away.
+        const faint = both(30, 24);
+        expect(off(faint.plain, bytes(bg)), 'faint trail').toBeGreaterThan(style === 'gel' ? 2 : 4);
+        const hidden = smoothstep(FILM_HIDES[0], FILM_HIDES[1], FAINT);
+        expect(hidden).toBeCloseTo(0.5, 6);
+        const under = faint.ground.map((g, k) => g + ((bg[k] ?? 0) - g) * hidden) as Rgb;
         if (style === 'glow') {
-          const lightOf = (k: number) => ((thin.linear[k] ?? 0) - (bg[k] ?? 0)) / (1 - (bg[k] ?? 0));
+          const lightOf = (k: number) => ((faint.linear[k] ?? 0) - (bg[k] ?? 0)) / (1 - (bg[k] ?? 0));
           const want = under.map((g, k) => g + (1 - g) * lightOf(k)) as Rgb;
-          expect(off(thin.on, bytes(want)), 'thin trail').toBeLessThanOrEqual(TWO);
+          expect(off(faint.on, bytes(want)), 'faint trail').toBeLessThanOrEqual(TWO);
         }
         if (style === 'paper') {
-          const want = under.map((g, k) => (g * (thin.linear[k] ?? 0)) / (bg[k] ?? 1)) as Rgb;
-          expect(off(thin.on, bytes(want)), 'thin trail').toBeLessThanOrEqual(TWO);
+          const want = under.map((g, k) => (g * (faint.linear[k] ?? 0)) / (bg[k] ?? 1)) as Rgb;
+          expect(off(faint.on, bytes(want)), 'faint trail').toBeLessThanOrEqual(TWO);
         }
+        // A thin trail that the picture shows hides all of the film below it, in every style.
+        const thin = both(26, 37);
+        expect(off(thin.plain, bytes(bg)), 'thin trail').toBeGreaterThan(20);
+        expect(off(thin.on, thin.plain), 'thin trail').toBeLessThanOrEqual(TWO);
         // A thick trail hides the ground in every style: the glow is white, the gel is opaque, the ink is black.
         const thick = both(41, 37);
         expect(off(thick.on, thick.plain), 'thick trail').toBeLessThanOrEqual(2);
@@ -2489,9 +2498,13 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       );
       expect(slimed.length).toBeGreaterThan(cases.length / 3);
       // Both runs dither alike, so every difference is one of the picture. The plasm hides the film below it (ADR
-      // 0060): a close view below a strong trail shows little of the film, 1 of 255 in 8 of the 84 frames.
-      expect(slimed.filter(([, d]) => d < 1)).toEqual([]);
-      expect(slimed.filter(([, d]) => d < 2).length).toBeLessThan(slimed.length / 5);
+      // 0060), and these scenes are full of trail: a close view of the glow and of paper lies below plasm and shows
+      // no film. The agents style draws dots with ground between them, so each of its frames shows the film, and so
+      // do most of the others.
+      const agents = slimed.filter(([name]) => name.includes('agents'));
+      expect(agents.length).toBeGreaterThan(slimed.length / 4);
+      expect(agents.filter(([, d]) => d < 2)).toEqual([]);
+      expect(slimed.filter(([, d]) => d >= 2).length).toBeGreaterThan(slimed.length / 2);
       const jonesFrames = cases.flatMap((c, i) => (c.settings.model === 'jones' ? [differs[i] ?? 0] : []));
       expect(Math.max(0, ...jonesFrames)).toBe(0);
     }, 240_000);
