@@ -5455,9 +5455,9 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'FP2 front: the chance of a paid claim leaves out the sum P of the sink rates',
     STAGE4_SIM,
-    'if (rand() >= Math.min(1, (B * this.sinkRate[c]!) / P)) continue;',
-    'if (rand() >= Math.min(1, B * this.sinkRate[c]!)) continue;',
-    'claim one with the chance',
+    "front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B / P;",
+    "front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B;",
+    'claim one with its chance',
     STAGE4_SPEC,
   ],
   [
@@ -5505,7 +5505,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     STAGE4_SIM,
     '      if (!this.roomFor(c, this.occNext)) continue;\n      able.push(i);',
     '      able.push(i);',
-    'claim one with the chance',
+    'claim one with its chance',
     STAGE4_SPEC,
   ],
   [
@@ -5513,7 +5513,7 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     STAGE4_SIM,
     '      if (front.rim && !this.atRim(c)) continue;\n      atFront++;',
     '      atFront++;',
-    'claim one with the chance',
+    'claim one with its chance',
     STAGE4_SPEC,
   ],
   [
@@ -5522,6 +5522,30 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'for (const c of this.payable) {\n      seedFor(c, MARK, k, this.p.seed);',
     'for (let c = 0; c < this.cells; c++) {\n      seedFor(c, MARK, k, this.p.seed);',
     'marks in the second form a payable cell',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP11 front: the filled chances keep λ = B / P when a chance reaches 1',
+    STAGE4_SIM,
+    '    lambda = (target - full.length) / rest;',
+    '    lambda = target / P;',
+    'fills the chances',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP12 front: the filled chances take the scale of the plain chances',
+    STAGE4_SIM,
+    "front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B / P;",
+    "front.paidBy === 'fill' ? B / P : B / P;",
+    'claim one with its chance',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP13 front: with the integer sums a sink takes its share with its own rate, not with the rate that R counted',
+    STAGE4_SIM,
+    'const r = fixed ? Math.round(this.sinkRate[c]! * FIXED) / FIXED : this.sinkRate[c]!;',
+    'const r = this.sinkRate[c]!;',
+    'the sinks take exactly what the sources give',
     STAGE4_SPEC,
   ],
 ];

@@ -25,10 +25,13 @@ const RULES = {
 };
 const gpuRules = (more: Record<string, string> = {}): Front => frontFrom({ ...RULES, ...GPU_FORMS, ...more });
 
-/** A dish of 60 cells with one food in the middle: small and fast. `slimeLeft`: slime on the open cells left of x 30. */
-function smallDish(front: Front, seed = 1, slimeLeft = false) {
+/**
+ * A dish of 60 cells with one food in the middle: small and fast. `slime`: on the open cells left of x 30 ('left'), or
+ * on every open cell ('all').
+ */
+function smallDish(front: Front, seed = 1, slime: 'left' | 'all' | 'none' = 'none') {
   const layout = dish(60, [[30, 30, 3]]);
-  if (slimeLeft) layout.slime = layout.open.map((o, c) => (o && c % 60 < 30 ? 1 : 0));
+  if (slime !== 'none') layout.slime = layout.open.map((o, c) => (o && (slime === 'all' || c % 60 < 30) ? 1 : 0));
   return new Sim(layout, params({ seed, startStep: 18000, front }));
 }
 
@@ -103,7 +106,7 @@ describe('the CPU prototype of stage 4', () => {
     // A run with slime on one half of a dish: its rim lies near the edge of the slime, and both forms give the same
     // run.
     const run = (fresh: string) => {
-      const s = smallDish(gpuRules({ fresh }), 3, true);
+      const s = smallDish(gpuRules({ fresh }), 3, 'left');
       for (let j = 0; j < 45; j++) s.advance();
       return `${Array.from(s.occ).join('')} ${Array.from(s.sinkRate).join(',')}`;
     };
@@ -142,54 +145,61 @@ describe('the CPU prototype of stage 4', () => {
     expect(share(-3, high, 2)).toBe(0);
   });
 
-  it('lets each agent of the front that can claim a child claim one with the chance min(1, B · r / P) (ADR 0067)', () => {
-    const sim = smallDish(gpuRules(), 7);
-    const { w, h } = sim;
-    const { open } = sim.layout;
-    // Before the paid births of a growth step: the agents of the front after the moves, at the rim and no parent of
-    // Jones' rule in this step, and those of them with a free cell of the territory beside them.
-    let [P, front, chances] = [NaN, 0, 0];
-    sim.onPaid = () => {
-      const able: number[] = [];
-      front = 0;
-      for (let i = 0; i < sim.cap; i++) {
-        if (!sim.alive[i] || sim.want[i]! >= 0) continue;
-        const c = sim.cellOf(sim.ax[i]!, sim.ay[i]!);
-        if (sim.sinkRate[c]! <= 0 || sim.D[c]! < FLOW.half) continue;
-        const [x, y] = [c % w, Math.floor(c / w)];
-        let [rim, room] = [false, false];
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const [xx, yy] = [x + dx, y + dy];
-            if ((!dx && !dy) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-            const t = yy * w + xx;
-            if (!open[t] || sim.occNext[t]) continue;
-            if (sim.B[t]! < FLOW.bodyLow) rim = true;
-            if (sim.D[t]! >= FLOW.half && sim.territory[t]) room = true;
-          }
-        if (!rim) continue;
-        front++;
-        if (room) able.push(sim.sinkRate[c]!);
+  it.each(['chance', 'fill'])(
+    'lets each agent of the front that can claim a child claim one with its chance, paidBy=%s (ADR 0067)',
+    (paidBy) => {
+      const sim = smallDish(gpuRules({ paidBy }), 7);
+      const { w, h } = sim;
+      const { open } = sim.layout;
+      // Before the paid births of a growth step: the agents of the front after the moves, at the rim and no parent of
+      // Jones' rule in this step, and those of them with a free cell of the territory beside them. The scale λ of the
+      // chances min(1, λ · r): B / P, or with 'fill' the one that lets them add up to min(B, these agents).
+      let [P, front, chances, lambda] = [NaN, 0, 0, 0];
+      sim.onPaid = () => {
+        const able: number[] = [];
+        front = 0;
+        for (let i = 0; i < sim.cap; i++) {
+          if (!sim.alive[i] || sim.want[i]! >= 0) continue;
+          const c = sim.cellOf(sim.ax[i]!, sim.ay[i]!);
+          if (sim.sinkRate[c]! <= 0 || sim.D[c]! < FLOW.half) continue;
+          const [x, y] = [c % w, Math.floor(c / w)];
+          let [rim, room] = [false, false];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const [xx, yy] = [x + dx, y + dy];
+              if ((!dx && !dy) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+              const t = yy * w + xx;
+              if (!open[t] || sim.occNext[t]) continue;
+              if (sim.B[t]! < FLOW.bodyLow) rim = true;
+              if (sim.D[t]! >= FLOW.half && sim.territory[t]) room = true;
+            }
+          if (!rim) continue;
+          front++;
+          if (room) able.push(sim.sinkRate[c]!);
+        }
+        P = able.reduce((s, r) => s + Math.round(r * 2 ** 16), 0) / 2 ** 16;
+        const B = sim.budget;
+        lambda = paidBy === 'fill' ? fillScale(able, Math.min(B, able.length), true) : B / P;
+        chances = P > 0 && B > 0 ? able.reduce((s, r) => s + Math.min(1, lambda * r), 0) : 0;
+      };
+      let [steps, claims, expected] = [0, 0, 0];
+      for (let j = 0; j < 180; j++) {
+        P = NaN;
+        sim.advance();
+        if (Number.isNaN(P)) continue;
+        expect(sim.sinkPayable).toBe(P);
+        expect(sim.frontAgents).toBe(front);
+        if (P > 0) expect(sim.paidScale).toBe(lambda);
+        claims += sim.paidClaims;
+        expected += chances;
+        if (P > 0) steps++;
       }
-      P = able.reduce((s, r) => s + Math.round(r * 2 ** 16), 0) / 2 ** 16;
-      chances = P > 0 && sim.budget > 0 ? able.reduce((s, r) => s + Math.min(1, (sim.budget * r) / P), 0) : 0;
-    };
-    let [steps, claims, expected] = [0, 0, 0];
-    for (let j = 0; j < 180; j++) {
-      P = NaN;
-      sim.advance();
-      if (Number.isNaN(P)) continue;
-      expect(sim.sinkPayable).toBe(P);
-      expect(sim.frontAgents).toBe(front);
-      claims += sim.paidClaims;
-      expected += chances;
-      if (P > 0) steps++;
-    }
-    // The claims follow the chances: within three times the spread of a sum of draws.
-    expect(steps).toBeGreaterThan(20);
-    expect(expected).toBeGreaterThan(20);
-    expect(Math.abs(claims - expected)).toBeLessThan(3 * Math.sqrt(expected) + 1);
-  });
+      // The claims follow the chances: within three times the spread of a sum of draws.
+      expect(steps).toBeGreaterThan(20);
+      expect(expected).toBeGreaterThan(20);
+      expect(Math.abs(claims - expected)).toBeLessThan(3 * Math.sqrt(expected) + 1);
+    },
+  );
 
   it('fills the chances min(1, λ · r) up to the budget or the number of agents (ADR 0067)', () => {
     const chances = (rates: number[], target: number, fixed = false) => {
@@ -289,6 +299,25 @@ describe('the CPU prototype of stage 4', () => {
       if (sim.payable.length > 0) seen++;
     }
     expect(seen).toBeGreaterThan(5);
+  });
+
+  it('lets the sinks take exactly what the sources give, also with the integer sums on slime (ADR 0067)', () => {
+    // With slime everywhere every sink has the weight 0.025, and its rate counts as few steps of 2^-16: a sink that took
+    // its share with its own rate would miss S by the rounding of the sum.
+    const S = 2 * 8;
+    let active = 0;
+    for (const sums of ['fixed', 'float']) {
+      const sim = smallDish(gpuRules({ sums }), 8, 'all');
+      for (let j = 0; j < 120; j++) {
+        sim.advance();
+        if (sim.frontTotal <= 0) continue;
+        let given = 0;
+        for (const v of sim.extra) given += v;
+        expect(Math.abs(given)).toBeLessThan(1e-6 * S);
+        active++;
+      }
+    }
+    expect(active).toBeGreaterThan(100);
   });
 
   it('starts the territory on every open cell within 3 cells of a start agent with start=agents (ADR 0067)', () => {

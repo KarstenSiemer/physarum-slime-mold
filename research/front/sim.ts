@@ -226,7 +226,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
  * stays the disc: a square around each start agent (`start` 'agents') keeps every agent away from the edge of the
  * territory, where the sinks lie.
  */
-export const GPU_FORMS = { paidBy: 'chance', fresh: 'box', sums: 'fixed' } as const;
+export const GPU_FORMS = { paidBy: 'fill', fresh: 'box', sums: 'fixed' } as const;
 
 /**
  * The scale λ of `paidBy` 'fill' (ADR 0067): the chances min(1, λ · r) of the sink rates `rates` add up to `target`.
@@ -391,6 +391,8 @@ export class Sim {
   paidClaims = 0;
   /** The agents of the front in the last growth step, the most that the budget may hold (`paidBy` 'chance'). */
   frontAgents = 0;
+  /** The scale λ of the chances of the last growth step (`paidBy` 'chance' or 'fill'). */
+  paidScale = 0;
   /** The Chebyshev distance of each cell to ground without slime, at most 255 (with `reach`). */
   private readonly toFresh: Uint8Array;
   /** 1 for a cell of the territory of the colony (`speed`). */
@@ -996,6 +998,7 @@ export class Sim {
       }
     this.paidBirths += this.paidClaims;
     this.frontAgents = atFront;
+    this.paidScale = lambda;
     this.budget = Math.min(B - this.paidClaims, atFront);
   }
 
@@ -1450,7 +1453,15 @@ export class Sim {
     if (sources === 0 && front.colony) for (let c = 0; c < cells; c++) if (G[c]! > 0) sources++;
     if (sources === 0) return;
     const S = front.norm * this.p.flow;
-    for (let c = 0; c < cells; c++) if (G[c]! > 0) this.extra[c]! -= (S * this.sinkRate[c]!) / total;
+    // With `sums` 'fixed' a sink takes its share with the rate that the sum counted, in steps of 1 / FIXED: so the sinks
+    // take exactly the S that the sources give. With its own rate they would miss S by the rounding of the sum, and the
+    // pressure of a network with a sink more than its sources drifts from the ground beside it (ADR 0067).
+    const fixed = front.sums === 'fixed';
+    for (let c = 0; c < cells; c++) {
+      if (G[c]! <= 0) continue;
+      const r = fixed ? Math.round(this.sinkRate[c]! * FIXED) / FIXED : this.sinkRate[c]!;
+      this.extra[c]! -= (S * r) / total;
+    }
     if (portList.length > 0) for (const c of portList) this.extra[c]! += S / sources;
     else for (let c = 0; c < cells; c++) if (G[c]! > 0) this.extra[c]! += S / sources;
     this.frontActive = true;
