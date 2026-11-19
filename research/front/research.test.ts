@@ -290,29 +290,33 @@ describe('the CPU prototype of stage 4', () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  it('takes the paid claims off the budget, which never exceeds the front, and pays the flux in births (ADR 0067)', () => {
-    const sim = smallDish(gpuRules(), 4);
-    const inflow = (2 * 8) / 20;
-    let [claims, paid] = [0, 0];
-    for (let j = 0; j < 180; j++) {
-      // Once, a budget far above the number of agents of the front before a growth step: that step must cut it.
-      if (j === 150) sim.budget = 1000;
-      const start = sim.budget;
-      const growth = sim.step % 3 === 0;
-      sim.advance();
-      const gain = sim.frontTotal > 0 ? inflow : 0;
-      const after = growth ? Math.min(start - sim.paidClaims, sim.frontAgents) + gain : start + gain;
-      expect(sim.budget).toBeCloseTo(after, 9);
-      if (j === 150) expect(sim.budget).toBeLessThan(sim.frontAgents + 1);
-      if (j >= 150) continue;
-      if (growth) claims += sim.paidClaims;
-      paid += gain;
-    }
-    // The paid claims of the first 150 steps match the flux that the sinks took, within the budget that is left.
-    expect(paid).toBeGreaterThan(60);
-    expect(claims).toBeGreaterThan(0.6 * paid);
-    expect(claims).toBeLessThan(1.2 * paid);
-  });
+  it.each(['rank', 'fill'])(
+    'takes the paid claims off the budget, which never exceeds the front, and pays the flux in births, paidBy=%s (ADR 0067)',
+    (paidBy) => {
+      const sim = smallDish(gpuRules({ paidBy }), 4);
+      const inflow = (2 * 8) / 20;
+      let [claims, paid] = [0, 0];
+      for (let j = 0; j < 180; j++) {
+        // Once, a budget far above the number of agents of the front before a growth step: that step must cut it.
+        if (j === 150) sim.budget = 1000;
+        const start = sim.budget;
+        // As with the order, a budget below 1 pays nothing with 'rank', and the growth step keeps it.
+        const growth = sim.step % 3 === 0 && (paidBy !== 'rank' || start >= 1);
+        sim.advance();
+        const gain = sim.frontTotal > 0 ? inflow : 0;
+        const after = growth ? Math.min(start - sim.paidClaims, sim.frontAgents) + gain : start + gain;
+        expect(sim.budget).toBeCloseTo(after, 9);
+        if (j === 150) expect(sim.budget).toBeLessThan(sim.frontAgents + 1);
+        if (j >= 150) continue;
+        if (growth) claims += sim.paidClaims;
+        paid += gain;
+      }
+      // The paid claims of the first 150 steps match the flux that the sinks took, within the budget that is left.
+      expect(paid).toBeGreaterThan(60);
+      expect(claims).toBeGreaterThan(0.6 * paid);
+      expect(claims).toBeLessThan(1.2 * paid);
+    },
+  );
 
   it('sums the sink rates in steps of 2^-16 as integers (ADR 0067)', () => {
     const sim = smallDish(gpuRules({ paidBy: 'ahead' }), 5);

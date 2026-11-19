@@ -5564,6 +5564,14 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'with the least keys',
     STAGE4_SPEC,
   ],
+  [
+    'FP16 front: the claims of the rank do not lower the budget',
+    STAGE4_SIM,
+    'this.budget = Math.min(this.budget - this.paidClaims, atFront);',
+    'this.budget = Math.min(this.budget, atFront);',
+    'paidBy=rank',
+    STAGE4_SPEC,
+  ],
 ];
 
 const only = process.argv.slice(2);

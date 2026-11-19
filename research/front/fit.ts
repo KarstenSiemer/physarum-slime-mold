@@ -14,14 +14,14 @@ import { PRESETS } from '../../src/model/presets.ts';
 import { BACKENDS, CANVASES, MEMORY } from '../electrode/fit.ts';
 
 /**
- * The bytes per cell of the design of ADR 0067, once and per strain. Both backends: the territory and the marks, two
- * copies of 1 B, and the owner of each cell, 1 B. WebGPU: the sink rate of each strain, 4 B, updated in place.
- * WebGL2: the sink rate in two targets of 4 B, and the pyramid of its sums over squares of 4 × 4 cells, 16 B per
- * square and level: 16 / 15 B per cell.
+ * The bytes of the design of ADR 0067 per cell, once and per strain, and per agent. Both backends: the territory, two
+ * copies of 1 B, and the owner of each cell, 1 B; the key of the order of each agent, 4 B. WebGPU: the sink rate of each
+ * strain, 4 B, updated in place. WebGL2: the sink rate in two targets of 4 B, and the pyramid of its sums over squares
+ * of 4 × 4 cells, 16 B per square and level: 16 / 15 B per cell.
  */
 export const FRONT_BYTES = {
-  WebGPU: { once: 3, perStrain: 4 },
-  WebGL2: { once: 3, perStrain: 8 + 16 / 15 },
+  WebGPU: { once: 3, perStrain: 4, perAgent: 4 },
+  WebGL2: { once: 3, perStrain: 8 + 16 / 15, perAgent: 4 },
 } as const;
 
 const gridOf = (s: Settings) => (s.lattice ? `lattice ${s.lattice.join(' × ')}` : String(s.resolution));
@@ -59,8 +59,10 @@ export async function frontFit(): Promise<{ cases: number; changes: string[]; sc
             cases++;
             const s = scene.settings();
             backend.bytesPerCell = limits.bytesPerCell;
+            backend.bytesPerAgent = limits.bytesPerAgent;
             const before = gridOf(engine.fit(s));
             backend.bytesPerCell = limits.bytesPerCell + front.once + front.perStrain * flowStrains(s);
+            backend.bytesPerAgent = limits.bytesPerAgent + front.perAgent;
             const now = gridOf(engine.fit(s));
             const hint = memory === undefined ? 'no memory hint' : `a memory hint of ${String(memory)} GB`;
             if (before !== now)

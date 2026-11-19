@@ -124,13 +124,13 @@ export interface Front {
   slimeWeight: number;
   /**
    * How the births that the flux pays find their parents (ADR 0067). 'order': one random order over all agents of the
-   * front, with odds in the weight of each (ADR 0065). 'chance', the form of a GPU: each agent of the front that could
-   * claim a child claims one with the chance min(1, B · r / P), B the budget, r its sink rate and P the sum of the sink
-   * rates of these agents (paidByChance()). 'fill': the chance min(1, λ · r), λ such that the chances add up to the
-   * smaller of B and the number of these agents, as the order gives (fillScale()). 'ahead', the second try: after the
-   * step before a growth step the cells whose agent could claim a child get a mark with the chance of 'chance', and in
-   * the growth step the agent of the front on a marked cell claims a child; the budget never exceeds the number of
-   * sinks. Each claim lowers the budget by 1.
+   * front, with odds in the weight of each (ADR 0065). 'rank', the form of a GPU: the same order with a key of its own
+   * for each agent that could claim a child (paidByRank()). 'chance', a try: each of these agents claims one with the
+   * chance min(1, B · r / P), B the budget, r its sink rate and P the sum of the sink rates of these agents
+   * (paidByChance()). 'fill', a try: the chance min(1, λ · r), λ such that the chances add up to the smaller of B and
+   * the number of these agents (fillScale()). 'ahead', a try: after the step before a growth step the cells whose agent
+   * could claim a child get a mark with the chance of 'chance', and in the growth step the agent of the front on a
+   * marked cell claims a child; the budget never exceeds the number of sinks. Each claim lowers the budget by 1.
    */
   paidBy: 'order' | 'rank' | 'chance' | 'fill' | 'ahead';
   /**
@@ -226,7 +226,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
  * stays the disc: a square around each start agent (`start` 'agents') keeps every agent away from the edge of the
  * territory, where the sinks lie.
  */
-export const GPU_FORMS = { paidBy: 'fill', fresh: 'box', sums: 'fixed' } as const;
+export const GPU_FORMS = { paidBy: 'rank', fresh: 'box', sums: 'fixed' } as const;
 
 /**
  * The key of an agent with the sink rate r and the uniform draw u in the order of the paid births (`paidBy` 'order'
