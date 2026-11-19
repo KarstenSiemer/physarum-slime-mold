@@ -31,11 +31,6 @@ const three = presetById('three-strains');
 const shrinking = onScreen(presetById('shrinking'), 512);
 if (!maze?.env || !three || !shrinking?.env) throw new Error('presets missing');
 const mazeEnv = maze.env;
-/**
- * The Maze without growth, as it ran until ADR 0064: 0.12 agents per cell and no buffers of growth. The two tests of
- * the bytes of the flow tune their budget of bytes per cell to it.
- */
-const plainMaze = (): Settings => ({ ...maze.settings(), growth: false, capacity: 0 });
 const shrinkingEnv = shrinking.env;
 /**
  * Revision 0 of Shrinking plasmodium's shapes, its 8 foods before ADR 0027, which old links still paint: the tests of
@@ -212,7 +207,7 @@ describe('food, light and walls on a new simulation', () => {
     // 1400 B per cell fit 768 × 480 into the 512 MiB budget; with 84 more, only 512 × 320 fits.
     const backend = new CpuBackend();
     backend.bytesPerCell = 1400;
-    const off = { ...plainMaze(), flow: false, resolution: 768 };
+    const off = { ...maze.settings(), flow: false, resolution: 768 };
     const { engine, sim } = await engineWith(off, mazeEnv, canvas(), backend);
     expect([sim().width, sim().height]).toEqual([768, 480]);
     const before = sim();
@@ -221,7 +216,7 @@ describe('food, light and walls on a new simulation', () => {
     await engine.apply({ ...engine.settings, flow: true });
     expect([sim().width, sim().height]).toEqual([512, 320]);
     expect(engine.settings.resolution).toBe(512);
-    const fresh = await engineWith({ ...plainMaze(), resolution: 512 });
+    const fresh = await engineWith({ ...maze.settings(), resolution: 512 });
     expect(differing(sim().env, fresh.sim().env)).toBe(0);
   });
 
@@ -231,7 +226,7 @@ describe('food, light and walls on a new simulation', () => {
     // one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
     const backend = new CpuBackend();
     backend.bytesPerCell = 1305;
-    const one = { ...plainMaze(), resolution: 768 };
+    const one = { ...maze.settings(), resolution: 768 };
     expect(one.flow).toBe(true);
     const { engine, sim } = await engineWith(one, mazeEnv, canvas(), backend);
     expect([sim().width, sim().height]).toEqual([768, 480]);

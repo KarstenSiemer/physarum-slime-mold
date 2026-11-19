@@ -5,6 +5,7 @@
 - Extended by ADR 0045 (2026-11-15): the scene Coarsening network.
 - Extended by ADR 0048 (2026-11-15): the scene Voronoi diagram.
 - Extended by ADR 0060 (2026-11-18): a copy dims the light that the screen shows.
+- Extended by ADR 0064 (2026-11-19): the texts about the grid name Jones and the paper only for a scene of Jones 2010.
 
 ## Context
 

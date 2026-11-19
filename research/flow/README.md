@@ -2339,9 +2339,76 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts DR1 DR
 Result: each of the 11 wrong rules fails at least one test. ADR 0063 has the numbers of the
 owner's two links. The record is `logs/panel/density-mutations.txt`.
 
+### 25. Do the start scenes and the experiments show tubes with the rules of the organism? [ADR 0064]
+
+The owner wanted smooth, calm tubes in every scene of Start here and of Experiments, as in the Corn
+maze. Those scenes now run one rule set: one agent per cell, growth, the flow and the slime, with
+Jones' agent. Two new start scenes grow three and two rival colonies from food. Fleeing light
+and the Foraging maze got the rules that they lacked. The Maze keeps its settings: it follows
+the protocol of the maze of 2000, and growth makes it worse.
+
+**The numbers and the pictures** of the two start scenes and of Fleeing light, from the built app
+(`test-results/pictures/`, 1.5 minutes): the agents of every strain, the foods that every strain
+covers and the share of the cells with trail, every 250 to 500 steps, and pictures of four steps.
+`SCENES=light` makes one scene only, `LONG=1` adds the steps 20,000 and 40,000:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/scenes.spec.ts
+```
+
+**The Foraging maze with the flow**, 10 seeds on WebGPU (6 minutes), then the table of the seeds:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_KIND=webgpu VITE_SCENE=foraging-maze VITE_SEED=$seed VITE_STEPS=1000,2000,3000,4000,5000,6000,8000,10000,15000,20000 VITE_NAME=g64-fm-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g64-fm-webgpu-s$seed >> research/flow/out/g64-foraging-maze-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/out/g64-foraging-maze-webgpu.txt
+```
+
+**The Maze with growth**, the option that ADR 0064 rejects: the Maze with growth, a Capacity of
+0.25 and no random shrinkage, 10 seeds on WebGPU (5 minutes); with `VITE_KIND=webgl2` and the
+seeds 1 to 3 the same on WebGL2. The table of the Maze as it is comes from the record of part 11:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_KIND=webgpu VITE_SCENE=maze VITE_SEED=$seed VITE_PATCH='{"growth":true,"capacity":0.25,"shrink":0}' VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000 VITE_NAME=g64-mz-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g64-mz-webgpu-s$seed >> research/flow/out/g64-maze-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/out/g64-maze-webgpu.txt research/flow/logs/engine/maze-webgpu-flux8-sites.txt
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g64-digest-branch`. The
+digests of `main` for it are those of part 22:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g64-digest-branch.jsonl research/flow/logs/engine/front/digest-branch.jsonl
+```
+
+It must print that 50 of 54 runs are equal, and name Fleeing light and the Foraging maze on both
+backends: the two scenes that this record changes. The file holds 58 runs: 4 are the two new
+scenes.
+
+Result: every strain of Three strains covers all 12 foods at step 1,003, and three networks stay
+to step 40,000 in pictures. The Foraging maze joins its two foods by step 5,000 in 10 of 10
+seeds, and its tube is 1.03 times as long as the shortest route from step 15,000. With growth the
+dead ends of the Maze fall below a tenth of the route's trail at step 12,500 (7,500 to 15,000),
+against step 1,500 (1,500 to 2,000) without it, and its tube is 1.17 times the shortest route at
+step 15,000, against 1.10. Not measured: the two start scenes and Fleeing light with more than
+one seed in numbers, and any of the new scenes on WebGL2 in numbers. ADR 0064 has the tables.
+The records are in `logs/engine/scenes-0064/`:
+
+| Record                     | Runs                                                           |
+| -------------------------- | -------------------------------------------------------------- |
+| `numbers-webgpu.txt`       | the lines of `scenes.spec.ts` for the three scenes, seed 1     |
+| `foraging-maze-webgpu.txt` | the lines of `measure-maze.ts` for the Foraging maze, 10 seeds |
+| `maze-growth-webgpu.txt`   | the same for the Maze with growth, 10 seeds                    |
+| `maze-growth-webgl2.txt`   | the same on WebGL2, 3 seeds                                    |
+| `digest-branch.jsonl`      | the digests of every scene after 500 steps on both backends    |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 412 files, 8.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 417 files, 8.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2379,6 +2446,7 @@ asks for the new digest.
 | `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, the wrong rules, and the e2e times                                                                                                                                  |
 | `logs/view/levels/`                                  | the runs of part 23 (ADR 0062): the black level in eleven cases on each backend, and the wrong rules                                                                                                                            |
 | `logs/panel/`                                        | the wrong rules of part 24 (ADR 0063): the density at a switch to one agent per cell                                                                                                                                            |
+| `logs/engine/scenes-0064/`                           | the runs of part 25 (ADR 0064): the new scenes, the Foraging maze with the flow, the Maze with growth, the digests                                                                                                              |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

@@ -24,6 +24,7 @@
   the stroke (decision 17). Decision 5 holds with the port of a site in place of the cell of a site.
 - Changed by [ADR 0032](0032-scenes-for-the-flow.md) (2026-11-13): the levels of the trail of
   decision 4, 0.2 and 1 deposits, hold at Jones' decay of 0.1 and follow the decay of the strain.
+- Extended by ADR 0064 (2026-11-19): the Maze runs with growth and without its random shrinkage.
 
 ## Context
 

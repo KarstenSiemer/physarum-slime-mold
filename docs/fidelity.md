@@ -144,6 +144,12 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   mark of starved ground: each cell kept the flow memory that its tube had when it vanished, so most of the ground of
   a dead end opened again after some thousand steps. Since ADR 0054 a starved tube that vanishes leaves its ground at
   the lowest flow memory, and that ground is closed for births for 3.7 days of model time (row 16).
+- **Measured, the Maze's walls with growth** (ADR 0064, 10 seeds on WebGPU): the Foraging maze grows a colony from
+  one food, with the flow. It joins both foods by step 5,000 in 10 of 10 seeds. Its dead ends hold 0.91 of the
+  route's trail at step 5,000, 0.15 at step 10,000 and 0.016 at step 15,000. The Maze itself with growth switched on
+  has its dead ends below a tenth of the route's trail at step 12,500 (7,500 to 15,000), against step 1,500 (1,500 to
+  2,000) without growth: growth sends twigs into a dead end until its ground is starved. So the Maze keeps the
+  protocol of 2000 and has no growth.
 - **Limits of that**: when the mark has faded, after 160,182 steps, the colony comes back once: the blind branches
   fill for 1,000 to 3,000 steps each and are empty and closed again after it (two seeds to step 220,000). Agents
   still walk off the tube onto closed ground and starve there, as short twigs beside the tube. The experiment of 2000
@@ -193,9 +199,13 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   and `defaultSettings()` in `src/model/params.ts` has the layout `mixed` and `growth: false`; `docs/model.md`, 10).
   It runs without growth (ADR 0029, "The Maze (flux 8)"), and food lies at both ends. The Snail maze and the Corn maze
   grow a colony from one food (ADR 0051). That is another experiment: the plasmodium of 2000 did not grow after the
-  food came (ADR 0052).
+  food came (ADR 0052). So the Maze keeps these settings and stands with the experiments of the papers, not with the
+  scenes that run growth (ADR 0064).
 - **Measured**: one tube remains, 1.10 times as long as the shortest route at step 15,000 (ADR 0029, The Maze; the
-  same with the food sites of the amendment 2026-11-14 (2), 10 seeds on WebGPU).
+  same with the food sites of the amendment 2026-11-14 (2), 10 seeds on WebGPU). In the Foraging maze, the same walls
+  with a colony that grows from one food, the tube is 1.03 times as long as the shortest route at the steps 15,000
+  and 20,000 (1.01 to 1.08; ADR 0064, 10 seeds on WebGPU). With growth switched on in the Maze itself it is 1.17 times
+  as long (1.13 to 1.22).
 - **Limits**: every wall of the Maze touches the edge of the box or a wall that does (the preset `maze` in `src/model/presets.ts`).
   So the free space has one route only, and the scene shows how the dead ends die and the tube pulls tight. It does not
   show a choice between two routes. The maze of 2000 has four routes, and no scene has its layout, so the counts of
@@ -353,7 +363,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   the scene without light (3 seeds): the colony grows over lit ground almost as over dark ground. From step 16,000 on
   it holds 4.6 % there (1.3 to 8.7) against 9.1 % (6.2 to 16.2). Light strengths of 0.02, 0.2 and 0.5 give 4.5, 3.8
   and 5.1 % (2 seeds each). In the Jones model the agents leave the disc of a repellent source, and the field follows
-  Jones' one map with a source below 0 (GPU tests, ADR 0044). No ADR has a number for Fleeing light. With Light stops
+  Jones' one map with a source below 0 (GPU tests, ADR 0044). Fleeing light has one seed: a colony with growth and the
+  flow covers the six foods around the lamp by step 2,001, and in pictures no tube crosses the lit disc at step 8,000
+  (ADR 0064). No number says how far its tubes keep from the lamp. With Light stops
   growth at 1 (ADR 0050, 10 seeds, on the first map with 53 lit cells) the network holds 3.3 % of its cells on lit ground at step
   2,000 (2.7 to 4.4) and 1.3 % from step 16,000 on (0.9 to 1.9). At 0.5 it holds 13.0 % at step 2,000 (3 seeds).
 - **Limits**: in a filled lit area the repellent is the same in every cell, so by the rule the light turns an agent
@@ -619,7 +631,7 @@ The model has a number, and the docs hold none of the organism:
   of Nakagaki et al. 2000, and no length of its tube).
 
 Neither side is measured, not even against Jones: Plateau's angles, Jones' Fig. 6, 9, 11 to 14, 20 and 23, the time
-until a wound closes, the tracer of Fig. 7, and Fleeing light.
+until a wound closes, the tracer of Fig. 7, and how far the tubes of Fleeing light keep from the lamp.
 
 ## How to add a row or a number
 

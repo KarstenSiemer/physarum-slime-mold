@@ -35,7 +35,9 @@ export interface EnvShape {
  * - `start` and `experiments`: this app's rules for the organism. One agent per cell, growth and shrinkage, the flow
  *   in the tubes and the slime, in the extended model.
  * - `jones`: the patterns of Jones 2010, with the values and the model of the paper.
- * - `papers`: the experiments of the papers on Jones' model, each with the values and the model of its paper.
+ * - `papers`: the experiments of papers, each as its paper sets it. The experiments of the papers on Jones' model
+ *   have the model and the values of their paper, and the Maze has the protocol of Nakagaki et al. 2000: it starts
+ *   full and does not grow.
  * - `shared`: the scenes without the rule of one agent per cell, where several agents share a cell: Fogleman's saved
  *   settings, and this app's two scenes in that style.
  */
@@ -768,15 +770,15 @@ SCENES.push(
   {
     id: 'maze',
     name: 'Maze',
-    group: 'experiments',
+    group: 'papers',
     source: 'Nakagaki et al. 2000',
     summary: 'Food at both ends of a winding corridor: the network fills it, then one tube remains.',
     watch:
-      'The network first fills every corridor. The flow runs from food to food and passes the dead ends by. They starve and are nearly empty after about 4,000 steps. One thick tube remains and pulls tight along a short route. Turn Flow in the tubes off for Jones’ rules alone: tubes stay in the dead ends.',
+      'The network first fills every corridor. The flow runs from food to food and passes the dead ends by. They starve and are empty after about 4,000 steps. One thick tube remains and pulls tight along a short route. Turn Flow in the tubes off to see Jones’ rules alone: many paths remain.',
     about:
       'In 2000, Toshiyuki Nakagaki and colleagues let a real slime mold fill an agar maze and put food at two exits. It pulled out of the dead ends and kept tubes on short routes, in 5 of 19 runs on the shortest alone. Here, walls form a winding corridor with one route between two foods. The flow in the tubes does what the flow in the real one does: the tube that carries it stays and gets wider, and the dead ends starve.',
     strainRoles: ['Jones’ contracting agent, drawn to food'],
-    why: 'Jones’ contracting agent with values chosen for this app: 12 % of cells hold an agent at the start, as the real slime mold filled its maze. Sensor distance 7, food weight 0.03, closed box edges. Growth and shrinkage with Jones’ values of 2011 renew the tube, and Capacity 0.25 leaves room. Flow in the tubes is on: each food gives or takes a flux of 8, after the model of Tero et al. Walls block moves and sensing.',
+    why: 'Jones’ contracting setting with values chosen for this app: 12 % of cells hold an agent, sensor distance 7, food weight 0.03, a shrinkage of 0.0001 per agent and step, closed box edges, one agent per cell. Flow in the tubes is on: each food gives or takes a flux of 8, after the model of Tero et al. Walls block movement and sensing, so no agent follows a trail behind a wall.',
     figure: {
       href: 'https://www.nature.com/articles/35035159/figures/1',
       label: 'Fig. 1',
@@ -786,17 +788,10 @@ SCENES.push(
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },
         // Sensors that walls block are the owner's rule for the Maze, not Jones': the extended model (ADR 0020, 0022).
-        // The flow in the tubes lets the dead ends starve, as in the real maze (ADR 0029). Growth and shrinkage renew
-        // the tube that stays (ADR 0064); until then a shrinkage of 0.0001 per agent and step thinned the network.
-        {
-          model: 'extended',
-          density: 0.12,
-          capacity: 0.25,
-          boundary: 'box',
-          foodStrength: 0.03,
-          growth: true,
-          flow: true,
-        },
+        // The flow in the tubes lets the dead ends starve, as in the real maze (ADR 0029). The Maze starts full and
+        // has no growth: the slime mold of 2000 filled its maze and did not grow after the food came (ADR 0052). With
+        // growth its dead ends empty about eight times later (ADR 0064), so it keeps these settings.
+        { model: 'extended', density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001, flow: true },
       ),
     env: [
       wall(-0.4, -0.5, -0.4, 0.2),
@@ -815,7 +810,7 @@ SCENES.push(
     source: 'After Jones 2011 and 2017',
     summary: 'A small colony on one food grows through the maze to the other food; then one tube stays.',
     watch:
-      'Fifty agents start on the bottom-right food. They divide at the thin edge and fill the corridors with a mesh. After about 4,500 steps it reaches the top-left food. Then the flow runs between the foods and the rest starves: one tube is left by step 20,000. Hold Inoculate to start a colony.',
+      'Fifty agents start on the bottom-right food. They divide at the thin edge and fill the corridors with a mesh. By step 5,000 it reaches the top-left food. Then the flow runs between the foods and the rest starves: one tube is left from about step 15,000. Hold Inoculate to start a colony.',
     about:
       'Jones lets his agents divide where the colony is thin and die where it is crowded (2011). A colony then grows from one food and forages, as a real slime mold does. Here, a small colony starts on one food of the maze and finds the other food by growth alone, as no scent reaches that far. Then the flow in the tubes keeps the tube between the two foods.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],

@@ -228,14 +228,13 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
   });
 
   it('keeps growth off in the patterns, in the scenes where agents share cells and in a link without it', () => {
-    // The scenes of Start here and of Experiments run the rules of the organism, with growth (ADR 0064): all but the
-    // Maze start as a small colony on a food and grow from it (ADR 0025, 0029, 0031), and the Maze starts full. The
-    // Coarsening network and the Voronoi diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048).
+    // The scenes of Start here and of Experiments run the rules of the organism, with growth (ADR 0064): each starts
+    // as a small colony on a food and grows from it (ADR 0025, 0029, 0031). The Coarsening network and the Voronoi
+    // diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048). The Maze does not grow (ADR 0052).
     const grows = [
       'three-networks',
       'two-networks',
       'light',
-      'maze',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
@@ -366,12 +365,11 @@ describe('flow in the tubes (ADR 0029)', () => {
     expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
   });
 
-  it('is on in every scene of Start here and of Experiments (ADR 0032, ADR 0064)', () => {
+  it('is on in every scene of Start here and of Experiments, and in the Maze (ADR 0029, ADR 0032, ADR 0064)', () => {
     const flowing = [
       'three-networks',
       'two-networks',
       'light',
-      'maze',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
@@ -380,6 +378,7 @@ describe('flow in the tubes (ADR 0029)', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'maze',
     ];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');

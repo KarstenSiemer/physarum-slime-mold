@@ -94,14 +94,14 @@ describe('presets', () => {
   });
 
   // ADR 0064 (the owner's wish of 2026-11-19): the scenes of Start here and of Experiments run the same rule set, this
-  // app's rules for the organism. A scene that follows the experiment of a paper on Jones' model keeps the model and
-  // the values of its paper, in a group of its own. The scenes without the rule of one agent per cell have theirs.
+  // app's rules for the organism. A scene that follows the experiment of a paper keeps what its paper sets, in a group
+  // of its own: the model and the values of a paper on Jones' model, and for the Maze the protocol of Nakagaki et al.
+  // 2000. The scenes without the rule of one agent per cell have their group too.
   it('run each group on one rule set: the organism, the papers, or agents that share cells', () => {
     const ids = (group: string) => PRESETS.filter((p) => p.group === group).map((p) => p.id);
     expect(ids('start')).toEqual(['three-networks', 'two-networks']);
     expect(ids('experiments')).toEqual([
       'light',
-      'maze',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
@@ -117,6 +117,7 @@ describe('presets', () => {
       'steiner',
       'shrinking',
       'wound',
+      'maze',
       'coarsening',
       'electrotaxis',
       'voronoi',
@@ -141,7 +142,9 @@ describe('presets', () => {
           ]);
         expect([s.diffusion, s.foodStrength], p.id).toEqual([1, 0.03]);
       }
-      if (p.group === 'jones' || p.group === 'papers') expect(s.model, p.id).toBe('jones');
+      // The Maze follows an experiment on the organism, with this app's flow: the extended model.
+      if (p.group === 'jones' || p.group === 'papers')
+        expect(s.model, p.id).toBe(p.id === 'maze' ? 'extended' : 'jones');
       if (p.group === 'papers') expect(p.figure, p.id).toBeDefined();
       if (p.group === 'shared') expect([s.collisions, s.density >= 1], p.id).toEqual([false, true]);
     }
@@ -185,7 +188,7 @@ describe('presets', () => {
     for (const e of (two.env ?? []).slice(2)) expect(Math.abs(e.at[0])).toBeLessThan(0.6);
   });
 
-  it('give Fleeing light, the Maze and the Foraging maze the rules of the organism (ADR 0064)', () => {
+  it('give Fleeing light and the Foraging maze the rules of the organism, and keep the Maze as it was (ADR 0064)', () => {
     // Fleeing light: six foods around the lamp, the start on the left one, and the lamp after the foods.
     const light = preset('light');
     expect(light.env?.map((e) => e.kind)).toEqual(['food', 'food', 'food', 'food', 'food', 'food', 'light']);
@@ -196,7 +199,8 @@ describe('presets', () => {
     expect([light.settings().lightStrength, light.settings().lightGrowth, light.settings().flowStrength]).toEqual([
       0.2, 1, 2,
     ]);
-    // The Maze starts full, as the slime mold filled its maze, with Jones' contracting agent.
+    // The Maze keeps the protocol of Nakagaki et al. 2000 (ADR 0052): it starts full, with Jones' contracting agent,
+    // and it does not grow. With growth its dead ends empty about eight times later (ADR 0064).
     const maze = settingsOf('maze');
     expect([maze.layout, maze.density, maze.strains[0]?.sensorAngle, maze.flowStrength]).toEqual([
       'mixed',
@@ -204,6 +208,15 @@ describe('presets', () => {
       45,
       8,
     ]);
+    expect([maze.model, maze.collisions, maze.flow, maze.growth, maze.capacity, maze.shrink]).toEqual([
+      'extended',
+      true,
+      true,
+      false,
+      0,
+      0.0001,
+    ]);
+    expect(preset('maze').group).toBe('papers');
     // The Foraging maze starts as a small colony on a food, with Jones' foraging agent.
     const foraging = settingsOf('foraging-maze');
     expect([foraging.layout, foraging.density, foraging.strains[0]?.sensorAngle, foraging.flowStrength]).toEqual([
@@ -241,7 +254,6 @@ describe('presets', () => {
       'three-networks',
       'two-networks',
       'light',
-      'maze',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
@@ -251,6 +263,7 @@ describe('presets', () => {
       'rival-networks',
       'tokyo-rivals',
       ...jones.map((p) => p.id),
+      'maze',
       'coarsening',
       'electrotaxis',
       'voronoi',
