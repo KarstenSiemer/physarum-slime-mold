@@ -36,7 +36,7 @@ agent runs ahead. A fixed chance per cell did not work: both arms of the Y-maze 
 
 **Step 6: the Y-maze.** 40 runs per case. The slime lies on one arm, on both arms, on every open cell (slime
 everywhere, as on the agar of Reid et al. 2012), or nowhere. The colony is its own source: it has no food. The rules
-of steps 3 to 5 with the slime weight 0.025 of the owner, for the three forms of the drift (step 7), and the births
+of steps 3 to 5 with the slime weight 0.025 of the owner, for the three forms of the drift (step 8), and the births
 that the flux pays only at the fresh rim (`out/y4`):
 
 | Case                             | Drift 0: a tree | Drift 1.5: a crown | Drift 5: a fan   | The organism     |
@@ -51,33 +51,56 @@ that the flux pays only at the fresh rim (`out/y4`):
 
 Each slower time lies outside the spread of the seeds (a Mann-Whitney test against no slime: p below 3·10⁻⁷).
 Slime everywhere slows the colony more than slime on both arms, so the fresh base of the maze is not the cause, as
-this page said before. The cause: the flux that a rim on slime takes pays no birth. With the births at every sink,
-in the share of the flux that it takes (`paidOn=sinks`, `out/y5`):
+this page said before. The cause: the flux that a rim on slime takes pays no birth. Two changes follow. The births
+go to every sink, in the share of the flux that it takes (`paidOn=sinks`, the owner's decision 7 of the ADR). And
+every sink sits at the edge of the territory, where the colony grows, while ground without slime within 6 cells sets
+only its weight (`sinkAt=edge`, decision 8). Before, a sink on fresh ground could sit 6 cells inside the edge, and a
+sink on slime only 2. With both changes (`out/y6`; 120 seeds for slime on both arms, `out/both120`):
 
-| Case                             | Drift 0: a tree | Drift 1.5: a crown | Drift 5: a fan | The organism     |
-| -------------------------------- | --------------- | ------------------ | -------------- | ---------------- |
-| Slime on one arm: blank : slime  | 33 : 7          | 40 : 0             | 40 : 0         | 39 : 1           |
-| Slime on both arms: left : right | 21 : 19         | 20 : 20            | 18 : 22        | no preference    |
-| Slime everywhere: left : right   | 19 : 21         | 21 : 19            | 20 : 20        | –                |
-| No slime: left : right           | 18 : 22         | 19 : 20, 1 split   | 18 : 22        | no preference    |
-| First food, no slime             | 3,800 steps     | 3,513 steps        | 3,452 steps    | 2,400 to 7,200   |
-| First food, slime on both arms   | 1.19 times      | 1.08 (p 0.088)     | 1.01 (p 0.41)  | –                |
-| First food, slime everywhere     | 1.00 (p 0.82)   | 0.95 (p 0.15)      | 0.96 (p 0.33)  | as fast as blank |
+| Case                             | Drift 0: a tree | Drift 1.5: a crown | Drift 5: a fan   | The organism     |
+| -------------------------------- | --------------- | ------------------ | ---------------- | ---------------- |
+| Slime on one arm: blank : slime  | 31 : 9          | 40 : 0             | 40 : 0           | 39 : 1           |
+| Slime on both arms: left : right | 19 : 21         | 60 : 59, 1 split   | 60 : 59, 1 split | no preference    |
+| Slime everywhere: left : right   | 19 : 21         | 21 : 19            | 20 : 20          | –                |
+| No slime: left : right           | 19 : 21         | 18 : 22            | 22 : 18          | no preference    |
+| First food, no slime             | 3,768 steps     | 3,420 steps        | 3,275 steps      | 2,400 to 7,200   |
+| First food, slime on both arms   | 1.15 times      | 1.07 times         | 1.08 times       | –                |
+| First food, slime everywhere     | 1.01 (p 0.53)   | 0.98 (p 0.53)      | 1.01 (p 0.71)    | as fast as blank |
 
-So the crown and the fan reach all three targets with the births at every sink. The tree takes the blank arm 33 of
-40 times (the organism 39 of 40; Fisher's test: p 0.057). The owner's rule says that only a birth onto fresh ground
-counts, so the owner decides (decision 7 of the ADR). Before the owner's decision of 2026-11-19 slime was no sink:
-drift 5 then gave 40 : 0, and 1.87 times on both arms (23 runs, `out/y3`).
+So the crown and the fan reach all three targets. The first 40 seeds with slime on both arms gave 28 : 12 at drift
+5, and 80 more seeds gave 32 : 47: chance. With slime on both arms the fresh base of the maze takes the flux first,
+and the colony is 1.07 to 1.15 times slower (p below 0.003); the paper gives no time for this case. The tree takes the
+blank arm 31 of 40 times (the organism 39 of 40; Fisher's test: p 0.014; with the old place of the sinks 33 of 40).
+The owner decided on 2026-11-19 that the births follow every sink: a colony in a dish full of slime must still give
+birth, else a strain dies in time despite enough food, and a second strain cannot multiply. Before the owner's
+decision on the weight, slime was no sink: drift 5 then gave 40 : 0, and 1.87 times on both arms (23 runs,
+`out/y3`).
 
-**Step 7: the crown.** Pictures show a crown at the head of a tube (drift 1.25) and a fan that migrates (drift 5).
+**Step 7: a dish full of slime.** The owner asked whether a colony keeps its births in a dish full of slime
+(2026-11-19). A dish of 160 cells (8.6 cm) with one food in the middle, slime on every cell or none, 20,000 steps
+(11 h), 10 seeds per case, the rules of step 6 (`dish.ts`, `out/dish2`):
+
+| Case                                     | Drift 0: a tree     | Drift 1.5: a crown  | Drift 5: a fan      |
+| ---------------------------------------- | ------------------- | ------------------- | ------------------- |
+| Half of the dish covered, no slime       | 40 % at step 20,000 | after 4,985 steps   | after 4,289 steps   |
+| The same, slime everywhere               | 40 % (p 0.41)       | 1.04 times (p 0.71) | 0.96 times (p 0.17) |
+| Agents at step 20,000, slime everywhere  | 1,132 (least 885)   | 855 (least 587)     | 1,037 (least 795)   |
+| Births of the last 5,000 steps, on slime | 7,547               | 14,954              | 23,144              |
+
+No colony dies. When the dish is full, the number of agents stays, and Jones' births go on; the flux pays no birth
+then, because no sink has room. With the births only at the fresh rim the crown covers half of the dish 1.18 times
+later on slime (p 0.034, `out/dish1`), and it lives too, because Jones' births do not read the slime. The tree is slow
+in an open dish: it covers 40 % of it in 20,000 steps.
+
+**Step 8: the crown.** Pictures show a crown at the head of a tube (drift 1.25) and a fan that migrates (drift 5).
 Measured on runs of a lane and a dish: the veins lie along the flow (the mean |cos| of the angle is 0.89 to 0.99),
 and a cell becomes a vein (D ≥ 0.5) a median of 400 to 1,900 steps after the front reached it (the organism: about
 1,500, Schenz 2019). The front runs 0.015 to 0.03 cells per step: 1.5 to 3 cm/h (the organism: 1 to 3 cm/h).
 
 **What is not reached.**
 
-- With the births only at the fresh rim, a colony on slime everywhere is 1.32 to 2.23 times slower (step 6). With
-  the births at every sink, the tree takes the blank arm only 33 of 40 times.
+- The tree takes the blank arm only 31 of 40 times (Fisher's test against the organism: p 0.014), and it covers only
+  40 % of an open dish in 20,000 steps.
 - In an open dish the front is an octagon and the veins prefer the axes of the grid: the square cells show, as de
   Almeida 2021 found on regular lattices.
 - Murray's exponent is not measured: the skeleton of the veins gives 0 to 2 junctions per picture.
@@ -86,12 +109,14 @@ and a cell becomes a vein (D ≥ 0.5) a median of 400 to 1,900 steps after the f
 ## The rules of the prototype
 
 `front` of `sim.ts`, all off by default. The rule set of step 6 is
-`speed=0.004 speedOn=push paid=20 norm=2 reach=6 rim=1 colony=1 slimeWeight=0.025 solver=app` with `drift=0`, `1.5` or
-`5`, and `paidOn=fresh` or `sinks`:
+`speed=0.004 speedOn=push paid=20 norm=2 reach=6 rim=1 colony=1 slimeWeight=0.025 paidOn=sinks sinkAt=edge solver=app`
+with `drift=0`, `1.5` or `5`. `paidOn=fresh` is the rule before the owner's decision 7, and `sinkAt=fresh` the place
+of the sinks before decision 8:
 
 - `speed`, `speedOn=push`: the territory and its push (step 5).
-- `reach`, `rim`: the sinks are the agents with a free cell of the territory beside them, within `reach` cells of
-  ground without slime; `slimeWeight` gives a rim without such ground a weight.
+- `reach`, `rim`, `sinkAt`, `slimeWeight`: the sinks are the agents at the edge of the territory with a free cell of it
+  beside them (`sinkAt=edge`), with the weight 1 within `reach` cells of ground without slime and `slimeWeight`
+  elsewhere. With `sinkAt=fresh` a sink on fresh ground sits anywhere within `reach` of ground without slime.
 - `norm`: all sinks of the strain take `norm` times the flow strength, shared by an exponential mean over `tau`
   (100) steps. `colony`: without a covered food every tube cell gives an equal share; else the ports of the
   covered sites give it.

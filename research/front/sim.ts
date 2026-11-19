@@ -82,6 +82,12 @@ export interface Front {
    */
   paidOn: 'fresh' | 'sinks';
   /**
+   * Where a sink sits: within `reach` of ground without slime, or at the edge of the territory on slime ('fresh'), or
+   * always at the edge of the territory, where the colony grows, with the weight 1 within `reach` of ground without
+   * slime and `slimeWeight` elsewhere ('edge'): then slime sets only the weight of a sink, not its place.
+   */
+  sinkAt: 'fresh' | 'edge';
+  /**
    * Above 0: the front is the agents of a tube cell with room beside it that lie at most this many cells from ground
    * without slime (a Chebyshev distance). 0: the young ground of `young` is the front.
    */
@@ -149,6 +155,7 @@ export const noFront = (): Front => ({
   young: 0,
   paid: 0,
   paidOn: 'fresh',
+  sinkAt: 'fresh',
   reach: 0,
   rim: false,
   drift: 0,
@@ -165,6 +172,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   solver: ['app', 'exact'],
   speedOn: ['body', 'trail', 'push'],
   paidOn: ['fresh', 'sinks'],
+  sinkAt: ['fresh', 'edge'],
 };
 
 /**
@@ -1142,7 +1150,9 @@ export class Sim {
         }
       if (!room) continue;
       // Without fresh ground near, a rim with room is a sink of the weight slimeWeight (a territory must hold it).
-      if (!young && !this.territoryEdge(c)) continue;
+      // With `sinkAt` 'edge' every sink sits at the edge of the territory, and the fresh ground sets only its weight.
+      const atEdge = front.sinkAt === 'edge' && front.speed > 0;
+      if ((atEdge || !young) && !this.territoryEdge(c)) continue;
       at.push(c);
       weight.set(c, young ? 1 : front.slimeWeight);
     }

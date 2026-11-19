@@ -44,3 +44,20 @@ Found so far (CPU prototype `sim.ts`, one strain, the rules of forager()):
     (`paidOn=sinks`, `out/y5`): slime everywhere 1.00, 0.95 and 0.96 times (p 0.82, 0.15 and 0.33); the blank arm
     33 : 7 (drift 0; Fisher p 0.057 against 39 : 1), 40 : 0 and 40 : 0; the first food without slime 5 to 9 % later.
     The owner decides (ADR 0065, decision 7), because the rule touches "only a birth onto fresh ground counts".
+16. The owner decided on 2026-11-19 that the births follow every sink: a colony in a dish full of slime must still
+    give birth. A dish of 160 cells with one food in the middle, 20,000 steps, 10 seeds (`dish.ts`, `out/dish1`):
+    with the births at every sink the territory covers half of the dish as fast on slime everywhere as without slime
+    (drift 1.5: 0.94 times, p 0.23; drift 5: 0.96 times, p 0.45); with the births only at the fresh rim it is 1.18
+    times slower (p 0.034). No colony dies: when the dish is full, 600 to 1,100 agents live, and Jones' births go on
+    (3,000 to 4,700 per 1,000 steps); the flux pays no birth then, because no sink has room. Drift 0 covers only 31 to
+    40 % of the dish in 20,000 steps.
+17. On slime the sinks sat nearer the rim than on fresh ground: within 2 cells of the edge of the territory, against
+    within 6 cells of ground without slime. Drift 0 then grew a little faster on slime (7,117 against 5,587 cells at
+    step 20,000; p 0.11). `sinkAt=edge` puts every sink at the edge of the territory and lets the fresh ground set only
+    its weight (`out/y6`, `out/dish2`).
+18. `sinkAt=edge` (decision 8, `out/y6`, `out/dish2`): slime everywhere gives the same runs as `sinkAt=fresh`, as it
+    must. The Y-maze: 31 : 9 (tree), 40 : 0 and 40 : 0; slime everywhere 1.01, 0.98 and 1.01 times. The dish: the
+    tree covers 40 % on slime and without slime (p 0.41); the crown 1.04 times (p 0.71), the fan 0.96 times (p 0.17).
+19. Slime on both arms at drift 5 gave 28 : 12 in seeds 1 to 40 (p 0.017) and 32 : 47 in seeds 41 to 120: chance.
+    120 seeds give 60 : 59 at drift 1.5 and at drift 5 (`out/both120`). The fresh base of the maze makes slime on both
+    arms 1.07 to 1.08 times slower (p below 0.003).

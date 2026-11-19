@@ -41,6 +41,19 @@ describe('the CPU prototype of stage 4', () => {
     expect(() => frontFrom({ paidOn: 'slime' })).toThrow(/takes/);
   });
 
+  it('puts every sink at the edge of the territory: on slime everywhere as before (ADR 0065, decision 8)', () => {
+    const run = (sinkAt: string, kind: 'all' | 'none') => {
+      const { layout } = yMazeLayout(slimedOf(kind, 1), 19, kind === 'all');
+      const rules = { speed: '0.004', speedOn: 'push', paid: '20', norm: '2', reach: '6', rim: '1', colony: '1' };
+      const front = frontFrom({ ...rules, drift: '1.5', slimeWeight: '0.025', paidOn: 'sinks', sinkAt });
+      const sim = new Sim(layout, params({ seed: 1, startStep: 18000, front }));
+      for (let k = 0; k < 150; k++) sim.advance();
+      return Array.from(sim.occ).join('');
+    };
+    expect(run('edge', 'all')).toBe(run('fresh', 'all'));
+    expect(run('edge', 'none')).not.toBe(run('fresh', 'none'));
+  });
+
   it('measures rows, veins, their direction, their delay and Murray exponents without failing', () => {
     const { layout } = yMazeLayout([]);
     const sim = new Sim(layout, params({ seed: 2, startStep: 18000 }));
