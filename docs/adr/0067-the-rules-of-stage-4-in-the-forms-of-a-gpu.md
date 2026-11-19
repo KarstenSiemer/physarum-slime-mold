@@ -4,8 +4,9 @@
   setting, every rule of stage 4 is off unless a setting turns it on, two candidates for the paid births, and no rule
   tuned to a number. The forms, the passes and the buffers are choices of an agent. Both under the owner's delegation
   of 2026-11-12. The form of the paid births is none of the two candidates but the order itself (decision 1): the
-  first candidate cost the tree births, and the agent did not build the second.
-- Date: 2026-11-19; the last runs on 2026-11-20.
+  first candidate cost the tree births, and the agent did not build the second. The coordinator's review of
+  2026-11-20 added decision 10, the second word of R in decision 3 and the cost of `rank` in decision 1.
+- Date: 2026-11-19; the last runs and the review on 2026-11-20.
 - Extends [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (its decision 1, the rule set, and its open
   point on the paid births).
 - In short: [`research/front/README.md`](../../research/front/README.md), step 9, tells the story and has the
@@ -35,8 +36,10 @@ least 16 samplers, and the agent pass samples 11. The start scene has 3 strains 
      counts the agents of the front with atomics. In a new pass `rank` each agent with a key counts the agents of its
      strain with a smaller key (the same key and a smaller id counts too), and stops when the count reaches the whole
      part of B: below it, the agent claims the cell of its child as a parent of Jones' rule does, and counts the claim.
-     The agents with the least keys read every key, so a growth step reads at most the whole part of B times the
-     agents. `win` needs no new input: the key of a claim is unique for an agent and a step, so an agent without a
+     Let b be the whole part of B and n the agents. An agent with q smaller keys stops after about b · n / q keys,
+     and the b agents with the least keys read all n keys. So a growth step reads about b · n · (1 + ln(F / b))
+     keys, F the agents with a key, and `rank` lasts as long as one agent takes to read all n keys. `win` needs no
+     new input: the key of a claim is unique for an agent and a step, so an agent without a
      child of Jones' rule is a paid parent exactly when the cell that its paid child would take holds its key.
    - The first candidate of the coordinator, a chance per agent min(1, B · r / P) with P the sum of the sink rates of
      these agents (`paidBy=chance`), spends less than the order where few agents can claim a child and one of them has
@@ -54,11 +57,16 @@ least 16 samplers, and the agent pass samples 11. The start scene has 3 strains 
    around it for an open cell without slime. Only "within 6 cells" is read, and the chamfer transform with the unit
    weights of the prototype gives the Chebyshev distance through every cell of the grid, so both forms give the same
    answer on every cell (the unit test) and the same runs. It needs no buffer and no pass: only a sink looks.
+   Decision 10 lets the look follow paths over open cells.
 3. **The sums: integers** (`sums=fixed`). Each sink rate counts in steps of 2^-16 as an unsigned integer of 32 bits:
    WebGPU adds them with atomics after a sum per workgroup, WebGL2 with a pyramid of `RGBA32UI` targets over squares
    of 4 × 4 cells, and both get the same integer in every order. The sums of a step serve the same step: the pressure
    iterations come after them. Per strain: R and the tube cells C for the shares, and the sinks N for whether the
-   front takes flux. A sum stays exact below 65,536 times the weight 1. Each sink takes its share
+   front takes flux. A word of 32 bits holds R exactly only below 65,536 times the weight 1. A grid with more open
+   cells than that can hold more sinks, and an atomic addition would then wrap without a sign. So R keeps a second
+   word: an addition that wraps the first word adds 1 to the second (WebGPU: `atomicAdd` returns the old value;
+   WebGL2: each level of the pyramid adds the carries in the fourth lane), and R stays exact in every order of the
+   additions (the coordinator's review). Each sink takes its share
    S · r / R with the rate r that R counted, so the sinks take exactly the S that the sources give (10⁻⁹ of the flux,
    as in floats). With its own rate a sink missed S by the rounding of R, up to 8 · 10⁻⁵ of the flux with slime
    everywhere, and the crown in the Y-maze with slime everywhere then took 1.10 times as long, also with the order
@@ -124,6 +132,14 @@ least 16 samplers, and the agent pass samples 11. The start scene has 3 strains 
    bytes, as `//#if FLOW` keeps them for the flow (`src/engine/shaders/variant.ts`). The constants (the speed 0.004,
    6 cells, the weight 0.025, 100 steps, 2 times the flow strength, 20 per birth) ride in the uniform block of the
    flow, and the drift in a lane per strain of the parameters, as the food weight.
+10. **Both tests of a sink follow paths over open cells** (the coordinator's review). The edge of the territory
+    (open ground outside the territory within 2 cells) and the ground without slime (within 6 cells) count only a
+    cell that a path of at most 2 or 6 steps over open cells reaches, without a diagonal step between two walls, as
+    for a move. A square alone sees through a thin wall: a sink then pulls flux to a wall that the territory cannot
+    cross, and a sink on slime takes the weight 1 from fresh ground behind the wall. The organism meets slime and
+    fresh ground only where it can go. In the Y-maze and the dish of the prototype, a path reaches every open cell
+    of the square of 5 × 5 and of 13 × 13 cells around every open cell (the unit test), so the paths give the runs of
+    decision 5. On a GPU a sink searches its 13 × 13 cells in 6 steps, with a row of bits for each row of cells.
 
 ## Consequences
 
@@ -137,8 +153,9 @@ least 16 samplers, and the agent pass samples 11. The start scene has 3 strains 
   9 cases.
 - The prototype keeps the old form of every part: `paidBy`, `fresh` and `sums` take their old words, and the tries
   that lost results stay as `paidBy=chance`, `paidBy=fill`, `paidBy=ahead` and `start=agents`.
-- A growth step of the engine gains one pass, `rank`. Its cost grows with the whole part of B times the agents: the
-  few agents with the least keys read every key. The time is not measured; with many agents a pyramid of the least
+- A growth step of the engine gains one pass, `rank`. Its cost grows with the whole part of B times the agents, and
+  with the logarithm of the agents with a key (decision 1): the few agents with the least keys read every key. The
+  time is not measured; with many agents a pyramid of the least
   keys could cut it.
 
 ## Open points

@@ -109,10 +109,12 @@ sums over all cells. Each now has a form of a GPU, as an option of `sim.ts`:
   in the next, each of these agents counts the agents of its strain with a smaller key and stops at the whole part of
   B. As with the order, a budget below 1 pays nothing, and the budget never exceeds the number of agents of the front.
 - `fresh=box`: a sink looks at the 13 × 13 cells around it for ground without slime. That gives the same answer as the
-  chamfer transform on every cell, so the same runs.
+  chamfer transform on every cell, so the same runs. The engine follows paths over open cells within the square, so
+  that no test of a sink sees through a wall (ADR 0067, decision 10). In the Y-maze and the dish a path reaches every
+  open cell of each square, so the paths give these runs too.
 - `sums=fixed`: each sink rate counts in steps of 2^-16 as an integer, so every order of the additions gives the same
   sum, and each sink takes its share with the rate that the sum counted, so the sinks take exactly what the sources
-  give.
+  give. The engine keeps the sum R in two words of 32 bits, so that many sinks do not overflow it.
 
 The births took six tries (NOTES.md, notes 20 to 23, 27 to 29). Marks per cell, drawn after the step before a growth
 step, would fit the passes of a GPU best, but they lose births where few agents can claim one. With P the sum over all

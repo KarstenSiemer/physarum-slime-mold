@@ -35,6 +35,44 @@ function smallDish(front: Front, seed = 1, slime: 'left' | 'all' | 'none' = 'non
   return new Sim(layout, params({ seed, startStep: 18000, front }));
 }
 
+/**
+ * The open cells whose square of side 2r + 1 holds an open cell that no path of r steps over open cells reaches
+ * (8 neighbours, no diagonal step between two walls). None: the square of a test of a sink sees through no wall.
+ */
+function seenThroughWalls({ w, h, open }: { w: number; h: number; open: Uint8Array }, r: number): number {
+  const isOpen = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && open[y * w + x] === 1;
+  const stamp = new Int32Array(w * h).fill(-1);
+  let bad = 0;
+  for (let c = 0; c < w * h; c++) {
+    if (!open[c]) continue;
+    stamp[c] = c;
+    let wave = [c];
+    for (let d = 0; d < r; d++) {
+      const next: number[] = [];
+      for (const s of wave) {
+        const [x, y] = [s % w, Math.floor(s / w)];
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            if ((dx === 0 && dy === 0) || !isOpen(x + dx, y + dy)) continue;
+            if (dx !== 0 && dy !== 0 && !isOpen(x + dx, y) && !isOpen(x, y + dy)) continue;
+            const t = (y + dy) * w + x + dx;
+            if (stamp[t] !== c) {
+              stamp[t] = c;
+              next.push(t);
+            }
+          }
+      }
+      wave = next;
+    }
+    const [x0, y0] = [c % w, Math.floor(c / w)];
+    let through = false;
+    for (let y = y0 - r; y <= y0 + r && !through; y++)
+      for (let x = x0 - r; x <= x0 + r && !through; x++) through = isOpen(x, y) && stamp[y * w + x] !== c;
+    if (through) bad++;
+  }
+  return bad;
+}
+
 describe('the CPU prototype of stage 4', () => {
   it('runs the Y-maze as the app does: the first food after about 65 steps (ADR 0056)', () => {
     const firsts = [1, 2, 3].map((seed) => runY(seed, ['left'], noFront(), 400, 0).first);
@@ -374,5 +412,14 @@ describe('the CPU prototype of stage 4', () => {
     expect(alignment(sim).cells).toBeGreaterThanOrEqual(0);
     expect(veinDelay(sim).cells).toBeGreaterThanOrEqual(0);
     expect(murray(sim).n.every((n) => n > 0)).toBe(true);
+  });
+
+  it('sees through no wall in the Y-maze and the dish, so the squares of a sink equal paths there (ADR 0067, decision 10)', () => {
+    const layouts = [yMazeLayout([]).layout, dish(160, [[80, 80, 5]])];
+    for (const layout of layouts) for (const r of [2, 6]) expect(seenThroughWalls(layout, r)).toBe(0);
+    // A wall of one cell across a square of 5 × 5: each open cell beside the wall sees the far side of it.
+    const open = new Uint8Array(25).fill(1);
+    for (let y = 0; y < 5; y++) open[y * 5 + 2] = 0;
+    expect(seenThroughWalls({ w: 5, h: 5, open }, 2)).toBe(10);
   });
 });
