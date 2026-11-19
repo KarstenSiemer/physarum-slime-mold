@@ -3,8 +3,9 @@
 // of respawn while the cut is held (ADR 0041), of the repellent source of the Jones model (ADR 0044), of the mean over a window above 3 × 3 (ADR 0046), of the
 // Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
 // (ADR 0053), of the mark that a starved tube leaves (ADR 0054), of the slime field, its brush and its picture
-// (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057) and of the outlines and
-// the picture of the electrodes (ADR 0058). The script puts one wrong rule at a time into a source file of the app,
+// (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
+// the picture of the electrodes (ADR 0058) and of the black level below the plasm (ADR 0062). The script puts one
+// wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
 // the engine, the sweep, the link or the tool for painted slime. Every wrong rule must fail at least one test.
@@ -135,6 +136,17 @@ const [FRONT_GPU, FRONT_GL] = ['the front field on webgpu', 'the front field on 
 const FAN = 'the skirt of the growth front in the picture';
 /** The copies around a periodic lattice (ADR 0026, ADR 0060): the tests of the lattices in the default style. */
 const LATTICE_SPEC = 'src/engine/lattice.gpu.test.ts';
+/**
+ * The black level below the plasm (ADR 0062): the rule on the CPU, the histogram of WebGPU and the samples of WebGL2
+ * over the cells that hold an agent, and the tests of the levels on the CPU and on each backend.
+ */
+const EXPOSURE_TS = 'src/engine/exposure.ts';
+const EXPOSURE_UNIT = 'src/engine/exposure.test.ts';
+const HISTOGRAM_WGSL = 'src/engine/shaders/histogram.wgsl';
+const SAMPLE_FRAG = 'src/engine/gl/glsl/sample.frag';
+const WEBGPU_TS = 'src/engine/webgpu.ts';
+const LEVELS_SPEC = 'src/engine/levels.gpu.test.ts';
+const [LEVELS_GPU, LEVELS_GL] = ['the black level on webgpu', 'the black level on webgl2'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -1191,32 +1203,32 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'V51 webgpu: the strand of the scent view from the picture, for a PNG and at once',
     'src/engine/webgpu.ts',
-    '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
-    '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.pictureTexture]);',
+    '    return (): Trails | undefined =>\n      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];',
+    '    return (): Trails | undefined =>\n      sim.destroyed ? undefined : [sim.pictureTexture, sim.pictureTexture, sim.agentCells];',
     GPU,
     TUBES_SPEC,
   ],
   [
     'V52 webgpu: the levels of a PNG from the trail without the tubes',
     'src/engine/webgpu.ts',
-    '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
-    '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.viewTexture, sim.viewTexture]);',
+    '    return (): Trails | undefined =>\n      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];',
+    '    return (): Trails | undefined =>\n      sim.destroyed ? undefined : [sim.viewTexture, sim.viewTexture, sim.agentCells];',
     GPU,
     TUBES_SPEC,
   ],
   [
     'V53 webgpu: a measurement that waits keeps the textures of before its wait',
     'src/engine/webgpu.ts',
-    '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
-    '    const early: Trails = [sim.pictureTexture, sim.viewTexture];\n    return (): Trails | undefined => (sim.destroyed ? undefined : early);',
+    '    return (): Trails | undefined =>\n      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];',
+    '    const early: Trails = [sim.pictureTexture, sim.viewTexture, sim.agentCells];\n    return (): Trails | undefined => (sim.destroyed ? undefined : early);',
     GPU,
     TUBES_SPEC,
   ],
   [
     'V54 webgpu: a measurement asks a destroyed simulation for its textures',
     'src/engine/webgpu.ts',
-    '    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);',
-    '    return (): Trails | undefined => [sim.pictureTexture, sim.viewTexture];',
+    '    return (): Trails | undefined =>\n      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];',
+    '    return (): Trails | undefined => [sim.pictureTexture, sim.viewTexture, sim.agentCells];',
     GPU,
     TUBES_SPEC,
   ],
@@ -1239,16 +1251,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'V57 webgpu: the strand of the scent view from the picture, in the frames',
     'src/engine/webgpu.ts',
-    'this.auto.update(trail, fallback, sim.viewTexture);',
-    'this.auto.update(trail, fallback);',
+    'this.auto.update(this.trailsOf(sim), fallback);',
+    'this.auto.update(() => [trail, trail, sim.agentCells], fallback);',
     GPU,
     TUBES_SPEC,
   ],
   [
     'V58 webgpu: the levels of the frames from the trail without the tubes',
     'src/engine/webgpu.ts',
-    'this.auto.update(trail, fallback, sim.viewTexture);',
-    'this.auto.update(sim.viewTexture, fallback, sim.viewTexture);',
+    'this.auto.update(this.trailsOf(sim), fallback);',
+    'this.auto.update(() => [sim.viewTexture, sim.viewTexture, sim.agentCells], fallback);',
     GPU,
     TUBES_SPEC,
   ],
@@ -5118,6 +5130,94 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '  float soft = V.slimeLight.y * k.h * shine.y;',
     FAN,
     FRONT_SPEC,
+  ],
+  [
+    'BL1 ts: the black level may lie at the whole median trail under the agents',
+    EXPOSURE_TS,
+    'export const PLASM_EDGE = 0.5;',
+    'export const PLASM_EDGE = 1;',
+    '',
+    EXPOSURE_UNIT,
+  ],
+  [
+    'BL2 ts: the levels do not read the cells that hold an agent',
+    EXPOSURE_TS,
+    '  const edge = plasm === undefined ? Infinity : PLASM_EDGE * plasm;',
+    '  const edge = Infinity;',
+    '',
+    EXPOSURE_UNIT,
+  ],
+  [
+    'BL3 ts: the level that nine of ten agents exceed, not the median',
+    EXPOSURE_TS,
+    '  return agents > 0 ? levelWithin(held, agents, 0.5) : undefined;',
+    '  return agents > 0 ? levelWithin(held, agents, 0.9) : undefined;',
+    '',
+    EXPOSURE_UNIT,
+  ],
+  [
+    'BL4 wgsl: the histogram of the agents counts every cell',
+    HISTOGRAM_WGSL,
+    '  if (all(gid.xy < size) && occ[gid.y * size.x + gid.x] != 0u) {',
+    '  if (all(gid.xy < size) && occ[gid.y * size.x + gid.x] >= 0u) {',
+    LEVELS_GPU,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL5 wgsl: an agent on a cell without trail does not count',
+    HISTOGRAM_WGSL,
+    '    } else {\n      atomicAdd(&local[0], 1u);\n    }',
+    '    }',
+    LEVELS_GPU,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL6 glsl: every sample counts as a cell with an agent',
+    SAMPLE_FRAG,
+    '  float agent = held == 1 && texelFetch(occ, c, 0).r > 0.5 ? 1.0 : 0.0;',
+    '  float agent = held == 1 && texelFetch(occ, c, 0).r > -0.5 ? 1.0 : 0.0;',
+    LEVELS_GL,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL7 webgl2: an agent on a cell without trail does not count',
+    GL_BACKEND,
+    '        if (held ? (samples[i + 1] ?? 0) < 0.5 : v <= 0) continue;',
+    '        if ((held && (samples[i + 1] ?? 0) < 0.5) || v <= 0) continue;',
+    LEVELS_GL,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL8 webgpu: a measurement gets no cells with agents',
+    WEBGPU_TS,
+    '      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];',
+    '      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, undefined];',
+    LEVELS_GPU,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL9 webgl2: a measurement gets no cells with agents',
+    GL_SIM,
+    '    return this.settings.collisions ? this.occupancyTexture : undefined;',
+    '    return undefined;',
+    LEVELS_GL,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL10 webgpu: the levels read the cells of the agents without the rule',
+    GPU_SIM,
+    '    return this.settings.collisions ? this.occupancy : undefined;',
+    '    return this.occupancy;',
+    LEVELS_GPU,
+    LEVELS_SPEC,
+  ],
+  [
+    'BL11 webgl2: the levels read the cells of the agents without the rule',
+    GL_SIM,
+    '    return this.settings.collisions ? this.occupancyTexture : undefined;',
+    '    return this.occupancyTexture;',
+    LEVELS_GL,
+    LEVELS_SPEC,
   ],
 ];
 

@@ -114,7 +114,8 @@ export class WebGpuBackend implements Backend<Simulation> {
    * waits for the one before it.
    */
   private trailsOf(sim: Simulation) {
-    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);
+    return (): Trails | undefined =>
+      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];
   }
 
   async settle(sim: Simulation): Promise<Levels> {
@@ -165,7 +166,7 @@ export class WebGpuBackend implements Backend<Simulation> {
     const fallback = 0.4 / equilibrium(s);
     // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009). The
     // strand is a level of the trail of the model, with or without the picture of the tubes.
-    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback, sim.viewTexture);
+    if (measure && (!agents || s.showScent)) this.auto.update(this.trailsOf(sim), fallback);
     const l = given ?? this.levels();
     const base = agents ? 0.4 / s.density : l.gain || fallback;
     const exposure = base * 2 ** s.exposure;
