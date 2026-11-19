@@ -1472,7 +1472,7 @@ describe('lattices', () => {
   });
 
   it('give the app’s scenes a grid shaped like the screen', async () => {
-    for (const id of ['three-strains', 'maze', 'light', 'cyclones']) {
+    for (const id of ['three-strains', 'maze', 'foraging-maze', 'cyclones']) {
       const p = jones(id);
       for (const [w, h] of screens) {
         const { sim } = await engineWith(p.settings(), p.env ?? [], canvas(w, h));

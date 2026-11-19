@@ -954,9 +954,10 @@ describe('the model switch', () => {
     Object.assign(app.settings, { diffusion: 0, trailSaturation: 30, scentDecay: 0.01 });
     setModel('jones');
     expect(app.notice).toBe(
-      `${BASE} The light acts as a repellent source in Jones’ trail map. It changed Diffusion passes from 0 to 1, ` +
-        'Scent decay from 0.01 to 0.1 (the Decay of strain A), Trail saturation from 30 to 0, the weight of strain A ' +
-        'on its own trail from +0.5 to +1, Food attraction from +0.4 to +1 and Light avoidance from +2 to +1.',
+      `${BASE} The light acts as a repellent source in Jones’ trail map. It removed the flow in the tubes. It changed ` +
+        'Diffusion passes from 0 to 1, Scent decay from 0.01 to 0.1 (the Decay of strain A), Trail saturation from 30 ' +
+        'to 0, the weight of strain A on its own trail from +0.5 to +1, Food attraction from +0.4 to +1 and Light ' +
+        'avoidance from +2 to +1.',
     );
     expect(app.settings.strains[0]?.share).toBe(1);
     expect(app.settings.lightStrength).toBe(0.2);
@@ -1080,19 +1081,25 @@ describe('the model switch', () => {
 
   it('to Jones and back changes an extended scene that fits Jones only for the switch itself', async () => {
     const { app, loadPreset, sceneChanged, setModel } = await fresh();
-    // Foraging maze is extended for its walls alone. The Maze also has the flow in the tubes, which stays off after
-    // the way back (ADR 0029).
+    // Without the flow in the tubes, the Foraging maze is extended for its walls alone: the way to Jones and back
+    // gives its settings again.
     loadPreset('foraging-maze');
+    app.settings.flow = false;
+    const before = JSON.parse(JSON.stringify(app.settings)) as Settings;
     setModel('jones');
-    expect(sceneChanged()).toBe(true);
+    expect(app.settings.model).toBe('jones');
     setModel('extended');
-    expect(sceneChanged()).toBe(false);
-    expect(app.settings).toEqual({ ...sceneOf('foraging-maze'), seed: app.settings.seed });
-    loadPreset('maze');
-    setModel('jones');
-    setModel('extended');
-    expect(sceneChanged()).toBe(true);
-    expect(app.settings).toEqual({ ...sceneOf('maze'), seed: app.settings.seed, flow: false });
+    expect(app.settings).toEqual(before);
+    // The scenes of Start here and of Experiments have the flow in the tubes, which the Jones model takes off. It
+    // stays off after the way back (ADR 0029), and nothing else changes.
+    for (const id of ['foraging-maze', 'maze']) {
+      loadPreset(id);
+      setModel('jones');
+      expect(sceneChanged(), id).toBe(true);
+      setModel('extended');
+      expect(sceneChanged(), id).toBe(true);
+      expect(app.settings, id).toEqual({ ...sceneOf(id), seed: app.settings.seed, flow: false });
+    }
   });
 
   it('is undone by Reload scene, which restores the model of the scene', async () => {

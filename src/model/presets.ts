@@ -29,12 +29,24 @@ export interface EnvShape {
   r: number;
 }
 
-/** Groups of the preset list, in this order in the Panel and in Learn → Scenes. */
+/**
+ * Groups of the preset list, in this order in the Panel and in Learn → Scenes (ADR 0064). A group holds the scenes of
+ * one rule set:
+ * - `start` and `experiments`: this app's rules for the organism. One agent per cell, growth and shrinkage, the flow
+ *   in the tubes and the slime, in the extended model.
+ * - `jones`: the patterns of Jones 2010, with the values and the model of the paper.
+ * - `papers`: the experiments of papers, each as its paper sets it. The experiments of the papers on Jones' model
+ *   have the model and the values of their paper, and the Maze has the protocol of Nakagaki et al. 2000: it starts
+ *   full and does not grow.
+ * - `shared`: the scenes without the rule of one agent per cell, where several agents share a cell: Fogleman's saved
+ *   settings, and this app's two scenes in that style.
+ */
 export const GROUPS = [
   { id: 'start', label: 'Start here' },
-  { id: 'jones', label: 'Jones 2010' },
   { id: 'experiments', label: 'Experiments' },
-  { id: 'fogleman', label: 'Fogleman 2020' },
+  { id: 'jones', label: 'Jones 2010' },
+  { id: 'papers', label: 'Paper experiments' },
+  { id: 'shared', label: 'Agents share cells' },
 ] as const;
 
 export type Group = (typeof GROUPS)[number]['id'];
@@ -164,7 +176,7 @@ export function shapesAt(p: Preset, revision: number): EnvShape[] | undefined {
 }
 
 /** The scene the app starts with. */
-export const START = 'three-strains';
+export const START = 'three-networks';
 
 const deg = (rad: number) => (rad * 180) / Math.PI;
 
@@ -354,10 +366,13 @@ function voronoiShapes(): EnvShape[] {
 /** The lattice of the dish scenes with the flow (ADR 0032): the same picture on every screen. */
 const L384 = (): Lattice => [384, 384];
 
-/** `count` foods on a ring of radius `radius` around the middle, the first one on the right. */
-const ring = (count: number, radius: number, r: number): EnvShape[] =>
+/**
+ * `count` foods on a ring of radius `radius` around the middle. The first one lies on the right, or `turn` degrees
+ * from there toward the bottom of the screen.
+ */
+const ring = (count: number, radius: number, r: number, turn = 0): EnvShape[] =>
   Array.from({ length: count }, (_, i) => {
-    const angle = (2 * Math.PI * i) / count;
+    const angle = (2 * Math.PI * i) / count + (turn * Math.PI) / 180;
     // Rounded, so that a scene and a link to it hold the same numbers.
     const at = (v: number) => Math.round(radius * v * 1e4) / 1e4;
     return food(at(Math.cos(angle)), at(Math.sin(angle)), r);
@@ -493,56 +508,53 @@ const tokyo = (extra: Partial<Settings> = {}) =>
 const FOGLEMAN_WHY =
   'Not derived from biology. Fogleman’s program draws random settings and prints them, and he saved this set under its name. The values are copied exactly: radians turned into degrees, his kept fraction into decay = 1 − kept, and his repulsion factor into a negative weight on the other strains’ trails.';
 
-export const PRESETS: Preset[] = [
+const SCENES: Preset[] = [
   {
-    id: 'three-strains',
+    id: 'three-networks',
     name: 'Three strains',
     group: 'start',
     source: 'Made for this app',
-    summary: 'Three rival strains start in one disc and weave their networks around each other.',
+    summary: 'Three rival strains grow from three foods, and each weaves a network of its own.',
+    watch:
+      'Three small colonies grow from the foods in the middle. After about 800 steps their meshes fill the dish and push into each other. Then the flow thins each mesh. From about step 8,000 three networks remain on the same foods, one of each strain, wound around each other.',
     about:
-      'The start scene. Three strains begin as slices of one disc. Each follows its own trail and steers away from the other two, so their networks wind around each other instead of merging. It works like the versions of Sage Jenson and Michael Fogleman: several agents per cell and no one-agent-per-cell rule, which gives thin, sharp filaments.',
-    strainRoles: ['One of three equal rivals', 'The same settings as A', 'The same settings as A'],
-    why: 'Chosen for this app, not taken from a paper. As in Fogleman’s version, agents share cells (3 agents per cell) and the trail gets two blur passes. Decay 0.6 removes most of the trail every step, so a path lasts only while agents keep walking it. Sensor distance 18 sets the size of the mesh (Jones, Fig. 10). A weight of −0.7 on the other strains’ trails keeps the networks apart.',
-    settings: () =>
-      settings({
-        density: 3,
-        diffusion: 2,
-        layout: 'sectors',
-        strains: strains(
-          [0, 1, 2].map((i) => ({
-            sensorAngle: 35,
-            rotationAngle: 40,
-            sensorOffset: 18,
-            stepSize: 1.4,
-            decay: 0.6,
-            attraction: repulsion(i, 0.7),
-          })),
-        ),
-      }),
+      'The start scene. Twelve food sources in a dish, and three strains that flee each other’s trail. Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. So each strain keeps the tubes that it needs, and the three networks wind around each other.',
+    strainRoles: [
+      'Starts on the lower food of the three in the middle',
+      'The same settings as A, starts at the upper left',
+      'The same settings as A, starts at the upper right',
+    ],
+    why: 'Jones’ foraging agent with growth and shrinkage, three times. A weight of −1 on the other strains’ trails keeps the tubes apart. The start layout puts each strain on a food of its own. Flow in the tubes is on with a strength of 8, the Maze’s, for each strain. The dish has 384 × 384 cells on every screen. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    settings: () => forager({ lattice: L384() }, 3),
+    // The start layout 'food' places strain A on the first food, B on the second and C on the third: the three in the
+    // middle. The nine on the ring are for all.
+    env: [...ring(3, 0.13, 0.014, 90), ...ring(9, 0.33, 0.014, 30)],
   },
   {
-    id: 'two-strains',
+    id: 'two-networks',
     name: 'Two strains',
     group: 'start',
     source: 'Made for this app',
-    summary: 'Two strains side by side; each builds its own network and avoids the other.',
+    summary: 'Two rival strains grow from the left and the right, and each builds its own network.',
+    watch:
+      'A colony starts on the food at the left, and one on the food at the right. Their meshes meet in the middle after about 1,200 steps and fill the box by step 2,500. Then the flow thins them. From about step 8,000 two networks remain on the same foods, one of each strain.',
     about:
-      'Two strains start in two bands, side by side. Each follows its own trail and is repelled by the other’s, so the two networks compete for space. Watch what happens where they meet. Like the start scene, it runs without the one-agent-per-cell rule.',
-    strainRoles: ['Starts in the left band', 'The same settings as A, starts in the right band'],
-    why: 'Chosen for this app. Sensor distance 14 (Jones: 9) gives a coarser mesh, and decay 0.3 lies between Jones’ 0.1 and the start scene’s 0.6. A weight of −0.6 on the other strain’s trail keeps the strains apart, and 2 agents per cell fill the grid.',
-    settings: () =>
-      settings({
-        density: 2,
-        layout: 'bands',
-        strains: strains(
-          [0, 1].map((i) => ({
-            sensorOffset: 14,
-            decay: 0.3,
-            attraction: repulsion(i, 0.6).map((v, j) => (j < 2 ? v : 0)),
-          })),
-        ),
-      }),
+      'Nine food sources in a box, and two strains that flee each other’s trail. One starts at the left and one at the right. Each has a flow of its own, which runs only through its own tubes. So each keeps the tubes that carry its own flow between the foods, and the two networks end side by side.',
+    strainRoles: ['Starts on the food at the left', 'The same settings as A, starts at the right'],
+    why: 'Jones’ foraging agent with growth and shrinkage, twice, as in the scene Three strains. A weight of −1 on the other strain’s trail keeps the tubes apart. Flow in the tubes is on with a strength of 8 for each strain. The box has 480 × 320 cells on every screen. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    settings: () => forager({ lattice: [480, 320], boundary: 'box' }, 2),
+    // The start layout 'food' places strain A on the first food and strain B on the second: left and right.
+    env: [
+      food(-0.6, 0, 0.014),
+      food(0.6, 0, 0.014),
+      food(-0.3, -0.27, 0.014),
+      food(-0.3, 0.27, 0.014),
+      food(0, -0.3, 0.014),
+      food(0, 0, 0.014),
+      food(0, 0.3, 0.014),
+      food(0.3, -0.27, 0.014),
+      food(0.3, 0.27, 0.014),
+    ],
   },
   {
     id: 'network',
@@ -607,11 +619,11 @@ export const PRESETS: Preset[] = [
 ];
 
 // Experiments from Jones 2010 and the Physarum literature: settings, environment and what to watch.
-PRESETS.push(
+SCENES.push(
   {
     id: 'shortest-path',
     name: 'Shortest path',
-    group: 'experiments',
+    group: 'papers',
     source: 'Jones 2010, Fig. 18',
     summary: 'Two food sources in a dish: the network contracts into one band between them.',
     watch:
@@ -635,7 +647,7 @@ PRESETS.push(
   {
     id: 'steiner',
     name: 'Steiner tree',
-    group: 'experiments',
+    group: 'papers',
     source: 'Jones 2010, Fig. 19',
     summary: 'Four food sources: the network shrinks to a short tree that joins them all.',
     watch:
@@ -662,7 +674,7 @@ PRESETS.push(
   {
     id: 'shrinking',
     name: 'Shrinking plasmodium',
-    group: 'experiments',
+    group: 'papers',
     source: 'Jones 2010, Fig. 21',
     summary: 'A full sheet of agents slowly dies off and shrinks onto the food sources.',
     watch:
@@ -719,7 +731,7 @@ PRESETS.push(
   {
     id: 'wound',
     name: 'Wound healing',
-    group: 'experiments',
+    group: 'papers',
     source: 'Jones 2010, Fig. 22',
     summary: 'A repelling spot pattern that grows back after you cut it.',
     watch:
@@ -740,23 +752,25 @@ PRESETS.push(
     name: 'Fleeing light',
     group: 'experiments',
     source: 'Made for this app',
-    summary: 'A transport network around a bright lamp: it retreats from the light.',
+    summary: 'A colony grows around a bright lamp and joins six foods with tubes that avoid the light.',
     watch:
-      'Physarum avoids light. The network retreats from the lit disc and reroutes around it. Paint more light with the Light tool.',
+      'The colony starts on the food at the left and grows around the lit disc: no agent is born on a lit cell. After about 2,000 steps it covers all six foods. Then the flow thins the mesh, and a ring of tubes around the lamp remains. Paint more light with the Light tool.',
     about:
-      'Real Physarum avoids light. A lamp in the middle releases a repellent that spreads and fades, so agents feel it before they enter the lit disc. The network itself uses Jones’ settings for Fig. 4.',
-    strainRoles: ['Jones’ standard agent, flees light'],
-    why: 'The network uses Jones’ values for Fig. 4 with one agent per cell. The lamp releases a spreading repellent with strength 0.2. That is the rule of the repellent sources in Jones’ later papers (Jones and Adamatzky 2015). To use it for light is this app’s choice: Jones’ own light rule of 2012 makes the sensors of a lit agent weaker, and this app does not have it.',
-    // A repellent source is a rule of Jones (ADR 0044), and the Jones model runs this scene with the same bytes. To
-    // call the source light is this app's reading, so the scene stays in the extended model (ADR 0022).
-    settings: () =>
-      jones({ sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 9 }, { model: 'extended', lightStrength: 0.2 }),
-    env: [{ kind: 'light', at: [0, 0], r: 0.16 }],
+      'Real Physarum avoids light. A lamp in the middle releases a repellent that spreads and fades, so agents feel it before they enter the lit disc, and no agent is born on lit ground. Six foods lie around the lamp. The colony joins them with tubes, and no tube crosses the light.',
+    strainRoles: ['Jones’ foraging agent, drawn to food, flees light'],
+    why: 'Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 2, as in Food ring. The lamp releases a spreading repellent with strength 0.2, and Light stops growth is 1, the default. Both light rules are this app’s: Jones’ own light rule of 2012 makes the sensors of a lit agent weaker. The dish has 384 × 384 cells. Sensor distance 7 and food weight 0.03 are the Maze’s.',
+    // A repellent source is a rule of Jones (ADR 0044). To call the source light, and to let light stop growth
+    // (ADR 0050), is this app's reading, so the scene runs on the extended model (ADR 0022).
+    settings: () => forager({ lattice: L384(), flowStrength: 2, lightStrength: 0.2 }),
+    // The start layout 'food' places the colony on the first food: the one at the left. The light comes after the food.
+    env: [...ring(6, 0.33, 0.014, 180), { kind: 'light', at: [0, 0], r: 0.16 }],
+    // Revision 0, until ADR 0064: the lamp alone, in a network of Jones' agents without growth and without the flow.
+    envHistory: [[{ kind: 'light', at: [0, 0], r: 0.16 }]],
   },
   {
     id: 'maze',
     name: 'Maze',
-    group: 'experiments',
+    group: 'papers',
     source: 'Nakagaki et al. 2000',
     summary: 'Food at both ends of a winding corridor: the network fills it, then one tube remains.',
     watch:
@@ -774,7 +788,9 @@ PRESETS.push(
       jones(
         { sensorAngle: 45, rotationAngle: 45, sensorOffset: 7 },
         // Sensors that walls block are the owner's rule for the Maze, not Jones': the extended model (ADR 0020, 0022).
-        // The flow in the tubes lets the dead ends starve, as in the real maze (ADR 0029).
+        // The flow in the tubes lets the dead ends starve, as in the real maze (ADR 0029). The Maze starts full and
+        // has no growth: the slime mold of 2000 filled its maze and did not grow after the food came (ADR 0052). With
+        // growth its dead ends empty about eight times later (ADR 0064), so it keeps these settings.
         { model: 'extended', density: 0.12, boundary: 'box', foodStrength: 0.03, shrink: 0.0001, flow: true },
       ),
     env: [
@@ -792,13 +808,13 @@ PRESETS.push(
     name: 'Foraging maze',
     group: 'experiments',
     source: 'After Jones 2011 and 2017',
-    summary: 'A small colony on one food grows through the maze until it reaches the other food.',
+    summary: 'A small colony on one food grows through the maze to the other food; then one tube stays.',
     watch:
-      'Fifty agents start on the bottom-right food. They divide at the thin edge of the colony, branch out and fill the corridors with a fine mesh. Within a few thousand steps a path reaches the top-left food. Hold Inoculate on a food to start a colony of your own.',
+      'Fifty agents start on the bottom-right food. They divide at the thin edge and fill the corridors with a mesh. By step 5,000 it reaches the top-left food. Then the flow runs between the foods and the rest starves: one tube is left from about step 15,000. Hold Inoculate to start a colony.',
     about:
-      'Jones lets his agents divide where the colony is thin and die where it is crowded (2011). A colony then grows from one food and forages, as a real slime mold does. Here, a small colony starts on one food of the maze. It branches through the corridors and finds the other food by growth alone, as no scent reaches that far.',
+      'Jones lets his agents divide where the colony is thin and die where it is crowded (2011). A colony then grows from one food and forages, as a real slime mold does. Here, a small colony starts on one food of the maze and finds the other food by growth alone, as no scent reaches that far. Then the flow in the tubes keeps the tube between the two foods.',
     strainRoles: ['Jones’ foraging agent, drawn to food'],
-    why: 'Growth and shrinkage with Jones’ values of 2011: a 9 × 9 window with 1 to 10 agents for growth, a 5 × 5 window with up to 20 for shrinkage, both every 3 steps. Sensor angle 22.5° and rotation angle 45° are Jones’ angles for foraging (2011, 2017); 45° makes the colony contract. The maze, its foods, sensor distance 7 and food weight 0.03 are the Maze’s. Capacity 0.25 leaves room for the colony.',
+    why: 'Growth and shrinkage with Jones’ values of 2011: a 9 × 9 window with 1 to 10 agents for growth, a 5 × 5 window with up to 20 for shrinkage, both every 3 steps. Sensor angle 22.5° and rotation angle 45° are Jones’ angles for foraging (2011, 2017). The maze, its foods, sensor distance 7, food weight 0.03 and the flow strength of 8 are the Maze’s. Capacity 0.25 leaves room for the colony.',
     settings: () =>
       jones(
         { sensorAngle: 22.5, rotationAngle: 45, sensorOffset: 7 },
@@ -810,6 +826,8 @@ PRESETS.push(
           boundary: 'box',
           foodStrength: 0.03,
           growth: true,
+          // The flow keeps the tubes between the two foods once the colony covers both (ADR 0064).
+          flow: true,
         },
       ),
     // The start layout 'food' places the colony on the first food: the bottom-right one.
@@ -859,7 +877,7 @@ PRESETS.push(
   {
     id: 'coarsening',
     name: 'Coarsening network',
-    group: 'experiments',
+    group: 'papers',
     source: 'Baumgarten, Jones and Hauser 2015, Fig. 2',
     summary: 'A dense network loses vein after vein until one ring is left, and the ring closes.',
     watch:
@@ -894,7 +912,7 @@ PRESETS.push(
   {
     id: 'electrotaxis',
     name: 'Electrotaxis',
-    group: 'experiments',
+    group: 'papers',
     source: 'Tsuda et al. 2011, Fig. 11',
     summary: 'A line of agents between two rows of electrodes moves to the cathodes.',
     watch:
@@ -934,7 +952,7 @@ PRESETS.push(
   {
     id: 'voronoi',
     name: 'Voronoi diagram',
-    group: 'experiments',
+    group: 'papers',
     source: 'Jones and Adamatzky 2015, Fig. 10',
     summary: 'Seven repellent dots in a dish: the network settles on the lines halfway between them.',
     watch:
@@ -1052,12 +1070,63 @@ PRESETS.push(
   },
 );
 
-// Michael Fogleman's saved settings (MIT).
-PRESETS.push(
+// The scenes without the rule of one agent per cell: this app's two scenes in the style of Jenson and Fogleman, which
+// were its start scenes until ADR 0064, and Michael Fogleman's saved settings (MIT).
+SCENES.push(
+  {
+    id: 'three-strains',
+    name: 'Three-strain weave',
+    group: 'shared',
+    source: 'Made for this app',
+    summary: 'Three rival strains start in one disc and weave their networks around each other.',
+    about:
+      'Three strains begin as slices of one disc. Each follows its own trail and steers away from the other two, so their networks wind around each other instead of merging. It works like the versions of Sage Jenson and Michael Fogleman: several agents per cell and no one-agent-per-cell rule, which gives thin, sharp filaments.',
+    strainRoles: ['One of three equal rivals', 'The same settings as A', 'The same settings as A'],
+    why: 'Chosen for this app, not taken from a paper. As in Fogleman’s version, agents share cells (3 agents per cell) and the trail gets two blur passes. Decay 0.6 removes most of the trail every step, so a path lasts only while agents keep walking it. Sensor distance 18 sets the size of the mesh (Jones, Fig. 10). A weight of −0.7 on the other strains’ trails keeps the networks apart.',
+    settings: () =>
+      settings({
+        density: 3,
+        diffusion: 2,
+        layout: 'sectors',
+        strains: strains(
+          [0, 1, 2].map((i) => ({
+            sensorAngle: 35,
+            rotationAngle: 40,
+            sensorOffset: 18,
+            stepSize: 1.4,
+            decay: 0.6,
+            attraction: repulsion(i, 0.7),
+          })),
+        ),
+      }),
+  },
+  {
+    id: 'two-strains',
+    name: 'Two-strain weave',
+    group: 'shared',
+    source: 'Made for this app',
+    summary: 'Two strains side by side; each builds its own network and avoids the other.',
+    about:
+      'Two strains start in two bands, side by side. Each follows its own trail and is repelled by the other’s, so the two networks compete for space. Watch what happens where they meet. Like the Three-strain weave, it runs without the one-agent-per-cell rule.',
+    strainRoles: ['Starts in the left band', 'The same settings as A, starts in the right band'],
+    why: 'Chosen for this app. Sensor distance 14 (Jones: 9) gives a coarser mesh, and decay 0.3 lies between Jones’ 0.1 and the 0.6 of the Three-strain weave. A weight of −0.6 on the other strain’s trail keeps the strains apart, and 2 agents per cell fill the grid.',
+    settings: () =>
+      settings({
+        density: 2,
+        layout: 'bands',
+        strains: strains(
+          [0, 1].map((i) => ({
+            sensorOffset: 14,
+            decay: 0.3,
+            attraction: repulsion(i, 0.6).map((v, j) => (j < 2 ? v : 0)),
+          })),
+        ),
+      }),
+  },
   {
     id: 'cyclones',
     name: 'Cyclones',
-    group: 'fogleman',
+    group: 'shared',
     source: 'Fogleman 2020',
     summary: 'Two species: one builds a coarse honeycomb, the other spins vortices inside it.',
     about:
@@ -1076,7 +1145,7 @@ PRESETS.push(
   {
     id: 'dunes',
     name: 'Dunes',
-    group: 'fogleman',
+    group: 'shared',
     source: 'Fogleman 2020',
     summary: 'Two species: rough ridges like dune crests, with small dots between them.',
     about:
@@ -1095,7 +1164,7 @@ PRESETS.push(
   {
     id: 'dot-grid',
     name: 'Dot grid',
-    group: 'fogleman',
+    group: 'shared',
     source: 'Fogleman 2020',
     summary: 'Three species: a regular lattice of dots inside a network of cells.',
     about:
@@ -1113,6 +1182,9 @@ PRESETS.push(
       ),
   },
 );
+
+/** Every scene, in the order of the groups, and within a group in the order of the list above. */
+export const PRESETS: Preset[] = GROUPS.flatMap((g) => SCENES.filter((p) => p.group === g.id));
 
 export const presetById = (id: string) => PRESETS.find((p) => p.id === id);
 
@@ -1149,16 +1221,35 @@ export const gridText = (s: Pick<Settings, 'lattice' | 'resolution'>) =>
   s.lattice ? latticeText(s.lattice) : `${s.resolution} cells on the long side`;
 
 /**
- * Shown below the grid while a scene with the lattice of its figure runs on another grid `now` (ADR 0026): the grid,
- * Jones' lattice, and why the result then differs from the paper, with the names of the panel. Also for a shared link
- * made on another grid, so it says what runs, not who changed it.
+ * Whether the lattice of a scene is the lattice of a figure of Jones 2010 (ADR 0026). Every other scene with a lattice
+ * has a grid of its own: this app's choice, or the lattice of another paper. The texts about the grid name Jones and
+ * his figure only for a scene of the first kind (ADR 0064).
  */
-export function latticeNotice(lattice: Lattice, now: Pick<Settings, 'lattice' | 'resolution'>): string {
+export const figureLattice = (p: Preset | undefined): boolean => p !== undefined && sourceKind(p) === 'jones';
+
+/** What the grid choice writes behind the lattice of the scene: `figure` as figureLattice() gives it. */
+export const latticeOrigin = (figure: boolean) => (figure ? ', as in the paper' : ', the scene’s grid');
+
+/**
+ * Shown below the grid while a scene with a lattice runs on another grid `now` (ADR 0026): the grid, the lattice of
+ * the scene, and why the result then differs, with the names of the panel. Also for a shared link made on another
+ * grid, so it says what runs, not who changed it. `figure`: the lattice is that of a figure of Jones 2010
+ * (figureLattice()), and the text names Jones and the paper.
+ */
+export function latticeNotice(lattice: Lattice, now: Pick<Settings, 'lattice' | 'resolution'>, figure = true): string {
+  if (!figure)
+    return `This grid has ${gridText(now)}. The scene was made for ${latticeText(lattice)}. Lengths such as Sensor distance and Step size are in cells. So the pattern keeps its size in cells, and another grid holds more or less of it. The scene can then run differently.`;
   return `This grid has ${gridText(now)}. For this figure, Jones used ${latticeText(lattice)}. Jones gives lengths in cells, as for Sensor distance and Step size. So the pattern keeps its size in cells, and another grid holds more or less of it. The result is then different from the paper.`;
 }
 
-/** Shown below the grid while the device cannot hold the lattice of the scene's figure (ADR 0026): no way back. */
-export function latticeLostNotice(lattice: Lattice, now: Pick<Settings, 'lattice' | 'resolution'>): string {
+/** Shown below the grid while the device cannot hold the lattice of the scene (ADR 0026): no way back. */
+export function latticeLostNotice(
+  lattice: Lattice,
+  now: Pick<Settings, 'lattice' | 'resolution'>,
+  figure = true,
+): string {
+  if (!figure)
+    return `This device cannot hold the scene’s grid of ${latticeText(lattice)}. The scene runs on a grid of ${gridText(now)}, so it can run differently.`;
   return `This device cannot hold Jones’ grid of ${latticeText(lattice)} for this figure. The scene runs on a grid of ${gridText(now)}, so the result can be different from the paper.`;
 }
 

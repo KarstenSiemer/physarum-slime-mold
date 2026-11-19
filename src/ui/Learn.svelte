@@ -294,11 +294,14 @@
       </p>
     {:else if app.learnTab === 'Scenes'}
       <p>
-        Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
-        figure in his paper, on the grid of that figure. Fogleman 2020 scenes are his saved settings, and the others
-        were made for this app. These scenes use a grid shaped like your screen. The three Tokyo scenes, Food ring and
-        Rival networks have a square grid on every screen, so north stays up on the map of Tokyo. Snail maze and Corn
-        maze have a grid of their own too, so their corridors are as wide on every screen.
+        Each scene loads its settings with its food, light and walls. The scenes under Start here and Experiments run
+        this app’s rules for the organism: one agent per cell, growth and shrinkage, the flow in the tubes and the
+        slime. Scenes marked Jones 2010 use the settings of a figure in his paper, on the grid of that figure. Paper
+        experiments are the experiments of the papers on Jones’ model, each with the model and the values of its paper.
+        Under Agents share cells the rule of one agent per cell is off: Fogleman 2020 scenes are his saved settings, and
+        the two weaves were made for this app. Most scenes have a grid of their own on every screen, so a dish stays
+        round, a corridor keeps its width and north stays up on the map of Tokyo. Maze, Foraging maze and the scenes
+        where agents share cells use a grid shaped like your screen.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>

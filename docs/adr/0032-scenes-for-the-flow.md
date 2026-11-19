@@ -13,6 +13,8 @@
   that each build a network of their own (ADR 0031). For them, each strain starts on a food of its
   own. And the level of the trail from which a cell holds a tube now follows the decay of the
   strain, so the flow also acts in a scene whose trail decays fast.
+- Extended by ADR 0064 (2026-11-19): the two start scenes, Fleeing light, the Maze and the Foraging maze run the
+  same rules as the scenes of this record.
 
 ## Context
 

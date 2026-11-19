@@ -227,10 +227,14 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
     expect([d.shrinkEvery, d.shrinkWindow, d.shrinkMin, d.shrinkMax]).toEqual([3, 5, 0, 20]);
   });
 
-  it('keeps growth off in every scene but the foraging scenes and the Coarsening network, and in a link without it', () => {
-    // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031). The Coarsening network
-    // and the Voronoi diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048).
+  it('keeps growth off in the patterns, in the scenes where agents share cells and in a link without it', () => {
+    // The scenes of Start here and of Experiments run the rules of the organism, with growth (ADR 0064): each starts
+    // as a small colony on a food and grows from it (ADR 0025, 0029, 0031). The Coarsening network and the Voronoi
+    // diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048). The Maze does not grow (ADR 0052).
     const grows = [
+      'three-networks',
+      'two-networks',
+      'light',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
@@ -361,9 +365,12 @@ describe('flow in the tubes (ADR 0029)', () => {
     expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
   });
 
-  it('is on in the Maze, in the two Tokyo scenes and in the scenes made for it (ADR 0032)', () => {
+  it('is on in every scene of Start here and of Experiments, and in the Maze (ADR 0029, ADR 0032, ADR 0064)', () => {
     const flowing = [
-      'maze',
+      'three-networks',
+      'two-networks',
+      'light',
+      'foraging-maze',
       'snail-maze',
       'corn-maze',
       'tokyo',
@@ -371,6 +378,7 @@ describe('flow in the tubes (ADR 0029)', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'maze',
     ];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
