@@ -21,9 +21,10 @@ heal and compete. Everything runs on your graphics card, in the browser.
 - Paint **food** (attracts), **light** (repels), **walls**, inoculate agents, or **cut** a
   wound and watch it heal.
 - Run **experiments**: mazes, light avoidance, rival networks and the Tokyo rail network of Tero
-  et al. (2010) with the rules of the organism. The experiments of the papers on Jones' model run
-  with the model of their paper: shortest path, Steiner tree, shrinking plasmodium, wound healing,
-  a coarsening network, electrotaxis and a Voronoi diagram.
+  et al. (2010) with the rules of the organism. The experiments of papers run as their paper sets
+  them: the maze of Nakagaki et al. (2000) with its protocol, and from the papers on Jones' model
+  the shortest path, Steiner tree, shrinking plasmodium, wound healing, a coarsening network,
+  electrotaxis and a Voronoi diagram.
 - Turn on **flow in the tubes**: tubes that carry flow between foods stay, the others starve.
   The Maze then keeps one tube along a short route. The picture draws every tube as wide as its
   flow memory says: a tube that keeps much flow stays thick, the others get thin and faint. Small
