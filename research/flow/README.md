@@ -2263,9 +2263,63 @@ CI. Not measured: the time of a draw with the skirt. ADR 0060 has the rest. The 
 | `e2e-half2-main.txt`, `e2e-half2-branch`    | the second shard of the e2e tests in the image of CI, `main`, here   |
 | `bench-front-r*`, `bench-main-r*`           | the time of a step with the front stamp, and on `main`               |
 
+### 23. Does the black level cut the plasm? [ADR 0062]
+
+The owner saw tubes tear as soon as they covered a certain share of the work surface. The black
+level of the picture was the 65th percentile of the trail over all cells. Above a cover of 35 %
+it rose into the plasm. Now, with one agent per cell, it is at most half of the median trail of
+the cells that hold an agent. This part has no measurement of the model: no rule reads the levels.
+
+**The pictures and the numbers**: eleven cases, each with the black level of before and with the
+one of the app, from the built app (`test-results/pictures/`, 1 minute). `LEVELS=sheet,spots`
+makes those cases only, and `BACKEND=webgl2` runs the app on WebGL2. A line per case says how
+many of the cells with an agent each black level draws black:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/levels.spec.ts
+```
+
+**The tests** of the rule on the CPU, and of a sheet, a network, agents without trail and a scene
+without the rule on both backends (15 seconds):
+
+```bash
+npx vitest run --project unit src/engine/exposure.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/levels.gpu.test.ts
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g62-digest-branch`. The
+digests of `main` for it are those of part 22:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g62-digest-branch.jsonl research/flow/logs/engine/front/digest-branch.jsonl
+```
+
+It must print that all 54 runs are equal.
+
+**The wrong rules** of the black level (BL1 to BL11), and the six wrong rules of the picture of
+the tubes whose lines changed (part 7 has the tool):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts BL1 BL2 BL3 BL4 BL5 BL6 BL7 BL8 BL9 BL10 BL11 V51 V52 V53 V54 V57 V58
+```
+
+Result: in the owner's case the black level of before drew 19 % of the cells with an agent black,
+and the one of the app 0.6 %. A sheet of agents went from 48 % to 1.2 %. Six cases keep their
+level: there the 65th percentile lies below the limit. Each of the 17 wrong rules fails at least
+one test. Not measured: the time of a measurement of the levels. ADR 0062 has the table. The
+records are in `logs/view/levels/`:
+
+| Record                     | Runs                                          |
+| -------------------------- | --------------------------------------------- |
+| `webgpu.txt`, `webgl2.txt` | the lines of the eleven cases on each backend |
+| `mutations.txt`            | the 17 wrong rules of the command above       |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 408 files, 8.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 411 files, 8.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2301,6 +2355,7 @@ asks for the new digest.
 | `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
 | `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
 | `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, the wrong rules, and the e2e times                                                                                                                                  |
+| `logs/view/levels/`                                  | the runs of part 23 (ADR 0062): the black level in eleven cases on each backend, and the wrong rules                                                                                                                            |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
