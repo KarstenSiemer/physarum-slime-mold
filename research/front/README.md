@@ -38,10 +38,10 @@ of steps 3 to 5, with the colony as its own source (it has no food):
 | Case                             | Slime is no sink (the owner's rule) | Slime is a sink of weight 0.025 | The organism     |
 | -------------------------------- | ----------------------------------- | ------------------------------- | ---------------- |
 | Slime on one arm: blank : slime  | 40 : 0                              | 40 : 0                          | 39 : 1           |
-| Slime on both arms: left : right | 7 : 15 (p 0.13)                     | 10 : 13 (p 0.68)                | no preference    |
+| Slime on both arms: left : right | 8 : 15 (p 0.21)                     | 10 : 13 (p 0.68)                | no preference    |
 | No slime: left : right           | 12 : 11                             | 8 : 14 and 1 split              | no preference    |
 | First food, no slime             | 3,479 steps (1.9 h)                 | 3,332 steps                     | 2,400 to 7,200   |
-| First food, slime on both arms   | 6,569 steps: 1.89 times             | 4,217 steps: 1.27 times         | as fast as blank |
+| First food, slime on both arms   | 6,507 steps: 1.87 times             | 4,217 steps: 1.27 times         | as fast as blank |
 
 **Step 7: the crown.** Pictures show a crown at the head of a tube (drift 1.25) and a fan that migrates (drift 5).
 Measured on runs of a lane and a dish: the veins lie along the flow (the mean |cos| of the angle is 0.89 to 0.99),
@@ -50,7 +50,7 @@ and a cell becomes a vein (D ≥ 0.5) a median of 400 to 1,900 steps after the f
 
 **What is not reached.**
 
-- With the owner's rule, a colony on slime everywhere is 1.89 times slower: without a sink there is no drift, and
+- With the owner's rule, a colony on slime everywhere is 1.87 times slower: without a sink there is no drift, and
   less plasm pushes the front. A small weight for slime gives 1.27 times; the rest is the base of the maze, which
   is fresh and holds the drift first.
 - In an open dish the front is an octagon and the veins prefer the axes of the grid: the square cells show, as de

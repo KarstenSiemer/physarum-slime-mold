@@ -51,7 +51,7 @@ food after 3,332 to 3,479 steps (the organism: 2,400 to 7,200).
    the code of ADR 0029.
 4. **No GPU pass is written** before the owner has seen the pictures and the table (the plan of stage 4).
 5. **For the owner: the owner's rule and the third target of the Y-maze conflict.** With slime as no sink, a colony
-   on slime everywhere has no drift and is 1.89 times slower. A sink of weight 0.025 on slime, shared with the fresh
+   on slime everywhere has no drift and is 1.87 times slower. A sink of weight 0.025 on slime, shared with the fresh
    rims, gives 1.27 times and keeps the dead ends without a sink (decision 2). The agent recommends the weight, and
    to measure it in an open dish, where the base of the maze does not delay it.
 6. **For the owner: the look.** The drift sets it: 0 gives a tree of tubes with small heads, 1.25 to 1.5 a tube with a
