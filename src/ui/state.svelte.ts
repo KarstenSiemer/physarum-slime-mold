@@ -7,6 +7,7 @@ import {
   constrain,
   defaultSettings,
   globalSpec,
+  JONES_DENSITY,
   MAX_STRAINS,
   MEAN_WINDOW,
   RESOLUTIONS,
@@ -14,11 +15,20 @@ import {
   strainLike,
   strainSpec,
   toJones,
+  withRule,
   type Lattice,
   type Model,
   type Settings,
 } from '../model/params';
-import { presetById, RULE_MISSING_NOTICE, shapeRevision, shapesAt, usesRule, type Preset } from '../model/presets';
+import {
+  presetById,
+  RULE_MISSING_NOTICE,
+  ruleOffNotice,
+  shapeRevision,
+  shapesAt,
+  usesRule,
+  type Preset,
+} from '../model/presets';
 import { fmt, letter, list, modelChanged, signed } from '../model/scene';
 import type { Link } from '../model/url';
 import { latticeResolution, type GridTuner } from './tune';
@@ -205,6 +215,12 @@ export interface AppState {
   linkBase: Settings | undefined;
   /** The backend supports one agent per cell (WebGL2 needs EXT_float_blend). */
   canCollide: boolean;
+  /**
+   * The Agents per cell that a switch to the rule of one agent per cell replaced with Jones' value (setRule(),
+   * setModel(), ADR 0063): a switch back puts it back while Agents per cell is still Jones' value. Undefined after
+   * that switch back and after a new scene or a link.
+   */
+  densityBeforeRule: number | undefined;
   stats: Stats;
 }
 
@@ -235,6 +251,7 @@ export const app = $state<AppState>({
   lostLattice: null,
   linkBase: undefined,
   canCollide: true,
+  densityBeforeRule: undefined,
   stats: { fps: 0, stepsPerSecond: 0, step: 0, alive: [], run: -1 },
 });
 
@@ -268,6 +285,8 @@ export function setScene(p: Preset) {
   app.strainOrigin = s.strains.map((_, i) => i);
   // The inoculate tool places the selected strain, and a scene with fewer strains has no such strain.
   app.strain = Math.min(app.strain, s.strains.length - 1);
+  // The density that a switch to the rule replaced belonged to the scene before.
+  app.densityBeforeRule = undefined;
 }
 
 let ruleNoticeShown = false;
@@ -320,6 +339,7 @@ export function clearEnvironment() {
 export function openLink({ settings, drawing, drawingLost }: Link) {
   app.settings = settings;
   app.linkBase = structuredClone(settings);
+  app.densityBeforeRule = undefined;
   linkDrawing = drawing;
   app.envVersion++;
   if (drawingLost) showNotice('This app cannot read the scene and drawing in this link, so only its settings load.');
@@ -413,6 +433,45 @@ export function ruleUnavailable() {
   noteMissingRule();
 }
 
+/** Shown when the rule goes off while growth is on: constrain() turns growth off with it. */
+const GROWTH_OFF =
+  'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.';
+
+/**
+ * The panel's switch of the rule of one agent per cell (ADR 0008). The engine restarts the population on every
+ * switch, so agents stacked without the rule do not stay stacked.
+ *
+ * On: settings with 1 agent per cell or more get Jones' population (withRule(), ADR 0063), and a notice says so: at 1
+ * every cell would hold an agent, and none could move. Off: the Agents per cell that the switch on replaced comes
+ * back, while the value is still the one that the switch set. A scene made for the rule gets the notice of what
+ * changes without it, and growth, which needs the rule, the notice that it is off.
+ */
+export function setRule(on: boolean) {
+  const s = app.settings;
+  if (on === s.collisions) return;
+  if (on) {
+    const { density } = withRule($state.snapshot(s));
+    if (density !== s.density) {
+      app.densityBeforeRule = s.density;
+      showNotice(
+        `With one agent per cell, Agents per cell is the share of the cells that hold an agent. It changed from ${fmt(s.density)} to ${fmt(density)}, Jones’ value: at 1 every cell is full, and no agent can move.`,
+        12_000,
+      );
+      s.density = density;
+    }
+    s.collisions = true;
+    return;
+  }
+  const growing = s.growth;
+  s.collisions = false;
+  if (app.densityBeforeRule !== undefined && s.density === JONES_DENSITY) s.density = app.densityBeforeRule;
+  app.densityBeforeRule = undefined;
+  const scene = presetById(app.scene);
+  const growth = growing ? ` ${GROWTH_OFF}` : '';
+  if (scene && usesRule(scene)) showNotice(ruleOffNotice(scene) + growth, 15_000);
+  else if (growing) showNotice(GROWTH_OFF);
+}
+
 /**
  * The panel's model choice. A switch to Jones keeps only what Jones' model has (toJones()): strain A, one agent per
  * cell, one diffusion pass, and the scent bound to the trail. A notice says what went (jonesChanges()). The extended
@@ -438,6 +497,8 @@ export function setModel(model: Model) {
     return;
   }
   const next = toJones(s);
+  // The switch turns the rule on: a switch of the rule back puts the Agents per cell of before back (setRule()).
+  if (!s.collisions && next.density !== s.density) app.densityBeforeRule = s.density;
   app.settings = next;
   app.strainOrigin = app.strainOrigin.slice(0, 1);
   app.strain = 0;

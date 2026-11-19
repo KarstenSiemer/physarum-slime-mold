@@ -7,6 +7,8 @@
   source, as Jones' papers use it. It replaces decision 8 and the list item "Light that releases a repellent scent".
 - Extended by ADR 0046 (the mean window of Jones' later papers, a setting of the Jones model).
 - Extended by ADR 0047 (the Electrode tool: the current sinks and sources of Tsuda, Jones et al. 2011).
+- Extended by ADR 0063 (2026-11-19): the switch to the Jones model gives a scene with 1 agent per cell or more
+  Jones' population.
 
 ## Context
 

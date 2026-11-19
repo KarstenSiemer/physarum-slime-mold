@@ -30,16 +30,7 @@
     type Lattice,
     type Strain,
   } from '../model/params';
-  import {
-    GROUPS,
-    latticeLostNotice,
-    latticeNotice,
-    latticeText,
-    PRESETS,
-    presetById,
-    ruleOffNotice,
-    usesRule,
-  } from '../model/presets';
+  import { GROUPS, latticeLostNotice, latticeNotice, latticeText, PRESETS, presetById } from '../model/presets';
   import Matrix from './Matrix.svelte';
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
@@ -56,7 +47,7 @@
     pickGrid,
     removeStrain,
     setModel,
-    showNotice,
+    setRule,
     useSceneLattice,
   } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
@@ -154,21 +145,6 @@
     await tick();
     document.getElementById('capacity')?.focus();
   }
-
-  // The engine restarts the population on every switch, so agents stacked without the rule do not stay
-  // stacked (ADR 0008).
-  function setRule(on: boolean) {
-    const growing = s.growth;
-    s.collisions = on;
-    const scene = presetById(app.scene);
-    const growth = !on && growing ? ` ${GROWTH_OFF}` : '';
-    if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene) + growth, 15_000);
-    else if (growth) showNotice(GROWTH_OFF);
-  }
-
-  /** Shown when the rule goes off while growth is on: constrain() turns growth off with it. */
-  const GROWTH_OFF =
-    'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.';
 </script>
 
 <aside class="panel" aria-label="Simulation settings">

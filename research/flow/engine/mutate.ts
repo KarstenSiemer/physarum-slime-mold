@@ -4,8 +4,9 @@
 // Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
 // (ADR 0053), of the mark that a starved tube leaves (ADR 0054), of the slime field, its brush and its picture
 // (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
-// the picture of the electrodes (ADR 0058) and of the black level below the plasm (ADR 0062). The script puts one
-// wrong rule at a time into a source file of the app,
+// the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062) and of the density when the
+// rule of one agent per cell goes on (ADR 0063). The script puts one wrong rule at a time into a source file of the
+// app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
 // the engine, the sweep, the link or the tool for painted slime. Every wrong rule must fail at least one test.
@@ -5218,6 +5219,94 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '    return this.occupancyTexture;',
     LEVELS_GL,
     LEVELS_SPEC,
+  ],
+  [
+    'DR1 ts: a switch to the rule keeps several agents per cell, which the cap turns into a full grid',
+    PARAMS_TS,
+    '  return { ...s, collisions: true, density: s.density >= 1 ? JONES_DENSITY : s.density };',
+    '  return { ...s, collisions: true };',
+    '',
+    PARAMS_SPEC,
+  ],
+  [
+    'DR2 ts: a switch to the rule keeps exactly 1 agent per cell',
+    PARAMS_TS,
+    '  return { ...s, collisions: true, density: s.density >= 1 ? JONES_DENSITY : s.density };',
+    '  return { ...s, collisions: true, density: s.density > 1 ? JONES_DENSITY : s.density };',
+    '',
+    PARAMS_SPEC,
+  ],
+  [
+    'DR3 ts: settings that hold the rule and a full grid get another density',
+    PARAMS_TS,
+    '  if (s.collisions) return s;',
+    '  if (s.collisions && s.density < 1) return s;',
+    '',
+    PARAMS_SPEC,
+  ],
+  [
+    'DR4 ts: the switch to the Jones model caps a dense scene at a full grid',
+    PARAMS_TS,
+    "  return constrain({ ...withRule(s), model: 'jones', diffusion: 1, strains: [{ ...st, attraction }] });",
+    "  return constrain({ ...s, model: 'jones', collisions: true, diffusion: 1, strains: [{ ...st, attraction }] });",
+    '',
+    PARAMS_SPEC,
+  ],
+  [
+    'DR5 ts: a switch back leaves the density that the switch to the rule set',
+    STATE_TS,
+    '  if (app.densityBeforeRule !== undefined && s.density === JONES_DENSITY) s.density = app.densityBeforeRule;',
+    '',
+    'the switch of the rule',
+    STATE_SPEC,
+  ],
+  [
+    'DR6 ts: a switch back replaces a density that the user set',
+    STATE_TS,
+    '  if (app.densityBeforeRule !== undefined && s.density === JONES_DENSITY) s.density = app.densityBeforeRule;',
+    '  if (app.densityBeforeRule !== undefined) s.density = app.densityBeforeRule;',
+    'the switch of the rule',
+    STATE_SPEC,
+  ],
+  [
+    'DR7 ts: a new scene keeps the density of the scene before for a switch back',
+    STATE_TS,
+    '  // The density that a switch to the rule replaced belonged to the scene before.\n  app.densityBeforeRule = undefined;',
+    '  // The density that a switch to the rule replaced belonged to the scene before.',
+    'the switch of the rule',
+    STATE_SPEC,
+  ],
+  [
+    'DR8 ts: a link keeps the density of the scene before for a switch back',
+    STATE_TS,
+    '  app.linkBase = structuredClone(settings);\n  app.densityBeforeRule = undefined;',
+    '  app.linkBase = structuredClone(settings);',
+    'the switch of the rule',
+    STATE_SPEC,
+  ],
+  [
+    'DR9 ts: the switch to the Jones model does not keep the density of before',
+    STATE_TS,
+    '  if (!s.collisions && next.density !== s.density) app.densityBeforeRule = s.density;',
+    '',
+    'the switch of the rule',
+    STATE_SPEC,
+  ],
+  [
+    'DR10 ts: the switch of the rule does not keep the density of before',
+    STATE_TS,
+    '      app.densityBeforeRule = s.density;\n      showNotice(',
+    '      showNotice(',
+    'the switch of the rule',
+    STATE_SPEC,
+  ],
+  [
+    'DR11 ts: the switch of the rule changes the density without a notice',
+    STATE_TS,
+    '        12_000,\n      );\n      s.density = density;',
+    "        12_000,\n      );\n      app.notice = '';\n      s.density = density;",
+    'the switch of the rule',
+    STATE_SPEC,
   ],
 ];
 

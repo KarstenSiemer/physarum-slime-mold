@@ -8,6 +8,7 @@ import {
   defaultStrain,
   fieldText,
   globalSpec,
+  JONES_DENSITY,
   jonesFits,
   MAX_STRAINS,
   MEAN_WINDOW,
@@ -21,6 +22,7 @@ import {
   strainLike,
   strainSpec,
   toJones,
+  withRule,
   type Settings,
   type Spec,
   type Strain,
@@ -526,10 +528,32 @@ describe('the Jones model', () => {
     expect(jonesFits(s)).toBe(true);
     expect(s.model).toBe('jones');
     expect([s.strains.length, s.collisions, s.diffusion, s.trailSaturation]).toEqual([1, true, 1, 0]);
-    expect(s.density).toBeLessThanOrEqual(1);
+    // The scene holds 3 agents per cell without the rule: with the rule it gets Jones' population (withRule()).
+    expect([three.collisions, three.density, s.density]).toEqual([false, 3, JONES_DENSITY]);
     expect(s.scentDecay).toBe(three.strains[0]?.decay);
     expect(s.strains[0]?.attraction[0]).toBe(1);
     expect(toJones({ ...three, strains: one({ attraction: [-0.7, 1, 0, 0] }) }).strains[0]?.attraction[0]).toBe(-1);
+  });
+
+  // With the rule, Agents per cell is the share of the cells that hold an agent (ADR 0063): at 1 every cell is full.
+  it('gives settings with 1 agent per cell or more Jones’ population when the rule goes on (withRule)', () => {
+    const d = defaultSettings();
+    expect([d.collisions, d.density]).toEqual([false, 1]);
+    for (const density of [1, 1.5, 3, 8]) {
+      const s = withRule({ ...d, density });
+      expect([s.collisions, s.density], String(density)).toEqual([true, 0.15]);
+    }
+    expect(JONES_DENSITY).toBe(0.15);
+    // A value below 1 is a share of the cells with the rule too.
+    for (const density of [0.01, 0.5, 0.99]) {
+      const s = withRule({ ...d, density });
+      expect([s.collisions, s.density], String(density)).toEqual([true, density]);
+    }
+    // The rule is on: the settings stay as they are, also with every cell full, as a link holds them.
+    const full = { ...d, collisions: true, density: 1 };
+    expect(withRule(full)).toBe(full);
+    // The other settings stay.
+    expect(withRule({ ...d, density: 3 })).toEqual({ ...d, collisions: true, density: 0.15 });
   });
 
   it('turns a Jones model without the rule into the extended model', () => {

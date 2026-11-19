@@ -505,7 +505,7 @@ export const growthHelp = {
 /** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */
 export const collisionsHelp = {
   label: 'One agent per cell',
-  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. The Jones model always has the rule, and only the extended model can switch it off. A switch restarts the population. With the rule, Agents per cell is at most 1.',
+  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. The Jones model always has the rule, and only the extended model can switch it off. A switch restarts the population. With the rule, Agents per cell is the share of the cells that hold an agent, 1 at most. At 1 every cell is full and no agent can move. So a switch to the rule from 1 agent per cell or more sets Agents per cell to 0.15, Jones’ value, and a switch back puts the value of before back.',
   ref: 'Jones 2010, p. 133 and 135',
 } as const;
 
@@ -912,13 +912,28 @@ function asJones(s: Settings): Settings {
   };
 }
 
+/** Jones' population of his networks: 15 % of the cells hold an agent (Jones 2010, Fig. 4 and 5; Table 1, %p). */
+export const JONES_DENSITY = 0.15;
+
+/**
+ * The settings with the rule of one agent per cell switched on (ADR 0063). With the rule, Agents per cell is the share
+ * of the cells that hold an agent, 1 at most (constrain()). Settings without the rule that hold 1 agent per cell or
+ * more would start with an agent in every cell: no cell is free, so no agent moves to another cell, and with growth
+ * the first shrinkage test kills every agent but those at the rim. Such settings get Jones' population. A value below
+ * 1 is a share of the cells with the rule too, and stays. Returns `s` itself when the rule is on already.
+ */
+export function withRule(s: Settings): Settings {
+  if (s.collisions) return s;
+  return { ...s, collisions: true, density: s.density >= 1 ? JONES_DENSITY : s.density };
+}
+
 /**
  * The settings in Jones' model: strain A alone, which follows or flees its own trail with weight 1, one agent per
- * cell, one mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
+ * cell (withRule()), one mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
  */
 export function toJones(s: Settings): Settings {
   const st = s.strains[0] ?? defaultStrain(0);
   const self = (st.attraction[0] ?? 1) < 0 ? -1 : 1;
   const attraction = st.attraction.map((v, j) => (j === 0 ? self : v));
-  return constrain({ ...s, model: 'jones', collisions: true, diffusion: 1, strains: [{ ...st, attraction }] });
+  return constrain({ ...withRule(s), model: 'jones', diffusion: 1, strains: [{ ...st, attraction }] });
 }
