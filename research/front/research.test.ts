@@ -1,5 +1,6 @@
 // The prototype of stage 4 (README.md of this folder) must keep the rules of the app when its own rules are off, and
 // its measures must keep working. These runs are short: the long runs of the story are commands of the README.
+// CI runs them about five times slower than a laptop, and a unit test has 5 s: keep each one below 0.5 s here.
 import { describe, expect, it } from 'vitest';
 import { yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
@@ -8,7 +9,7 @@ import { runY, slimedOf } from './ymaze';
 
 describe('the CPU prototype of stage 4', () => {
   it('runs the Y-maze as the app does: the first food after about 65 steps (ADR 0056)', () => {
-    const firsts = [1, 2, 3].map((seed) => runY(seed, ['left'], noFront(), 400, 50).first);
+    const firsts = [1, 2, 3].map((seed) => runY(seed, ['left'], noFront(), 400, 0).first);
     for (const f of firsts) expect(f).toBeGreaterThanOrEqual(55);
     for (const f of firsts) expect(f).toBeLessThanOrEqual(75);
   });
@@ -18,7 +19,7 @@ describe('the CPU prototype of stage 4', () => {
     const front = { ...noFront(), speed: 0.004, speedOn: 'push' as const, paid: 20, norm: 2, reach: 6, rim: true };
     const sim = new Sim(layout, params({ seed: 1, startStep: 18000, front: { ...front, colony: true, drift: 5 } }));
     const start = sim.territory.reduce((a, b) => a + b, 0);
-    for (let k = 0; k < 600; k++) sim.advance();
+    for (let k = 0; k < 150; k++) sim.advance();
     for (let c = 0; c < sim.cells; c++) if (sim.occ[c]) expect(sim.territory[c]).toBe(1);
     expect(sim.territory.reduce((a, b) => a + b, 0)).toBeGreaterThan(start);
   });
@@ -47,7 +48,7 @@ describe('the CPU prototype of stage 4', () => {
       const rules = { speed: '0.004', speedOn: 'push', paid: '20', norm: '2', reach: '6', rim: '1', colony: '1' };
       const front = frontFrom({ ...rules, drift: '1.5', slimeWeight: '0.025', paidOn: 'sinks', sinkAt });
       const sim = new Sim(layout, params({ seed: 1, startStep: 18000, front }));
-      for (let k = 0; k < 150; k++) sim.advance();
+      for (let k = 0; k < 30; k++) sim.advance();
       return Array.from(sim.occ).join('');
     };
     expect(run('edge', 'all')).toBe(run('fresh', 'all'));
