@@ -1,7 +1,8 @@
 # The growth front as a sink of the flow: a prototype on the CPU (stage 4)
 
-This folder belongs to [ADR 0065](../../docs/adr/0065-the-growth-front-takes-the-flow-a-prototype.md). The first part
-tells in plain words what the prototype found. The rest lists the commands.
+This folder belongs to [ADR 0065](../../docs/adr/0065-the-growth-front-takes-the-flow-a-prototype.md) and to
+[ADR 0067](../../docs/adr/0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md), the forms of a GPU (step 9). The first
+part tells in plain words what the prototype found. The rest lists the commands.
 [how-the-crown-forms.md](how-the-crown-forms.md) tells how the agents and the new rules make a crown, and which
 behaviour of the organism each rule copies.
 
@@ -97,6 +98,75 @@ Measured on runs of a lane and a dish: the veins lie along the flow (the mean |c
 and a cell becomes a vein (D ≥ 0.5) a median of 400 to 1,900 steps after the front reached it (the organism: about
 1,500, Schenz 2019). The front runs 0.015 to 0.03 cells per step: 1.5 to 3 cm/h (the organism: 1 to 3 cm/h).
 
+**Step 9: the forms of a GPU** ([ADR 0067](../../docs/adr/0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md)).
+Three parts of the rule set had no form that a GPU runs: the paid births go in one order over all agents of the front,
+the distance to ground without slime comes from two passes that run in sequence over the grid, and the shares need
+sums over all cells. Each now has a form of a GPU, as an option of `sim.ts`:
+
+- `paidBy=rank`: the order of step 6 itself. In a growth step each agent of the front that could claim a child (at the
+  rim, with a free cell of the territory beside it) draws its own key −ln(1 − u) / r, r its sink rate, and the whole
+  part of the budget B of them with the least keys claim a child. A GPU writes the keys in one pass over the agents;
+  in the next, each of these agents counts the agents of its strain with a smaller key and stops at the whole part of
+  B. As with the order, a budget below 1 pays nothing, and the budget never exceeds the number of agents of the front.
+- `fresh=box`: a sink looks at the 13 × 13 cells around it for ground without slime. That gives the same answer as the
+  chamfer transform on every cell, so the same runs.
+- `sums=fixed`: each sink rate counts in steps of 2^-16 as an integer, so every order of the additions gives the same
+  sum, and each sink takes its share with the rate that the sum counted, so the sinks take exactly what the sources
+  give.
+
+The births took six tries (NOTES.md, notes 20 to 23, 27 to 29). Marks per cell, drawn after the step before a growth
+step, would fit the passes of a GPU best, but they lose births where few agents can claim one. With P the sum over all
+tube cells the budget climbed to its cap, and the paid births fell by a third. With the marks on the cells whose agent
+could claim a child at the end of the step before (`paidBy=ahead`), the Y-maze kept every choice, but in the open dish
+the tree ended with 0.74 to 0.78 times the territory (p 0.028 and 0.00088): at drift 0 fewer than one agent per growth
+step can claim a child, and it walks on before the growth step. A chance per agent in the growth step draws where the
+agents are. As min(1, B · r / P), the first candidate of the coordinator (`paidBy=chance`), it spent less than the order
+where few agents can claim a child and one of them has most of the sink rate: its chance stops at 1, and the others
+keep theirs. The tree then reached the food 1.13 times later with slime on both arms (p 0.00032), and ended in the open
+dish with 0.69 times the territory (p 0.0025). With chances that add up to the budget (`paidBy=fill`) the Y-maze and the
+crown and the fan in the dish keep every result, but the tree in an open dish with slime everywhere ends with 0.83 times
+the territory (p 0.0075, 40 seeds), 30 % of the dish against 37 % without slime (p 0.0097). The order spreads its
+births more widely over the agents that could claim one. The rank gives the births of the order.
+
+The integer sums took two tries (note 26). When each sink took its share with its own rate, the sinks missed what the
+sources give by the rounding of the sum, up to 8 · 10⁻⁵ of the flux with slime everywhere, where every rate is 40
+times smaller; the crown in the Y-maze with slime everywhere then took 1.10 times as long (p 0.0040, even with the
+order). With the counted rates the sinks miss by 10⁻⁹, as in floats.
+
+The territory of the start stays the disc of the start and a rim of 3 cells. A square of 7 × 7 cells around each start
+agent (`start=agents`) keeps every agent 4 cells from the edge of the territory, and a sink lies within 2 cells of the
+edge: the tree in the open dish then got a quarter of its paid births in the first 500 steps (note 24).
+
+With the three forms (`out/y11`, `out/dish7`, `out/both120gpu-rank`, `out/more-rank`) against the rule set of step 6
+(`out/y6`, `out/dish2`, `out/both120`, `out/more/rules`, `out/more2/rules`): 40 seeds per case of the Y-maze and 120 at
+the drift 1.5 and 5 with slime on both arms, everywhere and none; 10 seeds per case of the dish, 40 for the tree with
+slime everywhere and 20 without. The rule set of step 6 is in brackets:
+
+| Case                             | Drift 0: a tree     | Drift 1.5: a crown         | Drift 5: a fan                      | The organism     |
+| -------------------------------- | ------------------- | -------------------------- | ----------------------------------- | ---------------- |
+| Slime on one arm: blank : slime  | 36 : 4 (31 : 9)     | 40 : 0 (40 : 0)            | 40 : 0 (40 : 0)                     | 39 : 1           |
+| Slime on both arms: left : right | 17 : 23 (19 : 21)   | 65 : 55 (60 : 59, 1 split) | 50 : 69, 1 split (60 : 59, 1 split) | no preference    |
+| Slime everywhere: left : right   | 17 : 23 (19 : 21)   | 56 : 64 (60 : 60)          | 64 : 56 (57 : 63)                   | –                |
+| No slime: left : right           | 18 : 22 (19 : 21)   | 53 : 66, 1 split (52 : 68) | 57 : 63 (58 : 62)                   | no preference    |
+| First food, no slime             | 3,832 steps (3,768) | 3,504 steps (3,516)        | 3,392 steps (3,346)                 | 2,400 to 7,200   |
+| First food, slime on both arms   | 1.19 times (1.15)   | 1.05 times (1.04)          | 1.06 times (1.06)                   | –                |
+| First food, slime everywhere     | 1.01, p 0.61 (1.01) | 1.02, p 0.11 (1.00)        | 1.01, p 0.37 (1.03)                 | as fast as blank |
+
+Against the rule set no choice and no time leaves the spread of the seeds: Fisher's test gives p 0.22 to 1.0, and the
+first food comes 0.98 to 1.05 times as late (Mann-Whitney p 0.18 to 0.99). The dish:
+
+| Case                                    | Drift 0: a tree           | Drift 1.5: a crown        | Drift 5: a fan            |
+| --------------------------------------- | ------------------------- | ------------------------- | ------------------------- |
+| Territory at step 20,000, no slime      | 33 % (40 %; p 0.079)      | the whole dish            | the whole dish            |
+| The same, slime everywhere              | 32 % (36 %; p 0.29)       | the whole dish            | the whole dish            |
+| Half of the dish covered, no slime      | –                         | after 5,139 steps (4,985) | after 4,160 steps (4,289) |
+| The same, slime everywhere              | 0.96 times (0.91; p 0.57) | 1.03 times (1.04; p 0.26) | 1.04 times (0.96; p 0.13) |
+| Agents at step 20,000, slime everywhere | 1,133 (1,118)             | 793 (855)                 | 912 (1,037)               |
+
+For the tree "the same, slime everywhere" is its territory against the one without slime. The half of the dish comes
+as early as with the rule set (p 0.082 to 0.94), and no colony dies. The tree covers a third of the open dish in 20,000
+steps, with the rule set 36 to 40 %; its spread is wide: one campaign of the rule set gave 4,906 to 8,435 cells.
+
 **What is not reached.**
 
 - The tree takes the blank arm only 31 of 40 times (Fisher's test against the organism: p 0.014), and it covers only
@@ -125,6 +195,9 @@ of the sinks before decision 8:
   share of the flux that it takes (`sinks`).
 - `drift`: a sensor reads minus this weight times the pressure.
 - `solver`: the app's 16 iterations, or `exact` (conjugate gradients), for a check. Both give the Y-maze result.
+- The forms of a GPU of step 9 (ADR 0067), each with its old word as the default: `paidBy=rank` (else `order`),
+  `fresh=box` (else `chamfer`) and `sums=fixed` (else `float`); `GPU_FORMS` of `sim.ts` holds the three. Four tries
+  that lost results stay as words: `paidBy=chance`, `paidBy=fill`, `paidBy=ahead` and `start=agents` (else `disc`).
 
 ## Commands
 
@@ -136,6 +209,21 @@ slimeWeight=0.025 paidOn=sinks name=y5/d5-one` (cases `one`, `both`, `none` and 
   25 s per run). An unknown key or a number that does not parse stops the run.
 - The table: `node --import ./research/flow/register.mjs research/front/tables.ts research/front/out/y5`. A case with
   slime also shows its time against the case without slime of the same name, with a Mann-Whitney test.
+- A whole campaign, the Y-maze and the dish for the three forms of the drift (78 jobs on 11 cores, about 25 minutes):
+  `bash research/front/campaign.sh y11 dish7 "paidBy=rank fresh=box sums=fixed"` (step 9); without the third argument
+  it runs the rule set of step 6. Seeds 41 to 120 with slime on both arms:
+  `bash research/front/both120.sh both120gpu-rank "paidBy=rank fresh=box sums=fixed"`. More seeds of the tree in the
+  dish and of the Y-maze with slime everywhere and without: `bash research/front/more.sh more-rank "paidBy=rank
+fresh=box sums=fixed" forms` (without `forms` it also runs the rule set). Some forms in the four cases that left the
+  spread: `bash research/front/split.sh split fixed="sums=fixed"`. The earlier records came from
+  `paidBy=ahead fresh=box sums=fixed start=agents` (`out/y7`, `out/dish3`; the records name it `paidBy=chance`),
+  `paidBy=chance fresh=box sums=fixed` (`out/y8`, `out/dish4`) and `paidBy=fill fresh=box sums=fixed` (`out/y9`,
+  `out/dish5` with the first integer sums of NOTES.md, note 26; `out/y10`, `out/dish6`, `out/both120gpu-final`,
+  `out/more/forms` and `out/more2/forms` with the balanced ones).
+- Two campaigns case by case: `research/front/compare.ts research/front/out/y11 research/front/out/y6
+research/front/out/dish7 research/front/out/dish2` (Fisher's test for the choice, Mann-Whitney for the times; `-` in
+  place of the first two folders compares the dish alone).
+- The grids that the buffers of ADR 0067 would change: `research/front/fit.ts`.
 - Pictures and measures of a dish or a lane: `research/front/shots.ts scene=dish side=200 pics=3000,5000 ...` with
   the same rules; `research/front/ypics.ts slimed=left pics=1500,3300 ...` for the Y-maze.
 - The test of the prototype: `npx vitest run --project unit research/front/research.test.ts`.

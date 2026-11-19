@@ -276,11 +276,17 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   the territory, and the slime sets only its weight. `research/front/how-the-crown-forms.md` tells how the agents and
   the new rules make a crown.
 - Not measured: Murray's exponent; the scenes of the app with these rules (they need the engine).
-- **Next: the engine of stage 4** (ADR 0065, decision 1): both backends, a CPU reference, wrong rules, `docs/model.md`,
-  the drift as a setting of the panel, the digests of every scene and the measures of the 11 scenes with growth and
-  the flow, and a test where a second strain grows on the slime of the first. A form of the paid births without a
-  global order goes to the prototype first (ADR 0065, open points). Then the picture: the skirt goes, or it is drawn
-  from the plasm of the crown.
+- **The forms of a GPU** (ADR 0067, 2026-11-19 and 20): the paid births go in the order of ADR 0065 with a key of its
+  own per agent, which a GPU ranks in one pass; a sink looks at the square of 13 × 13 cells around it for ground
+  without slime; the sums are integers, and each sink takes its share with the rate that the sum counted. Measured on
+  the prototype with 40 to 120 seeds per case of the Y-maze and 10 to 40 of the dish: every result stays in the spread
+  of the seeds (`research/front/README.md`, step 9). Chances per agent cost the tree births where few agents can
+  claim a child. ADR 0067 has the passes and the buffers of both backends; the start scene would lose its lattice at
+  a memory hint of 0.5 GB.
+- **Next: the engine of stage 4** (ADR 0065, decision 1; the design of ADR 0067): both backends, a CPU reference,
+  wrong rules, `docs/model.md`, the drift as a setting of the panel, the digests of every scene and the measures of
+  the 13 scenes with growth and the flow, and a test where a second strain grows on the slime of the first. Then the
+  picture: the skirt goes, or it is drawn from the plasm of the crown.
 
 Open, for the owner:
 
