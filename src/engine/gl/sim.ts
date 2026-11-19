@@ -701,6 +701,15 @@ export class GlSim implements Sim {
     return this.collision?.occ[this.q].texture;
   }
 
+  /**
+   * The agents per cell after the last step while the rule of one agent per cell runs: the agents are then the plasm,
+   * and the auto levels keep the black level below their trail (exposure.ts levels(), ADR 0062). Nothing without the
+   * rule: agents share cells then, and nobody keeps the texture up to date.
+   */
+  get agentCells(): WebGLTexture | undefined {
+    return this.settings.collisions ? this.occupancyTexture : undefined;
+  }
+
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
     // Moving first new settings make a new view of the same state, and the scent view's coarse map counts it as a change

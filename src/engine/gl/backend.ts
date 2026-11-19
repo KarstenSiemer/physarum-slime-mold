@@ -287,8 +287,10 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   /**
    * The black level and the gain from the trail that the frame draws, and the strand from the trail of the model:
-   * the frame draws another trail while it shows the picture of the tubes (ADR 0034). Both sets of samples are
-   * drawn before any wait: a target may be freed while the readback is on its way.
+   * the frame draws another trail while it shows the picture of the tubes (ADR 0034). With one agent per cell, a
+   * sample of the trail that the frame draws also says whether its cell holds an agent: the black level stays below
+   * the plasm (exposure.ts levels(), ADR 0062). Both sets of samples are drawn before any wait: a target may be freed
+   * while the readback is on its way.
    */
   private async sample(sim: GlSim): Promise<Levels | undefined> {
     const gl = this.gl;
@@ -301,18 +303,21 @@ export class WebGl2Backend implements Backend<GlSim> {
     const t = this.sampleTarget;
     // Before the target is bound: the passes of the view and of the picture (gl/sim.ts) bind their own.
     const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];
+    const agentCells = sim.agentCells;
     const p = this.prog.sample;
-    const read = (trail: WebGLTexture) => {
+    const read = (trail: WebGLTexture, occ?: WebGLTexture) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
       gl.viewport(0, 0, t.width, t.height);
       gl.useProgram(p.program);
-      textures(gl, p.program, { trail });
+      // A sampler that the program does not read still needs a texture: the trail stands in for the agents per cell.
+      textures(gl, p.program, { trail, occ: occ ?? trail });
+      gl.uniform1i(p.loc('held'), occ ? 1 : 0);
       gl.uniform2f(p.loc('outSize'), t.width, t.height);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       // The pixels go to a buffer of their own now, so the next draw into the target does not change them.
       return readTargetAsync(gl, t);
     };
-    const reads = drawn === model ? [read(drawn)] : [read(drawn), read(model)];
+    const reads = drawn === model ? [read(drawn, agentCells)] : [read(drawn, agentCells), read(model)];
     let px: Float32Array[];
     try {
       px = await Promise.all(reads);
@@ -320,18 +325,20 @@ export class WebGl2Backend implements Backend<GlSim> {
       return undefined; // context lost: nothing to measure
     }
     if (generation !== this.generation) return undefined;
-    const binsOf = (samples: Float32Array) => {
+    // `held`: only the samples whose cell holds an agent, and one without trail counts in the lowest bin, as in
+    // histogram.wgsl `held`.
+    const binsOf = (samples: Float32Array, held = false) => {
       const bins = new Array<number>(BINS).fill(0);
       for (let i = 0; i < samples.length; i += 4) {
         const v = samples[i] ?? 0;
-        if (v <= 0) continue;
-        const b = Math.min(BINS - 1, Math.max(0, Math.floor((Math.log2(v) + 10) * 2)));
+        if (held ? (samples[i + 1] ?? 0) < 0.5 : v <= 0) continue;
+        const b = v > 0 ? Math.min(BINS - 1, Math.max(0, Math.floor((Math.log2(v) + 10) * 2))) : 0;
         bins[b] = (bins[b] ?? 0) + 1;
       }
       return bins;
     };
     const bins = binsOf(at(px, 0));
-    const l = levels(bins, t.width * t.height);
+    const l = levels(bins, t.width * t.height, agentCells && binsOf(at(px, 0), true));
     return l && { ...l, strand: strandLevel(px[1] ? binsOf(px[1]) : bins, t.width * t.height) };
   }
 

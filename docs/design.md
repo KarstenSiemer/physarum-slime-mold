@@ -269,7 +269,10 @@ the arrows.
 - Linear-light compositing: radiance `L = Σ trail_s · gain · color_s`, then tone mapping,
   then sRGB encoding. Overlaps turn white-hot instead of clipping.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed
-  (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009).
+  (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009). With one agent per cell the agents
+  are the plasm, and the black level is at most half of the median trail of the cells that hold an agent: at the edge
+  of a band of plasm the trail is half of the trail inside it, so a higher black level would draw plasm black
+  (ADR 0062). Where the plasm covers more than 35 % of the grid, the 65th percentile alone tore it.
 - Bloom: thresholded, normalised mip chain on a half-resolution `rgba16float` target.
 - Gel relief style: the trail as a wet gel on dark agar. A thick tube is higher than a thin one, has the full colour
   of its strain and hides the ground. Thin gel is pale and clear, a little with the mild gel color and much with the

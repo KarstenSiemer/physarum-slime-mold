@@ -551,8 +551,12 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     const [plain, tubes] = [await levelsOf(false), await levelsOf(true)];
     for (const place of ['png', 'frames', 'settled'] as const) {
       // The picture of the tubes holds other levels: the band is at a quarter, and the tube is wider. The frames of
-      // WebGPU go a quarter of the way from the levels of before to a measurement.
-      expect(Math.abs(tubes[place].gain / plain[place].gain - 1), place).toBeGreaterThan(0.05);
+      // WebGPU go a quarter of the way from the levels of before to a measurement. Every cell of this scene holds an
+      // agent, so the black level is half the median trail of the picture (ADR 0062): with the tubes a quarter of the
+      // one without them. Both black levels lie lower than the 65th percentile did, so the gains differ less.
+      expect(Math.abs(tubes[place].gain / plain[place].gain - 1), place).toBeGreaterThan(0.02);
+      expect(tubes[place].black, place).toBeGreaterThan(0);
+      expect(tubes[place].black / plain[place].black, place).toBeLessThan(0.5);
       expect(tubes[place].strand, place).toBeGreaterThan(0);
       expect(tubes[place].strand, place).toBe(plain[place].strand);
     }

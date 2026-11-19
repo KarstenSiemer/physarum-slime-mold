@@ -607,6 +607,15 @@ export class Simulation implements Sim {
     return this.ensureCollision().occ[this.occParity];
   }
 
+  /**
+   * The agents per cell after the last step while the rule of one agent per cell runs: the agents are then the plasm,
+   * and the auto levels keep the black level below their trail (exposure.ts levels(), ADR 0062). Nothing without the
+   * rule: agents share cells then, and nobody keeps the buffer up to date.
+   */
+  get agentCells(): GPUBuffer | undefined {
+    return this.settings.collisions ? this.occupancy : undefined;
+  }
+
   /** Outline distances, light and the walls' shadow for the renderer; call syncShape() before reading it. */
   get shape(): GPUBuffer {
     return this.shapeBuffer;
