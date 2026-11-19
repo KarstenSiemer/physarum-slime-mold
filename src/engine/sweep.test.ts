@@ -351,6 +351,28 @@ describe('the sweep with painted slime', () => {
 // dish the centre of cell (1389, 101) lies 6.8e-7 cells inside the rim moved in by SLACK, within that hair of 1.04e-6
 // (2026-11-11, for Jones' dish of ADR 0027: a search of every grid side from 16 to 4,096, square and with sides of
 // either parity, found no smaller grid with such a cell). The edit stays (mutant IV4).
+// ADR 0066: a start spot of a scene paints nothing. Nothing on screen shows it, so no stroke clears it: the sweep keeps
+// it under an erase and a wall, and it keeps no erase that clears nothing else.
+describe('the sweep with a start spot', () => {
+  const [w, h] = [128, 96];
+  const dab = (kind: EnvTool, x: number, y: number, radius: number) =>
+    fromStroke({ kind, from: [x, y], to: [x, y], radius }, [w, h], 'box');
+  const swept = (list: EnvEdit[]) => [...sweep(new Placement(w, h, list))];
+
+  it('keeps a start spot under an erase and a wall, and lets an erase over it go', () => {
+    expect(swept([dab('start', 40, 40, 2), dab('erase', 40, 40, 6)])).toEqual([1]);
+    expect(swept([dab('start', 40, 40, 2), dab('wall', 40, 40, 6)])).toEqual([]);
+    // A food under the same erase goes with the erase, and the start spot beside it stays.
+    expect(swept([dab('food', 40, 40, 2), dab('start', 40, 40, 2), dab('erase', 40, 40, 6)])).toEqual([0, 2]);
+    // The same in a long list, where the placement finds the strokes by its tiles.
+    const many = Array.from({ length: 300 }, (_, i) => dab('food', 8 + (i % 20) * 6, 8 + Math.floor(i / 20) * 5, 1));
+    const list = [...many, dab('start', 40, 40, 2), dab('erase', 40, 40, 6)];
+    const gone = swept(list);
+    expect(gone).toContain(list.length - 1);
+    expect(gone).not.toContain(many.length);
+  });
+});
+
 describe('the sweep at the rim', () => {
   it('keeps an edit whose cell lies within a hair inside the rim moved in, under an erase there', () => {
     const [w, h] = [2201, 2201];

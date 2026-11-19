@@ -1,7 +1,7 @@
 // The food, light, walls, electrodes and painted slime of a shared link: the engine's edit list as compact bytes
 // (docs/adr/0021).
 import { fromShape, MIN_RADIUS, sameEdit, STEP, type EnvEdit } from '../engine/environment';
-import { EnvKind, type EnvTool } from '../engine/types';
+import { EnvKind, paints, type EnvTool } from '../engine/types';
 import { BOUNDARIES, MAX_STRAINS, type Boundary } from './params';
 import { presetById, shapesAt, type EnvShape } from './presets';
 
@@ -43,6 +43,10 @@ export const MAX_WORK = 64;
  * stroke do not change, only one more number is a kind. So a link without painted slime has the bytes that it had
  * before, and an older build still opens it. An older build refuses a link with painted slime, as it refuses a later
  * version: it does not know the kind.
+ *
+ * A start spot (ADR 0066) is a shape of a scene and never a stroke: no tool paints one. A link holds it as it holds
+ * every shape of its scene, by the bit of the shape, so a link of the scene starts the colony there. A drawing with a
+ * stroke of a start spot gives no bytes, and bytes with its number (7) give no drawing.
  */
 const VERSION = 4;
 /** The value in the arena bits of a head byte that marks a stroke of a later kind (version 4). */
@@ -242,7 +246,7 @@ export function packDrawing(d: Drawing): Uint8Array<ArrayBuffer> | undefined {
     const arena = BOUNDARIES.indexOf(e.boundary);
     if (fx === undefined || fy === undefined || tx === undefined || ty === undefined || radius === undefined)
       return undefined;
-    if (!sides || arena < 0 || !budget.add(e)) return undefined;
+    if (!sides || arena < 0 || !budget.add(e) || !paints(e.kind)) return undefined;
     const grid = w !== last.grid[0] || h !== last.grid[1];
     const from = fx !== last.to[0] || fy !== last.to[1];
     const to = tx !== fx || ty !== fy;

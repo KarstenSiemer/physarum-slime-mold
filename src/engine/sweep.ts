@@ -9,7 +9,7 @@
 // stamp either: a wall goes only when later erases cover its cells, and they clear the stamps there too.
 import { dishRadius, joinRuns, paintedAsIs, reachOf, Rows, segmentDistance, SLACK, someCell } from './brush';
 import { strokeOn, type EnvEdit, type Painted } from './environment';
-import type { EnvTool } from './types';
+import { paints, type EnvTool } from './types';
 
 /** A box of cells: x0, y0, x1, y1, the ends excluded. */
 type Box = [number, number, number, number];
@@ -139,8 +139,12 @@ export class Placement {
     this.add(strokeOn(e, this.w, this.h));
   }
 
-  /** Adds the next edit by its stroke on this grid (strokeOn()). */
-  add(s: Painted | undefined) {
+  /**
+   * Adds the next edit by its stroke on this grid (strokeOn()). A start spot paints nothing (ADR 0066): it stands in
+   * the list as an edit outside the grid does, so no sweep judges it or deletes it, and it clears nothing.
+   */
+  add(painted: Painted | undefined) {
+    const s = painted && paints(painted.kind) ? painted : undefined;
     const i = this.strokes.length;
     this.strokes.push(s);
     this.rows.push(undefined);

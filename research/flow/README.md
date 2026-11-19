@@ -2406,9 +2406,70 @@ The records are in `logs/engine/scenes-0064/`:
 | `maze-growth-webgl2.txt`   | the same on WebGL2, 3 seeds                                    |
 | `digest-branch.jsonl`      | the digests of every scene after 500 steps on both backends    |
 
+### 26. Do the scenes of Reid et al. 2012 show what the app does with slime? [ADR 0066]
+
+The owner asked for a Y-maze with slime on one arm and a dish with slime everywhere: the test beds of
+stage 4 (ADR 0065). Both scenes start their colony on a start spot without food, as the plasmodium of
+the paper starts. No rule reads the slime, so the runs must not change when the slime goes.
+
+**The runs**, both scenes with 5 seeds on WebGPU and 6,000 steps (30 s), and with 2 seeds on WebGL2
+and 3,000 steps (40 s); each with the slime and without it (`VITE_SLIME=0`), with pictures:
+
+```bash
+VITE_KINDS=webgpu VITE_SEEDS=1-5 VITE_STEPS=6000 VITE_SNAPS=200,1000,3000,6000 VITE_NAME=g66-webgpu npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+VITE_KINDS=webgpu VITE_SEEDS=1-5 VITE_STEPS=6000 VITE_SLIME=0 VITE_NAME=g66-webgpu-blank npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+VITE_KINDS=webgl2 VITE_SEEDS=1-2 VITE_STEPS=3000 VITE_SNAPS=1000,3000 VITE_NAME=g66-webgl2 npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+VITE_KINDS=webgl2 VITE_SEEDS=1-2 VITE_STEPS=3000 VITE_SLIME=0 VITE_NAME=g66-webgl2-blank npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+```
+
+The table of each run: the step at which each food holds plasm, and the agents and the cells with
+plasm at some steps, in the Y-maze also on the base and on each arm. With a second record it says
+whether each run ends with the bytes of the run of the same seed there:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-reid.ts g66-webgpu g66-webgpu-blank
+node --import ./research/flow/register.mjs research/flow/engine/measure-reid.ts g66-webgl2 g66-webgl2-blank
+```
+
+They must print that 10 of 10 and 4 of 4 runs have the bytes of the runs without the slime. A
+picture is the PNG of the canvas as base64 in `out/engine/`:
+`base64 --decode < <file>.png.b64 > <file>.png` makes the image.
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g66-digest-branch`. The
+digests of `main` for it are those of part 25:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g66-digest-branch.jsonl research/flow/logs/engine/scenes-0064/digest-branch.jsonl
+```
+
+It must print that 58 of 58 runs are equal. The file holds 62 runs: 4 are the two new scenes.
+
+**The wrong rules** of the start spot and of the film of the Y-maze (5 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SP1 SP2 SP3 SP4 SP5 SP6 SP7 SP8 SP9 SP10 SP11 SP12 SP13 SP14 SP15
+```
+
+Each must fail at least one test.
+
+Result: in the Y-maze the colony reaches the first food after 64 to 140 steps, the food of the arm
+with slime first in 2 of 7 runs, and one tube joins the two foods from about step 3,000. In the dish
+it reaches the glucose after 115 to 511 steps, and a network of loops remains. Every run with the
+slime has the bytes of the run without it. Not measured: more seeds, and slime on both arms or on
+none. ADR 0066 has the tables. The records are in `logs/engine/reid-0066/`:
+
+| Record                      | Runs                                                          |
+| --------------------------- | ------------------------------------------------------------- |
+| `scenes-webgpu.jsonl`       | the lines of `reid.gpu.test.ts` for both scenes, seeds 1 to 5 |
+| `scenes-webgpu-blank.jsonl` | the same without the slime                                    |
+| `scenes-webgl2.jsonl`       | the same on WebGL2, seeds 1 and 2, with the slime             |
+| `scenes-webgl2-blank.jsonl` | the same without the slime                                    |
+| `digest-branch.jsonl`       | the digests of every scene after 500 steps on both backends   |
+| `mutations.txt`             | the tests that fail for each of the wrong rules SP1 to SP15   |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 417 files, 8.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 423 files, 8.5 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2447,6 +2508,7 @@ asks for the new digest.
 | `logs/view/levels/`                                  | the runs of part 23 (ADR 0062): the black level in eleven cases on each backend, and the wrong rules                                                                                                                            |
 | `logs/panel/`                                        | the wrong rules of part 24 (ADR 0063): the density at a switch to one agent per cell                                                                                                                                            |
 | `logs/engine/scenes-0064/`                           | the runs of part 25 (ADR 0064): the new scenes, the Foraging maze with the flow, the Maze with growth, the digests                                                                                                              |
+| `logs/engine/reid-0066/`                             | the runs of part 26 (ADR 0066): the two scenes of Reid et al. 2012 with the slime and without it, the digests, and the wrong rules SP1 to SP15                                                                                  |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

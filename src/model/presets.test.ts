@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lightByte } from '../engine/brush';
+import { dishRadius, lightByte } from '../engine/brush';
 import { agentCount } from '../engine/sizing';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, meanWindowOf, sanitize, type Settings } from './params';
 import {
@@ -28,6 +28,7 @@ import {
   VORONOI_RING,
   type Preset,
 } from './presets';
+import { yMaze } from './y-maze';
 
 const preset = (id: string): Preset => {
   const p = presetById(id);
@@ -110,6 +111,8 @@ describe('presets', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'y-maze',
+      'slime-everywhere',
     ]);
     expect(ids('jones')).toEqual(['network', 'hexagons', 'spots', 'stripes']);
     expect(ids('papers')).toEqual([
@@ -231,6 +234,51 @@ describe('presets', () => {
     expect(preset('maze').envHistory).toBeUndefined();
   });
 
+  // ADR 0066 (the owner's wish of 2026-11-19): two scenes of Reid et al. 2012, the test beds of the avoidance of slime.
+  // No rule of the app reads the slime yet (ADR 0056), and their texts say so.
+  it('rebuild the Y-maze and the dish with slime everywhere of Reid et al. 2012 (ADR 0066)', () => {
+    const [y, dish] = [preset('y-maze'), preset('slime-everywhere')];
+    for (const p of [y, dish]) {
+      expect([p.group, p.source, sourceKind(p)], p.id).toEqual(['experiments', 'Reid et al. 2012', 'reid']);
+      expect([p.figure, p.envHistory], p.id).toEqual([undefined, undefined]);
+      // One start spot, the first shape: the start layout Food places the colony there, not on a food.
+      expect(
+        p.env?.filter((e) => e.kind === 'start'),
+        p.id,
+      ).toHaveLength(1);
+      expect([p.env?.[0]?.kind, p.env?.[0]?.r, p.settings().layout], p.id).toEqual(['start', 0, 'food']);
+      expect(p.about, p.id).toMatch(/no rule yet that reads the slime/);
+      expect(sourceText(p), p.id).toMatch(/No rule of the app reads the slime yet\.$/);
+    }
+    // The Y-maze: the settings of the Snail maze on the lattice of the layout of ADR 0056, as y-maze.gpu.test.ts ran it.
+    const unseeded = (s: Settings) => ({ ...s, seed: 0, lattice: null });
+    expect(unseeded(y.settings())).toEqual(unseeded(settingsOf('snail-maze')));
+    expect(y.settings().lattice).toEqual([129, 90]);
+    const maze = yMaze();
+    expect(y.env).toEqual([maze.startShape, ...maze.shapes(['left']), ...maze.film(['left'])]);
+    // The start spot is the middle of the base, on the axis of the Y; the slime lies on the left arm alone: its runs,
+    // and one stroke for its film (y-maze.test.ts holds that the film stamps no other cell).
+    expect(maze.startShape.at[0]).toBe(0);
+    expect(maze.startShape.at[1] * 90 + 45).toBeCloseTo(maze.start[1], 9);
+    const slime = y.env?.filter((e) => e.kind === 'slime') ?? [];
+    expect(slime).toHaveLength(maze.slimeRuns(['left']).length + 1);
+    for (const e of slime) expect(Math.max(e.at[0], e.to?.[0] ?? 0)).toBeLessThan(0);
+    // The dish: 8.6 cm wide at 0.537 mm per cell, its start at the top and the well of glucose at the bottom, both 1 cm
+    // inside the rim on the vertical axis, and slime on every cell.
+    const s = dish.settings();
+    expect([s.boundary, s.lattice, s.flowStrength]).toEqual(['dish', [169, 169], 8]);
+    const mm = (cells: number) => cells * 0.537;
+    expect(mm(2 * dishRadius(169, 169))).toBeCloseTo(86, 0);
+    expect(dish.env?.map((e) => e.kind)).toEqual(['start', 'food', 'slime']);
+    const [start, well, coat] = dish.env ?? [];
+    expect(start?.at[0]).toBe(0);
+    expect(start?.at[1]).toBeLessThan(0); // the y axis points down
+    expect(well?.at).toEqual([0, -(start?.at[1] ?? NaN)]);
+    expect(mm(dishRadius(169, 169) - Math.abs(start?.at[1] ?? 0) * 169)).toBeCloseTo(10, 1);
+    expect(mm(2 * (well?.r ?? 0) * 169)).toBeCloseTo(5, 1);
+    expect(coat).toEqual({ kind: 'slime', at: [0, 0], r: 0.5 });
+  });
+
   it('Jones scenes run with one agent per cell and a density of at most 1', () => {
     const jones = PRESETS.filter((p) => sourceKind(p) === 'jones');
     expect(jones.map((p) => p.id)).toEqual([
@@ -262,6 +310,8 @@ describe('presets', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'y-maze',
+      'slime-everywhere',
       ...jones.map((p) => p.id),
       'maze',
       'coarsening',
@@ -440,6 +490,8 @@ describe('presets', () => {
       'three-networks': [384, 384], // this app's choice: the same dish on every screen (ADR 0064)
       'two-networks': [480, 320], // this app's choice: the same box on every screen (ADR 0064)
       light: [384, 384], // the dish of Food ring (ADR 0064)
+      'y-maze': [129, 90], // the Y-maze of ADR 0056 at 0.537 mm per cell (ADR 0066)
+      'slime-everywhere': [169, 169], // a dish 8.6 cm wide at 0.537 mm per cell (ADR 0066)
       network: [200, 200], // Fig. 4, p. 135
       hexagons: [200, 200], // Fig. 5, p. 136
       spots: [200, 200], // Fig. 16 top, p. 144

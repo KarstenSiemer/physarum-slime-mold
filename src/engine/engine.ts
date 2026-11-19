@@ -11,7 +11,7 @@ import {
 import { latticeText, type EnvShape } from '../model/presets';
 import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
-import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
+import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit, type Painted } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import { flowOn } from './flow';
 import { foodStrokes, NO_SITES, SiteCells } from './sites';
@@ -34,7 +34,7 @@ import {
 } from './sizing';
 import { slimeModel } from './slime';
 import { compact, Placement, sweeping } from './sweep';
-import type { Backend, Levels, Sim, Stroke, View } from './types';
+import { paints, type Backend, type Levels, type Sim, type Stroke, type View } from './types';
 
 /**
  * Most frames in flight at which the loop still starts a frame (ADR 0028): with two frames on the GPU a third would
@@ -484,17 +484,19 @@ export class Engine {
    * run at a food source. Each strain has a food of its own (ADR 0032): strain A the first food stroke of the list,
    * strain B the second, and so on, one step for each, at the start of the stroke. A food stroke is a dab or every
    * segment of one drag, as a food site of the flow is (ADR 0029, decision 17; sites.ts foodStrokes()): so a dragged
-   * line is one food here too. A strain without such a food starts without agents. About FOOD_TRIES
-   * dead agents try a random point of the disc; with the rule one agent takes each cell they hit (about FOOD_START),
-   * and without it about FOOD_START agents try. The steps are the first steps of the run, the same in every run of a
-   * seed. With one strain it is the one step on the first food that it was.
+   * line is one food here too. A start spot of a scene takes the place of a food (ADR 0066): strain A starts at the
+   * first start spot of the list, if there is one, strain B at the second, and so on. A strain without either starts
+   * without agents. About FOOD_TRIES dead agents try a random point of the disc; with the rule one agent takes each
+   * cell they hit (about FOOD_START), and without it about FOOD_START agents try. The steps are the first steps of the
+   * run, the same in every run of a seed. With one strain it is the one step on the first food that it was.
    */
   private seedAtFood() {
     if (this.settings.layout !== 'food') return;
     const foods = foodStrokes(this.edits).map((stroke) => stroke[0]);
+    const starts = this.edits.filter((e) => e.kind === 'start');
     const agents = strainAgents(this.settings.strains, this.sim.agents);
     this.settings.strains.forEach((_, strain) => {
-      const food = foods[strain];
+      const food = starts[strain] ?? foods[strain];
       const at = food && strokeOn(food, this.sim.width, this.sim.height);
       if (!at) return;
       const dead = Math.max(1, agents[strain] ?? 0);
@@ -647,7 +649,8 @@ export class Engine {
 
   /**
    * Paints the edits the current simulation does not hold yet, mapped to its grid, in one call. Each goes through the
-   * canonical frame of the arena it was painted in (strokeOn()), whatever arena the simulation runs in.
+   * canonical frame of the arena it was painted in (strokeOn()), whatever arena the simulation runs in. A start spot
+   * paints nothing (ADR 0066): the simulation does not get it.
    */
   private flushEnv() {
     if (this.painted === this.edits.length) return;
@@ -662,7 +665,7 @@ export class Engine {
       for (const s of strokes) this.placement.add(s);
     }
     this.painted = this.edits.length;
-    this.sim.paint(strokes.filter((s) => s !== undefined));
+    this.sim.paint(strokes.filter((s): s is Painted => s !== undefined && paints(s.kind)));
     this.syncSites();
   }
 

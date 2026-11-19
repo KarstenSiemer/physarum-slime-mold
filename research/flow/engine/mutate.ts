@@ -4,8 +4,8 @@
 // Electrode tool (ADR 0047), of Light stops growth (ADR 0050), of the rule that no child is born onto starved ground
 // (ADR 0053), of the mark that a starved tube leaves (ADR 0054), of the slime field, its brush and its picture
 // (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
-// the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062) and of the density when the
-// rule of one agent per cell goes on (ADR 0063). The script puts one wrong rule at a time into a source file of the
+// the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062), of the density when the
+// rule of one agent per cell goes on (ADR 0063) and of the start spot of a scene (ADR 0066). The script puts one wrong rule at a time into a source file of the
 // app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
@@ -148,6 +148,17 @@ const SAMPLE_FRAG = 'src/engine/gl/glsl/sample.frag';
 const WEBGPU_TS = 'src/engine/webgpu.ts';
 const LEVELS_SPEC = 'src/engine/levels.gpu.test.ts';
 const [LEVELS_GPU, LEVELS_GL] = ['the black level on webgpu', 'the black level on webgl2'];
+/**
+ * The start spot of a scene (ADR 0066): the start layout Food in the engine, the kinds of a stroke, the sweep and the
+ * link, the film of the Y-maze and the two scenes of Reid et al. 2012, each with the tests of it; the engine also
+ * against the GPU tests of the start spot on both backends.
+ */
+const ENGINE_GPU_SPEC = 'src/engine/engine.gpu.test.ts';
+const PRESETS_TS = 'src/model/presets.ts';
+const PRESETS_SPEC = 'src/model/presets.test.ts';
+const Y_MAZE_TS = 'src/model/y-maze.ts';
+const Y_MAZE_SPEC = 'research/flow/engine/y-maze.test.ts';
+const [START_NODE, START_GPU] = ['the start spots of a scene', 'start spot of the Y-maze'];
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -5307,6 +5318,127 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     "        12_000,\n      );\n      app.notice = '';\n      s.density = density;",
     'the switch of the rule',
     STATE_SPEC,
+  ],
+  // The start spot of a scene (ADR 0066): where the start layout Food places a colony, and that it paints nothing.
+  [
+    'SP1 engine: the colony starts on the food also where the scene has a start spot',
+    ENGINE_TS,
+    '      const food = starts[strain] ?? foods[strain];',
+    '      const food = foods[strain];',
+    START_NODE,
+    ENGINE_SPEC,
+  ],
+  [
+    'SP2 engine: the colony starts on the food also where the scene has a start spot (both backends)',
+    ENGINE_TS,
+    '      const food = starts[strain] ?? foods[strain];',
+    '      const food = foods[strain];',
+    START_GPU,
+    ENGINE_GPU_SPEC,
+  ],
+  [
+    'SP3 engine: a strain without a start spot starts without agents where the scene has one',
+    ENGINE_TS,
+    '      const food = starts[strain] ?? foods[strain];',
+    '      const food = starts.length > 0 ? starts[strain] : foods[strain];',
+    START_NODE,
+    ENGINE_SPEC,
+  ],
+  [
+    'SP4 engine: every strain starts on the first start spot',
+    ENGINE_TS,
+    '      const food = starts[strain] ?? foods[strain];',
+    '      const food = starts[0] ?? foods[strain];',
+    START_NODE,
+    ENGINE_SPEC,
+  ],
+  [
+    'SP5 engine: the simulation gets the strokes of the start spots',
+    ENGINE_TS,
+    'this.sim.paint(strokes.filter((s): s is Painted => s !== undefined && paints(s.kind)));',
+    'this.sim.paint(strokes.filter((s): s is Painted => s !== undefined));',
+    START_NODE,
+    ENGINE_SPEC,
+  ],
+  [
+    'SP6 types.ts: a start spot paints the environment (both backends)',
+    TYPES_TS,
+    "export const paintsEnv = (kind: EnvTool) => kind !== 'slime' && kind !== 'start';",
+    "export const paintsEnv = (kind: EnvTool) => kind !== 'slime';",
+    START_GPU,
+    ENGINE_GPU_SPEC,
+  ],
+  [
+    'SP7 types.ts: a start spot changes the slime field',
+    TYPES_TS,
+    "export const changesSlime = (kind: EnvTool) => kind === 'slime' || kind === 'erase' || kind === 'wall';",
+    "export const changesSlime = (kind: EnvTool) =>\n  kind === 'slime' || kind === 'erase' || kind === 'wall' || kind === 'start';",
+    START_NODE,
+    ENGINE_SPEC,
+  ],
+  [
+    'SP8 sweep: the sweep judges a start spot as an edit that paints',
+    SWEEP_TS,
+    '    const s = painted && paints(painted.kind) ? painted : undefined;',
+    '    const s = painted;',
+    'the sweep with a start spot',
+    SWEEP_SPEC,
+  ],
+  [
+    'SP9 link: a link holds the stroke of a start spot',
+    LINK_TS,
+    '    if (!sides || arena < 0 || !budget.add(e) || !paints(e.kind)) return undefined;',
+    '    if (!sides || arena < 0 || !budget.add(e)) return undefined;',
+    'start spot of a scene by the bit',
+    LINK_SPEC,
+  ],
+  [
+    'SP10 link: a link reads the stroke of a start spot',
+    LINK_TS,
+    "  [EnvKind.slime]: 'slime',\n};",
+    "  [EnvKind.slime]: 'slime',\n  [EnvKind.start]: 'start',\n};",
+    'start spot of a scene by the bit',
+    LINK_SPEC,
+  ],
+  [
+    'SP11 engine: Clear keeps the start spots',
+    ENGINE_TS,
+    '  clearEnvironment() {\n    this.edits = [];',
+    "  clearEnvironment() {\n    this.edits = this.edits.filter((e) => e.kind === 'start');",
+    START_NODE,
+    ENGINE_SPEC,
+  ],
+  [
+    'SP12 y-maze: the film of an arm stamps cells that the two arms share',
+    Y_MAZE_TS,
+    'Math.sqrt((filmRadius + FILM_SLACK) ** 2 - 0.5)',
+    'Math.sqrt((filmRadius - FILM_SLACK) ** 2 - 0.5)',
+    'film of the full amount',
+    Y_MAZE_SPEC,
+  ],
+  [
+    'SP13 y-maze: the film of an arm gives the cells by the walls less than the full amount',
+    Y_MAZE_TS,
+    'const filmRadius = half / Math.SQRT2 + FILM_FULL;',
+    'const filmRadius = half / Math.SQRT2 + FILM_FULL / 2;',
+    'film of the full amount',
+    Y_MAZE_SPEC,
+  ],
+  [
+    'SP14 presets: the Y-maze has no start spot, and its colony starts on the food of the left arm',
+    PRESETS_TS,
+    "    env: [Y.startShape, ...Y.shapes(['left']), ...Y.film(['left'])],",
+    "    env: [...Y.shapes(['left']), ...Y.film(['left'])],",
+    'Reid et al. 2012',
+    PRESETS_SPEC,
+  ],
+  [
+    'SP15 presets: the colony of Slime everywhere starts on the glucose',
+    PRESETS_TS,
+    "    { kind: 'start', at: [0, -y], r: 0 },\n",
+    '',
+    'Reid et al. 2012',
+    PRESETS_SPEC,
   ],
 ];
 

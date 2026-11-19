@@ -7,6 +7,8 @@
   [ADR 0025](0025-growth-and-shrinkage.md) (the Foraging maze) and
   [ADR 0026](0026-scenes-of-jones-on-their-lattices.md) (the texts about the grid of a scene). The Maze of
   [ADR 0029](0029-flow-in-the-tubes.md) stays as it is.
+- Extended by [ADR 0066](0066-two-scenes-of-reid-and-the-start-spot.md) (2026-11-19): two scenes of Reid et al. 2012
+  join Experiments with the rules of the organism.
 - In short: the scenes are in `src/model/presets.ts`. [`research/flow/README.md`](../../research/flow/README.md),
   part 25, has the commands and the records.
 

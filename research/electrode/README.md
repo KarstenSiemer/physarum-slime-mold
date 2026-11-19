@@ -240,12 +240,12 @@ node --import ./research/flow/register.mjs research/electrode/outline.ts
 node --import ./research/flow/register.mjs research/electrode/fit.ts
 ```
 
-The second command fits the default settings and the 28 scenes with the 4 B and without them, on three backends, six
-hints of the memory of the device and six canvases: 3,132 cases. It runs the fit of the engine itself on the CPU
+The second command fits the default settings and the 30 scenes with the 4 B and without them, on three backends, six
+hints of the memory of the device and six canvases: 3,348 cases. It runs the fit of the engine itself on the CPU
 backend of the engine tests. Eight grids change, and the command must print:
 
 ```text
-3132 cases: 8 with another grid
+3348 cases: 8 with another grid
 three-networks on WebGL2, a memory hint of 0.5 GB, a canvas of 1600 × 1000: lattice 384 × 384 before, 256 now
 three-networks on WebGL2, a memory hint of 0.5 GB, a canvas of 1920 × 1080: lattice 384 × 384 before, 512 now
 three-networks on WebGL2, a memory hint of 0.5 GB, a canvas of 2560 × 1440: lattice 384 × 384 before, 512 now
@@ -260,11 +260,12 @@ So the start scene Three strains (`three-networks`, ADR 0064) runs without its l
 0.5 GB: on a grid of 512 or 256 cells on the long side. The Three-strain weave (`three-strains`) goes from 1024 to 768
 cells on the long side in one case, and the Maze from 512 to 256 in one. Every other case keeps its grid.
 
-The record changed twice. When ADR 0058 was built, the list held 26 scenes, 2,916 cases, and one grid changed:
+The record changed three times. When ADR 0058 was built, the list held 26 scenes, 2,916 cases, and one grid changed:
 Cyclones on WebGL2 without float blending, with a hint of 2 GB on a canvas of 390 × 844 pixels, went from 1024 to 768
 cells. Then the slime counted 11 B more per cell (ADR 0057, ADR 0060), and two other grids changed in its place:
 those of the Three-strain weave, then the scene Three strains, and of the Maze. Since ADR 0064 the list holds the two
-new start scenes too.
+new start scenes too, 3,132 cases. Since ADR 0066 it holds the two scenes of Reid et al. 2012 as well: they add 216
+cases, and their grids stay.
 
 **The tests.** The CPU copies in Node, then both backends against them in a headless browser:
 
