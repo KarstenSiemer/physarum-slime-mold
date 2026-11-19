@@ -2,10 +2,35 @@
 // its measures must keep working. These runs are short: the long runs of the story are commands of the README.
 // CI runs them about five times slower than a laptop, and a unit test has 5 s: keep each one below 0.5 s here.
 import { describe, expect, it } from 'vitest';
-import { yMazeLayout } from './layouts';
+import { FLOW, pcg } from '../../src/engine/flow';
+import { dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
-import { Sim, frontFrom, noFront, params } from './sim';
+import { GPU_FORMS, Sim, frontFrom, noFront, params, type Front } from './sim';
 import { runY, slimedOf } from './ymaze';
+
+/** The rule set of ADR 0065 (README.md, step 6) with the drift 1.5, and the forms of a GPU of ADR 0067. */
+const RULES = {
+  speed: '0.004',
+  speedOn: 'push',
+  paid: '20',
+  norm: '2',
+  reach: '6',
+  rim: '1',
+  colony: '1',
+  slimeWeight: '0.025',
+  paidOn: 'sinks',
+  sinkAt: 'edge',
+  solver: 'app',
+  drift: '1.5',
+};
+const gpuRules = (more: Record<string, string> = {}): Front => frontFrom({ ...RULES, ...GPU_FORMS, ...more });
+
+/** A dish of 60 cells with one food in the middle: small and fast. `slimeLeft`: slime on the open cells left of x 30. */
+function smallDish(front: Front, seed = 1, slimeLeft = false) {
+  const layout = dish(60, [[30, 30, 3]]);
+  if (slimeLeft) layout.slime = layout.open.map((o, c) => (o && c % 60 < 30 ? 1 : 0));
+  return new Sim(layout, params({ seed, startStep: 18000, front }));
+}
 
 describe('the CPU prototype of stage 4', () => {
   it('runs the Y-maze as the app does: the first food after about 65 steps (ADR 0056)', () => {
@@ -53,6 +78,151 @@ describe('the CPU prototype of stage 4', () => {
     };
     expect(run('edge', 'all')).toBe(run('fresh', 'all'));
     expect(run('edge', 'none')).not.toBe(run('fresh', 'none'));
+  });
+
+  it('finds ground without slime within 6 cells by the box as by the distance field (ADR 0067)', () => {
+    // Slime on every open cell of the Y-maze but one in 300: the distances to ground without slime run from 0 to far
+    // above 6. The two forms must agree on every open cell.
+    const { layout } = yMazeLayout([], 19, true);
+    const slime = layout.slime!;
+    layout.open.forEach((o, c) => {
+      if (o && pcg(c ^ 0x5eed) % 300 === 0) slime[c] = 0;
+    });
+    const sim = new Sim(layout, params({ seed: 1, startStep: 18000, front: gpuRules() }));
+    const k = sim.step;
+    const field = sim.freshField(k);
+    let [near, far] = [0, 0];
+    for (let c = 0; c < sim.cells; c++) {
+      if (!layout.open[c]) continue;
+      expect(sim.freshNear(c, k)).toBe(field[c]! <= 6);
+      if (field[c]! <= 6) near++;
+      else far++;
+    }
+    expect(near).toBeGreaterThan(500);
+    expect(far).toBeGreaterThan(500);
+    // A run with slime on one half of a dish: its rim lies near the edge of the slime, and both forms give the same
+    // run.
+    const run = (fresh: string) => {
+      const s = smallDish(gpuRules({ fresh }), 3, true);
+      for (let j = 0; j < 45; j++) s.advance();
+      return `${Array.from(s.occ).join('')} ${Array.from(s.sinkRate).join(',')}`;
+    };
+    expect(run('box')).toBe(run('chamfer'));
+  });
+
+  it('marks a cell whose agent can claim a child with the chance min(1, B · r / R) (ADR 0067)', () => {
+    const sim = smallDish(gpuRules());
+    const open = Array.from(sim.layout.open.keys()).filter((c) => sim.layout.open[c]);
+    const [low, high] = [open.slice(0, 600), open.slice(600, 1200)];
+    for (const c of low) sim.sinkRate[c] = 0.5;
+    for (const c of high) sim.sinkRate[c] = 1;
+    sim.payable.length = 0;
+    sim.payable.push(...low, ...high);
+    sim.sinkPayable = 900;
+    const share = (budget: number, cells: number[], draws = 20) => {
+      sim.budget = budget;
+      let marked = 0;
+      let others = 0;
+      for (let j = 0; j < draws; j++) {
+        sim.step = 18002 + 3 * j;
+        sim.markPaid();
+        for (const c of cells) marked += sim.marks[c]!;
+        for (const c of open.slice(1200)) others += sim.marks[c]!;
+      }
+      expect(others).toBe(0);
+      return marked / (draws * cells.length);
+    };
+    // B = 450: the chance 0.25 on a cell of the rate 0.5, and 0.5 on one of the rate 1.
+    expect(Math.abs(share(450, low) - 0.25)).toBeLessThan(0.02);
+    expect(Math.abs(share(450, high) - 0.5)).toBeLessThan(0.02);
+    // A chance above 1 marks every such cell, and a budget of 0 or less marks none.
+    expect(share(2000, low, 2)).toBe(1);
+    expect(share(0, high, 2)).toBe(0);
+    expect(share(-3, high, 2)).toBe(0);
+  });
+
+  it('marks only the cells whose agent at the rim has a free cell of the territory beside it (ADR 0067)', () => {
+    const sim = smallDish(gpuRules(), 2);
+    const { w, h } = sim;
+    const { open } = sim.layout;
+    let checked = 0;
+    for (let j = 0; j < 75; j++) {
+      // The flow pass of a step reads the territory of the step before: the push of the step comes after it.
+      const territory = sim.territory.slice();
+      sim.advance();
+      // The flow pass of the step that just ended came before a growth step: it listed the payable cells.
+      if (sim.step % 3 !== 0) continue;
+      const listed = new Set(sim.payable);
+      for (let c = 0; c < sim.cells; c++) {
+        const [x, y] = [c % w, Math.floor(c / w)];
+        const near = (test: (t: number, dx: number, dy: number) => boolean) => {
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const [xx, yy] = [x + dx, y + dy];
+              if ((dx || dy) && xx >= 0 && yy >= 0 && xx < w && yy < h && test(yy * w + xx, dx, dy)) return true;
+            }
+          return false;
+        };
+        const rim = near((t) => open[t] === 1 && !sim.occ[t] && sim.B[t]! < FLOW.bodyLow);
+        const room = near((t) => open[t] === 1 && !sim.occ[t] && sim.D[t]! >= FLOW.half && territory[t] === 1);
+        const payable = sim.occ[c] === 1 && sim.sinkRate[c]! > 0 && sim.D[c]! >= FLOW.half && rim && room;
+        expect(listed.has(c)).toBe(payable);
+        if (payable) checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
+  it('takes the paid claims off the budget, which never exceeds the sinks, and pays the flux in births (ADR 0067)', () => {
+    const sim = smallDish(gpuRules(), 4);
+    const inflow = (2 * 8) / 20;
+    let [claims, paid] = [0, 0];
+    for (let j = 0; j < 180; j++) {
+      // Once, a budget far above the number of sinks before a growth step: that step must cut it.
+      if (j === 150) sim.budget = 1000;
+      const start = sim.budget;
+      const growth = sim.step % 3 === 0;
+      sim.advance();
+      const gain = sim.frontTotal > 0 ? inflow : 0;
+      const after = growth ? Math.min(start - sim.paidClaims, sim.demand) + gain : start + gain;
+      expect(sim.budget).toBeCloseTo(after, 9);
+      if (j === 150) expect(sim.budget).toBeLessThan(sim.demand + 1);
+      if (j >= 150) continue;
+      if (growth) claims += sim.paidClaims;
+      paid += gain;
+    }
+    // The paid claims of the first 150 steps match the flux that the sinks took, within the budget that is left.
+    expect(paid).toBeGreaterThan(60);
+    expect(claims).toBeGreaterThan(0.6 * paid);
+    expect(claims).toBeLessThan(1.2 * paid);
+  });
+
+  it('sums the sink rates in steps of 2^-16 as integers (ADR 0067)', () => {
+    const sim = smallDish(gpuRules(), 5);
+    let seen = 0;
+    for (let j = 0; j < 60; j++) {
+      sim.advance();
+      let [total, payable] = [0, 0];
+      for (let c = 0; c < sim.cells; c++) if (sim.G[c]! > 0) total += Math.round(sim.sinkRate[c]! * 2 ** 16);
+      for (const c of sim.payable) payable += Math.round(sim.sinkRate[c]! * 2 ** 16);
+      expect(sim.sinkTotal).toBe(total / 2 ** 16);
+      expect(sim.sinkPayable).toBe(payable / 2 ** 16);
+      if (sim.payable.length > 0) seen++;
+    }
+    expect(seen).toBeGreaterThan(5);
+  });
+
+  it('starts the territory on every open cell within 3 cells of a start agent (ADR 0067)', () => {
+    const sim = smallDish(gpuRules(), 6);
+    const { w } = sim;
+    const agents: [number, number][] = [];
+    for (let i = 0; i < sim.cap; i++) if (sim.alive[i]) agents.push([Math.floor(sim.ax[i]!), Math.floor(sim.ay[i]!)]);
+    expect(agents.length).toBeGreaterThan(30);
+    for (let c = 0; c < sim.cells; c++) {
+      const [x, y] = [c % w, Math.floor(c / w)];
+      const near = agents.some(([ax, ay]) => Math.max(Math.abs(ax - x), Math.abs(ay - y)) <= 3);
+      expect(sim.territory[c]).toBe(sim.layout.open[c] && near ? 1 : 0);
+    }
   });
 
   it('measures rows, veins, their direction, their delay and Murray exponents without failing', () => {

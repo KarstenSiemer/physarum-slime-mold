@@ -15,6 +15,12 @@ export const VEIN = FLOW.birthFrom;
 
 // Random streams, numbered as in the app where the app has them (docs/model.md, 7.7), and new ones above 10.
 const [STEER, BLOCK, GROW, ORDER, RESPAWN, STARVE, HOLD_MOVE, HOLD_BIRTH, START] = [0, 3, 4, 6, 8, 9, 11, 12, 13];
+/** The marks of the paid births in the form of a GPU (`paidBy` 'chance'); START + 1 is the push of the territory. */
+const MARK = 15;
+/** A sum in the form of a GPU (`sums` 'fixed') counts a sink rate in steps of 1 / FIXED, as an integer. */
+export const FIXED = 65536;
+/** The cells around a start agent that join the territory of its strain (`start` 'agents'): a square of 7 × 7. */
+export const START_REACH = 3;
 
 let rs = 0;
 const seedFor = (id: number, salt: number, step: number, seed: number) => {
@@ -112,6 +118,30 @@ export interface Front {
   speedOn: 'body' | 'trail' | 'push';
   /** The weight of a sink at a rim without fresh ground within `reach`: 0 is the owner's rule (only fresh ground). */
   slimeWeight: number;
+  /**
+   * How the births that the flux pays find their parents (ADR 0067). 'order': one random order over all agents of the
+   * front, with odds in the weight of each (ADR 0065). 'chance', the form of a GPU: after the step before a growth
+   * step each cell gets a mark with the chance min(1, budget · r / R), r its sink rate and R the sum of the sink rates
+   * of the tube cells; in the growth step each agent of the front on a marked cell claims a child. Each claim lowers
+   * the budget by 1, and the budget never exceeds the number of sinks of the step.
+   */
+  paidBy: 'order' | 'chance';
+  /**
+   * How a sink learns whether ground without slime lies within `reach` (ADR 0067). 'chamfer': the distance field of
+   * two passes over the grid. 'box', the form of a GPU: the sink looks at the square of side 2 · reach + 1 around it.
+   * Both give the same sinks.
+   */
+  fresh: 'chamfer' | 'box';
+  /**
+   * How the sums over the cells are taken (ADR 0067). 'float': in floats. 'fixed', the form of a GPU: each sink rate
+   * in steps of 1 / FIXED as an integer, so that every order of the additions gives the same sum.
+   */
+  sums: 'float' | 'fixed';
+  /**
+   * The territory of the start (ADR 0067). 'disc': the disc of the start and a rim of 3 cells. 'agents', the form of a
+   * GPU: every open cell within START_REACH cells of a start agent (the square of 7 × 7 around it).
+   */
+  start: 'disc' | 'agents';
 }
 
 export interface Params {
@@ -163,6 +193,10 @@ export const noFront = (): Front => ({
   speed: 0,
   speedOn: 'body',
   slimeWeight: 0,
+  paidBy: 'order',
+  fresh: 'chamfer',
+  sums: 'float',
+  start: 'disc',
 });
 
 /** The words that a text option of `Front` takes. */
@@ -173,7 +207,14 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   speedOn: ['body', 'trail', 'push'],
   paidOn: ['fresh', 'sinks'],
   sinkAt: ['fresh', 'edge'],
+  paidBy: ['order', 'chance'],
+  fresh: ['chamfer', 'box'],
+  sums: ['float', 'fixed'],
+  start: ['disc', 'agents'],
 };
+
+/** The forms of a GPU for the rules of stage 4 (ADR 0067): the key=value words that turn all of them on. */
+export const GPU_FORMS = { paidBy: 'chance', fresh: 'box', sums: 'fixed', start: 'agents' } as const;
 
 /**
  * The rules of stage 4 from the key=value words of a command line: a flag is 1 or 0. `own` names the other keys of
@@ -287,10 +328,20 @@ export class Sim {
   /** The total sink of the front in the last step. */
   frontTotal = 0;
   /** Births that the flow paid for and that are not born yet. */
-  private budget = 0;
+  budget = 0;
   paidBirths = 0;
   /** The agents at the young front in the last flow pass. */
   demand = 0;
+  /** The sum of the sink rates of the tube cells in the last flow pass. */
+  sinkTotal = 0;
+  /** The cells whose agent could claim a paid child after the last flow pass before a growth step (canPay()). */
+  readonly payable: number[] = [];
+  /** The sum of the sink rates of the cells of `payable` (`paidBy` 'chance'). */
+  sinkPayable = 0;
+  /** 1 for a cell that is marked for a paid birth in the next growth step (`paidBy` 'chance'). */
+  readonly marks: Uint8Array;
+  /** The paid claims of the last growth step, which the flow pass of that step takes off the budget (`paidBy` 'chance'). */
+  paidClaims = 0;
   /** The Chebyshev distance of each cell to ground without slime, at most 255 (with `reach`). */
   private readonly toFresh: Uint8Array;
   /** 1 for a cell of the territory of the colony (`speed`). */
@@ -315,6 +366,8 @@ export class Sim {
     readonly p: Params,
   ) {
     const { w, h } = layout;
+    // The marks of `paidBy` 'chance' follow the sink rates: they are the form of `paidOn` 'sinks'.
+    if (p.front.paidBy === 'chance' && p.front.paidOn !== 'sinks') throw new Error('paidBy=chance needs paidOn=sinks');
     this.w = w;
     this.h = h;
     const n = w * h;
@@ -361,6 +414,7 @@ export class Sim {
     this.sinkCount = new Float32Array(n);
     this.extra = new Float32Array(n);
     this.toFresh = new Uint8Array(n);
+    this.marks = new Uint8Array(n);
     this.territory = new Uint8Array(n);
     this.veinAt = new Uint32Array(n);
     this.low = 0.2 * p.deposit;
@@ -435,8 +489,19 @@ export class Sim {
       placed++;
     }
     this.aliveCount = placed;
-    // The territory of the start: the disc of the colony and a rim of 3 cells (`speed`).
     const { h } = this.layout;
+    if (this.p.front.start === 'agents') {
+      // The form of a GPU: every open cell within START_REACH cells of a start agent (ADR 0067).
+      for (let i = 0; i < placed; i++) {
+        const c = this.cellOf(this.ax[i]!, this.ay[i]!);
+        const [x, y] = [c % w, Math.floor(c / w)];
+        for (let yy = Math.max(0, y - START_REACH); yy <= Math.min(h - 1, y + START_REACH); yy++)
+          for (let xx = Math.max(0, x - START_REACH); xx <= Math.min(w - 1, x + START_REACH); xx++)
+            if (open[yy * w + xx]) this.territory[yy * w + xx] = 1;
+      }
+      return;
+    }
+    // The territory of the start: the disc of the colony and a rim of 3 cells (`speed`).
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++)
         if (open[y * w + x] && Math.hypot(x + 0.5 - sx, y + 0.5 - sy) <= r + 3) this.territory[y * w + x] = 1;
@@ -548,7 +613,26 @@ export class Sim {
     this.slimePass();
     this.flowPass();
     if (this.p.front.speed > 0) this.grow();
+    // The marks of the paid births come with the push of the territory, after the step before a growth step.
+    if (this.p.front.paid > 0 && this.p.front.paidBy === 'chance' && (this.step + 1) % 3 === 0) this.markPaid();
     this.step++;
+  }
+
+  /**
+   * The marks of the births that the flux pays, in the form of a GPU (`paidBy` 'chance', ADR 0067): each cell whose
+   * agent could claim a child (canPay()) gets a mark with the chance min(1, B · r / R), r its sink rate, B the budget
+   * and R the sum of the sink rates of these cells, all of the flow pass of this step. A draw of its own per cell, as
+   * a pass over the cells makes it.
+   */
+  markPaid() {
+    this.marks.fill(0);
+    const [B, R] = [this.budget, this.sinkPayable];
+    if (!(B > 0) || !(R > 0)) return;
+    const k = this.step;
+    for (const c of this.payable) {
+      seedFor(c, MARK, k, this.p.seed);
+      if (rand() < Math.min(1, (B * this.sinkRate[c]!) / R)) this.marks[c] = 1;
+    }
   }
 
   /**
@@ -730,9 +814,24 @@ export class Sim {
       if (nG < 1 || nG > 10 || this.D[c]! < FLOW.half) continue;
       this.claimChild(i, c, free);
     }
+    // The births that the flow paid for, in the form of a GPU (`paidBy` 'chance', ADR 0067): every agent of the front
+    // on a marked cell claims a child. The flow pass of this step takes the claims off the budget.
+    if (front.paid > 0 && front.paidBy === 'chance') {
+      this.paidClaims = 0;
+      for (let i = 0; i < cap; i++) {
+        if (!this.alive[i] || this.want[i]! >= 0) continue;
+        const c = this.cellOf(this.ax[i]!, this.ay[i]!);
+        if (!this.marks[c] || this.D[c]! < FLOW.half) continue;
+        if (front.rim && !this.atRim(c)) continue;
+        if (this.claimChild(i, c, free, front.rim)) {
+          this.paidClaims++;
+          this.paidBirths++;
+        }
+      }
+    }
     // The births that the flow paid for: agents at the front, in a random order (stage 4). With `paidOn` 'sinks' an
     // agent at a sink comes first with odds in the share of its flux (the weighted order of Efraimidis and Spirakis).
-    if (front.paid > 0 && this.budget >= 1) {
+    if (front.paid > 0 && front.paidBy === 'order' && this.budget >= 1) {
       const atSinks = front.paidOn === 'sinks';
       const at: number[] = [];
       for (let i = 0; i < cap; i++) {
@@ -809,7 +908,7 @@ export class Sim {
    */
   isYoung(c: number, k = this.step): boolean {
     const front = this.p.front;
-    if (front.reach > 0) return this.toFresh[c]! <= front.reach;
+    if (front.reach > 0) return front.fresh === 'box' ? this.freshNear(c, k) : this.toFresh[c]! <= front.reach;
     const f = this.F[c]!;
     return front.young > 0 && f !== 0 && this.hasSlime(c, k) && k + 1 - f < front.young;
   }
@@ -829,8 +928,11 @@ export class Sim {
     return false;
   }
 
-  /** Whether a cell lies at the rim of the colony: an open, empty neighbour without a tube body. */
-  atRim(c: number): boolean {
+  /**
+   * Whether a cell lies at the rim of the colony: an open, empty neighbour without a tube body. `occ`: the occupancy,
+   * by default the one after the moves of a growth step.
+   */
+  atRim(c: number, occ = this.occNext): boolean {
     const { w, h } = this;
     const { open } = this.layout;
     const [x, y] = [c % w, Math.floor(c / w)];
@@ -839,16 +941,66 @@ export class Sim {
         const [xx, yy] = [x + dx, y + dy];
         if ((dx === 0 && dy === 0) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
         const t = yy * w + xx;
-        if (open[t] && !this.occNext[t] && this.B[t]! < FLOW.bodyLow) return true;
+        if (open[t] && !occ[t] && this.B[t]! < FLOW.bodyLow) return true;
       }
     return false;
   }
 
-  /** The distance of every cell to open ground without slime (two passes of the chamfer transform). */
-  private freshDistance() {
+  /**
+   * Whether an agent on cell c could claim a child at the end of this step (`paidBy` 'chance'): a cell of the front
+   * (a sink rate above 0, the flow memory at least `half`, at the rim with `rim`) with a free cell beside it, as
+   * claimChild() takes one: open, empty, not starved, of the territory, and not behind the corner of two walls.
+   */
+  canPay(c: number): boolean {
+    const { w, h, occ } = this;
+    const { open, wall } = this.layout;
+    const front = this.p.front;
+    if (!occ[c] || this.sinkRate[c]! <= 0 || this.D[c]! < FLOW.half) return false;
+    if (front.rim && !this.atRim(c, occ)) return false;
+    const [x, y] = [c % w, Math.floor(c / w)];
+    const isWall = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < w && yy < h && wall[yy * w + xx] === 1;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const [xx, yy] = [x + dx, y + dy];
+        if ((dx === 0 && dy === 0) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const t = yy * w + xx;
+        if (!open[t] || occ[t] || this.D[t]! < FLOW.half) continue;
+        if (front.speed > 0 && !this.territory[t]) continue;
+        if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;
+        return true;
+      }
+    return false;
+  }
+
+  /**
+   * Whether an open cell without slime before step k lies in the square of side 2 · reach + 1 around cell c: the form
+   * of a GPU of `toFresh[c] <= reach` (`fresh` 'box', ADR 0067). The two passes of the chamfer transform give the
+   * Chebyshev distance through every cell of the grid, so both give the same answer.
+   */
+  freshNear(c: number, k = this.step): boolean {
+    const { w, h } = this;
+    const { open } = this.layout;
+    const r = this.p.front.reach;
+    const [x, y] = [c % w, Math.floor(c / w)];
+    for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)
+      for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {
+        const t = yy * w + xx;
+        if (open[t] && !this.hasSlime(t, k)) return true;
+      }
+    return false;
+  }
+
+  /** For tests: the distance of every cell to ground without slime before step k, from the chamfer transform. */
+  freshField(k = this.step): Uint8Array {
+    this.freshDistance(k);
+    return this.toFresh.slice();
+  }
+
+  /** The distance of every cell to open ground without slime before step k (two passes of the chamfer transform). */
+  private freshDistance(k = this.step + 1) {
     const { w, h, toFresh: d } = this;
     const { open } = this.layout;
-    for (let c = 0; c < this.cells; c++) d[c] = open[c] && !this.hasSlime(c, this.step + 1) ? 0 : 255;
+    for (let c = 0; c < this.cells; c++) d[c] = open[c] && !this.hasSlime(c, k) ? 0 : 255;
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const c = y * w + x;
@@ -1130,7 +1282,7 @@ export class Sim {
     const { cells, G, w, h } = this;
     const { open } = this.layout;
     const k = this.step + 1;
-    if (front.reach > 0) this.freshDistance();
+    if (front.reach > 0 && front.fresh === 'chamfer') this.freshDistance();
     const at: number[] = [];
     const weight = new Map<number, number>();
     for (let c = 0; c < cells; c++) {
@@ -1157,6 +1309,10 @@ export class Sim {
       weight.set(c, young ? 1 : front.slimeWeight);
     }
     this.demand = at.length;
+    // In the form of a GPU the flow pass of a growth step takes the paid claims off the budget, and the budget never
+    // exceeds the number of sinks (`paidBy` 'chance', ADR 0067).
+    if (front.paidBy === 'chance' && this.step % 3 === 0)
+      this.budget = Math.min(this.budget - this.paidClaims, at.length);
     // The sink of a cell follows its share of the demand with the time `tau`.
     const tau = Math.max(1, front.tau);
     let total = 0;
@@ -1165,7 +1321,21 @@ export class Sim {
       const r = this.sinkRate[c]! + (this.sinkCount[c]! - this.sinkRate[c]!) / tau;
       this.sinkRate[c] = r;
       this.sinkCount[c] = 0;
-      if (G[c]! > 0) total += r;
+      if (G[c]! > 0) total += front.sums === 'fixed' ? Math.round(this.sinkRate[c]! * FIXED) : r;
+    }
+    if (front.sums === 'fixed') total /= FIXED;
+    this.sinkTotal = total;
+    // Before a growth step, the cells whose agent could claim a paid child, and the sum of their sink rates: the
+    // marks of the births follow their shares (markPaid()).
+    this.payable.length = 0;
+    this.sinkPayable = 0;
+    if (front.paidBy === 'chance' && (this.step + 1) % 3 === 0) {
+      for (let c = 0; c < cells; c++) {
+        if (!this.canPay(c)) continue;
+        this.payable.push(c);
+        this.sinkPayable += front.sums === 'fixed' ? Math.round(this.sinkRate[c]! * FIXED) : this.sinkRate[c]!;
+      }
+      if (front.sums === 'fixed') this.sinkPayable /= FIXED;
     }
     if (at.length === 0 || total <= 0) return;
     const portList = Array.from(this.ports).filter((c) => c >= 0);

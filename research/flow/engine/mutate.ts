@@ -5,7 +5,8 @@
 // (ADR 0053), of the mark that a starved tube leaves (ADR 0054), of the slime field, its brush and its picture
 // (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
 // the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062), of the density when the
-// rule of one agent per cell goes on (ADR 0063) and of the start spot of a scene (ADR 0066). The script puts one wrong rule at a time into a source file of the
+// rule of one agent per cell goes on (ADR 0063), of the start spot of a scene (ADR 0066) and of the forms of a GPU for
+// the growth front in the prototype on the CPU (ADR 0067). The script puts one wrong rule at a time into a source file of the
 // app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
@@ -159,6 +160,9 @@ const PRESETS_SPEC = 'src/model/presets.test.ts';
 const Y_MAZE_TS = 'src/model/y-maze.ts';
 const Y_MAZE_SPEC = 'research/flow/engine/y-maze.test.ts';
 const [START_NODE, START_GPU] = ['the start spots of a scene', 'start spot of the Y-maze'];
+/** The forms of a GPU for the rules of stage 4 in the prototype on the CPU (ADR 0067), with its unit tests. */
+const STAGE4_SIM = 'research/front/sim.ts';
+const STAGE4_SPEC = 'research/front/research.test.ts';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -5439,6 +5443,70 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '',
     'Reid et al. 2012',
     PRESETS_SPEC,
+  ],
+  [
+    'FP1 front: the box of a sink looks one cell less far for ground without slime',
+    STAGE4_SIM,
+    'for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)',
+    'for (let yy = Math.max(0, y - r + 1); yy <= Math.min(h - 1, y + r - 1); yy++)',
+    'by the box as by the distance field',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP2 front: the chance of a mark leaves out the sum of the sink rates',
+    STAGE4_SIM,
+    'if (rand() < Math.min(1, (B * this.sinkRate[c]!) / R)) this.marks[c] = 1;',
+    'if (rand() < Math.min(1, B * this.sinkRate[c]!)) this.marks[c] = 1;',
+    'with the chance min',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP3 front: a free cell outside the territory makes a cell payable',
+    STAGE4_SIM,
+    '        if (front.speed > 0 && !this.territory[t]) continue;\n        if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;\n        return true;',
+    '        if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;\n        return true;',
+    'a free cell of the territory beside it',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP4 front: the paid claims do not lower the budget',
+    STAGE4_SIM,
+    'this.budget = Math.min(this.budget - this.paidClaims, at.length);',
+    'this.budget = Math.min(this.budget, at.length);',
+    'takes the paid claims off the budget',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP5 front: the budget may exceed the number of sinks',
+    STAGE4_SIM,
+    'this.budget = Math.min(this.budget - this.paidClaims, at.length);',
+    'this.budget = this.budget - this.paidClaims;',
+    'takes the paid claims off the budget',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP6 front: the sums count the sink rates in steps of 2^-8',
+    STAGE4_SIM,
+    'export const FIXED = 65536;',
+    'export const FIXED = 256;',
+    'sums the sink rates in steps',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP7 front: the territory of the start reaches 2 cells from a start agent',
+    STAGE4_SIM,
+    'export const START_REACH = 3;',
+    'export const START_REACH = 2;',
+    'within 3 cells of a start agent',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP8 front: the marks come after a growth step, not before it',
+    STAGE4_SIM,
+    "this.p.front.paidBy === 'chance' && (this.step + 1) % 3 === 0) this.markPaid();",
+    "this.p.front.paidBy === 'chance' && this.step % 3 === 0) this.markPaid();",
+    'takes the paid claims off the budget',
+    STAGE4_SPEC,
   ],
 ];
 
