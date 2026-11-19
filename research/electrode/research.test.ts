@@ -116,22 +116,29 @@ describe('the record of the look of the electrodes (ADR 0058)', () => {
     expect(wall[1]?.split('|')[1]).toBe('0.98');
   }, 120_000);
 
-  // One grid when ADR 0058 was built. Since then the slime counts 11 B more per cell (ADR 0057, ADR 0060), and the fit
-  // stands at other limits.
-  it('changes two grids of 2,916 cases with the 4 B per cell of the outlines of the poles', async () => {
+  // One grid when ADR 0058 was built, with 26 scenes and 2,916 cases. Then the slime counted 11 B more per cell
+  // (ADR 0057, ADR 0060), and two other grids changed. Since ADR 0064 the list holds 28 scenes, and the Maze has
+  // growth: the fit stands at other limits again.
+  it('changes seven grids of 3,132 cases with the 4 B per cell of the outlines of the poles', async () => {
     const lines = await fitReport();
     const text = [ADR, './README.md'].map((file) => readFileSync(here(file), 'utf8').replace(/\s+/g, ' '));
-    expect(lines[0]).toBe('2916 cases: 2 with another grid');
-    // The two cases, as the ADR and README.md name them.
-    expect(lines.slice(1)).toEqual([
+    expect(lines[0]).toBe('3132 cases: 7 with another grid');
+    // The start scene of ADR 0064 loses its lattice on WebGL2 with a memory hint of 0.5 GB, on all six canvases.
+    const start = lines.slice(1).filter((line) => line.startsWith('three-networks on WebGL2, a memory hint of 0.5 GB'));
+    expect(start).toHaveLength(6);
+    for (const line of start) expect(line).toMatch(/: lattice 384 × 384 before, (256|512) now$/);
+    // The seventh case, as the ADR and README.md name it.
+    expect(lines.slice(1).filter((line) => !start.includes(line))).toEqual([
       'three-strains on WebGL2, a memory hint of 1 GB, a canvas of 390 × 844: 1024 before, 768 now',
-      'maze on WebGL2, a memory hint of 0.5 GB, a canvas of 1000 × 1000: 512 before, 256 now',
     ]);
     for (const t of text) {
+      expect(t).toContain('3,132 cases');
       expect(t).toContain('2,916 cases');
       expect(t).toContain('from 512 to 256');
       expect(t).toContain('from 1024 to 768');
     }
+    // README.md prints the lines of the command.
+    for (const line of lines) expect(text[1]).toContain(line);
   }, 120_000);
 
   it('holds the digests of main for every scene, after 500 and after 3,000 steps', () => {

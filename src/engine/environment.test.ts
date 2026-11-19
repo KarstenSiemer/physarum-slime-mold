@@ -284,7 +284,16 @@ describe('preset shapes in the canonical frame', () => {
   // On 6:5 the short-side frame of a dish put the Maze's two foods beside the grid (review of ADR 0019).
   it('keep the shapes of a box or a periodic grid at those fractions on every screen, turned on a tall one', () => {
     const arenas = Object.keys(before).filter((id) => boundaryOf(id) !== 'dish');
-    expect(arenas).toEqual(['light', 'maze']);
+    // Fleeing light runs in a dish since ADR 0064. Its lamp of revision 0 lies in the middle, and a radius counts in
+    // parts of the short side in every arena: a link made before paints the lamp where it was.
+    expect(arenas).toEqual(['maze']);
+    const lamp = presetById('light');
+    for (const [name, [w, h]] of Object.entries(grids))
+      for (const e of (lamp && shapesAt(lamp, 0)) ?? [])
+        expect(strokeOn(fromShape(e, 'dish'), w, h), name).toEqual({
+          ...strokeOn(fromShape(e, 'wrap'), w, h),
+          boundary: 'dish',
+        });
     for (const id of arenas)
       for (const [name, [w, h]] of Object.entries(grids)) {
         const now = preset(id).map((e) => strokeOn(fromShape(e, boundaryOf(id)), w, h));

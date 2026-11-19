@@ -10,6 +10,8 @@
   does not change.
 - In short: the commands and the records are in
   [`research/electrode/README.md`](../../research/electrode/README.md), part "The look of the electrodes".
+- Extended by ADR 0064 (2026-11-19): with two more scenes and growth in the Maze, the fit of the grid has other
+  cases (Results, "The fit of the grid").
 
 ## Context
 
@@ -164,7 +166,10 @@ the scene Cyclones on WebGL2 without float blending, with a hint of 2 GB on a ca
 1024 to 768 cells on the long side. Since ADR 0060 the slime counts 15 B per cell in place of 4, and the 4 B of the
 poles change two other cases: Three strains on WebGL2 with a hint of 1 GB on a canvas of 390 × 844 pixels goes from
 1024 to 768 cells, and the Maze on WebGL2 with a hint of 0.5 GB on a canvas of 1,000 × 1,000 pixels from 512 to 256
-cells. Every other case keeps its grid.
+cells. Every other case keeps its grid. Since ADR 0064 the list holds 28 scenes, which gives 3,132 cases, and the
+Maze has growth. The 4 B then change seven cases: the Three strains of before, now the scene Three-strain weave, as
+above, and the new start scene Three strains on WebGL2 with a hint of 0.5 GB on all six canvases. There it runs
+without its lattice of 384 × 384 cells. The Maze keeps its grid.
 
 **Tests**, on both backends unless a backend is named:
 

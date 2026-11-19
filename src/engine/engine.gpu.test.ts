@@ -11,6 +11,7 @@ import { OutOfMemoryError } from './gpu';
 import { AgentToolKind, stepChance } from './pack';
 import { paintReference } from './paint-reference';
 import type { Simulation } from './sim';
+import { agentCount } from './sizing';
 import type { Backend, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -665,7 +666,8 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
   // A preset load puts the scene's shapes in place of every edit: on the same grid the simulation clears its
   // environment and paints them in one call, on another grid or under the dish a new simulation paints them.
   it('keep the outlines on the side of env after a preset load, on the same grid and on a new one', async () => {
-    const { engine } = await load('network', { lattice: null, resolution: 512, density: 0.12 });
+    // The grid and the agents of the Maze: 512 cells on the long side, and a capacity of 0.25 agents per cell.
+    const { engine } = await load('network', { lattice: null, resolution: 512, density: 0.12, capacity: 0.25 });
     engine.paint({ kind: 'food', from: [100.3, 100.7], to: [160.1, 120.4], radius: 9.3 });
     engine.paint({ kind: 'wall', from: [300.2, 40.6], to: [310.4, 240.3], radius: 3.1 });
     engine.frame(performance.now(), 0);
@@ -674,7 +676,7 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
       if (!p) throw new Error(`no preset ${id}`);
       const before = engine.sim;
       await engine.load({ ...p.settings(), seed: 5, resolution: 512 }, p.env ?? []);
-      // The Maze runs on the grid and the density of before (512, 0.12): no new simulation.
+      // The Maze runs on the grid and with the agents of before: no new simulation.
       expect(engine.sim === before, id).toBe(id === 'maze');
       expect(engine.sim.hasEnvironment).toBe(true);
       expect(await disagreements(engine), id).toEqual([]);
@@ -741,7 +743,11 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     }
     const shared = [...per.values()].filter((k) => k > 1).length;
     expect(blocked).toBe(0);
-    expect(dead).toBeLessThanOrEqual(Math.floor(1e-4 * engine.sim.agents));
+    // With a capacity above Agents per cell, as in the Maze (ADR 0064), the agents above the start population start
+    // dead: growth brings them to life.
+    const spare = engine.sim.agents - agentCount(engine.settings, width, height);
+    expect(dead).toBeGreaterThanOrEqual(spare);
+    expect(dead - spare).toBeLessThanOrEqual(Math.floor(1e-4 * engine.sim.agents));
     // A backend without the rule (WebGL2 without EXT_float_blend) runs the scene with shared cells.
     if (engine.settings.collisions) expect(shared).toBe(0);
     engine.destroy();

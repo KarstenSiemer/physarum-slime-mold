@@ -646,9 +646,9 @@ test('the Scent switch and the S key show the scent with its legend, and go into
   await button.click();
   await expect(button).toHaveAttribute('aria-pressed', 'true');
   await expect(legend).toBeVisible();
-  // Fleeing light has light and no food.
+  // Fleeing light has light and food (ADR 0064).
   await expect(legend.getByText(/^Light \(pink glow\)$/)).toBeVisible();
-  await expect(legend.getByText(/^Food/)).toHaveCount(0);
+  await expect(legend.getByText(/^Food \(green glow\)$/)).toBeVisible();
   await expect(legend).toHaveAccessibleDescription(/Pink glow/);
   await page.waitForFunction(() => globalThis.physarum?.settings.showScent === true);
   await expect(changed).toHaveCount(0);

@@ -35,7 +35,8 @@ for (const viewport of [
   }) => {
     const errors = watchErrors(page);
     await page.setViewportSize(viewport);
-    // A small device memory keeps the start scene small on SwiftShader in CI; the grid it lowers shows a notice.
+    // A small device memory: the device cannot hold the lattice of the start scene, three strains with a flow each
+    // (ADR 0064). The scene then runs on a grid shaped like the screen, and a notice says so.
     await page.addInitScript(() => {
       Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
     });
@@ -43,7 +44,7 @@ for (const viewport of [
     const label = page.getByRole('button', { name: /^Scene: Three strains/ });
     await expect(label).toBeVisible();
     const notice = page.getByRole('status');
-    await expect(notice).toContainText('Lowered the grid to', { timeout: 60_000 });
+    await expect(notice).toContainText('This device cannot hold a lattice of 384 × 384 cells', { timeout: 60_000 });
     const [l, n, t] = [await box(label), await box(notice), await box(page.getByRole('toolbar'))];
     expect(overlap(l, n)).toBe(false);
     expect(overlap(l, t)).toBe(false);
@@ -451,7 +452,7 @@ test('Learn → Scenes loads a scene, and the panel shows it', async ({ page }) 
   await page.getByRole('button', { name: 'Learn', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Learn' });
   await dialog.getByRole('tab', { name: 'Scenes' }).click();
-  for (const group of ['Start here', 'Jones 2010', 'Experiments', 'Fogleman 2020'])
+  for (const group of ['Start here', 'Experiments', 'Jones 2010', 'Paper experiments', 'Agents share cells'])
     await expect(dialog.getByRole('heading', { name: group, exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Details of Turing spots' }).click();
   await expect(dialog).toContainText('Why these settings:');

@@ -1,8 +1,8 @@
 # Physarum: a slime mold simulator for the browser
 
-An interactive simulation of the slime mold _Physarum polycephalum_. Millions of simple agents
-leave trails and follow them, and transport networks appear: they connect food, flee light,
-shrink, heal and compete. Everything runs on your graphics card, in the browser.
+An interactive simulation of the slime mold _Physarum polycephalum_. Many simple agents leave
+trails and follow them, and transport networks appear: they connect food, flee light, shrink,
+heal and compete. Everything runs on your graphics card, in the browser.
 
 ![Three strains weave their networks](docs/images/hero.jpg)
 
@@ -10,14 +10,20 @@ shrink, heal and compete. Everything runs on your graphics card, in the browser.
 
 ## What you can do
 
+- Watch the **start scene**: three rival strains grow from three foods, and each builds a network
+  of tubes of its own. The scenes under Start here and Experiments run the rules of the organism:
+  one agent per cell, growth and shrinkage, the flow in the tubes and the slime
+  ([ADR 0064](docs/adr/0064-the-scenes-run-the-rules-of-the-organism.md)).
 - Place up to **four strains** side by side, give each a color and its own behaviour, and set
   how strongly each strain follows or flees the others.
 - Change every parameter of the Jones (2010) model live: sensor angle, sensor distance,
   rotation angle, step size, deposit, decay, random turns, population, diffusion.
 - Paint **food** (attracts), **light** (repels), **walls**, inoculate agents, or **cut** a
   wound and watch it heal.
-- Run **experiments**: shortest path, Steiner tree, shrinking plasmodium and wound healing from
-  the paper, plus light avoidance, a maze and the Tokyo rail network of Tero et al. (2010).
+- Run **experiments**: mazes, light avoidance, rival networks and the Tokyo rail network of Tero
+  et al. (2010) with the rules of the organism. The experiments of the papers on Jones' model run
+  with the model of their paper: shortest path, Steiner tree, shrinking plasmodium, wound healing,
+  a coarsening network, electrotaxis and a Voronoi diagram.
 - Turn on **flow in the tubes**: tubes that carry flow between foods stay, the others starve.
   The Maze then keeps one tube along a short route. The picture draws every tube as wide as its
   flow memory says: a tube that keeps much flow stays thick, the others get thin and faint. Small

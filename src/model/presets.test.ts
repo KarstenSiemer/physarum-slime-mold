@@ -6,9 +6,11 @@ import {
   BAUMGARTEN_PDF,
   ELECTROTAXIS,
   GROUPS,
+  figureLattice,
   JONES_PDF,
   latticeLostNotice,
   latticeNotice,
+  latticeOrigin,
   latticeText,
   PRESETS,
   presetById,
@@ -75,8 +77,9 @@ describe('presets', () => {
     expect(defaultSettings().model).toBe('extended');
   });
 
-  it('sit in the four groups, in group order, with the start scene under Start here', () => {
+  it('sit in the five groups, in group order, with the start scene under Start here', () => {
     const order = GROUPS.map((g) => g.id);
+    expect(order).toEqual(['start', 'experiments', 'jones', 'papers', 'shared']);
     for (const g of order)
       expect(
         PRESETS.some((p) => p.group === g),
@@ -85,8 +88,134 @@ describe('presets', () => {
     const ranks = PRESETS.map((p) => order.indexOf(p.group));
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
     expect(preset(START).group).toBe('start');
+    expect(PRESETS[0]?.id).toBe(START);
     for (const p of PRESETS.filter((x) => x.group === 'jones')) expect(p.source).toMatch(/^Jones 2010, Fig\. /);
-    for (const p of PRESETS.filter((x) => x.group === 'fogleman')) expect(p.source).toBe('Fogleman 2020');
+    for (const p of PRESETS.filter((x) => sourceKind(x) === 'fogleman')) expect(p.group, p.id).toBe('shared');
+  });
+
+  // ADR 0064 (the owner's wish of 2026-11-19): the scenes of Start here and of Experiments run the same rule set, this
+  // app's rules for the organism. A scene that follows the experiment of a paper on Jones' model keeps the model and
+  // the values of its paper, in a group of its own. The scenes without the rule of one agent per cell have theirs.
+  it('run each group on one rule set: the organism, the papers, or agents that share cells', () => {
+    const ids = (group: string) => PRESETS.filter((p) => p.group === group).map((p) => p.id);
+    expect(ids('start')).toEqual(['three-networks', 'two-networks']);
+    expect(ids('experiments')).toEqual([
+      'light',
+      'maze',
+      'foraging-maze',
+      'snail-maze',
+      'corn-maze',
+      'tokyo',
+      'tokyo-light',
+      'food-ring',
+      'rival-networks',
+      'tokyo-rivals',
+    ]);
+    expect(ids('jones')).toEqual(['network', 'hexagons', 'spots', 'stripes']);
+    expect(ids('papers')).toEqual([
+      'shortest-path',
+      'steiner',
+      'shrinking',
+      'wound',
+      'coarsening',
+      'electrotaxis',
+      'voronoi',
+    ]);
+    expect(ids('shared')).toEqual(['three-strains', 'two-strains', 'cyclones', 'dunes', 'dot-grid']);
+    for (const p of PRESETS) {
+      const s = p.settings();
+      const organism = p.group === 'start' || p.group === 'experiments';
+      // One agent per cell, growth and shrinkage, the flow in the tubes and the slime, in the extended model.
+      const rules = [s.model, s.collisions, s.growth, s.flow, s.slimeLife > 0];
+      if (organism) expect(rules, p.id).toEqual(['extended', true, true, true, true]);
+      else expect(rules, p.id).not.toEqual(['extended', true, true, true, true]);
+      if (organism) {
+        // Jones' values of 2011 for growth and shrinkage, and room for the colony.
+        expect([s.growthEvery, s.growthWindow, s.growthMin, s.growthMax], p.id).toEqual([3, 9, 1, 10]);
+        expect([s.shrinkEvery, s.shrinkWindow, s.shrinkMin, s.shrinkMax, s.shrink], p.id).toEqual([3, 5, 0, 20, 0]);
+        expect(s.capacity, p.id).toBe(0.25);
+        // Jones' agent of this app's scenes: a step of 1 cell, 5 units per move, a decay of 0.1, sensors 7 cells away.
+        for (const st of s.strains)
+          expect([st.stepSize, st.deposit, st.decay, st.sensorOffset, st.rotationAngle], p.id).toEqual([
+            1, 5, 0.1, 7, 45,
+          ]);
+        expect([s.diffusion, s.foodStrength], p.id).toEqual([1, 0.03]);
+      }
+      if (p.group === 'jones' || p.group === 'papers') expect(s.model, p.id).toBe('jones');
+      if (p.group === 'papers') expect(p.figure, p.id).toBeDefined();
+      if (p.group === 'shared') expect([s.collisions, s.density >= 1], p.id).toEqual([false, true]);
+    }
+  });
+
+  it('start with three and with two rival colonies, each on a food of its own (ADR 0064)', () => {
+    const [three, two] = [preset('three-networks'), preset('two-networks')];
+    for (const [p, strains, foods] of [
+      [three, 3, 12],
+      [two, 2, 9],
+    ] as const) {
+      const s = p.settings();
+      expect(s.strains, p.id).toHaveLength(strains);
+      expect([s.layout, s.flowStrength, s.density], p.id).toEqual(['food', 8, 0.01]);
+      // Each strain follows its own trail and flees the trail of every other strain.
+      s.strains.forEach((st, i) => {
+        expect(st.attraction, `${p.id} ${String(i)}`).toEqual(
+          Array.from({ length: MAX_STRAINS }, (_, j) => (j === i ? 1 : -1)),
+        );
+        expect([st.sensorAngle, st.food, st.light], p.id).toEqual([22.5, 1, 1]);
+      });
+      expect(p.env, p.id).toHaveLength(foods);
+      expect(
+        p.env?.every((e) => e.kind === 'food' && e.r === 0.014),
+        p.id,
+      ).toBe(true);
+      expect(p.envHistory, p.id).toBeUndefined();
+    }
+    expect([three.settings().boundary, two.settings().boundary]).toEqual(['dish', 'box']);
+    // Three strains: the first three foods are the starts, a triangle near the middle; nine more lie on a ring.
+    const radius = (three.env ?? []).map((e) => Math.hypot(e.at[0], e.at[1]));
+    for (const r of radius.slice(0, 3)) expect(r).toBeCloseTo(0.13, 3);
+    for (const r of radius.slice(3)) expect(r).toBeCloseTo(0.33, 3);
+    // The lower one is the start of strain A: the y axis points down.
+    expect(three.env?.[0]?.at).toEqual([0, 0.13]);
+    // Two strains: the starts are the foods at the left and at the right, and the others lie between them.
+    expect((two.env ?? []).slice(0, 2).map((e) => e.at)).toEqual([
+      [-0.6, 0],
+      [0.6, 0],
+    ]);
+    for (const e of (two.env ?? []).slice(2)) expect(Math.abs(e.at[0])).toBeLessThan(0.6);
+  });
+
+  it('give Fleeing light, the Maze and the Foraging maze the rules of the organism (ADR 0064)', () => {
+    // Fleeing light: six foods around the lamp, the start on the left one, and the lamp after the foods.
+    const light = preset('light');
+    expect(light.env?.map((e) => e.kind)).toEqual(['food', 'food', 'food', 'food', 'food', 'food', 'light']);
+    expect(light.env?.[0]?.at).toEqual([-0.33, 0]);
+    expect(light.env?.at(-1)).toEqual({ kind: 'light', at: [0, 0], r: 0.16 });
+    // A link made before holds revision 0 of its shapes: the lamp alone.
+    expect(light.envHistory).toEqual([[{ kind: 'light', at: [0, 0], r: 0.16 }]]);
+    expect([light.settings().lightStrength, light.settings().lightGrowth, light.settings().flowStrength]).toEqual([
+      0.2, 1, 2,
+    ]);
+    // The Maze starts full, as the slime mold filled its maze, with Jones' contracting agent.
+    const maze = settingsOf('maze');
+    expect([maze.layout, maze.density, maze.strains[0]?.sensorAngle, maze.flowStrength]).toEqual([
+      'mixed',
+      0.12,
+      45,
+      8,
+    ]);
+    // The Foraging maze starts as a small colony on a food, with Jones' foraging agent.
+    const foraging = settingsOf('foraging-maze');
+    expect([foraging.layout, foraging.density, foraging.strains[0]?.sensorAngle, foraging.flowStrength]).toEqual([
+      'food',
+      0.01,
+      22.5,
+      8,
+    ]);
+    // Both run in the same maze.
+    const walls = (id: string) => preset(id).env?.filter((e) => e.kind === 'wall');
+    expect(walls('foraging-maze')).toEqual(walls('maze'));
+    expect(preset('maze').envHistory).toBeUndefined();
   });
 
   it('Jones scenes run with one agent per cell and a density of at most 1', () => {
@@ -106,24 +235,27 @@ describe('presets', () => {
       expect(s.collisions, p.id).toBe(true);
       expect(s.density, p.id).toBeLessThanOrEqual(1);
     }
-    // Fleeing light, the mazes, Tokyo and the scenes of the flow (ADR 0032) use Jones' agents too; usesRule() marks
-    // every scene made for the rule.
+    // The start scenes, Fleeing light, the mazes, Tokyo and the scenes of the flow (ADR 0032) use Jones' agents too;
+    // usesRule() marks every scene made for the rule: all but the scenes where agents share cells.
     expect(PRESETS.filter(usesRule).map((p) => p.id)).toEqual([
-      ...jones.map((p) => p.id),
+      'three-networks',
+      'two-networks',
       'light',
       'maze',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
-      'coarsening',
-      'electrotaxis',
-      'voronoi',
       'tokyo',
       'tokyo-light',
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      ...jones.map((p) => p.id),
+      'coarsening',
+      'electrotaxis',
+      'voronoi',
     ]);
+    expect(PRESETS.filter((p) => !usesRule(p)).map((p) => p.group)).toEqual(Array<string>(5).fill('shared'));
   });
 
   it('keep the parameters of Jones 2010 (Table 1 p. 134, Fig. 4 p. 135 to Fig. 22 p. 148)', () => {
@@ -292,6 +424,9 @@ describe('presets', () => {
       'snail-maze': [384, 384], // this app's choice: the rings stay round on every screen (ADR 0051)
       'corn-maze': [480, 320], // 12 × 8 rooms of 40 cells (ADR 0051)
       'tokyo-rivals': [512, 512], // the map of the Tokyo scene
+      'three-networks': [384, 384], // this app's choice: the same dish on every screen (ADR 0064)
+      'two-networks': [480, 320], // this app's choice: the same box on every screen (ADR 0064)
+      light: [384, 384], // the dish of Food ring (ADR 0064)
       network: [200, 200], // Fig. 4, p. 135
       hexagons: [200, 200], // Fig. 5, p. 136
       spots: [200, 200], // Fig. 16 top, p. 144
@@ -309,7 +444,7 @@ describe('presets', () => {
     for (const id of Object.keys(lattices)) expect(settingsOf(id).resolution, id).toBe(512);
     // Without glow the holes of the networks stay dark (decided 2026-11-09).
     for (const id of ['network', 'hexagons']) expect(settingsOf(id).bloom, id).toBe(0);
-    for (const id of ['spots', 'stripes', 'shrinking', 'wound', 'light', 'maze']) {
+    for (const id of ['spots', 'stripes', 'shrinking', 'wound', 'light', 'maze', 'three-networks']) {
       expect(settingsOf(id).resolution, id).toBe(512);
       expect(settingsOf(id).bloom, id).toBe(1);
     }
@@ -341,6 +476,35 @@ describe('presets', () => {
     for (const sentence of text.split(/(?<=\.)\s+/))
       expect(sentence.split(/\s+/).length, sentence).toBeLessThanOrEqual(20);
     expect(text).not.toMatch(/—/);
+  });
+
+  // ADR 0064: a scene of this app with a lattice has a grid of its own, and no paper stands behind it. The texts about
+  // the grid name Jones and his figure only for a scene of Jones 2010.
+  it('name the grid of the scene, not a paper, where the lattice is the scene’s own', () => {
+    const nb = (t: string) => t.replaceAll(' ', '\u00a0');
+    expect(['network', 'shrinking'].map((id) => figureLattice(preset(id)))).toEqual([true, true]);
+    for (const id of ['three-networks', 'tokyo', 'corn-maze', 'coarsening', 'electrotaxis'])
+      expect(figureLattice(preset(id)), id).toBe(false);
+    expect(figureLattice(undefined)).toBe(false);
+    expect([latticeOrigin(true), latticeOrigin(false)]).toEqual([', as in the paper', ', the scene’s grid']);
+    const text = latticeNotice([384, 384], { lattice: null, resolution: 512 }, false);
+    expect(text).toContain('This grid has 512 cells on the long side.');
+    expect(text).toContain(`The scene was made for ${nb('384 × 384')} cells.`);
+    expect(text).toContain('Sensor distance and Step size');
+    expect(text).toContain('the pattern keeps its size in cells');
+    const lost = latticeLostNotice([384, 384], { lattice: null, resolution: 256 }, false);
+    expect(lost).toBe(
+      `This device cannot hold the scene’s grid of ${nb('384 × 384')} cells. The scene runs on a grid of 256 cells on the long side, so it can run differently.`,
+    );
+    for (const t of [text, lost]) {
+      expect(t).not.toMatch(/Jones|paper|figure|—/);
+      for (const sentence of t.split(/(?<=\.)\s+/))
+        expect(sentence.split(/\s+/).length, sentence).toBeLessThanOrEqual(22);
+    }
+    // The texts of a figure of Jones 2010 are those of before, also without the third argument.
+    expect(latticeNotice([300, 300], { lattice: null, resolution: 512 }, true)).toBe(
+      latticeNotice([300, 300], { lattice: null, resolution: 512 }),
+    );
   });
 
   // ADR 0027 (owner, 2026-11-12, "Ja, je Paper"): each scene runs the order of a step of its paper.
@@ -434,7 +598,8 @@ describe('presets', () => {
       const sentences = p.about.split(/(?<=[.!?])\s+(?=[A-Z“])/).length;
       expect(sentences, `${p.id}: sentences in about`).toBeGreaterThanOrEqual(2);
       expect(sentences, `${p.id}: sentences in about`).toBeLessThanOrEqual(4);
-      expect(p.watch !== undefined, p.id).toBe(p.group === 'experiments');
+      // What to watch: for the scenes that change over a run, which are all but the patterns and the weaves.
+      expect(p.watch !== undefined, p.id).toBe(['start', 'experiments', 'papers'].includes(p.group));
       for (const t of [...texts(p), ruleOffNotice(p)]) expect(t, p.id).not.toMatch(/—/);
     }
     expect(RULE_MISSING_NOTICE).not.toMatch(/—/);

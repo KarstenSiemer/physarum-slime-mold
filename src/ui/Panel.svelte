@@ -30,7 +30,16 @@
     type Lattice,
     type Strain,
   } from '../model/params';
-  import { GROUPS, latticeLostNotice, latticeNotice, latticeText, PRESETS, presetById } from '../model/presets';
+  import {
+    figureLattice,
+    GROUPS,
+    latticeLostNotice,
+    latticeNotice,
+    latticeOrigin,
+    latticeText,
+    PRESETS,
+    presetById,
+  } from '../model/presets';
   import Matrix from './Matrix.svelte';
   import SceneCard from './SceneCard.svelte';
   import Section from './Section.svelte';
@@ -63,6 +72,8 @@
       ? app.lostLattice
       : undefined,
   );
+  /** The lattice of the scene is that of a figure of Jones 2010: only then the texts about the grid name the paper. */
+  const figure = $derived(figureLattice(presetById(app.scene)));
   let gridSelect = $state<HTMLSelectElement>();
 
   // The button removes itself with the hint: the focus goes to the grid choice it changed, not to the page.
@@ -193,7 +204,7 @@
       >
         {#each lattices as l (latticeValue(l))}
           <option value={latticeValue(l)}
-            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? ', as in the paper' : ''}</option
+            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? latticeOrigin(figure) : ''}</option
           >
         {/each}
         {#each RESOLUTIONS as r (r)}<option value={String(r)}>{r} cells on the long side</option>{/each}
@@ -201,11 +212,11 @@
     </label>
     {#if left}
       <div class="lattice" id="lattice-help">
-        <p class="helptext">{latticeNotice(left, s)}</p>
+        <p class="helptext">{latticeNotice(left, s, figure)}</p>
         <button type="button" class="action" onclick={useLattice}>Use {latticeText(left)}</button>
       </div>
     {:else if lost}
-      <p class="helptext" id="lattice-help">{latticeLostNotice(lost, s)}</p>
+      <p class="helptext" id="lattice-help">{latticeLostNotice(lost, s, figure)}</p>
     {/if}
     <div class="check">
       <label>
