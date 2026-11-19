@@ -70,6 +70,18 @@ describe('the switch of the rule of one agent per cell', () => {
     expect(app.settings.density).toBe(0.15);
   });
 
+  it('forgets the Agents per cell of before when a link opens', async () => {
+    const { app, loadPreset, openLink, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    expect(app.densityBeforeRule).toBe(4);
+    // A link with the rule and Jones' population: the value is the link's own.
+    openLink({ settings: presetById('network')?.settings() ?? defaultSettings() });
+    expect([app.settings.density, app.densityBeforeRule]).toEqual([0.15, undefined]);
+    setRule(false);
+    expect(app.settings.density).toBe(0.15);
+  });
+
   it('puts it back too after the switch to the Jones model turned the rule on', async () => {
     const { app, loadPreset, setModel, setRule } = await fresh();
     loadPreset('dunes');

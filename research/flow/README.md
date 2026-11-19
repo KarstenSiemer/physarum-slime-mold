@@ -2317,9 +2317,31 @@ records are in `logs/view/levels/`:
 | `webgpu.txt`, `webgl2.txt` | the lines of the eleven cases on each backend |
 | `mutations.txt`            | the 17 wrong rules of the command above       |
 
+### 24. Does a scene move after a switch to one agent per cell? [ADR 0063]
+
+With the rule, Agents per cell is the share of the cells that hold an agent. A switch to the rule
+from 1 agent per cell or more gave 1: an agent in every cell, and no agent could move. Now the
+switch gives such a scene Jones' 0.15, and a switch back puts the value of before back. This part
+has no measurement of the engine: the rule is in the settings and in the panel.
+
+**The tests** of the rule in the settings and of the switch in the panel (2 seconds):
+
+```bash
+npx vitest run --project unit src/model/params.test.ts src/ui/state.test.ts
+```
+
+**The wrong rules** of the density at the switch (DR1 to DR11; part 7 has the tool):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts DR1 DR2 DR3 DR4 DR5 DR6 DR7 DR8 DR9 DR10 DR11
+```
+
+Result: each of the 11 wrong rules fails at least one test. ADR 0063 has the numbers of the
+owner's two links. The record is `logs/panel/density-mutations.txt`.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 411 files, 8.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 412 files, 8.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2356,6 +2378,7 @@ asks for the new digest.
 | `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
 | `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, the wrong rules, and the e2e times                                                                                                                                  |
 | `logs/view/levels/`                                  | the runs of part 23 (ADR 0062): the black level in eleven cases on each backend, and the wrong rules                                                                                                                            |
+| `logs/panel/`                                        | the wrong rules of part 24 (ADR 0063): the density at a switch to one agent per cell                                                                                                                                            |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

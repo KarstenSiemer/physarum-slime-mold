@@ -61,8 +61,9 @@ so. After 400 steps both strains hold a network of tubes, and 40 % of the agents
 gives 2 agents per cell again.
 
 Tests: `src/model/params.test.ts` (`withRule()`, `toJones()`) and `src/ui/state.test.ts` (the switch of the rule: on,
-off again, a share below 1, a value of the user, a new scene, the switch to the Jones model, and the notices). The
-wrong rules `DR1` to `DR7` of `research/flow/engine/mutate.ts` each fail one of them.
+off again, a share below 1, a value of the user, a new scene, a link, the switch to the Jones model, and the notices).
+The wrong rules `DR1` to `DR11` of `research/flow/engine/mutate.ts` each fail at least one of them.
+[`research/flow/README.md`](../../research/flow/README.md), part 24, has the commands and the record.
 
 ## Consequences
 
