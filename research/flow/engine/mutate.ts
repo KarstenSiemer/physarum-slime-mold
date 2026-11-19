@@ -5511,8 +5511,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'FP9 front: an agent of the front need not lie at the rim',
     STAGE4_SIM,
-    '      if (front.rim && !this.atRim(c)) continue;\n      atFront++;',
-    '      atFront++;',
+    '      if (front.rim && !this.atRim(c)) continue;\n      atFront++;\n      if (!this.roomFor(c, this.occNext)) continue;\n      able.push(i);',
+    '      atFront++;\n      if (!this.roomFor(c, this.occNext)) continue;\n      able.push(i);',
     'claim one with its chance',
     STAGE4_SPEC,
   ],
