@@ -141,8 +141,9 @@ export interface Front {
    */
   sums: 'float' | 'fixed';
   /**
-   * The territory of the start (ADR 0067). 'disc': the disc of the start and a rim of 3 cells. 'agents', the form of a
-   * GPU: every open cell within START_REACH cells of a start agent (the square of 7 × 7 around it).
+   * The territory of the start (ADR 0067). 'disc': the disc of the start and a rim of 3 cells. 'agents', a try for a
+   * GPU: every open cell within START_REACH cells of a start agent (the square of 7 × 7 around it). It keeps every start
+   * agent 4 cells from the edge of the territory, so no agent is a sink until one walks out.
    */
   start: 'disc' | 'agents';
 }
@@ -216,8 +217,12 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   start: ['disc', 'agents'],
 };
 
-/** The forms of a GPU for the rules of stage 4 (ADR 0067): the key=value words that turn all of them on. */
-export const GPU_FORMS = { paidBy: 'chance', fresh: 'box', sums: 'fixed', start: 'agents' } as const;
+/**
+ * The forms of a GPU for the rules of stage 4 (ADR 0067): the key=value words that turn all of them on. The start
+ * stays the disc: a square around each start agent (`start` 'agents') keeps every agent away from the edge of the
+ * territory, where the sinks lie.
+ */
+export const GPU_FORMS = { paidBy: 'chance', fresh: 'box', sums: 'fixed' } as const;
 
 /**
  * The rules of stage 4 from the key=value words of a command line: a flag is 1 or 0. `own` names the other keys of
@@ -503,7 +508,7 @@ export class Sim {
     this.aliveCount = placed;
     const { h } = this.layout;
     if (this.p.front.start === 'agents') {
-      // The form of a GPU: every open cell within START_REACH cells of a start agent (ADR 0067).
+      // A try for a GPU: every open cell within START_REACH cells of a start agent (ADR 0067).
       for (let i = 0; i < placed; i++) {
         const c = this.cellOf(this.ax[i]!, this.ay[i]!);
         const [x, y] = [c % w, Math.floor(c / w)];

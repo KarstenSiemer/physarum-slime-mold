@@ -262,8 +262,8 @@ describe('the CPU prototype of stage 4', () => {
     expect(seen).toBeGreaterThan(5);
   });
 
-  it('starts the territory on every open cell within 3 cells of a start agent (ADR 0067)', () => {
-    const sim = smallDish(gpuRules(), 6);
+  it('starts the territory on every open cell within 3 cells of a start agent with start=agents (ADR 0067)', () => {
+    const sim = smallDish(gpuRules({ start: 'agents' }), 6);
     const { w } = sim;
     const agents: [number, number][] = [];
     for (let i = 0; i < sim.cap; i++) if (sim.alive[i]) agents.push([Math.floor(sim.ax[i]!), Math.floor(sim.ay[i]!)]);
