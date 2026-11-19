@@ -110,12 +110,13 @@ describe('the CPU prototype of stage 4', () => {
     expect(run('box')).toBe(run('chamfer'));
   });
 
-  it('marks a cell whose agent can claim a child with the chance min(1, B · r / R) (ADR 0067)', () => {
-    const sim = smallDish(gpuRules());
+  it('marks in the second form a payable cell with the chance min(1, B · r / P) (ADR 0067)', () => {
+    const sim = smallDish(gpuRules({ paidBy: 'ahead' }));
     const open = Array.from(sim.layout.open.keys()).filter((c) => sim.layout.open[c]);
     const [low, high] = [open.slice(0, 600), open.slice(600, 1200)];
     for (const c of low) sim.sinkRate[c] = 0.5;
     for (const c of high) sim.sinkRate[c] = 1;
+    for (const c of open.slice(1200)) sim.sinkRate[c] = 1;
     sim.payable.length = 0;
     sim.payable.push(...low, ...high);
     sim.sinkPayable = 900;
@@ -141,8 +142,57 @@ describe('the CPU prototype of stage 4', () => {
     expect(share(-3, high, 2)).toBe(0);
   });
 
-  it('marks only the cells whose agent at the rim has a free cell of the territory beside it (ADR 0067)', () => {
-    const sim = smallDish(gpuRules(), 2);
+  it('lets each agent of the front that can claim a child claim one with the chance min(1, B · r / P) (ADR 0067)', () => {
+    const sim = smallDish(gpuRules(), 7);
+    const { w, h } = sim;
+    const { open } = sim.layout;
+    // Before the paid births of a growth step: the agents of the front after the moves, at the rim and no parent of
+    // Jones' rule in this step, and those of them with a free cell of the territory beside them.
+    let [P, front, chances] = [NaN, 0, 0];
+    sim.onPaid = () => {
+      const able: number[] = [];
+      front = 0;
+      for (let i = 0; i < sim.cap; i++) {
+        if (!sim.alive[i] || sim.want[i]! >= 0) continue;
+        const c = sim.cellOf(sim.ax[i]!, sim.ay[i]!);
+        if (sim.sinkRate[c]! <= 0 || sim.D[c]! < FLOW.half) continue;
+        const [x, y] = [c % w, Math.floor(c / w)];
+        let [rim, room] = [false, false];
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const [xx, yy] = [x + dx, y + dy];
+            if ((!dx && !dy) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            const t = yy * w + xx;
+            if (!open[t] || sim.occNext[t]) continue;
+            if (sim.B[t]! < FLOW.bodyLow) rim = true;
+            if (sim.D[t]! >= FLOW.half && sim.territory[t]) room = true;
+          }
+        if (!rim) continue;
+        front++;
+        if (room) able.push(sim.sinkRate[c]!);
+      }
+      P = able.reduce((s, r) => s + Math.round(r * 2 ** 16), 0) / 2 ** 16;
+      chances = P > 0 && sim.budget > 0 ? able.reduce((s, r) => s + Math.min(1, (sim.budget * r) / P), 0) : 0;
+    };
+    let [steps, claims, expected] = [0, 0, 0];
+    for (let j = 0; j < 180; j++) {
+      P = NaN;
+      sim.advance();
+      if (Number.isNaN(P)) continue;
+      expect(sim.sinkPayable).toBe(P);
+      expect(sim.frontAgents).toBe(front);
+      claims += sim.paidClaims;
+      expected += chances;
+      if (P > 0) steps++;
+    }
+    // The claims follow the chances: within three times the spread of a sum of draws.
+    expect(steps).toBeGreaterThan(20);
+    expect(expected).toBeGreaterThan(20);
+    expect(Math.abs(claims - expected)).toBeLessThan(3 * Math.sqrt(expected) + 1);
+  });
+
+  it('marks in the second form only the cells whose agent could claim a child before the moves (ADR 0067)', () => {
+    const sim = smallDish(gpuRules({ paidBy: 'ahead' }), 2);
     const { w, h } = sim;
     const { open } = sim.layout;
     let checked = 0;
@@ -173,20 +223,20 @@ describe('the CPU prototype of stage 4', () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  it('takes the paid claims off the budget, which never exceeds the sinks, and pays the flux in births (ADR 0067)', () => {
+  it('takes the paid claims off the budget, which never exceeds the front, and pays the flux in births (ADR 0067)', () => {
     const sim = smallDish(gpuRules(), 4);
     const inflow = (2 * 8) / 20;
     let [claims, paid] = [0, 0];
     for (let j = 0; j < 180; j++) {
-      // Once, a budget far above the number of sinks before a growth step: that step must cut it.
+      // Once, a budget far above the number of agents of the front before a growth step: that step must cut it.
       if (j === 150) sim.budget = 1000;
       const start = sim.budget;
       const growth = sim.step % 3 === 0;
       sim.advance();
       const gain = sim.frontTotal > 0 ? inflow : 0;
-      const after = growth ? Math.min(start - sim.paidClaims, sim.demand) + gain : start + gain;
+      const after = growth ? Math.min(start - sim.paidClaims, sim.frontAgents) + gain : start + gain;
       expect(sim.budget).toBeCloseTo(after, 9);
-      if (j === 150) expect(sim.budget).toBeLessThan(sim.demand + 1);
+      if (j === 150) expect(sim.budget).toBeLessThan(sim.frontAgents + 1);
       if (j >= 150) continue;
       if (growth) claims += sim.paidClaims;
       paid += gain;
@@ -198,7 +248,7 @@ describe('the CPU prototype of stage 4', () => {
   });
 
   it('sums the sink rates in steps of 2^-16 as integers (ADR 0067)', () => {
-    const sim = smallDish(gpuRules(), 5);
+    const sim = smallDish(gpuRules({ paidBy: 'ahead' }), 5);
     let seen = 0;
     for (let j = 0; j < 60; j++) {
       sim.advance();
