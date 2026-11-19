@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
 import { Sim, noFront, params } from './sim';
-import { runY } from './ymaze';
+import { runY, slimedOf } from './ymaze';
 
 describe('the CPU prototype of stage 4', () => {
   it('runs the Y-maze as the app does: the first food after about 65 steps (ADR 0056)', () => {
@@ -21,6 +21,16 @@ describe('the CPU prototype of stage 4', () => {
     for (let k = 0; k < 600; k++) sim.advance();
     for (let c = 0; c < sim.cells; c++) if (sim.occ[c]) expect(sim.territory[c]).toBe(1);
     expect(sim.territory.reduce((a, b) => a + b, 0)).toBeGreaterThan(start);
+  });
+
+  it('lays slime on every open cell in the case all, and only on the arms in the case both (ADR 0056, target 3)', () => {
+    const all = yMazeLayout(slimedOf('all', 1), 19, true).layout;
+    const both = yMazeLayout(slimedOf('both', 1)).layout;
+    expect(slimedOf('all', 1)).toEqual(['left', 'right']);
+    expect(Array.from(all.slime ?? []).every((s, c) => s === all.open[c])).toBe(true);
+    const sum = (v?: Uint8Array) => (v ?? new Uint8Array()).reduce((a, b) => a + b, 0);
+    expect(sum(both.slime)).toBeGreaterThan(0);
+    expect(sum(both.slime)).toBeLessThan(sum(all.slime));
   });
 
   it('measures rows, veins, their direction, their delay and Murray exponents without failing', () => {

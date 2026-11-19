@@ -2,6 +2,8 @@
 
 This folder belongs to [ADR 0065](../../docs/adr/0065-the-growth-front-takes-the-flow-a-prototype.md). The first part
 tells in plain words what the prototype found. The rest lists the commands.
+[how-the-crown-forms.md](how-the-crown-forms.md) tells how the agents and the new rules make a crown, and which
+behaviour of the organism each rule copies.
 
 ## The story in one page
 
@@ -79,7 +81,7 @@ From the root of the repository. Pictures and records go to `research/front/out/
 
 - The Y-maze, one case and a range of seeds: `node --import ./research/flow/register.mjs research/front/ymaze.ts
 case=one seeds=1-40 speed=0.004 speedOn=push paid=20 norm=2 reach=6 rim=1 colony=1 solver=app drift=5
-slimeWeight=0 name=y3/w0-one` (cases `one`, `both`, `none`; about 2 min per run).
+slimeWeight=0 name=y3/w0-one` (cases `one`, `both`, `none` and `all`, slime on every open cell; 10 to 25 s per run).
 - The table: `node --import ./research/flow/register.mjs research/front/tables.ts research/front/out/y3`.
 - Pictures and measures of a dish or a lane: `research/front/shots.ts scene=dish side=200 pics=3000,5000 ...` with
   the same rules; `research/front/ypics.ts slimed=left pics=1500,3300 ...` for the Y-maze.

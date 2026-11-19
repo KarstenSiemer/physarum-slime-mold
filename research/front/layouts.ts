@@ -50,8 +50,11 @@ export function box(w: number, h: number, foods: readonly (readonly [number, num
   return withFoods(w, h, open, new Uint8Array(w * h), foods, first ? [first[0], first[1]] : [w / 2, h / 2]);
 }
 
-/** The Y-maze of ADR 0056 with slime on the own parts of the arms `slimed`: the left food is site 0. */
-export function yMazeLayout(slimed: readonly Side[], width = 19) {
+/**
+ * The Y-maze of ADR 0056 with slime on the own parts of the arms `slimed`, or on every open cell when `everywhere` is
+ * true (ADR 0056, target 3: slime everywhere). The left food is site 0.
+ */
+export function yMazeLayout(slimed: readonly Side[], width = 19, everywhere = false) {
   const m = yMaze(width);
   const { w, h, open } = m;
   const wall = open.map((o) => 1 - o);
@@ -71,7 +74,7 @@ export function yMazeLayout(slimed: readonly Side[], width = 19) {
     for (const c of cells) food[c] = 1;
     return Int32Array.from(cells);
   });
-  const slime = new Uint8Array(w * h);
+  const slime = everywhere ? open.slice() : new Uint8Array(w * h);
   for (const side of slimed) for (const c of m.arm[side]) slime[c] = 1;
   const layout: Layout = { w, h, open, wall, food, sites, start: m.start, slime };
   return { layout, maze: m };

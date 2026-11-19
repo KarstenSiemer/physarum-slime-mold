@@ -1,6 +1,7 @@
 // The Y-maze of Reid et al. 2012 on the CPU (ADR 0056): which arm does the colony choose? Prototype code.
 // Usage: node --import ./research/flow/register.mjs research/front/ymaze.ts case=one seeds=1-40 [key=value ...]
-// `case`: one (slime on the left arm for an odd seed, on the right one for an even seed), both or none. The other
+// `case`: one (slime on the left arm for an odd seed, on the right one for an even seed), both, none, or all (slime
+// on every open cell, as on agar with slime everywhere: ADR 0056, target 3). The other
 // keys set the rules of stage 4 (`front` of sim.ts) and `limit`, the most steps after the start of the colony.
 import { mkdirSync, appendFileSync } from 'node:fs';
 import type { Side } from '../flow/engine/y-maze';
@@ -22,10 +23,18 @@ export interface YRun {
 
 /** The slime of a case for a seed: one arm alternates by seed, as y-maze.gpu.test.ts does it. */
 export const slimedOf = (kind: string, seed: number): Side[] =>
-  kind === 'one' ? [seed % 2 === 1 ? 'left' : 'right'] : kind === 'both' ? ['left', 'right'] : [];
+  kind === 'one' ? [seed % 2 === 1 ? 'left' : 'right'] : kind === 'both' || kind === 'all' ? ['left', 'right'] : [];
 
-export function runY(seed: number, slimed: Side[], front: Front, limit = 10000, after = 2000, age = 18000): YRun {
-  const { layout } = yMazeLayout(slimed);
+export function runY(
+  seed: number,
+  slimed: Side[],
+  front: Front,
+  limit = 10000,
+  after = 2000,
+  age = 18000,
+  everywhere = false,
+): YRun {
+  const { layout } = yMazeLayout(slimed, 19, everywhere);
   const t0 = performance.now();
   const sim = new Sim(layout, params({ seed, startStep: age, front }));
   const touched = { left: -1, right: -1 };
@@ -65,8 +74,8 @@ if (isMain) {
   mkdirSync('research/front/out', { recursive: true });
   const file = `research/front/out/${name}.jsonl`;
   for (let seed = from; seed <= to; seed++) {
-    const run = runY(seed, slimedOf(kind, seed), front, limit);
-    appendFileSync(file, JSON.stringify({ ...run, front }) + '\n');
+    const run = runY(seed, slimedOf(kind, seed), front, limit, 2000, 18000, kind === 'all');
+    appendFileSync(file, JSON.stringify({ ...run, case: kind, limit, front }) + '\n');
     console.log(
       `seed ${String(seed)} slime ${run.slimed.join('+') || '-'}: ${run.chosen} first ${String(run.first)} other +${String(run.other)} agents ${String(run.agents)} (${String(run.ms)} ms)`,
     );

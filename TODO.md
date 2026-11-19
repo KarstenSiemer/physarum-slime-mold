@@ -266,13 +266,17 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   needs its own speed: a territory that the agents at the rim push open. Then a tube grows a crown with veins along
   the flow, a cell becomes a vein 400 to 1,900 steps after the front, and the front runs 1.5 to 3 cm/h.
 - **The Y-maze**: 40 : 0 for the blank arm, no preference with slime on both arms or none, the first food after about
-  3,400 steps. With the owner's rule a colony on slime everywhere is 1.87 times slower.
+  3,400 steps. With the owner's rule a colony on slime on both arms is 1.87 times slower.
+- **The owner decided on 2026-11-19** (ADR 0065, decisions 5 and 6): slime is a weak sink of weight 0.025 (1.27 times
+  slower on both arms), and the panel offers every form of the drift (a tree of tubes, a tube with a crown, a fan)
+  as a setting. `research/front/how-the-crown-forms.md` tells how the agents and the new rules make a crown.
 - Not measured: Murray's exponent; the scenes of the app with these rules (they need the engine).
+- **Next: the engine of stage 4** (ADR 0065, decision 1): both backends, a CPU reference, wrong rules, `docs/model.md`,
+  the drift as a setting of the panel, the digests of every scene and the measures of the 11 scenes with growth and
+  the flow. Then the picture: the skirt goes, or it is drawn from the plasm of the crown.
 
 Open, for the owner:
 
-- **Stage 4, two points of ADR 0065**: the look (the weight of the drift: a tree of tubes, a tube with a crown, or a
-  fan), and whether slime is a weak sink (weight 0.025) so that a colony on slime everywhere is not 1.87 times slower.
 - The 6 days and the flow strength of 2.8 are choices of the coordinator (ADR 0054, open points). The time is the default of the setting Slime life time since ADR 0055, and the strength is one constant.
 - The strength of the film of the slime: the owner chose the look "wet film" on pictures on 2026-11-17 (ADR 0057). Its colours, its body and its light per style are the numbers of `SLIME_LOOK` in `src/engine/render.ts`, and the 4,095 steps in which a tube builds full slime are `SLIME_FULL` in `src/engine/slime.ts`: say so if one of them should be another.
 - A rule for the moves on slime (ADR 0056, decision 5): it gives the choice of the Y-maze, and a colony that is 3.1 to 3.6 times slower on slime. It is not built. If the owner wants it before stage 4, it is a setting that is off in every scene.
