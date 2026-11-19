@@ -102,8 +102,9 @@ arm with slime is (27, 26, 21) in RGB, that of the blank arm (23, 21, 16), and t
    the runs do not stamp, so the slime of ADR 0056 keeps its cells. It gives 1,126 of the 1,228 cells of the arm the
    full amount. Only the picture reads the amount. The research code keeps the runs alone (`shapes()`); the film is
    `film()` of the layout.
-7. **The panel keeps the name of the layout**, "On food, one colony each": a start spot replaces a food only in a scene
-   that has one, and the card of the scene says where its colony starts.
+7. **The panel names the layout "On food or start, one colony each"** (the coordinator, on review). It was "On food, one
+   colony each", and in the two scenes of this record no colony starts on food: a label of the panel must say what the
+   layout does in every scene.
 8. **No link to a figure.** The knowledge base names Fig. 2 for the Y-maze, but the agent could not open the paper to
    see what the figure shows (ADR 0037 links a figure that shows the result of the scene). The tab About of Learn
    cites the paper with its DOI, and the chip of the source opens the tab Physarum.

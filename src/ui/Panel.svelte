@@ -97,7 +97,7 @@
     ring: 'Ring',
     center: 'Center spot',
     empty: 'Empty (inoculate)',
-    food: 'On food, one colony each',
+    food: 'On food or start, one colony each',
     line: 'Vertical line',
   };
   const BOUNDARY_LABEL: Record<(typeof BOUNDARIES)[number], string> = {
