@@ -18,6 +18,35 @@ export function binomial(k: number, n: number): number {
   return Math.min(1, sum);
 }
 
+/**
+ * A two-sided Mann-Whitney test of two samples, with mid ranks and the normal approximation: the chance of a gap of
+ * the ranks at least this large when both samples come from one distribution.
+ */
+export function mannWhitney(a: readonly number[], b: readonly number[]): number {
+  const all = [...a.map((v) => [v, 0] as const), ...b.map((v) => [v, 1] as const)].sort((x, y) => x[0] - y[0]);
+  const rank = new Array<number>(all.length);
+  for (let i = 0; i < all.length;) {
+    let j = i;
+    while (j + 1 < all.length && all[j + 1]![0] === all[i]![0]) j++;
+    for (let k = i; k <= j; k++) rank[k] = (i + j) / 2 + 1;
+    i = j + 1;
+  }
+  let ra = 0;
+  all.forEach(([, g], k) => {
+    if (g === 0) ra += rank[k]!;
+  });
+  const [n, m] = [a.length, b.length];
+  const u = ra - (n * (n + 1)) / 2;
+  const z = Math.abs(u - (n * m) / 2) / Math.sqrt((n * m * (n + m + 1)) / 12);
+  // The two tails of the normal distribution (Abramowitz and Stegun 7.1.26).
+  const t = 1 / (1 + 0.3275911 * (z / Math.SQRT2));
+  const erfc =
+    t *
+    (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) *
+    Math.exp(-(z * z) / 2);
+  return Math.min(1, erfc);
+}
+
 const median = (v: number[]) => {
   const s = [...v].sort((a, b) => a - b);
   return s.length === 0 ? NaN : s.length % 2 ? s[s.length >> 1]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2;
@@ -59,16 +88,28 @@ export function yRow(name: string, runs: YRun[]): YRow {
 const isMain = process.argv[1]?.endsWith('tables.ts');
 if (isMain) {
   const dir = process.argv[2] ?? 'research/front/out/y3';
-  for (const file of readdirSync(dir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .sort()) {
-    const runs = readFileSync(join(dir, file), 'utf8')
+  const read = (file: string) =>
+    readFileSync(join(dir, file), 'utf8')
       .split('\n')
       .filter(Boolean)
       .map((l) => JSON.parse(l) as YRun);
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .sort();
+  const firsts = (runs: YRun[]) => runs.map((r) => r.first).filter(Number.isFinite);
+  for (const file of files) {
+    const runs = read(file);
     const r = yRow(file.replace('.jsonl', ''), runs);
+    // A case with slime against the case without slime of the same name: the ratio of the medians and its test.
+    const none = file.replace(/-(both|all)\.jsonl$/, '-none.jsonl');
+    let against = '';
+    if (none !== file && files.includes(none)) {
+      const base = firsts(read(none));
+      const ratio = r.first / median(base);
+      against = `  ${ratio.toFixed(2)} times none, p ${mannWhitney(firsts(runs), base).toPrecision(2)}`;
+    }
     console.log(
-      `${r.name.padEnd(16)} ${String(r.runs).padStart(3)} runs  ${String(r.a)} : ${String(r.b)}${r.splits ? ` (+${String(r.splits)} split)` : ''}  p ${r.p.toPrecision(2)}  first ${String(r.first)}  other +${String(r.other)}`,
+      `${r.name.padEnd(16)} ${String(r.runs).padStart(3)} runs  ${String(r.a)} : ${String(r.b)}${r.splits ? ` (+${String(r.splits)} split)` : ''}  p ${r.p.toPrecision(2)}  first ${String(r.first)}  other +${String(r.other)}${against}`,
     );
   }
 }

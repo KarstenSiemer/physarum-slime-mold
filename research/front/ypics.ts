@@ -4,16 +4,10 @@ import { mkdirSync } from 'node:fs';
 import type { Side } from '../flow/engine/y-maze';
 import { yMazeLayout } from './layouts';
 import { picture } from './picture';
-import { Sim, noFront, params, type Front } from './sim';
+import { Sim, frontFrom, params } from './sim';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
-const front: Front = { ...noFront() };
-for (const key of Object.keys(front) as (keyof Front)[])
-  if (key in args)
-    (front as unknown as Record<string, unknown>)[key] = ['holdOn', 'holdBirthsOn', 'solver', 'speedOn'].includes(key)
-      ? args[key]
-      : Number(args[key]);
-for (const key of ['sink', 'colony', 'holdBirths', 'rim'] as const) if (key in args) front[key] = args[key] === '1';
+const front = frontFrom(args, ['slimed', 'seed', 'pics', 'name']);
 const slimed = (args.slimed ?? '').split(',').filter(Boolean) as Side[];
 const { layout } = yMazeLayout(slimed);
 const sim = new Sim(layout, params({ seed: Number(args.seed ?? 1), startStep: 18000, front }));

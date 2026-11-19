@@ -6,7 +6,7 @@
 import { mkdirSync, appendFileSync } from 'node:fs';
 import type { Side } from '../flow/engine/y-maze';
 import { yMazeLayout } from './layouts';
-import { Sim, noFront, params, type Front } from './sim';
+import { Sim, frontFrom, params, type Front } from './sim';
 
 export interface YRun {
   seed: number;
@@ -62,13 +62,7 @@ if (isMain) {
   const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
   const [from = 1, to = from] = (args.seeds ?? '1-4').split('-').map(Number);
   const kind = args.case ?? 'one';
-  const front: Front = { ...noFront() };
-  for (const key of Object.keys(front) as (keyof Front)[])
-    if (key in args)
-      (front as unknown as Record<string, unknown>)[key] = ['holdOn', 'holdBirthsOn', 'solver', 'speedOn'].includes(key)
-        ? args[key]
-        : Number(args[key]);
-  for (const key of ['sink', 'colony', 'holdBirths', 'rim'] as const) if (key in args) front[key] = args[key] === '1';
+  const front = frontFrom(args, ['case', 'seeds', 'limit', 'name']);
   const limit = Number(args.limit ?? 10000);
   const name = args.name ?? `y-${kind}`;
   mkdirSync('research/front/out', { recursive: true });

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
-import { Sim, noFront, params } from './sim';
+import { Sim, frontFrom, noFront, params } from './sim';
 import { runY, slimedOf } from './ymaze';
 
 describe('the CPU prototype of stage 4', () => {
@@ -31,6 +31,14 @@ describe('the CPU prototype of stage 4', () => {
     const sum = (v?: Uint8Array) => (v ?? new Uint8Array()).reduce((a, b) => a + b, 0);
     expect(sum(both.slime)).toBeGreaterThan(0);
     expect(sum(both.slime)).toBeLessThan(sum(all.slime));
+  });
+
+  it('reads the rules from a command line and stops on a word that it does not know', () => {
+    const front = frontFrom({ speed: '0.004', speedOn: 'push', rim: '1', case: 'one' }, ['case']);
+    expect(front).toMatchObject({ speed: 0.004, speedOn: 'push', rim: true, paidOn: 'fresh' });
+    expect(() => frontFrom({ speed: '0.004 speedOn=push' })).toThrow(/no number/);
+    expect(() => frontFrom({ sped: '1' })).toThrow(/unknown key/);
+    expect(() => frontFrom({ paidOn: 'slime' })).toThrow(/takes/);
   });
 
   it('measures rows, veins, their direction, their delay and Murray exponents without failing', () => {

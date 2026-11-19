@@ -40,13 +40,15 @@ had no veins (`docs/fidelity.md`, row 24; ADR 0060).
 4. **The front gets its own speed.** The colony lives on a territory: an agent steps and a child is born only onto
    it. Each agent beside open ground outside the territory pushes that ground in, with the chance 0.004 per step. So
    the rim moves the faster, the more agents lie at it. **The organism:** the front moves the faster, the thicker the
-   plasm at it (Kuroda et al. 2015: 0.17 · h^0.94 mm per min at a largest thickness of h mm). Without the territory, agents
-   walk ahead of the colony, and the front of the app runs about ten times too fast (`docs/fidelity.md`, row 6).
-5. **The flux pays for new plasm.** Every 20 of flux that the front takes is one child at an agent of the fresh rim.
-   A rim on slime takes flux, but that flux pays no child: only a birth onto fresh ground counts (the owner,
-   2026-11-16). **The organism:** the flow brings mass to the front, and the front grows with it. The model of de
-   Almeida 2021 has the same idea: a node at the rim stores the flux it takes and spends it on new veins beyond the
-   rim.
+   plasm at it (Kuroda et al. 2015: 0.17 · h^0.94 mm per min at a largest thickness of h mm). Without the territory,
+   agents walk ahead of the colony, and the front of the app runs about ten times too fast (`docs/fidelity.md`, row
+   6).
+5. **The flux pays for new plasm.** Every 20 of flux that the front takes is one child at an agent of the front.
+   Today the child comes only at the fresh rim: a rim on slime takes flux, but that flux pays no child, because only
+   a birth onto fresh ground counts (the owner, 2026-11-16). A variant gives the children to every sink in the share
+   of its flux, also on slime; the owner decides (ADR 0065, decision 7). **The organism:** the flow brings mass to
+   the front, and the front grows with it. The model of de Almeida 2021 has the same idea: a node at the rim stores
+   the flux it takes and spends it on new veins beyond the rim.
 6. **The rule of the tubes stays as it is.** The flow adapts while the front takes flux, also without two covered
    foods. **The organism:** in the sheet at the front, the veins along the direction of the flow get stronger and
    the others disappear (Le Verge-Serandour and Alim 2023, Sec. 4.1).
@@ -67,8 +69,8 @@ had no veins (`docs/fidelity.md`, row 24; ADR 0060).
 
 **The choice of the Y-maze.** The rim in the blank arm lies on fresh ground and takes flux with the weight 1. The rim
 in the arm with slime takes it with the weight 0.025. So the flux and the stream of agents go into the blank arm,
-and its front moves faster. The colony reaches the food of the blank arm first in 40 of 40 runs; the organism did it
-in 39 of 40 (Reid et al. 2012).
+and its front moves faster. With the drift 5 the colony reaches the food of the blank arm first in 40 of 40 runs; the
+organism did it in 39 of 40 (Reid et al. 2012).
 
 ## The three forms
 
@@ -79,6 +81,18 @@ The weight of the drift sets how strongly the flow pulls the agents, against the
 - **1.25 to 1.5, a tube with a crown**: the stream fills the head, and the trail still holds the tube.
 - **5, a fan that migrates**: the stream is stronger than the trail. The agents leave the back, and the whole colony
   moves as a fan.
+
+What each form keeps of the Y-maze (40 runs per case; the tables are in [README.md](README.md), step 6):
+
+| Births that the flux pays        | Drift 0: a tree | Drift 1.5: a crown | Drift 5: a fan | The organism     |
+| -------------------------------- | --------------- | ------------------ | -------------- | ---------------- |
+| Only at the fresh rim: blank arm | 39 of 40        | 40 of 40           | 40 of 40       | 39 of 40         |
+| Only at the fresh rim: slime all | 2.23 times      | 1.48 times         | 1.32 times     | as fast as blank |
+| At every sink: blank arm         | 33 of 40        | 40 of 40           | 40 of 40       | 39 of 40         |
+| At every sink: slime all         | 1.00 times      | 0.95 times         | 0.96 times     | as fast as blank |
+
+"Slime all" is the time to the first food with slime on every open cell, against no slime. Every form shows no
+preference with slime on both arms and without slime.
 
 The organism takes such forms in different conditions. On a rich medium it grows a mesh with a sheet at the front,
 and under starvation or with repellents it grows trees of branches (Takamatsu et al. 2009). On ground that is poor in
@@ -93,8 +107,9 @@ every form (ADR 0065, decision 6).
 - The front is the rim within 6 cells of ground without slime. The organism senses slime at contact or up to 1 mm,
   about 2 cells (`docs/knowledge-base/slime-mazes-and-the-front.md`, "For the model"). The model needs the 6 cells
   because the trail of the agents spreads a few cells ahead of them, and the slime of the model follows the trail.
-- The organism avoids slime as a choice at contact (Reid et al. 2012). The model gives a rim on slime a weak pull. On
-  slime on both arms the colony is 1.27 times slower than without slime; the organism is as fast.
+- The organism avoids slime as a choice at contact (Reid et al. 2012). The model gives a rim on slime a weak pull.
+  With the births only at the fresh rim, a colony on slime everywhere is 1.32 to 2.23 times slower than without
+  slime; the organism is as fast. The births at every sink close this gap (ADR 0065, decision 7).
 - The flow of the model is steady. The organism pumps its plasm to and fro with a period of about 2 min
   (`docs/fidelity.md`, row 17).
 - The grid shows: in an open dish the front is an octagon, and the veins prefer the axes of the grid.

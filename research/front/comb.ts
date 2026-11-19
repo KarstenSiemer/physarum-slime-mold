@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { box, dish } from './layouts';
 import { picture } from './picture';
-import { Sim, noFront, params, type Front } from './sim';
+import { Sim, frontFrom, params } from './sim';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
 const num = (k: string, d: number) => (k in args ? Number(args[k]) : d);
@@ -15,13 +15,7 @@ const side = num('side', 160);
 const long = num('long', 260);
 const steps = num('steps', 6000);
 const pics = (args.pics ?? '').split(',').filter(Boolean).map(Number);
-const front: Front = { ...noFront() };
-for (const key of Object.keys(front) as (keyof Front)[])
-  if (key in args)
-    (front as unknown as Record<string, unknown>)[key] = ['holdOn', 'holdBirthsOn', 'solver', 'speedOn'].includes(key)
-      ? args[key]
-      : Number(args[key]);
-for (const key of ['sink', 'colony', 'holdBirths', 'rim'] as const) if (key in args) front[key] = args[key] === '1';
+const front = frontFrom(args, ['scene', 'side', 'long', 'steps', 'pics', 'name', 'flow', 'seed', 'food', 'covered']);
 const name = args.name ?? scene;
 const out = `research/front/out/${name}`;
 mkdirSync(out, { recursive: true });

@@ -4,17 +4,11 @@ import { mkdirSync } from 'node:fs';
 import { box, dish } from './layouts';
 import { alignment, crown, head, murray, veinDelay } from './measure';
 import { look, picture } from './picture';
-import { Sim, noFront, params, type Front } from './sim';
+import { Sim, frontFrom, params } from './sim';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
 const num = (k: string, d: number) => (k in args ? Number(args[k]) : d);
-const front: Front = { ...noFront() };
-for (const key of Object.keys(front) as (keyof Front)[])
-  if (key in args)
-    (front as unknown as Record<string, unknown>)[key] = ['holdOn', 'holdBirthsOn', 'solver', 'speedOn'].includes(key)
-      ? args[key]
-      : Number(args[key]);
-for (const key of ['sink', 'colony', 'holdBirths', 'rim'] as const) if (key in args) front[key] = args[key] === '1';
+const front = frontFrom(args, ['scene', 'side', 'long', 'size', 'zoom', 'pics', 'name', 'flow', 'seed']);
 const scene = args.scene ?? 'lane';
 const side = num('side', 80);
 const long = num('long', 300);

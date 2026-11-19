@@ -1,15 +1,9 @@
 // The two arms of one Y-maze run side by side over time: how far the plasm and the territory reach along each arm,
 // and how many agents each arm holds. Prototype code.
 import { yMazeLayout } from './layouts';
-import { Sim, noFront, params, type Front } from './sim';
+import { Sim, frontFrom, params } from './sim';
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
-const front: Front = { ...noFront() };
-for (const key of Object.keys(front) as (keyof Front)[])
-  if (key in args)
-    (front as unknown as Record<string, unknown>)[key] = ['holdOn', 'holdBirthsOn', 'solver', 'speedOn'].includes(key)
-      ? args[key]
-      : Number(args[key]);
-for (const key of ['sink', 'colony', 'holdBirths', 'rim'] as const) if (key in args) front[key] = args[key] === '1';
+const front = frontFrom(args, ['seed']);
 const { layout, maze } = yMazeLayout(['left']);
 const sim = new Sim(layout, params({ seed: Number(args.seed ?? 1), startStep: 18000, front }));
 for (let k = 1; k <= 3400; k++) {

@@ -35,3 +35,12 @@ Found so far (CPU prototype `sim.ts`, one strain, the rules of forager()):
 13. The conflict: the owner's rule (only fresh ground is a sink) and target 3 (same time on slime everywhere): on
     slime everywhere there is no sink, so no drift, so less plasm at the front and a slower front with `push`.
     A weight for slime (normalized shares) would keep the speed. To measure: y2-w0-* and y2-w0.025-*.
+14. The owner took the slime weight 0.025 and every form of the drift as a setting (2026-11-19). The three forms with
+    the births only at the fresh rim (`out/y4`, 40 runs per case): the blank arm 39 : 1 (drift 0), 40 : 0 (1.5) and
+    40 : 0 (5). Slime everywhere (the new case `all`) is 2.23, 1.48 and 1.32 times slower than no slime, and slower
+    than slime on both arms (1.92, 1.27 and 1.24 times): the fresh base of the maze is not the cause (note 13 was
+    wrong). Mann-Whitney p below 3e-7 for every case with slime.
+15. The cause: on slime the flux pays no birth. With the births at every sink, in the share of its flux
+    (`paidOn=sinks`, `out/y5`): slime everywhere 1.00, 0.95 and 0.96 times (p 0.82, 0.15 and 0.33); the blank arm
+    33 : 7 (drift 0; Fisher p 0.057 against 39 : 1), 40 : 0 and 40 : 0; the first food without slime 5 to 9 % later.
+    The owner decides (ADR 0065, decision 7), because the rule touches "only a birth onto fresh ground counts".

@@ -76,6 +76,12 @@ export interface Front {
    */
   paid: number;
   /**
+   * Where the paid births go: to the agents of the rim on fresh ground ('fresh', the reading of the owner's rule that
+   * only a birth onto fresh ground counts), or to the agents of the rim at every sink in the share of the flux that it
+   * takes ('sinks'), so that the flux that a rim on slime takes pays births there.
+   */
+  paidOn: 'fresh' | 'sinks';
+  /**
    * Above 0: the front is the agents of a tube cell with room beside it that lie at most this many cells from ground
    * without slime (a Chebyshev distance). 0: the young ground of `young` is the front.
    */
@@ -142,6 +148,7 @@ export const noFront = (): Front => ({
   holdBirthsOn: 'same',
   young: 0,
   paid: 0,
+  paidOn: 'fresh',
   reach: 0,
   rim: false,
   drift: 0,
@@ -150,6 +157,41 @@ export const noFront = (): Front => ({
   speedOn: 'body',
   slimeWeight: 0,
 });
+
+/** The words that a text option of `Front` takes. */
+const FRONT_TEXT: Record<string, readonly string[]> = {
+  holdOn: ['trail', 'body'],
+  holdBirthsOn: ['same', 'trail', 'body'],
+  solver: ['app', 'exact'],
+  speedOn: ['body', 'trail', 'push'],
+  paidOn: ['fresh', 'sinks'],
+};
+
+/**
+ * The rules of stage 4 from the key=value words of a command line: a flag is 1 or 0. `own` names the other keys of
+ * the command. An unknown key, a number that does not parse or a word that an option does not take stops the run,
+ * because a run with a default in its place looks right (zsh passes "a=1 b=2" as one word from a variable).
+ */
+export function frontFrom(args: Record<string, string>, own: readonly string[] = []): Front {
+  const front = noFront();
+  const record = front as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(args)) {
+    if (own.includes(key)) continue;
+    if (!(key in front)) throw new Error(`unknown key ${key}=${value}`);
+    const now = record[key];
+    const words = FRONT_TEXT[key];
+    if (typeof now === 'boolean') record[key] = value === '1';
+    else if (words) {
+      if (!words.includes(value)) throw new Error(`${key}=${value}: the option takes ${words.join(', ')}`);
+      record[key] = value;
+    } else {
+      const n = Number(value);
+      if (!Number.isFinite(n)) throw new Error(`${key}=${value} is no number`);
+      record[key] = n;
+    }
+  }
+  return front;
+}
 
 /** The settings of forager() with Jones' foraging agent (ADR 0064, decision 1). */
 export const params = (patch: Partial<Params> = {}): Params => ({
@@ -501,7 +543,10 @@ export class Sim {
     this.step++;
   }
 
-  /** The territory grows: an open cell beside territory that holds a tube body joins it with the chance `speed`. */
+  /**
+   * The territory grows: an open cell beside territory joins it with the chance `speed` per agent beside it ('push'),
+   * or with the chance `speed` while a neighbour holds a tube body ('body') or plasm ('trail').
+   */
   private grow() {
     const { w, h, cells, territory: t } = this;
     const { open } = this.layout;
@@ -677,19 +722,28 @@ export class Sim {
       if (nG < 1 || nG > 10 || this.D[c]! < FLOW.half) continue;
       this.claimChild(i, c, free);
     }
-    // The births that the flow paid for: agents at the young front, in a random order (stage 4).
+    // The births that the flow paid for: agents at the front, in a random order (stage 4). With `paidOn` 'sinks' an
+    // agent at a sink comes first with odds in the share of its flux (the weighted order of Efraimidis and Spirakis).
     if (front.paid > 0 && this.budget >= 1) {
+      const atSinks = front.paidOn === 'sinks';
       const at: number[] = [];
       for (let i = 0; i < cap; i++) {
         if (!this.alive[i] || this.want[i]! >= 0) continue;
         const c = this.cellOf(this.ax[i]!, this.ay[i]!);
-        if (this.D[c]! >= FLOW.half && this.isYoung(c, k) && (!front.rim || this.atRim(c))) at.push(i);
+        if (this.D[c]! < FLOW.half) continue;
+        if (atSinks ? this.sinkRate[c]! <= 0 : !this.isYoung(c, k)) continue;
+        if (!front.rim || this.atRim(c)) at.push(i);
       }
       seedFor(1, ORDER, k, seed);
-      for (let a = at.length - 1; a > 0; a--) {
-        const b = Math.floor(rand() * (a + 1));
-        [at[a], at[b]] = [at[b]!, at[a]!];
-      }
+      if (atSinks) {
+        const order = new Map<number, number>();
+        for (const i of at) order.set(i, -Math.log(1 - rand()) / this.sinkRate[this.cellOf(this.ax[i]!, this.ay[i]!)]!);
+        at.sort((a, b) => order.get(a)! - order.get(b)!);
+      } else
+        for (let a = at.length - 1; a > 0; a--) {
+          const b = Math.floor(rand() * (a + 1));
+          [at[a], at[b]] = [at[b]!, at[a]!];
+        }
       for (const i of at) {
         if (this.budget < 1) break;
         if (this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free, front.rim)) {

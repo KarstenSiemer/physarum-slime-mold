@@ -1,7 +1,8 @@
 # 0065: The growth front takes the flow: what the prototype on the CPU found
 
 - Status: accepted. The prototype and its rules are choices of an agent under the owner's delegation of 2026-11-12.
-  The owner decided the conflict of decision 5 and the look of decision 6 on 2026-11-19.
+  The owner decided the conflict of decision 5 and the look of decision 6 on 2026-11-19. Decision 7 waits for the
+  owner.
 - Date: 2026-11-19
 - Extends [ADR 0052](0052-the-sources-on-slime-mazes-and-the-growth-front.md) (stage 4 of the plan),
   [ADR 0056](0056-the-avoidance-of-slime-waits-for-the-growth-front.md) (the targets of the Y-maze) and
@@ -34,9 +35,13 @@ rules of the app it gives the app's Y-maze: 60 to 65 steps and no preference.
 4. **The front needs its own speed, and the speed must follow the plasm.** A territory that grows only where agents
    push it gives the organism's speed and the choice of the Y-maze. A fixed speed per cell gives no choice.
 5. **The app's solver suffices**: 16 iterations from the last step give the same Y-maze as a solver to a tolerance.
+6. **On slime the speed comes from the births that the flux pays.** With the births only at the fresh rim, a colony
+   on slime everywhere is 1.32 to 2.23 times slower than without slime, and more so than with slime on both arms.
+   With the births at every sink, in the share of the flux that it takes, it is as fast as without slime.
 
-The README has the table: 40 : 0 with slime on one arm, no preference with slime on both arms or none, the first
-food after 3,332 to 3,479 steps (the organism: 2,400 to 7,200).
+The README has the tables of the three forms of the drift, with 40 runs per case: 39 : 1 or 40 : 0 with slime on
+one arm (33 : 7 for the tree with the births at every sink), no preference with slime on both arms, everywhere or
+nowhere, and the first food after 3,212 to 3,800 steps without slime (the organism: 2,400 to 7,200).
 
 ## Decision
 
@@ -54,14 +59,24 @@ food after 3,332 to 3,479 steps (the organism: 2,400 to 7,200).
 5. **The owner's decision of 2026-11-19: slime is a weak sink.** The owner's rule (only fresh ground is a sink) and
    the third target of the Y-maze conflict. With slime as no sink, a colony on slime on both arms has no drift there
    and is 1.87 times slower. A sink of weight 0.025 on slime, shared with the fresh rims, gives 1.27 times and keeps
-   the dead ends without a sink (decision 2). The agent recommended the weight, and the owner took it. A child still
-   comes only on fresh ground: a rim on slime takes flux, but that flux pays no birth.
+   the dead ends without a sink (decision 2). The agent recommended the weight, and the owner took it. With 40 runs
+   the weight gives 1.24 times on both arms and 1.32 times on slime everywhere. The agent had named the fresh base
+   of the maze as the cause of the rest; the case of slime everywhere shows that this is wrong (finding 6). Under
+   this decision a child still comes only on fresh ground: a rim on slime takes flux, but that flux pays no birth.
 6. **The owner's decision of 2026-11-19: the panel offers every form.** The weight of the drift sets the form: 0
    gives a tree of tubes with small heads, 1.25 to 1.5 a tube with a crown, 5 a fan that migrates. The owner asked
    to make the form selectable in the panel ("über die UI auswählbar") and to build all forms in. So the drift
    becomes a setting with a help text, and each scene sets its value. The agent picks the default of a scene from
    the Y-maze of each form (the README) and from the targets of the scene. The pictures are attached to the pull
    request.
+7. **For the owner: the births at every sink.** The flux that a sink takes pays births there, in the share of that
+   flux, also on slime (`paidOn=sinks`). Then a colony on slime everywhere is as fast as without slime in all three
+   forms (0.95 to 1.00 times; Mann-Whitney p 0.15 to 0.82), and the crown and the fan keep 40 : 0 with slime on one
+   arm. The tree gives 33 : 7 (the organism 39 : 1; Fisher's test: p 0.057), and the first food without slime comes
+   5 to 9 % later. It touches the owner's rule that only a birth onto fresh ground counts: a rim on slime then grows
+   from the flux that it takes. The agent recommends it. The flux that a sink takes then becomes plasm where it goes,
+   and the organism grows on slime as fast as on blank agar (Reid et al. 2012). A covered dead end still has no sink
+   and no birth (decision 2).
 
 ## Consequences
 
@@ -81,3 +96,6 @@ food after 3,332 to 3,479 steps (the organism: 2,400 to 7,200).
 - Not run: Tokyo, the mazes and the start scenes with these rules. They need the engine.
 - The default of the drift for each scene with growth and the flow waits for the measures of the scenes on the
   engine.
+- The prototype gives the births that the flux pays in one random order over all agents of the front. A GPU needs a
+  form without a global order, for example a store of flux per sink that pays a birth when it is full, as the nodes
+  at the rim of de Almeida 2021 do. That form is not measured.
