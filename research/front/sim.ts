@@ -17,8 +17,10 @@ export const VEIN = FLOW.birthFrom;
 const [STEER, BLOCK, GROW, ORDER, RESPAWN, STARVE, HOLD_MOVE, HOLD_BIRTH, START] = [0, 3, 4, 6, 8, 9, 11, 12, 13];
 /** The marks of the paid births of `paidBy` 'ahead'; START + 1 is the push of the territory. */
 const MARK = 15;
-/** The draw of a paid birth of `paidBy` 'chance', per agent. */
+/** The draw of a paid birth of `paidBy` 'chance' and 'fill', per agent. */
 const PAID = 16;
+/** The most rounds that `paidBy` 'fill' takes to find its scale (fillScale()). */
+const FILL_ROUNDS = 8;
 /** A sum in the form of a GPU (`sums` 'fixed') counts a sink rate in steps of 1 / FIXED, as an integer. */
 export const FIXED = 65536;
 /** The cells around a start agent that join the territory of its strain (`start` 'agents'): a square of 7 × 7. */
@@ -124,11 +126,13 @@ export interface Front {
    * How the births that the flux pays find their parents (ADR 0067). 'order': one random order over all agents of the
    * front, with odds in the weight of each (ADR 0065). 'chance', the form of a GPU: each agent of the front that could
    * claim a child claims one with the chance min(1, B · r / P), B the budget, r its sink rate and P the sum of the sink
-   * rates of these agents (paidByChance()). 'ahead', the second try: after the step before a growth step the cells
-   * whose agent could claim a child get a mark with that chance, and in the growth step the agent of the front on a
-   * marked cell claims a child; the budget never exceeds the number of sinks. Each claim lowers the budget by 1.
+   * rates of these agents (paidByChance()). 'fill': the chance min(1, λ · r), λ such that the chances add up to the
+   * smaller of B and the number of these agents, as the order gives (fillScale()). 'ahead', the second try: after the
+   * step before a growth step the cells whose agent could claim a child get a mark with the chance of 'chance', and in
+   * the growth step the agent of the front on a marked cell claims a child; the budget never exceeds the number of
+   * sinks. Each claim lowers the budget by 1.
    */
-  paidBy: 'order' | 'chance' | 'ahead';
+  paidBy: 'order' | 'chance' | 'fill' | 'ahead';
   /**
    * How a sink learns whether ground without slime lies within `reach` (ADR 0067). 'chamfer': the distance field of
    * two passes over the grid. 'box', the form of a GPU: the sink looks at the square of side 2 · reach + 1 around it.
@@ -211,7 +215,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   speedOn: ['body', 'trail', 'push'],
   paidOn: ['fresh', 'sinks'],
   sinkAt: ['fresh', 'edge'],
-  paidBy: ['order', 'chance', 'ahead'],
+  paidBy: ['order', 'chance', 'fill', 'ahead'],
   fresh: ['chamfer', 'box'],
   sums: ['float', 'fixed'],
   start: ['disc', 'agents'],
@@ -223,6 +227,34 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
  * territory, where the sinks lie.
  */
 export const GPU_FORMS = { paidBy: 'chance', fresh: 'box', sums: 'fixed' } as const;
+
+/**
+ * The scale λ of `paidBy` 'fill' (ADR 0067): the chances min(1, λ · r) of the sink rates `rates` add up to `target`.
+ * From λ = target / P, P the sum of the rates, each round counts the rates whose chance is 1 and sums them to S, and
+ * takes λ = (target − their count) / (P − S): a GPU runs a round as a pass over the agents. λ only grows, and the
+ * rounds end when the count stays, at most FILL_ROUNDS of them. With every chance at 1, λ is infinite. `fixed`: the
+ * sums in steps of 1 / FIXED, as `sums` 'fixed' takes them.
+ */
+export function fillScale(rates: readonly number[], target: number, fixed = false): number {
+  const sum = (v: readonly number[]) => {
+    let s = 0;
+    for (const r of v) s += fixed ? Math.round(r * FIXED) : r;
+    return fixed ? s / FIXED : s;
+  };
+  const P = sum(rates);
+  if (!(P > 0) || !(target > 0)) return 0;
+  let lambda = target / P;
+  let clipped = 0;
+  for (let round = 0; round < FILL_ROUNDS; round++) {
+    const full = rates.filter((r) => lambda * r >= 1);
+    if (full.length === clipped && round > 0) break;
+    clipped = full.length;
+    const rest = P - sum(full);
+    if (rest <= 0) return Infinity;
+    lambda = (target - full.length) / rest;
+  }
+  return lambda;
+}
 
 /**
  * The rules of stage 4 from the key=value words of a command line: a flag is 1 or 0. `own` names the other keys of
@@ -831,10 +863,10 @@ export class Sim {
       if (nG < 1 || nG > 10 || this.D[c]! < FLOW.half) continue;
       this.claimChild(i, c, free);
     }
-    // The births that the flow paid for, in the form of a GPU (`paidBy` 'chance' or 'ahead', ADR 0067): every agent of
-    // the front on a marked cell claims a child. The flow pass of this step takes the claims off the budget. With
-    // 'chance' the sink rates of the agents of the front that could claim a child give P of the next marks.
-    if (front.paid > 0 && front.paidBy === 'chance') this.paidByChance(free);
+    // The births that the flow paid for, in the forms of a GPU (ADR 0067): a chance per agent of the front ('chance',
+    // 'fill'), or the agent of the front on a marked cell claims a child ('ahead'; the flow pass of this step takes the
+    // claims off the budget).
+    if (front.paid > 0 && (front.paidBy === 'chance' || front.paidBy === 'fill')) this.paidByChance(free);
     if (front.paid > 0 && front.paidBy === 'ahead') {
       this.paidClaims = 0;
       for (let i = 0; i < cap; i++) {
@@ -949,11 +981,17 @@ export class Sim {
     const [B, P] = [this.budget, front.sums === 'fixed' ? mass / FIXED : mass];
     this.sinkPayable = P;
     this.paidClaims = 0;
+    // The chance of a sink rate r: λ · r, at most 1. 'chance': λ = B / P. 'fill': λ such that the chances add up to
+    // min(B, the agents that could claim), as the order gives min(B, them) births; a GPU finds it in a few passes that
+    // count the agents whose chance is 1 and sum their sink rates (fillScale()).
+    const rates = () => able.map((i) => this.sinkRate[this.cellOf(this.ax[i]!, this.ay[i]!)]!);
+    const lambda =
+      front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B / P;
     if (B > 0 && P > 0)
       for (const i of able) {
         const c = this.cellOf(this.ax[i]!, this.ay[i]!);
         seedFor(i, PAID, k, this.p.seed);
-        if (rand() >= Math.min(1, (B * this.sinkRate[c]!) / P)) continue;
+        if (rand() >= Math.min(1, lambda * this.sinkRate[c]!)) continue;
         if (this.claimChild(i, c, free, front.rim)) this.paidClaims++;
       }
     this.paidBirths += this.paidClaims;

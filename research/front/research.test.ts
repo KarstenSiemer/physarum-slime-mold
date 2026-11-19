@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { FLOW, pcg } from '../../src/engine/flow';
 import { dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
-import { GPU_FORMS, Sim, frontFrom, noFront, params, type Front } from './sim';
+import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, type Front } from './sim';
 import { runY, slimedOf } from './ymaze';
 
 /** The rule set of ADR 0065 (README.md, step 6) with the drift 1.5, and the forms of a GPU of ADR 0067. */
@@ -189,6 +189,35 @@ describe('the CPU prototype of stage 4', () => {
     expect(steps).toBeGreaterThan(20);
     expect(expected).toBeGreaterThan(20);
     expect(Math.abs(claims - expected)).toBeLessThan(3 * Math.sqrt(expected) + 1);
+  });
+
+  it('fills the chances min(1, λ · r) up to the budget or the number of agents (ADR 0067)', () => {
+    const chances = (rates: number[], target: number, fixed = false) => {
+      const lambda = fillScale(rates, target, fixed);
+      return rates.map((r) => Math.min(1, lambda * r));
+    };
+    const sum = (v: number[]) => v.reduce((a, b) => a + b, 0);
+    // One strong agent and two weak ones: the strong one gets the chance 1, the others share the rest.
+    const strong = chances([0.8, 0.1, 0.1], 2.4);
+    expect(strong[0]).toBe(1);
+    expect(strong[1]).toBeCloseTo(0.7, 12);
+    expect(strong[2]).toBeCloseTo(0.7, 12);
+    // No chance reaches 1: λ = B / P, as with `paidBy` 'chance'.
+    expect(fillScale([0.25, 0.25, 0.25, 0.25], 2)).toBeCloseTo(2, 12);
+    // A target of at least the number of agents gives each of them the chance 1, and none gives none.
+    expect(chances([0.5, 0.3, 0.2], 3)).toEqual([1, 1, 1]);
+    expect(fillScale([0.5, 0.3], 0)).toBe(0);
+    expect(fillScale([], 2)).toBe(0);
+    // Random rates of a few agents: the chances add up to the target, also with the sums in steps of 2^-16.
+    let s = 7;
+    const next = () => (s = pcg(s)) / 2 ** 32;
+    for (let round = 0; round < 200; round++) {
+      const rates = Array.from({ length: 1 + Math.floor(next() * 12) }, () => next() ** 3);
+      const target = next() * rates.length;
+      expect(sum(chances(rates, target))).toBeCloseTo(target, 9);
+      const fixed = rates.map((r) => Math.round(r * 2 ** 16) / 2 ** 16).filter((r) => r > 0);
+      if (fixed.length === rates.length) expect(sum(chances(fixed, target, true))).toBeCloseTo(target, 6);
+    }
   });
 
   it('marks in the second form only the cells whose agent could claim a child before the moves (ADR 0067)', () => {
