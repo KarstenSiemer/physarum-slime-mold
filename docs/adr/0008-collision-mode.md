@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-11-08
+- Extended by ADR 0063 (2026-11-19): a switch to the rule gives a scene with 1 agent per cell or more Jones'
+  population.
 
 ## Context
 

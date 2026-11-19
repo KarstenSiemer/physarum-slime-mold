@@ -19,6 +19,97 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// The switch of the rule of one agent per cell (ADR 0008, ADR 0063). With the rule, Agents per cell is the share of
+// the cells that hold an agent: at 1 every cell is full, and no agent can move.
+describe('the switch of the rule of one agent per cell', () => {
+  it('gives a scene with several agents per cell Jones’ population, and says so', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    expect([app.settings.collisions, app.settings.density]).toEqual([false, 4]);
+    setRule(true);
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([true, 0.15, 4]);
+    expect(app.notice).toContain('It changed from 4 to 0.15, Jones’ value');
+  });
+
+  it('puts the Agents per cell of before back when the rule goes off again', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    setRule(false);
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([false, 4, undefined]);
+  });
+
+  it('keeps a share of the cells below 1, without a notice', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    app.settings.density = 0.5;
+    setRule(true);
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([true, 0.5, undefined]);
+    expect(app.notice).toBe('');
+    setRule(false);
+    expect(app.settings.density).toBe(0.5);
+  });
+
+  it('keeps an Agents per cell that the user set while the rule was on', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    app.settings.density = 0.3;
+    setRule(false);
+    expect([app.settings.density, app.densityBeforeRule]).toEqual([0.3, undefined]);
+  });
+
+  it('forgets the Agents per cell of before when another scene loads', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    loadPreset('network');
+    expect([app.settings.density, app.densityBeforeRule]).toEqual([0.15, undefined]);
+    setRule(false);
+    // The scene's own 0.15 stays: it is not the value that a switch set.
+    expect(app.settings.density).toBe(0.15);
+  });
+
+  it('puts it back too after the switch to the Jones model turned the rule on', async () => {
+    const { app, loadPreset, setModel, setRule } = await fresh();
+    loadPreset('dunes');
+    setModel('jones');
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([true, 0.15, 4]);
+    setModel('extended');
+    setRule(false);
+    expect([app.settings.collisions, app.settings.density]).toEqual([false, 4]);
+  });
+
+  it('does nothing when the rule is as asked already', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('network');
+    const before = JSON.stringify(app.settings);
+    setRule(true);
+    expect([JSON.stringify(app.settings), app.notice]).toEqual([before, '']);
+  });
+
+  it('says what a scene made for the rule loses without it, and that growth is off', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('network');
+    setRule(false);
+    expect(app.notice).toContain('Without one agent per cell, agents pile up');
+    expect(app.notice).not.toContain('Growth and shrinkage');
+    loadPreset('foraging-maze');
+    expect(app.settings.growth).toBe(true);
+    setRule(false);
+    expect(app.notice).toContain('Without one agent per cell');
+    expect(app.notice).toContain('Growth and shrinkage need one agent per cell, so they are off now.');
+    // A scene without the rule that got it and growth from the user: only the notice of growth.
+    loadPreset('dunes');
+    setRule(true);
+    app.settings.growth = true;
+    setRule(false);
+    expect(app.notice).toBe(
+      'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.',
+    );
+  });
+});
+
 describe('the current scene', () => {
   it('is the loaded preset, unchanged until a model parameter changes', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
@@ -818,7 +909,7 @@ describe('the model switch', () => {
     expect([s.model, jonesFits(s), s.strains.length, s.collisions, s.diffusion]).toEqual(['jones', true, 1, true, 1]);
     expect([app.strainOrigin, app.strain, app.tool]).toEqual([[0], 0, 'light']); // the tool stays: Repellent
     expect(app.notice).toBe(
-      `${BASE} It removed strains B to C and agents that share a cell. It changed Agents per cell from 3 to 1, ` +
+      `${BASE} It removed strains B to C and agents that share a cell. It changed Agents per cell from 3 to 0.15, ` +
         'Diffusion passes from 2 to 1 and Scent decay from 0.1 to 0.6 (the Decay of strain A).',
     );
   });
