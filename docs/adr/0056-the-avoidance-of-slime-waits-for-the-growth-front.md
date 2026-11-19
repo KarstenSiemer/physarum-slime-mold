@@ -5,6 +5,9 @@
 - Date: 2026-11-17
 - Extends [ADR 0055](0055-the-slime-field.md): the second part of stage 2 of the plan of
   [ADR 0052](0052-the-sources-on-slime-mazes-and-the-growth-front.md).
+- Changed by [ADR 0066](0066-two-scenes-of-reid-and-the-start-spot.md) (2026-11-19): on the owner's wish the Y-maze is a
+  scene of the app, Y-maze with slime, which decision 3 kept out. Its layout moved to `src/model/y-maze.ts`, and the
+  research code imports it there.
 - In short: [`research/flow/README.md`](../../research/flow/README.md), part 20, has the commands and the records.
 
 ## Context

@@ -245,6 +245,8 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'y-maze',
+      'slime-everywhere',
     ];
     for (const p of PRESETS) {
       const s = p.settings();
@@ -378,6 +380,8 @@ describe('flow in the tubes (ADR 0029)', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'y-maze',
+      'slime-everywhere',
       'maze',
     ];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);

@@ -245,7 +245,8 @@ t² (3 − 2t)) rounded to a byte, with t = clamp((d − r) / (0.3 r − r), 0, 
 within 0.3 r, 0 at r. The shaders write this step out, because GLSL ES 3.00 leaves smoothstep undefined with its first
 edge above its second (ADR 0007, amendment of 2026-11-13). Erase: all bytes 0 (`shaders/paint.wgsl`,
 `gl/glsl/paint.frag`, CPU reference `lightByte()` in `brush.ts`). The Slime tool writes no byte of `env`: it paints the
-slime field, and an erase and a wall also clear that field in their cells (6.9).
+slime field, and an erase and a wall also clear that field in their cells (6.9). A start spot of a scene paints
+nothing (section 10).
 
 A dab of light with a radius of 2.5 cells on the centre of a cell holds bytes that sum to 2,243: 0.977 of 3 × 3 cells
 of the full byte. The scene Voronoi diagram paints its repellent dots so, in place of the hard dots of 3 × 3 cells of
@@ -608,7 +609,8 @@ cell a random permutation of the cells), bands (the strains side by side), secto
 ring, center, line (below), empty (every agent dead) and food (every agent dead; for each strain one inoculate step places about 50
 agents of the strain on a food of its own, a disc of about 100 cells at half the density of a full sheet: strain A at
 the start of the first food stroke of the list (a dab or a whole drag, 8.2), strain B on the second, and so on, and a
-strain without such a food starts without agents; ADR 0025, ADR 0032). With one agent per cell,
+strain without such a food starts without agents; ADR 0025, ADR 0032; a start spot takes the place of a food,
+below). With one agent per cell,
 claim rounds give each alive agent its own cell: 1 round for the mixed layout on a periodic grid or a box, without walls; else 64
 (`startRounds()` in `src/engine/pack.ts`); a loser
 of the last round starts dead. Without the rule an agent draws again up to 32 times while its cell is not open. With a
@@ -617,6 +619,17 @@ capacity above Agents per cell, only the first agents of each strain start alive
 Line (ADR 0047; Tsuda, Jones et al. 2011, p. 11): a vertical strip around the middle column of the grid, 0.75 · H
 cells high, and ⌈N / (0.75 · 0.75 · H)⌉ cells wide for the N agents that the buffer holds, at least 1 cell and at most
 W. Every draw of an agent is uniform in the strip, so with one agent per cell about 0.75 of its cells hold an agent.
+
+Start spot (ADR 0066; Reid et al. 2012 set a plasmodium on agar without food): a shape of the kind `start` of a scene.
+With the layout food, strain k starts at the k-th start spot of the list, in the same disc and with the same step as on
+a food, and a strain without a start spot starts on its food as above. A start spot is an edit of the list
+(`EnvKind.start`, 7) that paints nothing: no byte of `env`, no outline, no stamp and no amount of slime. The engine
+gives a simulation no stroke of one, and both backends would leave one out (`paintsEnv()` and `changesSlime()` in
+`src/engine/types.ts`). The sweep keeps it under an erase and a wall: nothing on the grid shows it, so no stroke
+clears it. Clear removes it with the rest of the list, and a reset then starts no colony there. A link holds it as it
+holds every shape of its scene, by the bit of the shape; no link holds one as a stroke. Its radius is not read. The
+scenes Y-maze with slime and Slime everywhere start their colony so: on the middle of the base of the Y-maze, and 1 cm
+inside the rim of the dish, opposite the glucose.
 
 ## 11. Parameters
 

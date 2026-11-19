@@ -817,6 +817,71 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
     expect((await engine.sim.readAgents()).filter((agent) => agent.bits & 4)).toEqual(first);
     engine.destroy();
   }, 150_000);
+
+  // ADR 0066: a start spot of a scene takes the place of the food of its strain, and paints nothing. In the Y-maze of
+  // Reid et al. 2012 the colony starts on the middle of the base, which holds no food.
+  it('starts about 50 agents on the start spot of the Y-maze, and the spot paints nothing', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [1280, 720];
+    const p = presetById('y-maze');
+    if (!p?.env) throw new Error('no Y-maze');
+    const env = p.env;
+    const s = { ...p.settings(), seed: 3 };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    await engine.load(s, env);
+    expect([engine.sim.width, engine.sim.height, engine.sim.step]).toEqual([129, 90, 1]);
+    const start = async () => (await engine.sim.readAgents()).filter((a) => a.bits & 4);
+    const colony = await start();
+    expect(colony.length).toBeGreaterThanOrEqual(40);
+    expect(colony.length).toBeLessThanOrEqual(60);
+    // Within the disc of 100 cells (radius 5.64) around the middle of the base, (64.5, 74.5), far from both foods.
+    for (const a of colony) {
+      expect(Math.hypot(a.x - 64.5, a.y - 74.5)).toBeLessThan(5.7);
+      expect(a.bits & 3).toBe(0);
+    }
+    engine.reset();
+    expect(await start()).toEqual(colony);
+    // Without a colony, the scene with its start spot and the scene without it paint the same environment, outlines
+    // and slime, and count the same changes. The comparison is not empty: walls, food and the slime of the left arm.
+    const fields = async () => [
+      await engine.sim.readEnv(),
+      await engine.sim.readShape(),
+      await engine.sim.readSlime(),
+      await engine.sim.readSlimeAmount(),
+    ];
+    const bytes = (v: ArrayBufferView) => new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+    const differing = (a: ArrayBufferView, b: ArrayBufferView) => {
+      const [x, y] = [bytes(a), bytes(b)];
+      return x.length === y.length ? x.reduce((n, v, i) => n + (v === y[i] ? 0 : 1), 0) : Infinity;
+    };
+    const quiet = { ...s, layout: 'empty' as const };
+    const load = async (shapes: typeof env) => {
+      const before = engine.sim.revision;
+      await engine.load(quiet, shapes);
+      return { fields: await fields(), changes: engine.sim.revision - before };
+    };
+    // The first load also changes the start layout; the two loads that are compared change only the shapes.
+    await load(env);
+    const withStart = await load(env);
+    const without = await load(env.filter((e) => e.kind !== 'start'));
+    expect(await start()).toEqual([]);
+    const [envBytes, , stamps] = withStart.fields;
+    if (!envBytes || !stamps) throw new Error('no fields');
+    expect(bytes(envBytes).filter((v, i) => i % 4 === 0 && v === 255).length).toBeGreaterThan(5000); // walls
+    expect(bytes(envBytes).filter((v, i) => i % 4 === 1 && v === 255).length).toBeGreaterThan(200); // two foods
+    expect(new Uint32Array(stamps.buffer).filter((v) => v !== 0).length).toBeGreaterThan(1000); // the left arm
+    withStart.fields.forEach((field, i) => {
+      expect(differing(field, without.fields[i] ?? new Uint8Array()), `field ${String(i)}`).toBe(0);
+    });
+    expect(withStart.changes).toBe(without.changes);
+    // A stroke of a start spot that reaches the simulation itself changes nothing either (paintsEnv(), changesSlime()).
+    engine.sim.paint([{ kind: 'start', from: [64.5, 74.5], to: [64.5, 40], radius: 12, boundary: 'box' }]);
+    engine.sim.paintSlime([{ kind: 'start', from: [64.5, 74.5], to: [64.5, 40], radius: 12, boundary: 'box' }]);
+    (await fields()).forEach((field, i) => {
+      expect(differing(field, without.fields[i] ?? new Uint8Array()), `field ${String(i)} after a stroke`).toBe(0);
+    });
+    engine.destroy();
+  }, 150_000);
 });
 
 // ADR 0027 (owner, 2026-11-12, "Weich"): a frame draws the map after the step's diffusion in either order. Moving first

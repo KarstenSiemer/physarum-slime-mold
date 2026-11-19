@@ -169,7 +169,8 @@ poles change two other cases: Three strains on WebGL2 with a hint of 1 GB on a c
 cells. Every other case keeps its grid. Since ADR 0064 the list holds 28 scenes, which gives 3,132 cases. The 4 B
 then change eight cases: the two above, where the Three strains of before is now the scene Three-strain weave, and
 the new start scene Three strains on WebGL2 with a hint of 0.5 GB on all six canvases. There it runs without its
-lattice of 384 × 384 cells.
+lattice of 384 × 384 cells. Since ADR 0066 the list holds 30 scenes, which gives 3,348 cases: the two scenes of
+Reid et al. 2012 keep their grids in every case.
 
 **Tests**, on both backends unless a backend is named:
 

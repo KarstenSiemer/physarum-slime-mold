@@ -8,6 +8,8 @@
   its own, strain A on the first food as here, and the panel names it "On food, one colony each".
 - Extended by ADR 0064 (2026-11-19): the Foraging maze has the flow in the tubes, and every scene of Start here and
   of Experiments has growth.
+- Extended by [ADR 0066](0066-two-scenes-of-reid-and-the-start-spot.md) (2026-11-19): a start spot of a scene takes the
+  place of the food of a strain in the start layout "At the first food".
 
 ## Context
 

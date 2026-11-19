@@ -1,6 +1,6 @@
 // The Y-maze of Reid et al. 2012 in the real engine: which arm does a colony choose when one arm has slime (ADR 0056,
 // stage 2b)? Not a test of the app: it runs only when asked, with the configuration research/vitest.config.ts. The
-// layout is y-maze.ts; measure-y-maze.ts reads the records. WebGPU only.
+// layout is src/model/y-maze.ts (ADR 0066); measure-y-maze.ts reads the records. WebGPU only.
 //
 // One run, with the settings of the scene Snail maze on the lattice of the layout and the start layout Empty:
 // 1. The engine paints the layout, with slime on the own part of the arms of the case. The slime is new at step 0.
@@ -45,7 +45,7 @@ import type { Stroke } from '../../../src/engine/types';
 import { WebGpuBackend } from '../../../src/engine/webgpu';
 import { constrain, FOOD_START } from '../../../src/model/params';
 import { presetById } from '../../../src/model/presets';
-import { RUN_RADIUS, SIDES, yMaze, type Side } from './y-maze';
+import { RUN_RADIUS, SIDES, yMaze, type Side } from '../../../src/model/y-maze';
 
 const OUT = 'research/flow/out/engine/y-maze/';
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;

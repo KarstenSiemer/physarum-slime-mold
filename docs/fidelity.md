@@ -561,6 +561,16 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   and the avoidance waits for stage 4 of the plan of 2026-11-16 (`TODO.md`). Since ADR 0054 the
   mark of starved ground keeps a colony with growth out of ground that it left: in the Snail maze the blind branches
   stay empty until the mark has faded (row 2). Agents still walk onto such ground.
+- **The two scenes of Reid et al. 2012** (ADR 0066), under Experiments, are the test beds of stage 4 of the plan. The
+  Y-maze with slime has the layout of ADR 0056 and slime on its left arm, and its colony starts on the base without
+  food, as the plasmodium of the paper. The dish Slime everywhere is 8.6 cm wide and coated with slime; its colony
+  starts 1 cm inside the rim, and a well of glucose of 5 mm lies opposite. What the app shows today, measured on
+  WebGPU with 5 seeds and on WebGL2 with 2: in the Y-maze the colony reaches the first food after 64 to 140 steps,
+  that of the left arm in 2 of 7 runs, and the other food 5 to 111 steps later; in the dish it reaches the glucose
+  after 115 to 511 steps. With the slime and without it every run ends with the same bytes (14 of 14). So the Y-maze
+  shows no avoidance, where 39 of 40 plasmodia chose the arm without slime, and the dish keeps the time and the way,
+  as the plasmodia of the paper did (n = 13 and 16). The avoidance waits for stage 4 (ADR 0065). Not measured: the
+  positions of the start and of the well in the dish of the paper, which this app chose.
 
 ### 24. Veins form a tree that follows Murray's law
 

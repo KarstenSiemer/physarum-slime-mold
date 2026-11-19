@@ -374,6 +374,12 @@
         <a href="https://arxiv.org/abs/1503.06973" rel="noreferrer">arXiv:1503.06973</a>.
       </p>
       <p>
+        The scenes Y-maze with slime and Slime everywhere: C. R. Reid, T. Latty, A. Dussutour and M. Beekman, “Slime
+        mold uses an externalized spatial ‘memory’ to navigate in complex environments”, <em>PNAS</em> 109(43):
+        17490–17494, 2012,
+        <a href="https://doi.org/10.1073/pnas.1215037109" rel="noreferrer">doi:10.1073/pnas.1215037109</a>.
+      </p>
+      <p>
         GPU approach and visual inspiration: Sage Jenson,
         <a href="https://cargocollective.com/sagejenson/physarum" rel="noreferrer">physarum</a> (2019). Multiple species
         and presets “Cyclones”, “Dunes”, “Dot grid”: Michael Fogleman,

@@ -166,6 +166,8 @@ const OUTLINE_DRAWS: OutlineDraws = {
   cathode: { segment: [], run: [] },
   // A stroke of the Slime tool joins no run: it changes only the slime field (brushSlime()).
   slime: { segment: [], run: [] },
+  // A start spot paints nothing (ADR 0066): paint() takes no such stroke (paintsEnv()).
+  start: { segment: [], run: [] },
 };
 /**
  * The same for the target of the outlines of the electrodes (POLES in shape.frag): R the cathodes, G the anodes. A
@@ -196,6 +198,7 @@ const POLE_DRAWS: OutlineDraws = {
     run: [],
   },
   slime: { segment: [], run: [] },
+  start: { segment: [], run: [] },
 };
 /** A segment of a run of paint(): its kind, its outline rectangles, and whether `poles` takes its outline too. */
 interface RunItem {

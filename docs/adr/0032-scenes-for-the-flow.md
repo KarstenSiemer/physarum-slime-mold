@@ -9,6 +9,8 @@
   sites of that amendment, which it measures again.
 - Changed by [ADR 0054](0054-a-starved-tube-leaves-starved-ground.md) (2026-11-17): the scene Tokyo, two networks runs
   a flow strength of 2.8 and not of 1.4, as the Tokyo rail network. The three scenes are measured again there.
+- Extended by [ADR 0066](0066-two-scenes-of-reid-and-the-start-spot.md) (2026-11-19): strain k starts at the k-th start
+  spot of a scene, where the scene has one, and on its food where it has none.
 - In short: three new scenes show the flow in the tubes (ADR 0029), two of them with rival strains
   that each build a network of their own (ADR 0031). For them, each strain starts on a food of its
   own. And the level of the trail from which a cell holds a tube now follows the decay of the

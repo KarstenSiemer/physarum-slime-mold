@@ -2,20 +2,30 @@ import type { Boundary, Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import type { FlowSites } from './sites';
 
-export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5, slime: 6 } as const;
+/**
+ * The kinds of an edit, with the number that the paint passes and a link give each. Every kind but `start` is a tool.
+ * A `start` is the start spot of a scene (ADR 0066): an edit of the list that paints nothing, where the start layout
+ * Food places the colony of a strain in place of its food (Engine.seedAtFood()).
+ */
+export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5, slime: 6, start: 7 } as const;
 export type EnvTool = keyof typeof EnvKind;
 
 /**
  * Whether a stroke of `kind` changes the environment and its outlines. A stroke of the Slime tool changes neither: it
- * writes only into the slime field (ADR 0055, decision 7).
+ * writes only into the slime field (ADR 0055, decision 7). A start spot changes nothing (ADR 0066).
  */
-export const paintsEnv = (kind: EnvTool) => kind !== 'slime';
+export const paintsEnv = (kind: EnvTool) => kind !== 'slime' && kind !== 'start';
 /**
  * Whether a stroke of `kind` changes the slime field (ADR 0055, decision 7). The Slime tool gives the open cells of its
  * stroke the stamp of the current step. An erase and a wall clear the stamp of their cells. Every other kind leaves the
  * field as it is.
  */
 export const changesSlime = (kind: EnvTool) => kind === 'slime' || kind === 'erase' || kind === 'wall';
+/**
+ * Whether a stroke of `kind` paints anything: the environment or the slime field. Every kind but a start spot does
+ * (ADR 0066). The engine gives a simulation only the strokes that paint, and the sweep judges only those.
+ */
+export const paints = (kind: EnvTool) => paintsEnv(kind) || changesSlime(kind);
 
 /**
  * The two poles of the Electrode tool (ADR 0047), as Tsuda, Jones et al. 2011 (p. 10) model a current: the cathode is

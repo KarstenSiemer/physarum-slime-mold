@@ -2,7 +2,7 @@
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it, vi } from 'vitest';
 import { drawingOf } from '../model/link';
-import { defaultSettings, defaultStrain, toJones, type Boundary, type Settings } from '../model/params';
+import { defaultSettings, defaultStrain, strainLike, toJones, type Boundary, type Settings } from '../model/params';
 import { presetById, shapesAt, type EnvShape, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
@@ -886,6 +886,101 @@ describe('the colonies of the start layout Food', () => {
       [0, 100, 200],
       [1, 300, 100],
     ]);
+  });
+});
+
+// ADR 0066: a start spot of a scene takes the place of the food of a strain, as Reid et al. 2012 set a plasmodium on
+// agar without food. It is an edit of the list that paints nothing: the sweep keeps it, Clear removes it, and a link
+// of the scene holds it by the bit of its shape.
+describe('the start spots of a scene', () => {
+  const yMaze = presetById('y-maze');
+  if (!yMaze?.env) throw new Error('no Y-maze');
+  const yEnv = yMaze.env;
+  const [first] = yMaze.settings().strains;
+  if (!first) throw new Error('no strain');
+  /** Where strokeOn() puts shape `i` of the Y-maze on its lattice. */
+  const cellOf = (i: number) => {
+    const shape = yEnv[i];
+    return shape && strokeOn(fromShape(shape, 'box'), 129, 90)?.from;
+  };
+  const toolsOf = (engine: Engine) => (engine.sim as CpuSim).tools.map((t) => [t.strain, t.x, t.y]);
+
+  it('start strain A on the start spot, and a strain without one on its own food', async () => {
+    expect(yEnv.map((e) => e.kind).filter((k) => k !== 'wall' && k !== 'slime')).toEqual(['start', 'food', 'food']);
+    const settings = { ...yMaze.settings(), strains: [first, strainLike(first, 1)] };
+    const engine = await Engine.create(canvas(), settings, undefined, new CpuBackend());
+    await engine.load(settings, yEnv);
+    expect([engine.sim.width, engine.sim.height]).toEqual([129, 90]);
+    // Strain A on the middle of the base (yMaze().start), strain B on the second food stroke: the food of the right
+    // arm, as the start layout Food gives it.
+    const [start, right] = [cellOf(0), cellOf(2)];
+    expect(start?.[0]).toBeCloseTo(64.5, 9);
+    expect(start?.[1]).toBeCloseTo(74.5, 9);
+    expect(toolsOf(engine)).toEqual([
+      [0, start?.[0], start?.[1]],
+      [1, right?.[0], right?.[1]],
+    ]);
+    // Without the start layout Food, no colony: the inoculate tool runs in no step.
+    const before = toolsOf(engine).length;
+    await engine.apply({ ...engine.settings, layout: 'mixed' });
+    expect(toolsOf(engine)).toHaveLength(before);
+  });
+
+  it('paint nothing: the environment, the slime field and the paint calls are those of the list without it', async () => {
+    const settings = yMaze.settings();
+    const [withStart, without] = [
+      await engineWith(settings, yEnv),
+      await engineWith(
+        settings,
+        yEnv.filter((e) => e.kind !== 'start'),
+      ),
+    ];
+    expect(differing(withStart.sim().env, without.sim().env)).toBe(0);
+    const [a, b] = [await withStart.sim().readSlime(), await without.sim().readSlime()];
+    expect(a.filter((v) => v !== 0).length).toBeGreaterThan(1000); // the slime of the left arm
+    expect(Buffer.compare(Buffer.from(a.buffer), Buffer.from(b.buffer))).toBe(0);
+    expect(withStart.sim().calls).toEqual(without.sim().calls);
+    expect(withStart.sim().revision).toBe(without.sim().revision);
+    // The list holds it, so the drawing of the scene matches the scene.
+    expect(edits(withStart.engine)).toHaveLength(yEnv.length);
+    expect(withStart.engine.matches(yEnv, 'box')).toBe(true);
+  });
+
+  it('stay under an erase, go with Clear, and come back with a link of the scene', async () => {
+    const settings = yMaze.settings();
+    const { engine } = await engineWith(settings, yEnv);
+    const start = cellOf(0) ?? [0, 0];
+    // An erase over the base clears no edit that paints: the sweep deletes the erase and keeps the start spot.
+    engine.paint({ kind: 'erase', from: start, to: start, radius: 9 });
+    engine.frame(0, 0);
+    expect(edits(engine)).toHaveLength(yEnv.length);
+    expect(edits(engine)[0]?.kind).toBe('start');
+    engine.reset();
+    expect(toolsOf(engine).at(-1)).toEqual([0, start[0], start[1]]);
+    // The link of the scene names every shape, the start spot too, and the colony of the receiver starts there.
+    const { hash, dropped } = await encodeLink(
+      engine.settings,
+      drawingOf(engine.envList(), 'y-maze', yEnv, 'box', [0]),
+    );
+    expect(dropped).toBe(false);
+    const link = await decodeLink(hash);
+    const d = link?.drawing;
+    if (!link || !d) throw new Error('no drawing in the link');
+    expect(d.shapes.every(Boolean)).toBe(true);
+    const receiver = await Engine.create(canvas(), link.settings, undefined, new CpuBackend());
+    await receiver.load(
+      link.settings,
+      yEnv.filter((_, i) => d.shapes[i]),
+      'box',
+      d.strokes,
+    );
+    expect(toolsOf(receiver)).toEqual([[0, start[0], start[1]]]);
+    // Clear removes the start spot with the rest: a reset then starts no colony.
+    const placed = toolsOf(engine).length;
+    engine.clearEnvironment();
+    engine.reset();
+    expect(edits(engine)).toEqual([]);
+    expect(toolsOf(engine)).toHaveLength(placed);
   });
 });
 

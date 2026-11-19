@@ -409,7 +409,7 @@ describe('the drawing of a link', () => {
           kind === 'anode' ? 4 : 5,
         ]);
         expect(unpackDrawing(bytes)?.strokes).toEqual([at(kind, boundary)]);
-        // A kind that no version has, and the same bytes as version 3, are refused.
+        // A kind that no stroke has (7 is a start spot, ADR 0066), and the same bytes as version 3, are refused.
         expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 7 : v)))).toBeUndefined();
         expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 4 ? 2 : v)))).toBeUndefined();
         expect(unpackDrawing(Uint8Array.from(bytes, (v, i) => (i === 0 ? 3 : v)))).toBeUndefined();
@@ -467,6 +467,43 @@ describe('the drawing of a link', () => {
     expect(d && [...kindsOf(d)].sort()).toEqual(['anode', 'erase', 'food', 'slime', 'wall']);
     // A link without painted slime starts with the same version as before, and so does one with it.
     expect([pack([at('food', 'box')])[0], pack(mixed)[0]]).toEqual([4, 4]);
+  });
+
+  // ADR 0066: a start spot is a shape of a scene, and no tool paints one. A link holds it by the bit of its shape, as it
+  // holds every shape of the scene, and never as a stroke.
+  it('holds the start spot of a scene by the bit of its shape, and never as a stroke', () => {
+    for (const id of ['y-maze', 'slime-everywhere']) {
+      const p = presetById(id);
+      if (!p?.env) throw new Error(`no scene ${id}`);
+      const arena = p.settings().boundary;
+      const list = p.env.map((e) => fromShape(e, arena));
+      const d = drawingOf(list, id, p.env, arena, [0]);
+      expect([d.shapes.every(Boolean), d.strokes], id).toEqual([true, []]);
+      expect(kindsOf(d).has('start'), id).toBe(true);
+      expect(unpackDrawing(packDrawing(d) ?? new Uint8Array()), id).toEqual(d);
+      // A list without its start spot holds the other shapes, and the bit of the start spot says that it went.
+      const without = drawingOf(list.slice(1), id, p.env, arena, [0]);
+      expect([without.shapes[0], without.shapes.slice(1).every(Boolean), without.strokes], id).toEqual([
+        false,
+        true,
+        [],
+      ]);
+    }
+    const at = (kind: EnvEdit['kind']): EnvEdit => ({
+      kind,
+      from: [10, 12],
+      to: [10, 12],
+      radius: 2,
+      grid: [512, 320],
+      boundary: 'box',
+    });
+    const pack = (strokes: EnvEdit[]) => packDrawing({ scene: '', revision: 0, origins: [], shapes: [], strokes });
+    expect(pack([at('start')])).toBeUndefined();
+    expect(pack([at('food'), at('start')])).toBeUndefined();
+    // The bytes of a stroke of the Slime tool with the number of a start spot (7) give no drawing.
+    const slime = pack([at('slime')]) ?? new Uint8Array();
+    expect(slime[4]).toBe(6);
+    expect(unpackDrawing(Uint8Array.from(slime, (v, i) => (i === 4 ? 7 : v)))).toBeUndefined();
   });
 
   it('decodes random, truncated and changed bytes without throwing, to nothing or a valid drawing', () => {

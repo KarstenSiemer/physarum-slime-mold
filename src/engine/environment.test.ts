@@ -327,14 +327,28 @@ describe('preset shapes in the canonical frame', () => {
     }
   });
 
-  it('keep every food source of the dish scenes inside the dish, also on a phone', () => {
+  // Painted slime coats ground and is no source: the slime of Slime everywhere reaches past the rim, so that it covers
+  // every cell of the dish (ADR 0066). A start spot paints nothing, and its radius is not read.
+  it('keep every food source and start spot of the dish scenes inside the dish, also on a phone', () => {
     for (const p of PRESETS.filter((x) => x.settings().boundary === 'dish'))
       for (const [name, [w, h]] of Object.entries(grids))
-        for (const e of p.env ?? []) {
+        for (const e of (p.env ?? []).filter((shape) => shape.kind !== 'slime')) {
           const s = strokeOn(fromShape(e, 'dish'), w, h);
           const r = Math.hypot((s?.from[0] ?? 0) - w / 2, (s?.from[1] ?? 0) - h / 2) + (s?.radius ?? 0);
           expect(r, `${p.id} on ${name}`).toBeLessThan(dishRadius(w, h));
         }
+  });
+
+  it('coat every cell of the dish of Slime everywhere with the full amount of slime, also on a phone', () => {
+    const slime = preset('slime-everywhere').filter((e) => e.kind === 'slime');
+    expect(slime).toHaveLength(1);
+    for (const [name, [w, h]] of Object.entries({ ...grids, lattice: [169, 169] as const })) {
+      const s = strokeOn(fromShape(slime[0] ?? { kind: 'slime', at: [0, 0], r: 0 }, 'dish'), w, h);
+      expect(s?.from, name).toEqual([w / 2, h / 2]);
+      // The amount of painted slime is full in a cell 3.5 cells or more inside the edge of the brush (docs/model.md,
+      // 6.9), and every cell of the dish has its centre inside the rim.
+      expect((s?.radius ?? 0) - 3.5, name).toBeGreaterThan(dishRadius(w, h));
+    }
   });
 
   it('keep the layout of Shortest path and Maze along the long side of a tall screen', () => {

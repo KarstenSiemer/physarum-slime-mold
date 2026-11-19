@@ -1,3 +1,4 @@
+import { dishRadius } from '../engine/brush';
 import {
   defaultSettings,
   defaultStrain,
@@ -9,6 +10,7 @@ import {
   type Strain,
 } from './params';
 import { tokyoLight, tokyoShapes } from './tokyo';
+import { Y_MAZE, yMaze } from './y-maze';
 
 /**
  * Food, light, a wall, an electrode or painted slime in the canonical frame of the preset's own arena
@@ -21,9 +23,14 @@ import { tokyoLight, tokyoShapes } from './tokyo';
  * A shape of the kind `slime` coats ground with slime (ADR 0055, decision 7), as the experiments of Reid et al. 2012
  * coat the agar. At the start of a run its cells without a wall have slime of the age 0, in the extended model. A wall
  * clears the slime of its cells, so the order of the walls and the slime of a scene does not matter.
+ *
+ * A shape of the kind `start` is a start spot (ADR 0066): the start layout Food places the colony of strain k at the
+ * k-th start spot of the scene, in place of the k-th food, as Reid et al. 2012 set a plasmodium on agar without food.
+ * A strain without a start spot starts on its food. A start spot paints nothing, and its radius is not read: the colony
+ * takes the disc that it takes on a food (Engine.seedAtFood()).
  */
 export interface EnvShape {
-  kind: 'food' | 'light' | 'wall' | 'anode' | 'cathode' | 'slime';
+  kind: 'food' | 'light' | 'wall' | 'anode' | 'cathode' | 'slime' | 'start';
   at: [number, number];
   to?: [number, number];
   r: number;
@@ -476,6 +483,35 @@ function cornShapes(): EnvShape[] {
       to: cells.at(x2 * room, y2 * room),
       r: cells.r(MAZE_WALL),
     })),
+  ];
+}
+
+/**
+ * The Y-maze of Reid et al. 2012 with slime on its left arm (ADR 0066): the layout of ADR 0056, and the start spot of
+ * the colony on the middle of its base.
+ */
+const Y = yMaze();
+
+/**
+ * The dish of the scene Slime everywhere (ADR 0066): Reid et al. 2012 without the trap. Their dish is 8.6 cm wide,
+ * 160 cells at the 0.537 mm per cell of the Y-maze, and the dish of the app is that wide on a lattice of 169 × 169
+ * cells (159.7 cells, dishRadius()). The well of glucose is 5 mm wide. The positions of the start and of the well are
+ * this app's choice: both lie on the vertical axis, `inset` mm inside the rim, the start at the top.
+ */
+export const SLIME_DISH = { side: 169, mmPerCell: Y_MAZE.mmPerCell, well: 5, inset: 10 } as const;
+
+/** The shapes of the scene Slime everywhere: the start spot, the well of glucose as food, then slime on the dish. */
+function slimeDishShapes(): EnvShape[] {
+  const { side, mmPerCell, well, inset } = SLIME_DISH;
+  // Cells to the canonical frame of a dish, whose unit is the side of the lattice. Rounded, so that a scene and a
+  // link to it hold the same numbers: to about 1/600 of a cell.
+  const unit = (cells: number) => Math.round((cells / side) * 1e5) / 1e5;
+  const y = unit(dishRadius(side, side) - inset / mmPerCell);
+  return [
+    { kind: 'start', at: [0, -y], r: 0 },
+    { kind: 'food', at: [0, y], r: unit(well / mmPerCell / 2) },
+    // Half the side of the lattice reaches past the rim: every cell of the dish.
+    { kind: 'slime', at: [0, 0], r: 0.5 },
   ];
 }
 
@@ -1068,6 +1104,39 @@ SCENES.push(
     // The start layout 'food' places strain A on the first food and strain B on the second.
     env: tokyoShapes(['Tokyo', 'Utsunomiya']),
   },
+  {
+    id: 'y-maze',
+    name: 'Y-maze with slime',
+    group: 'experiments',
+    source: 'Reid et al. 2012',
+    summary: 'Slime on one arm of a Y-maze: the slime mold takes the other arm, and the app fills both.',
+    watch:
+      'The colony starts on the base, without food, and grows into both arms at once. It reaches the first food after about 100 steps and the other one soon after: the slime on the left arm changes nothing yet. Then the flow keeps one tube between the two foods, and the rest of the base starves.',
+    about:
+      'Reid and colleagues set a slime mold on the base of a Y-maze with food at the end of each arm. With slime on one arm, 39 of 40 chose the arm without slime; with slime on both arms they showed no preference. This app has no rule yet that reads the slime, so its colony takes both arms alike. The avoidance will come with a rule for the growth front.',
+    strainRoles: ['Jones’ foraging agent, starts on the base without food'],
+    why: 'Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 8, as in the Snail maze. The maze has the paper’s sizes at 0.54 mm per cell, on 129 × 90 cells: a base of 1 cm² and arms of 4 cm. The paper gives no width and no angle of the arms: 1 cm and 45° are this app’s. The slime is new at the start; the paper’s was 8 to 12 hours old.',
+    settings: () => forager({ lattice: [...Y_MAZE.lattice], boundary: 'box' }),
+    // The start layout 'food' places the colony on the start spot: the middle of the base. The foods follow, the left
+    // one first, then the walls, the slime of the left arm and its film.
+    env: [Y.startShape, ...Y.shapes(['left']), ...Y.film(['left'])],
+  },
+  {
+    id: 'slime-everywhere',
+    name: 'Slime everywhere',
+    group: 'experiments',
+    source: 'Reid et al. 2012',
+    summary: 'A dish coated with slime: the colony grows to the glucose as fast as on blank agar.',
+    watch:
+      'The colony starts at the top of the dish, on slime like all of its ground. Arms grow out on all sides, and one reaches the glucose at the bottom after about 400 steps, as it does without the slime. With one food no flux runs in the tubes, and a network of loops remains.',
+    about:
+      'Reid and colleagues coated the agar of a dish with slime and let a slime mold find a well of glucose. Without a trap the slime changed neither the time to the glucose, nor the way, nor the speed. This app has no rule yet that reads the slime, so here too the colony grows as on blank agar. A rule for the avoidance of slime must keep this.',
+    strainRoles: ['Jones’ foraging agent, starts at the top, drawn to food'],
+    why: 'Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 8. The dish is 8.6 cm wide at 0.54 mm per cell, on 169 × 169 cells, and its food is a well of glucose 5 mm wide. The places of the start and of the well are this app’s: 1 cm inside the rim, at the top and at the bottom. The slime covers the dish and is new at the start.',
+    settings: () => forager({ lattice: [SLIME_DISH.side, SLIME_DISH.side] }),
+    // The start layout 'food' places the colony on the start spot at the top, not on the glucose.
+    env: slimeDishShapes(),
+  },
 );
 
 // The scenes without the rule of one agent per cell: this app's two scenes in the style of Jenson and Fogleman, which
@@ -1254,7 +1323,7 @@ export function latticeLostNotice(
 }
 
 export type SourceKind =
-  'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'tsuda' | 'voronoi' | 'app';
+  'jones' | 'fogleman' | 'nakagaki' | 'tero' | 'later' | 'coarsening' | 'tsuda' | 'voronoi' | 'reid' | 'app';
 
 export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('Jones 2010')) return 'jones';
@@ -1265,6 +1334,7 @@ export function sourceKind(p: Preset): SourceKind {
   if (p.source.startsWith('After Jones')) return 'later';
   if (p.source.startsWith('Baumgarten')) return 'coarsening';
   if (p.source.startsWith('Tsuda')) return 'tsuda';
+  if (p.source.startsWith('Reid')) return 'reid';
   return 'app';
 }
 
@@ -1295,6 +1365,10 @@ export function sourceText(p: Preset): string {
       return 'Tsuda, Jones, Adamatzky and Mills (2011, arXiv:1204.1752) steered a real slime mold with electric current: it grew toward the cathode. In Jones’ model they made each current sink a source above 0 of the trail map, and each current source one below 0. This scene uses the values of that model. The grid and the places of the electrodes were chosen for this app: the paper gives none.';
     case 'voronoi':
       return 'Jones and Adamatzky, “Slime mould inspired generalised Voronoi diagrams with repulsive fields” (2015, arXiv:1503.06973), add repellents to Jones’ model: sources below zero in the trail map. With them the agents draw the Voronoi diagram of a set of points. This scene uses the model of the paper. Its lattice and its strengths are read from the figures or chosen for this app.';
+    case 'reid': {
+      const what = p.id === 'y-maze' ? 'their Y-maze' : 'their dish without the trap';
+      return `Reid, Latty, Dussutour and Beekman, PNAS 109: 17490 (2012): a real slime mold avoids ground with its own slime, and it uses the slime as a memory to find its way out of a trap. This scene rebuilds ${what}, at 0.54 mm per cell. The agents, their growth and the flow in the tubes are this app’s. No rule of the app reads the slime yet.`;
+    }
     case 'app':
       return 'This scene was made for this app. Its settings are not taken from a paper.';
   }
