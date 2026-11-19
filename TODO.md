@@ -260,6 +260,28 @@ Handover for stage 4: the veins must come from the crown at the head of a tube (
 - **What stage 3 leaves for it.** The front stamp of each cell: the step at which plasm first came onto the cell. The skirt of the picture: a thin clear veil around young ground, below the plasm, which comes and goes without a jump. It is a picture and holds no plasm. When the model grows the crown, take the skirt out, or draw it from the plasm of the crown.
 - **Pictures first.** Show the owner pictures of the prototype early, at a zoom of 5 and more, and let the owner look at the running app before tests and polish: the look is the owner's choice, and the fan of stage 3 was built to the end before the owner saw it move.
 
+Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the story and the commands):
+
+- **A sink alone gives no crown.** The plasm must also move with the flow (a sensor reads the pressure), and the front
+  needs its own speed: a territory that the agents at the rim push open. Then a tube grows a crown with veins along
+  the flow, a cell becomes a vein 400 to 1,900 steps after the front, and the front runs 1.5 to 3 cm/h.
+- **The Y-maze and a dish full of slime** (the rules of decisions 5 to 8): the crown and the fan take the blank arm
+  40 : 0, show no preference with slime on both arms or none, and grow as fast on slime everywhere as without slime;
+  the tree gives 31 : 9 and covers only 40 % of an open dish in 20,000 steps. A dish full of slime keeps its colony:
+  its agents stay, and Jones' births go on.
+- **The owner decided on 2026-11-19** (ADR 0065, decisions 5 and 6): slime is a weak sink of weight 0.025 (1.27 times
+  slower on both arms), and the panel offers every form of the drift (a tree of tubes, a tube with a crown, a fan)
+  as a setting. On the same day the owner decided that the births follow every sink, also on slime (decision 7): a
+  colony in a dish full of slime must still give birth. Decision 8, an agent's choice: every sink sits at the edge of
+  the territory, and the slime sets only its weight. `research/front/how-the-crown-forms.md` tells how the agents and
+  the new rules make a crown.
+- Not measured: Murray's exponent; the scenes of the app with these rules (they need the engine).
+- **Next: the engine of stage 4** (ADR 0065, decision 1): both backends, a CPU reference, wrong rules, `docs/model.md`,
+  the drift as a setting of the panel, the digests of every scene and the measures of the 11 scenes with growth and
+  the flow, and a test where a second strain grows on the slime of the first. A form of the paid births without a
+  global order goes to the prototype first (ADR 0065, open points). Then the picture: the skirt goes, or it is drawn
+  from the plasm of the crown.
+
 Open, for the owner:
 
 - The 6 days and the flow strength of 2.8 are choices of the coordinator (ADR 0054, open points). The time is the default of the setting Slime life time since ADR 0055, and the strength is one constant.
