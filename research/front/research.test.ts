@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { FLOW, pcg } from '../../src/engine/flow';
 import { dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
-import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, type Front } from './sim';
+import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, rankKey, type Front } from './sim';
 import { runY, slimedOf } from './ymaze';
 
 /** The rule set of ADR 0065 (README.md, step 6) with the drift 1.5, and the forms of a GPU of ADR 0067. */
@@ -200,6 +200,34 @@ describe('the CPU prototype of stage 4', () => {
       expect(Math.abs(claims - expected)).toBeLessThan(3 * Math.sqrt(expected) + 1);
     },
   );
+
+  it('gives the whole part of the budget to the agents of the front with the least keys, as the order (ADR 0067)', () => {
+    // The key −ln(1 − u) / r: half of the draws give a key below ln 2 / r, and a larger rate a smaller key.
+    expect(rankKey(0.5, 0.25)).toBeCloseTo(Math.LN2 / 0.25, 12);
+    expect(rankKey(0, 0.5)).toBeCloseTo(0, 12);
+    expect(rankKey(0.9, 1)).toBeLessThan(rankKey(0.9, 0.1));
+    const sim = smallDish(gpuRules({ paidBy: 'rank' }), 9);
+    let [jones, budget] = [new Set<number>(), 0];
+    sim.onPaid = () => {
+      jones = new Set(Array.from(sim.want.keys()).filter((i) => sim.want[i]! >= 0));
+      budget = sim.budget;
+    };
+    let [steps, births] = [0, 0];
+    for (let j = 0; j < 150; j++) {
+      jones = new Set([-1]);
+      sim.advance();
+      if (jones.has(-1)) continue;
+      const parents = Array.from(sim.want.keys()).filter((i) => sim.want[i]! >= 0 && !jones.has(i));
+      const ranked = [...sim.paidKeys].sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(([, i]) => i);
+      const m = budget >= 1 ? Math.min(Math.floor(budget), ranked.length) : 0;
+      expect(parents.sort((a, b) => a - b)).toEqual(ranked.slice(0, m).sort((a, b) => a - b));
+      expect(sim.paidClaims).toBe(m);
+      if (m > 0) steps++;
+      births += m;
+    }
+    expect(steps).toBeGreaterThan(20);
+    expect(births).toBeGreaterThan(40);
+  });
 
   it('fills the chances min(1, λ · r) up to the budget or the number of agents (ADR 0067)', () => {
     const chances = (rates: number[], target: number, fixed = false) => {

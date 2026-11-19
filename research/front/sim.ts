@@ -132,7 +132,7 @@ export interface Front {
    * the growth step the agent of the front on a marked cell claims a child; the budget never exceeds the number of
    * sinks. Each claim lowers the budget by 1.
    */
-  paidBy: 'order' | 'chance' | 'fill' | 'ahead';
+  paidBy: 'order' | 'rank' | 'chance' | 'fill' | 'ahead';
   /**
    * How a sink learns whether ground without slime lies within `reach` (ADR 0067). 'chamfer': the distance field of
    * two passes over the grid. 'box', the form of a GPU: the sink looks at the square of side 2 · reach + 1 around it.
@@ -215,7 +215,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   speedOn: ['body', 'trail', 'push'],
   paidOn: ['fresh', 'sinks'],
   sinkAt: ['fresh', 'edge'],
-  paidBy: ['order', 'chance', 'fill', 'ahead'],
+  paidBy: ['order', 'rank', 'chance', 'fill', 'ahead'],
   fresh: ['chamfer', 'box'],
   sums: ['float', 'fixed'],
   start: ['disc', 'agents'],
@@ -227,6 +227,12 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
  * territory, where the sinks lie.
  */
 export const GPU_FORMS = { paidBy: 'fill', fresh: 'box', sums: 'fixed' } as const;
+
+/**
+ * The key of an agent with the sink rate r and the uniform draw u in the order of the paid births (`paidBy` 'order'
+ * and 'rank'): the least keys first, so that an agent comes early with odds in its rate (Efraimidis and Spirakis).
+ */
+export const rankKey = (u: number, r: number): number => -Math.log(1 - u) / r;
 
 /**
  * The scale λ of `paidBy` 'fill' (ADR 0067): the chances min(1, λ · r) of the sink rates `rates` add up to `target`.
@@ -393,6 +399,8 @@ export class Sim {
   frontAgents = 0;
   /** The scale λ of the chances of the last growth step (`paidBy` 'chance' or 'fill'). */
   paidScale = 0;
+  /** The keys and ids of the agents that could claim a child in the last growth step (`paidBy` 'rank'). */
+  readonly paidKeys: [number, number][] = [];
   /** The Chebyshev distance of each cell to ground without slime, at most 255 (with `reach`). */
   private readonly toFresh: Uint8Array;
   /** 1 for a cell of the territory of the colony (`speed`). */
@@ -869,6 +877,7 @@ export class Sim {
     // 'fill'), or the agent of the front on a marked cell claims a child ('ahead'; the flow pass of this step takes the
     // claims off the budget).
     if (front.paid > 0 && (front.paidBy === 'chance' || front.paidBy === 'fill')) this.paidByChance(free);
+    if (front.paid > 0 && front.paidBy === 'rank') this.paidByRank(free);
     if (front.paid > 0 && front.paidBy === 'ahead') {
       this.paidClaims = 0;
       for (let i = 0; i < cap; i++) {
@@ -897,7 +906,7 @@ export class Sim {
       seedFor(1, ORDER, k, seed);
       if (atSinks) {
         const order = new Map<number, number>();
-        for (const i of at) order.set(i, -Math.log(1 - rand()) / this.sinkRate[this.cellOf(this.ax[i]!, this.ay[i]!)]!);
+        for (const i of at) order.set(i, rankKey(rand(), this.sinkRate[this.cellOf(this.ax[i]!, this.ay[i]!)]!));
         at.sort((a, b) => order.get(a)! - order.get(b)!);
       } else
         for (let a = at.length - 1; a > 0; a--) {
@@ -1000,6 +1009,43 @@ export class Sim {
     this.frontAgents = atFront;
     this.paidScale = lambda;
     this.budget = Math.min(B - this.paidClaims, atFront);
+  }
+
+  /**
+   * The births that the flux pays as the order of ADR 0065 gives them, in the form of a GPU (`paidBy` 'rank', ADR
+   * 0067). Each agent of the front that could claim a child draws a key of its own (rankKey()), and the whole part of B
+   * of them with the least keys claim a child: the order of Efraimidis and Spirakis, as in growthPass(). A GPU writes
+   * the keys in one pass over the agents, and in the next each of these agents counts the agents of its strain with a
+   * smaller key, and stops at the whole part of B. As with the order, a budget below 1 pays nothing, and after the
+   * claims the budget never exceeds the number of agents of the front.
+   */
+  private paidByRank(free: number[]) {
+    const { cap } = this;
+    const front = this.p.front;
+    const k = this.step;
+    this.onPaid?.();
+    this.paidKeys.length = 0;
+    let atFront = 0;
+    for (let i = 0; i < cap; i++) {
+      if (!this.alive[i] || this.want[i]! >= 0) continue;
+      const c = this.cellOf(this.ax[i]!, this.ay[i]!);
+      if (this.sinkRate[c]! <= 0 || this.D[c]! < FLOW.half) continue;
+      if (front.rim && !this.atRim(c)) continue;
+      atFront++;
+      if (!this.roomFor(c, this.occNext)) continue;
+      seedFor(i, PAID, k, this.p.seed);
+      this.paidKeys.push([rankKey(rand(), this.sinkRate[c]!), i]);
+    }
+    this.frontAgents = atFront;
+    this.paidClaims = 0;
+    if (this.budget < 1) return;
+    // The rank of an agent: the agents with a smaller key, or with the same key and a smaller id.
+    const ranked = [...this.paidKeys].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    for (const [, i] of ranked.slice(0, Math.floor(this.budget))) {
+      if (this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free, front.rim)) this.paidClaims++;
+    }
+    this.paidBirths += this.paidClaims;
+    this.budget = Math.min(this.budget - this.paidClaims, atFront);
   }
 
   /**

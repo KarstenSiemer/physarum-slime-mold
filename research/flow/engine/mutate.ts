@@ -5548,6 +5548,22 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'the sinks take exactly what the sources give',
     STAGE4_SPEC,
   ],
+  [
+    'FP14 front: the key of the order grows with the sink rate',
+    STAGE4_SIM,
+    'export const rankKey = (u: number, r: number): number => -Math.log(1 - u) / r;',
+    'export const rankKey = (u: number, r: number): number => -Math.log(1 - u) * r;',
+    'with the least keys',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP15 front: the rank lets one agent more claim a child than the whole part of the budget',
+    STAGE4_SIM,
+    'ranked.slice(0, Math.floor(this.budget))',
+    'ranked.slice(0, Math.ceil(this.budget))',
+    'with the least keys',
+    STAGE4_SPEC,
+  ],
 ];
 
 const only = process.argv.slice(2);
