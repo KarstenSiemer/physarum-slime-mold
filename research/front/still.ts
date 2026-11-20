@@ -9,7 +9,9 @@
 //     steps=8000 every=500 pics=2000,8000 name=e2i/<case>/s<seed>
 //   node --import ./research/flow/register.mjs research/front/still.ts table=research/front/out/e2i/<set> [at=<step>]
 // `k`: the total of the sinks in units of the one of E2f (norm 2 times the flow strength 8); `base`: the base
-// conductance of a tube cell (0.02 in the app); `shareOn`: equal or supply (ADR 0077); `noise`: the noise of D.
+// conductance of a tube cell (0.02 in the app); `shareOn`: equal or supply (ADR 0077); `noise`: the noise of D;
+// `fluxOn`: the flux of a cell, sum (the app) or norm (ADR 0080, part E2j). Since ADR 0080 a row adds the direction of
+// the veins against the grid (gridShares()) and the angle of the main veins at the mouth (mouthAngles()).
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -17,12 +19,14 @@ import { FLOW, pcg } from '../../src/engine/flow';
 import { writePng } from '../flow/prototype/world';
 import { neck } from './layouts';
 import { ridgeCells, veinTowardRim, type CrownFields } from './measure';
-import { Sim, frontFrom, params, type Layout } from './sim';
+import { Sim, frontFrom, params, type Front, type Layout } from './sim';
 
 /** The box, the channel and the food of the neck of E2f, and the radius of the half disc at the mouth. */
 export const STILL = { w: 260, h: 240, wide: 14, long: 40, radius: 80, food: [130, 8, 5] as const } as const;
 /** The arcs of the half disc on which the veins are counted. */
 export const ARCS = [20, 40, 60, 75] as const;
+/** The radii of the two crossings of a main vein that give its angle at the mouth (mouthAngles()). */
+export const MOUTH = [15, 35] as const;
 /** The least D of a vein, as in E2f, and of a fine vein. */
 export const VEIN_D = 0.05;
 export const FINE_D = 0.01;
@@ -119,11 +123,12 @@ export interface StillOptions {
   base: number;
   shareOn: 'equal' | 'supply';
   noise: number;
+  fluxOn: Front['fluxOn'];
 }
 
 /** A Sim on the still sheet: no agents, a full body held by its trail, the rim as the sinks, D fresh with noise. */
 export function stillSim(sheet: StillSheet, o: StillOptions): Sim {
-  const words = { ...E2F_WORDS, norm: String(2 * o.k), paid: String(20 * o.k), shareOn: o.shareOn };
+  const words = { ...E2F_WORDS, norm: String(2 * o.k), paid: String(20 * o.k), shareOn: o.shareOn, fluxOn: o.fluxOn };
   const sim = new Sim(sheet.layout, params({ seed: o.seed, front: frontFrom(words), scentSteps: 0, startAgents: 0 }));
   sim.base = o.base;
   sim.stillSinks = sheet.rim;
@@ -167,9 +172,128 @@ export interface StillRow {
   top: number;
   /** What the sinks take together, over the total. */
   take: number;
+  /** The vein cells against the grid (gridShares()): of the veins and of the fine veins. Since ADR 0080. */
+  grid?: GridShares;
+  fineGrid?: GridShares;
+  /** The angle of the main vein at the mouth on the left and on the right (mouthAngles()). Since ADR 0080. */
+  mouth?: [number, number];
 }
 
 const round = (v: number, n = 4) => (Number.isFinite(v) ? Number(v.toPrecision(n)) : NaN);
+
+/**
+ * The axis of each vein cell (a cell of `ridge`, ridgeCells()) in degrees from the x axis, 0 to 180: across the main
+ * direction of the gradient of D over the 3 × 3 cells around it (the structure tensor). D is the mean over the body
+ * cells of the 3 × 3 block, as ridgeCells() reads it, and its gradient comes from Scharr's kernel, which reads every
+ * angle alike: a straight ridge at any angle reads within 0.2° (the test). On the crest of a vein the gradient is small,
+ * and its two flanks give the axis. NaN on any other cell. veinTowardRim() takes the axis of least curvature instead;
+ * off the crest of a narrow vein that axis turns across the vein.
+ */
+export function veinAxis(f: CrownFields, ridge: Uint8Array): Float32Array {
+  const { w, h, cells } = f;
+  const sm = new Float32Array(cells);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let [s, n] = [0, 0];
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const [xx, yy] = [x + dx, y + dy];
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h || !(f.B[yy * w + xx]! >= FLOW.bodyLow)) continue;
+          s += f.D[yy * w + xx]!;
+          n++;
+        }
+      sm[y * w + x] = n > 0 ? s / n : 0;
+    }
+  const at = (x: number, y: number) => sm[y * w + x]!;
+  const out = new Float32Array(cells).fill(NaN);
+  for (let y = 2; y < h - 2; y++)
+    for (let x = 2; x < w - 2; x++) {
+      if (!ridge[y * w + x]) continue;
+      let [jxx, jxy, jyy] = [0, 0, 0];
+      for (let v = y - 1; v <= y + 1; v++)
+        for (let u = x - 1; u <= x + 1; u++) {
+          const gx =
+            3 * (at(u + 1, v - 1) - at(u - 1, v - 1)) +
+            10 * (at(u + 1, v) - at(u - 1, v)) +
+            3 * (at(u + 1, v + 1) - at(u - 1, v + 1));
+          const gy =
+            3 * (at(u - 1, v + 1) - at(u - 1, v - 1)) +
+            10 * (at(u, v + 1) - at(u, v - 1)) +
+            3 * (at(u + 1, v + 1) - at(u + 1, v - 1));
+          [jxx, jxy, jyy] = [jxx + gx * gx, jxy + gx * gy, jyy + gy * gy];
+        }
+      if (!(jxx + jyy > 0)) continue;
+      const across = (0.5 * Math.atan2(2 * jxy, jxx - jyy) * 180) / Math.PI;
+      out[y * w + x] = (across + 270) % 180;
+    }
+  return out;
+}
+
+export interface GridShares {
+  /** The share of the vein cells whose axis lies within 7.5° of a diagonal (45°, 135°), and of an axis (0°, 90°). */
+  diag: number;
+  axis: number;
+  /** The vein cells of the half disc inside the ring of the sinks. */
+  cells: number;
+}
+
+/**
+ * The direction of the veins against the grid: of the vein cells of the half disc inside the ring of the sinks (centre
+ * less than 78 cells away), the share whose axis (veinAxis()) lies within 7.5° of a diagonal and within 7.5° of an axis
+ * of the grid. At random each share is 30° of 180°, 0.17.
+ */
+export function gridShares(sheet: StillSheet, f: CrownFields, ridge: Uint8Array): GridShares {
+  const axis = veinAxis(f, ridge);
+  let [n, diag, along] = [0, 0, 0];
+  for (let c = 0; c < f.cells; c++) {
+    const a = axis[c]!;
+    if (!Number.isFinite(a) || Math.floor(c / f.w) < STILL.long || !(sheet.dist[c]! < 78)) continue;
+    n++;
+    if (Math.min(Math.abs(a - 45), Math.abs(a - 135)) <= 7.5) diag++;
+    if (Math.min(a, Math.abs(a - 90), 180 - a) <= 7.5) along++;
+  }
+  return { diag: round(diag / n, 3), axis: round(along / n, 3), cells: n };
+}
+
+/**
+ * The angle of the main vein at the mouth on the left and on the right side of the axis of the channel, in degrees
+ * from that axis: 0 along it, 45 along a diagonal of the grid, 90 across. On each arc of MOUTH (a band 2 cells deep)
+ * the vein crosses where D is highest on that side: the D-weighted mean of the cells around that maximum, in the order
+ * of their angle, whose D is at least half of it. The angle is that of the line through the two crossings. The cells
+ * within 15° of the wall do not count: a vein along the wall is no main vein.
+ */
+export function mouthAngles(sheet: StillSheet, D: Float32Array): [number, number] {
+  const { w } = sheet.layout;
+  const [cx, cy] = [STILL.w / 2, STILL.long];
+  const crossing = (r: number, side: number): [number, number] => {
+    const band: { x: number; y: number; t: number; d: number }[] = [];
+    for (let c = 0; c < D.length; c++) {
+      const [x, y] = [(c % w) + 0.5, Math.floor(c / w) + 0.5];
+      if (!sheet.body[c] || y < cy || Math.abs(sheet.dist[c]! - r) >= 1 || Math.sign(x - cx) !== side) continue;
+      const t = Math.atan2(x - cx, y - cy);
+      if (Math.abs(t) > (75 * Math.PI) / 180) continue;
+      band.push({ x, y, t, d: D[c]! });
+    }
+    band.sort((a, b) => a.t - b.t);
+    let top = 0;
+    for (let i = 1; i < band.length; i++) if (band[i]!.d > band[top]!.d) top = i;
+    const half = 0.5 * band[top]!.d;
+    let [lo, hi] = [top, top];
+    while (lo > 0 && band[lo - 1]!.d >= half) lo--;
+    while (hi < band.length - 1 && band[hi + 1]!.d >= half) hi++;
+    let [sx, sy, sd] = [0, 0, 0];
+    for (let i = lo; i <= hi; i++) {
+      const b = band[i]!;
+      [sx, sy, sd] = [sx + b.d * b.x, sy + b.d * b.y, sd + b.d];
+    }
+    return [sx / sd, sy / sd];
+  };
+  const angle = (side: number) => {
+    const [[x1, y1], [x2, y2]] = MOUTH.map((r) => crossing(r, side)) as [[number, number], [number, number]];
+    return round((Math.atan2(Math.abs(x2 - x1), y2 - y1) * 180) / Math.PI, 3);
+  };
+  return [angle(-1), angle(1)];
+}
 
 /** The measures of a still sheet: D, Q, the pressure P and the takes of the sinks at a step. */
 export function stillProfile(
@@ -258,6 +382,9 @@ export function stillProfile(
     active: round(takes.filter((t) => t >= 0.1 * equal).length / takes.length, 3),
     top: round(taken > 0 ? top / taken : NaN, 3),
     take: round(taken / f.total, 6),
+    grid: gridShares(sheet, fields, ridge),
+    fineGrid: gridShares(sheet, fields, fine),
+    mouth: mouthAngles(sheet, f.D),
   };
 }
 
@@ -338,8 +465,11 @@ export function tableLines(dir: string, at?: number): string[] {
               `${String(a.r)}: ${String(a.veins)}×${String(a.cells)} f ${String(a.fine)}×${String(a.fineCells)} cos ${String(a.cos)} D ${String(a.d)}`,
           )
           .join(' | ');
+        const grid = row.grid
+          ? ` | diag ${String(row.grid.diag)} axis ${String(row.grid.axis)} fine ${String(row.fineGrid?.diag)} ${String(row.fineGrid?.axis)} mouth ${String(row.mouth)}`
+          : '';
         out.push(
-          `${kase} s${String(run.seed)} k ${String(row.k)} | ${arcs} | settle ${String(row.settle)} spread ${String(row.spread)} active ${String(row.active)} top ${String(row.top)}`,
+          `${kase} s${String(run.seed)} k ${String(row.k)} | ${arcs} | settle ${String(row.settle)} spread ${String(row.spread)} active ${String(row.active)} top ${String(row.top)}${grid}`,
         );
       }
     }
@@ -356,12 +486,15 @@ if (isMain) {
   }
   const shareOn = args.shareOn ?? 'equal';
   if (shareOn !== 'equal' && shareOn !== 'supply') throw new Error(`shareOn=${shareOn}`);
+  const fluxOn = args.fluxOn ?? 'sum';
+  if (fluxOn !== 'sum' && fluxOn !== 'norm') throw new Error(`fluxOn=${fluxOn}`);
   const o: StillOptions = {
     seed: Number(args.seed ?? 1),
     k: Number(args.k ?? 1),
     base: Number(args.base ?? FLOW.base),
     shareOn,
     noise: Number(args.noise ?? 0.01),
+    fluxOn,
   };
   const steps = Number(args.steps ?? 8000);
   const every = Number(args.every ?? 500);

@@ -4,8 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { FLOW, pcg } from '../../src/engine/flow';
 import { tubeOut, type SinkInput } from '../../src/engine/sinks-reference';
-import { dish, yMazeLayout } from './layouts';
-import { alignment, crown, murray, rows, veinDelay } from './measure';
+import { box, dish, yMazeLayout } from './layouts';
+import { alignment, crown, murray, ridgeCells, rows, veinDelay, type CrownFields } from './measure';
 import {
   GPU_FORMS,
   Sim,
@@ -19,6 +19,7 @@ import {
   supplyLevel,
   type Front,
 } from './sim';
+import { veinAxis } from './still';
 import { runY, slimedOf } from './ymaze';
 
 /** The rule set of ADR 0065 (README.md, step 6) with the drift 1.5, and the forms of a GPU of ADR 0067. */
@@ -613,5 +614,72 @@ describe('the CPU prototype of stage 4', () => {
     const open = new Uint8Array(25).fill(1);
     for (let y = 0; y < 5; y++) open[y * 5 + 2] = 0;
     expect(seenThroughWalls({ w: 5, h: 5, open }, 2)).toBe(10);
+  });
+
+  it('reads a uniform flow F at the angle θ as F · (|cos θ| + |sin θ|) with fluxOn=sum, and as F with norm (ADR 0080)', () => {
+    // A uniform sheet, G = 1 on every cell; the pressure falls by F per cell along θ. The cell in the middle.
+    const F = 0.3;
+    const flux = (on: 'sum' | 'norm', pressure: (x: number, y: number) => number) => {
+      const sim = new Sim(box(9, 9, []), params({ scentSteps: 0, startAgents: 0, front: frontFrom({ fluxOn: on }) }));
+      for (let c = 0; c < sim.cells; c++) {
+        sim.G[c] = 1;
+        sim.P[0]![c] = pressure((c % 9) - 4, Math.floor(c / 9) - 4);
+      }
+      sim.fluxOfCells();
+      return sim.Q[4 * 9 + 4]! / F;
+    };
+    // The measure as it is reads 1, 1.31 and 1.41 times F at 0°, 22.5° and 45°; the norm reads F.
+    for (const [deg, sum] of [
+      [0, 1],
+      [22.5, 1.30656],
+      [45, 1.41421],
+    ] as const) {
+      const t = (deg * Math.PI) / 180;
+      const flow = (x: number, y: number) => -F * (x * Math.cos(t) + y * Math.sin(t));
+      expect(flux('sum', flow)).toBeCloseTo(sum, 4);
+      expect(flux('norm', flow)).toBeCloseTo(1, 4);
+    }
+    // A sink: the flow comes in from the east and from the west. The norm reads its throughput, as the sum does; the
+    // mean of the signed fluxes would read 0.
+    const sink = (x: number) => F * Math.abs(x);
+    expect(flux('sum', sink)).toBeCloseTo(1, 4);
+    expect(flux('norm', sink)).toBeCloseTo(1, 4);
+  });
+
+  it('reads the axis of a straight vein at any angle to the grid within half a degree (ADR 0080)', () => {
+    const [w, h] = [48, 48];
+    const cells = w * h;
+    for (const sigma of [1, 3])
+      for (const deg of [0, 10, 22.5, 45, 60, 80, 100, 135, 170]) {
+        const t = (deg * Math.PI) / 180;
+        const D = new Float32Array(cells);
+        for (let c = 0; c < cells; c++) {
+          const [x, y] = [(c % w) + 0.5 - w / 2, Math.floor(c / w) + 0.5 - h / 2];
+          const across = -x * Math.sin(t) + y * Math.cos(t);
+          D[c] = 0.01 + 0.5 * Math.exp(-(across * across) / (2 * sigma * sigma));
+        }
+        const f: CrownFields = {
+          w,
+          h,
+          cells,
+          step: 0,
+          layout: { open: new Uint8Array(cells).fill(1), start: [0, 0] },
+          occ: new Uint8Array(cells),
+          F: new Uint32Array(cells).fill(1),
+          trail: new Float32Array(cells),
+          B: new Float32Array(cells).fill(1),
+          D,
+          Q: new Float32Array(cells),
+        };
+        const axis = veinAxis(f, ridgeCells(f, 1.5, 4, 0.05));
+        const off: number[] = [];
+        for (let c = 0; c < cells; c++) {
+          const [x, y] = [c % w, Math.floor(c / w)];
+          if (x < 12 || y < 12 || x >= w - 12 || y >= h - 12 || !Number.isFinite(axis[c]!)) continue;
+          off.push(Math.abs(((axis[c]! - deg + 270) % 180) - 90));
+        }
+        expect(off.length).toBeGreaterThan(20);
+        expect(Math.max(...off)).toBeLessThan(0.5);
+      }
   });
 });
