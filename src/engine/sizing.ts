@@ -1,6 +1,7 @@
 import { capacityOf, MEAN_WINDOW, meanWindowOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 import { flowOn, flowStrains } from './flow';
 import { slimeModel } from './slime';
+import { territoryOn } from './territory';
 import { TUBE_TILE } from './tubes';
 
 /**
@@ -178,6 +179,16 @@ export const SLIME_BYTES_PER_CELL = 15;
  */
 export const slimeBytesPerCell = (s: Pick<Settings, 'model'>) => (slimeModel(s) ? SLIME_BYTES_PER_CELL : 0);
 
+/**
+ * More bytes per cell while the rules of stage 4 run (ADR 0067, decision 7; ADR 0068): the territory of every strain,
+ * one byte per cell in two copies, because the push writes the next one, and the owners, one byte per cell (sim.ts
+ * `territory`, textures of 4 cells per texel and a buffer of 4 cells per word; gl/sim.ts `territory`, targets of one
+ * byte per cell). Both backends hold the same.
+ */
+export const TERRITORY_BYTES_PER_CELL = 3;
+/** The bytes per cell of the rules of stage 4 of these settings: 0 while they do not run (territoryOn()). */
+export const territoryBytesPerCell = (s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>) =>
+  territoryOn(s) ? TERRITORY_BYTES_PER_CELL : 0;
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion' | 'model' | 'meanWindow'>) =>
   s.stepOrder === 'move-first' && diffusePlanOf(s).length >= 2;

@@ -17,6 +17,8 @@ import {
   memoryBudget,
   SLIME_BYTES_PER_CELL,
   slimeBytesPerCell,
+  TERRITORY_BYTES_PER_CELL,
+  territoryBytesPerCell,
   TUBE_MAP_BYTES_PER_CELL_GL,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
@@ -256,5 +258,33 @@ describe('the slime field', () => {
     // The bytes of the field and its picture and no more: the budget with 15 B more per cell holds the grid again.
     const more = { ...withSlime, budget: budget + w * h * SLIME_BYTES_PER_CELL };
     expect(fitResolution(s, 16 / 10, more)).toBe(s.resolution);
+  });
+});
+
+describe('the territory of the rules of stage 4 (ADR 0068)', () => {
+  const on: Settings = { ...defaultSettings(), territory: true, flow: true, growth: true, collisions: true };
+
+  it('counts two copies of the territory and the owners, one byte per cell each, while the rules run', () => {
+    expect(TERRITORY_BYTES_PER_CELL).toBe(3);
+    expect(territoryBytesPerCell(on)).toBe(3);
+    // The rules need growth, one agent per cell, the flow and the extended model, as territoryOn() says.
+    const off: Settings[] = [
+      { ...on, territory: false },
+      { ...on, flow: false },
+      { ...on, growth: false },
+      { ...on, collisions: false },
+      { ...on, model: 'jones' },
+    ];
+    for (const s of off) expect(territoryBytesPerCell(s)).toBe(0);
+  });
+
+  it('lowers a grid that just fits without it', () => {
+    const [w, h] = gridSize(on.resolution, 16 / 10);
+    const budget = estimateBytes(w, h, on.density * w * h, BYTES_PER_CELL);
+    const limits = { ...roomy, budget };
+    const withTerritory = { ...limits, bytesPerCell: BYTES_PER_CELL + territoryBytesPerCell(on) };
+    expect(fitResolution(on, 16 / 10, withTerritory)).toBeLessThan(on.resolution);
+    const more = { ...withTerritory, budget: budget + w * h * TERRITORY_BYTES_PER_CELL };
+    expect(fitResolution(on, 16 / 10, more)).toBe(on.resolution);
   });
 });

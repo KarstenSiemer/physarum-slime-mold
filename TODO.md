@@ -281,6 +281,10 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   the flow, and a test where a second strain grows on the slime of the first. A form of the paid births without a
   global order goes to the prototype first (ADR 0065, open points). Then the picture: the skirt goes, or it is drawn
   from the plasm of the crown.
+- **The engine of stage 4, part 1 of 4** (ADR 0068, 2026-11-20): the territory of each strain in both backends, behind
+  the setting `territory`, which no scene turns on yet: moves, respawn and births only onto it, the owners, the push
+  and the start territory, against a CPU copy, with 38 wrong rules; every scene keeps its bytes.
+  `research/front/ENGINE.md` has the state of the four parts and what the next part needs.
 
 Open, for the owner:
 

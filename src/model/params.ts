@@ -537,6 +537,12 @@ export interface Settings extends Record<GlobalKey, number> {
   stepOrder: StepOrder;
   /** Flow in the tubes (flowHelp, ADR 0029), with `flowStrength`. Only in the extended model (constrain()). */
   flow: boolean;
+  /**
+   * The rules of stage 4 (ADR 0065, ADR 0067, ADR 0068), named for their first rule: each strain has a territory,
+   * agents move, come to life and are born only onto the territory of their strain, and the agents push it open. They
+   * run only in the extended model with growth and the flow (engine/territory.ts territoryOn()). No scene has them yet.
+   */
+  territory: boolean;
   style: Style;
   /** In the gel style: how pale and how clear thin gel is against thick gel. Display only. */
   gelColor: GelColor;
@@ -610,6 +616,7 @@ export function defaultSettings(): Settings {
     growth: false,
     stepOrder: 'sense-first',
     flow: false,
+    territory: false,
     style: 'gel',
     gelColor: 'mild',
     showScent: false,
@@ -755,6 +762,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   out.stepOrder = oneOf(raw.stepOrder, STEP_ORDERS, order);
   // A link from before the flow holds none: it stays off (ADR 0029).
   out.flow = raw.flow === true;
+  // So with the rules of stage 4 (ADR 0068): a link without the setting runs without them, as it was made.
+  out.territory = raw.territory === true;
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);
@@ -883,8 +892,8 @@ export function jonesFits(s: Settings): boolean {
  * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. A
  * repellent source goes into the same map with a value below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the
  * strain weighs it as its own trail too, and its strength stays the user's. Jones' papers have neither trail
- * saturation, nor a flow in the tubes, nor light that stops growth, nor slime, so their values return to the defaults,
- * and a link holds none of them. Returns `s` itself when it holds these values already.
+ * saturation, nor a flow in the tubes, nor light that stops growth, nor slime, nor a territory, so their values return
+ * to the defaults, and a link holds none of them. Returns `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
   const d = defaultSettings();
@@ -897,7 +906,8 @@ function asJones(s: Settings): Settings {
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
   // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
-  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife;
+  // So are the rules of stage 4 (ADR 0068): they need the flow, and a link of the Jones model holds none of them.
+  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && !s.territory;
   const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && own;
   if (ok) return s;
   return {
@@ -905,6 +915,7 @@ function asJones(s: Settings): Settings {
     scentDecay: st.decay,
     trailSaturation: 0,
     flow: false,
+    territory: false,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
     slimeLife: d.slimeLife,

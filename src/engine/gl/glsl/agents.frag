@@ -178,6 +178,10 @@ bool shrinkage(inout vec4 a, uint i) {
 }
 
 bool canClaim(vec4 a, int c, int clear) {
+#if TERRITORY
+  // While the rules of stage 4 run, also a cell of the territory of the agent's strain (ADR 0068).
+  if (!inTerritory(c, bitsOf(a) & 3u)) return false;
+#endif
   return habitable(c) && c != cellOf(a.xy) && vacant(c) && clearPath(a.xy, destination(a), clear);
 }
 

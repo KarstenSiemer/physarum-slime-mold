@@ -2467,9 +2467,45 @@ none. ADR 0066 has the tables. The records are in `logs/engine/reid-0066/`:
 | `digest-branch.jsonl`       | the digests of every scene after 500 steps on both backends   |
 | `mutations.txt`             | the tests that fail for each of the wrong rules SP1 to SP15   |
 
+### 27. Does the territory of each strain keep the bytes of every scene? [ADR 0068]
+
+The territory of each strain is the first of the four parts of the engine of stage 4
+(`research/front/ENGINE.md`). Its rules run only while the setting `territory` is on, and no scene
+turns it on yet, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g68-digest-branch` (75 s).
+The digests of `main` for it are those of part 26:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g68-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g68-digest-branch.jsonl research/flow/logs/engine/reid-0066/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the territory, with S1 and L3, whose texts follow the code of the territory
+now (5 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts TY1 TY2 TY3 TY4 TY5 TY6 TY7 TY8 TY9 TY10 TY11 TY12 TY13 TY14 TY15 TY16 TY17 TY18 TY19 TY20 TY21 TY22 TY23 TY24 TY25 TY26 TY27 TY28 TY29 TY30 TY31 TY32 TY33 TY34 TY35 TY36 TY37 TY38 S1 L3
+```
+
+Each must fail at least one test.
+
+Result: 62 of 62 runs are equal, and each of the 40 wrong rules fails at least one test. The
+records are in `logs/engine/territory-0068/`:
+
+| Record                | Runs                                                                   |
+| --------------------- | ---------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends            |
+| `mutations.txt`       | the tests that fail for each of the wrong rules TY1 to TY38, S1 and L3 |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 423 files, 8.5 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 425 files, 8.5 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2509,6 +2545,7 @@ asks for the new digest.
 | `logs/panel/`                                        | the wrong rules of part 24 (ADR 0063): the density at a switch to one agent per cell                                                                                                                                            |
 | `logs/engine/scenes-0064/`                           | the runs of part 25 (ADR 0064): the new scenes, the Foraging maze with the flow, the Maze with growth, the digests                                                                                                              |
 | `logs/engine/reid-0066/`                             | the runs of part 26 (ADR 0066): the two scenes of Reid et al. 2012 with the slime and without it, the digests, and the wrong rules SP1 to SP15                                                                                  |
+| `logs/engine/territory-0068/`                        | the runs of part 27 (ADR 0068): the digests of every scene, and the wrong rules TY1 to TY38                                                                                                                                     |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

@@ -35,7 +35,8 @@ describe('URL settings', () => {
   it('holds the mean window only when it is not 3 × 3, and round-trips it', async () => {
     const network = presetById('network')?.settings() ?? defaultSettings();
     for (const s of [defaultSettings(), network]) {
-      const { meanWindow: _, electrodeStrength: _e, ...held } = s;
+      // The rules of stage 4 are in a link only while they are on (ADR 0068).
+      const { meanWindow: _, electrodeStrength: _e, territory: _t, ...held } = s;
       // Light stops growth is in a link of the extended model, and in none of the Jones model (ADR 0050). So is Slime
       // life time (ADR 0055).
       const { lightGrowth: _l, slimeLife: _s, ...none } = held;
@@ -79,7 +80,7 @@ describe('URL settings', () => {
     const { lightGrowth: _, ...old } = s;
     expect(sanitize(old).lightGrowth).toBe(0);
     // A link with 0, and with a Slime life time of 0 (ADR 0055), has the bytes of a link made before the rule.
-    const { meanWindow: _m, electrodeStrength: _e, slimeLife: _s, ...made } = old;
+    const { meanWindow: _m, electrodeStrength: _e, slimeLife: _s, territory: _t, ...made } = old;
     expect(await encodeSettings({ ...s, lightGrowth: 0, slimeLife: 0 })).toBe(
       await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
     );
@@ -106,7 +107,7 @@ describe('URL settings', () => {
     const { slimeLife: _, ...old } = s;
     expect(sanitize(old).slimeLife).toBe(0);
     // A link with 0 has the bytes of a link made before the slime field.
-    const { meanWindow: _m, electrodeStrength: _e, ...made } = old;
+    const { meanWindow: _m, electrodeStrength: _e, territory: _t, ...made } = old;
     expect(await encodeSettings({ ...s, slimeLife: 0 })).toBe(
       await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
     );
@@ -575,5 +576,19 @@ describe('URL links and the model', () => {
     const strain = { ...defaultStrain(0), decay: 0.0005 };
     const s = { ...network, model: 'extended' as const, scentDecay: 0.0005, strains: [strain] };
     expect(await open(s)).toEqual(s);
+  });
+});
+
+// ADR 0068: a link holds the rules of stage 4 only while they are on, so a link without them has the bytes of a link
+// made before the setting, and a link without it opens with them off.
+describe('the rules of stage 4 in a link (ADR 0068)', () => {
+  it('holds the setting only while it is on, and round-trips it', async () => {
+    const s = { ...defaultSettings(), flow: true, growth: true, collisions: true, density: 0.15 };
+    const on = { ...s, territory: true };
+    expect(await encodeSettings(on)).not.toBe(await encodeSettings(s));
+    expect(await decodeSettings(await encodeSettings(on))).toEqual(on);
+    expect((await decodeSettings(await encodeSettings(s)))?.territory).toBe(false);
+    const { territory: _, ...before } = s;
+    expect(sanitize(before).territory).toBe(false);
   });
 });

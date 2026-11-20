@@ -28,12 +28,14 @@ import {
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
   slimeBytesPerCell,
+  territoryBytesPerCell,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
 } from './sizing';
 import { slimeModel } from './slime';
 import { compact, Placement, sweeping } from './sweep';
+import { TERRITORY, territoryOn } from './territory';
 import { paints, type Backend, type Levels, type Sim, type Stroke, type View } from './types';
 
 /**
@@ -235,9 +237,12 @@ export class Engine {
     const now = this.settings;
     // The flow was off, so nobody kept the food sites (syncSites()).
     if (flowOn(now) && !flowOn(prev)) this.syncSites();
+    // The rules of stage 4 start with the start territory, which a reset writes (seedAtFood(), ADR 0068): a switch of
+    // them restarts the population too, also when the flow or growth turns them on or off.
+    const restart = RESET_KEYS.some((k) => now[k] !== prev[k]) || territoryOn(now) !== territoryOn(prev);
     // The Jones model has no slime field (ADR 0055, decision 10): a switch back gives the model a new field, which
     // starts with the painted slime only. A reset paints it too (reset()).
-    if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
+    if (restart || shares(now) !== shares(prev)) this.reset();
     else if (slimeModel(now) && !slimeModel(prev)) this.repaintSlime();
   }
 
@@ -317,6 +322,8 @@ export class Engine {
       // The slime field by the model that runs (ADR 0055): on a backend without the rule, a scene of the Jones model
       // runs on the extended model (constrain()).
       slimeBytesPerCell(constrain({ ...s, collisions })) +
+      // The rules of stage 4 by the rule that the backend runs: they need growth (ADR 0068).
+      territoryBytesPerCell({ ...s, collisions }) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);
@@ -489,6 +496,10 @@ export class Engine {
    * without agents. About FOOD_TRIES dead agents try a random point of the disc; with the rule one agent takes each
    * cell they hit (about FOOD_START), and without it about FOOD_START agents try. The steps are the first steps of the
    * run, the same in every run of a seed. With one strain it is the one step on the first food that it was.
+   *
+   * While the rules of stage 4 run, the step of a strain comes after its start territory: the open cells within
+   * TERRITORY.rim cells of the disc join the territory of the strain (ADR 0067, decision 4; ADR 0068). No agent of the
+   * strain lives before its step, so the steps of the strains before change nothing of its territory.
    */
   private seedAtFood() {
     if (this.settings.layout !== 'food') return;
@@ -502,6 +513,7 @@ export class Engine {
       const dead = Math.max(1, agents[strain] ?? 0);
       const revive = Math.min(1, (this.settings.collisions ? FOOD_TRIES : FOOD_START) / dead);
       const [x, y] = at.from;
+      if (territoryOn(this.settings)) this.sim.addTerritory(strain, x, y, FOOD_RADIUS + TERRITORY.rim);
       this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain, revive });
     });
   }

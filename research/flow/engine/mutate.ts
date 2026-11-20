@@ -5,7 +5,7 @@
 // (ADR 0053), of the mark that a starved tube leaves (ADR 0054), of the slime field, its brush and its picture
 // (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
 // the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062), of the density when the
-// rule of one agent per cell goes on (ADR 0063) and of the start spot of a scene (ADR 0066). The script puts one wrong rule at a time into a source file of the
+// rule of one agent per cell goes on (ADR 0063), of the start spot of a scene (ADR 0066) and of the territory of each strain (ADR 0068). The script puts one wrong rule at a time into a source file of the
 // app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
@@ -159,6 +159,22 @@ const PRESETS_SPEC = 'src/model/presets.test.ts';
 const Y_MAZE_TS = 'src/model/y-maze.ts';
 const Y_MAZE_SPEC = 'research/flow/engine/y-maze.test.ts';
 const [START_NODE, START_GPU] = ['the start spots of a scene', 'start spot of the Y-maze'];
+/**
+ * The territory of each strain (ADR 0068): its passes and the rules that read it on each backend, with the GPU tests
+ * of the territory; the setting, the chances of the push, the memory, the link and the start territory, each with its
+ * unit tests.
+ */
+const TERRITORY_WGSL = 'src/engine/shaders/territory.wgsl';
+const TERRITORY_FRAG = 'src/engine/gl/glsl/territory.frag';
+const OWNERS_VERT = 'src/engine/gl/glsl/owners.vert';
+const AGENTS_FRAG = 'src/engine/gl/glsl/agents.frag';
+const TERRITORY_TS = 'src/engine/territory.ts';
+const TERRITORY_SPEC = 'src/engine/territory.gpu.test.ts';
+const TERRITORY_UNIT = 'src/engine/territory.test.ts';
+const URL_TS = 'src/model/url.ts';
+const URL_SPEC = 'src/model/url.test.ts';
+const [TERRITORY_GPU, TERRITORY_GL] = ['the territory on webgpu', 'the territory on webgl2'];
+const START_TERRITORY = 'the start territory of the rules of stage 4';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -232,8 +248,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'S1 webgpu: the bind group of settle without the variant',
     'src/engine/sim.ts',
-    "const settleKey = flow ? `flow${fm}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';",
-    "const settleKey = flow ? `flow${fm}` : '';",
+    "const settleKey = flow ? `${held}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';",
+    "const settleKey = flow ? `${held}` : '';",
     GPU,
   ],
   [
@@ -484,8 +500,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'L3 webgl2: the claims of the agents with the flow memory of the first strain alone',
     'src/engine/gl/sim.ts',
-    '{ occ: occ.texture, ...flowMemory }, claimPoints);',
-    '{ occ: occ.texture, flowMemory: flowMemory.flowMemory ?? occ.texture }, claimPoints);',
+    '{ occ: occ.texture, ...flowMemory, ...held }, claimPoints);',
+    '{ occ: occ.texture, flowMemory: flowMemory.flowMemory ?? occ.texture, ...held }, claimPoints);',
     GL,
   ],
   [
@@ -5439,6 +5455,325 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '',
     'Reid et al. 2012',
     PRESETS_SPEC,
+  ],
+  // The territory of each strain (ADR 0068): the moves, the respawn and the births onto it, the owners, the push,
+  // the start territory, and the setting.
+  [
+    'TY1 wgsl: a move ignores the territory',
+    AGENTS_WGSL,
+    '  if (!inTerritory(c, a.bits & 3u)) { return false; }',
+    '  if (false && !inTerritory(c, a.bits & 3u)) { return false; }',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY2 wgsl: a move reads the territory of strain A for every strain',
+    AGENTS_WGSL,
+    '  if (!inTerritory(c, a.bits & 3u)) { return false; }',
+    '  if (!inTerritory(c, 0u)) { return false; }',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY3 wgsl: a dead agent comes to life outside the territory',
+    AGENTS_WGSL,
+    '  if (!inTerritoryAt(q, a.bits & 3u)) { return none; }',
+    '  if (false && !inTerritoryAt(q, a.bits & 3u)) { return none; }',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY4 wgsl: an agent reads the byte of another cell of the texel',
+    AGENTS_WGSL,
+    '  return ((texel >> (8u * u32(q.x & 3))) & (1u << s)) != 0u;',
+    '  return ((texel >> (8u * u32(q.x & 1))) & (1u << s)) != 0u;',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY5 wgsl: a child is born outside the territory',
+    GROWTH_WGSL,
+    '      if (!inTerritory(m, s)) { continue; }',
+    '      if (false && !inTerritory(m, s)) { continue; }',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY6 wgsl: a child is born onto the territory of strain A',
+    GROWTH_WGSL,
+    '      if (!inTerritory(m, s)) { continue; }',
+    '      if (!inTerritory(m, 0u)) { continue; }',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY7 wgsl: a cell that holds an agent does not join its territory',
+    TERRITORY_WGSL,
+    '      bits |= ownersOf(c);',
+    '      bits |= 0u;',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY8 wgsl: the push draws one number for all strains',
+    TERRITORY_WGSL,
+    '    var rng = rngSeed(u32(c), PUSH + 0x10000u * s);',
+    '    var rng = rngSeed(u32(c), PUSH);',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY9 wgsl: the push takes the chance of one agent more',
+    TERRITORY_WGSL,
+    '    let k = n[s] - 1u;',
+    '    let k = min(n[s], 7u);',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY10 wgsl: the push takes walls in',
+    TERRITORY_WGSL,
+    '      if (!isWall(env[c])) { bits |= pushed(q, c, bits); }',
+    '      bits |= pushed(q, c, bits);',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY11 wgsl: the owners put every agent in the lane of strain A',
+    TERRITORY_WGSL,
+    '  atomicOr(&owners[u32(c) >> 2u], (1u << (a.bits & 3u)) << (8u * (u32(c) & 3u)));',
+    '  atomicOr(&owners[u32(c) >> 2u], 1u << (8u * (u32(c) & 3u)));',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY12 wgsl: the disc of the start territory takes walls in',
+    TERRITORY_WGSL,
+    '    if (c >= 0 && !isWall(env[c]) && toolDistance(vec2f(q) + 0.5, disc.xy) <= disc.z) {',
+    '    if (c >= 0 && toolDistance(vec2f(q) + 0.5, disc.xy) <= disc.z) {',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY13 wgsl: the disc of the start territory does not wrap',
+    TERRITORY_WGSL,
+    '    if (c >= 0 && !isWall(env[c]) && toolDistance(vec2f(q) + 0.5, disc.xy) <= disc.z) {',
+    '    if (c >= 0 && !isWall(env[c]) && distance(vec2f(q) + 0.5, disc.xy) <= disc.z) {',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY14 wgsl: the neighbours of the push do not wrap',
+    TERRITORY_WGSL,
+    '      let b = ownersOf(cellAt(q + vec2i(dx, dy)));',
+    '      let b = ownersOf(indexOf(q + vec2i(dx, dy)));',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY15 sim.ts: the owners come before the births',
+    GPU_SIM,
+    '      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform, territoryView);\n      // The owners after the moves and the births of the step (territory.wgsl `fillOwners`).\n      if (territory) this.encodeOwners(pass, territory);',
+    `      if (territory) this.encodeOwners(pass, territory);
+      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform, territoryView);`,
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY16 sim.ts: the next step reads the territory of before the push',
+    GPU_SIM,
+    `    pass.dispatchWorkgroups(...this.territoryGroups);
+    this.territoryT = flip(t);
+  }`,
+    `    pass.dispatchWorkgroups(...this.territoryGroups);
+  }`,
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY17 sim.ts: a reset keeps the territory',
+    GPU_SIM,
+    `    if (this.territory) this.clearTerritory(enc, this.territory);
+`,
+    '',
+    TERRITORY_GPU,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY18 glsl: a move ignores the territory',
+    AGENTS_FRAG,
+    '  if (!inTerritory(c, bitsOf(a) & 3u)) return false;',
+    '  if (false && !inTerritory(c, bitsOf(a) & 3u)) return false;',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY19 glsl: a dead agent comes to life outside the territory',
+    TOOLS_GLSL,
+    '  if (!inTerritoryAt(q, bitsOf(a) & 3u)) return none;',
+    '  if (false && !inTerritoryAt(q, bitsOf(a) & 3u)) return none;',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY20 glsl: a child is born outside the territory',
+    GROWTH_FRAG,
+    '      if ((texelFetch(territory, cellCoord(m), 0).r & (1u << (bits & 3u))) == 0u) continue;',
+    '      if (false) continue;',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY21 glsl: the push draws one number for all strains',
+    TERRITORY_FRAG,
+    '    uint rng = rngSeed(c, PUSH + 0x10000u * s);',
+    '    uint rng = rngSeed(c, PUSH);',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY22 glsl: a cell that holds an agent does not join its territory',
+    TERRITORY_FRAG,
+    '    bits |= ownersOf(q);',
+    '    bits |= 0u;',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY23 glsl: the push takes walls in',
+    TERRITORY_FRAG,
+    '    if (!isWall(texelFetch(env, q, 0))) bits |= pushed(q, bits);',
+    '    bits |= pushed(q, bits);',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY24 glsl: the owners put every agent in the lane of strain A',
+    OWNERS_VERT,
+    '  owner = 1u << (bits & 3u);',
+    '  owner = 1u;',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY25 glsl: the disc of the start territory takes walls in',
+    TERRITORY_FRAG,
+    '    if (!isWall(texelFetch(env, q, 0)) && toolDistance(vec2(q) + 0.5, disc.xy) <= disc.z) bits |= 1u << uint(disc.w);',
+    '    if (toolDistance(vec2(q) + 0.5, disc.xy) <= disc.z) bits |= 1u << uint(disc.w);',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY26 gl/sim.ts: the owners come before the births',
+    GL_SIM,
+    `    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow, held);
+    // The owners after the moves and the births of the step (owners.vert).
+    if (territory) this.encodeOwners(territory);`,
+    `    if (territory) this.encodeOwners(territory);
+    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow, held);`,
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY27 gl/sim.ts: the next step reads the territory of before the push',
+    GL_SIM,
+    `    this.pass(this.prog.territory().push, copies[flip(this.tt)], tex, {});
+    this.tt = flip(this.tt);`,
+    '    this.pass(this.prog.territory().push, copies[flip(this.tt)], tex, {});',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY28 gl/sim.ts: a reset keeps the territory',
+    GL_SIM,
+    `    if (this.territory) for (const t of [...this.territory.copies, this.territory.owners]) clearUint(gl, t);
+`,
+    '',
+    TERRITORY_GL,
+    TERRITORY_SPEC,
+  ],
+  [
+    'TY29 territory.ts: the rules run without growth',
+    TERRITORY_TS,
+    '  s.territory && flowOn(s) && growthOn(s);',
+    '  s.territory && flowOn(s);',
+    '',
+    TERRITORY_UNIT,
+  ],
+  [
+    'TY30 territory.ts: the chance of the push grows in a straight line with the agents',
+    TERRITORY_TS,
+    '  Math.fround(1 - (1 - TERRITORY.speed) ** (k + 1)),',
+    '  Math.fround(TERRITORY.speed * (k + 1)),',
+    '',
+    TERRITORY_UNIT,
+  ],
+  [
+    'TY31 territory.ts: the chances of the push lie before the slots of stage 4',
+    TERRITORY_TS,
+    '  new Float32Array(buf).set(PUSH_CHANCES, FLOW_TERRITORY_SLOT * 4);',
+    '  new Float32Array(buf).set(PUSH_CHANCES, FLOW_TERRITORY_SLOT * 4 - 4);',
+    '',
+    TERRITORY_UNIT,
+  ],
+  [
+    'TY32 sizing.ts: the territory in one copy',
+    SIZING_TS,
+    'export const TERRITORY_BYTES_PER_CELL = 3;',
+    'export const TERRITORY_BYTES_PER_CELL = 2;',
+    'territory',
+    SIZING_SPEC,
+  ],
+  [
+    'TY33 engine: the start territory without its rim',
+    ENGINE_TS,
+    'this.sim.addTerritory(strain, x, y, FOOD_RADIUS + TERRITORY.rim);',
+    'this.sim.addTerritory(strain, x, y, FOOD_RADIUS);',
+    START_TERRITORY,
+    ENGINE_SPEC,
+  ],
+  [
+    'TY34 engine: the start territory after the step of its colony',
+    ENGINE_TS,
+    `      if (territoryOn(this.settings)) this.sim.addTerritory(strain, x, y, FOOD_RADIUS + TERRITORY.rim);
+      this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain, revive });`,
+    `      this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain, revive });
+      if (territoryOn(this.settings)) this.sim.addTerritory(strain, x, y, FOOD_RADIUS + TERRITORY.rim);`,
+    START_TERRITORY,
+    ENGINE_SPEC,
+  ],
+  [
+    'TY35 engine: no restart when the flow starts or stops the rules',
+    ENGINE_TS,
+    '    const restart = RESET_KEYS.some((k) => now[k] !== prev[k]) || territoryOn(now) !== territoryOn(prev);',
+    '    const restart = RESET_KEYS.some((k) => now[k] !== prev[k]) || now.territory !== prev.territory;',
+    START_TERRITORY,
+    ENGINE_SPEC,
+  ],
+  [
+    'TY36 url: a link holds the setting while it is off',
+    URL_TS,
+    `  if (!s.territory) delete held.territory;
+`,
+    '',
+    '',
+    URL_SPEC,
+  ],
+  [
+    'TY37 params: the Jones model keeps the setting',
+    PARAMS_TS,
+    '  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && !s.territory;',
+    '  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife;',
+    'stage 4',
+    PARAMS_SPEC,
+  ],
+  [
+    'TY38 params: a link without the setting runs with the rules',
+    PARAMS_TS,
+    '  out.territory = raw.territory === true;',
+    '  out.territory = raw.territory !== false;',
+    'stage 4',
+    PARAMS_SPEC,
   ],
 ];
 

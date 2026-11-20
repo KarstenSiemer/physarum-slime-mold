@@ -52,6 +52,20 @@ fn starved(s: u32, q: vec2i) -> bool {
   return memory * memory < F.e.y;
 }
 //#endif
+//#if TERRITORY
+
+// The territory of each strain (ADR 0068, territory.wgsl; `//#if TERRITORY` in agents.wgsl): one byte per cell, 4
+// cells to a texel, with bit s for strain s. While the rules of stage 4 run, a child is born only onto a cell of the
+// territory of the strain of its parent.
+@group(0) @binding(17) var territory: texture_2d<u32>;
+
+// Whether cell c (an index) lies in the territory of strain s.
+fn inTerritory(c: i32, s: u32) -> bool {
+  let q = cellCoord(u32(c));
+  let texel = textureLoad(territory, vec2i(q.x >> 2u, q.y), 0).x;
+  return ((texel >> (8u * u32(q.x & 3))) & (1u << s)) != 0u;
+}
+//#endif
 
 // Random streams of their own (STEER 0 to BLOCK 3 in agents.wgsl), so growth never shifts the other draws.
 const GROW = 4u; // the cell that a parent divides into
@@ -170,6 +184,10 @@ fn divideInto(a: Agent, c: i32) -> i32 {
 //#if FLOW
       // No child is born onto starved ground (ADR 0053): such a neighbour is not open.
       if (starved(s, cellCoord(u32(m)))) { continue; }
+//#endif
+//#if TERRITORY
+      // While the rules of stage 4 run, a child only onto the territory of the parent's strain (ADR 0068).
+      if (!inTerritory(m, s)) { continue; }
 //#endif
       open |= 1u << k;
     }

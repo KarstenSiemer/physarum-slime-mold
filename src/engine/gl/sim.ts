@@ -16,6 +16,7 @@ import {
   type AgentTool,
 } from '../pack';
 import { diffusePlanOf, viewTrailOn } from '../sizing';
+import { packTerritory, territoryOn } from '../territory';
 import { TUBE_TILE, tubesShown } from '../tubes';
 import {
   changesSlime,
@@ -329,6 +330,13 @@ export class GlSim implements Sim {
   private front: Target | undefined;
   private am: Bit = 0;
   /**
+   * The territory of each strain and the owners (ADR 0068; territory.frag; `territory` in ../sim.ts), while the rules
+   * of stage 4 run: two targets of unsigned integers (R8UI), one byte per cell, that the push writes in turn, `tt` the
+   * one that holds the territory now, and the owners in a third.
+   */
+  private territory: { copies: Pair<Target>; owners: Target } | undefined;
+  private tt: Bit = 0;
+  /**
    * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
    * was last empty (`stamped` in ../sim.ts). Only then does an erase or a wall clear stamps (brushSlime()).
    */
@@ -443,6 +451,13 @@ export class GlSim implements Sim {
         this.slime = t(width, height, gl.R32UI);
         this.amount = [t(width, height, gl.R16UI), t(width, height, gl.R16UI)];
         this.front = t(width, height, gl.R32UI);
+      }
+      // So with the territory while the rules of stage 4 run: no cell lies in a territory.
+      if (territoryOn(settings)) {
+        this.territory = {
+          copies: [t(width, height, gl.R8UI), t(width, height, gl.R8UI)],
+          owners: t(width, height, gl.R8UI),
+        };
       }
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
@@ -740,6 +755,8 @@ export class GlSim implements Sim {
     if (!flowOn(settings) && this.flow) this.dropFlow();
     // The memory fit counts the slime field only in the model that has it: the Jones model has no slime.
     if (!slimeModel(settings)) this.dropSlime();
+    // It counts the territory only while the rules of stage 4 run (sizing.ts territoryBytesPerCell()).
+    if (!territoryOn(settings)) this.dropTerritory();
     // The picture of the tubes holds its targets only while the settings show it (tubes.ts). The memory fit counts them
     // with the flow, shown or not (sizing.ts tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
@@ -931,7 +948,8 @@ export class GlSim implements Sim {
   private flowBlock(flow: NonNullable<GlSim['flow']>, strain: number) {
     const gl = this.gl;
     gl.bindBufferBase(gl.UNIFORM_BUFFER, FLOW_BINDING, flow.ubo);
-    const block = packFlow(this.settings, this.sites, this.flowData, strain);
+    // The constants of stage 4 after the sites (territory.ts packTerritory(); ADR 0067, decision 9).
+    const block = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain));
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(block));
   }
 
@@ -1001,6 +1019,9 @@ export class GlSim implements Sim {
     for (const t of this.amount ?? []) clearUint(gl, t);
     if (this.front) clearUint(gl, this.front);
     this.stamped = false;
+    // A reset clears the territory (ADR 0068): the engine writes the start territory after it (Engine.seedAtFood()).
+    if (this.territory) for (const t of [...this.territory.copies, this.territory.owners]) clearUint(gl, t);
+    this.tt = 0;
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
@@ -1622,8 +1643,12 @@ export class GlSim implements Sim {
    */
   private agentProgram(): Program {
     const senseWalls = this.walls && this.settings.model === 'extended';
-    // With the flow in the tubes, the pass in which agents starve and come to life by the flow memory (ADR 0029).
-    if (flowOn(this.settings)) return this.prog.flowing(senseWalls, trailSaturation(this.settings) > 0);
+    // With the flow in the tubes, the pass in which agents starve and come to life by the flow memory (ADR 0029), and
+    // with the rules of stage 4 move and come to life only onto the territory (ADR 0068).
+    if (flowOn(this.settings)) {
+      const territory = this.settings.collisions && territoryOn(this.settings);
+      return this.prog.flowing(senseWalls, trailSaturation(this.settings) > 0, territory);
+    }
     if (trailSaturation(this.settings) > 0) {
       const p = this.prog.saturated();
       return senseWalls ? p.walled : p.agents;
@@ -1662,6 +1687,10 @@ export class GlSim implements Sim {
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
     if (flow) this.flowBlock(flow, 0);
     const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
+    // The rules of stage 4 (ADR 0068): the agent passes and growth read the territory of the step before, the owners
+    // come from the agents after the moves and the births, and the push writes the next territory.
+    const territory = this.settings.collisions && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
+    const held: Record<string, WebGLTexture> = territory ? { territory: territory.copies[this.tt].texture } : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1675,6 +1704,7 @@ export class GlSim implements Sim {
           claims,
           clearance: this.clearance.texture,
           ...flowMemory,
+          ...held,
         },
         { agentWidth: this.agentWidth, mode },
       );
@@ -1688,9 +1718,9 @@ export class GlSim implements Sim {
       const occ = col.occ[this.q];
       agentPass(1, A, B, occ.texture, dummy);
       clear(gl, col.claims);
-      // A tool's spot needs the occupancy (tools.glsl placement), and a spot of the flow its memory.
-      const claimPoints = flow ? this.prog.flow().points : this.prog.points;
-      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture, ...flowMemory }, claimPoints);
+      // A tool's spot needs the occupancy (tools.glsl placement), and a spot of the flow its memory and the territory.
+      const claimPoints = territory ? this.prog.territory().points : flow ? this.prog.flow().points : this.prog.points;
+      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture, ...flowMemory, ...held }, claimPoints);
       agentPass(2, B, A, occ.texture, col.claims.texture);
       const next = col.occ[flip(this.q)];
       clear(gl, next);
@@ -1701,7 +1731,9 @@ export class GlSim implements Sim {
     // Growth and shrinkage after the deposits, so an agent that shrinkage deletes keeps the trail of its move, as on
     // WebGPU (ADR 0025). Only with the rule, on the steps that test them.
     const tests = growthTests(this.settings, this.step);
-    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow);
+    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow, held);
+    // The owners after the moves and the births of the step (owners.vert).
+    if (territory) this.encodeOwners(territory);
     const covered = this.settings.coveredFood;
     // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
     const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
@@ -1750,6 +1782,93 @@ export class GlSim implements Sim {
       this.pass(this.prog.slime(), stamps, { trail }, {});
     }
     if (flow) this.encodeFlow(flow);
+    // The push last (ADR 0067, decision 6). It reads the constants of stage 4 of the uniform block of the flow, which the
+    // block of every strain holds (flowBlock()).
+    if (territory && flow) this.encodePush(territory);
+  }
+
+  /** The owners of every cell from the agents after the moves and the births (owners.vert, PASS 2 of territory.frag). */
+  private encodeOwners(territory: { owners: Target }) {
+    const gl = this.gl;
+    const p = this.prog.territory().owners;
+    clearUint(gl, territory.owners);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, territory.owners.fbo);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(p.program);
+    textures(gl, p.program, { agents: this.agentsTex[this.a].texture });
+    gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
+    // A target of unsigned integers takes no blending: with one agent per cell no two points meet.
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.POINTS, 0, this.agents);
+  }
+
+  /** The push (PASS 0 of territory.frag): the next territory, which becomes the current one. */
+  private encodePush(territory: { copies: Pair<Target>; owners: Target }) {
+    const { copies, owners } = territory;
+    const tex = { territory: copies[this.tt].texture, owners: owners.texture, env: this.env.texture };
+    this.pass(this.prog.territory().push, copies[flip(this.tt)], tex, {});
+    this.tt = flip(this.tt);
+  }
+
+  /**
+   * The targets of the territory, made at their first use while the rules of stage 4 run (sizing.ts
+   * TERRITORY_BYTES_PER_CELL). New targets hold zeros: no cell lies in a territory.
+   */
+  private ensureTerritory(): { copies: Pair<Target>; owners: Target } {
+    if (!this.territory) {
+      const gl = this.gl;
+      const [w, h] = [this.width, this.height];
+      this.territory = allOrNothing(gl, (keep) => {
+        const make = () => keep(target(gl, w, h, gl.R8UI));
+        return { copies: [make(), make()], owners: make() };
+      });
+      this.tt = 0;
+    }
+    return this.territory;
+  }
+
+  /** Frees the targets of the territory. */
+  private dropTerritory() {
+    if (!this.territory) return;
+    for (const t of [...this.territory.copies, this.territory.owners]) destroyTarget(this.gl, t);
+    this.territory = undefined;
+  }
+
+  /** The start territory (Sim.addTerritory(); PASS 1 of territory.frag). Nothing while the rules do not run. */
+  addTerritory(strain: number, x: number, y: number, radius: number) {
+    if (!territoryOn(this.settings)) return;
+    const gl = this.gl;
+    const { copies } = this.ensureTerritory();
+    this.writeParams();
+    const p = this.prog.territory().disc;
+    const tex = { territory: copies[this.tt].texture, env: this.env.texture };
+    this.pass(p, copies[flip(this.tt)], tex, {}, (prog) => {
+      gl.uniform4f(prog.loc('disc'), x, y, radius, strain);
+    });
+    this.tt = flip(this.tt);
+  }
+
+  /** For tests and measurements: the territory, one byte per cell (Sim.readTerritory()). */
+  readTerritory(): Promise<Uint8Array> {
+    if (!this.territory) return Promise.resolve(new Uint8Array(this.width * this.height));
+    return Promise.resolve(Uint8Array.from(readUintTarget(this.gl, this.territory.copies[this.tt])));
+  }
+
+  /** For tests: the owners of the last step, one byte per cell (Sim.readOwners()). */
+  readOwners(): Promise<Uint8Array> {
+    if (!this.territory) return Promise.resolve(new Uint8Array(this.width * this.height));
+    return Promise.resolve(Uint8Array.from(readUintTarget(this.gl, this.territory.owners)));
+  }
+
+  /** For tests: replaces the territory, one byte per cell (Sim.writeTerritory()), while the rules of stage 4 run. */
+  writeTerritory(data: Uint8Array) {
+    if (!territoryOn(this.settings)) return;
+    const gl = this.gl;
+    const t = this.ensureTerritory().copies[this.tt];
+    // Rows of one byte per cell: no row needs to start at a multiple of 4.
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    writeTarget(gl, t, 0, 0, this.width, this.height, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   }
 
   /**
@@ -1820,7 +1939,7 @@ export class GlSim implements Sim {
    * pass through the tests, and on a growth step through the claims, the pyramids and the births. Then the occupancy
    * is counted anew for the next step.
    */
-  private encodeGrowth(grow: boolean) {
+  private encodeGrowth(grow: boolean, territory: Record<string, WebGLTexture>) {
     const gl = this.gl;
     const g = this.ensureGrowth();
     const p = this.prog.growth();
@@ -1837,11 +1956,16 @@ export class GlSim implements Sim {
     // read.
     const flow = flowOn(this.settings) ? this.flow : undefined;
     const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
+    // With the rules of stage 4, the test in which a child is born only onto the territory (TERRITORY in growth.frag,
+    // ADR 0068): it reads the territory that the agent pass of the step read.
+    const test = territory.territory ? this.prog.territory().test : flow ? this.prog.growthFlowing() : p.test;
     this.pass(
-      flow ? this.prog.growthFlowing() : p.test,
+      test,
       tested,
-      { agentsIn: this.agentsTex[this.a].texture, windows, occ, env, ...flowMemory },
-      { agentWidth },
+      { agentsIn: this.agentsTex[this.a].texture, windows, occ, env, ...flowMemory, ...territory },
+      {
+        agentWidth,
+      },
     );
     this.a = flip(this.a);
     if (grow) {

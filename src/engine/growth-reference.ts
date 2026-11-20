@@ -1,6 +1,7 @@
 // The CPU copy of growth and shrinkage (shaders/growth.wgsl, gl/glsl/growth.frag and growth.vert; ADR 0025), for
 // tests only: sim.gpu.test.ts steps it from the state after the moves of a step and compares both GPU backends with it.
-// flow.gpu.test.ts does the same with the flow on, and gives it the flow memory (ADR 0053).
+// flow.gpu.test.ts does the same with the flow on, and gives it the flow memory (ADR 0053), and territory.gpu.test.ts
+// with the territory of the rules of stage 4 (ADR 0068).
 import type { Boundary, Settings } from '../model/params';
 import { DISH_FILL } from './brush';
 import { FLOW, pcg } from './flow';
@@ -137,6 +138,12 @@ export interface GrowthInput {
    * both, the cell of the parent (ADR 0029, decision 9) and the cell of the child (ADR 0053).
    */
   starvedCells?: 'both' | 'parent' | 'child';
+  /**
+   * With the rules of stage 4 (ADR 0068): the territory before the step, one byte per cell with bit s for strain s
+   * (Sim.readTerritory()). A neighbour outside the territory of the parent's strain is not free. Without it every
+   * neighbour may be.
+   */
+  territory?: Uint8Array;
 }
 
 /**
@@ -182,6 +189,7 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
     const open = Array.from({ length: 8 }, (_, k) => around(k))
       .filter(([dx, dy]) => habitable(at(dx, dy)) && occ[at(dx, dy)] === 0)
       .filter(([dx, dy]) => reads === 'parent' || !starved(a.bits & 3, at(dx, dy)))
+      .filter(([dx, dy]) => !input.territory || (((input.territory[at(dx, dy)] ?? 0) >> (a.bits & 3)) & 1) === 1)
       .filter(([dx, dy]) => dx === 0 || dy === 0 || !(wall(at(dx, 0)) && wall(at(0, dy))))
       .map(([dx, dy]) => at(dx, dy));
     if (open.length === 0) return -1;

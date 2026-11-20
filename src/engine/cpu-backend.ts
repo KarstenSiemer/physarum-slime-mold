@@ -126,6 +126,23 @@ export class CpuSim implements Sim {
   readSlimeFront() {
     return Promise.resolve(this.front?.slice() ?? new Uint32Array(this.width * this.height));
   }
+  /**
+   * The discs of the start territory that the engine asked for, in order, with the step at which each came
+   * (Sim.addTerritory()). No step reads them here.
+   */
+  readonly territories: { strain: number; x: number; y: number; radius: number; step: number }[] = [];
+  addTerritory(strain: number, x: number, y: number, radius: number) {
+    this.territories.push({ strain, x, y, radius, step: this.step });
+  }
+  readTerritory() {
+    return Promise.resolve(new Uint8Array(this.width * this.height));
+  }
+  readOwners() {
+    return Promise.resolve(new Uint8Array(this.width * this.height));
+  }
+  writeTerritory() {
+    // nothing to write
+  }
   writeFlow() {
     // nothing to write
   }

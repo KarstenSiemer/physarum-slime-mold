@@ -44,6 +44,25 @@ struct FlowRule {
 const STARVE = 9u; // streams 4 to 6: growth.wgsl; 7 and every 7 + k · 65536: the start (init.wgsl)
 const RESPAWN = 8u;
 //#endif
+//#if TERRITORY
+
+// The territory of each strain (ADR 0068, territory.wgsl), as the push of the step before left it: one byte per cell,
+// 4 cells to a texel, with bit s while the cell lies in the territory of strain s. While the rules of stage 4 run, an
+// agent moves and comes to life only onto a cell of the territory of its strain. The lines between `//#if TERRITORY`
+// and `//#endif` are part of the source only then (variant.ts), and always with those of the flow; without them the
+// source is the one of the code before, character for character.
+@group(0) @binding(14) var territory: texture_2d<u32>;
+
+// Whether the cell at q (cellXY()) lies in the territory of strain s; never outside a closed arena.
+fn inTerritoryAt(q: vec2i, s: u32) -> bool {
+  if (q.x < 0) { return false; }
+  let texel = textureLoad(territory, vec2i(q.x >> 2u, q.y), 0).x;
+  return ((texel >> (8u * u32(q.x & 3))) & (1u << s)) != 0u;
+}
+
+// The same for the index of a cell, or −1.
+fn inTerritory(c: i32, s: u32) -> bool { return c >= 0 && inTerritoryAt(cellCoord(u32(c)), s); }
+//#endif
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
 const STEER = 0u;
@@ -256,6 +275,10 @@ fn respawn(a: Agent, id: u32) -> Spot {
   let q = cellXY(vec2i(floor(p)));
   let c = indexOf(q);
   if (!openCell(c)) { return none; }
+//#if TERRITORY
+  // While the rules of stage 4 run, only onto the territory of the agent's strain (ADR 0068). No draw.
+  if (!inTerritoryAt(q, a.bits & 3u)) { return none; }
+//#endif
   let m = textureLoad(flowMemory, q, a.bits & 3u, 0);
   if (m.y < F.c.z || rand(&rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) { return none; }
   return Spot(wrapPos(p), rand(&rng) * TAU, c);
@@ -361,6 +384,10 @@ fn destination(a: Agent) -> vec2f { return a.pos + P.stepSize[a.bits & 3u] * dir
 
 // A move needs a free target: habitable, empty at the start of the step, and no wall on the way.
 fn canClaim(a: Agent, c: i32, clear: i32) -> bool {
+//#if TERRITORY
+  // While the rules of stage 4 run, also a cell of the territory of the agent's strain (ADR 0068).
+  if (!inTerritory(c, a.bits & 3u)) { return false; }
+//#endif
   return habitable(c) && c != cellOf(a.pos) && occ[c] == 0u && clearPath(a.pos, destination(a), clear);
 }
 
