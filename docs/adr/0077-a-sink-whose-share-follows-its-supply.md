@@ -4,6 +4,7 @@
   weights of the drift, 2 seeds each); a full measurement only if the pictures show a crown. The rule and its form are
   an agent's, under the owner's delegation of 2026-11-12.
 - Date: 2026-11-20
+- Extended by ADR 0078
 - Extends [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (option 3, finding 7).
 - In short: the section "A sink whose share follows its supply" of
   [`research/front/the-crown-at-the-head.md`](../../research/front/the-crown-at-the-head.md); the raw records are in

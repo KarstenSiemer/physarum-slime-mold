@@ -116,10 +116,20 @@ const spread = (v: number[], d = 2) => {
   return s.length === 0 ? '-' : `${fmt(median(s), d)} (${fmt(Math.min(...s), d)}–${fmt(Math.max(...s), d)})`;
 };
 
+/** The spreads of the pressure over the sinks of every seed of a case at step k (`*sinks.jsonl`, ADR 0078). */
+export function caseSpreads(dir: string, k: number): number[] {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('sinks.jsonl'))
+    .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').filter(Boolean))
+    .map((l) => JSON.parse(l) as { k: number; spread: number | null })
+    .filter((r) => r.k === k)
+    .map((r) => r.spread ?? NaN);
+}
+
 /** The rows of every seed of a case at step k. */
 export function caseRows(dir: string, k: number): CrownRow[] {
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.jsonl'))
+    .filter((f) => f.endsWith('.jsonl') && !f.endsWith('sinks.jsonl'))
     .flatMap((f) =>
       readFileSync(join(dir, f), 'utf8')
         .split('\n')
@@ -176,6 +186,8 @@ if (isMain) {
           0,
         )}, veins toward the rim |cos| ${spread(s.map((x) => x.toward))}`,
       );
+      const spreads = caseSpreads(join(root, name), k);
+      if (spreads.length > 0) console.log(`${''.padEnd(18)}spread of the pressure at the sinks ${spread(spreads)}`);
     }
   }
 }

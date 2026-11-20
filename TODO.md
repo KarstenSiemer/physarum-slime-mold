@@ -353,8 +353,10 @@ Open, for the owner:
     dish gives no birth and keeps 0.42 times the agents (261 against 619). It changes the look at every weight above 0.
   - Look further first: the owner chose it on 2026-11-20, first as a small try (ADR 0077). The sink whose share
     follows its supply (`shareOn=supply`) gives no crown in 8 of 8 runs (drift 1.5 and 5, 2 seeds, with and without
-    `jones=edge`): sheets, with `jones=edge` veins toward the rim but one smooth rim. Open: whether the crown aim of
-    stage 4 ends, and options 1 and 2.
+    `jones=edge`): sheets, with `jones=edge` veins toward the rim but one smooth rim. The owner went on with a small try
+    on 2026-11-20 (ADR 0078): a tube body that follows the cube of the share of agents (`bodyOn=cube`) gives no crown
+    in 12 of 12 runs (drift 1.5 and 5, 2 seeds, alone, with `jones=edge`, and with both rules): small colonies of arms
+    of full plasm, no sheet at the head. Open: whether the crown aim of stage 4 ends, and options 1 and 2.
 
 The stages:
 
