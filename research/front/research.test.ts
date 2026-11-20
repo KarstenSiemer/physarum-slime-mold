@@ -6,7 +6,7 @@ import { FLOW, pcg } from '../../src/engine/flow';
 import { tubeOut, type SinkInput } from '../../src/engine/sinks-reference';
 import { dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
-import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, rankKey, type Front } from './sim';
+import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, rankKey, supplyLevel, type Front } from './sim';
 import { runY, slimedOf } from './ymaze';
 
 /** The rule set of ADR 0065 (README.md, step 6) with the drift 1.5, and the forms of a GPU of ADR 0067. */
@@ -298,6 +298,45 @@ describe('the CPU prototype of stage 4', () => {
       expect(sum(chances(rates, target))).toBeCloseTo(target, 9);
       const fixed = rates.map((r) => Math.round(r * 2 ** 16) / 2 ** 16).filter((r) => r > 0);
       if (fixed.length === rates.length) expect(sum(chances(fixed, target, true))).toBeCloseTo(target, 6);
+    }
+  });
+
+  it('lets the sinks of shareOn=supply drain into one level that reads only differences of the pressure (ADR 0077)', () => {
+    const takes = (a: number[], p: number[], S: number) => {
+      const level = supplyLevel(a, p, S);
+      return a.map((g, i) => g * Math.max(0, p[i]! - level));
+    };
+    const sum = (v: number[]) => v.reduce((x, y) => x + y, 0);
+    // Two sinks of one conductance at the pressures 3 and 1: a small total goes to the higher one alone.
+    expect(supplyLevel([1, 1], [3, 1], 1)).toBeCloseTo(2, 12);
+    expect(takes([1, 1], [3, 1], 1)).toEqual([1, 0]);
+    // A larger total reaches both: the level 0, the takes 3 and 1.
+    expect(supplyLevel([1, 1], [3, 1], 4)).toBeCloseTo(0, 12);
+    // At one pressure every sink takes in its conductance.
+    const even = takes([1, 2, 1], [5, 5, 5], 8);
+    [2, 4, 2].forEach((v, i) => {
+      expect(even[i]).toBeCloseTo(v, 12);
+    });
+    expect(supplyLevel([1], [1], 0)).toBeNaN();
+    expect(supplyLevel([0, 0], [1, 2], 1)).toBeNaN();
+    // Random sinks: the takes add up to the total, and a constant added to every pressure changes no take.
+    let s = 11;
+    const next = () => (s = pcg(s)) / 2 ** 32;
+    for (let round = 0; round < 200; round++) {
+      const n = 1 + Math.floor(next() * 12);
+      const a = Array.from({ length: n }, () => next() ** 2);
+      const p = Array.from({ length: n }, () => 10 * next() - 5);
+      const S = 3 * next() + 1e-3;
+      const was = takes(a, p, S);
+      expect(sum(was)).toBeCloseTo(S, 9);
+      const now = takes(
+        a,
+        p.map((v) => v + 200),
+        S,
+      );
+      now.forEach((v, i) => {
+        expect(v).toBeCloseTo(was[i]!, 9);
+      });
     }
   });
 

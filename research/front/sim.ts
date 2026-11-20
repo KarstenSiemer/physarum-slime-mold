@@ -198,6 +198,14 @@ export interface Front {
    * the slime, as the sinks of `sinkAt` 'edge' (ADR 0065, decision 8): a colony on slime grows at its edge too.
    */
   jones: 'all' | 'fresh' | 'edge';
+  /**
+   * The share of a sink (ADR 0077, a try): its weight alone, so that every sink of one weight takes an equal share, as
+   * before ('equal'), or its weight times the supply that reaches it ('supply'): the flux that its cell would pass at
+   * the pressure of the last solve into one common level of all sinks, over the conductivity of its own cell
+   * (supplyLevel()). A sink at the end of a good path from the food stands higher and takes more; one that the network
+   * reaches badly stands low and takes less. The sink rate follows that demand with `tau`, as it follows the weight.
+   */
+  shareOn: 'equal' | 'supply';
 }
 
 export interface Params {
@@ -261,6 +269,7 @@ export const noFront = (): Front => ({
   bodyOn: 'trail',
   bodyFull: 0.4,
   jones: 'all',
+  shareOn: 'equal',
 });
 
 /** The words that a text option of `Front` takes. */
@@ -279,6 +288,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   start: ['disc', 'agents'],
   bodyOn: ['trail', 'agents'],
   jones: ['all', 'fresh', 'edge'],
+  shareOn: ['equal', 'supply'],
 };
 
 /**
@@ -320,6 +330,28 @@ export function fillScale(rates: readonly number[], target: number, fixed = fals
     lambda = (target - full.length) / rest;
   }
   return lambda;
+}
+
+/**
+ * The common level of the sinks of `shareOn` 'supply' (ADR 0077): the level L at which sinks with the conductances `a`
+ * at the pressures `p` take S together, the sum of a · max(0, p − L) equal to S. From the sink of the highest pressure
+ * down, each sink joins while its pressure lies above the level of those before it. A constant added to every pressure
+ * moves L by that constant, so the takes p − L read only differences of the pressure. NaN without S or a conductance.
+ */
+export function supplyLevel(a: readonly number[], p: readonly number[], S: number): number {
+  if (!(S > 0)) return NaN;
+  const order = p.map((_, i) => i).sort((i, j) => p[j]! - p[i]!);
+  let [sum, weighted, level] = [0, 0, NaN];
+  for (let k = 0; k < order.length; k++) {
+    const i = order[k]!;
+    if (!(a[i]! > 0)) continue;
+    sum += a[i]!;
+    weighted += a[i]! * p[i]!;
+    level = (weighted - S) / sum;
+    const next = order[k + 1];
+    if (next === undefined || level >= p[next]!) break;
+  }
+  return level;
 }
 
 /**
@@ -1808,7 +1840,8 @@ export class Sim {
     // The sink of a cell follows its share of the demand with the time `tau`.
     const tau = Math.max(1, front.tau);
     let total = 0;
-    for (const c of at) this.sinkCount[c] = weight.get(c) ?? 1;
+    if (front.shareOn === 'supply') this.supplyCounts(at, weight);
+    else for (const c of at) this.sinkCount[c] = weight.get(c) ?? 1;
     for (let c = 0; c < cells; c++) {
       const r = this.sinkRate[c]! + (this.sinkCount[c]! - this.sinkRate[c]!) / tau;
       this.sinkRate[c] = r;
@@ -1852,6 +1885,27 @@ export class Sim {
     this.frontActive = true;
     this.frontTotal = S;
     this.budget += S / front.paid;
+  }
+
+  /**
+   * The demands of `shareOn` 'supply' (ADR 0077): each sink c of the list `at` drains over the conductivity G of its
+   * own cell, times its weight, into the common level of supplyLevel(), at the pressure of the last solve; its demand
+   * is the flux that this gives, in units of the equal share of a weight 1, so the demands add up to the sum of the
+   * weights, as those of 'equal' do. Once the rates have followed, a sink takes that flux.
+   */
+  private supplyCounts(at: readonly number[], weight: ReadonlyMap<number, number>) {
+    const S = this.p.front.norm * this.p.flow;
+    const a = at.map((c) => (weight.get(c) ?? 1) * this.G[c]!);
+    const p = at.map((c) => this.pm(c));
+    const level = supplyLevel(a, p, S);
+    const sum = at.reduce((s, c) => s + (weight.get(c) ?? 1), 0);
+    if (!Number.isFinite(level) || !(sum > 0)) {
+      for (const c of at) this.sinkCount[c] = weight.get(c) ?? 1;
+      return;
+    }
+    at.forEach((c, i) => {
+      this.sinkCount[c] = (a[i]! * Math.max(0, p[i]! - level) * sum) / S;
+    });
   }
 
   /** The pressure: 16 iterations of damped Jacobi with momentum per lane, from the pressure of the last step (8.3). */

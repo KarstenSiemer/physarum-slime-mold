@@ -164,6 +164,21 @@ the rule, and D there 0.087 to 0.094.
   stands well above the base conductance 0.02, and the tries with more flux (k = 2 to 8) changed the pull of the drift
   before they made veins toward the rim.
 
+## A sink whose share follows its supply (ADR 0077)
+
+The owner chose option 3 of ADR 0076 on 2026-11-20, first as a small try. `shareOn=supply` (`sim.ts`): every sink
+drains over the conductivity of its own cell into one common level of all sinks, the level at which they take the
+total of now; the sink rate follows that demand with `tau`. So a sink that a good path from the food reaches stands
+higher and takes more. It reads only differences of the pressure and needs no new number.
+
+Drift 1.5 and 5, seeds 1 and 2, step 8,000 (`out/e2g/r1`, measured again in `out/e2g/r1r`): all 12 runs are sheets.
+The rules as they are give the records of `c2` byte for byte. With the rule alone the half disc stays, smaller. With
+`jones=edge` one thick tube runs along the wall, thin tubes run from it to the band at the rim, and the veins near the
+head run toward the rim (|cos| 0.81 to 0.88; 0.24 to 0.31 without the rule), but the rim is one smooth arc, the head
+is a band, and no vein forks at the rim; agents lie on 8 to 10 % of the old ground. No run shows a crown. Montages:
+`out/e2g/montage/supply-look-8000.png` and `supply-measure-8000.png` (rows: the rules as they are, the rule, the rule
+with `jones=edge`; columns: drift 1.5 seeds 1 and 2, drift 5 seeds 1 and 2). Jobs: `jobs/r1.jobs` in the archive.
+
 ## Pictures for the owner
 
 In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to its upper 160 rows, at step 8,000:
