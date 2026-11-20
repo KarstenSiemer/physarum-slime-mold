@@ -188,8 +188,10 @@ export interface Front {
    * What sets the tube body of a cell (ADR 0076, a try): its trail, as the app does ('trail'), or the share of the
    * open cells of its 3 × 3 block that hold an agent, full from `bodyFull` on ('agents'). With 'agents' a thin sheet
    * conducts less than a thick one; with the trail a sheet with an agent on one cell of ten holds a full body.
+   * 'cube' (ADR 0078, a try): the cube s³ of that share s, full at s = 1, as a sheet of thickness s conducts as s³
+   * (Poiseuille). A thin sheet then conducts far less than a thick one, and the flow gathers in the thick parts.
    */
-  bodyOn: 'trail' | 'agents';
+  bodyOn: 'trail' | 'agents' | 'cube';
   bodyFull: number;
   /**
    * Where Jones' births come (ADR 0076): wherever an agent has few others near it, as the app ('all'), only within
@@ -286,7 +288,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   fresh: ['chamfer', 'box'],
   sums: ['float', 'fixed'],
   start: ['disc', 'agents'],
-  bodyOn: ['trail', 'agents'],
+  bodyOn: ['trail', 'agents', 'cube'],
   jones: ['all', 'fresh', 'edge'],
   shareOn: ['equal', 'supply'],
 };
@@ -330,6 +332,33 @@ export function fillScale(rates: readonly number[], target: number, fixed = fals
     lambda = (target - full.length) / rest;
   }
   return lambda;
+}
+
+/**
+ * The level that the tube body of a cell follows when the agents set it: s the share of the open cells of its 3 × 3
+ * block that hold an agent. 'agents' (ADR 0076): s / full, at most 1. 'cube' (ADR 0078): s³, full at s = 1.
+ */
+export function bodyLevel(on: 'agents' | 'cube', s: number, full: number): number {
+  return on === 'cube' ? s * s * s : Math.min(1, s / full);
+}
+
+/**
+ * The spread of the pressure over the sinks (ADR 0078): the 10th to the 90th percentile of the pressures `sinks`, over
+ * the drop from the pressure `food` of the source to their mean. A constant added to every pressure, or a factor on
+ * every pressure, changes nothing. NaN without sinks or without a drop.
+ */
+export function sinkSpread(food: number, sinks: readonly number[]): number {
+  if (sinks.length === 0) return NaN;
+  const sorted = [...sinks].sort((a, b) => a - b);
+  const at = (q: number) => {
+    const x = q * (sorted.length - 1);
+    const i = Math.floor(x);
+    const j = Math.min(sorted.length - 1, i + 1);
+    return sorted[i]! + (x - i) * (sorted[j]! - sorted[i]!);
+  };
+  const mean = sinks.reduce((a, b) => a + b, 0) / sinks.length;
+  const drop = food - mean;
+  return drop > 0 ? (at(0.9) - at(0.1)) / drop : NaN;
 }
 
 /**
@@ -480,6 +509,8 @@ export class Sim {
   paidBirths = 0;
   /** The agents at the young front in the last flow pass. */
   demand = 0;
+  /** The cells of those sinks (`paid`), for sinkPressures(). */
+  private sinkCells: readonly number[] = [];
   /** The sum of the sink rates of the tube cells in the last flow pass. */
   sinkTotal = 0;
   /** The cells whose agent could claim a paid child after the last flow pass before a growth step (`paidBy` 'ahead'). */
@@ -730,6 +761,17 @@ export class Sim {
     let v = this.trail[c]! + this.p.foodWeight * this.scent[c]!;
     if (drift > 0) v -= drift * this.driftPressure(px, py, qx, qy, c);
     return v;
+  }
+
+  /**
+   * The pressures of the last solve at the sources and at the sinks of the last flow pass (`paid`), as the drift reads
+   * them (pm()): `food` the mean over the ports of the sites, NaN without a port; `sinks` one per sink. For
+   * sinkSpread() (ADR 0078).
+   */
+  sinkPressures(): { food: number; sinks: number[]; ports: number } {
+    const ports = Array.from(this.ports).filter((c) => c >= 0);
+    const food = ports.length > 0 ? ports.reduce((s, c) => s + this.pm(c), 0) / ports.length : NaN;
+    return { food, sinks: this.sinkCells.map((c) => this.pm(c)), ports: ports.length };
   }
 
   /** The mean pressure of the lanes that ran at cell c, as the drift reads it. */
@@ -1560,7 +1602,7 @@ export class Sim {
     // The update of the memory, the body and the conductivity (8.1, 8.4).
     const Gn = this.Gnext;
     const half2 = FLOW.half * FLOW.half;
-    const byAgents = this.p.front.bodyOn === 'agents';
+    const bodyOn = this.p.front.bodyOn;
     const { w, h } = this;
     for (let c = 0; c < cells; c++) {
       if (!open[c]) {
@@ -1572,8 +1614,8 @@ export class Sim {
       if (bodyOld >= FLOW.bodyLow) d = fed ? Math.max(FLOW.floor, d + FLOW.rate * (this.fmean[c]! - d)) : d;
       else d = Math.min(FLOW.fresh, Math.max(d, FLOW.floor) * (1 + this.recover));
       let presence = Math.min(1, Math.max(0, (this.trail[c]! - this.low) * this.scale));
-      if (byAgents) {
-        // The share of the open cells of the 3 × 3 block with an agent (bodyOn 'agents', ADR 0076).
+      if (bodyOn !== 'trail') {
+        // The share of the open cells of the 3 × 3 block with an agent (bodyOn 'agents', ADR 0076; 'cube', ADR 0078).
         const [x, y] = [c % w, Math.floor(c / w)];
         let [a, n] = [0, 0];
         for (let dy = -1; dy <= 1; dy++)
@@ -1583,7 +1625,7 @@ export class Sim {
             a += this.occ[yy * w + xx]!;
             n++;
           }
-        presence = Math.min(1, a / n / this.p.front.bodyFull);
+        presence = bodyLevel(bodyOn, a / n, this.p.front.bodyFull);
       }
       const body = bodyOld + FLOW.bodyRate * (presence - bodyOld);
       if (bodyOld >= FLOW.bodyLow && body < FLOW.bodyLow && d * d < half2) d = FLOW.floor;
@@ -1833,6 +1875,7 @@ export class Sim {
       weight.set(c, young ? 1 : front.slimeWeight);
     }
     this.demand = at.length;
+    this.sinkCells = at;
     // 'ahead': the flow pass of a growth step takes the paid claims off the budget, and the budget never exceeds the
     // number of sinks (ADR 0067).
     if (front.paidBy === 'ahead' && this.step % 3 === 0)
