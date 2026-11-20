@@ -191,6 +191,32 @@ export interface StillRow {
 
 const round = (v: number, n = 4) => (Number.isFinite(v) ? Number(v.toPrecision(n)) : NaN);
 
+/** The parts of a set of cells (8 neighbours) and their mean cells: the veins that cross an arc. */
+export function partsOf(set: Set<number>, w: number, h: number): { n: number; cells: number } {
+  let [n, size] = [0, 0];
+  const done = new Set<number>();
+  for (const c of set) {
+    if (done.has(c)) continue;
+    n++;
+    const stack = [c];
+    done.add(c);
+    while (stack.length > 0) {
+      const a = stack.pop()!;
+      size++;
+      const [x, y] = [a % w, Math.floor(a / w)];
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const [xx, yy] = [x + dx, y + dy];
+          const m = yy * w + xx;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h || !set.has(m) || done.has(m)) continue;
+          done.add(m);
+          stack.push(m);
+        }
+    }
+  }
+  return { n, cells: n > 0 ? size / n : 0 };
+}
+
 /**
  * The axis of each vein cell (a cell of `ridge`, ridgeCells()) in degrees from the x axis, 0 to 180: across the main
  * direction of the gradient of D over the 3 × 3 cells around it (the structure tensor). D is the mean over the body
@@ -316,30 +342,7 @@ export function stillProfile(
   const ridge = ridgeCells(fields, 1.5, 4, VEIN_D);
   const fine = ridgeCells(fields, 1.5, 4, FINE_D);
   const [toward, fineToward] = [veinTowardRim(fields, ridge), veinTowardRim(fields, fine)];
-  const parts = (set: Set<number>) => {
-    let [n, size] = [0, 0];
-    const done = new Set<number>();
-    for (const c of set) {
-      if (done.has(c)) continue;
-      n++;
-      const stack = [c];
-      done.add(c);
-      while (stack.length > 0) {
-        const a = stack.pop()!;
-        size++;
-        const [x, y] = [a % w, Math.floor(a / w)];
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const [xx, yy] = [x + dx, y + dy];
-            const m = yy * w + xx;
-            if (xx < 0 || yy < 0 || xx >= w || yy >= h || !set.has(m) || done.has(m)) continue;
-            done.add(m);
-            stack.push(m);
-          }
-      }
-    }
-    return { n, cells: n > 0 ? size / n : 0 };
-  };
+  const parts = (set: Set<number>) => partsOf(set, w, h);
   const meanOf = (list: number[], v: (c: number) => number) => {
     const xs = list.map(v).filter(Number.isFinite);
     return xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
@@ -407,7 +410,7 @@ const RAMP = [
 ] as const;
 
 /** The colour of log10 D from -3 (dark) to 0 (pale yellow). */
-function ramp(d: number): [number, number, number] {
+export function ramp(d: number): [number, number, number] {
   const t = Math.min(1, Math.max(0, (Math.log10(Math.max(d, 1e-6)) + 3) / 3));
   for (let i = 1; i < RAMP.length; i++) {
     const [t1, r1, g1, b1] = RAMP[i]!;
