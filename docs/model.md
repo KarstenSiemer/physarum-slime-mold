@@ -400,6 +400,12 @@ read them (8.7).
   the update of the step, 8.1), that has room, a free cell of the territory of s within 1 step (a free cell holds no
   agent), and that lies at the edge of the territory of s: an open cell outside it lies within 2 steps. Its weight w
   is 1 if ground without slime lies within 6 steps, else 0.025. Every other cell has the weight 0 for s.
+- **The tube of a sink** (ADR 0072): a sink must also lie on a tube that carries flux to it. The tube cells of s that
+  a path between 4-neighbours over tube cells of s reaches from the cell, inside the square of 13 × 13 cells around
+  it, must include a cell on the edge of the square or a port of s of the step (8.2). A step of such a path crosses
+  the seam of the periodic grid. A patch of tube inside that square without a port takes no flux: the flow joins it
+  to the network only by the ghost conductance (8.1), and the sinks there would pull its pressure down by tens of
+  thousands in a step. Such patches come where the tube body of the first steps crosses 0.05 in pieces.
 - **The sink rate** r_s of every cell is the mean of its weight over 100 steps. It counts in steps of 2^-24 as a whole
   number R: in each step R moves toward W = w · 2^24, rounded to the nearest (2^24 for the weight 1, 419,430 for
   0.025), by ⌈|W − R| / 100⌉. So the rate reaches its weight and stays there, the rate of a cell that is no sink comes

@@ -25,6 +25,8 @@ const FILL_ROUNDS = 8;
 export const FIXED = 65536;
 /** The cells around a start agent that join the territory of its strain (`start` 'agents'): a square of 7 × 7. */
 export const START_REACH = 3;
+/** The square around a sink in which its tube must reach the edge or a port (`sinkTube`, ADR 0072): 13 × 13 cells. */
+export const SINK_TUBE_REACH = 6;
 
 let rs = 0;
 const seedFor = (id: number, salt: number, step: number, seed: number) => {
@@ -106,6 +108,24 @@ export interface Front {
   rim: boolean;
   /** Above 0: a sensor also reads minus this weight times the pressure: the agents move with the flow. */
   drift: number;
+  /**
+   * The pressure that the drift reads (ADR 0072). 'all': the pressure at the cell of the sensor, on every open cell
+   * (ADR 0065). 'net': the pressure at the cell of the sensor less the pressure at the cell of the agent, and only
+   * where both cells hold a tube: a constant added to the pressure of a network then changes no turn.
+   */
+  driftOn: 'all' | 'net';
+  /**
+   * A sink lies on a tube that carries flux to it (ADR 0072): the tube cells that a path between 4-neighbours over tube
+   * cells reaches from it, within the square of 13 × 13 cells around it, include a cell on the edge of the square or a
+   * port. A patch of tube inside that square without a port takes no flux.
+   */
+  sinkTube: boolean;
+  /**
+   * The cell that the pressure recentres by (ADR 0072). 'roles': the port of the first site with a role, else the first
+   * cell of the first site (ADR 0029). 'ports': the port of the first site with a role, else the port of the first
+   * covered site, else the first cell of the first site.
+   */
+  refOn: 'roles' | 'ports';
   /** The pressure: the app's 16 iterations from the last step ('app'), or solved to a tolerance ('exact'). */
   solver: 'app' | 'exact';
   /**
@@ -177,6 +197,8 @@ export interface Params {
   startAgents: number;
   /** The step at which the colony starts (the Y-maze starts it after the slime has aged). */
   startStep: number;
+  /** The steps of the food scent before the colony starts: 300 bring it to its steady state; the app starts at 0. */
+  scentSteps: number;
   front: Front;
 }
 
@@ -197,6 +219,9 @@ export const noFront = (): Front => ({
   reach: 0,
   rim: false,
   drift: 0,
+  driftOn: 'all',
+  sinkTube: false,
+  refOn: 'roles',
   solver: 'app',
   speed: 0,
   speedOn: 'body',
@@ -212,6 +237,8 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   holdOn: ['trail', 'body'],
   holdBirthsOn: ['same', 'trail', 'body'],
   solver: ['app', 'exact'],
+  driftOn: ['all', 'net'],
+  refOn: ['roles', 'ports'],
   speedOn: ['body', 'trail', 'push'],
   paidOn: ['fresh', 'sinks'],
   sinkAt: ['fresh', 'edge'],
@@ -306,6 +333,7 @@ export const params = (patch: Partial<Params> = {}): Params => ({
   capacity: 0,
   startAgents: 50,
   startStep: 0,
+  scentSteps: 300,
   front: noFront(),
   ...patch,
 });
@@ -522,7 +550,7 @@ export class Sim {
     }
     if (layout.slime) for (let c = 0; c < n; c++) if (layout.slime[c] && open[c]) this.S[c] = 1;
     // The food scent reaches its steady state before the colony starts.
-    for (let k = 0; k < 300; k++) this.diffuseScent();
+    for (let k = 0; k < this.p.scentSteps; k++) this.diffuseScent();
     this.inoculate();
   }
 
@@ -628,9 +656,14 @@ export class Sim {
     const drift = this.p.front.drift;
     let v = this.trail[c]! + this.p.foodWeight * this.scent[c]!;
     if (drift > 0) {
-      let p = 0;
-      for (let l = 0; l < this.lanes; l++) p += this.P[l]![c]!;
-      v -= (drift * p) / this.lanes;
+      // 'net' (ADR 0072): the pressure against that of the cell of the agent, on the cells of the network alone.
+      const net = this.p.front.driftOn === 'net';
+      const a = this.cellOf(px, py);
+      if (!net || (a >= 0 && this.G[a]! > 0 && this.G[c]! > 0)) {
+        let p = 0;
+        for (let l = 0; l < this.lanes; l++) p += this.P[l]![c]! - (net ? this.P[l]![a]! : 0);
+        v -= (drift * p) / this.lanes;
+      }
     }
     return v;
   }
@@ -1059,6 +1092,42 @@ export class Sim {
     return front.young > 0 && f !== 0 && this.hasSlime(c, k) && k + 1 - f < front.young;
   }
 
+  /**
+   * Whether the tube of cell c carries flux to it (`sinkTube`, ADR 0072): the tube cells that a path between
+   * 4-neighbours over tube cells (G > 0) reaches from c, inside the square of side 2 · SINK_TUBE_REACH + 1 around it,
+   * include a cell on the edge of the square or a port of a site.
+   */
+  tubeOut(c: number): boolean {
+    const { w, h, G } = this;
+    const [x0, y0] = [c % w, Math.floor(c / w)];
+    const ports = new Set(Array.from(this.ports).filter((p) => p >= 0));
+    let ring = [c];
+    const seen = new Set([c]);
+    while (ring.length > 0) {
+      const next: number[] = [];
+      for (const t of ring) {
+        const [x, y] = [t % w, Math.floor(t / w)];
+        if (Math.max(Math.abs(x - x0), Math.abs(y - y0)) === SINK_TUBE_REACH || ports.has(t)) return true;
+        for (const [xx, yy] of [
+          [x + 1, y],
+          [x - 1, y],
+          [x, y + 1],
+          [x, y - 1],
+        ] as const) {
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          if (Math.abs(xx - x0) > SINK_TUBE_REACH || Math.abs(yy - y0) > SINK_TUBE_REACH) continue;
+          const n = yy * w + xx;
+          if (G[n]! > 0 && !seen.has(n)) {
+            seen.add(n);
+            next.push(n);
+          }
+        }
+      }
+      ring = next;
+    }
+    return false;
+  }
+
   /** Whether a cell lies within 2 cells of open ground outside the territory: the rim of the territory. */
   private territoryEdge(c: number): boolean {
     const { w, h } = this;
@@ -1459,6 +1528,8 @@ export class Sim {
       // With `sinkAt` 'edge' every sink sits at the edge of the territory, and the fresh ground sets only its weight.
       const atEdge = front.sinkAt === 'edge' && front.speed > 0;
       if ((atEdge || !young) && !this.territoryEdge(c)) continue;
+      // A patch of tube that no tube joins to the network takes no flux (`sinkTube`, ADR 0072).
+      if (front.sinkTube && !this.tubeOut(c)) continue;
       at.push(c);
       weight.set(c, young ? 1 : front.slimeWeight);
     }
@@ -1535,7 +1606,9 @@ export class Sim {
     const acting = Array.from(this.ports).filter((c) => c >= 0 && this.role[c] !== 0);
     const [sx, sy] = this.layout.start;
     const first = sites[0]?.[0] ?? this.cellOf(sx, sy);
-    const ref = acting[0] ?? first;
+    // `refOn` 'ports' (ADR 0072): without a role the port of the first covered site, a cell of the network.
+    const covered = this.p.front.refOn === 'ports' ? Array.from(this.ports).find((c) => c >= 0) : undefined;
+    const ref = acting[0] ?? covered ?? first;
     const signOf = (code: number, l: number) => {
       const digit = Math.floor(code / 3 ** l) % 3;
       return digit === 1 ? 1 : digit === 2 ? -1 : 0;

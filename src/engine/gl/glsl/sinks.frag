@@ -45,6 +45,7 @@ uniform highp usampler2D territory; // the copy of the step (territory.frag)
 uniform highp usampler2D stamps; // the slime field after the stamps of the step (slime.frag)
 uniform sampler2D memory; // the memory of the flow of the strain after its update
 uniform sampler2D ratesIn; // the sink rates of the strain before the step
+uniform sampler2D ports; // texel (site, strain): x the port of this step, −1 for none (flow.frag)
 
 // The paths: rows of bits over the square of 13 × 13 cells around the cell of the fragment (`openRows` in
 // sinks.wgsl).
@@ -105,6 +106,62 @@ void spread() {
 // The cell of row r and bit b of the square around q.
 ivec2 cellOfBit(ivec2 q, int r, int b) { return cellXY(q + ivec2(b - MID, r - MID)); }
 
+// The tube of a sink (tubeRows in sinks.wgsl, ADR 0072): rows of bits of the tube cells of the strain, of its ports of
+// this step, and of the tube cells that a path from the cell reaches.
+uint tubeRows[13];
+uint portRows[13];
+uint tubeReached[13];
+
+// The offset d along an axis of `size` cells, on the periodic grid to the nearest copy (offsetOf in sinks.wgsl).
+int offsetOf(int d, int size) {
+  if (P.cfg.z != 0u) return d;
+  int m = ((d % size) + size) % size;
+  return 2 * m >= size ? m - size : m;
+}
+
+// Whether the tube of the cell at q carries flux to it, for the strain s (tubeOut in sinks.wgsl).
+bool tubeOut(ivec2 q, uint s) {
+  for (int r = 0; r < SIDE; r++) {
+    tubeRows[r] = 0u;
+    portRows[r] = 0u;
+    tubeReached[r] = 0u;
+  }
+  for (int dy = -MID; dy <= MID; dy++) {
+    for (int dx = -MID; dx <= MID; dx++) {
+      ivec2 p = cellXY(q + ivec2(dx, dy));
+      if (p.x < 0) continue;
+      if (texelFetch(memory, p, 0).z > 0.0) tubeRows[dy + MID] |= 1u << uint(dx + MID);
+    }
+  }
+  int n = int(U.d.w);
+  for (int i = 0; i < 64; i++) {
+    if (i >= n) break;
+    int c = int(texelFetch(ports, ivec2(i, int(s)), 0).x);
+    if (c < 0) continue;
+    ivec2 d = ivec2(offsetOf(c % W() - q.x, W()), offsetOf(c / W() - q.y, H()));
+    if (abs(d.x) <= MID && abs(d.y) <= MID) portRows[d.y + MID] |= 1u << uint(d.x + MID);
+  }
+  tubeReached[MID] = 1u << uint(MID);
+  uint edgeBits = 1u | (1u << uint(SIDE - 1));
+  for (int k = 0; k < SIDE * SIDE; k++) {
+    uint next[13];
+    bool grew = false;
+    for (int r = 0; r < SIDE; r++) {
+      uint here = tubeReached[r];
+      if ((here & portRows[r]) != 0u) return true;
+      if (here != 0u && (r == 0 || r == SIDE - 1 || (here & edgeBits) != 0u)) return true;
+      uint m = here | (here << 1u) | (here >> 1u);
+      if (r > 0) m |= tubeReached[r - 1];
+      if (r < SIDE - 1) m |= tubeReached[r + 1];
+      next[r] = m & tubeRows[r];
+      if (next[r] != here) grew = true;
+    }
+    if (!grew) return false;
+    for (int r = 0; r < SIDE; r++) tubeReached[r] = next[r];
+  }
+  return false;
+}
+
 // The weight of the open cell at q for the strain s in steps of the rate, 0 if it is no sink (sinkWeight in
 // sinks.wgsl). The caller knows that the cell holds a tube of s.
 uint sinkWeight(ivec2 q, uint s) {
@@ -139,6 +196,8 @@ uint sinkWeight(ivec2 q, uint s) {
     }
   }
   if (!atEdge) return 0u;
+  // A tube that carries flux to it (ADR 0072).
+  if (!tubeOut(q, s)) return 0u;
   // Ground without slime that a path of at most `fresh` steps reaches.
   int fresh = int(U.sinks.x);
   load(q, edge, fresh);

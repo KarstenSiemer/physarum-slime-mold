@@ -3,6 +3,7 @@
 // CI runs them about five times slower than a laptop, and a unit test has 5 s: keep each one below 0.5 s here.
 import { describe, expect, it } from 'vitest';
 import { FLOW, pcg } from '../../src/engine/flow';
+import { tubeOut, type SinkInput } from '../../src/engine/sinks-reference';
 import { dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
 import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, rankKey, type Front } from './sim';
@@ -419,6 +420,41 @@ describe('the CPU prototype of stage 4', () => {
     expect(alignment(sim).cells).toBeGreaterThanOrEqual(0);
     expect(veinDelay(sim).cells).toBeGreaterThanOrEqual(0);
     expect(murray(sim).n.every((n) => n > 0)).toBe(true);
+  });
+
+  it('finds the tube of a sink as the CPU copy of the engine does, and starts without a scent with scentSteps 0 (ADR 0072)', () => {
+    const sim = smallDish(gpuRules({ sinkTube: '1' }), 3);
+    const { w, h } = sim;
+    const inside = sim as unknown as { G: Float32Array; ports: Int32Array };
+    // Tube on half of the open cells: many patches of 4-neighbours. A port at a cell of the tube.
+    let r = 11;
+    const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+    for (let c = 0; c < sim.cells; c++) inside.G[c] = sim.layout.open[c] && rnd() < 0.5 ? 0.1 : 0;
+    const port = Array.from(inside.G).findIndex((g, c) => g > 0 && c > 30 * w);
+    inside.ports.fill(-1);
+    inside.ports[0] = port;
+    const env = new Uint8Array(sim.cells * 4);
+    for (let c = 0; c < sim.cells; c++) env[c * 4] = sim.layout.open[c] ? 0 : 255;
+    const memory = new Float32Array(sim.cells * 4);
+    for (let c = 0; c < sim.cells; c++) memory[c * 4 + 2] = inside.G[c]!;
+    const n = sim.cells;
+    const input: SinkInput = {
+      ...{ g: { w, h, boundary: 'box', env }, strain: 0, owners: new Uint8Array(n), territory: new Uint8Array(n) },
+      ...{ stamps: new Uint32Array(n), life: 0, step: 0, memory, rates: new Float32Array(n), ports: [port] },
+    };
+    let [cut, kept] = [0, 0];
+    for (let c = 0; c < sim.cells; c++) {
+      if (!(inside.G[c]! > 0)) continue;
+      expect(sim.tubeOut(c)).toBe(tubeOut(input, c));
+      if (sim.tubeOut(c)) kept++;
+      else cut++;
+    }
+    expect(cut).toBeGreaterThan(50);
+    expect(kept).toBeGreaterThan(50);
+    // The start of the app: no food scent when the colony starts.
+    const cold = new Sim(dish(60, [[30, 30, 3]]), params({ seed: 3, startStep: 18000, scentSteps: 0 }));
+    expect(cold.scent.every((v) => v === 0)).toBe(true);
+    expect(smallDish(noFront()).scent.some((v) => v > 0)).toBe(true);
   });
 
   it('sees through no wall in the Y-maze and the dish, so the squares of a sink equal paths there (ADR 0067, decision 10)', () => {

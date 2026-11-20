@@ -2001,6 +2001,8 @@ export class GlSim implements Sim {
         stamps: this.ensureSlime().stamps.texture,
         memory,
         ratesIn: rates[this.sr].texture,
+        // The ports of the step: the test of the tube of a sink (ADR 0072).
+        ports,
       },
       {},
     );

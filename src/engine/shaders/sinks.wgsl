@@ -6,8 +6,10 @@
 // - `sinks`: one invocation per cell. The cell is a sink of the strain s of the pass when it holds an agent of s (the
 //   owners of the step), a tube of s (a conductivity above 0 after the update), and room: a free cell of the
 //   territory of s that one step reaches. And it lies at the edge of the territory of s: a path of at most F.sinks.y
-//   steps reaches open ground outside it. Its weight is 1 if a path of at most F.sinks.x steps reaches an open cell
-//   without slime, else F.sinks.w steps of the rate. A path goes over open cells from a cell to one of its 8
+//   steps reaches open ground outside it. And its tube carries flux to it (ADR 0072): the tube cells of s that a path
+//   between 4-neighbours over tube cells of s reaches from it, inside the square of 13 × 13 cells around it, include a
+//   cell on the edge of the square or a port of s. Its weight is 1 if a path of at most F.sinks.x steps reaches an
+//   open cell without slime, else F.sinks.w steps of the rate. A path goes over open cells from a cell to one of its 8
 //   neighbours, and takes a diagonal step only where the two cells beside its corner are not both walls, as a move
 //   and a birth do (ADR 0067, decision 10). The cell of the sink starts every path. The sink rate of each cell and
 //   strain is the mean of its weight over F.sinks.z steps (0 for a cell that is no sink), an integer in steps of 2^-24
@@ -52,7 +54,9 @@ struct FlowRule {
 @group(0) @binding(6) var memory: texture_2d<f32>; // the memory of the flow of the strain after its update
 @group(0) @binding(7) var<storage, read_write> rates: array<f32>; // per strain and cell: strain · W · H + cell
 @group(0) @binding(8) var<storage, read_write> sums: array<atomic<u32>>; // per strain: R low, R high, C, N
-@group(0) @binding(9) var<storage, read> ports: array<vec2i>; // per strain and site: x the port of this step (flow.wgsl)
+// Per strain and site: x the port of this step (flow.wgsl). `sinks` reads it for the tube of a sink, `state` for the
+// covered ports.
+@group(0) @binding(9) var<storage, read> ports: array<vec2i>;
 // The state of every strain, 2 vec4 each (sinks.ts SINK_STATE_LANES); then F and K of each strain, which growth counts
 // in the step (paid.ts PAID_COUNTS_BYTE); the keys of the paid births follow them, and no pass here reads them.
 struct States {
@@ -130,6 +134,65 @@ fn cellOfBit(q: vec2i, r: i32, b: i32) -> vec2i {
   return cellXY(q + vec2i(b - MID, r - MID));
 }
 
+// The tube of a sink (ADR 0072): rows of bits over the same square, of the tube cells of the strain (a conductivity
+// above 0 after the update), of its ports of this step, and of the tube cells that a path from the cell reaches.
+var<private> tubeRows: array<u32, 13>;
+var<private> portRows: array<u32, 13>;
+var<private> tubeReached: array<u32, 13>;
+
+// The offset d along an axis of `size` cells, on the periodic grid to the nearest copy.
+fn offsetOf(d: i32, size: i32) -> i32 {
+  if (P.cfg.z != 0u) { return d; }
+  let m = ((d % size) + size) % size;
+  return select(m, m - size, 2 * m >= size);
+}
+
+// Whether the tube of the cell at q carries flux to it, for the strain s: the tube cells of s that a path between
+// 4-neighbours over tube cells of s reaches from q, inside the square, include a cell on the edge of the square or a
+// port of s. A patch of tube inside the square without a port takes no flux: only the ghost conductance joins it to
+// the network (flow.wgsl), and its sinks would pull its pressure down without end. Each round reaches one step
+// further, and the rounds end when a round reaches no cell more: at most one round per cell of the square.
+fn tubeOut(q: vec2i, s: u32) -> bool {
+  for (var r = 0; r < SIDE; r++) {
+    tubeRows[r] = 0u;
+    portRows[r] = 0u;
+    tubeReached[r] = 0u;
+  }
+  for (var dy = -MID; dy <= MID; dy++) {
+    for (var dx = -MID; dx <= MID; dx++) {
+      let p = cellXY(q + vec2i(dx, dy));
+      if (p.x < 0) { continue; }
+      if (textureLoad(memory, p, 0).z > 0.0) { tubeRows[dy + MID] |= 1u << u32(dx + MID); }
+    }
+  }
+  let size = vec2i(i32(W()), i32(H()));
+  for (var i = 0u; i < u32(F.d.w); i++) {
+    let c = ports[s * 64u + i].x;
+    if (c < 0) { continue; }
+    let d = vec2i(offsetOf(c % size.x - q.x, size.x), offsetOf(c / size.x - q.y, size.y));
+    if (abs(d.x) <= MID && abs(d.y) <= MID) { portRows[d.y + MID] |= 1u << u32(d.x + MID); }
+  }
+  tubeReached[MID] = 1u << u32(MID);
+  let edgeBits = 1u | (1u << u32(SIDE - 1));
+  for (var k = 0; k < SIDE * SIDE; k++) {
+    var next: array<u32, 13>;
+    var grew = false;
+    for (var r = 0; r < SIDE; r++) {
+      let here = tubeReached[r];
+      if ((here & portRows[r]) != 0u) { return true; }
+      if (here != 0u && (r == 0 || r == SIDE - 1 || (here & edgeBits) != 0u)) { return true; }
+      var n = here | (here << 1u) | (here >> 1u);
+      if (r > 0) { n |= tubeReached[r - 1]; }
+      if (r < SIDE - 1) { n |= tubeReached[r + 1]; }
+      next[r] = n & tubeRows[r];
+      if (next[r] != here) { grew = true; }
+    }
+    if (!grew) { return false; }
+    tubeReached = next;
+  }
+  return false;
+}
+
 // The weight of the open cell c at q for the strain s, in steps of the rate: 0 if it is no sink. The caller knows
 // that the cell holds a tube of s.
 fn sinkWeight(q: vec2i, c: i32, s: u32) -> u32 {
@@ -159,6 +222,8 @@ fn sinkWeight(q: vec2i, c: i32, s: u32) -> u32 {
     }
   }
   if (!atEdge) { return 0u; }
+  // A tube that carries flux to it (ADR 0072).
+  if (!tubeOut(q, s)) { return 0u; }
   // Ground without slime that a path of at most `fresh` steps reaches.
   let fresh = i32(F.sinks.x);
   load(q, edge, fresh);

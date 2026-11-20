@@ -2,7 +2,7 @@
 
 The rules of stage 4 (ADR 0065, decision 1) come into the engine in parts, in the forms of ADR 0067. This page says
 what each part holds, and what the next agent needs to know. The rules in force are in `docs/model.md`, sections 6.10,
-6.11, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070 and ADR 0071.
+6.11, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070, ADR 0071 and ADR 0072.
 
 ## The parts
 
@@ -12,6 +12,7 @@ what each part holds, and what the next agent needs to know. The rules in force 
 | E2a  | the sinks: the corner of the push, sink test, mean sink rate, sums R, C, N, the state    | done (ADR 0069) |
 | E2b  | the pressure with sinks and sources, the adaptation while the front took flux, the drift | done (ADR 0070) |
 | E3   | the paid births: the keys in `test`, the new pass `rank`, the budget in the state        | done (ADR 0071) |
+| E2c  | the tube of a sink; the gap between the backends was a chance of six seeds               | done (ADR 0072) |
 | E4   | scenes turn the rules on, the panel, digests, measures, the e2e tests of Reid et al.     | next            |
 
 ## The setting
@@ -68,12 +69,14 @@ what each part holds, and what the next agent needs to know. The rules in force 
 
 ## The shaders
 
-- WGSL: `shaders/territory.wgsl` (`fillOwners`, `push`, `addDisc`) and `shaders/sinks.wgsl` (`sinks`, `state`). The
+- WGSL: `shaders/territory.wgsl` (`fillOwners`, `push`, `addDisc`) and `shaders/sinks.wgsl` (`sinks`, `state`;
+  `tubeOut()`, the tube of a sink, reads the ports of the step, ADR 0072). The
   lines between `//#if TERRITORY` and `//#endif` in `agents.wgsl` (binding 14) and `growth.wgsl` (binding 17). Without
   TERRITORY each source is the one of before, character for character; TERRITORY always comes with FLOW
   (`Kernels.flowing()`, `Kernels.growth()`).
 - GLSL: `gl/glsl/territory.frag` (PASS 0 push, 1 disc, 2 the fragment of the owners), `gl/glsl/owners.vert`,
-  `gl/glsl/sinks.frag` (PASS 0 sinks, 1 the first level of the pyramid, 2 a level above, 3 the state).
+  `gl/glsl/sinks.frag` (PASS 0 sinks, with the ports for the tube of a sink; 1 the first level of the pyramid, 2 a
+  level above, 3 the state).
 - GLSL with the rules: `#if TERRITORY` in `tools.glsl` (the sampler and `inTerritory()`), `agents.frag` and
   `growth.frag`. The programs are `Programs.territory()`, `Programs.sinks()` and `Programs.flowing(…, territory)` in
   `gl/programs.ts`.
@@ -124,8 +127,9 @@ what each part holds, and what the next agent needs to know. The rules in force 
   the buffer). An error of WGSL makes the passes of the step do nothing, and no test prints the message: read
   `getCompilationInfo()` of the module when every test of WebGPU reads zeros.
 - **Limits**: `settle` and growth `win` bind 8 storage buffers, the default limit, and `test` 8 now; `rank` binds 5,
-  `sinks` 5, `state` 3, the flow `update` 3 and `pressure` 4. WebGL2 samples 16 textures in the agent pass, the minimum
-  of a device, 13 in the test of growth, 10 in `rank` and 4 in the state.
+  `sinks` 6 (the ports for the tube of a sink, ADR 0072), `state` 3, the flow `update` 3 and `pressure` 4. WebGL2
+  samples 16 textures in the agent pass, the minimum of a device, 13 in the test of growth, 10 in `rank`, 7 in the
+  sinks (PASS 0) and 4 in the state.
 - **The variants**: `variant.test.ts` lets TERRITORY replace lines only after a `//#else`: one line in `agents.wgsl`
   (the name of `sensed()`), none in `growth.wgsl` and `flow.wgsl`. A rule that must change what an old line computes
   needs the same form, and the test then names the new count. It counts 15 calls of `rngSeed()` on each backend.
@@ -142,6 +146,14 @@ what each part holds, and what the next agent needs to know. The rules in force 
   tolerance and rank the keys of the GPU (`GrowthInput.paid.keys`); everything after the rank compares exactly.
 - **A claim key of 0** on WebGPU (one id in 2^32 per step) gets no key and no paid child (`paid.gpu.test.ts` finds
   such a seed with the inverse of pcg).
+- **The level of a network against its ground** (ADR 0072): the drift reads the pressure of a sensor's cell on the
+  network and on the ground alike, and Kirchhoff's law fixes the level of a network against the ground beside it only
+  through the ghost conductance. The history of the iteration sets it, and it decides whether a front grows: a strain
+  of the start scene ends step 1,503 with 124 to 1,593 agents. Compare scenes over 18 seeds or more; six seeds split by
+  chance (ADR 0072, finding 1). The cell that the pressure recentres by does not change it.
+- **The start of a colony**: the app starts every scene without a food scent, the prototype after 300 steps of it
+  (`Params.scentSteps`). The records of ADR 0065 and 0067 have the start of the prototype; `research/front/start.sh`
+  runs both starts (ADR 0072, open points).
 - **One agent per cell**: the owners have one bit per strain and cell; the push and the sinks count cells, which are
   agents only with the rule. `territoryOn()` holds the rule.
 - **The start territory** exists only for the start layout Food. Every other layout starts with an empty territory.
@@ -162,8 +174,10 @@ what each part holds, and what the next agent needs to know. The rules in force 
   territory (`addDisc()`). All with two strains.
 - `src/engine/sinks.gpu.test.ts`, both backends, against `sinks-reference.ts` exactly: one step in three arenas with
   thin walls, the X of two diagonal walls, 9 steps with births and a short slime, the carry of R on 512 × 256 cells,
-  no sinks without the rules, a reset and a third strain. The helper `stepOnce()` reads every input of the pass: the
-  territory and the rates before the step; the owners, the stamps and the memory after it.
+  no sinks without the rules, a reset and a third strain, and the tube of a sink in each arena (ADR 0072): tube on
+  half of the cells, patches of a port that keep their sinks, and ports across the seam. The helper `stepOnce()` reads
+  every input of the pass: the territory and the rates before the step; the owners, the stamps and the memory after
+  it; the ports from the memory before it (`flowPorts()`).
 - `src/engine/flow-sinks.gpu.test.ts`, both backends, against `flow-reference.ts` with a tolerance: 5 steps of two
   strains in a dish with walls (a port pays for one, the tube cells for the other; no tube adapts in the first step),
   the frozen memory without a sink, the rates as R counted them, a large R, and the drift (256 agents, drift 1.5 and
@@ -179,9 +193,11 @@ what each part holds, and what the next agent needs to know. The rules in force 
   on WebGPU a claim key of 0. `src/engine/paid.test.ts`: the constants, the odds of the key, its series in float32,
   the budget, and the CPU copy on cases made by hand. `sinks.gpu.test.ts` checks the budget of the state with F and K
   of the GPU.
-- The digests of every scene: `research/flow/README.md`, parts 27 to 30; the records are
-  `logs/engine/territory-0068/`, `logs/engine/sinks-0069/`, `logs/engine/flow-sinks-0070/` and
-  `logs/engine/paid-0071/` in `research/flow/logs.tar.gz`.
+- The digests of every scene: `research/flow/README.md`, parts 27 to 31; the records are
+  `logs/engine/territory-0068/`, `logs/engine/sinks-0069/`, `logs/engine/flow-sinks-0070/`, `logs/engine/paid-0071/`
+  and `logs/engine/tube-0072/` in `research/flow/logs.tar.gz`.
+- The diagnosis of ADR 0072: the scripts `research/front/e2c-*` and `research/front/start.sh`, and the story in
+  `research/front/E2c-NOTES.md`.
 
 ## Not measured
 
@@ -189,3 +205,4 @@ what each part holds, and what the next agent needs to know. The rules in force 
   the start scene.
 - Any scene with the rules: the speed of the front in the engine, the crown of each drift, the Y-maze, the dish (E4).
 - How often two keys within a few units in the last place change the births between the backends.
+- The time of the pass of the sinks with the test of the tube (ADR 0072).

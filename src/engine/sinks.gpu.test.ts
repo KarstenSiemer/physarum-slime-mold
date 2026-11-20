@@ -150,8 +150,8 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
       }
   }
 
-  /** The number of sites of a strain with a port in a step, from its memory before the step (flow.wgsl `sites`). */
-  function covered(s: Settings, g: TerritoryGrid, sites: FlowSites, strain: number, memory: Float32Array) {
+  /** The ports of a strain in a step, a cell per site or −1, from its memory before the step (flow.wgsl `sites`). */
+  function portsOf(s: Settings, g: TerritoryGrid, sites: FlowSites, strain: number, memory: Float32Array) {
     const u = new Float32Array(packFlow(s, sites, undefined, strain));
     const fields = {
       memory,
@@ -160,7 +160,7 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
       ports: new Int32Array(FLOW_SITES * 2).fill(-1),
     };
     const ports = flowPorts({ width: g.w, height: g.h, boundary: g.boundary, env: g.env }, u, sites.cells, fields);
-    return Array.from({ length: FLOW_SITES }, (_, i) => ports[i * 2] ?? -1).filter((c) => c >= 0).length;
+    return Array.from({ length: FLOW_SITES }, (_, i) => ports[i * 2] ?? -1);
   }
 
   /**
@@ -187,13 +187,15 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
     for (const strain of all) {
       const memory = await sim.readFlow(strain);
       const rates = before[strain] ?? new Float32Array(0);
-      const input: SinkInput = { g, strain, owners, territory, stamps, life: slimeSteps(s), step: k, memory, rates };
+      const ports = portsOf(s, g, sites, strain, memoryBefore[strain] ?? new Float32Array(0));
+      const life = slimeSteps(s);
+      const input: SinkInput = { g, strain, owners, territory, stamps, life, step: k, memory, rates, ports };
       const pass = sinksStep(input);
       const at = `strain ${String(strain)}, step ${String(k)}`;
       expect(differ(await sim.readSinks(strain), pass, g.w), at).toEqual([]);
       const words = SINK_SUM_WORDS * strain;
       expect(Array.from(sums.subarray(words, words + SINK_SUM_WORDS)), at).toEqual(pass.sums);
-      const ports = covered(s, g, sites, strain, memoryBefore[strain] ?? new Float32Array(0));
+      const covered = ports.filter((c) => c >= 0).length;
       const lanes = SINK_STATE_LANES * strain;
       // The budget of the paid births from the one before the step, with F and K of the step as the GPU counted them:
       // paid.gpu.test.ts compares those with the CPU copy (ADR 0071).
@@ -205,7 +207,7 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
         increment: paidIncrement(s.flowStrength),
       };
       expect(Array.from(state.subarray(lanes, lanes + SINK_STATE_LANES)), at).toEqual(
-        sinkState(pass.sums, ports, budget),
+        sinkState(pass.sums, covered, budget),
       );
       out.push({ input, pass });
     }
@@ -275,6 +277,64 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
       const state = await sim.readSinkState();
       expect([state[3], state[SINK_STATE_LANES + 3]]).toEqual([1, 0]);
       expect([state[4], state[SINK_STATE_LANES + 4]]).toEqual([1, 1]);
+    },
+    120_000,
+  );
+
+  it.each(['wrap', 'box', 'dish'] as const)(
+    'takes no sink on a patch of tube without a port inside the square of its paths, as the CPU copy (%s, ADR 0072)',
+    async (boundary: Boundary) => {
+      const [w, h] = [46, 40];
+      const n = w * h;
+      // The agents stay in their cells (a step size of 0): the owners are the cells that the test fills, on every GPU,
+      // so the counts below do not hang on how a GPU rounds a move.
+      const s = stage4({ boundary, seed: 61, strains: TWO.map((st) => ({ ...st, stepSize: 0 })) });
+      const sim = await make({ ...s, collisions: false }, w, h, n);
+      // Food dabs, each in a patch of tube of strain 0 that no other tube joins: its port lets the patch keep its
+      // sinks. On the periodic grid the patches lie across the seam, and each port lies at x = 0: a sink at x = 44 or
+      // 45 finds it only across the seam.
+      const dabs: [number, number][] = boundary === 'wrap' ? [6, 16, 26, 36].map((y) => [0, y]) : [[12, 20]];
+      const food: FoodStroke[] = dabs.map(([x, y]) => [{ kind: 'food', from: [x, y], to: [x, y], radius: 1.5 }]);
+      sim.paint(food.flat());
+      const sites = flowSites(food, w, h, boundary);
+      sim.foodSites(sites);
+      const env = await sim.readEnv();
+      const rnd = random(67);
+      seed(sim, s, env, rnd, () => (rnd() < 0.45 ? (rnd() < 0.5 ? 0 : 1) : undefined));
+      sim.update(s);
+      // The distance of a cell from the nearest dab, across the seam of the periodic grid.
+      const far = (c: number) =>
+        Math.min(
+          ...dabs.map(([x, y]) => {
+            const dx = Math.abs((c % w) - x);
+            return Math.hypot(boundary === 'wrap' ? Math.min(dx, w - dx) : dx, Math.floor(c / w) - y);
+          }),
+        );
+      // Tube on half of the cells, near the share where the patches of 4-neighbours join: many small patches. Around
+      // the food a patch of strain 0 within 2 cells, and a ring without a tube of strain 0 around it.
+      sim.writeFlow(
+        memoryOf(n, (c) => far(c) <= 2 || (far(c) > 4 && rnd() < 0.5)),
+        0,
+      );
+      sim.writeFlow(
+        memoryOf(n, () => rnd() < 0.5),
+        1,
+      );
+      sim.writeTerritory(randomTerritory(n, 2, 0.55, random(71)));
+      const g: TerritoryGrid = { w, h, boundary, env: await sim.readEnv() };
+      const passes = await stepOnce(sim, s, g, sites, 0);
+      // Sinks that the test of the tube takes away, sinks of the patches of the ports, and those across the seam.
+      let [cut, kept, across] = [0, 0, 0];
+      for (const { input, pass } of passes)
+        for (let c = 0; c < n; c++) {
+          if (sinkWeight(input, c, false) > 0 && pass.weights[c] === 0) cut++;
+          if (input.strain !== 0 || far(c) > 2 || !((pass.weights[c] ?? 0) > 0)) continue;
+          kept++;
+          if (c % w >= w - 2) across++;
+        }
+      expect(cut).toBeGreaterThan(20);
+      expect(kept).toBeGreaterThan(0);
+      if (boundary === 'wrap') expect(across).toBeGreaterThan(0);
     },
     120_000,
   );
