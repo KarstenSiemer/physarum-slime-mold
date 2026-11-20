@@ -5,7 +5,8 @@
 // (ADR 0053), of the mark that a starved tube leaves (ADR 0054), of the slime field, its brush and its picture
 // (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
 // the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062), of the density when the
-// rule of one agent per cell goes on (ADR 0063) and of the start spot of a scene (ADR 0066). The script puts one wrong rule at a time into a source file of the
+// rule of one agent per cell goes on (ADR 0063), of the start spot of a scene (ADR 0066) and of the forms of a GPU for
+// the growth front in the prototype on the CPU (ADR 0067). The script puts one wrong rule at a time into a source file of the
 // app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
@@ -159,6 +160,9 @@ const PRESETS_SPEC = 'src/model/presets.test.ts';
 const Y_MAZE_TS = 'src/model/y-maze.ts';
 const Y_MAZE_SPEC = 'research/flow/engine/y-maze.test.ts';
 const [START_NODE, START_GPU] = ['the start spots of a scene', 'start spot of the Y-maze'];
+/** The forms of a GPU for the rules of stage 4 in the prototype on the CPU (ADR 0067), with its unit tests. */
+const STAGE4_SIM = 'research/front/sim.ts';
+const STAGE4_SPEC = 'research/front/research.test.ts';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -5439,6 +5443,134 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     '',
     'Reid et al. 2012',
     PRESETS_SPEC,
+  ],
+  [
+    'FP1 front: the box of a sink looks one cell less far for ground without slime',
+    STAGE4_SIM,
+    'for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)',
+    'for (let yy = Math.max(0, y - r + 1); yy <= Math.min(h - 1, y + r - 1); yy++)',
+    'by the box as by the distance field',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP2 front: the chance of a paid claim leaves out the sum P of the sink rates',
+    STAGE4_SIM,
+    "front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B / P;",
+    "front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B;",
+    'claim one with its chance',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP3 front: a free cell outside the territory lets an agent claim a child',
+    STAGE4_SIM,
+    '        if (front.speed > 0 && !this.territory[t]) continue;\n        if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;\n        return true;',
+    '        if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;\n        return true;',
+    'claim a child',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP4 front: the paid claims do not lower the budget',
+    STAGE4_SIM,
+    'this.budget = Math.min(B - this.paidClaims, atFront);',
+    'this.budget = Math.min(B, atFront);',
+    'takes the paid claims off the budget',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP5 front: the budget may exceed the number of agents of the front',
+    STAGE4_SIM,
+    'this.budget = Math.min(B - this.paidClaims, atFront);',
+    'this.budget = B - this.paidClaims;',
+    'takes the paid claims off the budget',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP6 front: the sums count the sink rates in steps of 2^-8',
+    STAGE4_SIM,
+    'export const FIXED = 65536;',
+    'export const FIXED = 256;',
+    'sums the sink rates in steps',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP7 front: the territory of the start reaches 2 cells from a start agent',
+    STAGE4_SIM,
+    'export const START_REACH = 3;',
+    'export const START_REACH = 2;',
+    'within 3 cells of a start agent',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP8 front: P counts the agents of the front without a free cell beside them',
+    STAGE4_SIM,
+    '      if (!this.roomFor(c, this.occNext)) continue;\n      able.push(i);',
+    '      able.push(i);',
+    'claim one with its chance',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP9 front: an agent of the front need not lie at the rim',
+    STAGE4_SIM,
+    '      if (front.rim && !this.atRim(c)) continue;\n      atFront++;\n      if (!this.roomFor(c, this.occNext)) continue;\n      able.push(i);',
+    '      atFront++;\n      if (!this.roomFor(c, this.occNext)) continue;\n      able.push(i);',
+    'claim one with its chance',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP10 front: the marks of the second form go to cells that are not payable',
+    STAGE4_SIM,
+    'for (const c of this.payable) {\n      seedFor(c, MARK, k, this.p.seed);',
+    'for (let c = 0; c < this.cells; c++) {\n      seedFor(c, MARK, k, this.p.seed);',
+    'marks in the second form a payable cell',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP11 front: the filled chances keep λ = B / P when a chance reaches 1',
+    STAGE4_SIM,
+    '    lambda = (target - full.length) / rest;',
+    '    lambda = target / P;',
+    'fills the chances',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP12 front: the filled chances take the scale of the plain chances',
+    STAGE4_SIM,
+    "front.paidBy === 'fill' ? fillScale(rates(), Math.min(B, able.length), front.sums === 'fixed') : B / P;",
+    "front.paidBy === 'fill' ? B / P : B / P;",
+    'claim one with its chance',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP13 front: with the integer sums a sink takes its share with its own rate, not with the rate that R counted',
+    STAGE4_SIM,
+    'const r = fixed ? Math.round(this.sinkRate[c]! * FIXED) / FIXED : this.sinkRate[c]!;',
+    'const r = this.sinkRate[c]!;',
+    'the sinks take exactly what the sources give',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP14 front: the key of the order grows with the sink rate',
+    STAGE4_SIM,
+    'export const rankKey = (u: number, r: number): number => -Math.log(1 - u) / r;',
+    'export const rankKey = (u: number, r: number): number => -Math.log(1 - u) * r;',
+    'with the least keys',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP15 front: the rank lets one agent more claim a child than the whole part of the budget',
+    STAGE4_SIM,
+    'ranked.slice(0, Math.floor(this.budget))',
+    'ranked.slice(0, Math.ceil(this.budget))',
+    'with the least keys',
+    STAGE4_SPEC,
+  ],
+  [
+    'FP16 front: the claims of the rank do not lower the budget',
+    STAGE4_SIM,
+    'this.budget = Math.min(this.budget - this.paidClaims, atFront);',
+    'this.budget = Math.min(this.budget, atFront);',
+    'paidBy=rank',
+    STAGE4_SPEC,
   ],
 ];
 
