@@ -98,7 +98,8 @@ function inOrder(less: string, more: string, skip = new Set<string>()) {
 // The passes that the territory changes (ADR 0068). Its lines come only with those of the flow, and without them each
 // source is the one of the code before: with the flow alone, and without the flow. They add lines to the source of
 // the flow, and replace only the lines after a `//#else` of TERRITORY: in agents.wgsl the name of the sensor of the
-// flow, which the drift wraps (ADR 0070).
+// flow, which the drift wraps (ADR 0070), and the three calls of the sensors, which pass them what the cell of the
+// agent gives (ADR 0075).
 describe.each(['./agents.wgsl', './growth.wgsl'])('the territory in %s', (path) => {
   const source = read(path);
 
@@ -107,7 +108,7 @@ describe.each(['./agents.wgsl', './growth.wgsl'])('the territory in %s', (path) 
     for (const off of [variant(source), flow]) expect(off.includes('territory')).toBe(false);
     expect(both.includes('var territory: texture_2d<u32>;')).toBe(true);
     const replaced = elseLines(source, 'TERRITORY');
-    expect(replaced.size).toBe(path === './agents.wgsl' ? 1 : 0);
+    expect(replaced.size).toBe(path === './agents.wgsl' ? 4 : 0);
     inOrder(flow, both, replaced);
   });
 });

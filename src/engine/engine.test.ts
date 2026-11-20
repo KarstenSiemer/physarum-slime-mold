@@ -383,6 +383,37 @@ describe('the memory of the sinks (ADR 0069)', () => {
     expect(await largest(off, 64)).toBe(await largest(off, 0));
   });
 
+  it('counts the bytes of the drift of the backend while the rules of stage 4 run (ADR 0075)', async () => {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    const on: Settings = {
+      ...defaultSettings(),
+      resolution: 256,
+      model: 'extended',
+      flow: true,
+      growth: true,
+      collisions: true,
+      territory: true,
+      density: 0.001,
+    };
+    /** The largest square lattice that fits these settings on a backend with `bytes` B of the drift per cell. */
+    const largest = async (s: Settings, bytes: number) => {
+      const backend = new CpuBackend();
+      backend.driftBytesPerCell = bytes;
+      const engine = await Engine.create(canvas, s, undefined, backend);
+      let [low, high] = [16, 8192];
+      while (high - low > 1) {
+        const side = Math.floor((low + high) / 2);
+        if (engine.fit({ ...s, lattice: [side, side] }).lattice) low = side;
+        else high = side;
+      }
+      return low;
+    };
+    expect(await largest(on, 64)).toBeLessThan(await largest(on, 0));
+    // Without the rules the drift takes no memory.
+    const off = { ...on, territory: false };
+    expect(await largest(off, 64)).toBe(await largest(off, 0));
+  });
+
   it('counts the key of the births that the flux pays per agent while the rules run (ADR 0071)', async () => {
     const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
     // One agent per cell in a box: the bytes per agent count as much as bytes per cell.

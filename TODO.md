@@ -314,8 +314,17 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   drift against a shift of the level of a network by ±200. Six read no level; of those, `take` (off the tubes, the
   pressure of the agent's cell less the drop that the flux of its sink would have over the sensor offset) grows three
   quarters of what the records grew, with a small spread, and keeps the Y-maze, the speed of the front and the dish with
-  slime everywhere. The agent proposes it; the owner chooses the form (above). Part E2e builds the chosen form in both
-  backends.
+  slime everywhere. The owner chose `take` on 2026-11-20, after the coordinator explained `all`, `take` and
+  `mirror`.
+- **The engine of stage 4, part 2e** (ADR 0075, 2026-11-20): the drift `take` in both backends, behind the setting
+  `territory`: a sensor on a tube of its strain reads the mean pressure there, one off the tubes the pressure of the
+  agent's cell less the sensor offset times what the sink there takes over the conductivity, and an agent off the
+  tubes reads no drift. A pass at the start of each step writes take / G of each strain (WebGPU a texture of a layer
+  per strain; WebGL2 two targets of a lane per strain, the mean pressure and take / G, in place of the four pressure
+  samplers). Against a CPU copy, with a test that a shift of the pressure of the tubes moves no agent, and 40 wrong
+  rules more; every scene keeps its bytes. The start scene with the rules on both backends grows alike: over 12 seeds
+  every strain ends step 1,503 with 224 to 430 agents (medians 291 to 328, p 0.27 or more between the backends), as the
+  prototype with `take` (284 to 435), where the form `all` gave 124 to 1,593.
 - **Next: part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
   the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
   panel, the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a
@@ -328,16 +337,6 @@ Open, for the owner:
 - The strength of the film of the slime: the owner chose the look "wet film" on pictures on 2026-11-17 (ADR 0057). Its colours, its body and its light per style are the numbers of `SLIME_LOOK` in `src/engine/render.ts`, and the 4,095 steps in which a tube builds full slime are `SLIME_FULL` in `src/engine/slime.ts`: say so if one of them should be another.
 - A rule for the moves on slime (ADR 0056, decision 5): it gives the choice of the Y-maze, and a colony that is 3.1 to 3.6 times slower on slime. It is not built. If the owner wants it before stage 4, it is a setting that is off in every scene.
 - What the owner meant by slime that "should also be perfused" (ADR 0052, open points).
-- The form of the drift of stage 4 (ADR 0074, open points): the drift as built reads the level of a network against
-  its ground, a lottery of the first steps of the flux. Each form changes what the weights 1.25 to 1.5 and 5 of
-  decision 6 of ADR 0065 give (0 stays). The numbers of the prototype, at drift 1.5 and 5: agents of the dish at step
-  1,500; half of the dish without slime; the front in the lane, in cells per step. Every form keeps the Y-maze and the
-  dish with slime everywhere.
-  - `all`, as built: 405 agents, 229 to 1,643 by the level; half after 5,501 and 4,218 steps; 0.0129 and 0.0143.
-  - `take`, the agent's proposal: 377 (287 to 454); 5,883 and 3,668 steps; 0.0142 and 0.0170; the look of `all`; in
-    the full dish at drift 1.5 fewer agents (619 against 844) and half the births.
-  - `mirror`: 1,024 (912 to 1,162); 3,162 and 2,588 steps; 0.0190 and 0.0203; a full dish draws back into tubes.
-  - `extend`, the ground that the solver would reach (no form of a GPU): 667 (508 to 813); 0.0160 at drift 1.5.
 
 The stages:
 

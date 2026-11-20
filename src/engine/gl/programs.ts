@@ -150,6 +150,11 @@ export interface SinkPrograms {
   update: Program;
   /** PASS 1 of flow.frag with TERRITORY: the pressure, which takes the sinks and the sources (ADR 0070). */
   pressure: Program;
+  /**
+   * PASS 5 of flow.frag with TERRITORY: what the sensors read of the flow of a strain, its mean pressure and take / G
+   * (ADR 0075).
+   */
+  drift: Program;
 }
 
 /** The passes of the picture of the tubes (tubes.frag, ADR 0034). */
@@ -493,6 +498,7 @@ export function compile(gl: GL): Programs {
         state: sim('#define PASS 3\n' + sinksFrag),
         update: sim('#define PASS 0\n#define TERRITORY 1\n' + flowFrag),
         pressure: sim('#define PASS 1\n#define TERRITORY 1\n' + flowFrag),
+        drift: sim('#define PASS 5\n#define TERRITORY 1\n' + flowFrag),
       }),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),

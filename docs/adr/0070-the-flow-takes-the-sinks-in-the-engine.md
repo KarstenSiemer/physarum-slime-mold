@@ -10,6 +10,7 @@
 - Extends [ADR 0067](0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md) (decisions 3, 6, 8 and 9) and
   [ADR 0069](0069-the-sinks-of-each-strain-in-the-engine.md).
 - Extended by ADR 0071 ([the births that the flux pays in the engine](0071-the-births-that-the-flux-pays-in-the-engine.md)).
+- Extended by [ADR 0075](0075-the-drift-take-in-the-engine.md) (the drift `take`: decisions 6 and 7).
 - In short: [`docs/model.md`](../model.md), section 8.7, has the rules;
   [`research/front/ENGINE.md`](../../research/front/ENGINE.md) has the state of the parts and what part E3 needs.
 

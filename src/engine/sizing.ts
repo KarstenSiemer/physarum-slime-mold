@@ -191,9 +191,10 @@ export const territoryBytesPerCell = (s: Pick<Settings, 'territory' | 'flow' | '
   territoryOn(s) ? TERRITORY_BYTES_PER_CELL : 0;
 /**
  * More bytes per cell and strain for the sinks while the rules of stage 4 run (ADR 0067, decision 7; ADR 0069): the
- * sink rate of each cell and strain, 4 B, in one buffer that the pass updates in place on WebGPU (sim.ts `sinks`).
+ * sink rate of each cell and strain, 4 B, in one buffer that the pass updates in place on WebGPU (sim.ts `sinks`), and
+ * what the sink of each cell takes over its conductivity for the sensors, 4 B, a layer per strain (ADR 0075).
  */
-export const SINK_BYTES_PER_CELL = 4;
+export const SINK_BYTES_PER_CELL = 8;
 /**
  * The same on WebGL2 (gl/sim.ts `sinks`): the rates in two targets of 4 B, because the pass reads the rates of before
  * the step, and the pyramid of the sums, 16 B per texel of 4 × 4 cells and less above it, 16 / 15 B.
@@ -207,6 +208,18 @@ export const sinkBytesPerCell = (
   s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions' | 'strains'>,
   perStrain: number,
 ) => (territoryOn(s) ? perStrain * flowStrains(s) : 0);
+/**
+ * More bytes per cell on WebGL2 while the rules of stage 4 run, for what the sensors read of the flow (ADR 0075): the
+ * mean pressure and what the sink of each cell takes over its conductivity, a lane per strain in two targets of 16 B,
+ * whatever the number of strains (gl/sim.ts `sinks`). WebGPU counts its layers of the second in SINK_BYTES_PER_CELL
+ * and reads the pressure of the flow.
+ */
+export const DRIFT_BYTES_PER_CELL_GL = 32;
+/** The bytes per cell of the drift of these settings: `bytes` (Backend.driftBytesPerCell) while the rules run. */
+export const driftBytesPerCell = (
+  s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>,
+  bytes: number,
+) => (territoryOn(s) ? bytes : 0);
 /**
  * More bytes per agent while the rules of stage 4 run (ADR 0067, decision 7; ADR 0071): the key of the births that the
  * flux pays, a float per agent (sim.ts after the state of the sinks, gl/sim.ts a target of the agents). Both backends
