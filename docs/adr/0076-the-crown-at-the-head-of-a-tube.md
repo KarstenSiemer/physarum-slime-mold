@@ -5,6 +5,8 @@
   are the owner's: they change what the weights of decision 6 of ADR 0065 give, the look, and the births of a full
   dish (README step 7 of `research/front/`).
 - Date: 2026-11-20
+- Extended by ADR 0077
+- Decided by the owner on 2026-11-20: option 3, first as a small try (ADR 0077)
 - Extends [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (decision 6, the forms of the drift; decision
   7, the births) and [ADR 0074](0074-a-drift-that-does-not-read-the-level-of-the-ground.md) (the drift `take`, built
   by [ADR 0075](0075-the-drift-take-in-the-engine.md)), and [ADR 0060](0060-the-growth-front-in-the-picture.md)

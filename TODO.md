@@ -351,8 +351,10 @@ Open, for the owner:
     at the rim and tubes on bare ground (agents on 4 % of the old ground), the veins near the head along the rim (|cos|
     0.24), no crown. The Y-maze keeps its choices; the dish is 1.09 times slower and as fast on slime everywhere; a full
     dish gives no birth and keeps 0.42 times the agents (261 against 619). It changes the look at every weight above 0.
-  - Look further first: a sink whose share follows the supply that reaches it, so that the rim in front of a tube
-    outgrows the rest (not built).
+  - Look further first: the owner chose it on 2026-11-20, first as a small try (ADR 0077). The sink whose share
+    follows its supply (`shareOn=supply`) gives no crown in 8 of 8 runs (drift 1.5 and 5, 2 seeds, with and without
+    `jones=edge`): sheets, with `jones=edge` veins toward the rim but one smooth rim. Open: whether the crown aim of
+    stage 4 ends, and options 1 and 2.
 
 The stages:
 
