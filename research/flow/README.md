@@ -2684,11 +2684,11 @@ runs are equal, and each of the 17 wrong rules fails at least one test. The reco
 | `levels-*.txt`         | the level of each network against its ground, drift 1.5 and 0, and the dish              |
 | `aggregate-*.txt`      | sums of each strain at drift 0, seeds 1 to 30, for a quantity that differs by backend    |
 | `start.txt`, `map.txt` | the start of each strain, and a map of the cells around three spikes                     |
-| `proto/`               | the prototype: the shift of a level, the starts, the 40 seeds, `start.sh` (y/, dish/)    |
+| `proto/`               | the prototype: a shift of a level, both starts, 40 seeds, the Y-maze, `start.sh`         |
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 483 files, 9.3 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 484 files, 9.3 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.

@@ -52,6 +52,9 @@ seeds=1-40 steps=60 scent=0`), −24,000 to −444,000 within 60 steps. With its
 - `driftOn=net` (sim.ts): a sensor reads the pressure of its cell less that of the agent's cell, and only where both
   hold a tube. A shift then changes nothing (none 84 to 300, +200 66 to 247, −200 70 to 211), but the colony grows a
   quarter as much: it loses the crown of ADR 0065.
+- In the Y-maze the colony covers no food at first, and its tube cells pay what the sinks take (`colony=1`): its
+  network floats −850 to +460 from the ground at step 100 (`e2c-proto.ts layout=ymaze seeds=1-6 steps=600`), with no
+  patch that holds sinks. Its choice with slime on one arm stays 40 : 0: the weight of a sink on slime decides it.
 - The reference cell of the recentring does not matter: it shifts every cell by one value, the network and the
   ground alike.
 
