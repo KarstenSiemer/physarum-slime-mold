@@ -65,17 +65,20 @@ pressure of the lanes.
 - **Both backends follow the CPU copy** (`flow-sinks.gpu.test.ts`, 5 tests, both backends, M3 Pro): two strains in a
   dish with a wall that has a gap, over 5 steps, one with a covered port and one whose tube cells pay, with 117 to 175
   sinks per strain: the pressure within 1.7 · 10⁻⁵ of its largest value and the memory within 10⁻³; the CPU copy
-  without the sinks lies 0.90 to 1.03 of the largest pressure away. No tube adapts in the first step, over 500 cells of
-  each strain in the steps after it. A strain without a sink and with one site keeps its flow memory. Tube cells whose
-  rates R counts as 0: within 6 · 10⁻⁷, where their own rates would move the pressure by 0.056 of its largest value.
-  A grid of 320 × 256 cells whose R passes 2^32 steps of 2^-16: R from the low word alone would be another pressure.
-  256 agents of both strains turn as the CPU copy says, at the drift 1.5 (81 keep their heading, 52 turn right, 53
-  left, 70 by the draw) and at 0 (all keep it), on both backends alike.
+  without the sinks lies 0.90 to 1.03 of the largest pressure away. No tube adapts in the first step, and all 860 and
+  861 open tube cells of the two strains adapt in each step after it. A strain without a sink and with one site keeps
+  its flow memory. Tube cells whose rates R counts as 0: within 6 · 10⁻⁷, where their own rates would take 2.16 times S
+  and move the pressure by 0.056 of its largest value. A grid of 320 × 256 cells with rates of 0.9 to 1, whose R of
+  77,052 passes 2^32 steps of 2^-16: within 2.9 · 10⁻⁶, where R from the low word alone, 11,516, moves the pressure
+  by its whole largest value. 256 agents of both strains turn as the CPU copy says, at the drift 1.5 (81 keep their
+  heading, 52 turn right, 53 left, 70 by the draw) and at 0 (all keep it), on both backends alike.
 - **The CPU copy** (`flow-reference.test.ts`): the sinks take S, and the sources give it, to 10⁻⁶ of S, with 0 to 3
   ports, and with R of 131,072 cells near the rate 1, whose low word wraps.
 - **The wrong rules** TY102 to TY140 of `research/flow/engine/mutate.ts` each fail at least one test, and so do TY36
   and TY37, whose texts follow the code of the link and of the Jones model now
-  (`research/flow/logs/engine/flow-sinks-0070/mutations.txt`).
+  (`research/flow/logs/engine/flow-sinks-0070/mutations.txt`). A wrong rule of WGSL keeps reading each binding: a
+  binding that a pass does not read leaves its layout, and every test would then fail for that alone.
+- **Where**: the whole GPU suite (1,407 tests) on an M3 Pro; not in the image of CI.
 - **No scene changes**: the digests of every scene after 500 steps on both backends, with the state of the flow, equal
   those of the record of ADR 0069 in 62 of 62 runs (`research/flow/README.md`, part 29).
 

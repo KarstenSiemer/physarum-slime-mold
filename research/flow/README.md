@@ -2539,9 +2539,47 @@ records are in `logs/engine/sinks-0069/`:
 | `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends            |
 | `mutations.txt`       | the tests that fail for each of the wrong rules TY39 to TY101 and TY31 |
 
+### 29. Does the flow that takes the sinks keep the bytes of every scene? [ADR 0070]
+
+The flow with the sinks and the sources, the adaptation while the front took flux, and the drift in
+the sensors are part E2b of the engine of stage 4 (`research/front/ENGINE.md`). They run only while
+the setting `territory` is on, which no scene turns on, so every scene must keep its bytes. The
+parameters of every pass gain the slot of the drift, and the uniform block of the flow a slot of
+what the sinks take: no pass of the code before reads them.
+
+**The bytes of the scenes.** The digests as in part 28, with the name `g70-digest-branch`. The
+digests of the code before are those of part 28, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g70-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g70-digest-branch.jsonl research/flow/logs/engine/sinks-0069/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the flow with the sinks and of the drift, with TY36 and TY37, whose texts
+follow the code of the link and of the Jones model now (3 minutes on an M3 Pro):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts TY36 TY37 $(seq -f 'TY%g' 102 140)
+```
+
+Each must fail at least one test.
+
+Result: 62 of 62 runs are equal, and each of the 41 wrong rules fails at least one test. The
+records are in `logs/engine/flow-sinks-0070/`:
+
+| Record                | Runs                                                                          |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                   |
+| `mutations.txt`       | the tests that fail for each of the wrong rules TY36, TY37 and TY102 to TY140 |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 427 files, 8.7 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 429 files, 8.7 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2583,6 +2621,7 @@ asks for the new digest.
 | `logs/engine/reid-0066/`                             | the runs of part 26 (ADR 0066): the two scenes of Reid et al. 2012 with the slime and without it, the digests, and the wrong rules SP1 to SP15                                                                                  |
 | `logs/engine/territory-0068/`                        | the runs of part 27 (ADR 0068): the digests of every scene, and the wrong rules TY1 to TY38                                                                                                                                     |
 | `logs/engine/sinks-0069/`                            | the runs of part 28 (ADR 0069): the digests of every scene, and the wrong rules TY39 to TY101                                                                                                                                   |
+| `logs/engine/flow-sinks-0070/`                       | the runs of part 29 (ADR 0070): the digests of every scene, and the wrong rules TY102 to TY140, TY36 and TY37                                                                                                                   |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
