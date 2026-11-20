@@ -8,6 +8,8 @@
   [ADR 0056](0056-the-avoidance-of-slime-waits-for-the-growth-front.md) (the targets of the Y-maze) and
   [ADR 0060](0060-the-growth-front-in-the-picture.md) (the veins must come from the model).
 - Extended by [ADR 0067](0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md) (the forms of a GPU).
+- Extended by [ADR 0073](0073-a-colony-with-the-rules-starts-as-the-app-starts.md) (the start of a colony).
+- Extended by [ADR 0074](0074-a-drift-that-does-not-read-the-level-of-the-ground.md) (a drift without the level).
 - In short: [`research/front/README.md`](../../research/front/README.md) tells the story on one page and has the
   commands. [`research/front/how-the-crown-forms.md`](../../research/front/how-the-crown-forms.md) tells how the
   agents and the new rules make a crown, and which behaviour of the organism each rule copies.

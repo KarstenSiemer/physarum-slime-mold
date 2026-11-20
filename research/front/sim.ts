@@ -109,11 +109,25 @@ export interface Front {
   /** Above 0: a sensor also reads minus this weight times the pressure: the agents move with the flow. */
   drift: number;
   /**
-   * The pressure that the drift reads (ADR 0072). 'all': the pressure at the cell of the sensor, on every open cell
-   * (ADR 0065). 'net': the pressure at the cell of the sensor less the pressure at the cell of the agent, and only
-   * where both cells hold a tube: a constant added to the pressure of a network then changes no turn.
+   * The pressure that the drift reads (ADR 0072, ADR 0074). 'all': the pressure at the cell of the sensor, on every
+   * open cell (ADR 0065). 'net': the pressure at the cell of the sensor less the pressure at the cell of the agent, and
+   * only where both cells hold a tube: a constant added to the pressure of a network then changes no turn. The forms
+   * of part E2d (ADR 0074) read the pressure of a sensor's cell on a tube as 'all' does, and off the tubes a value that
+   * the network sets, so that a constant added to the pressure of a network changes no turn either:
+   * - 'mirror': the pressure of the agent's cell continued along the line from the cell as far behind the agent
+   *   (2 · p(agent) − p(behind)), the flux that reaches the agent continued past it; p(agent) without a tube behind.
+   * - 'take': p(agent) less the sensor offset times the flux that a sink at the agent's cell takes over the
+   *   conductivity of that cell, the drop of that flux continued into fresh ground; p(agent) at an agent without sink.
+   * - 'sinks': the mean pressure of the sinks of the strain, weighted by what each takes: the front meets the fresh
+   *   ground at one level.
+   * - 'rim': the mean pressure of the tube cells beside a cell without a tube.
+   * - 'leak': the pressure of the cell, the ground shifted after the solve so that no flux leaks between the network
+   *   and the ground through the ghost conductance.
+   * - 'extend': the pressure of the cell, the ground solved to its steady state from the network after each solve
+   *   (conjugate gradients; a check, no form of a GPU).
+   * With every form but 'all', 'leak' and 'extend' an agent off the tubes reads no drift, as 'net'.
    */
-  driftOn: 'all' | 'net';
+  driftOn: 'all' | 'net' | 'mirror' | 'take' | 'sinks' | 'rim' | 'leak' | 'extend';
   /**
    * A sink lies on a tube that carries flux to it (ADR 0072): the tube cells that a path between 4-neighbours over tube
    * cells reaches from it, within the square of 13 × 13 cells around it, include a cell on the edge of the square or a
@@ -237,7 +251,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   holdOn: ['trail', 'body'],
   holdBirthsOn: ['same', 'trail', 'body'],
   solver: ['app', 'exact'],
-  driftOn: ['all', 'net'],
+  driftOn: ['all', 'net', 'mirror', 'take', 'sinks', 'rim', 'leak', 'extend'],
   refOn: ['roles', 'ports'],
   speedOn: ['body', 'trail', 'push'],
   paidOn: ['fresh', 'sinks'],
@@ -400,6 +414,13 @@ export class Sim {
   private readonly sinkCount: Float32Array;
   /** What the front takes (below 0) and what the sources give (above 0) at each cell, in this step. */
   readonly extra: Float32Array;
+  /** What the sink of each cell takes in this step (`paid`), 0 elsewhere: the drift of `driftOn` 'take' and 'sinks'. */
+  readonly take: Float32Array;
+  /** The levels of `driftOn` 'sinks' and 'rim' after the last solve, the mean of the lanes; NaN without one. */
+  sinkLevel = NaN;
+  rimLevel = NaN;
+  /** The iterations of the last solve of the ground of `driftOn` 'extend', the most of the lanes. */
+  extendIterations = 0;
   private frontActive = false;
   /** The total sink of the front in the last step. */
   frontTotal = 0;
@@ -500,6 +521,7 @@ export class Sim {
     this.sinkRate = new Float32Array(n);
     this.sinkCount = new Float32Array(n);
     this.extra = new Float32Array(n);
+    this.take = new Float32Array(n);
     this.toFresh = new Uint8Array(n);
     this.marks = new Uint8Array(n);
     this.territory = new Uint8Array(n);
@@ -655,17 +677,53 @@ export class Sim {
     if (!this.clearPath(px, py, qx, qy)) return BLOCKED;
     const drift = this.p.front.drift;
     let v = this.trail[c]! + this.p.foodWeight * this.scent[c]!;
-    if (drift > 0) {
-      // 'net' (ADR 0072): the pressure against that of the cell of the agent, on the cells of the network alone.
-      const net = this.p.front.driftOn === 'net';
-      const a = this.cellOf(px, py);
-      if (!net || (a >= 0 && this.G[a]! > 0 && this.G[c]! > 0)) {
-        let p = 0;
-        for (let l = 0; l < this.lanes; l++) p += this.P[l]![c]! - (net ? this.P[l]![a]! : 0);
-        v -= (drift * p) / this.lanes;
-      }
-    }
+    if (drift > 0) v -= drift * this.driftPressure(px, py, qx, qy, c);
     return v;
+  }
+
+  /** The mean pressure of the lanes that ran at cell c, as the drift reads it. */
+  private pm(c: number): number {
+    let p = 0;
+    for (let l = 0; l < this.lanes; l++) p += this.P[l]![c]!;
+    return p / this.lanes;
+  }
+
+  /** The mean over the lanes that ran of the pressure at cell c less that at cell a, in the order of 'net'. */
+  private pd(c: number, a: number): number {
+    let p = 0;
+    for (let l = 0; l < this.lanes; l++) p += this.P[l]![c]! - this.P[l]![a]!;
+    return p / this.lanes;
+  }
+
+  /**
+   * The pressure that the sensor at (qx, qy) of the agent at (px, py) reads, on cell c (`driftOn`). The forms other
+   * than 'all', 'leak' and 'extend' give the pressure less that of the agent's cell, so an agent off the tubes reads 0
+   * at every sensor.
+   */
+  private driftPressure(px: number, py: number, qx: number, qy: number, c: number): number {
+    const form = this.p.front.driftOn;
+    if (form === 'all' || form === 'leak' || form === 'extend') return this.pm(c);
+    const { G } = this;
+    const a = this.cellOf(px, py);
+    if (a < 0 || !(G[a]! > 0)) return 0;
+    if (G[c]! > 0) return this.pd(c, a);
+    switch (form) {
+      case 'net':
+        return 0;
+      case 'mirror': {
+        // The cell as far behind the agent as the sensor lies ahead of it, on a tube and without a wall between.
+        const [mx, my] = [2 * px - qx, 2 * py - qy];
+        const m = this.cellOf(mx, my);
+        if (m < 0 || !this.layout.open[m] || !(G[m]! > 0) || !this.clearPath(px, py, mx, my)) return 0;
+        return this.pd(a, m);
+      }
+      case 'take':
+        return -(this.p.sensorOffset * this.take[a]!) / G[a]!;
+      case 'sinks':
+        return Number.isFinite(this.sinkLevel) ? this.sinkLevel - this.pm(a) : 0;
+      case 'rim':
+        return Number.isFinite(this.rimLevel) ? this.rimLevel - this.pm(a) : 0;
+    }
   }
 
   private steer(i: number): number {
@@ -1460,6 +1518,162 @@ export class Sim {
     this.frontSinks();
     if (this.p.front.solver === 'exact') this.exactPressure(i0);
     else this.pressure(i0);
+    this.afterSolve();
+  }
+
+  /** The levels and the ground of the forms of the drift of part E2d (`driftOn`, ADR 0074), after the solve. */
+  private afterSolve() {
+    const form = this.p.front.driftOn;
+    const { cells, G, nb } = this;
+    const { open } = this.layout;
+    if (form === 'sinks') {
+      let [sum, weight] = [0, 0];
+      for (let c = 0; c < cells; c++)
+        if (this.take[c]! > 0 && G[c]! > 0) {
+          sum += this.take[c]! * this.pm(c);
+          weight += this.take[c]!;
+        }
+      this.sinkLevel = weight > 0 ? sum / weight : NaN;
+    } else if (form === 'rim') {
+      let [sum, count] = [0, 0];
+      for (let c = 0; c < cells; c++) {
+        if (!open[c] || !(G[c]! > 0)) continue;
+        let edge = false;
+        for (let e = 0; e < 4 && !edge; e++) {
+          const m = nb[c * 4 + e]!;
+          if (m >= 0 && !(G[m]! > 0)) edge = true;
+        }
+        if (!edge) continue;
+        sum += this.pm(c);
+        count++;
+      }
+      this.rimLevel = count > 0 ? sum / count : NaN;
+    } else if (form === 'leak') for (let l = 0; l < this.lanes; l++) this.leakGround(l);
+    else if (form === 'extend') {
+      this.extendIterations = 0;
+      for (let l = 0; l < this.lanes; l++) this.extendGround(l);
+    }
+  }
+
+  /**
+   * `driftOn` 'leak': shifts the ground (the open cells without a tube) of lane l so that the flux through the ghost
+   * conductance between the network and the ground sums to 0. A constant added to the network then moves the ground
+   * with it in the next solve.
+   */
+  private leakGround(l: number) {
+    const P = this.P[l]!;
+    const { cells, G, nb } = this;
+    const { open } = this.layout;
+    const ghost = FLOW.ghost;
+    let [leak, sum] = [0, 0];
+    for (let c = 0; c < cells; c++) {
+      if (!open[c] || !(G[c]! > 0)) continue;
+      for (let e = 0; e < 4; e++) {
+        const m = nb[c * 4 + e]!;
+        if (m < 0 || G[m]! > 0) continue;
+        const g = harmonic(G[c]! + ghost, G[m]! + ghost);
+        leak += g * (P[m]! - P[c]!);
+        sum += g;
+      }
+    }
+    if (!(sum > 0)) return;
+    const shift = -leak / sum;
+    for (let c = 0; c < cells; c++) if (open[c] && !(G[c]! > 0)) P[c]! += shift;
+  }
+
+  private extIndex?: Int32Array;
+
+  /**
+   * `driftOn` 'extend': the ground of lane l solved to its steady state from the pressure of the network: on each open
+   * cell without a tube the edges of the solve (with the ghost conductance) balance, the tube cells fixed. Conjugate
+   * gradients from the ground of the last step, to a residual of 10⁻⁹ of the right side. A check of what the drift of
+   * ADR 0065 reads when the ground has settled, no form of a GPU.
+   */
+  private extendGround(l: number) {
+    const P = this.P[l]!;
+    const { cells, G, nb } = this;
+    const { open } = this.layout;
+    const ghost = FLOW.ghost;
+    const index = (this.extIndex ??= new Int32Array(cells));
+    index.fill(-1);
+    const list: number[] = [];
+    let tubes = 0;
+    for (let c = 0; c < cells; c++) {
+      if (!open[c]) continue;
+      if (G[c]! > 0) tubes++;
+      else {
+        index[c] = list.length;
+        list.push(c);
+      }
+    }
+    const n = list.length;
+    if (n === 0 || tubes === 0) return;
+    const links = new Int32Array(n * 4).fill(-1);
+    const cond = new Float64Array(n * 4);
+    const diag = new Float64Array(n);
+    const b = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const c = list[i]!;
+      for (let e = 0; e < 4; e++) {
+        const m = nb[c * 4 + e]!;
+        if (m < 0) continue;
+        const g = harmonic(G[c]! + ghost, G[m]! + ghost) / ghost;
+        diag[i]! += g;
+        if (index[m]! >= 0) {
+          links[i * 4 + e] = index[m]!;
+          cond[i * 4 + e] = g;
+        } else b[i]! += g * P[m]!;
+      }
+    }
+    const apply = (x: Float64Array, y: Float64Array) => {
+      for (let i = 0; i < n; i++) {
+        let v = diag[i]! * x[i]!;
+        for (let e = 0; e < 4; e++) {
+          const j = links[i * 4 + e]!;
+          if (j >= 0) v -= cond[i * 4 + e]! * x[j]!;
+        }
+        y[i] = v;
+      }
+    };
+    const x = new Float64Array(n);
+    for (let i = 0; i < n; i++) x[i] = P[list[i]!]!;
+    const r = new Float64Array(n);
+    const z = new Float64Array(n);
+    const q = new Float64Array(n);
+    const d = new Float64Array(n);
+    apply(x, r);
+    let bn = 0;
+    for (let i = 0; i < n; i++) {
+      r[i] = b[i]! - r[i]!;
+      bn += b[i]! * b[i]!;
+    }
+    for (let i = 0; i < n; i++) z[i] = r[i]! / diag[i]!;
+    d.set(z);
+    let rz = 0;
+    for (let i = 0; i < n; i++) rz += r[i]! * z[i]!;
+    let it = 0;
+    for (; it < 5000; it++) {
+      let rn = 0;
+      for (let i = 0; i < n; i++) rn += r[i]! * r[i]!;
+      if (rn <= 1e-18 * Math.max(bn, 1e-30)) break;
+      apply(d, q);
+      let dq = 0;
+      for (let i = 0; i < n; i++) dq += d[i]! * q[i]!;
+      if (!(dq > 0)) break;
+      const alpha = rz / dq;
+      for (let i = 0; i < n; i++) {
+        x[i]! += alpha * d[i]!;
+        r[i]! -= alpha * q[i]!;
+      }
+      for (let i = 0; i < n; i++) z[i] = r[i]! / diag[i]!;
+      let rz2 = 0;
+      for (let i = 0; i < n; i++) rz2 += r[i]! * z[i]!;
+      const beta = rz2 / rz;
+      rz = rz2;
+      for (let i = 0; i < n; i++) d[i] = z[i]! + beta * d[i]!;
+    }
+    this.extendIterations = Math.max(this.extendIterations, it);
+    for (let i = 0; i < n; i++) P[list[i]!] = x[i]!;
   }
 
   /** The sinks of the front and the sources that pay them, in `extra` (stage 4). */
@@ -1467,6 +1681,7 @@ export class Sim {
     const front = this.p.front;
     const { cells, G } = this;
     this.extra.fill(0);
+    this.take.fill(0);
     this.frontActive = false;
     this.frontTotal = 0;
     if (front.paid > 0) {
@@ -1578,6 +1793,7 @@ export class Sim {
       if (G[c]! <= 0) continue;
       const r = fixed ? Math.round(this.sinkRate[c]! * FIXED) / FIXED : this.sinkRate[c]!;
       this.extra[c]! -= (S * r) / total;
+      this.take[c] = (S * r) / total;
     }
     if (portList.length > 0) for (const c of portList) this.extra[c]! += S / sources;
     else for (let c = 0; c < cells; c++) if (G[c]! > 0) this.extra[c]! += S / sources;

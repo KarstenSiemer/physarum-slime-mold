@@ -457,6 +457,75 @@ describe('the CPU prototype of stage 4', () => {
     expect(smallDish(noFront()).scent.some((v) => v > 0)).toBe(true);
   });
 
+  it('reads no level of a network against its ground with the forms of the drift of part E2d (ADR 0074)', () => {
+    interface Inside {
+      driftPressure(px: number, py: number, qx: number, qy: number, c: number): number;
+      afterSolve(): void;
+      G: Float32Array;
+      Pb: Float32Array[];
+    }
+    // One colony under `take`, and every form reads that one state, before and after a shift of every tube cell by 200.
+    // A form reads only through driftPressure() and the level that afterSolve() sets for it, so one state is enough;
+    // a colony per form, and a check per sensor, took more than the 5 s of a unit test on CI.
+    const sim = smallDish(gpuRules({ sinkTube: '1', driftOn: 'take' }), 3);
+    for (let k = 0; k < 200; k++) sim.advance();
+    expect(sim.frontTotal).toBeGreaterThan(0);
+    const inside = sim as unknown as Inside;
+    const front = sim.p.front as { driftOn: string };
+    /** What every sensor of every agent reads of the pressure with the form. */
+    const read = (form: string) => {
+      front.driftOn = form;
+      inside.afterSolve();
+      const out: number[] = [];
+      const so = sim.p.sensorOffset;
+      for (let i = 0; i < sim.cap; i++) {
+        if (!sim.alive[i]) continue;
+        const [px, py, h] = [sim.ax[i]!, sim.ay[i]!, sim.ah[i]!];
+        for (const turn of [0, -Math.PI / 8, Math.PI / 8]) {
+          const [qx, qy] = [px + so * Math.cos(h + turn), py + so * Math.sin(h + turn)];
+          const c = sim.cellOf(qx, qy);
+          if (c >= 0 && sim.layout.open[c]) out.push(inside.driftPressure(px, py, qx, qy, c));
+        }
+      }
+      return out;
+    };
+    const forms = ['net', 'take', 'mirror', 'sinks', 'rim', 'all'];
+    const before = new Map(forms.map((form) => [form, read(form)]));
+    // A sensor compares what it reads with the other two of its agent: the pressure of the agent's cell, which the
+    // forms subtract, does not change a turn.
+    for (const P of [...sim.P, ...inside.Pb]) for (let c = 0; c < sim.cells; c++) if (inside.G[c]! > 0) P[c]! += 200;
+    const after = new Map(forms.map((form) => [form, read(form)]));
+    for (const form of forms.slice(0, -1)) {
+      const [was, now] = [before.get(form) ?? [], after.get(form) ?? []];
+      expect(was.length, form).toBeGreaterThan(100);
+      // The sensors whose read moved by 0.005 or more: none.
+      expect(
+        was.flatMap((v, k) => (Math.abs((now[k] ?? NaN) - v) < 0.005 ? [] : [[k, v, now[k]]])),
+        form,
+      ).toEqual([]);
+    }
+    // The drift of ADR 0065 reads the pressure of the cell itself: the shift moves every sensor on a tube.
+    const [was, now] = [before.get('all') ?? [], after.get('all') ?? []];
+    expect(now.filter((v, k) => Math.abs(v - (was[k] ?? NaN) - 200) < 0.01).length).toBeGreaterThan(100);
+    // `take`: a sensor off the tubes of an agent at a sink reads the drop of the flux of the sink over the sensor offset.
+    front.driftOn = 'take';
+    const wrong: number[][] = [];
+    let checked = 0;
+    for (let i = 0; i < sim.cap; i++) {
+      const a = sim.cellOf(sim.ax[i]!, sim.ay[i]!);
+      if (!sim.alive[i] || !(inside.G[a]! > 0) || !(sim.take[a]! > 0)) continue;
+      const [qx, qy] = [sim.ax[i]! + 7 * Math.cos(sim.ah[i]!), sim.ay[i]! + 7 * Math.sin(sim.ah[i]!)];
+      const c = sim.cellOf(qx, qy);
+      if (c < 0 || !sim.layout.open[c] || inside.G[c]! > 0) continue;
+      const got = inside.driftPressure(sim.ax[i]!, sim.ay[i]!, qx, qy, c);
+      const want = (-7 * sim.take[a]!) / inside.G[a]!;
+      if (!(Math.abs(got - want) < 5e-7)) wrong.push([i, got, want]);
+      checked++;
+    }
+    expect(wrong).toEqual([]);
+    expect(checked).toBeGreaterThan(0);
+  });
+
   it('sees through no wall in the Y-maze and the dish, so the squares of a sink equal paths there (ADR 0067, decision 10)', () => {
     const layouts = [yMazeLayout([]).layout, dish(160, [[80, 80, 5]])];
     for (const layout of layouts) for (const r of [2, 6]) expect(seenThroughWalls(layout, r)).toBe(0);

@@ -306,6 +306,16 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   backends compute the flow of the scene as the CPU copy. The spikes of the pressure were patches of tube that held
   sinks and no port; a sink now lies on a tube that leaves the square of 13 × 13 cells around it or holds a port, in
   both backends and the CPU copy, with 17 wrong rules more; every scene keeps its bytes.
+- **The start of a colony with the rules** (ADR 0073, the coordinator's decision of 2026-11-20 under the owner's
+  delegation): a colony starts as the app starts every scene, without a food scent before it. With that start and the
+  tube rule of ADR 0072 the prototype keeps its targets (Y-maze 40 : 0 with slime on one arm, 26 : 14 without slime,
+  half of the dish after 5,500 steps). Open: the 26 : 14 (p 0.081); part E4 measures it in the engine over 40 seeds.
+- **A drift that does not read the level of the ground** (ADR 0074, part E2d, prototype only): eight forms of the
+  drift against a shift of the level of a network by ±200. Six read no level; of those, `take` (off the tubes, the
+  pressure of the agent's cell less the drop that the flux of its sink would have over the sensor offset) grows three
+  quarters of what the records grew, with a small spread, and keeps the Y-maze, the speed of the front and the dish with
+  slime everywhere. The agent proposes it; the owner chooses the form (above). Part E2e builds the chosen form in both
+  backends.
 - **Next: part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
   the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
   panel, the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a
@@ -318,14 +328,16 @@ Open, for the owner:
 - The strength of the film of the slime: the owner chose the look "wet film" on pictures on 2026-11-17 (ADR 0057). Its colours, its body and its light per style are the numbers of `SLIME_LOOK` in `src/engine/render.ts`, and the 4,095 steps in which a tube builds full slime are `SLIME_FULL` in `src/engine/slime.ts`: say so if one of them should be another.
 - A rule for the moves on slime (ADR 0056, decision 5): it gives the choice of the Y-maze, and a colony that is 3.1 to 3.6 times slower on slime. It is not built. If the owner wants it before stage 4, it is a setting that is off in every scene.
 - What the owner meant by slime that "should also be perfused" (ADR 0052, open points).
-- The start of a colony with the rules of stage 4 (ADR 0072, open points): the prototype measured every record with a
-  food scent at its steady state when the colony starts, and the app starts without a scent. With the start of the
-  app the prototype keeps the targets, but its dish covers half of its cells 1.07 times later, and the Y-maze without
-  slime chooses the left arm 28 : 12. Either the engine starts a colony with the rules on a steady scent, or the
-  records stay those of the start of the app (`research/front/start.sh`).
-- A form of the drift that does not read the level of a network against its ground (ADR 0072, finding 3): a shift of
-  that level by ±200 changes the agents of the prototype's dish at step 1,500 from 381 to 519 to 202 to 1,311. The one
-  form tried that does not read it, `driftOn=net`, grows a quarter as many agents and loses the crown.
+- The form of the drift of stage 4 (ADR 0074, open points): the drift as built reads the level of a network against
+  its ground, a lottery of the first steps of the flux. Each form changes what the weights 1.25 to 1.5 and 5 of
+  decision 6 of ADR 0065 give (0 stays). The numbers of the prototype, at drift 1.5 and 5: agents of the dish at step
+  1,500; half of the dish without slime; the front in the lane, in cells per step. Every form keeps the Y-maze and the
+  dish with slime everywhere.
+  - `all`, as built: 405 agents, 229 to 1,643 by the level; half after 5,501 and 4,218 steps; 0.0129 and 0.0143.
+  - `take`, the agent's proposal: 377 (287 to 454); 5,883 and 3,668 steps; 0.0142 and 0.0170; the look of `all`; in
+    the full dish at drift 1.5 fewer agents (619 against 844) and half the births.
+  - `mirror`: 1,024 (912 to 1,162); 3,162 and 2,588 steps; 0.0190 and 0.0203; a full dish draws back into tubes.
+  - `extend`, the ground that the solver would reach (no form of a GPU): 667 (508 to 813); 0.0160 at drift 1.5.
 
 The stages:
 
