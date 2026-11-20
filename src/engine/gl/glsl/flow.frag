@@ -2,7 +2,8 @@
 // PASS 0 is `update` (the memory of each cell), PASS 1 is `pressure` (one iteration of the pressure of the four lanes).
 // The port of every site and strain takes three passes (`blocks` and `sites` in flow.wgsl): PASS 2 is `blocks`, a texel
 // per block of the list of cells and strain; PASS 3 looks at the blocks of a site, a texel per site, strain and lane
-// of 64; PASS 4 takes the least of the lanes, a texel per site and strain.
+// of 64; PASS 4 takes the least of the lanes, a texel per site and strain. PASS 5, only with the rules of stage 4, is
+// what the sensors read of the flow of a strain (`takes` in flow.wgsl, ADR 0075).
 
 // The flow takes the sinks of its strain while the rules of stage 4 run (ADR 0070; `//#if TERRITORY` in
 // ../../shaders/flow.wgsl): programs.ts compiles the update and the pressure with it, and gl/sim.ts uses them only
@@ -38,6 +39,9 @@ uniform sampler2D pressureIn;
 uniform sampler2D pressureBefore;
 // 1 and 2: the first two iterations of a step take the pressure of the reference cell off (RECENTRE in flow.wgsl).
 uniform int recentre;
+#elif PASS == 5
+// The pressure of the strain as the flow of the step before left it.
+uniform sampler2D pressureIn;
 #else
 // The cells of every site, as indices y · W + x, W per row of the texture, and −1 for no cell (siteCells in
 // flow.wgsl).
@@ -63,17 +67,24 @@ uniform sampler2D portsIn;
 // The ports of this step: texel (site, strain), x the port of the site, y its port in the step before; −1 for none.
 uniform sampler2D ports;
 #endif
-#if TERRITORY && PASS < 2
+#if TERRITORY && (PASS < 2 || PASS == 5)
 // The state of the sinks of every strain (sinks.frag PASS 3), texel (k, strain): the update reads the copy of the step
-// before, the pressure the copy of this step.
+// before, the pressure the copy of this step. PASS 5 reads the copy that the flow of the step before wrote.
 uniform sampler2D state;
 #endif
-#if TERRITORY && PASS == 1
-// The sink rates of the strain of this step (sinks.frag PASS 0), with a minus sign for a sink.
+#if TERRITORY && (PASS == 1 || PASS == 5)
+// The sink rates of the strain of this step (sinks.frag PASS 0), with a minus sign for a sink; for PASS 5 those of
+// the step before.
 uniform sampler2D rates;
 #endif
 
+#if PASS == 5
+// Lane s of two targets, which gl/sim.ts masks to the lane of the strain of the pass.
+layout(location = 0) out vec4 result;
+layout(location = 1) out vec4 share;
+#else
 out vec4 result;
+#endif
 
 #if PASS < 2
 // The port of site i for the strain of the pass in this step, or −1 (port in flow.wgsl).
@@ -93,6 +104,17 @@ float edge(float a, float b) {
   if (a <= 0.0 || b <= 0.0) return 0.0;
   return 2.0 * a * b / (a + b);
 }
+#if TERRITORY && (PASS == 1 || PASS == 5)
+
+// What the sink of the tube cell p takes while the front of the strain takes flux (taken in flow.wgsl, ADR 0070).
+float taken(ivec2 p) {
+  int s = int(U.f.z);
+  float total = U.take.x * U.a.x;
+  uint steps = uint(abs(texelFetch(rates, p, 0).r) * 16777216.0);
+  float r = float((steps + 128u) >> 8u) * (1.0 / 65536.0);
+  return total * r / texelFetch(state, ivec2(0, s), 0).x;
+}
+#endif
 
 #if PASS == 0
 // The conductivity of the cell at q (openXY), 0 for none.
@@ -265,9 +287,7 @@ float sinksAndSources(ivec2 p, float g) {
   int c = p.y * W() + p.x;
   float q = 0.0;
   if (g > 0.0) {
-    uint steps = uint(abs(texelFetch(rates, p, 0).r) * 16777216.0);
-    float r = float((steps + 128u) >> 8u) * (1.0 / 65536.0);
-    q -= total * r / sums.x;
+    q -= taken(p);
     if (sums.w == 0.0) q += total / sums.y;
   }
   // Only a cell with food is the port of a site.
@@ -395,6 +415,19 @@ void main() {
     }
   }
   result = found;
+}
+#elif PASS == 5
+// What the sensors of the strain read of its flow (agents.frag driftOf(), ADR 0075), from the flow of the step before:
+// the mean pressure of the four lanes, and in `share` what the sink of the cell takes over its conductivity, 0 at a
+// cell without a tube and while the front takes no flux (`takes` in flow.wgsl).
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 pr = texelFetch(pressureIn, p, 0);
+  result = vec4((pr.x + pr.y + pr.z + pr.w) * 0.25);
+  float g = texelFetch(memory, p, 0).z;
+  float t = 0.0;
+  if (g > 0.0 && texelFetch(state, ivec2(1, int(U.f.z)), 0).x != 0.0) t = taken(p) / g;
+  share = vec4(t);
 }
 #else
 // The port of site i (x of the texel) for strain s (y of the texel): the cell of the least entry of the lanes of

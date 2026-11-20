@@ -310,6 +310,11 @@ export interface Backend<S extends Sim = Sim> {
    * SINK_BYTES_PER_CELL, SINK_BYTES_PER_CELL_GL).
    */
   readonly sinkBytesPerCell: number;
+  /**
+   * More GPU bytes per grid cell while the rules of stage 4 run, for what the sensors read of the flow of every strain
+   * at once (sizing.ts DRIFT_BYTES_PER_CELL_GL); 0 on a backend that counts it per strain in `sinkBytesPerCell`.
+   */
+  readonly driftBytesPerCell: number;
   readonly supportsCollisions: boolean;
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;

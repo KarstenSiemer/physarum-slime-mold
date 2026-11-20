@@ -2,7 +2,8 @@
 // backends against it. It reads the uniform block as the shaders do (flow.ts packFlow()): the block names the strain
 // whose flow this is (ADR 0031), and the fields are those of that strain. The cells of the sites are those of the
 // list that the simulation holds (sites.ts FlowSites). With the rules of stage 4 the update and the pressure take the
-// sinks (ADR 0070; `//#if TERRITORY` in the shaders): sinks.gpu.test.ts checks both backends against that.
+// sinks (ADR 0070; `//#if TERRITORY` in the shaders): sinks.gpu.test.ts checks both backends against that. So do the
+// sensors, by what the sinks take (ADR 0075): flow-sinks.gpu.test.ts.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
 import { FLOW_CONSTANT_SLOTS, FLOW_ITERATIONS, FLOW_SITES, FLOW_TAKE_SLOT, flowRoles } from './flow';
@@ -232,13 +233,46 @@ export function sinksAndSources(
   const total = f((u[FLOW_TAKE_SLOT * 4] ?? 0) * (u[0] ?? 0));
   for (let c = 0; c < n; c++) {
     if (!((memory[c * 4 + 2] ?? 0) > 0)) continue;
-    // The rate in steps of 2^-24, a whole number, then in steps of 2^-16 as the sums count it.
-    const r = sumOf(Math.trunc(Math.abs(rates[c] ?? 0) * RATE_ONE)) / SUM_ONE;
-    let q = -f(f(total * r) / R);
+    let q = -taken(total, rates[c] ?? 0, R);
     if (P === 0) q = f(q + f(total / C));
     out[c] = q;
   }
   if (P > 0) for (const c of portsOf(u, ports)) if (c >= 0) out[c] = f((out[c] ?? 0) + f(total / P));
+  return out;
+}
+
+/**
+ * What the sink of a tube cell with the rate `rate` takes while the front of its strain takes flux (flow.wgsl
+ * taken()), in float32: total · r / R, with r the rate as R counted it, in steps of 2^-24, a whole number, then in steps
+ * of 2^-16.
+ */
+function taken(total: number, rate: number, R: number): number {
+  const f = Math.fround;
+  const r = sumOf(Math.trunc(Math.abs(rate) * RATE_ONE)) / SUM_ONE;
+  return f(f(total * r) / R);
+}
+
+/**
+ * `takes` of flow.wgsl and PASS 5 of flow.frag (ADR 0075): what the sink of every cell of a strain takes over the
+ * conductivity G of the cell, take / G, as the sensors of the next step read it, in float32 as the passes compute it:
+ * 0 at a cell without a tube (G of `memory` not above 0) and while the front of the strain takes no flux (the fifth
+ * lane of the state). `memory`, `rates` and `state`: those of the step, as sinksAndSources() takes them.
+ */
+export function takesOf(
+  u: Float32Array,
+  memory: Float32Array,
+  rates: Float32Array,
+  state: ArrayLike<number>,
+): Float32Array {
+  const f = Math.fround;
+  const n = rates.length;
+  const out = new Float32Array(n);
+  if (state.length < SINK_STATE_LANES || (state[4] ?? 0) === 0) return out;
+  const total = f((u[FLOW_TAKE_SLOT * 4] ?? 0) * (u[0] ?? 0));
+  for (let c = 0; c < n; c++) {
+    const g = memory[c * 4 + 2] ?? 0;
+    if (g > 0) out[c] = f(taken(total, rates[c] ?? 0, state[0] ?? 0) / g);
+  }
   return out;
 }
 
@@ -332,13 +366,37 @@ export function flowStep(
   return { memory, pressure, before, ports };
 }
 
-/**
- * The value that the sensor of an agent of strain `strain` reads at a cell while the rules of stage 4 run (agents.wgsl
- * sense(), ADR 0070), in float32 as the passes compute it: `read`, what it reads without the rules, minus the drift
- * times the mean of the pressure of the four lanes of the flow of the strain at the cell (`lanes`, Sim.readPressure()).
- */
-export function drifted(read: number, drift: number, lanes: ArrayLike<number>): number {
+/** The mean pressure of the four lanes of a cell (`lanes`, Sim.readPressure()), in float32 as the passes compute it. */
+export function meanPressure(lanes: ArrayLike<number>): number {
   const f = Math.fround;
-  const sum = f(f(f((lanes[0] ?? 0) + (lanes[1] ?? 0)) + (lanes[2] ?? 0)) + (lanes[3] ?? 0));
-  return f(read - f(drift * f(sum * 0.25)));
+  return f(f(f(f((lanes[0] ?? 0) + (lanes[1] ?? 0)) + (lanes[2] ?? 0)) + (lanes[3] ?? 0)) * 0.25);
+}
+
+/**
+ * What the cell of an agent gives its sensors while the rules of stage 4 run (agents.wgsl driftOf(), ADR 0075), in
+ * float32: undefined if it holds no tube of the agent's strain, else the ground, what a sensor on a cell without a tube
+ * reads: the mean pressure of the cell (`lanes`) less the sensor offset `so` times take / G there (`take`, takesOf()).
+ */
+export function groundOf(tube: boolean, lanes: ArrayLike<number>, take: number, so: number): number | undefined {
+  const f = Math.fround;
+  return tube ? f(meanPressure(lanes) - f(so * take)) : undefined;
+}
+
+/**
+ * The value that a sensor of an agent reads while the rules of stage 4 run (agents.wgsl sense(), ADR 0070, ADR 0075),
+ * in float32 as the passes compute it: `read`, what it reads without the rules (not blocked), minus the drift times the
+ * mean pressure of the cell of the sensor (`lanes`) if that cell holds a tube of the strain (`tube`), else times the
+ * ground of the agent's cell (groundOf()). An agent on a cell without a tube of its strain (`ground` undefined) reads
+ * no drift.
+ */
+export function drifted(
+  read: number,
+  drift: number,
+  ground: number | undefined,
+  tube: boolean,
+  lanes: ArrayLike<number>,
+): number {
+  if (ground === undefined) return read;
+  const f = Math.fround;
+  return f(read - f(drift * (tube ? meanPressure(lanes) : ground)));
 }

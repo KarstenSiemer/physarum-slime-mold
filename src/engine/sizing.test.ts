@@ -20,6 +20,8 @@ import {
   SINK_BYTES_PER_CELL,
   SINK_BYTES_PER_CELL_GL,
   sinkBytesPerCell,
+  DRIFT_BYTES_PER_CELL_GL,
+  driftBytesPerCell,
   sinkLevels,
   SLIME_BYTES_PER_CELL,
   slimeBytesPerCell,
@@ -295,14 +297,15 @@ describe('the territory of the rules of stage 4 (ADR 0068)', () => {
   });
 
   it('counts the sinks per strain: one rate on WebGPU, two and the pyramid of the sums on WebGL2 (ADR 0069)', () => {
-    expect(SINK_BYTES_PER_CELL).toBe(4);
+    // On WebGPU with take / G of each cell, which the sensors read (ADR 0075).
+    expect(SINK_BYTES_PER_CELL).toBe(8);
     expect(SINK_BYTES_PER_CELL_GL).toBeCloseTo(9.067, 3);
     // The pyramid over squares of 4 × 4: 16 B per texel of a level, a sixteenth of the cells, then a sixteenth of that.
     const [w, h] = [1024, 640];
     const texels = sinkLevels(w, h).reduce((sum, [x, y]) => sum + x * y, 0);
     expect((texels * 16) / (w * h)).toBeCloseTo(SINK_BYTES_PER_CELL_GL - 8, 2);
     const three = { ...on, strains: [defaultStrain(0, 3), defaultStrain(1, 3), defaultStrain(2, 3)] };
-    expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL)).toBe(12);
+    expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL)).toBe(24);
     expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL_GL)).toBeCloseTo(27.2, 1);
     for (const s of [
       { ...three, territory: false },
@@ -310,6 +313,20 @@ describe('the territory of the rules of stage 4 (ADR 0068)', () => {
       { ...three, collisions: false },
     ])
       expect(sinkBytesPerCell(s, SINK_BYTES_PER_CELL)).toBe(0);
+  });
+
+  it('counts what the sensors read on WebGL2 apart from the strains: two targets of 16 B (ADR 0075)', () => {
+    expect(DRIFT_BYTES_PER_CELL_GL).toBe(32);
+    for (const strains of [1, 2, 3, 4]) {
+      const s = { ...on, strains: Array.from({ length: strains }, (_, i) => defaultStrain(i, strains)) };
+      expect(driftBytesPerCell(s, DRIFT_BYTES_PER_CELL_GL)).toBe(32);
+    }
+    for (const s of [
+      { ...on, territory: false },
+      { ...on, flow: false },
+      { ...on, collisions: false },
+    ])
+      expect(driftBytesPerCell(s, DRIFT_BYTES_PER_CELL_GL)).toBe(0);
   });
 
   it('counts the key of the births that the flux pays, 4 B per agent, while the rules run (ADR 0071)', () => {

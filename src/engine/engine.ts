@@ -30,6 +30,7 @@ import {
   paidBytesPerAgent,
   slimeBytesPerCell,
   sinkBytesPerCell,
+  driftBytesPerCell,
   territoryBytesPerCell,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
@@ -327,6 +328,8 @@ export class Engine {
       // The rules of stage 4 by the rule that the backend runs: they need growth (ADR 0068).
       territoryBytesPerCell({ ...s, collisions }) +
       sinkBytesPerCell({ ...s, collisions }, this.backend.sinkBytesPerCell) +
+      // What the sensors read of the flow, on a backend that holds it apart from the strains (ADR 0075).
+      driftBytesPerCell({ ...s, collisions }, this.backend.driftBytesPerCell) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     // The key of the births that the flux pays while the rules of stage 4 run (ADR 0071).
     const bytesPerAgent =

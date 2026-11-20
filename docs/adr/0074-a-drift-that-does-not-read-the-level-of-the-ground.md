@@ -7,6 +7,9 @@
 - Extends [ADR 0072](0072-a-sink-lies-on-a-tube-that-carries-flux-to-it.md) (finding 3, open points),
   [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (decision 1, the drift; decision 6, its forms) and
   [ADR 0073](0073-a-colony-with-the-rules-starts-as-the-app-starts.md) (the start).
+- Accepted by the owner on 2026-11-20: `take`; the engine builds it in
+  [ADR 0075](0075-the-drift-take-in-the-engine.md).
+- Extended by [ADR 0075](0075-the-drift-take-in-the-engine.md) (the drift `take` in the engine).
 - In short: [`research/front/the-drift-and-the-ground.md`](../../research/front/the-drift-and-the-ground.md) tells the
   story on one page; [`research/front/E2d-NOTES.md`](../../research/front/E2d-NOTES.md) has the commands, the folders
   and every number.

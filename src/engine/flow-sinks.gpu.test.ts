@@ -11,8 +11,10 @@ import {
   flowStart,
   flowStep,
   flowUpdate,
+  groundOf,
   openCell,
   sinksAndSources,
+  takesOf,
   type FlowFields,
   type FlowGrid,
 } from './flow-reference';
@@ -21,6 +23,7 @@ import { rngSeed, stream } from './growth-reference';
 import { strainEnds } from './pack';
 import { flowSites, NO_SITES, type FlowSites, type FoodStroke } from './sites';
 import { RATE_ONE, SINK_STATE_LANES, SINKS, SUM_ONE } from './sinks';
+import { DRIFT_BYTES_PER_CELL_GL, SINK_BYTES_PER_CELL, SINK_BYTES_PER_CELL_GL } from './sizing';
 import { packTerritory } from './territory';
 import type { Backend, Sim } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -129,7 +132,7 @@ function pressureWith(
   return pressure;
 }
 
-describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %s (ADR 0070)', (_kind, create) => {
+describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %s (ADR 0070)', (kind, create) => {
   let backend: Backend;
   const live: Sim[] = [];
 
@@ -383,72 +386,168 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
     expect(offOf(got, wrong).off).toBeGreaterThan(1e-2);
   }, 180_000);
 
-  it('turns an agent down the mean pressure of the four lanes of its strain, times the drift', async () => {
-    // Agents of both strains in the middle of their cells, heading along x, with the sensors 9 cells ahead and 45°
-    // to each side (sim.gpu.test.ts, the agent rule): no trail, no food, a pressure of whole numbers in every lane of
-    // each strain, so every sensor reads an exact value. A territory of every cell: every move goes.
+  /**
+   * The case of the drift (ADR 0075): agents of both strains in the middle of their cells, heading along x, with the
+   * sensors 9 cells ahead and 45° to each side (sim.gpu.test.ts, the agent rule); no trail, no food, a territory of
+   * every cell, so every move goes. Each strain has a tube on half of the cells, of the conductivity 1 or 2, a sink
+   * rate of k / 16 on every cell (k from 0 to 15, with a sign and a rest that R rounds away), and a pressure of whole
+   * numbers in every lane: so take / G and every value that a sensor reads are exact. Strain 0 takes flux with R = 16,
+   * strain 1 with R = 8 takes none. `shift`: a pressure added to every lane of every tube cell, + for strain 0 and −
+   * for strain 1. The memory 0.5 lets almost no agent starve and no dead agent come to life.
+   */
+  async function driftCase(drift: number, shift = 0) {
     const [w, h] = [64, 64];
     const n = w * h;
     const RA = 30;
     const strains = TWO.map((st) => ({ ...st, sensorAngle: 45, rotationAngle: RA, sensorOffset: 9, randomTurn: 0 }));
+    const s = stage4({ seed: 53, strains, drift });
+    const sim = await make({ ...s, collisions: false }, w, h, 512);
+    const ends = strainEnds(s.strains, sim.agents);
+    const placed: { id: number; x: number; y: number; strain: number }[] = [];
+    for (let y = 2; y < h; y += 4)
+      for (let x = 2; x < w; x += 4) {
+        const strain = (x + y) % 8 === 0 ? 0 : 1;
+        const id = (ends[strain - 1] ?? 0) + placed.filter((p) => p.strain === strain).length;
+        placed.push({ id, x, y, strain });
+        sim.writeAgent(id, { x: x + 0.5, y: y + 0.5, heading: 0, bits: strain | ALIVE });
+      }
+    sim.update(s);
+    sim.writeTerritory(new Uint8Array(n).fill(3));
+    const rnd = random(61);
+    const memories = [0, 1].map((strain) => {
+      const m = new Float32Array(n * 4);
+      for (let c = 0; c < n; c++) {
+        const tube = rnd() < 0.5;
+        m.set([0.5, tube ? 1 : 0, tube ? (rnd() < 0.5 ? 1 : 2) : 0, 0], c * 4);
+      }
+      sim.writeFlow(m, strain);
+      return m;
+    });
+    const rates = [0, 1].map((strain) => {
+      const r = Float32Array.from(
+        { length: n },
+        () => ((rnd() < 0.5 ? -1 : 1) * (Math.floor(rnd() * 16) * 2 ** 20 + Math.floor(rnd() * 201) - 100)) / RATE_ONE,
+      );
+      sim.writeSinks(r, strain);
+      return r;
+    });
+    const state = new Float32Array(SINK_STATE_LANES * 2);
+    state.set([16, 0, 0, 0, 1, 0, 0, 0], 0);
+    state.set([8, 0, 0, 0, 0, 0, 0, 0], SINK_STATE_LANES);
+    sim.writeSinkState(state);
+    const pressures = [0, 1].map((strain) => {
+      const p = Float32Array.from({ length: n * 4 }, () => Math.floor(rnd() * 8));
+      const tubes = memories[strain] ?? new Float32Array(0);
+      for (let c = 0; c < n; c++)
+        if ((tubes[c * 4 + 2] ?? 0) > 0)
+          for (let k = 0; k < 4; k++) p[c * 4 + k] = (p[c * 4 + k] ?? 0) + (strain === 0 ? shift : -shift);
+      sim.writePressure(p, strain);
+      return p;
+    });
+    const takes = [0, 1].map((strain) =>
+      takesOf(
+        blockOf(s, NO_SITES, strain),
+        memories[strain] ?? new Float32Array(0),
+        rates[strain] ?? new Float32Array(0),
+        stateOf(state, strain),
+      ),
+    );
+    sim.run(1);
+    const agents = await sim.readAgents();
+    /** What the sensors of an agent read (agents.wgsl steer()): forward, left and right. */
+    const reads = (x: number, y: number, strain: number, form: 'take' | 'all' | 'no take') => {
+      const [m, p, t] = [memories[strain], pressures[strain], takes[strain]];
+      if (!m || !p || !t) throw new Error(`no strain ${String(strain)}`);
+      const at = (cx: number, cy: number) => (((cy % h) + h) % h) * w + (((cx % w) + w) % w);
+      const tube = (c: number) => (m[c * 4 + 2] ?? 0) > 0;
+      const lanes = (c: number) => p.subarray(c * 4, c * 4 + 4);
+      const a = at(x, y);
+      const ground = groundOf(tube(a), lanes(a), form === 'no take' ? 0 : (t[a] ?? 0), 9);
+      return [at(x + 9, y), at(x + 6, y - 6), at(x + 6, y + 6)].map((c) =>
+        form === 'all'
+          ? drifted(0, Math.fround(drift), 0, true, lanes(c))
+          : drifted(0, Math.fround(drift), ground, tube(c), lanes(c)),
+      );
+    };
+    const tubeAgent = (x: number, y: number, strain: number) => (memories[strain]?.[(y * w + x) * 4 + 2] ?? 0) > 0;
+    return { s, sim, agents, placed, reads, tubeAgent, takes, RA };
+  }
+
+  it('counts the memory of what the sensors read on its backend (ADR 0075)', () => {
+    // WebGPU holds take / G in a layer per strain of the sinks; WebGL2 the mean pressures and take / G in two targets.
+    const gl = kind === 'webgl2';
+    expect(backend.sinkBytesPerCell).toBe(gl ? SINK_BYTES_PER_CELL_GL : SINK_BYTES_PER_CELL);
+    expect(backend.driftBytesPerCell).toBe(gl ? DRIFT_BYTES_PER_CELL_GL : 0);
+  });
+
+  /** The turn of steer() in agents.wgsl from the values of its sensors: 0 keep, 1 right, −1 left, 2 a random turn. */
+  const turnOf = ([f = 0, l = 0, r = 0]: number[]) =>
+    f > l && f > r ? 0 : f < l && f < r ? 2 : l < r ? 1 : r < l ? -1 : 0;
+
+  it('turns an agent by the pressure on the tubes of its strain and by what its sink takes, times the drift', async () => {
     for (const drift of [1.5, 0]) {
-      const s = stage4({ seed: 53, strains, drift });
-      const sim = await make({ ...s, collisions: false }, w, h, 512);
-      const ends = strainEnds(s.strains, sim.agents);
-      const placed: { id: number; x: number; y: number; strain: number }[] = [];
-      for (let y = 2; y < h; y += 4)
-        for (let x = 2; x < w; x += 4) {
-          const strain = (x + y) % 8 === 0 ? 0 : 1;
-          const id = (ends[strain - 1] ?? 0) + placed.filter((p) => p.strain === strain).length;
-          placed.push({ id, x, y, strain });
-          sim.writeAgent(id, { x: x + 0.5, y: y + 0.5, heading: 0, bits: strain | ALIVE });
-        }
-      sim.update(s);
-      sim.writeTerritory(new Uint8Array(n).fill(3));
-      // No tube, and a flow memory at which almost no agent starves and no dead agent comes to life.
-      for (const strain of [0, 1])
-        sim.writeFlow(
-          memoryOf(n, () => false, 0.5),
-          strain,
-        );
-      const rnd = random(59);
-      const pressures = [0, 1].map((strain) => {
-        const p = Float32Array.from({ length: n * 4 }, () => Math.floor(rnd() * 8));
-        sim.writePressure(p, strain);
-        return p;
-      });
-      sim.run(1);
-      const agents = await sim.readAgents();
+      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift);
       const ra = Math.fround((RA * Math.PI) / 180);
-      const counts = { keep: 0, left: 0, right: 0, random: 0 };
+      const counts = { keep: 0, left: 0, right: 0, random: 0, offTube: 0, byTake: 0, dead: 0 };
       for (const { id, x, y, strain } of placed) {
-        const lanes = pressures[strain] ?? new Float32Array(0);
-        const read = (cx: number, cy: number) => {
-          const c = (((cy % h) + h) % h) * w + (((cx % w) + w) % w);
-          return drifted(0, Math.fround(drift), lanes.subarray(c * 4, c * 4 + 4));
-        };
-        const [f, l, r] = [read(x + 9, y), read(x + 6, y - 6), read(x + 6, y + 6)];
-        // The rule of steer() in agents.wgsl, with its draw for the random turn.
-        let turn = 0;
-        if (f > l && f > r) counts.keep++;
-        else if (f < l && f < r) {
-          const draw = stream(rngSeed(id, 0, 0, s.seed))();
-          turn = draw < 0.5 ? 1 : -1;
-          counts.random++;
-        } else if (l < r) [turn, counts.right] = [1, counts.right + 1];
-        else if (r < l) [turn, counts.left] = [-1, counts.left + 1];
-        else counts.keep++;
-        const heading = agents[id]?.heading ?? NaN;
+        const agent = agents[id];
+        if (!agent || (agent.bits & ALIVE) === 0) {
+          counts.dead++;
+          continue;
+        }
+        let turn = turnOf(reads(x, y, strain, 'take'));
+        if (turn === 2) turn = stream(rngSeed(id, 0, 0, s.seed))() < 0.5 ? 1 : -1;
+        if (!tubeAgent(x, y, strain)) counts.offTube++;
+        else if (turn === 0) counts.keep++;
+        else if (Math.abs(turnOf(reads(x, y, strain, 'take'))) === 2) counts.random++;
+        else if (turn > 0) counts.right++;
+        else counts.left++;
+        // An agent on a tube of strain 0 whose sink takes, and whose turn the take decides.
+        if (turnOf(reads(x, y, strain, 'take')) !== turnOf(reads(x, y, strain, 'no take'))) counts.byTake++;
         const want = turn === 0 ? 0 : turn > 0 ? ra : 2 * Math.PI - ra;
         expect(
-          Math.abs(heading - want),
+          Math.abs(agent.heading - want),
           `agent ${String(id)} at (${String(x)}, ${String(y)}), drift ${String(drift)}`,
         ).toBeLessThan(1e-5);
       }
-      if (drift > 0) for (const v of Object.values(counts)) expect(v, `drift ${String(drift)}`).toBeGreaterThan(10);
-      else expect(counts.keep).toBe(placed.length);
+      expect(counts.dead, `drift ${String(drift)}`).toBeLessThan(3);
+      // Half of the agents lie on a tube of their strain. The sink of strain 0 takes at a cell, and that of strain 1
+      // takes nothing: its front takes no flux.
+      expect(counts.offTube).toBeGreaterThan(80);
+      expect(Math.max(...(takes[0] ?? [])), 'strain 0 takes').toBeGreaterThan(0);
+      expect(
+        (takes[1] ?? []).every((v) => v === 0),
+        'strain 1 takes nothing',
+      ).toBe(true);
+      if (drift > 0) {
+        for (const k of ['keep', 'left', 'right', 'random'] as const) expect(counts[k], k).toBeGreaterThan(5);
+        expect(counts.byTake).toBeGreaterThan(5);
+      } else expect(counts.keep + counts.offTube + counts.dead).toBe(placed.length);
       sim.destroy();
       live.splice(live.indexOf(sim), 1);
     }
+  }, 120_000);
+
+  it('changes no move when the pressure of every tube cell of a strain moves by the same amount', async () => {
+    // The level of a network against its ground (ADR 0072, finding 3; ADR 0074): a sensor off the tubes reads no
+    // pressure of its own cell, so a shift of the pressure of the tubes of a strain shifts every value that an agent on
+    // a tube reads alike. With the form of before, where every sensor read the pressure of its cell, the shift turns
+    // many agents otherwise.
+    const runs = [];
+    for (const shift of [0, 200]) {
+      const run = await driftCase(1.5, shift);
+      runs.push(run);
+    }
+    const [base, shifted] = runs;
+    if (!base || !shifted) throw new Error('two runs');
+    let [turned, before] = [0, 0];
+    for (const { id, x, y, strain } of base.placed) {
+      const [a, b] = [base.agents[id], shifted.agents[id]];
+      expect(b, `agent ${String(id)}`).toEqual(a);
+      if (turnOf(base.reads(x, y, strain, 'take')) !== 0) turned++;
+      if (turnOf(base.reads(x, y, strain, 'all')) !== turnOf(shifted.reads(x, y, strain, 'all'))) before++;
+    }
+    expect(turned).toBeGreaterThan(40);
+    expect(before).toBeGreaterThan(20);
   }, 120_000);
 });

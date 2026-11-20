@@ -1,10 +1,11 @@
 // The flow takes the sinks of each strain (ADR 0070): the CPU copy of what the sinks take and the sources give
-// (flow-reference.ts sinksAndSources()), and of the drift in a sensor (drifted()), on cases made by hand.
-// sinks.gpu.test.ts compares both backends with the CPU copy.
+// (flow-reference.ts sinksAndSources()), of what the sink of a cell takes over its conductivity (takesOf(), ADR 0075),
+// and of the drift in a sensor (groundOf(), drifted()), on cases made by hand. sinks.gpu.test.ts and
+// flow-sinks.gpu.test.ts compare both backends with the CPU copy.
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Settings } from '../model/params';
 import { FLOW_SITES, packFlow } from './flow';
-import { drifted, sinksAndSources } from './flow-reference';
+import { drifted, groundOf, meanPressure, sinksAndSources, takesOf } from './flow-reference';
 import { NO_SITES } from './sites';
 import { RATE_ONE, SINKS, SUM_ONE } from './sinks';
 import { sinkState, sumOf } from './sinks-reference';
@@ -124,11 +125,55 @@ describe('the flow takes the sinks (ADR 0070)', () => {
       if (!((memory[c * 4 + 2] ?? 0) > 0) && c !== list[0]) expect(extra[c], `cell ${String(c)}`).toBe(0);
   });
 
-  it('reads the drift times the mean pressure of the four lanes as a repellent in a sensor', () => {
-    expect(drifted(0, 1.5, [1, 2, 3, 6])).toBe(-4.5);
-    expect(drifted(10, 0, [1e6, 2, 3, 4])).toBe(10);
-    expect(drifted(2, 2, [-1, -1, -1, -1])).toBe(4);
+  it('gives each tube cell what its sink takes over its conductivity, while the front takes flux (ADR 0075)', () => {
+    const { u, memory, list, rates, state } = sinkCase(500, 0.5, (rnd) => Math.floor(rnd() * 2 ** 20), 1, 43);
+    const takes = takesOf(u, memory, rates, state);
+    // What the sinks take at each cell, over the conductivity 0.5 of every tube cell: twice the sink of sinksAndSources()
+    // without the share of the port.
+    const extra = sinksAndSources(u, memory, list.fill(-1), rates, [...state.slice(0, 3), 0, ...state.slice(4)]);
+    const C = state[1] ?? 1;
+    let taking = 0;
+    for (let c = 0; c < 500; c++) {
+      const g = memory[c * 4 + 2] ?? 0;
+      if (!(g > 0)) {
+        expect(takes[c], `cell ${String(c)}`).toBe(0);
+        continue;
+      }
+      // sinksAndSources() gives what the colony gives, S / C, less what the sink takes.
+      expect(takes[c], `cell ${String(c)}`).toBeCloseTo((S / C - (extra[c] ?? 0)) / g, 4);
+      if ((takes[c] ?? 0) > 0) taking++;
+    }
+    expect(taking).toBeGreaterThan(100);
+    // As the passes compute it, in float32: S · r / R, then over G.
+    const c = (memory.findIndex((v, i) => i % 4 === 2 && v > 0) - 2) / 4;
+    const r = sumOf(Math.trunc(Math.abs(rates[c] ?? 0) * RATE_ONE)) / SUM_ONE;
+    const want = Math.fround(Math.fround(Math.fround(Math.fround(S) * r) / (state[0] ?? 1)) / 0.5);
+    expect(takes[c]).toBe(want);
+    // Nothing while the front takes no flux.
+    const idle = [...state];
+    idle[4] = 0;
+    expect(takesOf(u, memory, rates, idle).every((v) => v === 0)).toBe(true);
+  });
+
+  it('reads the pressure on the tubes and the ground of the agent off them, times the drift (ADR 0075)', () => {
+    expect(meanPressure([1, 2, 3, 6])).toBe(3);
+    // The ground of a tube cell: its mean pressure less the sensor offset times take / G; none off the tubes.
+    expect(groundOf(true, [1, 2, 3, 6], 0.25, 9)).toBe(0.75);
+    expect(groundOf(false, [1, 2, 3, 6], 0.25, 9)).toBeUndefined();
+    // A sensor on a tube reads the mean pressure of its cell, one off the tubes the ground of the agent's cell.
+    expect(drifted(0, 1.5, 0.75, true, [1, 2, 3, 6])).toBe(-4.5);
+    expect(drifted(0, 1.5, 0.75, false, [1e6, 2, 3, 4])).toBe(-1.125);
+    expect(drifted(10, 0, 0.75, true, [1e6, 2, 3, 4])).toBe(10);
+    expect(drifted(2, 2, -1, false, [7, 7, 7, 7])).toBe(4);
+    // An agent off the tubes reads no drift.
+    expect(drifted(2, 1.5, undefined, true, [1, 2, 3, 6])).toBe(2);
+    // A shift of the pressure of every tube cell shifts every value that an agent on a tube reads alike.
+    const shift = (v: number) => v + 200;
+    const ground = groundOf(true, [1, 2, 3, 6].map(shift), 0.25, 9);
+    expect(drifted(0, 1.5, ground, false, [0, 0, 0, 0]) - drifted(0, 1.5, 0.75, false, [0, 0, 0, 0])).toBe(-300);
     // In float32, as the passes compute it.
-    expect(drifted(0.1, 1.5, [0.1, 0.2, 0.3, 0.4])).toBe(Math.fround(0.1 - Math.fround(1.5 * 0.25)));
+    const f = Math.fround;
+    expect(drifted(0.1, 1.5, 0, true, [0.1, 0.2, 0.3, 0.4])).toBe(f(0.1 - f(1.5 * meanPressure([0.1, 0.2, 0.3, 0.4]))));
+    expect(groundOf(true, [0.1, 0.2, 0.3, 0.4], 0.3, 9)).toBe(f(meanPressure([0.1, 0.2, 0.3, 0.4]) - f(9 * 0.3)));
   });
 });

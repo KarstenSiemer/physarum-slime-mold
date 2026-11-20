@@ -145,6 +145,15 @@ interface SinkState {
    * (paid.ts PAID_COUNTS_BYTE and PAID_KEYS_BYTE; ADR 0067, decision 7).
    */
   state: GPUBuffer;
+  /**
+   * What the sink of each cell takes over the conductivity of the cell (flow.wgsl `takes`, ADR 0075), a layer per
+   * strain that the pass writes at the start of a step, for the sensors of its agent passes.
+   */
+  takes: GPUTexture;
+  /** Per strain: its layer of `takes`, for the pass. */
+  takeViews: GPUTextureView[];
+  /** Every layer of `takes`, for the agent passes: an agent reads the layer of its strain. */
+  takeArray: GPUTextureView;
 }
 /**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
@@ -1654,9 +1663,13 @@ export class Simulation implements Sim {
     const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${held}`;
     const territoryView = territory ? territory.views[tt] : null;
     // With the rules of stage 4 the sensors of `claim` read the pressure of the flow of the step before, every layer
-    // (agents.wgsl `//#if TERRITORY`, ADR 0070): the key names the texture that holds it.
+    // (agents.wgsl `//#if TERRITORY`, ADR 0070): the key names the texture that holds it. And what the sink of each
+    // cell takes over its conductivity, which `takes` writes first from the flow of the step before (ADR 0075): the
+    // group holds a texture of the sinks, which dropSinks() forgets with the key.
     const pressures = territory && flow ? at(flow.pressureArrays, this.flowP) : null;
-    const pressureKey = pressures ? `p${String(this.flowP)}` : '';
+    const takes = pressures && sinks ? sinks.takeArray : null;
+    const pressureKey = pressures ? `p${String(this.flowP)}-sinks` : '';
+    if (flow && sinks && takes) this.encodeTakes(pass, flow, sinks);
     const agentPasses = flowing ?? (saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k);
     // The agent passes read only the constants of the block, which every strain has: the block of the first strain.
     const [flowMemory, flowUniform] = flow ? [at(flow.memoryArrays, fm), at(flow.uniforms, 0)] : [null, null];
@@ -1714,6 +1727,7 @@ export class Simulation implements Sim {
           flowUniform,
           territoryView,
           pressures,
+          takes,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
@@ -1861,21 +1875,33 @@ export class Simulation implements Sim {
     if (!this.sinks) {
       const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
       const make = (size: number) => this.device.createBuffer({ size, usage });
+      // What the sensors read of the sinks (ADR 0075): a pass writes every texel of it before a step reads it.
+      const takes = this.device.createTexture({
+        size: [this.width, this.height, strains],
+        format: 'r32float',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+      });
       this.sinks = {
         strains,
         rates: make(this.width * this.height * strains * 4),
         sums: make(SINK_SUM_WORDS * strains * 4),
         // The state of every strain, the counts of the paid births and a key per agent (ADR 0071).
         state: make(PAID_KEYS_BYTE + this.agents * 4),
+        takes,
+        takeViews: Array.from({ length: strains }, (_, strain) =>
+          takes.createView({ dimension: '2d', baseArrayLayer: strain, arrayLayerCount: 1 }),
+        ),
+        takeArray: takes.createView({ dimension: '2d-array' }),
       };
     }
     return this.sinks;
   }
 
-  /** Frees the buffers of the sinks, and every bind group that holds them. */
+  /** Frees the buffers and the texture of the sinks, and every bind group that holds them. */
   private dropSinks() {
     if (!this.sinks) return;
     for (const b of [this.sinks.rates, this.sinks.sums, this.sinks.state]) b.destroy();
+    this.sinks.takes.destroy();
     this.sinks = undefined;
     for (const key of [...this.bindCache.keys()]) if (key.includes('sinks')) this.bindCache.delete(key);
   }
@@ -1914,6 +1940,27 @@ export class Simulation implements Sim {
     const state = [this.params, uniform, null, null, null, null, null, null, sinks.sums, ports, sinks.state];
     pass.setBindGroup(0, this.bind(`sinks-state${strain}-flow`, passes.state, state));
     pass.dispatchWorkgroups(1);
+  }
+
+  /**
+   * What the sink of each cell takes over the conductivity of the cell, for the sensors of the agent passes (flow.wgsl
+   * `takes`, ADR 0075), at the start of a step: per strain, with its block, from its memory, the rates and the state as
+   * the flow of the step before left them.
+   */
+  private encodeTakes(pass: GPUComputePassEncoder, flow: FlowState, sinks: SinkState) {
+    const takes = this.kernels.flowSinkPasses().takes;
+    const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
+    const m = this.flowM;
+    pass.setPipeline(takes);
+    for (let strain = 0; strain < flow.strains; strain++) {
+      const read = [this.params, at(flow.uniforms, strain), null, null, at(flow.memoryViews, strain)[m]];
+      const between = [null, null, null, null, null, null, null, null];
+      const resources = [...read, ...between, sinks.rates, sinks.state, at(sinks.takeViews, strain)];
+      // The group holds a block and a memory of the flow and the buffers of the sinks: dropFlow() and dropSinks()
+      // forget it.
+      pass.setBindGroup(0, this.bind(`flowTakes${strain}-${m}-sinks`, takes, resources));
+      pass.dispatchWorkgroups(...groups);
+    }
   }
 
   /**
@@ -2460,6 +2507,11 @@ interface FlowKernels {
   pressure: GPUComputePipeline[];
 }
 
+/** The passes of the flow that take the sinks (ADR 0070), and `takes`, what the sensors read of the sinks (ADR 0075). */
+interface FlowSinkKernels extends FlowKernels {
+  takes: GPUComputePipeline;
+}
+
 /** The passes of the picture of the tubes (tubes.wgsl, ADR 0034). */
 interface TubeKernels {
   roots: GPUComputePipeline;
@@ -2503,8 +2555,8 @@ class Kernels {
   /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
-  /** The update and the pressure of the flow with the sinks (flow.wgsl `//#if TERRITORY`, ADR 0070). */
-  private flowSinkPipelines?: FlowKernels;
+  /** The update and the pressure of the flow with the sinks (flow.wgsl `//#if TERRITORY`, ADR 0070), and `takes`. */
+  private flowSinkPipelines?: FlowSinkKernels;
   private tubePipelines?: TubeKernels;
   private slimePipeline?: GPUComputePipeline;
   private slimeBrushPipeline?: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout };
@@ -2565,13 +2617,9 @@ class Kernels {
    * Without the rules the source is the one of the code before, character for character.
    */
   flowPasses(sinks = false): FlowKernels {
-    const build = (names: string[]) => {
-      const module = this.device.createShaderModule({ code: common + variant(flowWgsl, names) });
-      return (entryPoint: string, constants: Record<string, number> = {}) =>
-        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
-    };
+    if (sinks) return this.flowSinkPasses();
     if (!this.flowPipelines) {
-      const pipeline = build([]);
+      const pipeline = this.flowBuild([]);
       this.flowPipelines = {
         blocks: pipeline('blocks'),
         sites: pipeline('sites'),
@@ -2579,16 +2627,31 @@ class Kernels {
         pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
       };
     }
-    if (!sinks) return this.flowPipelines;
+    return this.flowPipelines;
+  }
+
+  /**
+   * The passes of the flow with the sinks (flowPasses(true)), built at their first use, with `takes`: what the sink of
+   * each cell takes over its conductivity, for the sensors of the next step (ADR 0075).
+   */
+  flowSinkPasses(): FlowSinkKernels {
     if (!this.flowSinkPipelines) {
-      const pipeline = build(['TERRITORY']);
+      const pipeline = this.flowBuild(['TERRITORY']);
       this.flowSinkPipelines = {
-        ...this.flowPipelines,
+        ...this.flowPasses(),
         update: pipeline('update'),
         pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
+        takes: pipeline('takes'),
       };
     }
     return this.flowSinkPipelines;
+  }
+
+  /** The pipelines of an entry point of the source of the flow with the blocks of `names` (variant.ts). */
+  private flowBuild(names: string[]) {
+    const module = this.device.createShaderModule({ code: common + variant(flowWgsl, names) });
+    return (entryPoint: string, constants: Record<string, number> = {}) =>
+      this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
   }
 
   /**

@@ -67,6 +67,9 @@ fn inTerritory(c: i32, s: u32) -> bool { return c >= 0 && inTerritoryAt(cellCoor
 // (flow.wgsl). While the rules of stage 4 run, a sensor reads it as a repellent, with the drift of the strain (ADR 0070;
 // ADR 0065, decision 6): the plasm streams down the pressure, to the sinks of the growth front.
 @group(0) @binding(15) var pressure: texture_2d_array<f32>;
+// What the sink of each cell takes over the conductivity of the cell, take / G, a layer per strain, from the flow of
+// the step before (flow.wgsl `takes`, ADR 0075): 0 at a cell without a tube and while the front takes no flux.
+@group(0) @binding(16) var takes: texture_2d_array<f32>;
 //#endif
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
@@ -183,14 +186,42 @@ fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
 }
 //#if TERRITORY
 
-// What the sensor at p reads while the rules of stage 4 run (ADR 0070; ADR 0065, decision 6): what it reads without
-// them, minus the drift of the strain times the mean pressure of the four lanes of its flow at the cell of the sensor.
-// A blocked sensor stays blocked, and its cell is not read.
-fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
+// The mean pressure of the four lanes of the flow of strain s at the cell q.
+fn meanPressure(q: vec2i, s: u32) -> f32 {
+  let pr = textureLoad(pressure, q, s, 0);
+  return (pr.x + pr.y + pr.z + pr.w) * 0.25;
+}
+
+// Whether the cell q holds a tube of strain s: a conductivity above 0, as the update of the flow of the step before
+// left it.
+fn tubeAt(q: vec2i, s: u32) -> bool { return textureLoad(flowMemory, q, s, 0).z > 0.0; }
+
+// What the cell of an agent of strain s gives its sensors while the rules of stage 4 run (ADR 0075; ADR 0074, the form
+// `take`): whether it holds a tube of s, and `ground`, what a sensor on a cell without a tube of s reads: the mean
+// pressure of the agent's cell less the sensor offset `so` times take / G there. Fresh ground holds no pressure of its
+// own, and the flux that the sink of the cell takes would fall by take / G per cell beyond it.
+struct Drift {
+  on: bool,
+  ground: f32,
+}
+
+fn driftOf(pos: vec2f, s: u32, so: f32) -> Drift {
+  let q = cellXY(vec2i(floor(pos)));
+  if (q.x < 0 || !tubeAt(q, s)) { return Drift(false, 0.0); }
+  return Drift(true, meanPressure(q, s) - so * textureLoad(takes, q, s, 0).x);
+}
+
+// What the sensor at p reads while the rules of stage 4 run (ADR 0070; ADR 0075): what it reads without them, minus
+// the drift of the strain times the mean pressure of the four lanes of its flow at the cell of the sensor if that cell
+// holds a tube of the strain, else times the ground of the agent's cell `d`. An agent on a cell without a tube of its
+// strain reads no drift. A blocked sensor stays blocked, and its cell is not read.
+fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32, d: Drift) -> f32 {
   let read = sensed(pos, p, s, clear);
-  if (read == BLOCKED) { return BLOCKED; }
-  let pr = textureLoad(pressure, cellXY(vec2i(floor(p))), s, 0);
-  return read - P.drift[s] * ((pr.x + pr.y + pr.z + pr.w) * 0.25);
+  if (read == BLOCKED || !d.on) { return read; }
+  let q = cellXY(vec2i(floor(p)));
+  var v = d.ground;
+  if (tubeAt(q, s)) { v = meanPressure(q, s); }
+  return read - P.drift[s] * v;
 }
 //#endif
 
@@ -199,9 +230,17 @@ fn steer(a: Agent, s: u32, rng: ptr<function, u32>, clear: i32) -> f32 {
   let sa = P.sensorAngle[s];
   let so = P.sensorOffset[s];
   let ra = P.rotationAngle[s];
+//#if TERRITORY
+  // The cell of the agent, read once for its three sensors (ADR 0075).
+  let d = driftOf(a.pos, s, so);
+  let f = sense(a.pos, a.pos + so * dir(a.heading), s, clear, d);
+  let l = sense(a.pos, a.pos + so * dir(a.heading - sa), s, clear, d);
+  let r = sense(a.pos, a.pos + so * dir(a.heading + sa), s, clear, d);
+//#else
   let f = sense(a.pos, a.pos + so * dir(a.heading), s, clear);
   let l = sense(a.pos, a.pos + so * dir(a.heading - sa), s, clear);
   let r = sense(a.pos, a.pos + so * dir(a.heading + sa), s, clear);
+//#endif
   var h = a.heading;
   if (f > l && f > r) {
     // keep heading

@@ -19,7 +19,8 @@ export class WebGpuBackend implements Backend<Simulation> {
   readonly bytesPerAgent = BYTES_PER_AGENT;
   readonly coveredBytesPerCell = 0; // covered food counts into the collision buffers
   readonly tubeMapBytesPerCell = 0; // the picture of the tubes holds its map in the memory of a workgroup
-  readonly sinkBytesPerCell = SINK_BYTES_PER_CELL; // the sink rates in one buffer, per strain (sim.ts `sinks`)
+  readonly sinkBytesPerCell = SINK_BYTES_PER_CELL; // the sink rates and take / G, per strain (sim.ts `sinks`)
+  readonly driftBytesPerCell = 0; // take / G is in sinkBytesPerCell; the sensors read the pressure of the flow
 
   readonly description: string;
   readonly lost: Promise<string>;

@@ -2686,9 +2686,60 @@ runs are equal, and each of the 17 wrong rules fails at least one test. The reco
 | `start.txt`, `map.txt` | the start of each strain, and a map of the cells around three spikes                     |
 | `proto/`               | the prototype: a shift of a level, both starts, 40 seeds, the Y-maze, `start.sh`         |
 
+### 32. Does the drift `take` keep the bytes of every scene, and do both backends grow alike? [ADR 0075]
+
+Part E2e of the engine of stage 4 (`research/front/ENGINE.md`): the drift `take` that the owner chose (ADR 0074), in
+both backends. The notes are `research/front/E2e-NOTES.md`. It runs only while the setting `territory` is on, which
+no scene turns on, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 31, with the name `g75-digest-branch`, against the record of part
+31, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g75-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g75-digest-branch.jsonl research/flow/logs/engine/tube-0072/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The start scene with the rules** on both backends, seeds 1 to 12 to step 1,503, with the least pressure of each
+strain in the first 30 steps (about 3 minutes on an M3 Pro), and its summary:
+
+```bash
+VITE_OUT=e2e-backends npx vitest run --config research/vitest.config.ts research/front/e2e-backends.gpu.test.ts
+node --import ./research/flow/register.mjs research/front/e2e-summary.ts research/front/out/e2e-backends.txt
+```
+
+**The wrong rules** of the drift `take`, with the 19 rules whose texts follow the new code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts S2 L1 TY96 TY104 TY105 TY108 TY110 TY113 TY114 TY117 TY119 TY120 TY121 TY122 TY123 TY124 TY125 TY133 TY139 $(seq -f 'TY%g' 231 270)
+```
+
+Each must fail at least one test.
+
+**The time of a step** of the start scene at capacity 1 with the rules, this branch and `main` in turns
+(`research/front/E2e-NOTES.md`, part 6, has the commands and a trap of the copy of `main`).
+
+Result: 62 of 62 runs are equal. Every strain of the 24 runs of the start scene ends with 224 to 430 agents; the
+medians per strain are 291, 296 and 328 on WebGPU and 307.5, 316.5 and 299.5 on WebGL2 (Mann-Whitney p 0.64, 0.27 and
+0.89; the sum p 0.60). The least pressure of the first 30 steps is −258 to −3,801. Each of the 59 wrong rules fails at
+least one test. A step takes about 2 to 3 % more than on `main` (WebGPU 3.74 and 3.72 ms against 3.67 and 3.63 ms,
+WebGL2 8.06 and 7.96 ms against 7.84 and 7.80 ms). The records are in `logs/engine/take-0075/`:
+
+| Record                | Runs                                                                    |
+| --------------------- | ----------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends             |
+| `backends.txt`        | the start scene with `take` on both backends, seeds 1 to 12, step 1,503 |
+| `mutations.txt`       | the tests that fail for each of the 59 wrong rules                      |
+| `steps-*.jsonl`       | the time of a step at capacity 1: this branch, `main`, and no rules     |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 484 files, 9.3 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 601 files, 10.9 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2733,6 +2784,7 @@ asks for the new digest.
 | `logs/engine/flow-sinks-0070/`                       | the runs of part 29 (ADR 0070): the digests of every scene, and the wrong rules TY102 to TY140, TY36 and TY37                                                                                                                   |
 | `logs/engine/paid-0071/`                             | the runs of part 30 (ADR 0071): the digests of every scene, the wrong rules, the time of `rank` and of a step                                                                                                                   |
 | `logs/engine/tube-0072/`                             | the runs of part 31 (ADR 0072): the start scene on both backends, the spikes, the CPU checks, the prototype, digests, wrong rules                                                                                               |
+| `logs/engine/take-0075/`                             | the runs of part 32 (ADR 0075): the digests of every scene, the start scene with `take` on both backends, the wrong rules                                                                                                       |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
