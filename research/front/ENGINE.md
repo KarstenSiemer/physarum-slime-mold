@@ -149,7 +149,7 @@ what each part holds, and what the next agent needs to know. The rules in force 
 - **The level of a network against its ground** (ADR 0072): the drift reads the pressure of a sensor's cell on the
   network and on the ground alike, and Kirchhoff's law fixes the level of a network against the ground beside it only
   through the ghost conductance. The history of the iteration sets it, and it decides whether a front grows: a strain
-  of the start scene ends step 1,503 with 51 to 1,593 agents. Compare scenes over 18 seeds or more; six seeds split by
+  of the start scene ends step 1,503 with 124 to 1,593 agents. Compare scenes over 18 seeds or more; six seeds split by
   chance (ADR 0072, finding 1). The cell that the pressure recentres by does not change it.
 - **The start of a colony**: the app starts every scene without a food scent, the prototype after 300 steps of it
   (`Params.scentSteps`). The records of ADR 0065 and 0067 have the start of the prototype; `research/front/start.sh`

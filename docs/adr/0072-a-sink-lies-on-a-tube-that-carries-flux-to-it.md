@@ -107,13 +107,13 @@ of seed 1 lay at −16,300 against its ground on WebGL2, and at +90 on WebGPU.
 
 ## Consequences
 
-- The sinks of a strain lie on tubes that its sources reach within 13 × 13 cells, so the flux of the front runs
-  through tubes. A patch that leaves the square and joins the network only farther away still takes its share: it is
-  large, and its level moves slowly.
+- The sinks of a strain lie on tubes that leave the square of 13 × 13 cells around them or hold a port, so no small
+  patch takes flux. A patch that leaves the square and joins the network only farther away still takes its share: it
+  is large, and its level moves slowly.
 - The engine computes the rules as the prototype does, under the same start. The growth of the first thousands of
   steps stays a lottery of the level of each network against its ground (finding 3): a strain of the start scene ends
-  step 1,503 with 51 to 1,593 agents, and the prototype's dish holds 114 to 863 agents at step 1,000 with the start of
-  the app. Part E4 compares the scenes over enough seeds for that spread.
+  step 1,503 with 124 to 1,593 agents, and the prototype's dish holds 114 to 863 agents at step 1,000 with the start
+  of the app. Part E4 compares the scenes over enough seeds for that spread.
 
 ## Open points
 
