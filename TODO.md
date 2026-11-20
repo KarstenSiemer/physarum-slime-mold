@@ -359,7 +359,12 @@ Open, for the owner:
     of full plasm, no sheet at the head. The owner said on 2026-11-20 that the crown research goes on. A still sheet
     without agents (ADR 0079): the rule of the tubes makes veins that fork toward the rim, with equal sinks and from
     twice the flux of E2f at the rim on (4, 7, 8, 17 veins at the radii 20 to 75), and none with `shareOn=supply`.
-    Open: why the two main veins lie on the diagonals of the grid, and how the colony gets that flux and equal sinks.
+    The flux of a cell (ADR 0080): Q sums the 4 edges, so it reads a broad flow on a diagonal up to 1.41 times
+    higher, and that seeds the V. A measure that reads every angle alike (`fluxOn=norm`, the prototype only) moves the
+    main veins to 22° to 26° at k = 1, but it reads thin diagonal veins low: straight rays and veins along the axes,
+    no forks toward the rim. The owner's choice: keep the measure; the norm in the engine (it changes the bytes of
+    every scene with the flow); or first a flow over 8 neighbours in the prototype (the agent's advice). Open: how
+    the colony gets the flux of the crown and equal sinks.
 
 The stages:
 

@@ -7,6 +7,7 @@
 - Extends [ADR 0078](0078-a-conductance-that-follows-the-thickness-of-the-plasm.md) and
   [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (finding 4: the flux at the rim is too thin for a vein).
 - The script: `research/front/still.ts`; the raw records are in the archive under `logs/engine/still-0079/`.
+- Extended by [ADR 0080](0080-the-flux-of-a-cell-and-the-veins-at-45-degrees.md).
 
 ## Context
 
