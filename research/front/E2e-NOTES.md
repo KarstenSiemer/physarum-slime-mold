@@ -25,7 +25,7 @@ subtracts P̄(a) from every sensor of the agent, which changes no choice; the en
 | ------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
 | the share S · r / R of a cell         | `taken()`, `shaders/flow.wgsl:235`, shared by `sinksAndSources` | `taken()`, `gl/glsl/flow.frag:110`, the same               |
 | take / G for the sensors              | entry point `takes`, `flow.wgsl:456`, binding 15 `takeOut`      | PASS 5, `flow.frag:419`, with the mean pressure (MRT)      |
-| the run of it, at the start of a step | `encodeTakes()`, `src/engine/sim.ts:1950`, from `:1672`         | `encodeDrift()`, `src/engine/gl/sim.ts:1990`, from `:1775` |
+| the run of it, at the start of a step | `encodeTakes()`, `src/engine/sim.ts:1950`, from `:1672`         | `encodeDrift()`, `src/engine/gl/sim.ts:1992`, from `:1776` |
 | the texture                           | `sinks.takes`, `r32float`, a layer per strain (`ensureSinks()`) | `sinks.pressures`, `sinks.takes`: `RGBA32F`, lane s        |
 | the reads of the agent pass           | `driftOf()`, `sense()`, `agents.wgsl:208`, `:218`, `:235`       | `driftOf()`, `sense()`, `agents.frag:122`, `:157`, `:174`  |
 | the CPU copy                          | `takesOf()`, `meanPressure()`, `groundOf()`, `drifted()`        | `src/engine/flow-reference.ts:261`, `:370`, `:380`, `:392` |
