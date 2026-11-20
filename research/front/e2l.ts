@@ -37,12 +37,13 @@ export interface ArcCount {
 }
 
 /**
- * The veins that cross the arcs of ARCS_OUT around the mouth of the neck (the centre of the half disc of still.ts):
- * the open cells below the neck within 1 cell of the radius, as stillSheet() takes them.
+ * The veins that cross the arcs `radii` around the mouth of the neck (the middle of the box at the end of the channel,
+ * the centre of the half disc of still.ts in its box): the open cells below the neck within 1 cell of the radius, as
+ * stillSheet() takes them.
  */
-export function arcCounts(f: CrownFields): ArcCount[] {
+export function arcCounts(f: CrownFields, radii: readonly number[] = ARCS_OUT): ArcCount[] {
   const { w, h, cells } = f;
-  const [cx, cy] = [STILL.w / 2, STILL.long];
+  const [cx, cy] = [w / 2, STILL.long];
   const ridge = ridgeCells(f, 1.5, 4, VEIN_D);
   const fine = ridgeCells(f, 1.5, 4, FINE_D);
   const toward = veinTowardRim(f, ridge);
@@ -52,7 +53,7 @@ export function arcCounts(f: CrownFields): ArcCount[] {
     const xs = list.map(v).filter(Number.isFinite);
     return xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
   };
-  return ARCS_OUT.map((r) => {
+  return radii.map((r) => {
     const [band, near]: [number[], number[]] = [[], []];
     for (let c = 0; c < cells; c++) {
       const [x, y] = [c % w, Math.floor(c / w)];
@@ -111,8 +112,11 @@ export function rowLine(r: E2lRow): string {
   return `${r.case.padEnd(15)}s${String(r.seed)} ${r.form.padEnd(5)} alive ${String(r.alive)} speed ${fmt(r.speed, 4)} per sink ${fmt(r.perSink, 3)} Q head ${fmt(s.qHead, 2)} behind ${fmt(s.backAgents, 2)} toward ${fmt(s.toward, 2)} | arcs veins/fine:cover ${arcs}`;
 }
 
-/** The runs of a campaign folder at step k: the case folders, in them the records `s<seed>.jsonl`. */
-export function measureCampaign(root: string, k: number): E2lRow[] {
+/**
+ * The runs of a campaign folder at step k: the case folders, in them the records `s<seed>.jsonl`. `radii`: the arcs of
+ * arcCounts().
+ */
+export function measureCampaign(root: string, k: number, radii: readonly number[] = ARCS_OUT): E2lRow[] {
   const rows: E2lRow[] = [];
   const cases = readdirSync(root)
     .filter((f) => statSync(join(root, f)).isDirectory())
@@ -149,7 +153,7 @@ export function measureCampaign(root: string, k: number): E2lRow[] {
         speed: before ? (row.reach - before.reach) / (k / 2) : NaN,
         sinks,
         perSink: (record.front.norm * params().flow) / sinks,
-        arcs: arcCounts(f),
+        arcs: arcCounts(f, radii),
       });
     }
   }

@@ -178,7 +178,9 @@ if (isMain) {
         const { food, sinks, ports } = sim.sinkPressures();
         const drop = food - sinks.reduce((a, b) => a + b, 0) / sinks.length;
         const spread = sinkSpread(food, sinks);
-        appendFileSync(sinkFile, JSON.stringify({ seed, k, sinks: sinks.length, ports, drop, spread }) + '\n');
+        // With `sinkOn` 'fed' (ADR 0084) also the rim cells that could be sinks and the passes without a fed one.
+        const fed = front.sinkOn === 'fed' ? { candidates: sim.rimCandidates, fallback: sim.fedFallback } : {};
+        appendFileSync(sinkFile, JSON.stringify({ seed, k, sinks: sinks.length, ports, drop, spread, ...fed }) + '\n');
       }
       if (dumps.includes(k)) {
         const dir = `research/front/out/${name}-state`;
