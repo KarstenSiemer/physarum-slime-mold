@@ -16,7 +16,7 @@ tried here reaches a crown; the owner chooses whether `jones=edge` goes on as a 
 
 ## What a crown, a fan and a tree are
 
-- **A crown** (the owner's word "Kamm", from his photos and videos of 2026-11-18; the handover of stage 4 in
+- **A crown** (the owner's word "Kamm", from the owner's photos and videos of 2026-11-18; the handover of stage 4 in
   `TODO.md`): a tube grows with a whole sheet of plasm at its head, wider than the tube, with a lobed rim. Veins run in
   the sheet toward the rim and fork there, finer and finer. The sheet moves on and leaves the veins behind; the strong
   ones become the tube, the fine ones go. The sources agree. A front is first a sheet without structure; veins appear
