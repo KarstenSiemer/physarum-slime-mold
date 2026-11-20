@@ -59,8 +59,8 @@ disc with no tube. `layout=dish` and `layout=edge` (the box without the walls) a
   Result at step 8,000: drift 0 a tree in 10 of 10 (a T of arms along the wall), drift 1.25, 1.5, 3 and 5 a sheet in
   10 of 10 each: a thick band at the rim (agents on 61 to 68 % of its cells), behind it a thin sheet (agents on 10 to
   16 %) with a tube body on 83 to 87 % of the old ground and veins on 6 to 7 %, the V of two veins from the mouth, no
-  vein on the young lines. Q at the head 0.063 to 0.080, D 0.067 to 0.074. Montage: `out/e2f/montage/forms-look-8000.png`
-  (columns drift 0, 1.25, 1.5, 3, 5; rows seeds 1 and 2).
+  vein on the young lines. Q at the head 0.063 to 0.080, D 0.067 to 0.074. `c2` repeats it with the final measure.
+  (`c1` is not in the archive.)
 - Its ridge test counted lone body cells with the fresh D in the thin fringe ahead of the rim as veins (seen in
   `out/e2f/montage/zoom-measure.png`); since then a vein needs a body on 5 of its 3 × 3 cells. `c2` runs the five drifts
   again with that test and saves the fields (`dump=`), so a changed measure runs again without the runs
@@ -84,9 +84,39 @@ disc with no tube. `layout=dish` and `layout=edge` (the box without the walls) a
   veins cross the line of 1,200 steps, 4 to 5 the lines of 2,400 and 4,800 (seed 1). With `bodyOn=agents` and with k = 2
   similar. Montage: `out/e2f/montage/jones-fresh-8000-s1.png` (trail k1, agents k1, trail k2, agents k2).
 
-## Next campaign and its cost (named before it runs)
+## The final campaigns (the records of the story and of ADR 0076)
 
-122 jobs, about 390 minutes of one core, about 65 minutes on 6 cores: `c2` (the five drifts, the rules as they are,
-50 runs), `p1` (the same with `jones=fresh`, 50 runs), the dish of 160 cells with `jones=fresh` at drift 1.5 (slime
-everywhere and none, 10 seeds, 20,000 steps) and the Y-maze with `jones=fresh` at drift 1.5 (one, both, none, 40
-seeds).
+All in the archive under `logs/engine/crown-0076/` (unpack with `research/flow/logs.ts`), one `runs.jsonl` per case
+folder, so `crown-table.ts <folder> at=8000` reads them as they lie:
+
+- `c2`, `p1`, `p2`: the five drifts, 10 seeds, 8,000 steps; the rules as they are, `jones=fresh`, `jones=edge`. The run
+  records hold the measures every 1,000 steps. `c2r`, `p1r`, `p2r`: the same runs measured again from the saved fields
+  at steps 4,000, 6,000 and 8,000 with the direction of the veins (`towardRimByBand()`); the tables of the story come
+  from these. The saved fields (`out/e2f/<set>/d<drift>/s<seed>-state/`, about 0.5 MB each) stay out of the archive.
+- `tries/k1`, `tries/m1`, `tries/b1`: more flux, the low drifts, `bodyOn=agents` (4 seeds; the ridge test before the
+  rule of 5 body cells, no saved fields). `tries/j1r`: `jones=fresh` alone and with the other tries, measured again.
+- `dish/fresh`, `dish/edge`: the dish of 160 cells at drift 1.5, slime everywhere and none, 10 seeds, 20,000 steps
+  (`dish.ts table=<folder>`). `ymaze/fresh`, `ymaze/edge`: the Y-maze at drift 1.5, 40 seeds per case (`tables.ts
+<folder>`; `compare.ts` against `logs/engine/drift-0074/y/take` and `dish/take`).
+- `jobs/`: the job lists. `big.jobs` ran `c2`, `p1`, the dish and the Y-maze of `jones=fresh` (122 jobs, about 65
+  minutes on 6 cores, named before it ran); `edge.jobs` ran `p2`, its dish and its Y-maze (76 jobs, about 50 minutes);
+  `remeasure.jobs` the measures again (166 jobs, a few minutes).
+
+## Results (step 8,000, median)
+
+- The rules as they are: drift 0 a tree (10 of 10), 1.25 to 5 a sheet (10 of 10 each); agents on 11 to 15 % of the old
+  ground; 0 to 1 cell of vein on the line of 2,400 steps.
+- `jones=fresh`: drift 0 a tree; 1.25 to 5 tubes in 35 of 40, a sheet in 5; agents on 3 to 4 % of the old ground; the
+  veins near the head along the rim (|cos| 0.24 to 0.32). In the dish 1.43 times slower on slime everywhere (p 0.00016):
+  out.
+- `jones=edge`: drift 0 a tree; 1.25 to 5 tubes in 39 of 40, a fan in 1; agents on 3 to 4 % of the old ground; veins
+  near the head along the rim (|cos| 0.24 to 0.31). The Y-maze keeps its choices, the dish is 1.09 times slower and as
+  fast on slime everywhere, a full dish gives no birth (261 and 201 agents at step 20,000, before 619 and 643).
+- Montages for the owner: `out/e2f/montage/` (the story lists them).
+
+## Where to go on
+
+The next rule to try (not built): a sink whose share follows the supply that reaches it, for example the pressure at
+its cell over the pressure of the sinks around, so that the rim in front of a tube outgrows the rim between the tubes
+(the organism: a front splits and one part stops, Kuroda et al. 2015, p. 3736; a front cut off stops, Schenz 2019,
+Sec. 2.2.3). Run it with `jones=edge` and without, in the neck, and read `form()` and the direction of the veins.

@@ -1,4 +1,5 @@
-// Measures of the crown at the head of a tube, for a colony in a lane that grows along y (comb.ts scene=lane).
+// Measures of the crown at the head of a tube: for a colony in a lane that grows along y (comb.ts scene=lane), and from
+// crownProfile() on against the age of the ground, for any layout (crowns.ts, ADR 0076).
 // Prototype code. The targets are those of TODO.md, stage 4, and of the handover for stage 4.
 import { FLOW } from '../../src/engine/flow';
 import { VEIN, type Sim } from './sim';

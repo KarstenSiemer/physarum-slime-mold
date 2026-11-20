@@ -85,9 +85,9 @@ export const FORMS = ['tree', 'crown', 'fan', 'tubes', 'sheet'] as const;
 
 /**
  * The form of a run, from its measures (ADR 0076); read it at a step when the old ground (1,600 to 6,400 steps) lies
- * away from the food (step 8,000 in the neck). The limits lie between the groups that the pictures show (README of
- * ADR 0076): a tree's widest young line holds 7 to 31 cells of thick plasm, a sheet's or a crown's 81 to 384; the thin
- * sheet behind a head holds agents on 11 to 15 % of the old ground, bare ground 3 to 5 %.
+ * away from the food (step 8,000 in the neck). The limits lie between the groups that the pictures show
+ * (the-crown-at-the-head.md): a tree's widest young line holds 7 to 31 cells of thick plasm, any other 75 to 384; the
+ * thin sheet behind a head holds agents on 10 to 16 % of the old ground, bare ground 3 to 6 %.
  * - A tree: at most 60 cells of thick plasm on every young line (a few narrow tips, no sheet at the head).
  * - A sheet at the head: thick plasm on half of a young band or more. Behind it:
  *   - a sheet: agents on 8 % of the old ground or more (a thin sheet that keeps a tube body);

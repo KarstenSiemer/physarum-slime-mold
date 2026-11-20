@@ -325,6 +325,11 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   rules more; every scene keeps its bytes. The start scene with the rules on both backends grows alike: over 12 seeds
   every strain ends step 1,503 with 224 to 430 agents (medians 291 to 328, p 0.27 or more between the backends), as the
   prototype with `take` (284 to 435), where the form `all` gave 124 to 1,593.
+- **The crown at the head of a tube** (ADR 0076, part E2f, prototype only): in a channel that opens onto open ground,
+  with a measure of the forms from the model's fields, no weight of the drift `take` gives a crown or a fan: drift 0 a
+  tree, 1.25 to 5 a sheet (50 of 50 runs). Jones' births refill the ground behind the front, and its thin sheet holds a
+  full tube body. Jones' births only near the edge of the territory (`jones=edge`) leave tubes on bare ground, but the
+  veins near the head run along the rim. The owner chooses (below).
 - **Next: part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
   the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
   panel, the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a
@@ -337,6 +342,17 @@ Open, for the owner:
 - The strength of the film of the slime: the owner chose the look "wet film" on pictures on 2026-11-17 (ADR 0057). Its colours, its body and its light per style are the numbers of `SLIME_LOOK` in `src/engine/render.ts`, and the 4,095 steps in which a tube builds full slime are `SLIME_FULL` in `src/engine/slime.ts`: say so if one of them should be another.
 - A rule for the moves on slime (ADR 0056, decision 5): it gives the choice of the Y-maze, and a colony that is 3.1 to 3.6 times slower on slime. It is not built. If the owner wants it before stage 4, it is a setting that is off in every scene.
 - What the owner meant by slime that "should also be perfused" (ADR 0052, open points).
+- The crown and the forms of the drift (ADR 0076, options): with `take`, the weights of decision 6 of ADR 0065 give a
+  tree (0) and a sheet (1.25 to 5), no crown and no fan (10 seeds each, step 8,000, in a channel that opens onto open
+  ground). The numbers for each choice, at drift 1.5:
+  - Keep the rules: a sheet with a band of thick plasm at the rim and a thin sheet behind (agents on 15 % of its cells,
+    a tube body on about nine of ten), 2 veins; the help text of the drift then names a tree and a sheet.
+  - `jones=edge`, the agent's proposal as a step (Jones' births only within 6 cells of the edge of the territory): a band
+    at the rim and tubes on bare ground (agents on 4 % of the old ground), the veins near the head along the rim (|cos|
+    0.24), no crown. The Y-maze keeps its choices; the dish is 1.09 times slower and as fast on slime everywhere; a full
+    dish gives no birth and keeps 0.42 times the agents (261 against 619). It changes the look at every weight above 0.
+  - Look further first: a sink whose share follows the supply that reaches it, so that the rim in front of a tube
+    outgrows the rest (not built).
 
 The stages:
 
