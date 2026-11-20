@@ -22,20 +22,22 @@ that read the sinks come in part E2b, the paid births in part E3.
 ## Decision
 
 1. **The push counts a diagonal neighbour only if the two cells beside their corner are not both walls**, as a move and
-   a birth do. A cell outside a closed arena is no wall there, as in `divideInto()` of growth. It changes no push: two
-   cells of a dish that are diagonal neighbours have at least one of the two cells beside their corner in the dish too
-   (the opposite corners of a square have the same sum of squared distances to the centre).
+   a birth do. A cell outside a closed arena is no wall there, as in `divideInto()` of growth and `wallIn()` of a move.
+   So the territory reaches no cell that an agent cannot enter.
 2. **Two passes per strain in the loop of the flow**: `sinks`, per cell, and `state`, per strain, run for each strain
    right after the update of its flow and before its pressure. Decision 6 of ADR 0067 orders the update, the sinks, the
    state and the pressure; the passes of a strain read no state of another strain (ADR 0031), so the order between
    the strains changes no result, and the loop of the flow stays as it is.
-3. **The sink rate is a whole number of steps of 2^-24, and its mean rounds toward the weight.** WGSL and GLSL ES let a
-   compiler fuse a product and a sum, and give a division 2.5 ULP, so a mean in floats could round apart on two GPUs
-   and on the CPU, and the sums with it. In steps of 2^-24 the mean of a step is integer arithmetic,
-   R ← R ± ⌈|W − R| / 100⌉, the same on every GPU. Each step moves at least 1 toward the weight W, so the rate reaches
-   its weight and a cell that is no sink comes to 0, and the rate never passes W. It lies at most 100 steps of 2^-24
-   from the mean in exact numbers, less than one step of the sums (256 steps). The float of decision 7 holds the whole
-   number exactly, as it is at most 2^24. The weights are 2^24 and 419,430, the nearest whole number to 0.025 · 2^24.
+3. **The sink rate is a whole number of steps of 2^-24, and its mean rounds toward the weight.** WGSL lets a compiler
+   fuse a product and a sum (its section "Reassociation and Fusion"), and WGSL and GLSL ES give a division an error of
+   2.5 ULP, so a mean in floats could round apart on two GPUs and on the CPU, and the sums with it (`agents.wgsl`
+   holds a case: code that never runs changes how a compiler rounds, `SENSE_WALLS`). In steps of 2^-24 the mean of a
+   step is integer arithmetic, R ← R ± ⌈|W − R| / 100⌉, the same on every GPU. Each step moves at least 1 toward the
+   weight W, so the rate reaches its weight and a cell that is no sink comes to 0, and the rate never passes W. It lies
+   less than 100 steps of 2^-24 from the mean in exact numbers, less than one step of the sums (256 steps). The float
+   of decision 7 holds the whole number exactly, as it is at most 2^24. The weights are 2^24 and 419,430, the nearest
+   whole number to 0.025 · 2^24. Both backends and the CPU gave the same rates on an M3 Pro and on SwiftShader, the
+   GPU of CI.
 4. **A sink keeps its rate with a minus sign on both backends.** Decision 7 asks for it on WebGL2, where the pyramid
    counts N by the sign. On WebGPU it costs nothing, and the readers, the tests and the next parts see the same rates
    on both backends.
@@ -80,9 +82,12 @@ that read the sinks come in part E2b, the paid births in part E3.
 - **The corner of the push** (`territory.gpu.test.ts`): in 40 steps beside a thin diagonal wall no cell joins the
   territory of the strain of the other side, where the draws of the push would have taken more than 2 cells across
   the corners. The 22 tests of the file pass on both backends.
+- **Where**: the whole GPU suite (1,397 tests) on an M3 Pro, and `sinks.gpu.test.ts` and `territory.gpu.test.ts` in
+  the image of CI (SwiftShader; 35 s and 41 s for both backends).
 - **The wrong rules** TY39 to TY101 of `research/flow/engine/mutate.ts` each fail at least one test, and so does TY31,
   whose text follows `packTerritory()` now (`research/flow/logs/engine/sinks-0069/mutations.txt`).
-- **No scene changes**: DIGESTS
+- **No scene changes**: the digests of every scene after 500 steps on both backends, with the state of the flow, equal
+  those of the code of `main` (the record of ADR 0068) in 62 of 62 runs (`research/flow/README.md`, part 28).
 
 ## Consequences
 

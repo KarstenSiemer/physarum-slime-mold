@@ -2531,8 +2531,8 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts TY31 $
 
 Each must fail at least one test.
 
-Result: DIGEST_RESULT, and each of the 64 wrong rules fails at least one test. The records are in
-`logs/engine/sinks-0069/`:
+Result: 62 of 62 runs are equal, and each of the 64 wrong rules fails at least one test. The
+records are in `logs/engine/sinks-0069/`:
 
 | Record                | Runs                                                                   |
 | --------------------- | ---------------------------------------------------------------------- |
@@ -2541,7 +2541,7 @@ Result: DIGEST_RESULT, and each of the 64 wrong rules fails at least one test. T
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 425 files, 8.5 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 427 files, 8.7 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
