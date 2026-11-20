@@ -362,9 +362,13 @@ Open, for the owner:
     The flux of a cell (ADR 0080): Q sums the 4 edges, so it reads a broad flow on a diagonal up to 1.41 times
     higher, and that seeds the V. A measure that reads every angle alike (`fluxOn=norm`, the prototype only) moves the
     main veins to 22° to 26° at k = 1, but it reads thin diagonal veins low: straight rays and veins along the axes,
-    no forks toward the rim. The owner's choice: keep the measure; the norm in the engine (it changes the bytes of
-    every scene with the flow); or first a flow over 8 neighbours in the prototype (the agent's advice). Open: how
-    the colony gets the flux of the crown and equal sinks.
+    no forks toward the rim. A flow over 8 neighbours (ADR 0081, the prototype only): the veins of the still sheet
+    follow no direction of the grid; they fork toward the rim at 4 times the flux of E2f (0.26 per rim sink). The
+    growing colony with 8 edges (ADR 0082) forms no crown in 20 runs (k = 1, 2, 4, `jones=all` and `edge`): its rim
+    holds 420 to 700 sinks, so it gets 0.03 to 0.15 per sink, and its veins end before the rim. The owner's choice:
+    the 8 edges in the engine (it changes the bytes of every scene with the flow; the agent's advice once the colony
+    shows a crown); more flux at the rim of the colony; or more time for the veins at the head. Open: how the colony
+    gets the flux of the crown and equal sinks.
 
 The stages:
 

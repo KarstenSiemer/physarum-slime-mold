@@ -221,6 +221,26 @@ again at k = 2, and veins along the axes and the wall (0.25 to 0.39 of the cells
 norm reads a thin diagonal vein at 0.71 of its flux. Next: a flow over 8 neighbours in the prototype. Montage:
 `out/e2j/montage/d-16000-s1.png` (rows k = 1, 2, 4; columns sum, norm). Records: `logs/engine/still-0080/`.
 
+## A flow over 8 neighbours (ADR 0081)
+
+`stencil=8` adds the 4 diagonal edges to the solve, the fluxes and Q (axis weight √2 − 1, diagonal 1 − 1/√2), so a
+broad flow and a thin vein read and conduct alike along an axis and a diagonal. On the still sheet the veins then
+prefer no direction of the grid: 0.02 to 0.09 of the vein cells lie on a diagonal, as many on an axis. At k = 1 and 2
+four straight rays leave the mouth; at k = 4 a tree forks toward the rim (8, 8, 12, 24 parts on the arcs 20 to 75). So
+part of the forks of ADR 0079 came from the grid, and the forks need 4 times the flux of E2f at the rim. A step takes
+1.68 times as long on the CPU. Montage: `out/e2k/montage/d-16000-s1.png`. Records: `logs/engine/still-0081/`.
+
+## The growing colony with a flow over 8 neighbours (ADR 0082)
+
+The neck with the rule set of E2f and `stencil=8`: k = 1, 2 and 4 (`norm=2k paid=20k`), the drift scaled and not,
+`jones=all` and `jones=edge`, seeds 1 and 2, step 8,000. No crown in 20 runs: `jones=all` grows a half disc with
+radial veins that end before the rim; `jones=edge` a net of tubes with holes of bare ground, at k = 4 a tree of tubes
+with loops. The flux per rim sink stays at 0.03 to 0.15 against the 0.26 at which the still sheet forks: the rim of
+the colony holds 420 to 700 sinks. The veins fall in number toward the rim, and the forks of the still sheet take
+4,000 steps, in which the front moves 30 to 60 cells. Montages: `out/e2l/montage/look-8000.png` and `d-8000.png` (rows
+k = 1, 2 and 2, 4 and 4 with the drift 1.5, 0.75, 1.5, 0.375, 1.5; columns `jones=all` seeds 1 and 2, `jones=edge` seeds
+1 and 2). Records: `logs/engine/crown-0082/`.
+
 ## Pictures for the owner
 
 In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to its upper 160 rows, at step 8,000:

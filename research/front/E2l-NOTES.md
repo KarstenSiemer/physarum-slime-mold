@@ -1,8 +1,8 @@
 # Part E2l of stage 4: notes on the growing colony with a flow over 8 neighbours (2026-11-20)
 
 The question of the coordinator: does the growing colony form a crown when its flow has 8 edges (`stencil=8`, ADR 0081)
-and its rim gets the flux at which the still sheet forks? Prototype only. ADR 0082 is not written yet: it waits until
-PR #130 (E2j) and the branch `e2k-flow-over-8-neighbours` are merged. These notes hold the state.
+and its rim gets the flux at which the still sheet forks? Prototype only. ADR 0082 records the result; these notes
+hold the state.
 
 ## The runs
 
@@ -10,7 +10,8 @@ The neck and the rule set of E2f (`E2f-NOTES.md`), `stencil=8`, equal shares, st
 `norm=2k paid=20k` for k = 1, 2 and 4, the drift scaled (`1.5/k`) and not (`1.5`), `jones=all` and `jones=edge`: 20 runs,
 and one with `stencil=4` (k = 2, drift 0.75, `jones=all`, seed 1). The job list is `research/front/out/e2l/c1.jobs` (21
 jobs, 15 minutes on 6 cores, a run 3.7 minutes). The records, the saved fields and the pictures lie in
-`research/front/out/e2l/` of the main checkout (git ignores it; not yet in the archive). The measures:
+`research/front/out/e2l/` of the main checkout (git ignores it); the records are in the archive under
+`logs/engine/crown-0082/`. The measures:
 `node --import ./research/flow/register.mjs research/front/e2l.ts measure=research/front/out/e2l/c1` (one line per run,
 written to `c1-8000.jsonl`), `pics=` for the pictures of D, the montages with `crown-montage.sh`.
 
@@ -37,9 +38,3 @@ written to `c1-8000.jsonl`), `pics=` for the pictures of D, the montages with `c
   and per band the ground, agents, thick plasm, body, D and Q.
 - Montages: `out/e2l/montage/look-8000.png` and `d-8000.png`; rows k = 1 (drift 1.5), 2 (0.75), 2 (1.5), 4 (0.375),
   4 (1.5); columns `jones=all` seeds 1 and 2, `jones=edge` seeds 1 and 2.
-
-## Left to do
-
-When both are merged: merge `main`, ADR 0082 (these results), "Extended by ADR 0082" in ADR 0081, the crown item in
-`TODO.md`, a section in `the-crown-at-the-head.md`, the records (`c1/*/*.jsonl`, `check4/`, `c1-8000.jsonl`,
-`check4-8000.jsonl`, `c1.jobs`; not the saved fields) in the archive with the count and digest, and the pull request.

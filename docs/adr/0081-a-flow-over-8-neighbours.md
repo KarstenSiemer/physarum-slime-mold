@@ -3,8 +3,9 @@
 - Status: accepted. A study of an agent under the owner's delegation of 2026-11-12; the coordinator asked for it.
 - Date: 2026-11-20
 - Extends [ADR 0080](0080-the-flux-of-a-cell-and-the-veins-at-45-degrees.md) (next candidate: a flow over 8 neighbours).
-- The scripts: `research/front/sim.ts` (`stencil`), `still.ts`, `flux-angle.ts`, `stencil-time.ts`. The raw records lie
-  in `research/front/out/e2k/c1/` (not yet in the archive).
+- The scripts: `research/front/sim.ts` (`stencil`), `still.ts`, `flux-angle.ts`, `stencil-time.ts`. The raw records are
+  in the archive under `logs/engine/still-0081/`.
+- Extended by [ADR 0082](0082-the-growing-colony-with-a-flow-over-8-neighbours.md).
 
 ## The option
 
