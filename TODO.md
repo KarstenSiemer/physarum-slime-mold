@@ -356,7 +356,10 @@ Open, for the owner:
     `jones=edge`): sheets, with `jones=edge` veins toward the rim but one smooth rim. The owner went on with a small try
     on 2026-11-20 (ADR 0078): a tube body that follows the cube of the share of agents (`bodyOn=cube`) gives no crown
     in 12 of 12 runs (drift 1.5 and 5, 2 seeds, alone, with `jones=edge`, and with both rules): small colonies of arms
-    of full plasm, no sheet at the head. Open: whether the crown aim of stage 4 ends, and options 1 and 2.
+    of full plasm, no sheet at the head. The owner said on 2026-11-20 that the crown research goes on. A still sheet
+    without agents (ADR 0079): the rule of the tubes makes veins that fork toward the rim, with equal sinks and from
+    twice the flux of E2f at the rim on (4, 7, 8, 17 veins at the radii 20 to 75), and none with `shareOn=supply`.
+    Open: why the two main veins lie on the diagonals of the grid, and how the colony gets that flux and equal sinks.
 
 The stages:
 

@@ -6,7 +6,7 @@
 - Date: 2026-11-20
 - Extends [ADR 0078](0078-a-conductance-that-follows-the-thickness-of-the-plasm.md) and
   [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (finding 4: the flux at the rim is too thin for a vein).
-- The script: `research/front/still.ts`.
+- The script: `research/front/still.ts`; the raw records are in the archive under `logs/engine/still-0079/`.
 
 ## Context
 
@@ -68,5 +68,6 @@ The study stays in the prototype, and its hooks are off by default. No rule chan
 - A crown needs the take spread along the whole rim and twice the flux of E2f at the rim; the colony of E2f had 0.063
   to 0.080 per body cell at its head.
 - Not measured: the time that the veins need (thousands of steps here) against the speed of the front; another
-  radius, noise or channel; whether the diagonal V comes from the grid (Q sums the flux over the 4 edges, so it reads a
-  diagonal flow up to 1.4 times higher); the engine.
+  radius, noise or channel; the engine.
+- Open: whether the diagonal V comes from the grid (Q sums the flux over the 4 edges, so it reads a diagonal flow up
+  to 1.4 times higher). The coordinator studies it apart.

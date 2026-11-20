@@ -197,6 +197,19 @@ pressure at the rim. No run shows a crown. Montages: `out/e2h/montage/cube-look-
 `cube-measure-8000.png` (rows A, B, C; columns drift 1.5 seeds 1 and 2, drift 5 seeds 1 and 2). Jobs: `jobs/r1.jobs`
 in the archive (`logs/engine/cube-0078/`).
 
+## Veins in a still sheet (ADR 0079)
+
+The owner said on 2026-11-20 that the crown research goes on. This study takes the growth and the agents out: a fixed,
+full body (the channel and a half disc of radius 80 at its mouth), the food the source, the outer ring of the half
+disc the sinks, and the flow and the rule of the tubes of `sim.ts` (`still.ts`). With equal sinks the veins run from
+the mouth toward the rim and fork there, finer and finer, from twice the flux of E2f at the rim on: 4, 7, 8 and 17
+veins cross the arcs at the radii 20, 40, 60 and 75, |cos| toward the rim 0.98 to 0.74. At the flux of E2f only a V of
+two veins forms, and with the base conductance 0.002 it forks (2, 2, 6, 13). With `shareOn=supply` no run forks: the
+sinks at the ends of the V take most of the flux. So the rule of the tubes can grow the veins of a crown; the colony
+must bring twice the flux of E2f to its rim and keep its sinks equal. The two main veins lie on the diagonals of the
+grid in every run (open). Montage: `out/e2i/montage/d-16000-s1.png` (rows k = 1, 2, 4, 8; columns base 0.02 equal,
+supply, base 0.002 equal, supply). Records: `logs/engine/still-0079/`.
+
 ## Pictures for the owner
 
 In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to its upper 160 rows, at step 8,000:
