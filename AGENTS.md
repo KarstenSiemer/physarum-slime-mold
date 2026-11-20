@@ -60,7 +60,9 @@ are in the ADRs it names.
   pull requests.
 - Bring `main` in with a merge, never a rebase or a force push. `git fetch origin` before a pull request and before a
   merge.
-- Squash merge only, title `<PR title> (#n)`, body only the `Signed-off-by:` line.
+- Squash merge only, title `<PR title> (#n)`, body only the `Signed-off-by:` line from `git config`. The description
+  of a pull request holds no `Signed-off-by:` line and no email address: the repository is public, and its history
+  keeps every edit.
 - Paths in `.github/CODEOWNERS` (`.github/`, `renovate.json`, `.npmrc`, `.pre-commit-config.yaml`, `scripts/`) need
   the owner's review first (ADR 0014).
 - Prettier rewrites a whole Markdown table when a new row is longer than its longest row: keep new rows shorter.
