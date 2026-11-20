@@ -107,6 +107,9 @@ the least keys claim a child, and with B ≥ 1 the budget becomes min(B − the 
   (`research/flow/logs/engine/paid-0071/mutations.txt`).
 - **No scene changes**: the digests of every scene after 500 steps on both backends equal those of the record of ADR
   0070 in 62 of 62 runs (`research/flow/README.md`, part 30).
+- **Where**: `npm run verify` on an M3 Pro (the GPU suite with 1,416 tests; e2e on port 4318), and `paid.gpu.test.ts`,
+  `sinks.gpu.test.ts`, `territory.gpu.test.ts`, `flow-sinks.gpu.test.ts` and the tests of growth of `sim.gpu.test.ts`
+  in the image of CI (SwiftShader; 111 of 111 tests that run there, `paid.gpu.test.ts` in 45 s).
 - **The time of `rank`**: the next section.
 
 ## The time of `rank`
