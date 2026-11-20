@@ -10,7 +10,9 @@
 //   gets the bit of its strain.
 // - `push`: one invocation per texel, last in a step. A cell joins the territory of strain s when it holds an agent of
 //   s. An open cell outside the territory of s joins it with the chance 1 − (1 − v)^n, n the agents of s among its 8
-//   neighbours, with a draw of its own for each cell and strain. The territory never shrinks.
+//   neighbours, with a draw of its own for each cell and strain. A diagonal neighbour counts only if the two cells
+//   beside the corner between them are not both walls (ADR 0069), as for a move and a birth: the territory reaches no
+//   cell that an agent cannot enter. The territory never shrinks.
 // - `addDisc`: one invocation per texel. The open cells whose centres lie within a disc join the territory of a strain:
 //   the start territory (ADR 0067, decision 4).
 // A cell is open when it lies in the arena and is no wall.
@@ -47,6 +49,12 @@ fn ownersOf(c: i32) -> u32 {
   return (atomicLoad(&owners[u32(c) >> 2u]) >> (8u * (u32(c) & 3u))) & 0xffu;
 }
 
+// Whether the cell at p is a wall; a cell outside a closed arena is none (divideInto in growth.wgsl).
+fn wallAt(p: vec2i) -> bool {
+  let m = cellAt(p);
+  return m >= 0 && isWall(env[m]);
+}
+
 @compute @workgroup_size(256)
 fn fillOwners(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
   let i = gid.x + gid.y * groups.x * 256u;
@@ -59,12 +67,13 @@ fn fillOwners(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups
 
 // The strains that the push adds to the territory of the open cell c at q: each strain s outside `held` with n > 0
 // agents among the 8 neighbours of the cell joins it with the chance of n. A neighbour outside a closed arena holds
-// no agent.
+// no agent, and a diagonal one between two walls does not count.
 fn pushed(q: vec2i, c: i32, held: u32) -> u32 {
   var n = vec4u(0u);
   for (var dy = -1; dy <= 1; dy++) {
     for (var dx = -1; dx <= 1; dx++) {
       if (dx == 0 && dy == 0) { continue; }
+      if (dx != 0 && dy != 0 && wallAt(q + vec2i(dx, 0)) && wallAt(q + vec2i(0, dy))) { continue; }
       let b = ownersOf(cellAt(q + vec2i(dx, dy)));
       n += vec4u(b & 1u, (b >> 1u) & 1u, (b >> 2u) & 1u, (b >> 3u) & 1u);
     }

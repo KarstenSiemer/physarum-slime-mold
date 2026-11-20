@@ -4,9 +4,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { WebGl2Backend } from './gl/backend';
-import { growthStep } from './growth-reference';
+import { growthStep, rngSeed, stream } from './growth-reference';
 import { strainEnds } from './pack';
-import { TERRITORY } from './territory';
+import { PUSH, PUSH_CHANCES, TERRITORY } from './territory';
 import { addDisc, owners, push, respawnStep, territoryMoves, type TerritoryGrid } from './territory-reference';
 import type { Backend, Sim, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -283,6 +283,52 @@ describe.each(Object.entries(BACKENDS))('the territory on %s (ADR 0068)', (kind,
     },
     120_000,
   );
+
+  it('pushes no cell across a corner between two walls, as no move or birth crosses it (ADR 0069)', async () => {
+    // A thin wall along the diagonal x = y of a box. Strain 0 holds the cells (i + 1, i) beside it on the side x > y,
+    // strain 1 the cells (i, i + 1) on the other side; each territory holds the cells of its agents. So every cell
+    // beside the wall has an agent of the other strain as a diagonal neighbour across a corner of two walls.
+    const n = 48;
+    const strains = TWO.map((st) => ({ ...st, stepSize: 0.1 }));
+    const s = stage4({ boundary: 'box', seed: 23, strains });
+    const sim = await make({ ...s, collisions: false }, n, n, n * n);
+    const env = new Uint8Array(n * n * 4);
+    for (let i = 0; i < n; i++) env[(i * n + i) * 4] = 255;
+    sim.writeEnv(env);
+    seed(sim, s, env, random(37), (x, y) => (x === y + 1 ? 0 : y === x + 1 ? 1 : undefined), true);
+    sim.update(s);
+    const memory = memoryOf(n * n, 0.9, 0);
+    sim.writeFlow(memory, 0);
+    sim.writeFlow(memory, 1);
+    const start = new Uint8Array(n * n);
+    for (let i = 0; i + 1 < n; i++) [start[i * n + i + 1], start[(i + 1) * n + i]] = [1, 2];
+    sim.writeTerritory(start);
+    const g = await gridOf(sim, 'box');
+    // The draws that would have taken a cell in from across a corner without the rule.
+    let across = 0;
+    for (let k = 0; k < 40; k++) {
+      const before = await sim.readTerritory();
+      sim.run(1);
+      const got = await sim.readOwners();
+      expect(differ(await sim.readTerritory(), push(before, got, g, k, s.seed), n), `step ${String(k)}`).toEqual([]);
+      for (let i = 0; i + 1 < n; i++)
+        for (const [cell, other, strain] of [
+          [(i + 1) * n + i, i * n + i + 1, 0],
+          [i * n + i + 1, (i + 1) * n + i, 1],
+        ] as const) {
+          const draw = stream(rngSeed(cell, PUSH + 0x10000 * strain, k, s.seed))();
+          if ((got[other] ?? 0) & (1 << strain) && draw < (PUSH_CHANCES[0] ?? 0)) across++;
+        }
+    }
+    expect(across).toBeGreaterThan(2);
+    // No cell of a side lies in the territory of the strain of the other side.
+    const end = await sim.readTerritory();
+    for (let c = 0; c < n * n; c++) {
+      const [x, y] = [c % n, Math.floor(c / n)];
+      if (x < y) expect((end[c] ?? 0) & 1, `(${String(x)}, ${String(y)})`).toBe(0);
+      if (x > y) expect((end[c] ?? 0) & 2, `(${String(x)}, ${String(y)})`).toBe(0);
+    }
+  }, 120_000);
 
   it.each(['wrap', 'box', 'dish'] as const)(
     'adds the open cells of a disc to the territory of a strain: the start territory (%s)',

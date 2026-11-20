@@ -15,7 +15,8 @@ import {
   trailSaturation,
   type AgentTool,
 } from '../pack';
-import { diffusePlanOf, viewTrailOn } from '../sizing';
+import { SINK_STATE_LANES, SINK_SUM_WORDS } from '../sinks';
+import { diffusePlanOf, sinkLevels, viewTrailOn } from '../sizing';
 import { packTerritory, territoryOn } from '../territory';
 import { TUBE_TILE, tubesShown } from '../tubes';
 import {
@@ -39,6 +40,7 @@ import {
   fence,
   readTarget,
   readTargetAsync,
+  readUint4Target,
   readUintTarget,
   stencilTarget,
   target,
@@ -102,6 +104,20 @@ interface GlGrowth {
   dead: Pyramid;
 }
 
+/**
+ * The sinks of each strain (ADR 0069; sinks.frag; `sinks` in ../sim.ts), while the rules of stage 4 run: per strain the
+ * sink rates in two targets (R32F) that PASS 0 writes in turn, and the levels of the pyramid of its sums (RGBA32UI,
+ * sizing.ts sinkLevels()), whose top of one texel holds them; the state of every strain in two targets (RGBA32F, 2
+ * texels per strain) that PASS 3 writes in turn.
+ */
+interface GlSinks {
+  /** The strains of the settings that the targets were made for. */
+  strains: number;
+  rates: Pair<Target>[];
+  levels: Target[][];
+  state: Pair<Target>;
+}
+
 /** The layout of a pyramid over `n` elements, `width` texels a row (Pyramid). */
 function pyramidLayout(n: number, width: number) {
   const sizes = [n, ...pyramidLevels(n)];
@@ -114,6 +130,26 @@ function pyramidLayout(n: number, width: number) {
     heights[t] = (heights[t] ?? 0) + Math.ceil(size / width);
   });
   return { sizes, rows, heights, top: sizes.length - 1 };
+}
+
+/**
+ * The targets of the sinks for `strains` strains on a grid of `width` × `height` cells (GlSinks), made by `make`. Each
+ * strain has two targets of rates, the levels of its pyramid, and the state two targets of 2 texels per strain.
+ */
+function makeSinks(
+  make: (width: number, height: number, format: number) => Target,
+  width: number,
+  height: number,
+  strains: number,
+): GlSinks {
+  const gl = WebGL2RenderingContext;
+  const each = <T>(of: () => T) => Array.from({ length: strains }, of);
+  return {
+    strains,
+    rates: each((): Pair<Target> => [make(width, height, gl.R32F), make(width, height, gl.R32F)]),
+    levels: each(() => sinkLevels(width, height).map(([w, h]) => make(w, h, gl.RGBA32UI))),
+    state: [make(2, strains, gl.RGBA32F), make(2, strains, gl.RGBA32F)],
+  };
 }
 
 /** Cells of some rectangles. */
@@ -336,6 +372,10 @@ export class GlSim implements Sim {
    */
   private territory: { copies: Pair<Target>; owners: Target } | undefined;
   private tt: Bit = 0;
+  /** The sinks of each strain (GlSinks); `sr` names the current copy of the rates, `st` that of the state. */
+  private sinks: GlSinks | undefined;
+  private sr: Bit = 0;
+  private st: Bit = 0;
   /**
    * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
    * was last empty (`stamped` in ../sim.ts). Only then does an erase or a wall clear stamps (brushSlime()).
@@ -452,12 +492,14 @@ export class GlSim implements Sim {
         this.amount = [t(width, height, gl.R16UI), t(width, height, gl.R16UI)];
         this.front = t(width, height, gl.R32UI);
       }
-      // So with the territory while the rules of stage 4 run: no cell lies in a territory.
+      // So with the territory and the sinks while the rules of stage 4 run: no cell lies in a territory, and none was
+      // a sink.
       if (territoryOn(settings)) {
         this.territory = {
           copies: [t(width, height, gl.R8UI), t(width, height, gl.R8UI)],
           owners: t(width, height, gl.R8UI),
         };
+        this.sinks = makeSinks(t, width, height, flowStrains(settings));
       }
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
@@ -1022,6 +1064,13 @@ export class GlSim implements Sim {
     // A reset clears the territory (ADR 0068): the engine writes the start territory after it (Engine.seedAtFood()).
     if (this.territory) for (const t of [...this.territory.copies, this.territory.owners]) clearUint(gl, t);
     this.tt = 0;
+    // And the sinks: no cell was a sink before (ADR 0069).
+    if (this.sinks) {
+      for (const t of [...this.sinks.rates.flat(), ...this.sinks.state]) clear(gl, t);
+      for (const t of this.sinks.levels.flat()) clearUint(gl, t);
+    }
+    this.sr = 0;
+    this.st = 0;
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
@@ -1552,6 +1601,8 @@ export class GlSim implements Sim {
     this.dropFlow();
     this.dropTubes();
     this.dropSlime();
+    // The territory and the sinks of the rules of stage 4 (ADR 0068, ADR 0069).
+    this.dropTerritory();
     gl.deleteBuffer(this.ubo);
   }
 
@@ -1691,6 +1742,8 @@ export class GlSim implements Sim {
     // come from the agents after the moves and the births, and the push writes the next territory.
     const territory = this.settings.collisions && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
     const held: Record<string, WebGLTexture> = territory ? { territory: territory.copies[this.tt].texture } : {};
+    // The sinks of each strain (ADR 0069), in the passes of the flow.
+    const sinks = territory ? this.ensureSinks() : undefined;
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1781,7 +1834,7 @@ export class GlSim implements Sim {
       this.pass(this.prog.slimeFront(), fronts, { trail, stamps: stamps.texture }, {});
       this.pass(this.prog.slime(), stamps, { trail }, {});
     }
-    if (flow) this.encodeFlow(flow);
+    if (flow) this.encodeFlow(flow, territory && sinks ? { territory, sinks } : undefined);
     // The push last (ADR 0067, decision 6). It reads the constants of stage 4 of the uniform block of the flow, which the
     // block of every strain holds (flowBlock()).
     if (territory && flow) this.encodePush(territory);
@@ -1827,11 +1880,120 @@ export class GlSim implements Sim {
     return this.territory;
   }
 
-  /** Frees the targets of the territory. */
+  /** Frees the targets of the territory, and with them those of the sinks. */
   private dropTerritory() {
+    this.dropSinks();
     if (!this.territory) return;
     for (const t of [...this.territory.copies, this.territory.owners]) destroyTarget(this.gl, t);
     this.territory = undefined;
+  }
+
+  /**
+   * The targets of the sinks, made at their first use while the rules of stage 4 run (sizing.ts SINK_BYTES_PER_CELL_GL),
+   * for the strains of the settings: settings with another number of strains get new targets, as the flow gets new
+   * ones (ensureFlow()). New targets hold zeros: no cell was a sink.
+   */
+  private ensureSinks(): GlSinks {
+    const strains = flowStrains(this.settings);
+    if (this.sinks && this.sinks.strains !== strains) this.dropSinks();
+    if (!this.sinks) {
+      const gl = this.gl;
+      this.sinks = allOrNothing(gl, (keep) =>
+        makeSinks((w, h, format) => keep(target(gl, w, h, format)), this.width, this.height, strains),
+      );
+      this.sr = 0;
+      this.st = 0;
+    }
+    return this.sinks;
+  }
+
+  /** Frees the targets of the sinks. */
+  private dropSinks() {
+    if (!this.sinks) return;
+    const { rates, levels, state } = this.sinks;
+    for (const t of [...rates.flat(), ...levels.flat(), ...state]) destroyTarget(this.gl, t);
+    this.sinks = undefined;
+  }
+
+  /**
+   * The sinks of a strain and its state (sinks.frag, ADR 0069), after the update of its flow and before its pressure,
+   * with the block of the strain bound: `memory` is its memory after the update, `ports` the ports of the step. The
+   * next copies of the rates and of the state become the current ones after the last strain (encodeFlow()).
+   */
+  private encodeSinks(
+    stage4: { territory: { copies: Pair<Target>; owners: Target }; sinks: GlSinks },
+    strain: number,
+    memory: WebGLTexture,
+    ports: WebGLTexture,
+  ) {
+    const gl = this.gl;
+    const programs = this.prog.sinks();
+    const { territory, sinks } = stage4;
+    const rates = at(sinks.rates, strain);
+    const next = rates[flip(this.sr)];
+    this.pass(
+      programs.sinks,
+      next,
+      {
+        env: this.env.texture,
+        owners: territory.owners.texture,
+        territory: territory.copies[this.tt].texture,
+        stamps: this.ensureSlime().stamps.texture,
+        memory,
+        ratesIn: rates[this.sr].texture,
+      },
+      {},
+    );
+    // The pyramid of the sums: the first level from the rates, each level above from the one below it.
+    const levels = at(sinks.levels, strain);
+    levels.forEach((level, k) => {
+      const below = levels[k - 1];
+      if (!below) this.pass(programs.first, level, { rates: next.texture, memory }, {});
+      else
+        this.pass(programs.level, level, { below: below.texture }, {}, (p) => {
+          gl.uniform2i(p.loc('belowSize'), below.width, below.height);
+        });
+    });
+    // The state of the strain: its two texels of the next copy.
+    const out = sinks.state[flip(this.st)];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
+    gl.viewport(0, strain, 2, 1);
+    const state = programs.state;
+    gl.useProgram(state.program);
+    const sums = at(levels, levels.length - 1).texture;
+    textures(gl, state.program, { sums, ports, stateIn: sinks.state[this.st].texture });
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** For tests: the sink rates of a strain, with a minus sign for a sink of the last step (../sim.ts readSinks()). */
+  readSinks(strain = 0): Promise<Float32Array> {
+    const n = this.width * this.height;
+    const rates = this.sinks?.rates[strain];
+    if (!rates) return Promise.resolve(new Float32Array(n));
+    const rgba = readTarget(this.gl, rates[this.sr]);
+    return Promise.resolve(Float32Array.from({ length: n }, (_, i) => rgba[i * 4] ?? 0));
+  }
+
+  /** For tests: the sums of each strain of the last step, the top of its pyramid (../sim.ts readSinkSums()). */
+  readSinkSums(): Promise<Uint32Array> {
+    const out = new Uint32Array(SINK_SUM_WORDS * flowStrains(this.settings));
+    this.sinks?.levels.forEach((levels, strain) => {
+      out.set(readUint4Target(this.gl, at(levels, levels.length - 1)), strain * SINK_SUM_WORDS);
+    });
+    return Promise.resolve(out);
+  }
+
+  /** For tests: the state of each strain of the last step (../sim.ts readSinkState()). */
+  readSinkState(): Promise<Float32Array> {
+    if (!this.sinks) return Promise.resolve(new Float32Array(SINK_STATE_LANES * flowStrains(this.settings)));
+    return Promise.resolve(readTarget(this.gl, this.sinks.state[this.st]) as Float32Array);
+  }
+
+  /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
+  writeSinks(data: Float32Array, strain = 0) {
+    if (!territoryOn(this.settings)) return;
+    const rates = this.ensureSinks().rates[strain];
+    if (rates) writeTarget(this.gl, rates[this.sr], 0, 0, this.width, this.height, data);
   }
 
   /** The start territory (Sim.addTerritory(); PASS 1 of territory.frag). Nothing while the rules do not run. */
@@ -1876,7 +2038,10 @@ export class GlSim implements Sim {
    * the memory from the pressure and the trail of this step, then the pressure iterations on the new conductivity.
    * Once per strain, each with its own targets and its own block (ADR 0031).
    */
-  private encodeFlow(flow: NonNullable<GlSim['flow']>) {
+  private encodeFlow(
+    flow: NonNullable<GlSim['flow']>,
+    stage4?: { territory: { copies: Pair<Target>; owners: Target }; sinks: GlSinks },
+  ) {
     const programs = this.prog.flow();
     const env = this.env.texture;
     const [m, next] = [this.flowM, flip(this.flowM)];
@@ -1911,6 +2076,8 @@ export class GlSim implements Sim {
         {},
       );
       const memory = memories[next].texture;
+      // While the rules of stage 4 run, the sinks of the strain from its memory after the update (ADR 0069).
+      if (stage4) this.encodeSinks(stage4, strain, memory, ports.texture);
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
         const [behind, out] = [(p + 2) % 3, (p + 1) % 3];
         this.pass(
@@ -1931,6 +2098,10 @@ export class GlSim implements Sim {
     });
     this.flowM = next;
     this.flowP = p;
+    if (stage4) {
+      this.sr = flip(this.sr);
+      this.st = flip(this.st);
+    }
   }
 
   /**

@@ -209,6 +209,21 @@ export interface Sim {
   readOwners(): Promise<Uint8Array>;
   /** For tests: replaces the territory, one byte per cell as readTerritory() returns it, while the rules run. */
   writeTerritory(data: Uint8Array): void;
+  /**
+   * For tests: the sink rate of every cell for a strain (ADR 0069), one float per cell, rows from y = 0, with a minus
+   * sign where the cell was a sink of the strain in the last step. Only zeros while the rules of stage 4 do not run,
+   * and for a strain that the settings do not hold.
+   */
+  readSinks(strain?: number): Promise<Float32Array>;
+  /**
+   * For tests: the sums of each strain of the last step (ADR 0069), 4 words per strain: R in steps of 2^-16 as a low
+   * and a high word, C and N (sinks.ts SINK_SUM_WORDS). Only zeros while the rules of stage 4 do not run.
+   */
+  readSinkSums(): Promise<Uint32Array>;
+  /** For tests: the state of each strain of the last step (ADR 0069), sinks.ts SINK_STATE_LANES floats per strain. */
+  readSinkState(): Promise<Float32Array>;
+  /** For tests: replaces the sink rates of a strain, one float per cell as readSinks() returns them, while the rules run. */
+  writeSinks(data: Float32Array, strain?: number): void;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */
@@ -280,6 +295,11 @@ export interface Backend<S extends Sim = Sim> {
    * backend holds (sizing.ts TUBE_MAP_BYTES_PER_CELL_GL); 0 on a backend that holds none.
    */
   readonly tubeMapBytesPerCell: number;
+  /**
+   * More GPU bytes per grid cell and strain while the rules of stage 4 run, for the sinks (sizing.ts
+   * SINK_BYTES_PER_CELL, SINK_BYTES_PER_CELL_GL).
+   */
+  readonly sinkBytesPerCell: number;
   readonly supportsCollisions: boolean;
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;

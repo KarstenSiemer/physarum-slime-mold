@@ -185,6 +185,14 @@ export function readUintTarget(gl: GL, t: Target): Uint32Array {
   return Uint32Array.from({ length: t.width * t.height }, (_, i) => rgba[i * 4] ?? 0);
 }
 
+/** Reads a whole target of unsigned integers with four channels (RGBA32UI), four values per texel, rows from y = 0. */
+export function readUint4Target(gl: GL, t: Target): Uint32Array {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  const rgba = new Uint32Array(t.width * t.height * 4);
+  gl.readPixels(0, 0, t.width, t.height, gl.RGBA_INTEGER, gl.UNSIGNED_INT, rgba);
+  return rgba;
+}
+
 /**
  * Resolves once the GPU has run every command issued so far: a fence, polled without blocking. A fence
  * cannot signal within the task that made it (WebGL 2.0 spec, 5.27), so polling starts in the next task.

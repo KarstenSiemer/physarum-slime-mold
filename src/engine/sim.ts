@@ -28,11 +28,13 @@ import amountWgsl from './shaders/amount.wgsl?raw';
 import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
 import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import sinksWgsl from './shaders/sinks.wgsl?raw';
 import territoryWgsl from './shaders/territory.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
+import { SINK_STATE_LANES, SINK_SUM_WORDS } from './sinks';
 import { packTerritory, territoryOn } from './territory';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import {
@@ -126,6 +128,18 @@ interface TerritoryState {
   owners: GPUBuffer;
   /** The uniform of `addDisc`: the centre, the radius and the strain of a disc. */
   disc: GPUBuffer;
+}
+/**
+ * The sinks of each strain (ADR 0069; sinks.wgsl), while the rules of stage 4 run: the sink rate of every cell and
+ * strain, which the pass `sinks` updates in place; the sums of each strain, 4 words that its atomics add up in a step;
+ * and the state of each strain, 2 vec4 that the pass `state` writes in place.
+ */
+interface SinkState {
+  /** The strains of the settings that the state was made for. */
+  strains: number;
+  rates: GPUBuffer;
+  sums: GPUBuffer;
+  state: GPUBuffer;
 }
 /**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
@@ -227,6 +241,8 @@ export class Simulation implements Sim {
   /** The territory and the owners, while the rules of stage 4 run (ADR 0068); `territoryT` names the current copy. */
   private territory?: TerritoryState | undefined;
   private territoryT: Bit = 0;
+  /** The sinks of each strain, while the rules of stage 4 run (ADR 0069). */
+  private sinks?: SinkState | undefined;
   /** Which memory texture is current, and which pressure texture holds the pressure in work. */
   private flowM: Bit = 0;
   private flowP = 0;
@@ -349,9 +365,13 @@ export class Simulation implements Sim {
     this.groups = [x, Math.ceil(n / x)];
     // Now, inside the caller's out-of-memory scope, even while collisions are off: the budget counts them.
     this.ensureCollision();
-    // So with the slime field, while the model has it, and with the territory while the rules of stage 4 run.
+    // So with the slime field, while the model has it, and with the territory and the sinks while the rules of stage 4
+    // run.
     if (slimeModel(settings)) this.ensureSlime();
-    if (territoryOn(settings)) this.ensureTerritory();
+    if (territoryOn(settings)) {
+      this.ensureTerritory();
+      this.ensureSinks();
+    }
   }
 
   /**
@@ -758,6 +778,8 @@ export class Simulation implements Sim {
     this.stamped = false;
     // A reset clears the territory (ADR 0068): the engine writes the start territory after it (Engine.seedAtFood()).
     if (this.territory) this.clearTerritory(enc, this.territory);
+    // And the sinks: no cell was a sink before (ADR 0069).
+    if (this.sinks) for (const b of [this.sinks.rates, this.sinks.sums, this.sinks.state]) enc.clearBuffer(b);
     const pass = enc.beginComputePass();
     const init = this.starts().init;
     pass.setPipeline(init);
@@ -1539,6 +1561,8 @@ export class Simulation implements Sim {
     this.dropFlow();
     this.dropTubes();
     this.dropSlime();
+    // The territory and the sinks of the rules of stage 4 (ADR 0068, ADR 0069).
+    this.dropTerritory();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -1591,6 +1615,9 @@ export class Simulation implements Sim {
     // pass fills the owners anew, and the push writes the next territory.
     const territory = col && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
     if (territory) enc.clearBuffer(territory.owners);
+    // The sinks of each strain (ADR 0069): the atomics of the step add their sums from 0.
+    const sinks = territory ? this.ensureSinks() : undefined;
+    if (sinks) enc.clearBuffer(sinks.sums);
     let pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
@@ -1722,7 +1749,7 @@ export class Simulation implements Sim {
     }
     // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time.
     if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);
-    if (flow) this.encodeFlow(pass, flow, d);
+    if (flow) this.encodeFlow(pass, flow, d, territory && sinks ? { territory, sinks } : undefined);
     // The push last (ADR 0067, decision 6): the territory of the next step.
     if (territory && flowUniform) this.encodePush(pass, territory, flowUniform);
     pass.end();
@@ -1797,14 +1824,109 @@ export class Simulation implements Sim {
     this.territoryT = 0;
   }
 
-  /** Frees the territory and the owners, and every bind group that holds them. */
+  /** Frees the territory and the owners, and every bind group that holds them; with them the sinks. */
   private dropTerritory() {
+    this.dropSinks();
     if (!this.territory) return;
     for (const t of this.territory.textures) t.destroy();
     this.territory.owners.destroy();
     this.territory.disc.destroy();
     this.territory = undefined;
     for (const key of [...this.bindCache.keys()]) if (key.includes('terr')) this.bindCache.delete(key);
+  }
+
+  /**
+   * The buffers of the sinks, made at their first use while the rules of stage 4 run (sizing.ts SINK_BYTES_PER_CELL),
+   * for the strains of the settings: settings with another number of strains get new buffers, as the flow gets a new
+   * state (ensureFlow()). New buffers hold zeros: no cell was a sink.
+   */
+  private ensureSinks(): SinkState {
+    const strains = flowStrains(this.settings);
+    if (this.sinks && this.sinks.strains !== strains) this.dropSinks();
+    if (!this.sinks) {
+      const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+      const make = (size: number) => this.device.createBuffer({ size, usage });
+      this.sinks = {
+        strains,
+        rates: make(this.width * this.height * strains * 4),
+        sums: make(SINK_SUM_WORDS * strains * 4),
+        state: make(SINK_STATE_LANES * strains * 4),
+      };
+    }
+    return this.sinks;
+  }
+
+  /** Frees the buffers of the sinks, and every bind group that holds them. */
+  private dropSinks() {
+    if (!this.sinks) return;
+    for (const b of [this.sinks.rates, this.sinks.sums, this.sinks.state]) b.destroy();
+    this.sinks = undefined;
+    for (const key of [...this.bindCache.keys()]) if (key.includes('sinks')) this.bindCache.delete(key);
+  }
+
+  /**
+   * The sinks of a strain and its state (sinks.wgsl, ADR 0069), after the update of its flow and before its pressure:
+   * `uniform` is the block of the strain, `memory` its memory after the update.
+   */
+  private encodeSinks(
+    pass: GPUComputePassEncoder,
+    stage4: { territory: TerritoryState; sinks: SinkState },
+    strain: number,
+    uniform: GPUBuffer,
+    memory: GPUTextureView,
+    ports: GPUBuffer,
+    groups: readonly [number, number],
+  ) {
+    const passes = this.kernels.sinkPasses();
+    const { territory, sinks } = stage4;
+    const t = this.territoryT;
+    const next = flip(this.flowM);
+    pass.setPipeline(passes.sinks);
+    // The group holds the slime field, the territory and a block of the flow: dropSlime(), dropTerritory() and
+    // dropFlow() forget it, and dropSinks() too.
+    pass.setBindGroup(
+      0,
+      this.bind(`slime-sinks${strain}-${next}-terr${t}-flow`, passes.sinks, [
+        ...[this.params, uniform, this.env, territory.owners, territory.views[t], this.ensureSlime().stamps, memory],
+        ...[sinks.rates, sinks.sums],
+      ]),
+    );
+    pass.dispatchWorkgroups(...groups);
+    pass.setPipeline(passes.state);
+    const state = [null, uniform, null, null, null, null, null, null, sinks.sums, ports, sinks.state];
+    pass.setBindGroup(0, this.bind(`sinks-state${strain}-flow`, passes.state, state));
+    pass.dispatchWorkgroups(1);
+  }
+
+  /**
+   * For tests: the sink rate of every cell for a strain (Sim.readSinks()), with a minus sign where the cell was a sink
+   * in the last step. Only zeros while the rules of stage 4 do not run, and for a strain that the settings do not hold.
+   */
+  async readSinks(strain = 0): Promise<Float32Array> {
+    const n = this.width * this.height;
+    if (!this.sinks || strain >= this.sinks.strains) return new Float32Array(n);
+    const all = new Float32Array(await readBuffer(this.device, this.sinks.rates));
+    return all.slice(strain * n, (strain + 1) * n);
+  }
+
+  /** For tests: the sums of each strain of the last step, R low, R high, C and N (Sim.readSinkSums()). */
+  async readSinkSums(): Promise<Uint32Array> {
+    if (!this.sinks) return new Uint32Array(SINK_SUM_WORDS * flowStrains(this.settings));
+    return new Uint32Array(await readBuffer(this.device, this.sinks.sums));
+  }
+
+  /** For tests: the state of each strain of the last step, SINK_STATE_LANES floats (Sim.readSinkState()). */
+  async readSinkState(): Promise<Float32Array> {
+    if (!this.sinks) return new Float32Array(SINK_STATE_LANES * flowStrains(this.settings));
+    return new Float32Array(await readBuffer(this.device, this.sinks.state));
+  }
+
+  /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
+  writeSinks(data: Float32Array, strain = 0) {
+    if (!territoryOn(this.settings)) return;
+    const sinks = this.ensureSinks();
+    if (strain >= sinks.strains) return;
+    this.device.queue.writeBuffer(sinks.rates, strain * this.width * this.height * 4, data);
   }
 
   /**
@@ -1878,7 +2000,12 @@ export class Simulation implements Sim {
    * that holds the trail after the step. Once per strain, each with its own layers and its own block (ADR 0031): the
    * passes of a strain read no state of another strain.
    */
-  private encodeFlow(pass: GPUComputePassEncoder, flow: FlowState, trail: Bit) {
+  private encodeFlow(
+    pass: GPUComputePassEncoder,
+    flow: FlowState,
+    trail: Bit,
+    stage4?: { territory: TerritoryState; sinks: SinkState },
+  ) {
     const passes = this.kernels.flowPasses();
     const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
     const [m, next] = [this.flowM, flip(this.flowM)];
@@ -1931,6 +2058,8 @@ export class Simulation implements Sim {
         ]),
       );
       pass.dispatchWorkgroups(...groups);
+      // While the rules of stage 4 run, the sinks of the strain from its memory after the update (ADR 0069).
+      if (stage4) this.encodeSinks(pass, stage4, strain, uniform, memory[next], flow.ports, groups);
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
         // The first two iterations take the pressure of the reference cell off (flow.wgsl RECENTRE).
         const pipeline = at(passes.pressure, Math.min(i, 2) === 2 ? 0 : i + 1);
@@ -2243,6 +2372,12 @@ interface TerritoryKernels {
   addDisc: GPUComputePipeline;
 }
 
+/** The passes of the sinks (sinks.wgsl, ADR 0069). */
+interface SinkKernels {
+  sinks: GPUComputePipeline;
+  state: GPUComputePipeline;
+}
+
 /** `advance` (move) and `claim`, the agent passes that steer. */
 interface Steering {
   move: GPUComputePipeline;
@@ -2299,6 +2434,7 @@ class Kernels {
   private growthFlowPipelines?: GrowthKernels;
   private growthTerritoryPipelines?: GrowthKernels;
   private territoryPipelines?: TerritoryKernels;
+  private sinkPipelines?: SinkKernels;
   private flowModule?: GPUShaderModule;
   private territoryModule?: GPUShaderModule;
   /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
@@ -2510,6 +2646,17 @@ class Kernels {
       };
     }
     return this.territoryPipelines;
+  }
+
+  /** The passes of the sinks (sinks.wgsl, ADR 0069), built at their first use: no scene has them yet. */
+  sinkPasses(): SinkKernels {
+    if (!this.sinkPipelines) {
+      const module = this.device.createShaderModule({ code: common + sinksWgsl });
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+      this.sinkPipelines = { sinks: pipeline('sinks'), state: pipeline('state') };
+    }
+    return this.sinkPipelines;
   }
 
   /**

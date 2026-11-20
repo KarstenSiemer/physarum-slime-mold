@@ -9,6 +9,7 @@
 - Date: 2026-11-19; the last runs and the review on 2026-11-20.
 - Extends [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (its decision 1, the rule set, and its open
   point on the paid births).
+- Extended by ADR 0069 ([the sinks of each strain in the engine](0069-the-sinks-of-each-strain-in-the-engine.md)).
 - In short: [`research/front/README.md`](../../research/front/README.md), step 9, tells the story and has the
   commands. No engine code yet: the engine follows this design in a later pull request.
 

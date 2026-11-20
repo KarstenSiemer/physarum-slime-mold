@@ -367,7 +367,9 @@ character, so a scene keeps its bytes.
   float32, in the uniform block of the flow after its sites (`PUSH_CHANCES`, `packTerritory()`). So the territory
   grows faster where more plasm lies at its edge (ADR 0065, finding 4). A cell is open when it lies in the arena and
   holds no wall. The push counts the neighbours across the seam of the periodic grid, and none outside a box or the
-  dish. It has no rule for a corner: a diagonal neighbour between two walls counts.
+  dish. A diagonal neighbour counts only if the two cells beside the corner between it and the cell are not both
+  walls, as for a move (7.5) and a birth (section 9); a cell outside a closed arena is no wall here. So the territory
+  reaches no cell that an agent cannot enter (ADR 0069).
 - **The start territory**: a reset clears the territory. With the start layout food (section 10), each strain gets
   every open cell whose centre lies within √(100 / π) + 3 ≈ 8.64 cells of its start (the disc of its colony and a rim
   of 3 cells), on the periodic grid of the nearest copy, just before the step that places its colony. A strain without
@@ -379,6 +381,43 @@ character, so a scene keeps its bytes.
   4 cells per texel (`r32uint`), on WebGL2 targets of one byte per cell (`R8UI`). The owners are a buffer of 4 cells
   per word on WebGPU and a target of one byte per cell on WebGL2.
 - **A link** holds the setting only while it is on; a link without it runs without the rules (`sanitize()`).
+
+### 6.11 The sinks of each strain
+
+ADR 0069, the rule set of ADR 0065 (decisions 1, 5 and 8) in the forms of ADR 0067 (decisions 3, 6 to 8 and 10). Code:
+`shaders/sinks.wgsl`, `gl/glsl/sinks.frag`, `src/engine/sinks.ts`; CPU reference `src/engine/sinks-reference.ts`.
+
+The sinks are the second of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), and no scene
+turns them on yet. They find the sinks of the flow of each strain, but no rule reads them yet: the pressure, the tubes
+and the agents run as without them. The next part of stage 4 lets the pressure read them.
+
+- **A path** goes from a cell to one of its 8 neighbours that is open, across the seam of the periodic grid, and takes
+  a diagonal step only where the two cells beside its corner are not both walls, as a move does (7.5). A cell outside a
+  closed arena is no wall here. A cell lies within k steps of cell c when a path of at most k steps from c reaches it;
+  c lies within 0 steps.
+- **Ground without slime**: an open cell without slime for a reader of step k + 1 (6.9), so after the stamps of step k.
+- **A sink** of strain s in step k is a cell that holds an agent of s (the owners, 6.10) and a tube of s (G_s > 0 after
+  the update of the step, 8.1), that has room, a free cell of the territory of s within 1 step (a free cell holds no
+  agent), and that lies at the edge of the territory of s: an open cell outside it lies within 2 steps. Its weight w
+  is 1 if ground without slime lies within 6 steps, else 0.025. Every other cell has the weight 0 for s.
+- **The sink rate** r_s of every cell is the mean of its weight over 100 steps. It counts in steps of 2^-24 as a whole
+  number R: in each step R moves toward W = w · 2^24, rounded to the nearest (2^24 for the weight 1, 419,430 for
+  0.025), by ⌈|W − R| / 100⌉. So the rate reaches its weight and stays there, the rate of a cell that is no sink comes
+  to 0, and every GPU computes the same rate as the CPU. The cell holds the float r = R / 2^24, with a minus sign while
+  it is a sink in this step; a reader takes its size.
+- **The sums** of strain s after the step: R_s, the rates of the tube cells of s (G_s > 0) in steps of 2^-16, rounded to
+  the nearest, ⌊(R + 128) / 256⌋ each; C_s, the tube cells of s; N_s, the sinks of s. R_s is a whole number below 2^40,
+  held in two words of 32 bits. Every sum is the same integer in every order of the additions.
+- **The state** of strain s after the step: R_s as a float in the unit of the rate, computed as high · 2^16 + low / 2^16
+  from the two words, so that each addition rounds once; C_s; N_s; the covered ports P_s, the sites with a port of s in
+  this step (8.2); and whether the front of s takes flux: N_s > 0, R_s > 0, and P_s > 0 or C_s > 0. Three more lanes
+  belong to the parts after this one and stay 0.
+- **The order** (ADR 0067, decision 6): for each strain the pass of the sinks and the pass of its state run after the
+  update of its flow and before its pressure. The owners come before them, the push after them, so a sink reads the
+  territory of the step.
+- **A reset** sets every rate, sum and state to 0, and a new number of strains gives the sinks new buffers.
+- **Memory**: 4 B per cell and strain on WebGPU, a buffer that the pass updates in place; on WebGL2 two targets of the
+  rates, 8 B, and the pyramid of the sums, 16 / 15 B (section 12).
 
 ## 7. The agents
 
@@ -765,6 +804,11 @@ differ in these points:
 - The territory (6.10) lies in textures of 4 cells per texel on WebGPU and in targets of one byte per cell on WebGL2,
   and the owners in a buffer that atomics fill and in a target that one point per agent fills. The push draws by the
   index of the cell, which both backends share: from the same territory and the same owners both push alike.
+- The sinks (6.11) follow the paths in rows of bits over the 13 × 13 cells around a cell on both backends. WebGPU sums
+  the cells of a workgroup of 8 × 8 and adds its sums with atomics; an addition that wraps the low word of R adds 1
+  to the high one. WebGL2 sums them in a pyramid of `RGBA32UI` targets per strain over squares of 4 × 4, with the lanes
+  R low, R high, C and N; its levels add the carries in the second lane, and the sign of a rate counts N. Both give
+  the same integers, and from the same inputs the same rates and the same state as the CPU.
 
 No test compares the bytes of the two backends; the ADRs quote digests of runs made off-line.
 
@@ -801,6 +845,8 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | Respawn and the cut (7.2)               | `flow.gpu.test.ts`, "respawn while the cut is held": no birth in the wound, with and without growth; outside it as before       |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
 | The territory (6.10, 7.2, 7.6, 9)       | `territory.gpu.test.ts`: moves, respawn and births only onto it, two strains; the owners and the push in each arena; the start  |
+| The corner of the push (6.10)           | `territory.gpu.test.ts`: no cell across a thin diagonal wall in 40 steps, both strains; `territory.test.ts`: the CPU copy       |
+| The sinks (6.11)                        | `sinks.gpu.test.ts`: rates, sums and state against the CPU copy in each arena with thin walls, the X of walls, births, a carry  |
 | The start territory (6.10, 10)          | `territory.gpu.test.ts`: the disc in each arena, with walls; `engine-env.test.ts`: the disc of each strain, the restart         |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |

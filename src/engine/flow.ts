@@ -81,12 +81,14 @@ export const FLOW_SITES = 64;
 
 /**
  * Slots of 16 bytes in the uniform block `Flow` (flow.wgsl, flow.frag): seven of constants, then the sites, then the
- * constants of the rules of stage 4 (ADR 0067, decision 9; territory.ts packTerritory()). The passes of the flow read
- * the block up to the sites; only the passes of stage 4 read the slots after them.
+ * constants of the rules of stage 4 (ADR 0067, decision 9; territory.ts packTerritory()): 2 slots of the push, then 1
+ * of the sinks (FLOW_SINK_SLOT; sinks.ts packSinks()). The passes of the flow read the block up to the sites; only the
+ * passes of stage 4 read the slots after them.
  */
 export const FLOW_CONSTANT_SLOTS = 7;
 export const FLOW_TERRITORY_SLOT = FLOW_CONSTANT_SLOTS + FLOW_SITES;
-export const FLOW_TERRITORY_SLOTS = 2;
+export const FLOW_SINK_SLOT = FLOW_TERRITORY_SLOT + 2;
+export const FLOW_TERRITORY_SLOTS = 3;
 export const FLOW_SLOTS = FLOW_TERRITORY_SLOT + FLOW_TERRITORY_SLOTS;
 export const FLOW_BYTES = FLOW_SLOTS * 16;
 

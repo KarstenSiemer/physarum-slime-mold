@@ -7,6 +7,7 @@
 import type { Settings } from '../model/params';
 import { FLOW_TERRITORY_SLOT, flowOn } from './flow';
 import { growthOn } from './pack';
+import { packSinks } from './sinks';
 
 /** The constants of the territory (ADR 0065, decision 1; `speed` and the start in research/front/sim.ts). */
 export const TERRITORY = {
@@ -37,9 +38,12 @@ export const PUSH_CHANCES: readonly number[] = Array.from({ length: 8 }, (_, k) 
 
 /**
  * Writes the constants of stage 4 into the uniform block of the flow (`buf` from flow.ts packFlow()), after its sites
- * (FLOW_TERRITORY_SLOT; ADR 0067, decision 9): PUSH_CHANCES. Returns `buf`.
+ * (FLOW_TERRITORY_SLOT; ADR 0067, decision 9): PUSH_CHANCES, then the constants of the sinks (sinks.ts packSinks()).
+ * Returns `buf`.
  */
 export function packTerritory(buf: ArrayBuffer): ArrayBuffer {
-  new Float32Array(buf).set(PUSH_CHANCES, FLOW_TERRITORY_SLOT * 4);
+  const f = new Float32Array(buf);
+  f.set(PUSH_CHANCES, FLOW_TERRITORY_SLOT * 4);
+  packSinks(f);
   return buf;
 }
