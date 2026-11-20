@@ -200,6 +200,12 @@ of the sinks before decision 8:
 - The forms of a GPU of step 9 (ADR 0067), each with its old word as the default: `paidBy=rank` (else `order`),
   `fresh=box` (else `chamfer`) and `sums=fixed` (else `float`); `GPU_FORMS` of `sim.ts` holds the three. Four tries
   that lost results stay as words: `paidBy=chance`, `paidBy=fill`, `paidBy=ahead` and `start=agents` (else `disc`).
+- The options of part E2c of the engine (ADR 0072), each off by default: `sinkTube=1`, a sink lies on a tube that
+  reaches the edge of the square of 13 × 13 cells around it or a port (the rule of the engine); `driftOn=net`, the
+  drift reads the pressure of a sensor's cell less that of the agent's cell, only on the network; `refOn=ports`, the
+  pressure recentres by the port of the first covered site; and `Params.scentSteps` (the key `scent` of `ymaze.ts` and
+  `dish.ts`), the steps of the food scent before the colony starts: 300 as every record here, 0 as the app starts.
+  `research/front/E2c-NOTES.md` has what they showed; `start.sh` runs both starts.
 
 ## Commands
 

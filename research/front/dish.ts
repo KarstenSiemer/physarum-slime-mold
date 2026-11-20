@@ -29,13 +29,21 @@ export interface DishRun {
   ms: number;
 }
 
-export function runDish(seed: number, slime: DishRun['slime'], front: Front, steps = 20000, every = 1000, side = 160) {
+export function runDish(
+  seed: number,
+  slime: DishRun['slime'],
+  front: Front,
+  steps = 20000,
+  every = 1000,
+  side = 160,
+  scentSteps = 300,
+) {
   const layout = dish(side, [[side / 2, side / 2, 5]]);
   if (slime === 'all') layout.slime = layout.open.slice();
   const open = layout.open.reduce((a, b) => a + b, 0);
   const t0 = performance.now();
   // The colony starts 18,000 steps after the slime, as in the Y-maze (ymaze.ts).
-  const sim = new Sim(layout, params({ seed, startStep: 18000, front }));
+  const sim = new Sim(layout, params({ seed, startStep: 18000, front, scentSteps }));
   const rows: DishRow[] = [];
   let [half, most] = [-1, -1];
   let [births, paid, starved] = [0, 0, 0];
@@ -99,7 +107,8 @@ if (isMain) {
   const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
   if (args.table) table(args.table);
   else {
-    const own = ['slime', 'seeds', 'steps', 'every', 'side', 'name'];
+    // `scent`: the steps of the food scent before the colony starts (Params.scentSteps; 0 as the app, ADR 0072).
+    const own = ['slime', 'seeds', 'steps', 'every', 'side', 'name', 'scent'];
     const front = frontFrom(args, own);
     const [from = 1, to = from] = (args.seeds ?? '1-2').split('-').map(Number);
     const slime = args.slime === 'all' ? 'all' : 'none';
@@ -107,7 +116,8 @@ if (isMain) {
     mkdirSync('research/front/out', { recursive: true });
     const file = `research/front/out/${name}.jsonl`;
     for (let seed = from; seed <= to; seed++) {
-      const run = runDish(seed, slime, front, Number(args.steps ?? 20000), Number(args.every ?? 1000));
+      const steps = Number(args.steps ?? 20000);
+      const run = runDish(seed, slime, front, steps, Number(args.every ?? 1000), 160, Number(args.scent ?? 300));
       appendFileSync(file, JSON.stringify({ ...run, front }) + '\n');
       const end = run.rows.at(-1);
       console.log(

@@ -2625,9 +2625,70 @@ Result: 62 of 62 runs are equal, and each of the 79 wrong rules fails at least o
 | `rank-block1.jsonl`   | the same on WebGPU with one key per round of the loop (`RANK_BLOCK` 1)              |
 | `steps.jsonl`         | the time of a step of the start scene at capacity 1, with and without the rules     |
 
+### 31. Does the tube of a sink keep the bytes of every scene? [ADR 0072]
+
+Part E2c of the engine of stage 4 (`research/front/ENGINE.md`): the gap between the backends in the start scene with
+the rules, and the spikes of the pressure. The story is `research/front/E2c-NOTES.md`; its scripts are
+`research/front/e2c-*` and `research/front/start.sh`. The fix, the test of the tube of a sink, runs only while the
+setting `territory` is on, which no scene turns on, so every scene must keep its bytes.
+
+**The gap and the spikes.** The start scene on both backends, 18 seeds to step 1,503, and the first 30 steps of the
+flux of seeds 1 to 6 (about 5 minutes on an M3 Pro):
+
+```bash
+VITE_RULES=true VITE_SEEDS=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 VITE_OUT=e2c-backends-after npx vitest run --config research/vitest.config.ts research/front/e2c-backends.gpu.test.ts
+VITE_OUT=e2c-islands-after npx vitest run --config research/vitest.config.ts research/front/e2c-islands.gpu.test.ts
+```
+
+**The prototype.** The Y-maze and the dish with both starts, with and without the test of the tube (52 jobs on 11
+cores, 17 minutes), and the patches of the first 60 steps of 40 seeds of its dish:
+
+```bash
+bash research/front/start.sh e2c-start
+node --import ./research/flow/register.mjs research/front/e2c-proto.ts layout=dish seeds=1-40 steps=60 marks=60 scent=0 sinkTube=1
+```
+
+**The bytes of the scenes.** The digests as in part 30, with the name `g72-digest-branch`, against the record of part
+30, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g72-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g72-digest-branch.jsonl research/flow/logs/engine/paid-0071/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the tube of a sink:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f 'TY%g' 214 230)
+```
+
+Each must fail at least one test.
+
+Result: the 4 spikes go (the least pressure of the first 30 steps is −315 to −3,801 in all 36 runs of a strain), over
+the 18 seeds the medians are 1,486 agents on WebGPU and 1,531 on WebGL2 (WebGPU higher in 158 of 324 pairs), 62 of 62
+runs are equal, and each of the 17 wrong rules fails at least one test. The records are in `logs/engine/tube-0072/`:
+
+| Record                 | Runs                                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `digest-branch.jsonl`  | the digests of every scene after 500 steps on both backends                              |
+| `mutations.txt`        | the tests that fail for each of the wrong rules TY214 to TY230                           |
+| `backends-*.txt`       | the start scene on both backends: seeds 1 to 6 and 7 to 18 before the fix, 1 to 18 after |
+| `dish160-*.txt`        | one strain in the dish of the prototype on both backends, before and after the fix       |
+| `islands-*.txt`        | the patches of tube that hold sinks, the first 30 steps, before and after the fix        |
+| `pressure-cpu-*.txt`   | the update and the pressure of each strain against the CPU copy, step by step            |
+| `levels-*.txt`         | the level of each network against its ground, drift 1.5 and 0, and the dish              |
+| `aggregate-*.txt`      | sums of each strain at drift 0, seeds 1 to 30, for a quantity that differs by backend    |
+| `start.txt`, `map.txt` | the start of each strain, and a map of the cells around three spikes                     |
+| `proto/`               | the prototype: the shift of a level, the starts, the 40 seeds, `start.sh` (y/, dish/)    |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 429 files, 8.7 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 483 files, 9.3 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2670,6 +2731,8 @@ asks for the new digest.
 | `logs/engine/territory-0068/`                        | the runs of part 27 (ADR 0068): the digests of every scene, and the wrong rules TY1 to TY38                                                                                                                                     |
 | `logs/engine/sinks-0069/`                            | the runs of part 28 (ADR 0069): the digests of every scene, and the wrong rules TY39 to TY101                                                                                                                                   |
 | `logs/engine/flow-sinks-0070/`                       | the runs of part 29 (ADR 0070): the digests of every scene, and the wrong rules TY102 to TY140, TY36 and TY37                                                                                                                   |
+| `logs/engine/paid-0071/`                             | the runs of part 30 (ADR 0071): the digests of every scene, the wrong rules, the time of `rank` and of a step                                                                                                                   |
+| `logs/engine/tube-0072/`                             | the runs of part 31 (ADR 0072): the start scene on both backends, the spikes, the CPU checks, the prototype, digests, wrong rules                                                                                               |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

@@ -5,7 +5,7 @@ import { defaultSettings, type Boundary, type Settings } from '../model/params';
 import { FLOW_BYTES, FLOW_SINK_SLOT, FLOW_SLOTS, FLOW_TAKE_SLOT, FLOW_TERRITORY_SLOT, packFlow } from './flow';
 import { NO_SITES } from './sites';
 import { RATE_ONE, SINK_WINDOW, SINKS, SLIME_WEIGHT, SUM_ONE } from './sinks';
-import { paths, sinkState, sinksStep, sinkWeight, sumOf, toward, type SinkInput } from './sinks-reference';
+import { paths, sinkState, sinksStep, sinkWeight, sumOf, toward, tubeOut, type SinkInput } from './sinks-reference';
 import { sinkLevels } from './sizing';
 import { packTerritory } from './territory';
 import type { TerritoryGrid } from './territory-reference';
@@ -162,6 +162,7 @@ describe('the sinks (ADR 0069)', () => {
       step: 10,
       memory,
       rates: new Float32Array(n),
+      ports: [],
       ...patch,
     };
   }
@@ -222,6 +223,44 @@ describe('the sinks (ADR 0069)', () => {
     expect(sinkWeight(free, c)).toBe(SLIME_WEIGHT);
   });
 
+  it('takes no sink on a patch of tube that a square of 13 × 13 cells holds without a port (ADR 0072)', () => {
+    const c = 4 * 15 + 7; // (7, 4), the sink of caseOf()
+    // Only the cells of `cells` hold a tube.
+    const tubes = (cells: [number, number][], patch: Partial<SinkInput> = {}) => {
+      const input = caseOf(patch);
+      input.memory.fill(0);
+      for (const [x, y] of [[7, 4] as [number, number], ...cells]) input.memory[(y * 15 + x) * 4 + 2] = 0.5;
+      return input;
+    };
+    // A patch of two cells: no sink, but with a port in it, and on a tube that reaches the edge of the square, x = 1.
+    expect(sinkWeight(tubes([[7, 3]]), c)).toBe(0);
+    expect(tubeOut(tubes([[7, 3]]), c)).toBe(false);
+    expect(sinkWeight(tubes([[7, 3]], { ports: [-1, 3 * 15 + 7] }), c)).toBe(SLIME_WEIGHT);
+    expect(sinkWeight(tubes([[7, 3]], { ports: [3 * 15 + 8] }), c)).toBe(0);
+    const row = Array.from({ length: 6 }, (_, i): [number, number] => [6 - i, 4]);
+    expect(sinkWeight(tubes(row), c)).toBe(SLIME_WEIGHT);
+    expect(sinkWeight(tubes(row.slice(0, 5)), c)).toBe(0);
+    // Steps between 4-neighbours only: the row one cell lower touches the cell at a corner and does not join it.
+    expect(sinkWeight(tubes(row.map(([x, y]) => [x, y + 1])), c)).toBe(0);
+    // A winding tube inside the square counts with every step: down, right, up and right to x = 13.
+    const winding: [number, number][] = [
+      ...[5, 6, 7, 8].map((y): [number, number] => [7, y]),
+      ...[8, 9, 10, 11].map((x): [number, number] => [x, 8]),
+      ...[7, 6, 5, 4, 3, 2].map((y): [number, number] => [11, y]),
+      [12, 2],
+      [13, 2],
+    ];
+    expect(sinkWeight(tubes(winding), c)).toBe(SLIME_WEIGHT);
+    expect(sinkWeight(tubes(winding.slice(0, -1)), c)).toBe(0);
+    // Across the seam of the periodic grid: from (1, 4) the tube reaches x = 10, which is 6 cells to the left of it.
+    const seam = caseOf({ g: gridOf(15, 9, 'wrap') });
+    seam.memory.fill(0);
+    for (const x of [1, 0, 14, 13, 12, 11, 10]) seam.memory[(4 * 15 + x) * 4 + 2] = 0.5;
+    expect(tubeOut(seam, 4 * 15 + 1)).toBe(true);
+    seam.memory[(4 * 15 + 10) * 4 + 2] = 0;
+    expect(tubeOut(seam, 4 * 15 + 1)).toBe(false);
+  });
+
   it('sums the rates of the tube cells in two words, the tube cells and the sinks', () => {
     // Every cell a tube cell at the full rate, no sink: each rate falls by a hundredth, and R wraps its low word.
     const [w, h] = [400, 250];
@@ -240,6 +279,7 @@ describe('the sinks (ADR 0069)', () => {
       step: 0,
       memory,
       rates,
+      ports: [],
     };
     const out = sinksStep(input);
     let r = 0;

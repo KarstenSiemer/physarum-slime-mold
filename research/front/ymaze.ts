@@ -33,10 +33,11 @@ export function runY(
   after = 2000,
   age = 18000,
   everywhere = false,
+  scentSteps = 300,
 ): YRun {
   const { layout } = yMazeLayout(slimed, 19, everywhere);
   const t0 = performance.now();
-  const sim = new Sim(layout, params({ seed, startStep: age, front }));
+  const sim = new Sim(layout, params({ seed, startStep: age, front, scentSteps }));
   const touched = { left: -1, right: -1 };
   const foods = { left: layout.sites[0]!, right: layout.sites[1]! };
   let agents = 0;
@@ -62,13 +63,14 @@ if (isMain) {
   const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
   const [from = 1, to = from] = (args.seeds ?? '1-4').split('-').map(Number);
   const kind = args.case ?? 'one';
-  const front = frontFrom(args, ['case', 'seeds', 'limit', 'name']);
+  // `scent`: the steps of the food scent before the colony starts (Params.scentSteps; 0 as the app, ADR 0072).
+  const front = frontFrom(args, ['case', 'seeds', 'limit', 'name', 'scent']);
   const limit = Number(args.limit ?? 10000);
   const name = args.name ?? `y-${kind}`;
   mkdirSync('research/front/out', { recursive: true });
   const file = `research/front/out/${name}.jsonl`;
   for (let seed = from; seed <= to; seed++) {
-    const run = runY(seed, slimedOf(kind, seed), front, limit, 2000, 18000, kind === 'all');
+    const run = runY(seed, slimedOf(kind, seed), front, limit, 2000, 18000, kind === 'all', Number(args.scent ?? 300));
     appendFileSync(file, JSON.stringify({ ...run, case: kind, limit, front }) + '\n');
     console.log(
       `seed ${String(seed)} slime ${run.slimed.join('+') || '-'}: ${run.chosen} first ${String(run.first)} other +${String(run.other)} agents ${String(run.agents)} (${String(run.ms)} ms)`,

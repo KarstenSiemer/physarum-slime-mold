@@ -1898,13 +1898,14 @@ export class Simulation implements Sim {
     const t = this.territoryT;
     const next = flip(this.flowM);
     pass.setPipeline(passes.sinks);
-    // The group holds the slime field, the territory and a block of the flow: dropSlime(), dropTerritory() and
-    // dropFlow() forget it, and dropSinks() too.
+    // The group holds the slime field, the territory, a block and the ports of the flow: dropSlime(), dropTerritory()
+    // and dropFlow() forget it, and dropSinks() too.
     pass.setBindGroup(
       0,
       this.bind(`slime-sinks${strain}-${next}-terr${t}-flow`, passes.sinks, [
         ...[this.params, uniform, this.env, territory.owners, territory.views[t], this.ensureSlime().stamps, memory],
-        ...[sinks.rates, sinks.sums],
+        // The ports of the step: the test of the tube of a sink (ADR 0072).
+        ...[sinks.rates, sinks.sums, ports],
       ]),
     );
     pass.dispatchWorkgroups(...groups);

@@ -4,7 +4,7 @@
 // the state of each strain. It follows the paths over the cells of the grid with a queue; the passes hold rows of bits.
 import { grid } from './growth-reference';
 import { nextBudget } from './paid';
-import { RATE_ONE, SINKS, SLIME_WEIGHT, SUM_ONE } from './sinks';
+import { RATE_ONE, SINK_WINDOW, SINKS, SLIME_WEIGHT, SUM_ONE } from './sinks';
 import { wall, type TerritoryGrid } from './territory-reference';
 
 /** What the pass of the sinks of one strain reads in a step. */
@@ -24,6 +24,11 @@ export interface SinkInput {
   memory: Float32Array;
   /** The sink rates of the strain before the step (Sim.readSinks() before it). */
   rates: Float32Array;
+  /**
+   * The ports of the strain in the step, a cell per site or −1 for none (`ports` of flow.wgsl; flowPorts() from the
+   * memory before the step).
+   */
+  ports: readonly number[];
 }
 
 /** Whether cell c (an index, or −1) is open: in the arena and no wall. */
@@ -56,16 +61,55 @@ export function paths(g: TerritoryGrid, c: number, steps: number): Map<number, n
   return reached;
 }
 
+/**
+ * Whether the tube of cell c carries flux to it, for the strain of `input` (ADR 0072): the tube cells of the strain (a
+ * conductivity above 0 after the update) that a path between 4-neighbours over tube cells reaches from c, inside the
+ * square of the cells within SINK_WINDOW of it (the larger of |dx| and |dy|), include a cell on the edge of the square
+ * or a port of the strain. A step crosses the seam of the periodic grid, as a path of the sinks does.
+ */
+export function tubeOut(input: SinkInput, c: number): boolean {
+  const { g, memory } = input;
+  const { cellAt } = grid(g.w, g.h, g.boundary);
+  const ports = new Set(input.ports.filter((p) => p >= 0));
+  const [x, y] = [c % g.w, Math.floor(c / g.w)];
+  const tube = (dx: number, dy: number) => {
+    const t = cellAt(x + dx, y + dy);
+    return t >= 0 && (memory[t * 4 + 2] ?? 0) > 0;
+  };
+  const seen = new Set(['0,0']);
+  let ring: [number, number][] = [[0, 0]];
+  while (ring.length > 0) {
+    const next: [number, number][] = [];
+    for (const [dx, dy] of ring) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) === SINK_WINDOW || ports.has(cellAt(x + dx, y + dy))) return true;
+      for (const [ex, ey] of [
+        [dx + 1, dy],
+        [dx - 1, dy],
+        [dx, dy + 1],
+        [dx, dy - 1],
+      ] as const) {
+        const key = `${String(ex)},${String(ey)}`;
+        if (Math.abs(ex) > SINK_WINDOW || Math.abs(ey) > SINK_WINDOW || seen.has(key) || !tube(ex, ey)) continue;
+        seen.add(key);
+        next.push([ex, ey]);
+      }
+    }
+    ring = next;
+  }
+  return false;
+}
+
 /** Whether a cell with the stamp `held` has slime for a reader after the stamps of step `step` (slime.ts, 6.9). */
 export const slimeAfter = (held: number, step: number, life: number) => held !== 0 && step + 2 - held < life;
 
 /**
  * The weight of cell c for the strain of `input`, in steps of the rate (RATE_ONE is 1): 0 if it is no sink. A sink holds
- * an agent of the strain and a tube of it, has a free cell of its territory that one step reaches, and lies at the
- * edge of its territory: open ground outside it lies within SINKS.edge steps. Its weight is RATE_ONE if ground without
- * slime lies within SINKS.fresh steps, else SLIME_WEIGHT.
+ * an agent of the strain and a tube of it, has a free cell of its territory that one step reaches, lies at the edge
+ * of its territory: open ground outside it lies within SINKS.edge steps, and its tube carries flux to it (tubeOut()).
+ * Its weight is RATE_ONE if ground without slime lies within SINKS.fresh steps, else SLIME_WEIGHT. `tube`: false skips
+ * the test of the tube, the rule of ADR 0069, for a test that counts the sinks that the test of the tube takes away.
  */
-export function sinkWeight(input: SinkInput, c: number): number {
+export function sinkWeight(input: SinkInput, c: number, tube = true): number {
   const { g, owners, territory, stamps } = input;
   const mine = 1 << input.strain;
   if (!((owners[c] ?? 0) & mine) || !((input.memory[c * 4 + 2] ?? 0) > 0)) return 0;
@@ -73,6 +117,7 @@ export function sinkWeight(input: SinkInput, c: number): number {
   const within = (steps: number) => reached.flatMap(([t, k]) => (k <= steps ? [t] : []));
   if (!within(1).some((t) => (owners[t] ?? 0) === 0 && (territory[t] ?? 0) & mine)) return 0;
   if (!within(SINKS.edge).some((t) => !((territory[t] ?? 0) & mine))) return 0;
+  if (tube && !tubeOut(input, c)) return 0;
   const fresh = within(SINKS.fresh).some((t) => !slimeAfter(stamps[t] ?? 0, input.step, input.life));
   return fresh ? RATE_ONE : SLIME_WEIGHT;
 }
