@@ -25,6 +25,7 @@ struct Params {
   electrode: vec4f,      // the source of a cell of an electrode (ADR 0047); y: Light stops growth (ADR 0050)
   slimeLow: vec4f,       // per strain the trail from which a cell holds plasm (ADR 0055; flow.ts trailLevels())
   slime: vec4u,          // the life time of the slime in steps, 0 for no slime (ADR 0055); y, z, w unused
+  drift: vec4f,          // per strain the weight of the pressure in the sensors, with the rules of stage 4 (ADR 0070)
 }
 
 struct Agent {

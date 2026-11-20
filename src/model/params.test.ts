@@ -881,4 +881,18 @@ describe('the rules of stage 4 (ADR 0068)', () => {
     if (!maze) throw new Error('no Maze');
     expect(toJones({ ...maze, territory: true }).territory).toBe(false);
   });
+
+  // ADR 0070: the drift is a setting of the rules, 1.5 (the crown of ADR 0065, decision 6) until the scenes take it up.
+  it('have the drift 1.5 by default and in every scene, from 0 to 5, and its default in the Jones model', () => {
+    expect(defaultSettings().drift).toBe(1.5);
+    for (const p of PRESETS) expect(p.settings().drift, p.id).toBe(1.5);
+    expect(sanitize({ model: 'extended', drift: 7 }).drift).toBe(5);
+    expect(sanitize({ model: 'extended', drift: -1 }).drift).toBe(0);
+    expect(sanitize({ model: 'extended', drift: 'x' }).drift).toBe(1.5);
+    expect(sanitize({ model: 'extended', territory: true, drift: 0.5 }).drift).toBe(0.5);
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    expect(jones.model).toBe('jones');
+    expect(constrain({ ...jones, drift: 4 }).drift).toBe(1.5);
+  });
 });

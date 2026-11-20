@@ -38,6 +38,14 @@ struct Flow {
   f: vec4f, // the first cell of the first site x, y (referenceCell()), the strain of the pass, blocks of `siteCells`
   g: vec4f, // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
   sites: array<vec4f, 64>, // its first cell x, y; its cells in `siteCells`: from z, w of them (sites.ts FlowSites)
+//#if TERRITORY
+  // The constants of the rules of stage 4 after the sites (territory.ts packTerritory()): the chances of the push, the
+  // constants of the sinks (sinks.wgsl), and in x of `take` what the sinks of a strain take together, in units of I0
+  // (sinks.ts packSinks()).
+  push: array<vec4f, 2>,
+  sinks: vec4f,
+  take: vec4f,
+//#endif
 }
 
 // Kirchhoff's law fixes a pressure field only up to a constant, and the field moves as a whole when the sites do not
@@ -67,6 +75,16 @@ override RECENTRE: u32 = 0u;
 // Per strain and block of `siteCells` (U.f.w blocks per strain): the first entry of the block whose cell covers its
 // site, counted in the block, or −1. `blocks` writes it, `sites` reads it.
 @group(0) @binding(12) var<storage, read_write> blockHits: array<i32>;
+//#if TERRITORY
+
+// The flow takes the sinks of its strain while the rules of stage 4 run (ADR 0070; ADR 0065, decision 1; ADR 0067,
+// decisions 3 and 6). The lines between `//#if TERRITORY` and `//#endif` are part of the source only then (variant.ts);
+// without them the source is the one of the code before, character for character. sinks.wgsl writes both buffers
+// after `update` of the strain and before its `pressure`: `update` reads the state of the step before, `pressure` the
+// rates and the state of this step.
+@group(0) @binding(13) var<storage, read> rates: array<f32>; // per strain and cell: strain · W · H + cell
+@group(0) @binding(14) var<storage, read> states: array<vec4f>; // per strain 2 (sinks.ts SINK_STATE_LANES)
+//#endif
 
 const SITE_BLOCK = 64u;
 const NO_CELL = 0xffffffffu;
@@ -108,6 +126,11 @@ fn port(i: i32) -> i32 {
 // a starved cell. The agents still follow the memory that they find (agents.wgsl starved()): on fresh ground one of
 // 20,000 starves per step.
 fn fed() -> bool {
+//#if TERRITORY
+  // While the rules of stage 4 run, also while the front of the strain took flux in the step before (ADR 0067,
+  // decision 6): the state of the strain still holds it, since sinks.wgsl `state` runs after this pass.
+  if (states[u32(U.f.z) * 2u + 1u].x != 0.0) { return true; }
+//#endif
   var found = 0;
   for (var i = 0; i < 64; i++) {
     let c = ports[i32(U.f.z) * 64 + i].y;
@@ -199,6 +222,36 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
   if (count > 0.0) { level /= count; }
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4f(0.0), vec4f(1.0));
 }
+//#if TERRITORY
+
+// What the sinks of the strain take and what its sources give at the cell p, whose conductivity is g, in this step
+// (ADR 0070): nothing while its front takes no flux (sinks.wgsl `state`). Else the sinks take S = U.take.x · I0
+// together, each tube cell the share S · r / R with its rate r as R counted it, in steps of 2^-16 rounded to the
+// nearest (ADR 0067, decision 3), and R from the state. The covered ports give S in equal shares, and without one every
+// tube cell gives S / C, C the tube cells. So the sources give what the sinks take, up to the rounding of the floats.
+fn sinksAndSources(p: vec2i, g: f32) -> f32 {
+  let s = u32(U.f.z);
+  if (states[s * 2u + 1u].x == 0.0) { return 0.0; }
+  // R, C, N and the covered ports P.
+  let sums = states[s * 2u];
+  let total = U.take.x * U.a.x;
+  let c = p.y * i32(W()) + p.x;
+  var q = 0.0;
+  if (g > 0.0) {
+    let steps = u32(abs(rates[s * W() * H() + u32(c)]) * 16777216.0);
+    let r = f32((steps + 128u) >> 8u) * (1.0 / 65536.0);
+    q -= total * r / sums.x;
+    if (sums.w == 0.0) { q += total / sums.y; }
+  }
+  // Only a cell with food is the port of a site.
+  if (sums.w > 0.0 && envOf(env[c]).y > 0.0) {
+    for (var i = 0; i < i32(U.d.w); i++) {
+      if (port(i) == c) { q += total / sums.w; }
+    }
+  }
+  return q;
+}
+//#endif
 
 // The cell whose pressure the first two iterations of a step take off (RECENTRE): the port of the first site that
 // gives or takes, so a cell of the network. A cell of a site without a role can lie outside the network or under a
@@ -364,6 +417,10 @@ fn pressure(@builtin(global_invocation_id) gid: vec3u) {
       let signs = roleSigns(m.w);
       given = signs * U.a.x * headroom(pc, signs);
     }
+//#if TERRITORY
+    // The same in every lane: what the sinks take and the sources give (ADR 0070).
+    given += vec4f(sinksAndSources(p, m.z));
+//#endif
     let balanced = (acc + given) / sum;
     let jacobi = pc + U.c.x * (balanced - pc);
     if (RECENTRE == 2u) { before -= textureLoad(pressureBefore, referenceCell(), 0); }

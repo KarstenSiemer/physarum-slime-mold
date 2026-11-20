@@ -292,11 +292,15 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   and each strain has its sinks in both backends: the sink test along paths over open cells, the mean of the sink
   rate in whole steps of 2^-24, the sums R, C and N in integers of two words, and the state, against a CPU copy
   exactly, with 63 wrong rules more; no rule reads the sinks yet, and every scene keeps its bytes.
-- **Next: parts 2b to 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
-  the pressure with the sinks and the sources, the adaptation while the front took flux and the drift, then the paid
-  births, then the scenes: the drift as a setting of the panel, the digests of every scene and the measures of the 13
-  scenes with growth and the flow, and a test where a second strain grows on the slime of the first. Then the picture:
-  the skirt goes, or it is drawn from the plasm of the crown.
+- **The engine of stage 4, part 2b** (ADR 0070, 2026-11-20): the flow of each strain takes its sinks in both backends:
+  the pressure with what the sinks take (2 times the flow strength, by the rates as R counted them) and what the
+  covered ports or the tube cells give, the adaptation while the front took flux, and the drift in the sensors (a
+  setting for all strains, 1.5 for now), against a CPU copy, with 39 wrong rules more; every scene keeps its bytes.
+- **Next: parts 3 and 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
+  the paid births, then the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
+  panel, the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a
+  second strain grows on the slime of the first. Then the picture: the skirt goes, or it is drawn from the plasm of the
+  crown.
 
 Open, for the owner:
 

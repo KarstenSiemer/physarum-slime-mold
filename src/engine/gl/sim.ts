@@ -1005,7 +1005,10 @@ export class GlSim implements Sim {
     return { flowMemory: of(0), flowMemory1: of(1), flowMemory2: of(2), flowMemory3: of(3) };
   }
 
-  /** The pressure of the flow of every strain for the stream (tubes.frag): the samplers as flowMemories() names them. */
+  /**
+   * The pressure of the flow of every strain for the stream (tubes.frag) and for the sensors of the rules of stage 4
+   * (agents.frag, ADR 0070): the samplers as flowMemories() names them.
+   */
   private flowPressures(flow: NonNullable<GlSim['flow']>): Record<string, WebGLTexture> {
     const of = (strain: number) => at(flow.pressure[strain] ?? at(flow.pressure, 0), this.flowP).texture;
     return { flowPressure: of(0), flowPressure1: of(1), flowPressure2: of(2), flowPressure3: of(3) };
@@ -1744,6 +1747,9 @@ export class GlSim implements Sim {
     const held: Record<string, WebGLTexture> = territory ? { territory: territory.copies[this.tt].texture } : {};
     // The sinks of each strain (ADR 0069), in the passes of the flow.
     const sinks = territory ? this.ensureSinks() : undefined;
+    // With the rules the sensors read the pressure of the flow of the step before, of each strain (TERRITORY in
+    // agents.frag, ADR 0070): 16 samplers in all, the least that a device has.
+    const pressures: Record<string, WebGLTexture> = territory && flow ? this.flowPressures(flow) : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1758,6 +1764,7 @@ export class GlSim implements Sim {
           clearance: this.clearance.texture,
           ...flowMemory,
           ...held,
+          ...pressures,
         },
         { agentWidth: this.agentWidth, mode },
       );
@@ -2043,6 +2050,10 @@ export class GlSim implements Sim {
     stage4?: { territory: { copies: Pair<Target>; owners: Target }; sinks: GlSinks },
   ) {
     const programs = this.prog.flow();
+    // While the rules of stage 4 run, the update and the pressure that take the sinks (TERRITORY in flow.frag, ADR
+    // 0070): the update reads the current copy of the state, whether the front took flux in the step before; the
+    // pressure reads the next copies of the rates and of the state, which encodeSinks() writes for its strain.
+    const taking = stage4 ? this.prog.sinks() : undefined;
     const env = this.env.texture;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
@@ -2063,8 +2074,9 @@ export class GlSim implements Sim {
       const pressure = at(flow.pressure, strain);
       this.flowBlock(flow, strain);
       p = this.flowP;
+      const took = stage4 ? { state: stage4.sinks.state[this.st].texture } : {};
       this.pass(
-        programs.update,
+        taking?.update ?? programs.update,
         memories[next],
         {
           env,
@@ -2072,16 +2084,23 @@ export class GlSim implements Sim {
           pressureIn: at(pressure, p).texture,
           trail: this.trail[this.p].texture,
           ports: ports.texture,
+          ...took,
         },
         {},
       );
       const memory = memories[next].texture;
       // While the rules of stage 4 run, the sinks of the strain from its memory after the update (ADR 0069).
       if (stage4) this.encodeSinks(stage4, strain, memory, ports.texture);
+      const sinks = stage4
+        ? {
+            rates: at(stage4.sinks.rates, strain)[flip(this.sr)].texture,
+            state: stage4.sinks.state[flip(this.st)].texture,
+          }
+        : {};
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
         const [behind, out] = [(p + 2) % 3, (p + 1) % 3];
         this.pass(
-          programs.pressure,
+          taking?.pressure ?? programs.pressure,
           at(pressure, out),
           {
             env,
@@ -2089,6 +2108,7 @@ export class GlSim implements Sim {
             pressureIn: at(pressure, p).texture,
             pressureBefore: at(pressure, behind).texture,
             ports: ports.texture,
+            ...sinks,
           },
           // The first two iterations take the pressure of the reference cell off (RECENTRE in flow.wgsl).
           { recentre: i < 2 ? i + 1 : 0 },

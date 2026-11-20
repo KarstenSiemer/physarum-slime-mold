@@ -169,9 +169,9 @@ describe('packFlow', () => {
 
   it('has the size of the uniform block of the passes', () => {
     expect(FLOW_CONSTANT_SLOTS).toBe(7);
-    // Three slots of the constants of stage 4 after the sites: two of the push and one of the sinks (territory.ts
-    // packTerritory(), ADR 0068 and ADR 0069).
-    expect(FLOW_SLOTS).toBe(FLOW_CONSTANT_SLOTS + FLOW_SITES + 3);
+    // Four slots of the constants of stage 4 after the sites: two of the push, one of the sinks and one of what the
+    // sinks take (territory.ts packTerritory(), ADR 0068 to ADR 0070).
+    expect(FLOW_SLOTS).toBe(FLOW_CONSTANT_SLOTS + FLOW_SITES + 4);
     expect(FLOW_BYTES).toBe(FLOW_SLOTS * 16);
     expect(packFlow(settings, sites).byteLength).toBe(FLOW_BYTES);
     expect(FLOW_ITERATIONS).toBe(16);

@@ -122,7 +122,8 @@ describe('the slime field in the parameters of the passes', () => {
   });
 
   it('come after every slot of the code before, so no pass of the code before reads another value', () => {
-    expect(PARAM_SLOTS.slice(-3)).toEqual(['electrode', 'slimeLow', 'slime']);
+    // Only the drift of the rules of stage 4 comes after them (ADR 0070).
+    expect(PARAM_SLOTS.slice(-4)).toEqual(['electrode', 'slimeLow', 'slime', 'drift']);
     expect([lane('electrode'), lane('slimeLow'), lane('slime')]).toEqual([24 * 4, 25 * 4, 26 * 4]);
   });
 

@@ -128,7 +128,7 @@ export interface TerritoryPrograms {
   test: Program;
 }
 
-/** The passes of the sinks (sinks.frag, ADR 0069). */
+/** The passes of the sinks (sinks.frag, ADR 0069), and the passes of the flow that take them (ADR 0070). */
 export interface SinkPrograms {
   /** PASS 0: the sink rate of every cell. */
   sinks: Program;
@@ -138,6 +138,10 @@ export interface SinkPrograms {
   level: Program;
   /** PASS 3: the state of a strain. */
   state: Program;
+  /** PASS 0 of flow.frag with TERRITORY: the update, which adapts while the front took flux (ADR 0070). */
+  update: Program;
+  /** PASS 1 of flow.frag with TERRITORY: the pressure, which takes the sinks and the sources (ADR 0070). */
+  pressure: Program;
 }
 
 /** The passes of the picture of the tubes (tubes.frag, ADR 0034). */
@@ -224,7 +228,10 @@ export interface Programs {
   flowing: (senseWalls: boolean, saturate: boolean, territory?: boolean) => Program;
   /** The passes of the territory (ADR 0068), compiled at their first use: no scene has them yet. */
   territory: () => TerritoryPrograms;
-  /** The passes of the sinks (ADR 0069), compiled at their first use: no scene has them yet. */
+  /**
+   * The passes of the sinks (ADR 0069) and the passes of the flow that take them (ADR 0070), compiled at their first
+   * use: no scene has them yet.
+   */
   sinks: () => SinkPrograms;
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
@@ -474,6 +481,8 @@ export function compile(gl: GL): Programs {
         first: sim('#define PASS 1\n' + sinksFrag),
         level: sim('#define PASS 2\n' + sinksFrag),
         state: sim('#define PASS 3\n' + sinksFrag),
+        update: sim('#define PASS 0\n#define TERRITORY 1\n' + flowFrag),
+        pressure: sim('#define PASS 1\n#define TERRITORY 1\n' + flowFrag),
       }),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),

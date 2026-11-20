@@ -153,7 +153,9 @@ describe('WGSL', () => {
       growthFlow: common + variant(growthWgsl, ['FLOW']),
       growthTerritory: common + variant(growthWgsl, ['FLOW', 'TERRITORY']),
       territory: common + territoryWgsl,
-      flow: common + flowWgsl,
+      flow: common + variant(flowWgsl),
+      // The update and the pressure that take the sinks of the rules of stage 4 (ADR 0070).
+      flowSinks: common + variant(flowWgsl, ['TERRITORY']),
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
       // The brush on the environment and the brush on the slime field share the segment of brush.wgsl (ADR 0055).

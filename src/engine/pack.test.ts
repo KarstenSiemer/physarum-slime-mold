@@ -37,7 +37,7 @@ describe('Params layout', () => {
     const body = /struct Params \{([\s\S]*?)\n\}/.exec(wgsl)?.[1] ?? '';
     const types = [...body.matchAll(/:\s*([\w<>, ]+?),\s*(?:\/\/|$)/gm)].map((m) => m[1]);
     expect(types.every((t) => /^vec4[uf]$|^array<vec4f, 4>$/.test(t ?? ''))).toBe(true);
-    expect(PARAMS_BYTES).toBe(27 * 16);
+    expect(PARAMS_BYTES).toBe(28 * 16);
   });
 
   // WebGL2 fills the same bytes into its block (gl/glsl/common.glsl): the same members in the same order.
@@ -101,6 +101,19 @@ describe('Params layout', () => {
     const layout = (name: Settings['layout']) =>
       new Uint32Array(packParams({ ...s, layout: name }, { width: 8, height: 8, agents: 1, step: 0 }))[19 * 4];
     expect([layout('line'), layout('food'), layout('empty')]).toEqual([8, 6, 6]);
+  });
+
+  // ADR 0070: the drift of the rules of stage 4 in a lane per strain, as the food weight, in a slot after every slot
+  // of the code before: no pass of the code before reads another value.
+  it('packs the drift in a lane per strain, after every slot of the code before', () => {
+    expect(PARAM_SLOTS.at(-1)).toBe('drift');
+    const at = (PARAM_SLOTS.length + 3 - 1) * 4;
+    expect(at).toBe(27 * 4);
+    const rt = { width: 8, height: 8, agents: 8, step: 0 };
+    const two = { ...defaultSettings(), drift: 1.25, strains: [defaultStrain(0, 2), defaultStrain(1, 2)] };
+    expect([...new Float32Array(packParams(two, rt)).slice(at, at + 4)]).toEqual([1.25, 1.25, 0, 0]);
+    expect(defaultSettings().drift).toBe(1.5);
+    expect([...new Float32Array(packParams(defaultSettings(), rt)).slice(at, at + 4)]).toEqual([1.5, 0, 0, 0]);
   });
 });
 

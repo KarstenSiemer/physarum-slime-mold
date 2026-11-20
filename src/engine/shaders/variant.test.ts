@@ -66,8 +66,38 @@ describe.each(['./agents.wgsl', './growth.wgsl'])('the flow in %s', (path) => {
   });
 });
 
+/** The lines of the `//#else` branches of the blocks of `name` in `source`: the lines that the name replaces. */
+function elseLines(source: string, name: string): Set<string> {
+  const out = new Set<string>();
+  const open: { mine: boolean; other: boolean }[] = [];
+  for (const line of source.split('\n')) {
+    const mark = /^\s*\/\/#(if|else|endif)\b\s*(\w*)/.exec(line);
+    if (mark?.[1] === 'if') open.push({ mine: mark[2] === name, other: false });
+    else if (mark?.[1] === 'else') {
+      const top = open.at(-1);
+      if (top) top.other = true;
+    } else if (mark?.[1] === 'endif') open.pop();
+    else if (open.some((b) => b.mine && b.other)) out.add(line);
+  }
+  return out;
+}
+
+/** Whether every line of `less`, but those of `skip`, is a line of `more`, in the same order. */
+function inOrder(less: string, more: string, skip = new Set<string>()) {
+  const kept = more.split('\n');
+  let i = 0;
+  for (const line of less.split('\n')) {
+    if (skip.has(line)) continue;
+    while (i < kept.length && kept[i] !== line) i++;
+    expect(i, line).toBeLessThan(kept.length);
+    i++;
+  }
+}
+
 // The passes that the territory changes (ADR 0068). Its lines come only with those of the flow, and without them each
-// source is the one of the code before: with the flow alone, and without the flow.
+// source is the one of the code before: with the flow alone, and without the flow. They add lines to the source of
+// the flow, and replace only the lines after a `//#else` of TERRITORY: in agents.wgsl the name of the sensor of the
+// flow, which the drift wraps (ADR 0070).
 describe.each(['./agents.wgsl', './growth.wgsl'])('the territory in %s', (path) => {
   const source = read(path);
 
@@ -75,13 +105,25 @@ describe.each(['./agents.wgsl', './growth.wgsl'])('the territory in %s', (path) 
     const [flow, both] = [variant(source, ['FLOW']), variant(source, ['FLOW', 'TERRITORY'])];
     for (const off of [variant(source), flow]) expect(off.includes('territory')).toBe(false);
     expect(both.includes('var territory: texture_2d<u32>;')).toBe(true);
-    const kept = both.split('\n');
-    let i = 0;
-    for (const line of flow.split('\n')) {
-      while (i < kept.length && kept[i] !== line) i++;
-      expect(i, line).toBeLessThan(kept.length);
-      i++;
-    }
+    const replaced = elseLines(source, 'TERRITORY');
+    expect(replaced.size).toBe(path === './agents.wgsl' ? 1 : 0);
+    inOrder(flow, both, replaced);
+  });
+});
+
+// The flow takes the sinks while the rules of stage 4 run (ADR 0070): without them the source of the flow is the one
+// of the code before, and with them it only adds lines.
+describe('the rules of stage 4 in flow.wgsl', () => {
+  const source = read('./flow.wgsl');
+
+  it('are in the source only with the name TERRITORY, and add lines to it', () => {
+    const [off, on] = [variant(source), variant(source, ['TERRITORY'])];
+    for (const word of ['sinksAndSources', 'states', 'rates', 'U.take'])
+      expect(off.includes(word), `${word} without the rules`).toBe(false);
+    for (const word of ['sinksAndSources', 'var<storage, read> states', 'var<storage, read> rates', 'take: vec4f'])
+      expect(on.includes(word), word).toBe(true);
+    expect(elseLines(source, 'TERRITORY').size).toBe(0);
+    inOrder(off, on);
   });
 });
 

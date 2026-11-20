@@ -1,10 +1,13 @@
 // CPU mirror of the flow passes (shaders/flow.wgsl, gl/glsl/flow.frag), for tests only: flow.gpu.test.ts checks both
 // backends against it. It reads the uniform block as the shaders do (flow.ts packFlow()): the block names the strain
 // whose flow this is (ADR 0031), and the fields are those of that strain. The cells of the sites are those of the
-// list that the simulation holds (sites.ts FlowSites).
+// list that the simulation holds (sites.ts FlowSites). With the rules of stage 4 the update and the pressure take the
+// sinks (ADR 0070; `//#if TERRITORY` in the shaders): sinks.gpu.test.ts checks both backends against that.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
-import { FLOW_CONSTANT_SLOTS, FLOW_ITERATIONS, FLOW_SITES, flowRoles } from './flow';
+import { FLOW_CONSTANT_SLOTS, FLOW_ITERATIONS, FLOW_SITES, FLOW_TAKE_SLOT, flowRoles } from './flow';
+import { RATE_ONE, SINK_STATE_LANES, SUM_ONE } from './sinks';
+import { sumOf } from './sinks-reference';
 
 /** The grid as the passes see it: 4 bytes per cell as Sim.readEnv() returns them (wall, food, light, unused). */
 export interface FlowGrid {
@@ -26,6 +29,17 @@ export interface FlowFields {
    * none: `ports` of flow.wgsl for the strain of the block.
    */
   ports: Int32Array;
+}
+
+/**
+ * What the flow of a strain reads of its sinks in a step while the rules of stage 4 run (ADR 0070): whether its front
+ * took flux in the step before (the state before the step, Sim.readSinkState()), and the sink rates and the state of
+ * the step (Sim.readSinks() and Sim.readSinkState() after it), SINK_STATE_LANES values of the strain.
+ */
+export interface FlowSinks {
+  took: boolean;
+  rates: Float32Array;
+  state: ArrayLike<number>;
 }
 
 /** The start of a simulation: fresh ground, no pressure, no port. */
@@ -116,7 +130,8 @@ export function flowPorts(grid: FlowGrid, u: Float32Array, cells: Uint32Array, f
 /**
  * `update`: the memory after a step, from the memory and the pressure before it, the trail after it and the ports of
  * the step (flowPorts()). `step` and `seed` are those of the simulation's parameters: the roles of the sites depend
- * on them (flowRoles()).
+ * on them (flowRoles()). `took`: with the rules of stage 4, whether the front of the strain took flux in the step
+ * before (FlowSinks); a tube then adapts also without two sites with a role (ADR 0070).
  */
 export function flowUpdate(
   grid: FlowGrid,
@@ -126,6 +141,7 @@ export function flowUpdate(
   step: number,
   seed: number,
   ports: Int32Array,
+  took = false,
 ): Float32Array {
   const { width: w, height: h, env } = grid;
   const [gamma, rate, recover] = [u[1] ?? 0, u[2] ?? 0, u[3] ?? 0];
@@ -143,7 +159,7 @@ export function flowUpdate(
     const c = ports[i * 2 + 1] ?? -1;
     if (c >= 0 && (fields.memory[c * 4 + 3] ?? 0) !== 0) roled++;
   }
-  const fed = roled >= 2;
+  const fed = roled >= 2 || took;
   // The sites that the plasmodium covers: those with a port; and their roles.
   const sites = portsOf(u, ports);
   const covered = sites.map((c) => c >= 0);
@@ -193,8 +209,43 @@ export function roleSigns(code: number): number[] {
 }
 
 /**
+ * What the sinks of a strain take and what its sources give at every cell in a step, while the rules of stage 4 run
+ * (flow.wgsl sinksAndSources(), ADR 0070), in float32 as the passes compute it: nothing while the front of the strain
+ * takes no flux (the fifth lane of the state). Else the sinks take S = 2 · I0 together (the slot FLOW_TAKE_SLOT of the
+ * block), each tube cell (a conductivity above 0 in `memory`, after the update) the share S · r / R with its rate r as
+ * R counted it, in steps of 2^-16 rounded to the nearest (ADR 0067, decision 3). The covered ports of the step give S in
+ * equal shares, and without one every tube cell gives S / C. `rates`: those of the step, with a minus sign for a sink;
+ * `state`: the state of the step, SINK_STATE_LANES values (R, C, N, the covered ports, whether the front takes flux).
+ */
+export function sinksAndSources(
+  u: Float32Array,
+  memory: Float32Array,
+  ports: Int32Array,
+  rates: Float32Array,
+  state: ArrayLike<number>,
+): Float32Array {
+  const f = Math.fround;
+  const n = rates.length;
+  const out = new Float32Array(n);
+  if (state.length < SINK_STATE_LANES || (state[4] ?? 0) === 0) return out;
+  const [R = 0, C = 0, , P = 0] = Array.from(state).slice(0, 4);
+  const total = f((u[FLOW_TAKE_SLOT * 4] ?? 0) * (u[0] ?? 0));
+  for (let c = 0; c < n; c++) {
+    if (!((memory[c * 4 + 2] ?? 0) > 0)) continue;
+    // The rate in steps of 2^-24, a whole number, then in steps of 2^-16 as the sums count it.
+    const r = sumOf(Math.trunc(Math.abs(rates[c] ?? 0) * RATE_ONE)) / SUM_ONE;
+    let q = -f(f(total * r) / R);
+    if (P === 0) q = f(q + f(total / C));
+    out[c] = q;
+  }
+  if (P > 0) for (const c of portsOf(u, ports)) if (c >= 0) out[c] = f((out[c] ?? 0) + f(total / P));
+  return out;
+}
+
+/**
  * `pressure`: one iteration. `recentre`: 1 and 2 in the first two iterations of a step (flow.wgsl RECENTRE). `ports`:
- * those of the step (flowPorts()).
+ * those of the step (flowPorts()). `extra`: with the rules of stage 4, what the sinks take and the sources give at
+ * each cell (sinksAndSources()), in every lane.
  */
 export function flowPressure(
   grid: FlowGrid,
@@ -204,6 +255,7 @@ export function flowPressure(
   before: Float32Array,
   recentre: 0 | 1 | 2,
   ports: Int32Array,
+  extra?: Float32Array,
 ): Float32Array {
   const { width: w, height: h } = grid;
   const [i0, ghost, omega, weight] = [u[0] ?? 0, u[6] ?? 0, u[7] ?? 0, u[8] ?? 0];
@@ -235,10 +287,12 @@ export function flowPressure(
           nbs.forEach((nb, e) => {
             if ((edges[e] ?? 0) > 0) acc += (edges[e] ?? 0) * (pressure[nb * 4 + k] ?? 0);
           });
-          // A site gives or takes its flux only within its pressure limit.
+          // A site gives or takes its flux only within its pressure limit. With the rules of stage 4 the sinks take
+          // and the sources give in every lane (ADR 0070).
           const sign = signs[k] ?? 0;
           const room = Math.min(1, Math.max(0, (limit - sign * (pc - (level[k] ?? 0))) * limitScale));
-          const balanced = (acc + sign * i0 * room) / sum;
+          const given = sign * i0 * room;
+          const balanced = (acc + (extra ? given + (extra[c] ?? 0) : given)) / sum;
           const jacobi = pc + weight * (balanced - pc);
           const past = (before[i + k] ?? 0) - (recentre === 2 ? (before[ref + k] ?? 0) : 0);
           // Only a cell that conducts takes the momentum of the iteration.
@@ -254,7 +308,8 @@ export function flowPressure(
 
 /**
  * One step of the flow: the ports, the update, then the pressure iterations. `u`: the uniform block; `step` and
- * `seed`: those of the simulation; `cells`: the cells of the sites (sites.ts FlowSites).
+ * `seed`: those of the simulation; `cells`: the cells of the sites (sites.ts FlowSites). `sinks`: with the rules of
+ * stage 4, what the flow of the strain reads of its sinks (ADR 0070).
  */
 export function flowStep(
   grid: FlowGrid,
@@ -264,13 +319,26 @@ export function flowStep(
   step: number,
   seed: number,
   cells: Uint32Array,
+  sinks?: FlowSinks,
 ): FlowFields {
   const ports = flowPorts(grid, u, cells, fields);
-  const memory = flowUpdate(grid, u, fields, trail, step, seed, ports);
+  const memory = flowUpdate(grid, u, fields, trail, step, seed, ports, sinks?.took);
+  const extra = sinks ? sinksAndSources(u, memory, ports, sinks.rates, sinks.state) : undefined;
   let [pressure, before] = [fields.pressure, fields.before];
   for (let i = 0; i < FLOW_ITERATIONS; i++) {
-    const next = flowPressure(grid, u, memory, pressure, before, i === 0 ? 1 : i === 1 ? 2 : 0, ports);
+    const next = flowPressure(grid, u, memory, pressure, before, i === 0 ? 1 : i === 1 ? 2 : 0, ports, extra);
     [before, pressure] = [pressure, next];
   }
   return { memory, pressure, before, ports };
+}
+
+/**
+ * The value that the sensor of an agent of strain `strain` reads at a cell while the rules of stage 4 run (agents.wgsl
+ * sense(), ADR 0070), in float32 as the passes compute it: `read`, what it reads without the rules, minus the drift
+ * times the mean of the pressure of the four lanes of the flow of the strain at the cell (`lanes`, Sim.readPressure()).
+ */
+export function drifted(read: number, drift: number, lanes: ArrayLike<number>): number {
+  const f = Math.fround;
+  const sum = f(f(f((lanes[0] ?? 0) + (lanes[1] ?? 0)) + (lanes[2] ?? 0)) + (lanes[3] ?? 0));
+  return f(read - f(drift * f(sum * 0.25)));
 }

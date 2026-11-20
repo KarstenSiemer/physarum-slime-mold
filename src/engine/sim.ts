@@ -1644,6 +1644,10 @@ export class Simulation implements Sim {
     const held = flow ? `flow${fm}${territory ? `terr${tt}` : ''}` : '';
     const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${held}`;
     const territoryView = territory ? territory.views[tt] : null;
+    // With the rules of stage 4 the sensors of `claim` read the pressure of the flow of the step before, every layer
+    // (agents.wgsl `//#if TERRITORY`, ADR 0070): the key names the texture that holds it.
+    const pressures = territory && flow ? at(flow.pressureArrays, this.flowP) : null;
+    const pressureKey = pressures ? `p${String(this.flowP)}` : '';
     const agentPasses = flowing ?? (saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k);
     // The agent passes read only the constants of the block, which every strain has: the block of the first strain.
     const [flowMemory, flowUniform] = flow ? [at(flow.memoryArrays, fm), at(flow.uniforms, 0)] : [null, null];
@@ -1684,7 +1688,7 @@ export class Simulation implements Sim {
       pass.setPipeline(claim);
       pass.setBindGroup(
         0,
-        this.bind(`claim${p}${q}${a}${w}`, claim, [
+        this.bind(`claim${p}${q}${a}${w}${pressureKey}`, claim, [
           this.params,
           this.agentBuffer,
           trail,
@@ -1700,6 +1704,7 @@ export class Simulation implements Sim {
           flowMemory,
           flowUniform,
           territoryView,
+          pressures,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
@@ -2006,7 +2011,12 @@ export class Simulation implements Sim {
     trail: Bit,
     stage4?: { territory: TerritoryState; sinks: SinkState },
   ) {
-    const passes = this.kernels.flowPasses();
+    // While the rules of stage 4 run, the update and the pressure that take the sinks (flow.wgsl `//#if TERRITORY`, ADR
+    // 0070): they bind the state of the sinks, and the pressure their rates. Their groups hold buffers of the sinks:
+    // dropSinks() forgets them.
+    const passes = this.kernels.flowPasses(stage4 !== undefined);
+    const taking = stage4 ? [null, null, stage4.sinks.rates, stage4.sinks.state] : [];
+    const taken = stage4 ? '-sinks' : '';
     const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
@@ -2043,7 +2053,7 @@ export class Simulation implements Sim {
       pass.setPipeline(passes.update);
       pass.setBindGroup(
         0,
-        this.bind(`flowUpdate${strain}-${m}${p}${trail}`, passes.update, [
+        this.bind(`flowUpdate${strain}-${m}${p}${trail}${taken}`, passes.update, [
           this.params,
           uniform,
           this.trailViews[trail],
@@ -2055,6 +2065,8 @@ export class Simulation implements Sim {
           null,
           null,
           flow.ports,
+          // The update reads only the state: whether the front took flux in the step before.
+          ...(stage4 ? [null, null, null, stage4.sinks.state] : []),
         ]),
       );
       pass.dispatchWorkgroups(...groups);
@@ -2067,7 +2079,7 @@ export class Simulation implements Sim {
         pass.setPipeline(pipeline);
         pass.setBindGroup(
           0,
-          this.bind(`flowPressure${strain}-${Math.min(i, 2)}${next}${p}`, pipeline, [
+          this.bind(`flowPressure${strain}-${Math.min(i, 2)}${next}${p}${taken}`, pipeline, [
             this.params,
             uniform,
             null,
@@ -2079,6 +2091,7 @@ export class Simulation implements Sim {
             at(pressure, out),
             null,
             flow.ports,
+            ...taking,
           ]),
         );
         pass.dispatchWorkgroups(...groups);
@@ -2440,6 +2453,8 @@ class Kernels {
   /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
+  /** The update and the pressure of the flow with the sinks (flow.wgsl `//#if TERRITORY`, ADR 0070). */
+  private flowSinkPipelines?: FlowKernels;
   private tubePipelines?: TubeKernels;
   private slimePipeline?: GPUComputePipeline;
   private slimeBrushPipeline?: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout };
@@ -2494,12 +2509,19 @@ class Kernels {
     return p;
   }
 
-  /** The passes of the flow in the tubes (flow.wgsl), built at their first use. */
-  flowPasses(): FlowKernels {
-    if (!this.flowPipelines) {
-      const module = this.device.createShaderModule({ code: common + flowWgsl });
-      const pipeline = (entryPoint: string, constants: Record<string, number> = {}) =>
+  /**
+   * The passes of the flow in the tubes (flow.wgsl), built at their first use. `sinks`: with the update and the pressure
+   * that take the sinks of the rules of stage 4 (`//#if TERRITORY`, ADR 0070); the passes of the ports stay the same.
+   * Without the rules the source is the one of the code before, character for character.
+   */
+  flowPasses(sinks = false): FlowKernels {
+    const build = (names: string[]) => {
+      const module = this.device.createShaderModule({ code: common + variant(flowWgsl, names) });
+      return (entryPoint: string, constants: Record<string, number> = {}) =>
         this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
+    };
+    if (!this.flowPipelines) {
+      const pipeline = build([]);
       this.flowPipelines = {
         blocks: pipeline('blocks'),
         sites: pipeline('sites'),
@@ -2507,7 +2529,16 @@ class Kernels {
         pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
       };
     }
-    return this.flowPipelines;
+    if (!sinks) return this.flowPipelines;
+    if (!this.flowSinkPipelines) {
+      const pipeline = build(['TERRITORY']);
+      this.flowSinkPipelines = {
+        ...this.flowPipelines,
+        update: pipeline('update'),
+        pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
+      };
+    }
+    return this.flowSinkPipelines;
   }
 
   /**

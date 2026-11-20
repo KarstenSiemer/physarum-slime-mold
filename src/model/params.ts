@@ -350,6 +350,16 @@ export const globalSpec = {
     log: true,
     ref: 'Tero et al. 2010, Science 327: 439, Fig. 3 and S1',
   },
+  // The drift of the rules of stage 4 (ADR 0065, decision 6; ADR 0070): the weight of the pressure of the flow in the
+  // sensors of an agent. Its default and the form of the setting (one for all strains) are provisional: the panel and
+  // the scenes take it up with part E4 of the engine (research/front/ENGINE.md), and until then Learn shows no help.
+  drift: {
+    label: 'Drift',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. Each sensor of an agent reads the pressure of the flow of its strain as a repellent, with this weight: the plasm streams down the pressure, to the growth front that takes the flux. The weight sets the form of the front: 0 gives a tree of tubes with small heads, 1.25 to 1.5 a tube with a crown, and 5 a fan that moves as a whole.',
+    min: 0,
+    max: 5,
+    step: 0.05,
+  },
   speed: {
     label: 'Speed',
     unit: 'steps/s',
@@ -652,6 +662,8 @@ export function defaultSettings(): Settings {
     slimeLife: 144,
     // Tero et al. 2010 use I0 = 2 per tube (Fig. 4); a tube of this app is about 4 cells wide (ADR 0029).
     flowStrength: 8,
+    // The crown of ADR 0065, decision 6: provisional until the scenes take the rules of stage 4 up (ADR 0070).
+    drift: 1.5,
     speed: 120,
     exposure: 0,
     bloom: 1,
@@ -906,8 +918,9 @@ function asJones(s: Settings): Settings {
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
   // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
-  // So are the rules of stage 4 (ADR 0068): they need the flow, and a link of the Jones model holds none of them.
-  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && !s.territory;
+  // So are the rules of stage 4 (ADR 0068): they need the flow, and a link of the Jones model holds none of them, nor
+  // their drift (ADR 0070).
+  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && !s.territory && s.drift === d.drift;
   const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && own;
   if (ok) return s;
   return {
@@ -916,6 +929,7 @@ function asJones(s: Settings): Settings {
     trailSaturation: 0,
     flow: false,
     territory: false,
+    drift: d.drift,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
     slimeLife: d.slimeLife,

@@ -65,13 +65,16 @@ async function inflate(encoded: string): Promise<Uint8Array> {
  * time only when it is not 0 (ADR 0055): a link made before these settings holds none of them, and sanitize() reads a
  * link without them as 3 × 3, 1, 0 and 0, so the link runs as it was made. The defaults of Light stops growth and of
  * Slime life time are 1 and 144, so a link of the extended model made now holds them; a link of the Jones model holds
- * none: the model has neither rule. The rules of stage 4 are in it only when they are on (ADR 0068), so a link without
- * them is the link of before them.
+ * none: the model has neither rule. The rules of stage 4 are in it only when they are on (ADR 0068), and so is their
+ * drift (ADR 0070), so a link without them is the link of before them.
  */
 function linkSettings(s: Settings): Partial<Settings> {
   const held: Partial<Settings> = { ...s };
   if (s.meanWindow === MEAN_WINDOW) delete held.meanWindow;
-  if (!s.territory) delete held.territory;
+  if (!s.territory) {
+    delete held.territory;
+    delete held.drift;
+  }
   if (s.electrodeStrength === defaultSettings().electrodeStrength) delete held.electrodeStrength;
   if (s.lightGrowth === 0 || s.model === 'jones') delete held.lightGrowth;
   if (s.slimeLife === 0 || s.model === 'jones') delete held.slimeLife;

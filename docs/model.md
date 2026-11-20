@@ -388,8 +388,8 @@ ADR 0069, the rule set of ADR 0065 (decisions 1, 5 and 8) in the forms of ADR 00
 `shaders/sinks.wgsl`, `gl/glsl/sinks.frag`, `src/engine/sinks.ts`; CPU reference `src/engine/sinks-reference.ts`.
 
 The sinks are the second of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), and no scene
-turns them on yet. They find the sinks of the flow of each strain, but no rule reads them yet: the pressure, the tubes
-and the agents run as without them. The next part of stage 4 lets the pressure read them.
+turns them on yet. They find the sinks of the flow of each strain; the pressure, the tubes and the sensors of the agents
+read them (8.7).
 
 - **A path** goes from a cell to one of its 8 neighbours that is open, across the seam of the periodic grid, and takes
   a diagonal step only where the two cells beside its corner are not both walls, as a move does (7.5). A cell outside a
@@ -481,6 +481,7 @@ The agent senses only if the step senses: always sensing first; moving first in 
 - Otherwise it reads V = Σ_l A[s][l] · σ_K(T_l) + w_F[s] · C_F − w_L[s] · C_L, with σ_K(t) = t without saturation
   (section 6.8). In the Jones model w_F = w_L = A[0][0], the own weight +1 or −1 (section 6.4). So a strain that
   follows its trail turns away from a repellent, and a strain that flees its trail turns toward it.
+- While the rules of stage 4 run, it reads V minus the drift times the mean pressure of the flow of its strain (8.7).
 
 ### 7.4 Turning
 
@@ -599,7 +600,8 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 Kirchhoff's law Σ_n Ĝ_cn (P_c − P_n) = σ_c · I0 · h_c, solved with 16 iterations per step of damped Jacobi with
 momentum, in each lane, from the pressure of the last step:
 
-- P* = (Σ_n Ĝ_cn P_n + σ_c I0 h_c) / Σ_n Ĝ_cn;
+- P* = (Σ_n Ĝ_cn P_n + σ_c I0 h_c) / Σ_n Ĝ_cn; while the rules of stage 4 run, the sources and the sinks of 8.7 add
+  q_c to the sum above the line;
 - J = P + 0.9 (P* − P);
 - P_new = ω J + (1 − ω) P_old, with ω = 2 / (1 + √(1 − 0.99999²)) ≈ 1.991 on cells that conduct, and ω = 1 elsewhere.
 
@@ -613,8 +615,9 @@ shifts the whole history and changes no difference.
 - Flux of a cell: Q = ½ · Σ_{n ∈ N4} H(G_c, G_n) · |P_c − P_n|, per lane, with G and P of the last step.
 - f(Q) = Q^1.8 / (1 + Q^1.8) (Tero et al. 2010, γ = 1.8), averaged over the 4 lanes.
 - On a tube, while at least 2 sites had a role in the flow of the strain in the last step (at their ports of that step):
-  D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. On a tube without roles
-  D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · (1 + r)). The share r follows the setting Slime
+  D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. While the rules of
+  stage 4 run, a tube adapts so also while the front of its strain took flux in the step before (8.7). On a tube
+  without roles, and without that flux, D stays. On ground without a tube: D ← min(0.2, max(D, 1e-4) · (1 + r)). The share r follows the setting Slime
   life time (6.9; ADR 0055, decision 5): r = 0.00002875 · 144 / (the life time in hours), and r = 0.00002875 at a life
   time of 0 (`recoverShare()` in `src/engine/flow.ts`). At the default of 144 hours the factor is 1.00002875, so
   starved ground comes back to 0.2 in about 264,000 steps (ADR 0054). At 18 hours it is 1.00023, the factor of before
@@ -638,7 +641,7 @@ An agent follows the flow of its own strain: D and B below are those of the agen
   (section 9).
 - The agent and growth passes of step k read D of step k − 1.
 - A strain that covers fewer than 2 sites has no flux, and none of its cells adapts (8.4): its agents follow the memory
-  that its cells hold.
+  that its cells hold. While the rules of stage 4 run, its front can take flux all the same (8.7).
 
 ### 8.6 Time scale
 
@@ -651,6 +654,39 @@ life time of 144 hours. They change in proportion to the setting: fresh ground a
 births after 0.62 times (ADR 0055, decision 5). The time scale, 30 steps per minute, was set so that
 these constants give the organism's times (ADR 0029, decision 10; Marbach et al. 2023); see [fidelity.md](fidelity.md),
 row 4.
+
+### 8.7 The flow with the rules of stage 4
+
+ADR 0070, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisions 3, 6, 8 and 9). Code: the lines
+between `//#if TERRITORY` and `//#endif` in `shaders/flow.wgsl` and `shaders/agents.wgsl`, and `#if TERRITORY` in
+`gl/glsl/flow.frag` and `agents.frag`; CPU reference `sinksAndSources()`, `flowUpdate()` and `drifted()` in
+`src/engine/flow-reference.ts`.
+
+While the rules of stage 4 run (6.10), the flow of each strain takes the sinks of that strain (6.11): the growth front
+draws flux, and the plasm streams to it. No scene turns the rules on yet. Without them the passes have the source of
+the code before, character for character.
+
+- **What the sinks take**: while the front of strain s takes flux in the step (its state, 6.11), its sinks take
+  S = 2 · I0 together. Every tube cell c of s (G_s > 0 after the update) takes S · r_c / R_s, with r_c its rate as R_s
+  counted it, ⌊(|r| · 2^24 + 128) / 256⌋ / 2^16, and R_s from the state. So the sinks take exactly S, up to the rounding
+  of float32 (below 10⁻⁶ of S). A cell that is no sink in the step takes the share of its rate, which falls over about
+  100 steps (6.11).
+- **What the sources give**: S in equal shares at the ports of the sites that s covers in the step (8.2), and while it
+  covers none, S / C_s at each of its C_s tube cells (the colony pays).
+- **Kirchhoff's law** of 8.3 takes both in every lane: q_c is what the sources give at c minus what its sinks take. The
+  roles of the sites, their flux I0 and their pressure limit stay as they are.
+- **The adaptation** of 8.4: a tube adapts also while the front of its strain took flux in the step before (its state
+  of that step), as while two sites had a role. A strain without a sink and with fewer than two sites with a role keeps
+  its flow memory.
+- **The drift**: a sensor of an agent of strain s that is not blocked reads V − δ · (P_0 + P_1 + P_2 + P_3) / 4, with V
+  of 7.3 and P_k the pressure of lane k of the flow of s at its cell, as the flow of the step before left it. δ is the
+  setting `drift`, a lane per strain of the parameters, as the food weight; one value for all strains now. So the plasm
+  streams down the pressure, to the sinks. The drift sets the form of the front (ADR 0065, decision 6): 0 a tree of
+  tubes with small heads, 1.25 to 1.5 a tube with a crown, 5 a fan. Its default 1.5 is provisional (ADR 0070).
+- **The order** (ADR 0067, decision 6): per strain the update, which reads the state of the step before; the sinks and
+  the state of the step; then the pressure, which reads the rates and the state of the step.
+- **Memory**: no buffer more. The uniform block of the flow holds S / I0 in a slot after that of the sinks
+  (`FLOW_TAKE_SLOT`), and the parameters the drift in a slot after every slot of the code before.
 
 ## 9. Growth and shrinkage
 
@@ -761,6 +797,7 @@ checks that this table names every key.
 | `shrinkMin`         | Smin     | agents, 0 to 225                                                     | 0                 | both     | 9       |
 | `shrinkMax`         | Smax     | agents, 1 to 225                                                     | 20                | both     | 9       |
 | `flowStrength`      | I0       | the flux of each strain at a site, 0.1 to 32                         | 8                 | extended | 8.2     |
+| `drift`             | δ        | weight of the pressure in a sensor, 0 to 5 (the rules of stage 4)    | 1.5               | extended | 8.7     |
 | `slimeLife`         | L        | hours of model time, 0 to 240; 0 is no slime                         | 144               | extended | 6.9     |
 | `model`             |          | jones, extended                                                      | extended          |          | 2       |
 | `stepOrder`         |          | move-first, sense-first                                              | sense-first       | both     | 5       |
@@ -809,6 +846,12 @@ differ in these points:
   to the high one. WebGL2 sums them in a pyramid of `RGBA32UI` targets per strain over squares of 4 × 4, with the lanes
   R low, R high, C and N; its levels add the carries in the second lane, and the sign of a rate counts N. Both give
   the same integers, and from the same inputs the same rates and the same state as the CPU.
+- The flow with the rules of stage 4 (8.7): WebGPU binds the rates and the state of the sinks as storage buffers to the
+  update and the pressure, and reads the state in place, so the update of a strain still finds the state of the step
+  before. WebGL2 samples the current copy of the state in the update, and the copies of the rates and of the state
+  that the step writes in the pressure. The agent pass of WebGPU reads every layer of the pressure in one texture; that
+  of WebGL2 samples 16 textures with the 4 pressures, the least that a device has. What the sinks take is a float32 on
+  both backends, compared with the CPU to a tolerance, as the flow is.
 
 No test compares the bytes of the two backends; the ADRs quote digests of runs made off-line.
 
@@ -847,6 +890,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The territory (6.10, 7.2, 7.6, 9)       | `territory.gpu.test.ts`: moves, respawn and births only onto it, two strains; the owners and the push in each arena; the start  |
 | The corner of the push (6.10)           | `territory.gpu.test.ts`: no cell across a thin diagonal wall in 40 steps, both strains; `territory.test.ts`: the CPU copy       |
 | The sinks (6.11)                        | `sinks.gpu.test.ts`: rates, sums and state against the CPU copy in each arena with thin walls, the X of walls, births, a carry  |
+| The flow with the sinks (8.7)           | `flow-sinks.gpu.test.ts`: memory and pressure against the CPU copy, 2 strains in a dish with walls; a large R; the drift        |
 | The start territory (6.10, 10)          | `territory.gpu.test.ts`: the disc in each arena, with walls; `engine-env.test.ts`: the disc of each strain, the restart         |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |
@@ -857,6 +901,14 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | A colony for each strain (10)           | `engine.gpu.test.ts`: three strains in the Foraging maze start two colonies on the two foods                                    |
 | A flow per strain (7.1, 7.2, 8, 9)      | `flow.gpu.test.ts`: no flux between two strains; starvation, respawn and growth by the memory of the own strain                 |
 | Scale grows with SO                     | the network scale test (Jones 2010, Fig. 10)                                                                                    |
+
+`flow-sinks.gpu.test.ts` tests the flow with the rules of stage 4 (ADR 0070) on both backends: 5 steps of the memory
+and the pressure of two strains in a dish with walls against the CPU copy, one with a covered port and one whose tube
+cells pay, with a tube that adapts only from the step after the first step with flux; a strain without a sink and with
+one site keeps its flow memory; the sinks take S with the rates as R counted them, where their own rates would take
+more than twice S; a large R, whose low word wraps; and the turns of 256 agents of both strains down the mean pressure,
+with the drift 1.5 and 0. `flow-reference.test.ts` tests that the CPU copy lets the sinks take what the sources give, to
+10⁻⁶ of S, also when R is large.
 
 `flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
 route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of
