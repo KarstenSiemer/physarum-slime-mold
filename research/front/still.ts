@@ -11,7 +11,8 @@
 // `k`: the total of the sinks in units of the one of E2f (norm 2 times the flow strength 8); `base`: the base
 // conductance of a tube cell (0.02 in the app); `shareOn`: equal or supply (ADR 0077); `noise`: the noise of D;
 // `fluxOn`: the flux of a cell, sum (the app) or norm (ADR 0080, part E2j). Since ADR 0080 a row adds the direction of
-// the veins against the grid (gridShares()) and the angle of the main veins at the mouth (mouthAngles()).
+// the veins against the grid (gridShares()) and the angle of the main veins at the mouth (mouthAngles()). `stencil`: the
+// edges of the flow, 4 (the app) or 8 (ADR 0081, part E2k).
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -124,11 +125,20 @@ export interface StillOptions {
   shareOn: 'equal' | 'supply';
   noise: number;
   fluxOn: Front['fluxOn'];
+  /** The edges of the flow, 4 or 8 (ADR 0081). */
+  stencil: number;
 }
 
 /** A Sim on the still sheet: no agents, a full body held by its trail, the rim as the sinks, D fresh with noise. */
 export function stillSim(sheet: StillSheet, o: StillOptions): Sim {
-  const words = { ...E2F_WORDS, norm: String(2 * o.k), paid: String(20 * o.k), shareOn: o.shareOn, fluxOn: o.fluxOn };
+  const words = {
+    ...E2F_WORDS,
+    norm: String(2 * o.k),
+    paid: String(20 * o.k),
+    shareOn: o.shareOn,
+    fluxOn: o.fluxOn,
+    stencil: String(o.stencil),
+  };
   const sim = new Sim(sheet.layout, params({ seed: o.seed, front: frontFrom(words), scentSteps: 0, startAgents: 0 }));
   sim.base = o.base;
   sim.stillSinks = sheet.rim;
@@ -495,10 +505,11 @@ if (isMain) {
     shareOn,
     noise: Number(args.noise ?? 0.01),
     fluxOn,
+    stencil: Number(args.stencil ?? 4),
   };
   const steps = Number(args.steps ?? 8000);
   const every = Number(args.every ?? 500);
-  for (const n of [o.seed, o.k, o.base, o.noise, steps, every])
+  for (const n of [o.seed, o.k, o.base, o.noise, o.stencil, steps, every])
     if (!Number.isFinite(n)) throw new Error('a number does not parse');
   const pics = (args.pics ?? '').split(',').filter(Boolean).map(Number);
   const name = args.name ?? 'e2i/still';
