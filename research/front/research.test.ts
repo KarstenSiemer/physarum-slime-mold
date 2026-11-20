@@ -86,7 +86,9 @@ describe('the CPU prototype of stage 4', () => {
     const sim = new Sim(layout, params({ seed: 1, startStep: 18000, front: { ...front, colony: true, drift: 5 } }));
     const start = sim.territory.reduce((a, b) => a + b, 0);
     for (let k = 0; k < 150; k++) sim.advance();
-    for (let c = 0; c < sim.cells; c++) if (sim.occ[c]) expect(sim.territory[c]).toBe(1);
+    // One expect for all cells: an expect per cell made the test slow on CI.
+    const outside = [...sim.occ.keys()].filter((c) => sim.occ[c] && sim.territory[c] !== 1);
+    expect(outside).toEqual([]);
     expect(sim.territory.reduce((a, b) => a + b, 0)).toBeGreaterThan(start);
   });
 
@@ -133,12 +135,14 @@ describe('the CPU prototype of stage 4', () => {
     const k = sim.step;
     const field = sim.freshField(k);
     let [near, far] = [0, 0];
+    const differ: number[] = [];
     for (let c = 0; c < sim.cells; c++) {
       if (!layout.open[c]) continue;
-      expect(sim.freshNear(c, k)).toBe(field[c]! <= 6);
+      if (sim.freshNear(c, k) !== field[c]! <= 6) differ.push(c);
       if (field[c]! <= 6) near++;
       else far++;
     }
+    expect(differ).toEqual([]);
     expect(near).toBeGreaterThan(500);
     expect(far).toBeGreaterThan(500);
     // A run with slime on one half of a dish: its rim lies near the edge of the slime, and both forms give the same
@@ -301,6 +305,7 @@ describe('the CPU prototype of stage 4', () => {
     const { w, h } = sim;
     const { open } = sim.layout;
     let checked = 0;
+    const wrong: [number, number][] = [];
     for (let j = 0; j < 75; j++) {
       // The flow pass of a step reads the territory of the step before: the push of the step comes after it.
       const territory = sim.territory.slice();
@@ -321,10 +326,12 @@ describe('the CPU prototype of stage 4', () => {
         const rim = near((t) => open[t] === 1 && !sim.occ[t] && sim.B[t]! < FLOW.bodyLow);
         const room = near((t) => open[t] === 1 && !sim.occ[t] && sim.D[t]! >= FLOW.half && territory[t] === 1);
         const payable = sim.occ[c] === 1 && sim.sinkRate[c]! > 0 && sim.D[c]! >= FLOW.half && rim && room;
-        expect(listed.has(c)).toBe(payable);
+        // One expect for all cells below: an expect per cell made the test slow on CI.
+        if (listed.has(c) !== payable) wrong.push([sim.step, c]);
         if (payable) checked++;
       }
     }
+    expect(wrong).toEqual([]);
     expect(checked).toBeGreaterThan(20);
   });
 
