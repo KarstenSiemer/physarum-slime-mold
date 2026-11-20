@@ -210,6 +210,17 @@ must bring twice the flux of E2f to its rim and keep its sinks equal. The two ma
 grid in every run (open). Montage: `out/e2i/montage/d-16000-s1.png` (rows k = 1, 2, 4, 8; columns base 0.02 equal,
 supply, base 0.002 equal, supply). Records: `logs/engine/still-0079/`.
 
+## The flux of a cell and the veins at 45° (ADR 0080)
+
+The flux Q of a cell is half the sum of the sizes of the fluxes over its 4 edges, in the prototype and in the engine.
+A uniform flow at 45° to the grid then reads 1.41 times higher than along an axis; on the still sheet the flow on the
+diagonals reads 1.37 to 1.45 times higher (`flux-angle.ts`), and the rule of the tubes grows the V there. The option
+`fluxOn=norm` reads every broad flow alike: at k = 1 the main veins leave at 22° to 26° instead of 45°, and 0.05
+instead of 0.88 of the vein cells lie on a diagonal. But the veins stay bound to the grid: straight rays, a V at 45°
+again at k = 2, and veins along the axes and the wall (0.25 to 0.39 of the cells), with no forks toward the rim. The
+norm reads a thin diagonal vein at 0.71 of its flux. Next: a flow over 8 neighbours in the prototype. Montage:
+`out/e2j/montage/d-16000-s1.png` (rows k = 1, 2, 4; columns sum, norm). Records: `logs/engine/still-0080/`.
+
 ## Pictures for the owner
 
 In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to its upper 160 rows, at step 8,000:
