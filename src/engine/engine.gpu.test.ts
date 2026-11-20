@@ -882,6 +882,44 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: the start layout at the firs
     });
     engine.destroy();
   }, 150_000);
+
+  // ADR 0068: with the rules of stage 4 the colony of the Y-maze starts in its start territory, the open cells within
+  // 5.64 + 3 cells of the start, and every agent stays on the territory while the push grows it.
+  it('starts the colony of the Y-maze in its start territory with the rules of stage 4, and keeps it there', async () => {
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = [1280, 720];
+    const p = presetById('y-maze');
+    if (!p?.env) throw new Error('no Y-maze');
+    const s = { ...p.settings(), seed: 3, territory: true };
+    const engine = await Engine.create(canvas, s, undefined, lend(kind).lent);
+    await engine.load(s, p.env);
+    const { width: w, height: h } = engine.sim;
+    expect([w, h, engine.sim.step]).toEqual([129, 90, 1]);
+    const env = await engine.sim.readEnv();
+    // After the step of the colony: the disc of the start, and no cell more, since every agent lies within 5.64 cells
+    // of the start and pushes only cells beside it. A cell within 0.001 cells of the rim may lie on either side.
+    const r = Math.sqrt(100 / Math.PI) + 3;
+    const territory = await engine.sim.readTerritory();
+    let [disc, wrong] = [0, 0];
+    for (let c = 0; c < w * h; c++) {
+      const d = Math.hypot((c % w) + 0.5 - 64.5, Math.floor(c / w) + 0.5 - 74.5);
+      const open = (env[c * 4] ?? 0) < 128;
+      if (Math.abs(d - r) < 1e-3) continue;
+      const inside = open && d <= r;
+      if (inside) disc++;
+      if ((territory[c] ?? 0) !== (inside ? 1 : 0)) wrong++;
+    }
+    expect(wrong).toBe(0);
+    expect(disc).toBeGreaterThan(150);
+    engine.sim.run(300);
+    const later = await engine.sim.readTerritory();
+    const agents = (await engine.sim.readAgents()).filter((a) => a.bits & 4);
+    expect(agents.length).toBeGreaterThan(20);
+    for (const a of agents) expect(later[Math.floor(a.y) * w + Math.floor(a.x)]).toBe(1);
+    expect(later.filter((v) => v === 1).length).toBeGreaterThan(disc + 10);
+    expect(later.every((v, c) => v === 0 || (env[c * 4] ?? 0) < 128 || (territory[c] ?? 0) !== 0)).toBe(true);
+    engine.destroy();
+  }, 150_000);
 });
 
 // ADR 0027 (owner, 2026-11-12, "Weich"): a frame draws the map after the step's diffusion in either order. Moving first

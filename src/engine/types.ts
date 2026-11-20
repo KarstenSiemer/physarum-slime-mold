@@ -190,6 +190,25 @@ export interface Sim {
    * (painted slime). Only zeros in the Jones model, which has no slime.
    */
   readSlimeFront(): Promise<Uint32Array>;
+  /**
+   * The start territory (ADR 0067, decision 4; ADR 0068): every open cell whose centre lies within `radius` cells of
+   * (x, y), on the periodic grid of the nearest copy, joins the territory of `strain`. Nothing while the rules of stage 4
+   * do not run (territory.ts territoryOn()).
+   */
+  addTerritory(strain: number, x: number, y: number, radius: number): void;
+  /**
+   * For tests and measurements: the territory of every strain (ADR 0068), one byte per cell, rows from y = 0, with
+   * bit s set while the cell lies in the territory of strain s. Only zeros while the rules of stage 4 do not run.
+   */
+  readTerritory(): Promise<Uint8Array>;
+  /**
+   * For tests: the owners of the last step (ADR 0068), one byte per cell as readTerritory() gives the territory: bit s
+   * for an alive agent of strain s in the cell after the moves and the births. Only zeros before the first step and
+   * while the rules of stage 4 do not run.
+   */
+  readOwners(): Promise<Uint8Array>;
+  /** For tests: replaces the territory, one byte per cell as readTerritory() returns it, while the rules run. */
+  writeTerritory(data: Uint8Array): void;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */

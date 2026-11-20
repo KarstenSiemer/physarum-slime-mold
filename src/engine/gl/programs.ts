@@ -10,6 +10,7 @@ import fullscreen from './glsl/fullscreen.vert?raw';
 import growthFrag from './glsl/growth.frag?raw';
 import growthGlsl from './glsl/growth.glsl?raw';
 import growthVert from './glsl/growth.vert?raw';
+import ownersVert from './glsl/owners.vert?raw';
 import heightFrag from './glsl/height.frag?raw';
 import initFrag from './glsl/init.frag?raw';
 import orderFrag from './glsl/order.frag?raw';
@@ -26,6 +27,7 @@ import slimeDownFrag from './glsl/slime-down.frag?raw';
 import slimeFilmFrag from './glsl/slime-film.frag?raw';
 import slimePaintFrag from './glsl/slime-paint.frag?raw';
 import slimeFrag from './glsl/slime.frag?raw';
+import territoryFrag from './glsl/territory.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import trailDownFrag from './glsl/trail-down.frag?raw';
 import tubesFrag from './glsl/tubes.frag?raw';
@@ -111,6 +113,20 @@ export interface FlowPrograms {
   points: Program;
 }
 
+/** The passes of the territory (territory.frag, owners.vert, ADR 0068), and the passes that read it. */
+export interface TerritoryPrograms {
+  /** PASS 0: the push. */
+  push: Program;
+  /** PASS 1: the open cells of a disc join the territory of a strain. */
+  disc: Program;
+  /** The points of the owners (owners.vert with PASS 2). */
+  owners: Program;
+  /** The claim points whose agents the flow brings to life only onto the territory (FLOW and TERRITORY). */
+  points: Program;
+  /** PASS 2 of growth.frag with the flow and the territory (FLOW and TERRITORY in growth.frag). */
+  test: Program;
+}
+
 /** The passes of the picture of the tubes (tubes.frag, ADR 0034). */
 export interface TubePrograms {
   /** PASS 0: per cell and strain the factor of the radius of its tube. */
@@ -189,9 +205,12 @@ export interface Programs {
   growthFlowing: () => Program;
   /**
    * The agent pass in which agents starve and come to life by the flow memory (FLOW in tools.glsl and agents.frag,
-   * ADR 0029), by the wall check of the sensors and the trail saturation, compiled at its first use.
+   * ADR 0029), by the wall check of the sensors and the trail saturation, compiled at its first use. `territory`: with
+   * the rules of stage 4 too (TERRITORY, ADR 0068).
    */
-  flowing: (senseWalls: boolean, saturate: boolean) => Program;
+  flowing: (senseWalls: boolean, saturate: boolean, territory?: boolean) => Program;
+  /** The passes of the territory (ADR 0068), compiled at their first use: no scene has them yet. */
+  territory: () => TerritoryPrograms;
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
   covered: () => Program;
@@ -263,13 +282,22 @@ function simProgram(gl: GL, frag: string): Program {
 /**
  * The agent pass from `frag` (agents.frag or a version of it), with the agent tools (tools.glsl). `senseWalls`: the
  * sensors check for walls (SENSE_WALLS); `saturate`: the sensors saturate the trail (SATURATE, ADR 0022); `flow`:
- * agents starve and come to life by the flow memory (FLOW, ADR 0029).
+ * agents starve and come to life by the flow memory (FLOW, ADR 0029); `territory`: agents move and come to life only
+ * onto the territory of their strain (TERRITORY, ADR 0068).
  */
-export function agentsProgram(gl: GL, frag: string, senseWalls: boolean, saturate = false, flow = false): Program {
+export function agentsProgram(
+  gl: GL,
+  frag: string,
+  senseWalls: boolean,
+  saturate = false,
+  flow = false,
+  territory = false,
+): Program {
   const defines =
     (senseWalls ? '#define SENSE_WALLS 1\n' : '') +
     (saturate ? '#define SATURATE 1\n' : '') +
-    (flow ? '#define FLOW 1\n' : '');
+    (flow ? '#define FLOW 1\n' : '') +
+    (territory ? '#define TERRITORY 1\n' : '');
   return simProgram(gl, defines + toolsGlsl + frag);
 }
 
@@ -348,6 +376,7 @@ export function compile(gl: GL): Programs {
   let slimeBrushFront: Program | undefined;
   let poleShape: Program | undefined;
   let growthFlowing: Program | undefined;
+  let territory: TerritoryPrograms | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
@@ -399,15 +428,30 @@ export function compile(gl: GL): Programs {
     slimeBrushAmount: () => (slimeBrushAmount ??= sim(`#define PASS 1\n${brushGlsl}${amountGlsl}${slimePaintFrag}`)),
     slimeFront: () => (slimeFront ??= sim(`#define PASS 2\n${amountGlsl}${slimeFrag}`)),
     slimeBrushFront: () => (slimeBrushFront ??= sim(`#define PASS 2\n${brushGlsl}${amountGlsl}${slimePaintFrag}`)),
-    flowing: (senseWalls, saturate) => {
-      const key = `${String(senseWalls)}${String(saturate)}`;
+    flowing: (senseWalls, saturate, withTerritory = false) => {
+      const key = `${String(senseWalls)}${String(saturate)}${String(withTerritory)}`;
       let p = flowing.get(key);
       if (!p) {
-        p = agentsProgram(gl, agentsFrag, senseWalls, saturate, true);
+        p = agentsProgram(gl, agentsFrag, senseWalls, saturate, true, withTerritory);
         flowing.set(key, p);
       }
       return p;
     },
+    territory: () =>
+      (territory ??= {
+        push: sim('#define PASS 0\n' + territoryFrag),
+        disc: sim('#define PASS 1\n' + territoryFrag),
+        owners: wrap(gl, program(gl, V + common + ownersVert, V + common + '#define PASS 2\n' + territoryFrag)),
+        points: wrap(
+          gl,
+          program(
+            gl,
+            V + common + '#define FLOW 1\n#define TERRITORY 1\n' + toolsGlsl + pointsVert,
+            V + common + pointsFrag,
+          ),
+        ),
+        test: sim(`#define PASS 2\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
+      }),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
     view: () => (viewDiffuse ??= diffuseProgram(gl, diffuseFrag, false, true)),

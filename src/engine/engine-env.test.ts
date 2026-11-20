@@ -2,7 +2,15 @@
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it, vi } from 'vitest';
 import { drawingOf } from '../model/link';
-import { defaultSettings, defaultStrain, strainLike, toJones, type Boundary, type Settings } from '../model/params';
+import {
+  defaultSettings,
+  defaultStrain,
+  FOOD_START,
+  strainLike,
+  toJones,
+  type Boundary,
+  type Settings,
+} from '../model/params';
 import { presetById, shapesAt, type EnvShape, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
@@ -16,6 +24,7 @@ import { compact, Placement, sweep } from './sweep';
 import { paintReference } from './paint-reference';
 import { stampOf } from './slime';
 import { slimePaint } from './slime-reference';
+import { TERRITORY } from './territory';
 import type { Backend, Stroke } from './types';
 
 // 16:10, like a laptop window: a 512 grid has 512 × 320 cells.
@@ -892,6 +901,57 @@ describe('the colonies of the start layout Food', () => {
 // ADR 0066: a start spot of a scene takes the place of the food of a strain, as Reid et al. 2012 set a plasmodium on
 // agar without food. It is an edit of the list that paints nothing: the sweep keeps it, Clear removes it, and a link
 // of the scene holds it by the bit of its shape.
+// ADR 0068 (ADR 0067, decision 4): while the rules of stage 4 run, every strain gets its start territory, the disc of
+// the start layout Food and a rim of 3 cells, before the step that places its colony.
+describe('the start territory of the rules of stage 4', () => {
+  const yMaze = presetById('y-maze');
+  if (!yMaze?.env) throw new Error('no Y-maze');
+  const yEnv = yMaze.env;
+  const [first] = yMaze.settings().strains;
+  if (!first) throw new Error('no strain');
+  const two = { ...yMaze.settings(), strains: [first, strainLike(first, 1)] };
+  const radius = Math.sqrt((2 * FOOD_START) / Math.PI) + TERRITORY.rim;
+  /** The discs of the start territory, and the start of every colony with the step of its tool. */
+  const startsOf = (sim: CpuSim) => ({
+    discs: sim.territories,
+    colonies: sim.tools.map((t, step) => ({ strain: t.strain, x: t.x, y: t.y, radius, step })),
+  });
+
+  it('is the disc of the start of each strain with a rim of 3 cells, before the step of its colony', async () => {
+    const { sim } = await engineWith({ ...two, territory: true }, yEnv);
+    const { discs, colonies } = startsOf(sim());
+    expect(colonies).toHaveLength(2);
+    expect(discs).toEqual(colonies);
+  });
+
+  it('is not written while the rules do not run', async () => {
+    for (const patch of [{ territory: false }, { territory: true, flow: false }, { territory: true, growth: false }]) {
+      const { sim } = await engineWith({ ...two, ...patch }, yEnv);
+      expect(sim().tools, JSON.stringify(patch)).toHaveLength(2);
+      expect(sim().territories, JSON.stringify(patch)).toEqual([]);
+    }
+  });
+
+  it('restarts the run when the rules start or stop, also by the flow', async () => {
+    const { engine, sim } = await engineWith(two, yEnv);
+    const restarts = engine.restarts;
+    await engine.apply({ ...engine.settings, territory: true });
+    expect(engine.restarts).toBe(restarts + 1);
+    expect(sim().territories).toHaveLength(2);
+    // The setting stays on, but without the flow the rules stop: a new run without a start territory.
+    await engine.apply({ ...engine.settings, flow: false });
+    expect(engine.restarts).toBe(restarts + 2);
+    expect(sim().territories).toHaveLength(2);
+    // With the flow again they start again, with their start territory.
+    await engine.apply({ ...engine.settings, flow: true });
+    expect(engine.restarts).toBe(restarts + 3);
+    expect(sim().territories).toHaveLength(4);
+    // A change that the rules do not need restarts nothing.
+    await engine.apply({ ...engine.settings, flowStrength: 4 });
+    expect(engine.restarts).toBe(restarts + 3);
+  });
+});
+
 describe('the start spots of a scene', () => {
   const yMaze = presetById('y-maze');
   if (!yMaze?.env) throw new Error('no Y-maze');

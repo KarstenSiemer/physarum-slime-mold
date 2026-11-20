@@ -122,6 +122,8 @@ strains (one `vec4` lane each).
 | film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
 | front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0060) |
 | map of the front   | `rgba32float` texture, texels of 8 × 8 cells     | 0.25 B × W × H   | renderer only: young plasm and its age (ADR 0060)     |
+| `territory[2]`     | `r32uint`, 4 cells per texel (WebGL2: `R8UI`)    | 2 B × W × H      | the territory of each strain, bit s (ADR 0068)        |
+| `owners`           | storage `u32` per 4 cells (WebGL2: `R8UI`)       | 1 B × W × H      | the strains of the agent of each cell (ADR 0068)      |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -196,6 +198,12 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
    (`flowMemoryOf()`); a strain that the settings do not hold gets the memory of strain A, which no agent reads. The
    lines of the flow in `agents.wgsl` and `growth.wgsl` stand between `//#if FLOW` markers; a pass without the flow
    compiles from the source without them (`shaders/variant.ts`), so it keeps its bytes.
+8. **The territory passes**, only while the rules of stage 4 run (model.md, section 6.10; ADR 0068): after the growth
+   passes the owners (WebGPU: `atomicOr` by each agent; WebGL2: one point per agent into an `R8UI` target, without
+   blending), and after the flow the push into the other copy of the territory (WebGPU: one invocation per texel of 4
+   cells; WebGL2: one fragment per cell). Its constants ride in the uniform block of the flow, after the sites. The
+   lines of the territory in `agents.wgsl` and `growth.wgsl` stand between `//#if TERRITORY` markers and come only
+   with those of the flow.
 
 The whole step is deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
 counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each other on the grid run

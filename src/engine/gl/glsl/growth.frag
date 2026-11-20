@@ -89,6 +89,16 @@ bool starved(uint s, ivec2 q) {
 }
 #endif
 
+// The territory of each strain (ADR 0068; `//#if TERRITORY` in ../../shaders/growth.wgsl): programs.ts compiles this
+// pass with it, and gl/sim.ts uses that program only while the rules of stage 4 run, always with the flow. A child is
+// born only onto a cell of the territory of the strain of its parent.
+#ifndef TERRITORY
+#define TERRITORY 0
+#endif
+#if TERRITORY
+uniform highp usampler2D territory; // bit s while the cell lies in the territory of strain s (territory.frag)
+#endif
+
 // Light stops growth (ADR 0050; lightStops in growth.wgsl): a birth of agent i onto cell m fails with the chance
 // G_L · λ(m). The blue channel of the environment is the light byte / 255.
 bool lightStops(uint i, int m) {
@@ -121,6 +131,10 @@ int target(uint bits, int c, uint i) {
 #if FLOW
       // No child is born onto starved ground (ADR 0053): such a neighbour is not open.
       if (starved(bits & 3u, cellCoord(m))) continue;
+#endif
+#if TERRITORY
+      // While the rules of stage 4 run, a child only onto the territory of the parent's strain (ADR 0068).
+      if ((texelFetch(territory, cellCoord(m), 0).r & (1u << (bits & 3u))) == 0u) continue;
 #endif
       open |= 1u << k;
     }

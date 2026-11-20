@@ -860,3 +860,25 @@ describe('the mean window (ADR 0046)', () => {
     expect([0, 4, 6.4, 40].map((meanWindow) => meanWindowOf({ model: 'jones', meanWindow }))).toEqual([3, 3, 5, 15]);
   });
 });
+
+// ADR 0068: the rules of stage 4 are a setting of the extended model, off by default and in every scene.
+describe('the rules of stage 4 (ADR 0068)', () => {
+  it('are off by default, in every scene, and for a link without them', () => {
+    expect(defaultSettings().territory).toBe(false);
+    for (const p of PRESETS) expect(p.settings().territory, p.id).toBe(false);
+    expect(sanitize({ model: 'extended', territory: true }).territory).toBe(true);
+    for (const v of [undefined, 1, 'true', null])
+      expect(sanitize({ model: 'extended', territory: v }).territory).toBe(false);
+  });
+
+  it('never run in the Jones model: the model binds the switch to off', () => {
+    const jones = { ...presetById('network')?.settings(), territory: true };
+    const s = sanitize(jones);
+    expect(s.model).toBe('jones');
+    expect(s.territory).toBe(false);
+    expect(constrain(s)).toBe(s);
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    expect(toJones({ ...maze, territory: true }).territory).toBe(false);
+  });
+});

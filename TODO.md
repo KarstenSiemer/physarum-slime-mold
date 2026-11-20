@@ -284,10 +284,14 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   of the seeds (`research/front/README.md`, step 9). Chances per agent cost the tree births where few agents can
   claim a child. ADR 0067 has the passes and the buffers of both backends; the start scene would lose its lattice at
   a memory hint of 0.5 GB.
-- **Next: the engine of stage 4** (ADR 0065, decision 1; the design of ADR 0067): both backends, a CPU reference,
-  wrong rules, `docs/model.md`, the drift as a setting of the panel, the digests of every scene and the measures of
-  the 13 scenes with growth and the flow, and a test where a second strain grows on the slime of the first. Then the
-  picture: the skirt goes, or it is drawn from the plasm of the crown.
+- **The engine of stage 4, part 1 of 4** (ADR 0068, 2026-11-20): the territory of each strain in both backends, behind
+  the setting `territory`, which no scene turns on yet: moves, respawn and births only onto it, the owners, the push
+  and the start territory, against a CPU copy, with 38 wrong rules; every scene keeps its bytes.
+  `research/front/ENGINE.md` has the state of the four parts and what the next part needs.
+- **Next: parts 2 to 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
+  the sinks and the flow with the drift, then the paid births, then the scenes: the drift as a setting of the panel,
+  the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a second
+  strain grows on the slime of the first. Then the picture: the skirt goes, or it is drawn from the plasm of the crown.
 
 Open, for the owner:
 

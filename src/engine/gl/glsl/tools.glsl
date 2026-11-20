@@ -33,6 +33,22 @@ struct Spot {
   int cell;
 };
 
+// The territory of each strain (ADR 0068; `//#if TERRITORY` in ../../shaders/agents.wgsl): programs.ts compiles the
+// agent pass and the claim points with it, and gl/sim.ts uses them only while the rules of stage 4 run, always with
+// the flow. An agent moves and comes to life only onto a cell of the territory of its strain.
+#ifndef TERRITORY
+#define TERRITORY 0
+#endif
+#if TERRITORY
+uniform highp usampler2D territory; // bit s while the cell lies in the territory of strain s (territory.frag)
+
+// Whether the cell at q (cellXY()) lies in the territory of strain s; never outside a closed arena.
+bool inTerritoryAt(ivec2 q, uint s) { return q.x >= 0 && (texelFetch(territory, q, 0).r & (1u << s)) != 0u; }
+
+// The same for the index of a cell, or −1.
+bool inTerritory(int c, uint s) { return c >= 0 && inTerritoryAt(cellCoord(c), s); }
+#endif
+
 // Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/agents.wgsl): programs.ts compiles the agent pass and the
 // claim points with it, and gl/sim.ts uses them only while the flow is on. Without it the source is the one of the
 // code before.
@@ -79,6 +95,10 @@ Spot respawn(vec4 a, uint i) {
   ivec2 q = cellXY(ivec2(floor(p)));
   int c = indexOf(q);
   if (!openCell(c)) return none;
+#if TERRITORY
+  // While the rules of stage 4 run, only onto the territory of the agent's strain (ADR 0068). No draw.
+  if (!inTerritoryAt(q, bitsOf(a) & 3u)) return none;
+#endif
   vec4 m = flowMemoryOf(bitsOf(a) & 3u, q);
   if (m.y < F.c.z || rand(rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) return none;
   return Spot(wrapPos(p), rand(rng) * TAU, c);

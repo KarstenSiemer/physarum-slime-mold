@@ -71,6 +71,7 @@ import amountWgsl from './shaders/amount.wgsl?raw';
 import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
 import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import territoryWgsl from './shaders/territory.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { GROWTH_BINDINGS, GROWTH_FLOW_BINDINGS, Simulation } from './sim';
@@ -142,12 +143,16 @@ describe('WGSL', () => {
     const backend = await WebGpuBackend.create(document.createElement('canvas'));
     const { device } = backend.gpu;
     // agents.wgsl and growth.wgsl hold the lines of the flow in the tubes between markers (variant.ts, ADR 0029): the
-    // passes compile from the source without them, and with the flow from the source with them.
+    // passes compile from the source without them, and with the flow from the source with them. So with the lines of
+    // the territory, which come with those of the flow (ADR 0068).
     const sources = {
       agents: common + variant(agentsWgsl),
       agentsFlow: common + variant(agentsWgsl, ['FLOW']),
+      agentsTerritory: common + variant(agentsWgsl, ['FLOW', 'TERRITORY']),
       growth: common + variant(growthWgsl),
       growthFlow: common + variant(growthWgsl, ['FLOW']),
+      growthTerritory: common + variant(growthWgsl, ['FLOW', 'TERRITORY']),
+      territory: common + territoryWgsl,
       flow: common + flowWgsl,
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,

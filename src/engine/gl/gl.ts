@@ -73,6 +73,7 @@ const FORMATS: Record<number, [number, number]> = {
   [WebGL2RenderingContext.RGBA16F]: [WebGL2RenderingContext.RGBA, WebGL2RenderingContext.HALF_FLOAT],
   [WebGL2RenderingContext.RGBA8]: [WebGL2RenderingContext.RGBA, WebGL2RenderingContext.UNSIGNED_BYTE],
   [WebGL2RenderingContext.R32UI]: [WebGL2RenderingContext.RED_INTEGER, WebGL2RenderingContext.UNSIGNED_INT],
+  [WebGL2RenderingContext.R8UI]: [WebGL2RenderingContext.RED_INTEGER, WebGL2RenderingContext.UNSIGNED_BYTE],
 };
 
 export function target(gl: GL, width: number, height: number, format: number, linear = false): Target {

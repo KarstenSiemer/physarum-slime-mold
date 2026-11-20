@@ -48,6 +48,7 @@ The setting Model picks the rule set (ADR 0022, ADR 0044). `jonesFits()`, `asJon
 | The cut tool             | moves agents, keeps trail and scent              | moves agents, clears trail and scent in the wound      |
 | Flow in the tubes        | never                                            | optional, a flow for each strain                       |
 | Growth and shrinkage     | optional                                         | optional                                               |
+| The rules of stage 4     | never                                            | optional, with growth and the flow (6.10)              |
 
 One strain, one agent per cell, one diffusion pass and an own weight of ±1 are required: a Jones model without one of
 them becomes extended (`jonesFits()`). The other values of the Jones column are bound: `constrain()` resets them
@@ -91,6 +92,8 @@ where cells is W · H, or min(W, H)² in a dish (`src/engine/sizing.ts`).
 | P_s,k   | pressure of the flow of strain s in lane k = 0 … 3 (flow only)                         | float     |
 | S       | stamp of the slime, one for all strains (extended model only, section 6.9)             | integers  |
 | A       | amount of slime, one for all strains (extended model only, section 6.9)                | 0 … 4095  |
+| Θ       | territory: bit s while the cell lies in the territory of strain s (section 6.10)       | bits 0–3  |
+| O       | owners: bit s for an alive agent of strain s after the moves and births (6.10)         | bits 0–3  |
 
 Lanes without a strain have deposit and keep 0, so they hold 0 after one step. The flow has its fields for each strain
 of the settings, at most 4 (`flowStrains()` in `src/engine/flow.ts`). Settings with another number of strains get a new
@@ -112,6 +115,8 @@ A step runs these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl
    It reads the trail of every strain after the diffusion.
 5. **Flow**, only while it is on (section 8). It runs once per strain and reads the trail of that strain after the
    diffusion.
+6. **The push of the territory**, only while the rules of stage 4 run (section 6.10). It reads the owners, which a
+   pass fills from the agents after the moves and the births of the step.
 
 The two orders differ in when the agents sense, and in where the diffusion adds the sources:
 
@@ -336,6 +341,45 @@ The same setting gives the mark of starved ground its time (8.4). The picture dr
 ground, as thick as the amount says, and a skirt around young ground, by the age of the front stamp;
 the rules of both are in [design.md](design.md), section 5.
 
+### 6.10 The territory of each strain
+
+ADR 0068, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisions 4 and 6 to 9). Code:
+`shaders/territory.wgsl`, `gl/glsl/territory.frag`, `gl/glsl/owners.vert`, the lines between `//#if TERRITORY` and
+`//#endif` in `shaders/agents.wgsl` and `shaders/growth.wgsl`, and `#if TERRITORY` in `gl/glsl/tools.glsl`,
+`agents.frag` and `growth.frag`; `src/engine/territory.ts`; CPU reference `src/engine/territory-reference.ts`.
+
+The territory is the first of the rules of stage 4. They run only while the setting `territory` is on, in the extended
+model with growth, and so with one agent per cell, and with the flow (`territoryOn()`). No scene turns them on yet.
+Without them no pass of this section runs, and every other pass has the source of the code before, character for
+character, so a scene keeps its bytes.
+
+- **The territory** Θ is a set of cells for each strain, one byte per cell with bit s while the cell lies in the
+  territory of strain s. It never shrinks.
+- **What it does**: an agent moves, comes to life and is born only onto a cell of the territory of its strain (7.2,
+  7.6, section 9). A move inside the own cell needs no territory: it goes onto no other cell. A tool puts an agent
+  anywhere: inoculate, the cut and an agent under a wall (7.2).
+- **The owners** O: after the moves and the births of a step, every cell gets bit s for each alive agent of strain s
+  in it. With one agent per cell a cell has one owner at most.
+- **The push**, last in a step: a cell joins the territory of every strain that owns it. An open cell outside the
+  territory of strain s joins it with the chance 1 − (1 − v)^n, with v = 0.004 and n the number of agents of s among
+  its 8 neighbours. For each cell and strain the push draws one number of a stream of its own (7.7), and the cell joins
+  if the number lies below the chance of n. The CPU computes the 8 chances once and gives them to the passes as
+  float32, in the uniform block of the flow after its sites (`PUSH_CHANCES`, `packTerritory()`). So the territory
+  grows faster where more plasm lies at its edge (ADR 0065, finding 4). A cell is open when it lies in the arena and
+  holds no wall. The push counts the neighbours across the seam of the periodic grid, and none outside a box or the
+  dish. It has no rule for a corner: a diagonal neighbour between two walls counts.
+- **The start territory**: a reset clears the territory. With the start layout food (section 10), each strain gets
+  every open cell whose centre lies within √(100 / π) + 3 ≈ 8.64 cells of its start (the disc of its colony and a rim
+  of 3 cells), on the periodic grid of the nearest copy, just before the step that places its colony. A strain without
+  a start gets none. Every other start layout starts without a territory: the first push gives every alive agent its
+  cell.
+- **A switch** of the rules restarts the run, also when growth or the flow turns them on or off (`apply()` in
+  `src/engine/engine.ts`).
+- **Memory**: 3 B per cell. The territory has two copies, because the push writes the next one: on WebGPU textures of
+  4 cells per texel (`r32uint`), on WebGL2 targets of one byte per cell (`R8UI`). The owners are a buffer of 4 cells
+  per word on WebGPU and a target of one byte per cell on WebGL2.
+- **A link** holds the setting only while it is on; a link without it runs without the rules (`sanitize()`).
+
 ## 7. The agents
 
 ADR 0007, 0008, 0020, 0022, 0023, 0027, 0038, 0039, 0041. Code: `shaders/agents.wgsl`, `gl/glsl/agents.frag`,
@@ -383,7 +427,8 @@ no move and no deposit in its step.
   agent per cell the cell must also be empty at the start of the step, whatever the strain of the agent in it, and the
   agent claims it like a move (7.6). While the cut is held, a point within its radius (the wound) is no respawn point,
   with and without growth: the agent stays dead and draws again in the next step (ADR 0041). This test draws no random
-  number, so every other draw of the stream respawn (7.7) stays as it is.
+  number, so every other draw of the stream respawn (7.7) stays as it is. While the rules of stage 4 run, the cell
+  must also lie in the territory of the agent's strain (6.10), a test that draws no number either.
 
 ### 7.3 Sensing
 
@@ -433,7 +478,8 @@ claims:
 
 1. **Claim**: each agent senses, turns and claims its target cell with `atomicMax(claims[cell], key)`. A key is unique
    in a step: a bijective hash of the id, the step and the seed. It may claim only an open cell other than its own that
-   was empty at the start of the step, with no wall on the way. A placement (7.2) claims its cell the same way.
+   was empty at the start of the step, with no wall on the way, and while the rules of stage 4 run one of the territory
+   of its strain (6.10). A placement (7.2) claims its cell the same way.
 2. **Settle**: the agent whose key won moves and deposits. A loser is blocked (7.5). A placement that loses stays dead
    (inoculate, respawn) or stays where it was (cut, under a wall), with its heading, and draws again in the next step.
 
@@ -444,11 +490,12 @@ cells without a limit.
 
 Every random number comes from a PCG hash of (id, step, seed, stream): rng = pcg(id ^ pcg(step ^ pcg(seed ^ stream))),
 then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1 (also an agent under a wall,
-7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9; the death in the
-wound of a cut and under a wall (7.1) draws no number. So a run is the same for the same seed on one backend. For one
-agent and step the streams differ by construction, because pcg is a bijection. A start round's stream can equal
-another stream at a later step: for seeds 0 to 999, start rounds 0 to 64 and steps below 10^6, this happens at one
-step in each of 134 (seed, round, stream) cases.
+7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9, light stops growth
+10 (section 9), and the push of the territory 11 + 65536 · s for strain s (6.10), which draws with the index of the
+cell in place of the id; the death in the wound of a cut and under a wall (7.1) draws no number. So a run is the same
+for the same seed on one backend. For one agent and step the streams differ by construction, because pcg is a
+bijection. A start round's stream can equal another stream of an agent at a later step: for seeds 0 to 999, start
+rounds 0 to 64 and steps below 10^6, this happens at one step in each of 134 (seed, round, stream) cases.
 
 ## 8. Flow in the tubes
 
@@ -586,6 +633,8 @@ copy in `src/engine/growth-reference.ts`.
   The agent picks among the other free neighbours, with the same one draw, and it does not divide when every free
   neighbour is starved. So the rule of starved ground reads two cells: the cell of the parent (ADR 0029, decision 9)
   and the cell of the child. D_s is that of the strain of the parent, which is the strain of the child.
+- **Only onto the territory** (rules of stage 4, 6.10): a neighbour outside the territory of the parent's strain is not
+  free. The agent picks among the other free neighbours, with the same one draw.
 - **Light stops growth** (extended model, ADR 0050): the birth onto the picked neighbour m fails with the chance
   G_L · λ(m), G_L the setting Light stops growth and λ the light byte / 255 of m. The agent then makes no claim in this
   step and picks no other neighbour. The draw u is the first of a stream of its own (10), and the birth fails if
@@ -630,6 +679,9 @@ clears it. Clear removes it with the rest of the list, and a reset then starts n
 holds every shape of its scene, by the bit of the shape; no link holds one as a stroke. Its radius is not read. The
 scenes Y-maze with slime and Slime everywhere start their colony so: on the middle of the base of the Y-maze, and 1 cm
 inside the rim of the dish, opposite the glucose.
+
+While the rules of stage 4 run, the start layout food gives each strain its start territory just before the step
+that places its colony (6.10).
 
 ## 11. Parameters
 
@@ -678,6 +730,7 @@ checks that this table names every key.
 | `coveredFood`       |          | on or off                                                            | off               | both     | 6.5     |
 | `growth`            |          | on or off (needs one agent per cell)                                 | off               | both     | 9       |
 | `flow`              |          | on or off                                                            | off               | extended | 8       |
+| `territory`         |          | the rules of stage 4, on or off (they need growth and the flow)      | off               | extended | 6.10    |
 | `layout`            |          | section 10                                                           | mixed             | both     | 10      |
 | `seed`              |          | integer                                                              | 1                 | both     | 7.7     |
 | `resolution`        | W or H   | cells on the long side of a grid shaped like the screen, 256 to 4096 | 1536              | both     | 1       |
@@ -709,6 +762,9 @@ differ in these points:
 - WebGL2 without float blending has no rule of one agent per cell, so neither the Jones model nor growth: there the
   backends differ in a rule.
 - The light byte of a stroke may differ by ±1, a difference in a source.
+- The territory (6.10) lies in textures of 4 cells per texel on WebGPU and in targets of one byte per cell on WebGL2,
+  and the owners in a buffer that atomics fill and in a target that one point per agent fills. The push draws by the
+  index of the cell, which both backends share: from the same territory and the same owners both push alike.
 
 No test compares the bytes of the two backends; the ADRs quote digests of runs made off-line.
 
@@ -744,6 +800,8 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The cut and a wall with growth (7.1)    | "the cut and a painted wall while growth runs": the agents die, none lands in a closed room; placed with Gf 0 or growth off     |
 | Respawn and the cut (7.2)               | `flow.gpu.test.ts`, "respawn while the cut is held": no birth in the wound, with and without growth; outside it as before       |
 | Growth (9)                              | growth against the CPU copy in each arena; no child between two walls at a corner; intervals; one agent per cell                |
+| The territory (6.10, 7.2, 7.6, 9)       | `territory.gpu.test.ts`: moves, respawn and births only onto it, two strains; the owners and the push in each arena; the start  |
+| The start territory (6.10, 10)          | `territory.gpu.test.ts`: the disc in each arena, with walls; `engine-env.test.ts`: the disc of each strain, the restart         |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |
 | The time of the mark (8.4)              | `flow.gpu.test.ts`: eight times the share at a Slime life time of 18 hours; `flow.test.ts`: the share of each life time         |

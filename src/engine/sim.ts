@@ -13,7 +13,7 @@ import {
   trailSaturation,
   type AgentTool,
 } from './pack';
-import { readBuffer, readTexture } from './readback';
+import { readBuffer, readPixels, readTexture } from './readback';
 import { NO_SITES, SITE_BLOCK, type FlowSites } from './sites';
 import { slimeModel, slimeSteps } from './slime';
 import agentsWgsl from './shaders/agents.wgsl?raw';
@@ -28,10 +28,12 @@ import amountWgsl from './shaders/amount.wgsl?raw';
 import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
 import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import territoryWgsl from './shaders/territory.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
+import { packTerritory, territoryOn } from './territory';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import {
   changesSlime,
@@ -113,6 +115,17 @@ interface FlowState {
   hits: GPUBuffer;
   /** Whether `cells` holds the cells of the sites of now. */
   cellsCurrent: boolean;
+}
+/**
+ * The territory of each strain and the owners (ADR 0068; territory.wgsl), while the rules of stage 4 run: two
+ * textures of one byte per cell, 4 cells per texel, that the push writes in turn, and the owners, 4 cells to a word.
+ */
+interface TerritoryState {
+  textures: Pair<GPUTexture>;
+  views: Pair<GPUTextureView>;
+  owners: GPUBuffer;
+  /** The uniform of `addDisc`: the centre, the radius and the strain of a disc. */
+  disc: GPUBuffer;
 }
 /**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
@@ -211,6 +224,9 @@ export class Simulation implements Sim {
   private growth?: GrowthBuffers | undefined;
   /** The state of the flow in the tubes, while it is on (ADR 0029). */
   private flow?: FlowState | undefined;
+  /** The territory and the owners, while the rules of stage 4 run (ADR 0068); `territoryT` names the current copy. */
+  private territory?: TerritoryState | undefined;
+  private territoryT: Bit = 0;
   /** Which memory texture is current, and which pressure texture holds the pressure in work. */
   private flowM: Bit = 0;
   private flowP = 0;
@@ -333,8 +349,9 @@ export class Simulation implements Sim {
     this.groups = [x, Math.ceil(n / x)];
     // Now, inside the caller's out-of-memory scope, even while collisions are off: the budget counts them.
     this.ensureCollision();
-    // So with the slime field, while the model has it.
+    // So with the slime field, while the model has it, and with the territory while the rules of stage 4 run.
     if (slimeModel(settings)) this.ensureSlime();
+    if (territoryOn(settings)) this.ensureTerritory();
   }
 
   /**
@@ -701,6 +718,8 @@ export class Simulation implements Sim {
     if (!flowOn(settings)) this.dropFlow();
     // The memory fit counts the slime field only in the model that has it (sizing.ts): the Jones model has no slime.
     if (!slimeModel(settings)) this.dropSlime();
+    // The memory fit counts the territory only while the rules of stage 4 run (sizing.ts territoryBytesPerCell()).
+    if (!territoryOn(settings)) this.dropTerritory();
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -737,6 +756,8 @@ export class Simulation implements Sim {
     if (this.amount) enc.clearBuffer(this.amount);
     if (this.front) enc.clearBuffer(this.front);
     this.stamped = false;
+    // A reset clears the territory (ADR 0068): the engine writes the start territory after it (Engine.seedAtFood()).
+    if (this.territory) this.clearTerritory(enc, this.territory);
     const pass = enc.beginComputePass();
     const init = this.starts().init;
     pass.setPipeline(init);
@@ -1566,6 +1587,10 @@ export class Simulation implements Sim {
       enc.clearBuffer(growth.claims);
       enc.clearBuffer(growth.births);
     }
+    // The rules of stage 4 (ADR 0068): the agent passes and growth read the territory of the step before, the owners
+    // pass fills the owners anew, and the push writes the next territory.
+    const territory = col && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
+    if (territory) enc.clearBuffer(territory.owners);
     let pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
@@ -1580,12 +1605,18 @@ export class Simulation implements Sim {
     // With the flow in the tubes, the passes in which agents starve and come to life by the flow memory (agents.wgsl
     // `//#if FLOW`, ADR 0029): they read the memory of the step before, each agent the layer of its strain (ADR 0031).
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
+    // The block of each strain holds the constants of stage 4 after its sites (packTerritory(); ADR 0067, decision 9).
     flow?.uniforms.forEach((block, strain) => {
-      this.device.queue.writeBuffer(block, 0, packFlow(this.settings, this.sites, this.flowData, strain));
+      const data = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain));
+      this.device.queue.writeBuffer(block, 0, data);
     });
-    const flowing = flow ? k.flowing(senseWalls, saturate) : undefined;
+    // With the rules of stage 4, the passes of the flow with the lines of the territory (agents.wgsl `//#if TERRITORY`).
+    const flowing = flow ? k.flowing(senseWalls, saturate, territory !== undefined) : undefined;
     const fm = this.flowM;
-    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${flow ? `flow${fm}` : ''}`;
+    const tt = this.territoryT;
+    const held = flow ? `flow${fm}${territory ? `terr${tt}` : ''}` : '';
+    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${held}`;
+    const territoryView = territory ? territory.views[tt] : null;
     const agentPasses = flowing ?? (saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k);
     // The agent passes read only the constants of the block, which every strain has: the block of the first strain.
     const [flowMemory, flowUniform] = flow ? [at(flow.memoryArrays, fm), at(flow.uniforms, 0)] : [null, null];
@@ -1641,13 +1672,14 @@ export class Simulation implements Sim {
           this.clearance,
           flowMemory,
           flowUniform,
+          territoryView,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
       // Without the flow one `settle` serves every variant of the agent passes. With the flow each variant has its
       // own (Kernels.flowing()), so the key names the variant, as the keys of `move` and `claim` do.
       const settle = flowing?.settle ?? k.settle;
-      const settleKey = flow ? `flow${fm}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';
+      const settleKey = flow ? `${held}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';
       pass.setPipeline(settle);
       pass.setBindGroup(
         0,
@@ -1666,11 +1698,14 @@ export class Simulation implements Sim {
           this.clearance,
           flowMemory,
           flowUniform,
+          territoryView,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
       this.occParity = flip(q);
-      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform);
+      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform, territoryView);
+      // The owners after the moves and the births of the step (territory.wgsl `fillOwners`).
+      if (territory) this.encodeOwners(pass, territory);
     }
     let d = p;
     // The pass that adds the step's sources (diffuse.wgsl): the last moving first, the first sensing first (ADR 0027);
@@ -1688,8 +1723,139 @@ export class Simulation implements Sim {
     // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time.
     if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);
     if (flow) this.encodeFlow(pass, flow, d);
+    // The push last (ADR 0067, decision 6): the territory of the next step.
+    if (territory && flowUniform) this.encodePush(pass, territory, flowUniform);
     pass.end();
     this.parity = d;
+  }
+
+  /** The owners of every cell from the agents after the moves and the births (territory.wgsl `fillOwners`). */
+  private encodeOwners(pass: GPUComputePassEncoder, territory: TerritoryState) {
+    const fill = this.kernels.territoryPasses().fillOwners;
+    pass.setPipeline(fill);
+    const resources = [this.params, this.agentBuffer, null, territory.owners];
+    pass.setBindGroup(0, this.bind(`terrOwners${this.agentParity}`, fill, resources));
+    pass.dispatchWorkgroups(...this.groups);
+  }
+
+  /**
+   * The push (territory.wgsl `push`): the next territory from the current one and the owners, with the chances in the
+   * block of the flow. The next copy becomes the current one.
+   */
+  private encodePush(pass: GPUComputePassEncoder, territory: TerritoryState, flowUniform: GPUBuffer) {
+    const push = this.kernels.territoryPasses().push;
+    const t = this.territoryT;
+    pass.setPipeline(push);
+    const resources = [this.params, null, this.env, territory.owners, territory.views[t], territory.views[flip(t)]];
+    // The group holds a block of the flow: dropFlow() forgets it with the other groups of the flow.
+    pass.setBindGroup(0, this.bind(`terrPush${t}-flow`, push, [...resources, flowUniform]));
+    pass.dispatchWorkgroups(...this.territoryGroups);
+    this.territoryT = flip(t);
+  }
+
+  /** Workgroups of 8 × 8 over the texels of the territory, 4 cells to a texel (territory.wgsl). */
+  private get territoryGroups(): [number, number] {
+    return [Math.ceil(Math.ceil(this.width / 4) / 8), Math.ceil(this.height / 8)];
+  }
+
+  /**
+   * The textures of the territory and the buffer of the owners, made at their first use while the rules of stage 4
+   * run (sizing.ts TERRITORY_BYTES_PER_CELL). New textures and buffers hold zeros: no cell lies in a territory.
+   */
+  private ensureTerritory(): TerritoryState {
+    if (!this.territory) {
+      const usage =
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.RENDER_ATTACHMENT |
+        GPUTextureUsage.COPY_SRC |
+        GPUTextureUsage.COPY_DST;
+      const make = () =>
+        this.device.createTexture({ size: [Math.ceil(this.width / 4), this.height], format: 'r32uint', usage });
+      const textures: Pair<GPUTexture> = [make(), make()];
+      this.territory = {
+        textures,
+        views: [textures[0].createView(), textures[1].createView()],
+        owners: this.device.createBuffer({
+          size: Math.ceil((this.width * this.height) / 4) * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        }),
+        disc: this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+      };
+      this.territoryT = 0;
+    }
+    return this.territory;
+  }
+
+  /** Clears both copies of the territory and the owners: no cell lies in a territory, and none holds an owner. */
+  private clearTerritory(enc: GPUCommandEncoder, territory: TerritoryState) {
+    for (const view of territory.views) {
+      const clearValue = [0, 0, 0, 0];
+      enc.beginRenderPass({ colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue }] }).end();
+    }
+    enc.clearBuffer(territory.owners);
+    this.territoryT = 0;
+  }
+
+  /** Frees the territory and the owners, and every bind group that holds them. */
+  private dropTerritory() {
+    if (!this.territory) return;
+    for (const t of this.territory.textures) t.destroy();
+    this.territory.owners.destroy();
+    this.territory.disc.destroy();
+    this.territory = undefined;
+    for (const key of [...this.bindCache.keys()]) if (key.includes('terr')) this.bindCache.delete(key);
+  }
+
+  /**
+   * The start territory (Sim.addTerritory(); territory.wgsl `addDisc`): the open cells within `radius` cells of
+   * (x, y) join the territory of `strain`. Nothing while the rules of stage 4 do not run.
+   */
+  addTerritory(strain: number, x: number, y: number, radius: number) {
+    if (!territoryOn(this.settings)) return;
+    const territory = this.ensureTerritory();
+    const t = this.territoryT;
+    this.writeParams();
+    this.device.queue.writeBuffer(territory.disc, 0, new Float32Array([x, y, radius, strain]));
+    const add = this.kernels.territoryPasses().addDisc;
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(add);
+    const resources = [this.params, null, this.env, null, territory.views[t], territory.views[flip(t)]];
+    pass.setBindGroup(0, this.bind(`terrDisc${t}`, add, [...resources, null, territory.disc]));
+    pass.dispatchWorkgroups(...this.territoryGroups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.territoryT = flip(t);
+  }
+
+  /** For tests and measurements: the territory, one byte per cell (Sim.readTerritory()). */
+  async readTerritory(): Promise<Uint8Array> {
+    const cells = new Uint8Array(this.width * this.height);
+    if (!this.territory) return cells;
+    // A texel holds the bytes of its 4 cells in their order.
+    const bytes = await readPixels(this.device, at(this.territory.textures, this.territoryT));
+    const row = Math.ceil(this.width / 4) * 4;
+    for (let y = 0; y < this.height; y++) cells.set(bytes.subarray(y * row, y * row + this.width), y * this.width);
+    return cells;
+  }
+
+  /** For tests: the owners of the last step, one byte per cell (Sim.readOwners()). */
+  async readOwners(): Promise<Uint8Array> {
+    if (!this.territory) return new Uint8Array(this.width * this.height);
+    const bytes = new Uint8Array(await readBuffer(this.device, this.territory.owners));
+    return bytes.slice(0, this.width * this.height);
+  }
+
+  /** For tests: replaces the territory, one byte per cell (Sim.writeTerritory()), while the rules of stage 4 run. */
+  writeTerritory(data: Uint8Array) {
+    if (!territoryOn(this.settings)) return;
+    const territory = this.ensureTerritory();
+    const row = Math.ceil(this.width / 4) * 4;
+    const padded = new Uint8Array(row * this.height);
+    for (let y = 0; y < this.height; y++) padded.set(data.subarray(y * this.width, (y + 1) * this.width), y * row);
+    const texture = at(territory.textures, this.territoryT);
+    this.device.queue.writeTexture({ texture }, padded, { bytesPerRow: row }, [row / 4, this.height]);
   }
 
   /**
@@ -1807,13 +1973,14 @@ export class Simulation implements Sim {
     grow: boolean,
     flowMemory: GPUTextureView | null,
     flowUniform: GPUBuffer | null,
+    territory: GPUTextureView | null,
   ) {
     // With the flow in the tubes, the passes in which an agent on a starved cell does not divide and no child is born
     // onto one (growth.wgsl `//#if FLOW`, ADR 0029 and ADR 0053): they read the flow memory that the agent passes of
-    // the step read.
+    // the step read. With the rules of stage 4 also the territory that they read (`//#if TERRITORY`, ADR 0068).
     const flow = flowMemory !== null;
-    const k = this.kernels.growth(flow);
-    const f = flow ? `flow${this.flowM}` : '';
+    const k = this.kernels.growth(flow, territory !== null);
+    const f = flow ? `flow${this.flowM}${territory ? `terr${this.territoryT}` : ''}` : '';
     const a = this.agentParity;
     const moved = this.occParity;
     const after = this.ensureCollision().occ[moved];
@@ -1837,8 +2004,12 @@ export class Simulation implements Sim {
     ];
     // An 'auto' layout holds only the bindings that its entry point uses (GROWTH_BINDINGS).
     const used = (name: keyof GrowthKernels, extra: GPUBuffer | null = null) => {
-      const bindings = flow ? [...GROWTH_BINDINGS[name], ...GROWTH_FLOW_BINDINGS[name]] : GROWTH_BINDINGS[name];
-      return [...resources, extra, flowMemory, flowUniform].map((r, i) => (bindings.includes(i) ? r : null));
+      const bindings = [
+        ...GROWTH_BINDINGS[name],
+        ...(flow ? GROWTH_FLOW_BINDINGS[name] : []),
+        ...(territory ? GROWTH_TERRITORY_BINDINGS[name] : []),
+      ];
+      return [...resources, extra, flowMemory, flowUniform, territory].map((r, i) => (bindings.includes(i) ? r : null));
     };
     const run = (name: keyof GrowthKernels, groups: [number, number]) => {
       const pipeline = k[name];
@@ -2040,6 +2211,20 @@ export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]
   birth: [],
 };
 
+/**
+ * The bindings that a pass of growth.wgsl uses in addition while the rules of stage 4 run (`//#if TERRITORY`): the
+ * territory, in the passes that pick the cell of a child.
+ */
+export const GROWTH_TERRITORY_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
+  rowSums: [],
+  windowSums: [],
+  test: [17],
+  win: [17],
+  buildCells: [],
+  buildDead: [],
+  birth: [],
+};
+
 /** The passes of growth and shrinkage (growth.wgsl, ADR 0025). */
 interface GrowthKernels {
   rowSums: GPUComputePipeline;
@@ -2049,6 +2234,13 @@ interface GrowthKernels {
   buildCells: GPUComputePipeline;
   buildDead: GPUComputePipeline;
   birth: GPUComputePipeline;
+}
+
+/** The passes of the territory (territory.wgsl, ADR 0068). */
+interface TerritoryKernels {
+  fillOwners: GPUComputePipeline;
+  push: GPUComputePipeline;
+  addDisc: GPUComputePipeline;
 }
 
 /** `advance` (move) and `claim`, the agent passes that steer. */
@@ -2105,7 +2297,10 @@ class Kernels {
   private capacityPipelines?: Starts;
   private growthPipelines?: GrowthKernels;
   private growthFlowPipelines?: GrowthKernels;
+  private growthTerritoryPipelines?: GrowthKernels;
+  private territoryPipelines?: TerritoryKernels;
   private flowModule?: GPUShaderModule;
+  private territoryModule?: GPUShaderModule;
   /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
@@ -2142,13 +2337,18 @@ class Kernels {
    * built at their first use: every scene but the ones with the flow runs without them. Their source holds the lines
    * of the flow; the source of every other agent pass is the one of the code before.
    */
-  flowing(walls: boolean, saturate: boolean): Flowing {
-    const key = `${+walls}${+saturate}`;
+  flowing(walls: boolean, saturate: boolean, territory = false): Flowing {
+    const key = `${+walls}${+saturate}${+territory}`;
     let p = this.flowingPipelines.get(key);
     if (!p) {
-      const module = (this.flowModule ??= this.device.createShaderModule({
-        code: common + variant(this.agentsSource, ['FLOW']),
-      }));
+      // With the rules of stage 4, the source with the lines of the territory too (`//#if TERRITORY`, ADR 0068).
+      const module = territory
+        ? (this.territoryModule ??= this.device.createShaderModule({
+            code: common + variant(this.agentsSource, ['FLOW', 'TERRITORY']),
+          }))
+        : (this.flowModule ??= this.device.createShaderModule({
+            code: common + variant(this.agentsSource, ['FLOW']),
+          }));
       const constants = { ...(saturate ? { SATURATE: 1 } : {}), ...(walls ? { SENSE_WALLS: 1 } : {}) };
       const pipeline = (entryPoint: string) =>
         this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
@@ -2274,10 +2474,12 @@ class Kernels {
    * `flow`: with the lines of the flow in the tubes (`//#if FLOW`, ADR 0029); without them the source is the one of
    * the code before.
    */
-  growth(flow: boolean): GrowthKernels {
-    const built = flow ? this.growthFlowPipelines : this.growthPipelines;
+  growth(flow: boolean, territory = false): GrowthKernels {
+    const built = territory ? this.growthTerritoryPipelines : flow ? this.growthFlowPipelines : this.growthPipelines;
     if (built) return built;
-    const module = this.device.createShaderModule({ code: common + variant(growthWgsl, flow ? ['FLOW'] : []) });
+    // The rules of stage 4 run only with the flow (territory.ts territoryOn()): their lines come with those of the flow.
+    const names = territory ? ['FLOW', 'TERRITORY'] : flow ? ['FLOW'] : [];
+    const module = this.device.createShaderModule({ code: common + variant(growthWgsl, names) });
     const pipeline = (entryPoint: string) =>
       this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
     const pipelines = {
@@ -2289,9 +2491,25 @@ class Kernels {
       buildDead: pipeline('buildDead'),
       birth: pipeline('birth'),
     };
-    if (flow) this.growthFlowPipelines = pipelines;
+    if (territory) this.growthTerritoryPipelines = pipelines;
+    else if (flow) this.growthFlowPipelines = pipelines;
     else this.growthPipelines = pipelines;
     return pipelines;
+  }
+
+  /** The passes of the territory (territory.wgsl, ADR 0068), built at their first use: no scene has them yet. */
+  territoryPasses(): TerritoryKernels {
+    if (!this.territoryPipelines) {
+      const module = this.device.createShaderModule({ code: common + territoryWgsl });
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+      this.territoryPipelines = {
+        fillOwners: pipeline('fillOwners'),
+        push: pipeline('push'),
+        addDisc: pipeline('addDisc'),
+      };
+    }
+    return this.territoryPipelines;
   }
 
   /**
