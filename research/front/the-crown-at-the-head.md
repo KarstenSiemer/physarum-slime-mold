@@ -241,6 +241,27 @@ the colony holds 420 to 700 sinks. The veins fall in number toward the rim, and 
 k = 1, 2 and 2, 4 and 4 with the drift 1.5, 0.75, 1.5, 0.375, 1.5; columns `jones=all` seeds 1 and 2, `jones=edge` seeds
 1 and 2). Records: `logs/engine/crown-0082/`.
 
+## More flux for the veins of the growing colony (ADR 0083)
+
+The neck with 8 edges, step 8,000, seeds 1 and 2, `jones=all` and `jones=edge`: k = 8 and 16, and the base
+conductance 0.002 at k = 2 and 4 (a diagnostic). No crown in 16 runs. k = 16 gets 0.31 to 0.33 per rim sink, more than
+the still sheet needs to fork, but D stays high on the whole half disc: one thick sheet. The base 0.002 gives the veins
+of a crown: 5 to 6 main veins from the mouth that fork toward the rim, a sheet low in D between them. But the colony
+stays one half disc that grows along one smooth rim. Montages: `out/e2m/montage/look-8000.png` and `d-8000.png` (rows
+k = 8, 16, then the base at k = 2 and 4; columns `jones=all` seeds 1 and 2, `jones=edge` seeds 1 and 2). Records:
+`logs/engine/crown-0083/`.
+
+## A front that splits into crowns that move on (ADR 0084)
+
+Two options, off by default: a rim cell is a sink only if its D is at least 1.25 times the base conductance
+(`sinkOn=fed`), and Jones' births only on ground that the front reached less than 1,500 steps before (`jones=young`).
+The colony of ADR 0083 (base 0.002, k = 2), seeds 1 and 2, to step 16,000, in a box of 520 × 340 cells. The rim does
+not split in 8 runs: all of it advances. `sinkOn=fed` changes nothing: a cell that the front reaches holds the fresh D
+of 0.2 for about 1,500 steps, and no rim cell gets that old. `jones=young` thins the sheet behind the rim to a third: a
+crescent of sheet at the rim with veins toward it, fed by 1 to 3 thick tubes, bare ground behind. Montages:
+`out/e2n/montage/look.png` and `d.png` (rows neither, `fed`, `young`, both; columns seed 1 at steps 8,000 and 16,000,
+seed 2 at 8,000 and 16,000). Records: `logs/engine/crown-0084/`.
+
 ## Pictures for the owner
 
 In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to its upper 160 rows, at step 8,000:

@@ -3,6 +3,7 @@
 - Status: accepted. A study of an agent under the owner's delegation of 2026-11-12; the coordinator asked for it.
 - Date: 2026-11-20
 - Extends [ADR 0081](0081-a-flow-over-8-neighbours.md) (not measured: the growth and the agents with 8 edges).
+- Extended by ADR 0083 (2026-11-20): k = 8 and 16, and the base conductance 0.002 at k = 2 and 4; no crown.
 - The scripts: `research/front/crowns.ts` (the runs), `research/front/e2l.ts` (the measures and the pictures of D). The
   raw records are in the archive under `logs/engine/crown-0082/`; the notes are `research/front/E2l-NOTES.md`.
 

@@ -367,8 +367,12 @@ Open, for the owner:
     growing colony with 8 edges (ADR 0082) forms no crown in 20 runs (k = 1, 2, 4, `jones=all` and `edge`): its rim
     holds 420 to 700 sinks, so it gets 0.03 to 0.15 per sink, and its veins end before the rim. The owner's choice:
     the 8 edges in the engine (it changes the bytes of every scene with the flow; the agent's advice once the colony
-    shows a crown); more flux at the rim of the colony; or more time for the veins at the head. Open: how the colony
-    gets the flux of the crown and equal sinks.
+    shows a crown); more flux at the rim of the colony; or more time for the veins at the head. More flux (ADR 0083:
+    k = 8 and 16) thickens the whole sheet; the base conductance 0.002 (a diagnostic) gives the veins of a crown, 5 to
+    6 main veins that fork toward the rim, but one half disc with one smooth rim. A fed sink (`sinkOn=fed`) and Jones'
+    births only on ground younger than 1,500 steps (`jones=young`, ADR 0084, to step 16,000): the rim does not split
+    in 8 runs; `jones=young` gives a crescent of sheet at the rim fed by 1 to 3 thick tubes, bare ground behind.
+    Open: what makes one part of the rim fall behind, so that the front splits into crowns.
 
 The stages:
 
