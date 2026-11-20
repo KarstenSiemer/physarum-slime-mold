@@ -9,6 +9,8 @@
 - Date: 2026-11-20
 - Extends [ADR 0069](0069-the-sinks-of-each-strain-in-the-engine.md) (the sink test) and
   [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (the rule set, decision 1).
+- Extended by [ADR 0073](0073-a-colony-with-the-rules-starts-as-the-app-starts.md) (the start of a colony).
+- Extended by [ADR 0074](0074-a-drift-that-does-not-read-the-level-of-the-ground.md) (a drift without the level).
 - In short: [`docs/model.md`](../model.md), section 6.11, has the rule;
   [`research/front/E2c-NOTES.md`](../../research/front/E2c-NOTES.md) has the diagnosis and its commands;
   [`research/flow/README.md`](../../research/flow/README.md), part 31, has the checks.

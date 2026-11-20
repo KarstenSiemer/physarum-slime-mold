@@ -457,6 +457,67 @@ describe('the CPU prototype of stage 4', () => {
     expect(smallDish(noFront()).scent.some((v) => v > 0)).toBe(true);
   });
 
+  it('reads no level of a network against its ground with the forms of the drift of part E2d (ADR 0074)', () => {
+    interface Inside {
+      driftPressure(px: number, py: number, qx: number, qy: number, c: number): number;
+      afterSolve(): void;
+      G: Float32Array;
+      Pb: Float32Array[];
+    }
+    /** What every sensor of every agent reads of the pressure, before and after a shift of every tube cell by 200. */
+    const reads = (form: string) => {
+      const sim = smallDish(gpuRules({ sinkTube: '1', driftOn: form }), 3);
+      for (let k = 0; k < 200; k++) sim.advance();
+      const inside = sim as unknown as Inside;
+      const read = () => {
+        const out: number[] = [];
+        const so = sim.p.sensorOffset;
+        for (let i = 0; i < sim.cap; i++) {
+          if (!sim.alive[i]) continue;
+          const [px, py, h] = [sim.ax[i]!, sim.ay[i]!, sim.ah[i]!];
+          for (const turn of [0, -Math.PI / 8, Math.PI / 8]) {
+            const [qx, qy] = [px + so * Math.cos(h + turn), py + so * Math.sin(h + turn)];
+            const c = sim.cellOf(qx, qy);
+            if (c >= 0 && sim.layout.open[c]) out.push(inside.driftPressure(px, py, qx, qy, c));
+          }
+        }
+        return out;
+      };
+      const before = read();
+      // A sensor compares what it reads with the other two of its agent: the pressure of the agent's cell, which the
+      // forms subtract, does not change a turn.
+      for (const P of [...sim.P, ...inside.Pb]) for (let c = 0; c < sim.cells; c++) if (inside.G[c]! > 0) P[c]! += 200;
+      inside.afterSolve();
+      return { sim, before, after: read() };
+    };
+    for (const form of ['net', 'take', 'mirror', 'sinks', 'rim']) {
+      const { sim, before, after } = reads(form);
+      expect(before.length).toBeGreaterThan(100);
+      expect(sim.frontTotal).toBeGreaterThan(0);
+      for (let k = 0; k < before.length; k++) expect(after[k]!).toBeCloseTo(before[k]!, 2);
+    }
+    // The drift of ADR 0065 reads the pressure of the cell itself: the shift moves every sensor on a tube.
+    const all = reads('all');
+    expect(all.after.filter((v, k) => Math.abs(v - all.before[k]! - 200) < 0.01).length).toBeGreaterThan(100);
+    // `take`: a sensor off the tubes of an agent at a sink reads the drop of the flux of the sink over the sensor offset.
+    const { sim } = reads('take');
+    const inside = sim as unknown as Inside;
+    let checked = 0;
+    for (let i = 0; i < sim.cap; i++) {
+      const a = sim.cellOf(sim.ax[i]!, sim.ay[i]!);
+      if (!sim.alive[i] || !(inside.G[a]! > 0) || !(sim.take[a]! > 0)) continue;
+      const [qx, qy] = [sim.ax[i]! + 7 * Math.cos(sim.ah[i]!), sim.ay[i]! + 7 * Math.sin(sim.ah[i]!)];
+      const c = sim.cellOf(qx, qy);
+      if (c < 0 || !sim.layout.open[c] || inside.G[c]! > 0) continue;
+      expect(inside.driftPressure(sim.ax[i]!, sim.ay[i]!, qx, qy, c)).toBeCloseTo(
+        (-7 * sim.take[a]!) / inside.G[a]!,
+        6,
+      );
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
   it('sees through no wall in the Y-maze and the dish, so the squares of a sink equal paths there (ADR 0067, decision 10)', () => {
     const layouts = [yMazeLayout([]).layout, dish(160, [[80, 80, 5]])];
     for (const layout of layouts) for (const r of [2, 6]) expect(seenThroughWalls(layout, r)).toBe(0);

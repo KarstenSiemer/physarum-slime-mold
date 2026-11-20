@@ -8,12 +8,16 @@ import { Sim, frontFrom, params } from './sim';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.split('=') as [string, string]));
 const num = (k: string, d: number) => (k in args ? Number(args[k]) : d);
-const front = frontFrom(args, ['scene', 'side', 'long', 'size', 'zoom', 'pics', 'name', 'flow', 'seed']);
+const front = frontFrom(args, ['scene', 'side', 'long', 'size', 'zoom', 'pics', 'name', 'flow', 'seed', 'scent']);
 const scene = args.scene ?? 'lane';
 const side = num('side', 80);
 const long = num('long', 300);
 const layout = scene === 'lane' ? box(side, long, [[side / 2, 8, 5]]) : dish(side, [[side / 2, side / 2, 5]]);
-const sim = new Sim(layout, params({ seed: num('seed', 1), flow: num('flow', 8), front }));
+// `scent`: the steps of the food scent before the colony starts, 300 as the records of ADR 0065; 0 as the app (ADR 0073).
+const sim = new Sim(
+  layout,
+  params({ seed: num('seed', 1), flow: num('flow', 8), front, scentSteps: num('scent', 300) }),
+);
 const pics = (args.pics ?? '4000').split(',').map(Number);
 const out = `research/front/out/${args.name ?? 'shots'}`;
 mkdirSync(out, { recursive: true });

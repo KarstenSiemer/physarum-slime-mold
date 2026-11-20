@@ -169,6 +169,15 @@ For the tree "the same, slime everywhere" is its territory against the one witho
 as early as with the rule set (p 0.082 to 0.94), and no colony dies. The tree covers a third of the open dish in 20,000
 steps, with the rule set 36 to 40 %; its spread is wide: one campaign of the rule set gave 4,906 to 8,435 cells.
 
+**Step 10: the drift without the level of the ground** ([ADR
+0074](../../docs/adr/0074-a-drift-that-does-not-read-the-level-of-the-ground.md);
+[the-drift-and-the-ground.md](the-drift-and-the-ground.md) tells it on one page). A sensor read the pressure also on
+ground without a tube, and that ground keeps the first steps of the flux for about 1,000 steps: the level of a network
+against its ground made the growth a lottery (ADR 0072). Of eight forms of the drift, six read no level. The form `take`
+reads, off the tubes, the pressure of the agent's cell less the drop that the flux of its sink would have over the
+sensor offset: it grows three quarters of what the records grew and keeps the Y-maze, the speed of the front and the
+dish. The owner chooses the form.
+
 **What is not reached.**
 
 - The tree takes the blank arm only 31 of 40 times (Fisher's test against the organism: p 0.014), and it covers only
@@ -206,6 +215,9 @@ of the sinks before decision 8:
   pressure recentres by the port of the first covered site; and `Params.scentSteps` (the key `scent` of `ymaze.ts` and
   `dish.ts`), the steps of the food scent before the colony starts: 300 as every record here, 0 as the app starts.
   `research/front/E2c-NOTES.md` has what they showed; `start.sh` runs both starts.
+- The forms of the drift of part E2d (ADR 0074), more words of `driftOn`: `take`, `mirror`, `sinks`, `rim`, `leak` and
+  `extend` (the comment of `Front.driftOn` in `sim.ts` says what each reads). `shift.sh` runs the shift test,
+  `forms.sh` the targets, `lane.ts` the lane and `reads.ts` what the front reads; `E2d-NOTES.md` has the commands.
 
 ## Commands
 
