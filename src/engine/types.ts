@@ -222,6 +222,16 @@ export interface Sim {
   readSinkSums(): Promise<Uint32Array>;
   /** For tests: the state of each strain of the last step (ADR 0069), sinks.ts SINK_STATE_LANES floats per strain. */
   readSinkState(): Promise<Float32Array>;
+  /**
+   * For tests: replaces the state of each strain, SINK_STATE_LANES floats per strain as readSinkState() returns them,
+   * while the rules of stage 4 run. The budget of the paid births lies in lane paid.ts BUDGET_LANE (ADR 0071).
+   */
+  writeSinkState(data: Float32Array): void;
+  /**
+   * For tests: the keys of the births that the flux pays of the last growth step (ADR 0071), one float per agent by its
+   * id: paid.ts NO_KEY for an agent without a key. Empty while the rules of stage 4 do not run.
+   */
+  readPaidKeys(): Promise<Float32Array>;
   /** For tests: replaces the sink rates of a strain, one float per cell as readSinks() returns them, while the rules run. */
   writeSinks(data: Float32Array, strain?: number): void;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */

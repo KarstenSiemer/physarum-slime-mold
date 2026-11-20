@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { PAID_KEY } from '../paid';
 import { PUSH } from '../territory';
 import { variant } from './variant';
 
@@ -134,16 +135,29 @@ describe('the random streams of the agent passes', () => {
   it('gives every draw of the flow a stream of its own, in WGSL and in GLSL', () => {
     const wgsl = [
       ...streams('./agents.wgsl', /^const (STEER|TOOL|SHRINK|BLOCK|STARVE|RESPAWN) = (\d+)u;/gm),
-      ...streams('./growth.wgsl', /^const (GROW|BIRTH|PLACE_ORDER|SHADE) = (\d+)u;/gm),
+      ...streams('./growth.wgsl', /^const (GROW|BIRTH|PLACE_ORDER|SHADE|PAID_KEY) = (\d+)u;/gm),
       ...streams('./territory.wgsl', /^const (PUSH) = (\d+)u;/gm),
     ];
     expect(wgsl.map(([name]) => name).sort()).toEqual(
-      ['BIRTH', 'BLOCK', 'GROW', 'PLACE_ORDER', 'PUSH', 'RESPAWN', 'SHADE', 'SHRINK', 'STARVE', 'STEER', 'TOOL'].sort(),
+      [
+        'BIRTH',
+        'BLOCK',
+        'GROW',
+        'PAID_KEY',
+        'PLACE_ORDER',
+        'PUSH',
+        'RESPAWN',
+        'SHADE',
+        'SHRINK',
+        'STARVE',
+        'STEER',
+        'TOOL',
+      ].sort(),
     );
     expect(new Set(wgsl.map(([, n]) => n)).size).toBe(wgsl.length);
     const glsl = [
       ...streams('../gl/glsl/tools.glsl', /^const uint (STEER|TOOL|SHRINK|BLOCK|STARVE|RESPAWN) = (\d+)u;/gm),
-      ...streams('../gl/glsl/growth.glsl', /^const uint (GROW|BIRTH|PLACE_ORDER|SHADE) = (\d+)u;/gm),
+      ...streams('../gl/glsl/growth.glsl', /^const uint (GROW|BIRTH|PLACE_ORDER|SHADE|PAID_KEY) = (\d+)u;/gm),
       ...streams('../gl/glsl/territory.frag', /^const uint (PUSH) = (\d+)u;/gm),
     ];
     expect(Object.fromEntries(glsl)).toEqual(Object.fromEntries(wgsl));
@@ -151,12 +165,27 @@ describe('the random streams of the agent passes', () => {
     // With stream 7, the draw of starvation in step 0 was the first draw of the agent's start (review of 2026-11-13).
     for (const [name, n] of wgsl) expect(n % 0x10000, name).not.toBe(7);
     // The push of strain s draws from PUSH + 65536 · s (ADR 0068): below 65536 it is no other stream, so none of the
-    // four streams is another stream or one of the start. The CPU copy takes its number from territory.ts.
+    // four streams is another stream or one of the start. The CPU copy takes its number from territory.ts. The key of
+    // a paid birth draws from PAID_KEY (ADR 0071), which is no stream of the push: the CPU copy takes it from paid.ts.
     expect(Object.fromEntries(wgsl).PUSH).toBe(PUSH);
+    expect(Object.fromEntries(wgsl).PAID_KEY).toBe(PAID_KEY);
+    expect(PAID_KEY % 0x10000).not.toBe(PUSH);
   });
 
   it('seeds every draw of a shader with a named stream, and the start with its own streams', () => {
-    const names = ['BIRTH', 'BLOCK', 'GROW', 'PLACE_ORDER', 'RESPAWN', 'SHADE', 'SHRINK', 'STARVE', 'STEER', 'TOOL'];
+    const names = [
+      'BIRTH',
+      'BLOCK',
+      'GROW',
+      'PAID_KEY',
+      'PLACE_ORDER',
+      'RESPAWN',
+      'SHADE',
+      'SHRINK',
+      'STARVE',
+      'STEER',
+      'TOOL',
+    ];
     // The push of the territory names its stream with the strain (ADR 0068).
     names.push('PUSH + 0x10000u * s');
     const calls = (dir: string) =>
@@ -168,8 +197,9 @@ describe('the random streams of the agent passes', () => {
           ),
         );
     const all = [...calls('./'), ...calls('../gl/glsl/')];
-    // Both backends draw in the same places: 13 calls each (agents, growth, the start, the push of the territory).
-    expect(all.length).toBe(26);
+    // Both backends draw in the same places: 15 calls each (agents, growth, the start, the push of the territory, and
+    // the key and the cell of a child of the births that the flux pays).
+    expect(all.length).toBe(30);
     for (const [file, stream] of all) {
       if (file.startsWith('init.')) expect(stream, file).toBe('7u + round * 0x10000u');
       else expect(names, `${file}: ${stream}`).toContain(stream);

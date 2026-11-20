@@ -27,6 +27,7 @@ import {
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
+  paidBytesPerAgent,
   slimeBytesPerCell,
   sinkBytesPerCell,
   territoryBytesPerCell,
@@ -327,7 +328,9 @@ export class Engine {
       territoryBytesPerCell({ ...s, collisions }) +
       sinkBytesPerCell({ ...s, collisions }, this.backend.sinkBytesPerCell) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
-    const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
+    // The key of the births that the flux pays while the rules of stage 4 run (ADR 0071).
+    const bytesPerAgent =
+      this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0) + paidBytesPerAgent({ ...s, collisions });
     const budget = memoryBudget(memory);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
     // With the rule the capacity is at most one agent per cell (capacityOf()): count what this backend runs.

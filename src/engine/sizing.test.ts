@@ -15,6 +15,8 @@ import {
   SITE_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
+  PAID_BYTES_PER_AGENT,
+  paidBytesPerAgent,
   SINK_BYTES_PER_CELL,
   SINK_BYTES_PER_CELL_GL,
   sinkBytesPerCell,
@@ -308,5 +310,17 @@ describe('the territory of the rules of stage 4 (ADR 0068)', () => {
       { ...three, collisions: false },
     ])
       expect(sinkBytesPerCell(s, SINK_BYTES_PER_CELL)).toBe(0);
+  });
+
+  it('counts the key of the births that the flux pays, 4 B per agent, while the rules run (ADR 0071)', () => {
+    expect(PAID_BYTES_PER_AGENT).toBe(4);
+    expect(paidBytesPerAgent(on)).toBe(4);
+    for (const s of [
+      { ...on, territory: false },
+      { ...on, flow: false },
+      { ...on, growth: false },
+      { ...on, collisions: false },
+    ])
+      expect(paidBytesPerAgent(s)).toBe(0);
   });
 });

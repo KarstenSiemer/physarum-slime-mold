@@ -38,9 +38,9 @@ export const SINK_WINDOW = 6;
 
 /**
  * The state of each strain (ADR 0067, decision 7): 2 vec4 of floats. The lanes: R, the sum of the sink rates of its tube
- * cells; C, its tube cells; N, its sinks; the covered ports; 1 while the front takes flux, else 0; then three lanes
- * for the parts after this one (the budget of the paid births). The sums as integers are the 4 words R low, R high, C
- * and N per strain (Sim.readSinkSums()).
+ * cells; C, its tube cells; N, its sinks; the covered ports; 1 while the front takes flux, else 0; then the budget B of
+ * the paid births, the agents of the front F and the paid claims K of the step (paid.ts, ADR 0071). The sums as
+ * integers are the 4 words R low, R high, C and N per strain (Sim.readSinkSums()).
  */
 export const SINK_STATE_LANES = 8;
 export const SINK_SUM_WORDS = 4;
@@ -50,7 +50,7 @@ export const SINK_SUM_WORDS = 4;
  * those of the push (FLOW_SINK_SLOT): the steps of the path to ground without slime, the steps of the path to the edge,
  * the steps of the mean, and the weight on slime in steps of the rate. Each is a whole number, exact as a float32. In
  * the slot after it (FLOW_TAKE_SLOT, ADR 0070): x what the sinks of a strain take together in units of the flow
- * strength; y, z and w stay 0 for the part after this one (the births that the flux pays).
+ * strength; y is the growth of the budget of the paid births (paid.ts packPaid(), ADR 0071); z and w stay 0.
  */
 export function packSinks(f: Float32Array): Float32Array {
   f.set([SINKS.fresh, SINKS.edge, SINKS.tau, SLIME_WEIGHT], FLOW_SINK_SLOT * 4);

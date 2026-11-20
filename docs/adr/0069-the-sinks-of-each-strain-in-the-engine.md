@@ -9,6 +9,7 @@
 - Extends [ADR 0067](0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md) (decisions 3, 6 to 8 and 10) and
   [ADR 0068](0068-the-territory-of-each-strain-in-the-engine.md) (open point 1).
 - Extended by ADR 0070 ([the flow takes the sinks](0070-the-flow-takes-the-sinks-in-the-engine.md)).
+- Extended by ADR 0071 ([the births that the flux pays in the engine](0071-the-births-that-the-flux-pays-in-the-engine.md)).
 - In short: [`docs/model.md`](../model.md), sections 6.10 and 6.11, has the rules;
   [`research/front/ENGINE.md`](../../research/front/ENGINE.md) has the state of the parts and what part E2b needs.
 

@@ -208,6 +208,15 @@ export const sinkBytesPerCell = (
   perStrain: number,
 ) => (territoryOn(s) ? perStrain * flowStrains(s) : 0);
 /**
+ * More bytes per agent while the rules of stage 4 run (ADR 0067, decision 7; ADR 0071): the key of the births that the
+ * flux pays, a float per agent (sim.ts after the state of the sinks, gl/sim.ts a target of the agents). Both backends
+ * hold the same.
+ */
+export const PAID_BYTES_PER_AGENT = 4;
+/** The bytes per agent of the paid births of these settings: 0 while the rules of stage 4 do not run. */
+export const paidBytesPerAgent = (s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>) =>
+  territoryOn(s) ? PAID_BYTES_PER_AGENT : 0;
+/**
  * The sides of the levels of a pyramid of sums over squares of 4 × 4 on a grid of `w` × `h` cells (sinks.frag PASS 1 and
  * 2), from the first level to the top of one texel.
  */
