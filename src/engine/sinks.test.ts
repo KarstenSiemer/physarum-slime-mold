@@ -2,7 +2,7 @@
 // (sinks-reference.ts) on cases made by hand. sinks.gpu.test.ts compares both backends with the CPU copy.
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
-import { FLOW_BYTES, FLOW_SINK_SLOT, FLOW_SLOTS, FLOW_TERRITORY_SLOT, packFlow } from './flow';
+import { FLOW_BYTES, FLOW_SINK_SLOT, FLOW_SLOTS, FLOW_TAKE_SLOT, FLOW_TERRITORY_SLOT, packFlow } from './flow';
 import { NO_SITES } from './sites';
 import { RATE_ONE, SINK_WINDOW, SINKS, SLIME_WEIGHT, SUM_ONE } from './sinks';
 import { paths, sinkState, sinksStep, sinkWeight, sumOf, toward, type SinkInput } from './sinks-reference';
@@ -36,7 +36,7 @@ describe('the sinks (ADR 0069)', () => {
   const on: Settings = { ...defaultSettings(), territory: true, flow: true, growth: true, collisions: true };
 
   it('holds the constants of the rule set of ADR 0065 in the slot after the push, as whole numbers', () => {
-    expect(SINKS).toEqual({ edge: 2, fresh: 6, slime: 0.025, tau: 100 });
+    expect(SINKS).toEqual({ edge: 2, fresh: 6, slime: 0.025, tau: 100, take: 2 });
     expect([RATE_ONE, SUM_ONE, SLIME_WEIGHT]).toEqual([16777216, 65536, 419430]);
     expect(SINK_WINDOW).toBe(6);
     // The passes hold a window of 13 × 13 cells: no reach of the block may leave it, and the edge lies nearer.
@@ -44,10 +44,13 @@ describe('the sinks (ADR 0069)', () => {
     expect(SINKS.fresh).toBeGreaterThanOrEqual(SINKS.edge);
     expect(SINK_WINDOW).toBeGreaterThanOrEqual(SINKS.fresh);
     expect(FLOW_SINK_SLOT).toBe(FLOW_TERRITORY_SLOT + 2);
-    expect(FLOW_SLOTS).toBe(FLOW_SINK_SLOT + 1);
+    // The slot of what the sinks take comes last (ADR 0070): x the share of the flow strength, the rest for part E3.
+    expect(FLOW_TAKE_SLOT).toBe(FLOW_SINK_SLOT + 1);
+    expect(FLOW_SLOTS).toBe(FLOW_TAKE_SLOT + 1);
     const f = new Float32Array(packTerritory(packFlow(on, NO_SITES)));
     expect(f.length * 4).toBe(FLOW_BYTES);
     expect(Array.from(f.subarray(FLOW_SINK_SLOT * 4, FLOW_SINK_SLOT * 4 + 4))).toEqual([6, 2, 100, 419430]);
+    expect(Array.from(f.subarray(FLOW_TAKE_SLOT * 4, FLOW_TAKE_SLOT * 4 + 4))).toEqual([2, 0, 0, 0]);
   });
 
   it('moves a rate a hundredth of the way to its weight, rounded toward it, and reaches it', () => {

@@ -3,8 +3,9 @@
 // has a free cell of the territory of its strain beside it, and lies at the edge of that territory. Its weight is 1
 // near ground without slime and 0.025 elsewhere. Each cell keeps a sink rate per strain, the mean of its weight over
 // 100 steps, and the passes sum the rates, the tube cells and the sinks of each strain. The passes are in
-// shaders/sinks.wgsl and gl/glsl/sinks.frag, the CPU copy in sinks-reference.ts.
-import { FLOW_SINK_SLOT } from './flow';
+// shaders/sinks.wgsl and gl/glsl/sinks.frag, the CPU copy in sinks-reference.ts. The pressure of the flow takes the
+// sinks (ADR 0070): `//#if TERRITORY` in shaders/flow.wgsl and gl/glsl/flow.frag, the CPU copy in flow-reference.ts.
+import { FLOW_SINK_SLOT, FLOW_TAKE_SLOT } from './flow';
 
 /** The constants of the sinks (ADR 0065, decisions 1, 5 and 8; `paidSinks()` in research/front/sim.ts). */
 export const SINKS = {
@@ -16,6 +17,8 @@ export const SINKS = {
   slime: 0.025,
   /** The steps of the exponential mean of the sink rate. */
   tau: 100,
+  /** The sinks of a strain take together this many times the flow strength, S = 2 · I0 (ADR 0065, decision 1). */
+  take: 2,
 } as const;
 
 /**
@@ -45,9 +48,12 @@ export const SINK_SUM_WORDS = 4;
 /**
  * Writes the constants of the sinks into the uniform block of the flow (`f` over flow.ts packFlow()), in the slot after
  * those of the push (FLOW_SINK_SLOT): the steps of the path to ground without slime, the steps of the path to the edge,
- * the steps of the mean, and the weight on slime in steps of the rate. Each is a whole number, exact as a float32.
+ * the steps of the mean, and the weight on slime in steps of the rate. Each is a whole number, exact as a float32. In
+ * the slot after it (FLOW_TAKE_SLOT, ADR 0070): x what the sinks of a strain take together in units of the flow
+ * strength; y, z and w stay 0 for the part after this one (the births that the flux pays).
  */
 export function packSinks(f: Float32Array): Float32Array {
   f.set([SINKS.fresh, SINKS.edge, SINKS.tau, SLIME_WEIGHT], FLOW_SINK_SLOT * 4);
+  f.set([SINKS.take, 0, 0, 0], FLOW_TAKE_SLOT * 4);
   return f;
 }

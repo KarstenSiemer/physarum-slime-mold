@@ -62,6 +62,11 @@ fn inTerritoryAt(q: vec2i, s: u32) -> bool {
 
 // The same for the index of a cell, or −1.
 fn inTerritory(c: i32, s: u32) -> bool { return c >= 0 && inTerritoryAt(cellCoord(u32(c)), s); }
+
+// The pressure of the four lanes of the flow of each strain, a layer per strain, as the flow of the step before left it
+// (flow.wgsl). While the rules of stage 4 run, a sensor reads it as a repellent, with the drift of the strain (ADR 0070;
+// ADR 0065, decision 6): the plasm streams down the pressure, to the sinks of the growth front.
+@group(0) @binding(15) var pressure: texture_2d_array<f32>;
 //#endif
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
@@ -162,7 +167,11 @@ fn clearPath(p: vec2f, q: vec2f, clear: i32) -> bool {
 
 // What the sensor at p of an agent at pos reads for strain s. A wall, a cell outside a closed arena and a wall
 // between the agent and the sensor read BLOCKED (ADR 0020). `clear` is the agent's clearance (clearPath).
+//#if TERRITORY
+fn sensed(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
+//#else
 fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
+//#endif
   // The coordinates and the index of the cell from one wrap: cellCoord() of the index would divide.
   let q = cellXY(vec2i(floor(p)));
   let c = indexOf(q);
@@ -172,6 +181,18 @@ fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
   if (SATURATE) { t = t / (1.0 + t / P.model.x); }
   return dot(t, P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
 }
+//#if TERRITORY
+
+// What the sensor at p reads while the rules of stage 4 run (ADR 0070; ADR 0065, decision 6): what it reads without
+// them, minus the drift of the strain times the mean pressure of the four lanes of its flow at the cell of the sensor.
+// A blocked sensor stays blocked, and its cell is not read.
+fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
+  let read = sensed(pos, p, s, clear);
+  if (read == BLOCKED) { return BLOCKED; }
+  let pr = textureLoad(pressure, cellXY(vec2i(floor(p))), s, 0);
+  return read - P.drift[s] * ((pr.x + pr.y + pr.z + pr.w) * 0.25);
+}
+//#endif
 
 // Sense and rotate (Jones 2010, Fig. 3), then the random turn pCD. Returns the new heading.
 fn steer(a: Agent, s: u32, rng: ptr<function, u32>, clear: i32) -> f32 {

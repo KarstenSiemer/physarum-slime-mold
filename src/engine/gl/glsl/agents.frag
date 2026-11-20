@@ -99,9 +99,31 @@ bool clearPath(vec2 p, vec2 q, int clear) {
   }
   return true;
 }
+#if TERRITORY
+
+// The pressure of the four lanes of the flow of strains A to D, as the flow of the step before left it (flow.frag). A
+// scene with fewer strains binds the pressure of strain A in their place, and no agent reads it there. While the rules
+// of stage 4 run, a sensor reads it as a repellent, with the drift of the strain (`pressure` in agents.wgsl, ADR 0070).
+uniform sampler2D flowPressure;
+uniform sampler2D flowPressure1;
+uniform sampler2D flowPressure2;
+uniform sampler2D flowPressure3;
+
+// The pressure of the flow of strain s at cell q.
+vec4 pressureOf(int s, ivec2 q) {
+  if (s == 1) return texelFetch(flowPressure1, q, 0);
+  if (s == 2) return texelFetch(flowPressure2, q, 0);
+  if (s == 3) return texelFetch(flowPressure3, q, 0);
+  return texelFetch(flowPressure, q, 0);
+}
+#endif
 
 // The sensor at p of an agent at pos; a wall between them reads BLOCKED too (sense in agents.wgsl, ADR 0020).
+#if TERRITORY
+float sensed(vec2 pos, vec2 p, int s, int clear) {
+#else
 float sense(vec2 pos, vec2 p, int s, int clear) {
+#endif
   // The cell as coordinates straight from the wrap (cellXY): cellCoord() of its index would divide.
   ivec2 c = cellXY(ivec2(floor(p)));
 #if SENSE_WALLS
@@ -119,6 +141,17 @@ float sense(vec2 pos, vec2 p, int s, int clear) {
   return dot(texelFetch(trail, q, 0), P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
 #endif
 }
+#if TERRITORY
+
+// What the sensor at p reads while the rules of stage 4 run: minus the drift of the strain times the mean pressure of
+// the four lanes of its flow (sense in agents.wgsl, ADR 0070). A blocked sensor stays blocked.
+float sense(vec2 pos, vec2 p, int s, int clear) {
+  float read = sensed(pos, p, s, clear);
+  if (read == BLOCKED) return BLOCKED;
+  vec4 pr = pressureOf(s, cellXY(ivec2(floor(p))));
+  return read - P.drift[s] * ((pr.x + pr.y + pr.z + pr.w) * 0.25);
+}
+#endif
 
 // Jones 2010, Fig. 3, then the random turn pCD.
 float steer(vec4 a, int s, inout uint rng, int clear) {

@@ -43,8 +43,9 @@ describe('the territory (ADR 0068)', () => {
     const at = FLOW_TERRITORY_SLOT * 4;
     expect(Array.from(f.subarray(at, at + 8))).toEqual(PUSH_CHANCES);
     expect(FLOW_SINK_SLOT * 4).toBe(at + 8);
-    // The steps of a path to ground without slime and to the edge, of the mean, and the weight on slime (sinks.ts).
-    expect(Array.from(f.subarray(at + 8))).toEqual([6, 2, 100, 419430]);
+    // The steps of a path to ground without slime and to the edge, of the mean, and the weight on slime (sinks.ts);
+    // then what the sinks take, in units of the flow strength (ADR 0070).
+    expect(Array.from(f.subarray(at + 8))).toEqual([6, 2, 100, 419430, 2, 0, 0, 0]);
     expect(Array.from(f.subarray(0, at))).toEqual(Array.from(plain.subarray(0, at)));
     // packFlow() clears the slots of stage 4.
     expect(plain.subarray(at).every((v) => v === 0)).toBe(true);

@@ -4,6 +4,12 @@
 // per block of the list of cells and strain; PASS 3 looks at the blocks of a site, a texel per site, strain and lane
 // of 64; PASS 4 takes the least of the lanes, a texel per site and strain.
 
+// The flow takes the sinks of its strain while the rules of stage 4 run (ADR 0070; `//#if TERRITORY` in
+// ../../shaders/flow.wgsl): programs.ts compiles the update and the pressure with it, and gl/sim.ts uses them only
+// then. Without it the source is the one of the code before.
+#ifndef TERRITORY
+#define TERRITORY 0
+#endif
 layout(std140) uniform Flow {
   vec4 a; // I0, gamma, rate, recover
   vec4 b; // base, food conductivity, ghost conductivity, omega
@@ -13,6 +19,13 @@ layout(std140) uniform Flow {
   vec4 f; // reference cell x, y, the strain of the pass, blocks of `cells`
   vec4 g; // steps that a lane keeps its roles, pressure limit of a site, 1 / (the part of it where the flux falls)
   vec4 sites[64]; // its first cell x, y; its cells in `cells`: from z, w of them (sites.ts FlowSites)
+#if TERRITORY
+  // The constants of the rules of stage 4 after the sites (territory.ts packTerritory()): the chances of the push, the
+  // constants of the sinks (sinks.frag), and in x of `take` what the sinks of a strain take together, in units of I0.
+  vec4 push[2];
+  vec4 sinks;
+  vec4 take;
+#endif
 } U;
 
 uniform sampler2D env;
@@ -49,6 +62,15 @@ uniform sampler2D portsIn;
 #if PASS < 2
 // The ports of this step: texel (site, strain), x the port of the site, y its port in the step before; −1 for none.
 uniform sampler2D ports;
+#endif
+#if TERRITORY && PASS < 2
+// The state of the sinks of every strain (sinks.frag PASS 3), texel (k, strain): the update reads the copy of the step
+// before, the pressure the copy of this step.
+uniform sampler2D state;
+#endif
+#if TERRITORY && PASS == 1
+// The sink rates of the strain of this step (sinks.frag PASS 0), with a minus sign for a sink.
+uniform sampler2D rates;
 #endif
 
 out vec4 result;
@@ -131,6 +153,10 @@ float roleCode(ivec2 p) {
 // Whether a flux runs between foods: at least two food sites gave or took in the step before, at their ports of that
 // step (fed in flow.wgsl).
 bool fed() {
+#if TERRITORY
+  // While the rules of stage 4 run, also while the front of the strain took flux in the step before (fed in flow.wgsl).
+  if (texelFetch(state, ivec2(1, int(U.f.z)), 0).x != 0.0) return true;
+#endif
   int found = 0;
   for (int i = 0; i < 64; i++) {
     int c = int(texelFetch(ports, ivec2(i, int(U.f.z)), 0).y);
@@ -226,6 +252,35 @@ vec4 headroom(vec4 pc, vec4 signs) {
   if (count > 0.0) level /= count;
   return clamp((U.g.y - signs * (pc - level)) * U.g.z, vec4(0.0), vec4(1.0));
 }
+#if TERRITORY
+
+// What the sinks of the strain take and what its sources give at the cell p, whose conductivity is g, in this step
+// (sinksAndSources in flow.wgsl, ADR 0070).
+float sinksAndSources(ivec2 p, float g) {
+  int s = int(U.f.z);
+  if (texelFetch(state, ivec2(1, s), 0).x == 0.0) return 0.0;
+  // R, C, N and the covered ports P.
+  vec4 sums = texelFetch(state, ivec2(0, s), 0);
+  float total = U.take.x * U.a.x;
+  int c = p.y * W() + p.x;
+  float q = 0.0;
+  if (g > 0.0) {
+    uint steps = uint(abs(texelFetch(rates, p, 0).r) * 16777216.0);
+    float r = float((steps + 128u) >> 8u) * (1.0 / 65536.0);
+    q -= total * r / sums.x;
+    if (sums.w == 0.0) q += total / sums.y;
+  }
+  // Only a cell with food is the port of a site.
+  if (sums.w > 0.0 && texelFetch(env, p, 0).g > 0.0) {
+    int n = int(U.d.w);
+    for (int i = 0; i < 64; i++) {
+      if (i >= n) break;
+      if (port(i) == c) q += total / sums.w;
+    }
+  }
+  return q;
+}
+#endif
 
 // The cell whose pressure the first two iterations of a step take off: the port of the first site that gives or
 // takes, else the cell of the uniform block (referenceCell in flow.wgsl).
@@ -272,6 +327,10 @@ void main() {
       vec4 signs = roleSigns(m.w);
       given = signs * U.a.x * headroom(pc, signs);
     }
+#if TERRITORY
+    // The same in every lane: what the sinks take and the sources give (ADR 0070).
+    given += vec4(sinksAndSources(p, m.z));
+#endif
     vec4 balanced = (acc + given) / sum;
     vec4 jacobi = pc + U.c.x * (balanced - pc);
     if (recentre == 2) before -= texelFetch(pressureBefore, referenceCell(), 0);

@@ -46,8 +46,9 @@
   ]);
   const specs: { label: string; help: string; ref?: string }[] = [
     ...Object.values(strainSpec),
+    // The panel offers no Drift yet: the rules of stage 4 come to the panel with part E4 of their engine (ADR 0070).
     ...Object.entries(globalSpec)
-      .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength')
+      .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength' && k !== 'drift')
       .map(([, v]) => v),
     // Light strength under the name that the Jones model gives it (ADR 0044).
     repellentSpec,

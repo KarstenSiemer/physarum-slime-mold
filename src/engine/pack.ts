@@ -27,6 +27,7 @@ export const PARAM_SLOTS = [
   'electrode',
   'slimeLow',
   'slime',
+  'drift',
 ] as const;
 export const PARAMS_BYTES = (PARAM_SLOTS.length + 3) * 16;
 
@@ -264,5 +265,9 @@ export function packParams(s: Settings, rt: Runtime, buf = new ArrayBuffer(PARAM
   // of the stamps does not run (slime.wgsl).
   f.set(plasmLevels(s), slot('slimeLow'));
   u[slot('slime')] = slimeSteps(s);
+  // The drift of the rules of stage 4 (ADR 0070; ADR 0065, decision 6): per strain the weight of the pressure of its
+  // flow in its sensors, as the food weight. One setting for all strains for now. Only the agent passes of the rules
+  // read it (agents.wgsl `//#if TERRITORY`).
+  lanes('drift', () => s.drift);
   return buf;
 }
