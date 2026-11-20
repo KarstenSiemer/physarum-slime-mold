@@ -179,6 +179,24 @@ is a band, and no vein forks at the rim; agents lie on 8 to 10 % of the old grou
 `out/e2g/montage/supply-look-8000.png` and `supply-measure-8000.png` (rows: the rules as they are, the rule, the rule
 with `jones=edge`; columns: drift 1.5 seeds 1 and 2, drift 5 seeds 1 and 2). Jobs: `jobs/r1.jobs` in the archive.
 
+## A conductance that follows the thickness of the plasm (ADR 0078)
+
+The owner went on with the crown research on 2026-11-20, with a small try. `bodyOn=cube` (`sim.ts`): the tube body of
+a cell follows s³, with s the share of the open cells of its 3 × 3 block that hold an agent, full at s = 1; a sheet of
+thickness h conducts as h³ (Poiseuille). So a thin layer loses its body and its conductance, and the flux stays in the
+thick plasm. The runs (`out/e2h/r1`, measured again in `out/e2h/r1r`) take the new body alone (row A), with
+`jones=edge` (B) and with `jones=edge shareOn=supply` (C), at drift 1.5 and 5, seeds 1 and 2, step 8,000. A new
+measure, the spread of the pressure over the sinks (the 10th to 90th percentile over the drop from the food to the
+mean of the sinks), tests whether the rim stands at one pressure.
+
+All 12 runs are small colonies of arms of full plasm with blunt ends (613 to 1,223 agents; 1,441 to 1,584 in row C
+without the option): no thin sheet, no sheet at the head, no lobe, no vein that forks at the rim. `form()` counts them
+as trees. The spread reaches 0.56 to 0.61 with equal shares (rows A and B); with `shareOn=supply` it is 0.03 to 0.04
+at drift 1.5 and 0.20 to 0.23 at drift 5 (0.01 to 0.07 without the option). The sinks of `shareOn=supply` level the
+pressure at the rim. No run shows a crown. Montages: `out/e2h/montage/cube-look-8000.png` and
+`cube-measure-8000.png` (rows A, B, C; columns drift 1.5 seeds 1 and 2, drift 5 seeds 1 and 2). Jobs: `jobs/r1.jobs`
+in the archive (`logs/engine/cube-0078/`).
+
 ## Pictures for the owner
 
 In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to its upper 160 rows, at step 8,000:
@@ -193,7 +211,7 @@ In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to 
 
 ## What is not measured
 
-- A sink whose share follows the supply that reaches it: the next rule to try, not built.
+- `shareOn=supply` and `bodyOn=cube` ran 2 seeds at 2 drifts each (ADR 0077, ADR 0078).
 - `jones=edge` in the engine, in the scenes of the app (Tokyo, the mazes, the start scene with three strains), with two
   strains on one slime, and its look in the running app.
 - The dish and the Y-maze at drifts other than 1.5 with `jones=edge`; the lane of 80 × 300 cells; the speed of the

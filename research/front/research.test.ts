@@ -6,7 +6,19 @@ import { FLOW, pcg } from '../../src/engine/flow';
 import { tubeOut, type SinkInput } from '../../src/engine/sinks-reference';
 import { dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, rows, veinDelay } from './measure';
-import { GPU_FORMS, Sim, fillScale, frontFrom, noFront, params, rankKey, supplyLevel, type Front } from './sim';
+import {
+  GPU_FORMS,
+  Sim,
+  bodyLevel,
+  fillScale,
+  frontFrom,
+  noFront,
+  params,
+  rankKey,
+  sinkSpread,
+  supplyLevel,
+  type Front,
+} from './sim';
 import { runY, slimedOf } from './ymaze';
 
 /** The rule set of ADR 0065 (README.md, step 6) with the drift 1.5, and the forms of a GPU of ADR 0067. */
@@ -338,6 +350,35 @@ describe('the CPU prototype of stage 4', () => {
         expect(v).toBeCloseTo(was[i]!, 9);
       });
     }
+  });
+
+  it('gives bodyOn=cube the cube of the share of agents, and a spread of the sinks that reads no level (ADR 0078)', () => {
+    // The cube: full at s = 1, an eighth at s = 1/2, 1/27 at 3 of 9 cells; 'agents' stays s / full, at most 1.
+    expect(bodyLevel('cube', 1, 0.4)).toBe(1);
+    expect(bodyLevel('cube', 0.5, 0.4)).toBe(0.125);
+    expect(bodyLevel('cube', 3 / 9, 0.4)).toBeCloseTo(1 / 27, 15);
+    expect(bodyLevel('agents', 0.2, 0.4)).toBe(0.5);
+    expect(bodyLevel('agents', 0.6, 0.4)).toBe(1);
+    // Sinks at 0, 1, ..., 10 under a food at 15: the 10th to 90th percentile is 1 to 9, the drop 15 − 5.
+    const sinks = Array.from({ length: 11 }, (_, i) => i);
+    expect(sinkSpread(15, sinks)).toBeCloseTo(0.8, 12);
+    // A constant on every pressure and a factor on every pressure change nothing; the order of the sinks neither.
+    expect(
+      sinkSpread(
+        15 + 300,
+        sinks.map((p) => p + 300),
+      ),
+    ).toBeCloseTo(0.8, 12);
+    expect(
+      sinkSpread(
+        15 * 7,
+        [...sinks].reverse().map((p) => p * 7),
+      ),
+    ).toBeCloseTo(0.8, 12);
+    // One pressure at every sink: no spread. No sinks, or no drop: NaN.
+    expect(sinkSpread(2, [1, 1, 1])).toBe(0);
+    expect(sinkSpread(2, [])).toBeNaN();
+    expect(sinkSpread(1, [1, 2])).toBeNaN();
   });
 
   it('marks in the second form only the cells whose agent could claim a child before the moves (ADR 0067)', () => {

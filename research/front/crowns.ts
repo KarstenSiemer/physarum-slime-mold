@@ -1,6 +1,6 @@
 // The crown at the head of a tube (ADR 0076, part E2f of stage 4): a colony that grows from one food onto open ground,
-// with room for its head to spread. Per seed, every `every` steps, the measures of crownProfile() (measure.ts), and
-// pictures at the steps `pics`. Prototype code. Usage:
+// with room for its head to spread. Per seed, every `every` steps, the measures of crownProfile() (measure.ts) and the
+// spread of the pressure over the sinks (`<name>-sinks.jsonl`, ADR 0078), and pictures at the steps `pics`. Prototype code. Usage:
 //   node --import ./research/flow/register.mjs research/front/crowns.ts layout=neck seeds=1-2 steps=8000 pics=4000 \
 //     name=<file> <the rules of stage 4>
 // `layout`: neck (a box of `side` × `long` cells; its first `neckLong` rows are wall but for a channel `neckWide` cells
@@ -23,7 +23,7 @@ import {
   type CrownProfile,
 } from './measure';
 import { look, measureLook, picture } from './picture';
-import { Sim, frontFrom, params, type Front, type Layout } from './sim';
+import { Sim, frontFrom, params, sinkSpread, type Front, type Layout } from './sim';
 
 export interface CrownOptions {
   layout: 'neck' | 'edge' | 'dish';
@@ -159,6 +159,7 @@ if (isMain) {
   const [from = 1, to = from] = (args.seeds ?? '1-1').split('-').map(Number);
   const name = args.name ?? 'crowns';
   const file = `research/front/out/${name}.jsonl`;
+  const sinkFile = `research/front/out/${name}-sinks.jsonl`;
   mkdirSync(file.slice(0, file.lastIndexOf('/')), { recursive: true });
   for (let seed = from; seed <= to; seed++) {
     const layout = crownLayout(o);
@@ -170,6 +171,11 @@ if (isMain) {
       if (k % every === 0) {
         const row = { k, alive: sim.aliveCount, ...crownProfile(sim) };
         rows.push(row);
+        // The spread of the pressure over the sinks (ADR 0078), in a file of its own: the records keep their form.
+        const { food, sinks, ports } = sim.sinkPressures();
+        const drop = food - sinks.reduce((a, b) => a + b, 0) / sinks.length;
+        const spread = sinkSpread(food, sinks);
+        appendFileSync(sinkFile, JSON.stringify({ seed, k, sinks: sinks.length, ports, drop, spread }) + '\n');
       }
       if (dumps.includes(k)) {
         const dir = `research/front/out/${name}-state`;
