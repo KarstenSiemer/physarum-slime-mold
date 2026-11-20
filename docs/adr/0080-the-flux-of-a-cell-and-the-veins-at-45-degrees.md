@@ -5,6 +5,7 @@
 - Extends [ADR 0079](0079-veins-in-a-still-sheet.md) (open point: the diagonal V).
 - The scripts: `research/front/still.ts` (`fluxOn`), `research/front/flux-angle.ts`; `cellFlux()` in
   `research/front/sim.ts`. The raw records are in the archive under `logs/engine/still-0080/`.
+- Extended by [ADR 0081](0081-a-flow-over-8-neighbours.md).
 
 ## Context
 

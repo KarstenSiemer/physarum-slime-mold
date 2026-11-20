@@ -11,7 +11,8 @@
 // `k`: the total of the sinks in units of the one of E2f (norm 2 times the flow strength 8); `base`: the base
 // conductance of a tube cell (0.02 in the app); `shareOn`: equal or supply (ADR 0077); `noise`: the noise of D;
 // `fluxOn`: the flux of a cell, sum (the app) or norm (ADR 0080, part E2j). Since ADR 0080 a row adds the direction of
-// the veins against the grid (gridShares()) and the angle of the main veins at the mouth (mouthAngles()).
+// the veins against the grid (gridShares()) and the angle of the main veins at the mouth (mouthAngles()). `stencil`: the
+// edges of the flow, 4 (the app) or 8 (ADR 0081, part E2k).
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -124,11 +125,20 @@ export interface StillOptions {
   shareOn: 'equal' | 'supply';
   noise: number;
   fluxOn: Front['fluxOn'];
+  /** The edges of the flow, 4 or 8 (ADR 0081). */
+  stencil: number;
 }
 
 /** A Sim on the still sheet: no agents, a full body held by its trail, the rim as the sinks, D fresh with noise. */
 export function stillSim(sheet: StillSheet, o: StillOptions): Sim {
-  const words = { ...E2F_WORDS, norm: String(2 * o.k), paid: String(20 * o.k), shareOn: o.shareOn, fluxOn: o.fluxOn };
+  const words = {
+    ...E2F_WORDS,
+    norm: String(2 * o.k),
+    paid: String(20 * o.k),
+    shareOn: o.shareOn,
+    fluxOn: o.fluxOn,
+    stencil: String(o.stencil),
+  };
   const sim = new Sim(sheet.layout, params({ seed: o.seed, front: frontFrom(words), scentSteps: 0, startAgents: 0 }));
   sim.base = o.base;
   sim.stillSinks = sheet.rim;
@@ -180,6 +190,32 @@ export interface StillRow {
 }
 
 const round = (v: number, n = 4) => (Number.isFinite(v) ? Number(v.toPrecision(n)) : NaN);
+
+/** The parts of a set of cells (8 neighbours) and their mean cells: the veins that cross an arc. */
+export function partsOf(set: Set<number>, w: number, h: number): { n: number; cells: number } {
+  let [n, size] = [0, 0];
+  const done = new Set<number>();
+  for (const c of set) {
+    if (done.has(c)) continue;
+    n++;
+    const stack = [c];
+    done.add(c);
+    while (stack.length > 0) {
+      const a = stack.pop()!;
+      size++;
+      const [x, y] = [a % w, Math.floor(a / w)];
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const [xx, yy] = [x + dx, y + dy];
+          const m = yy * w + xx;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h || !set.has(m) || done.has(m)) continue;
+          done.add(m);
+          stack.push(m);
+        }
+    }
+  }
+  return { n, cells: n > 0 ? size / n : 0 };
+}
 
 /**
  * The axis of each vein cell (a cell of `ridge`, ridgeCells()) in degrees from the x axis, 0 to 180: across the main
@@ -306,30 +342,7 @@ export function stillProfile(
   const ridge = ridgeCells(fields, 1.5, 4, VEIN_D);
   const fine = ridgeCells(fields, 1.5, 4, FINE_D);
   const [toward, fineToward] = [veinTowardRim(fields, ridge), veinTowardRim(fields, fine)];
-  const parts = (set: Set<number>) => {
-    let [n, size] = [0, 0];
-    const done = new Set<number>();
-    for (const c of set) {
-      if (done.has(c)) continue;
-      n++;
-      const stack = [c];
-      done.add(c);
-      while (stack.length > 0) {
-        const a = stack.pop()!;
-        size++;
-        const [x, y] = [a % w, Math.floor(a / w)];
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const [xx, yy] = [x + dx, y + dy];
-            const m = yy * w + xx;
-            if (xx < 0 || yy < 0 || xx >= w || yy >= h || !set.has(m) || done.has(m)) continue;
-            done.add(m);
-            stack.push(m);
-          }
-      }
-    }
-    return { n, cells: n > 0 ? size / n : 0 };
-  };
+  const parts = (set: Set<number>) => partsOf(set, w, h);
   const meanOf = (list: number[], v: (c: number) => number) => {
     const xs = list.map(v).filter(Number.isFinite);
     return xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
@@ -397,7 +410,7 @@ const RAMP = [
 ] as const;
 
 /** The colour of log10 D from -3 (dark) to 0 (pale yellow). */
-function ramp(d: number): [number, number, number] {
+export function ramp(d: number): [number, number, number] {
   const t = Math.min(1, Math.max(0, (Math.log10(Math.max(d, 1e-6)) + 3) / 3));
   for (let i = 1; i < RAMP.length; i++) {
     const [t1, r1, g1, b1] = RAMP[i]!;
@@ -495,10 +508,11 @@ if (isMain) {
     shareOn,
     noise: Number(args.noise ?? 0.01),
     fluxOn,
+    stencil: Number(args.stencil ?? 4),
   };
   const steps = Number(args.steps ?? 8000);
   const every = Number(args.every ?? 500);
-  for (const n of [o.seed, o.k, o.base, o.noise, steps, every])
+  for (const n of [o.seed, o.k, o.base, o.noise, o.stencil, steps, every])
     if (!Number.isFinite(n)) throw new Error('a number does not parse');
   const pics = (args.pics ?? '').split(',').filter(Boolean).map(Number);
   const name = args.name ?? 'e2i/still';

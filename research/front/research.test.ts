@@ -8,6 +8,7 @@ import { box, dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, ridgeCells, rows, veinDelay, type CrownFields } from './measure';
 import {
   GPU_FORMS,
+  STENCIL8,
   Sim,
   bodyLevel,
   fillScale,
@@ -644,6 +645,69 @@ describe('the CPU prototype of stage 4', () => {
     const sink = (x: number) => F * Math.abs(x);
     expect(flux('sum', sink)).toBeCloseTo(1, 4);
     expect(flux('norm', sink)).toBeCloseTo(1, 4);
+  });
+
+  it('reads a uniform flow F as F at 0° and 45° and 1.08 · F at 22.5° with stencil=8 (ADR 0081)', () => {
+    const F = 0.3;
+    const front = frontFrom({ stencil: '8' });
+    for (const [deg, want] of [
+      [0, 1],
+      [22.5, 1.08239],
+      [45, 1],
+    ] as const) {
+      const t = (deg * Math.PI) / 180;
+      const sim = new Sim(box(9, 9, []), params({ scentSteps: 0, startAgents: 0, front }));
+      for (let c = 0; c < sim.cells; c++) {
+        const [x, y] = [(c % 9) - 4, Math.floor(c / 9) - 4];
+        sim.G[c] = 1;
+        sim.P[0]![c] = -F * (x * Math.cos(t) + y * Math.sin(t));
+      }
+      sim.fluxOfCells();
+      expect(sim.Q[4 * 9 + 4]! / F).toBeCloseTo(want, 4);
+    }
+    expect(STENCIL8.axis + 2 * STENCIL8.diag).toBeCloseTo(1, 12);
+    expect(() => new Sim(box(9, 9, []), params({ front: frontFrom({ stencil: '6' }) }))).toThrow();
+    expect(() => new Sim(box(9, 9, []), params({ front: frontFrom({ stencil: '8', fluxOn: 'norm' }) }))).toThrow();
+  });
+
+  it('lets a vein of one cell along a diagonal read its flux and conduct as one along an axis with stencil=8 (ADR 0081)', () => {
+    // Only the cells of the vein conduct; a source of 1 at one end, a sink at the other, the pressure solved exactly.
+    const vein = (cells: [number, number][]) => {
+      const sim = new Sim(
+        box(14, 14, []),
+        params({ scentSteps: 0, startAgents: 0, front: frontFrom({ stencil: '8' }) }),
+      );
+      for (const [x, y] of cells) sim.G[y * 14 + x] = 1;
+      sim.extra[cells[0]![1] * 14 + cells[0]![0]] = 1;
+      sim.extra[cells.at(-1)![1] * 14 + cells.at(-1)![0]] = -1;
+      sim.solveExact();
+      const [a, b] = [cells[3]!, cells[8]!];
+      const fall = Math.abs(sim.P[0]![a[1] * 14 + a[0]]! - sim.P[0]![b[1] * 14 + b[0]]!);
+      return { q: sim.Q[cells[5]![1] * 14 + cells[5]![0]]!, conduct: Math.hypot(b[0] - a[0], b[1] - a[1]) / fall };
+    };
+    const along = vein(Array.from({ length: 12 }, (_, i) => [1 + i, 6] as [number, number]));
+    const diagonal = vein(Array.from({ length: 12 }, (_, i) => [1 + i, 1 + i] as [number, number]));
+    expect(along.q).toBeCloseTo(1, 6);
+    expect(diagonal.q).toBeCloseTo(1, 6);
+    expect(along.conduct).toBeCloseTo(STENCIL8.axis, 6);
+    expect(diagonal.conduct).toBeCloseTo(STENCIL8.axis, 6);
+  });
+
+  it('lets a diagonal edge of stencil=8 pass no corner of a wall (ADR 0081)', () => {
+    // A square of 2 × 2 cells; a source of 1 at (0, 0), a sink at (1, 1), G = 1. With the wall at (1, 0) the flux
+    // takes the two axis edges through (0, 1); without it the diagonal joins the two cells too.
+    const drop = (wall: boolean) => {
+      const layout = box(2, 2, []);
+      if (wall) [layout.open[1], layout.wall[1]] = [0, 1];
+      const sim = new Sim(layout, params({ scentSteps: 0, startAgents: 0, front: frontFrom({ stencil: '8' }) }));
+      for (let c = 0; c < 4; c++) if (layout.open[c]) sim.G[c] = 1;
+      [sim.extra[0], sim.extra[3]] = [1, -1];
+      sim.solveExact();
+      return { drop: sim.P[0]![0]! - sim.P[0]![3]!, q: sim.Q[2]! };
+    };
+    expect(drop(true).drop).toBeCloseTo(2 / STENCIL8.axis, 6);
+    expect(drop(true).q).toBeCloseTo(1, 6);
+    expect(drop(false).drop).toBeCloseTo(1 / (STENCIL8.axis + STENCIL8.diag), 6);
   });
 
   it('reads the axis of a straight vein at any angle to the grid within half a degree (ADR 0080)', () => {

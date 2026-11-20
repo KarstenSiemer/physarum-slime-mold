@@ -215,6 +215,13 @@ export interface Front {
    * at every angle with 'norm'.
    */
   fluxOn: 'sum' | 'norm';
+  /**
+   * The edges of the flow (ADR 0081, a try): 4, the axis neighbours, as the app; or 8, also the diagonal neighbours,
+   * in the solve of the pressure, in the fluxes and in the flux of a cell. With 8 an axis edge has the weight
+   * STENCIL8.axis and a diagonal edge STENCIL8.diag, and Q is half the sum of the sizes of the fluxes over the 8
+   * edges (fluxOn must be 'sum'). A diagonal edge passes no corner of a wall: both cells beside it must be open.
+   */
+  stencil: number;
 }
 
 export interface Params {
@@ -280,6 +287,7 @@ export const noFront = (): Front => ({
   jones: 'all',
   shareOn: 'equal',
   fluxOn: 'sum',
+  stencil: 4,
 });
 
 /** The words that a text option of `Front` takes. */
@@ -456,6 +464,17 @@ export function cellFlux(on: Front['fluxOn'], e: number, w: number, s: number, n
   return Math.sqrt(ax * ax + ay * ay);
 }
 
+/**
+ * The weights of the edges of `stencil` 8 (ADR 0081): an axis edge conducts STENCIL8.axis times the harmonic mean of
+ * its two cells, a diagonal edge STENCIL8.diag times. Their ratio is 1/√2. Then a broad uniform flow reads the same
+ * flux at 0° and at 45° (and at most 1.08 times more between, at 22.5°: the width of a regular octagon), and a vein of
+ * one cell conducts the same along an axis and along a diagonal (one diagonal edge per √2 cells of length). The sum
+ * axis + 2 · diag is 1: a uniform sheet conducts as with 4 edges, in every direction. The weights of the isotropic
+ * 9-point Laplacian (2/3 and 1/6) read a broad flow 1.18 times higher off the axes and let a thin diagonal vein
+ * conduct 0.35 times as well as a thin vein along an axis.
+ */
+export const STENCIL8 = { axis: Math.SQRT2 - 1, diag: 1 - Math.SQRT1_2 } as const;
+
 export class Sim {
   readonly w: number;
   readonly h: number;
@@ -489,6 +508,12 @@ export class Sim {
   private readonly walls: boolean;
   /** The four neighbours of a cell (east, west, south, north) for the flow, −1 for none. */
   private readonly nb: Int32Array;
+  /**
+   * With `stencil` 8 (ADR 0081): the four diagonal neighbours of a cell (south-east, north-west, south-west,
+   * north-east), −1 for none and where the edge would pass the corner of a wall. Empty with 4.
+   */
+  private readonly nbd: Int32Array;
+  private readonly eight: boolean;
   // The flow (section 8): memory D, tube body B, conductivity G, the role code of a port, pressure per lane.
   readonly D: Float32Array;
   readonly B: Float32Array;
@@ -503,6 +528,9 @@ export class Sim {
   private readonly fmean: Float32Array;
   private readonly edgeE: Float32Array;
   private readonly edgeS: Float32Array;
+  /** The diagonal edges of `stencil` 8: to the south-east and to the south-west neighbour. */
+  private readonly edgeSE: Float32Array;
+  private readonly edgeSW: Float32Array;
   private ports: Int32Array;
   private portsPrev: Int32Array;
   private lanes = 1;
@@ -586,6 +614,13 @@ export class Sim {
     const { w, h } = layout;
     // The marks of `paidBy` 'chance' follow the sink rates: they are the form of `paidOn` 'sinks'.
     if (p.front.paidBy !== 'order' && p.front.paidOn !== 'sinks') throw new Error('paidBy needs paidOn=sinks');
+    const stencil = p.front.stencil;
+    if (stencil !== 4 && stencil !== 8) throw new Error(`stencil=${String(stencil)}: 4 or 8`);
+    // The 8 edges cover the solve, the fluxes and the flux of a cell; the ground of the drift keeps its 4 edges.
+    if (stencil === 8 && p.front.fluxOn !== 'sum') throw new Error('stencil=8 needs fluxOn=sum');
+    if (stencil === 8 && (p.front.driftOn === 'leak' || p.front.driftOn === 'extend'))
+      throw new Error(`stencil=8 does not solve the ground of driftOn=${p.front.driftOn}`);
+    this.eight = stencil === 8;
     this.w = w;
     this.h = h;
     const n = w * h;
@@ -623,6 +658,8 @@ export class Sim {
     this.fmean = new Float32Array(n);
     this.edgeE = new Float32Array(n);
     this.edgeS = new Float32Array(n);
+    this.edgeSE = new Float32Array(this.eight ? n : 0);
+    this.edgeSW = new Float32Array(this.eight ? n : 0);
     this.ports = new Int32Array(layout.sites.length).fill(-1);
     this.portsPrev = new Int32Array(layout.sites.length).fill(-1);
     this.S = new Uint32Array(n);
@@ -650,6 +687,18 @@ export class Sim {
           xx < 0 || yy < 0 || xx >= w || yy >= h || !open[yy * w + xx] ? -1 : yy * w + xx;
         this.nb.set([at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)], c * 4);
       }
+    // The diagonal neighbours of `stencil` 8: the edge to (x + dx, y + dy) needs (x + dx, y) and (x, y + dy) open.
+    this.nbd = new Int32Array(this.eight ? n * 4 : 0).fill(-1);
+    if (this.eight)
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const c = y * w + x;
+          if (!open[c]) continue;
+          const ok = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < w && yy < h && !!open[yy * w + xx];
+          const diag = (dx: number, dy: number) =>
+            ok(x + dx, y + dy) && ok(x + dx, y) && ok(x, y + dy) ? (y + dy) * w + x + dx : -1;
+          this.nbd.set([diag(1, 1), diag(-1, -1), diag(-1, 1), diag(1, -1)], c * 4);
+        }
     this.clear = new Uint8Array(n).fill(255);
     this.walls = wall.some((v) => v === 1);
     if (this.walls) {
@@ -1662,6 +1711,10 @@ export class Sim {
     const { open } = this.layout;
     const { cells, nb, G } = this;
     const on = this.p.front.fluxOn;
+    if (this.eight) {
+      this.fluxOfCells8();
+      return;
+    }
     for (let c = 0; c < cells; c++) {
       if (!open[c]) continue;
       const e = nb[c * 4]!;
@@ -1687,6 +1740,75 @@ export class Sim {
           s >= 0 ? this.edgeS[c]! * Math.abs(pc - P[s]!) : 0,
           nn >= 0 ? this.edgeS[nn]! * Math.abs(pc - P[nn]!) : 0,
         );
+        const qg = q <= 0 ? 0 : Math.pow(q, FLOW.gamma);
+        this.fmean[c]! += qg / (1 + qg) / this.lanes;
+        this.Q[c]! += q / this.lanes;
+      }
+    }
+  }
+
+  /**
+   * The conductances of the edges of `stencil` 8 (ADR 0081) from G plus `ghost` on both cells: the east and the south
+   * edge of a cell times STENCIL8.axis, its south-east and south-west edge times STENCIL8.diag.
+   */
+  private edges8(ghost: number) {
+    const { open } = this.layout;
+    const { cells, nb, nbd, G } = this;
+    const { axis, diag } = STENCIL8;
+    for (let c = 0; c < cells; c++) {
+      if (!open[c]) continue;
+      const gc = G[c]! + ghost;
+      const e = nb[c * 4]!;
+      const s = nb[c * 4 + 2]!;
+      const se = nbd[c * 4]!;
+      const sw = nbd[c * 4 + 2]!;
+      this.edgeE[c] = e >= 0 ? axis * harmonic(gc, G[e]! + ghost) : 0;
+      this.edgeS[c] = s >= 0 ? axis * harmonic(gc, G[s]! + ghost) : 0;
+      this.edgeSE[c] = se >= 0 ? diag * harmonic(gc, G[se]! + ghost) : 0;
+      this.edgeSW[c] = sw >= 0 ? diag * harmonic(gc, G[sw]! + ghost) : 0;
+    }
+  }
+
+  /**
+   * The pressure of lane 0 solved exactly from G and `extra` as they stand (no roles), then fluxOfCells(): for the
+   * measures of a flux by hand (ADR 0081, flux-angle.ts), which set G and the sources themselves.
+   */
+  solveExact() {
+    this.exactPressure(0);
+    this.fluxOfCells();
+  }
+
+  /** fluxOfCells() with `stencil` 8: Q is half the sum of the sizes of the fluxes over the 8 edges of a cell. */
+  private fluxOfCells8() {
+    const { open } = this.layout;
+    const { cells, nb, nbd } = this;
+    const { edgeE, edgeS, edgeSE, edgeSW } = this;
+    this.edges8(0);
+    this.fmean.fill(0);
+    this.Q.fill(0);
+    for (let l = 0; l < this.lanes; l++) {
+      const P = this.P[l]!;
+      for (let c = 0; c < cells; c++) {
+        if (!open[c]) continue;
+        const pc = P[c]!;
+        const e = nb[c * 4]!;
+        const wv = nb[c * 4 + 1]!;
+        const s = nb[c * 4 + 2]!;
+        const nn = nb[c * 4 + 3]!;
+        const se = nbd[c * 4]!;
+        const nw = nbd[c * 4 + 1]!;
+        const sw = nbd[c * 4 + 2]!;
+        const ne = nbd[c * 4 + 3]!;
+        let sum = 0;
+        if (e >= 0) sum += edgeE[c]! * Math.abs(pc - P[e]!);
+        if (wv >= 0) sum += edgeE[wv]! * Math.abs(pc - P[wv]!);
+        if (s >= 0) sum += edgeS[c]! * Math.abs(pc - P[s]!);
+        if (nn >= 0) sum += edgeS[nn]! * Math.abs(pc - P[nn]!);
+        if (se >= 0) sum += edgeSE[c]! * Math.abs(pc - P[se]!);
+        if (nw >= 0) sum += edgeSE[nw]! * Math.abs(pc - P[nw]!);
+        if (sw >= 0) sum += edgeSW[c]! * Math.abs(pc - P[sw]!);
+        if (ne >= 0) sum += edgeSW[ne]! * Math.abs(pc - P[ne]!);
+        const q = 0.5 * sum;
         const qg = q <= 0 ? 0 : Math.pow(q, FLOW.gamma);
         this.fmean[c]! += qg / (1 + qg) / this.lanes;
         this.Q[c]! += q / this.lanes;
@@ -2013,13 +2135,16 @@ export class Sim {
     const limit = FLOW.head * i0;
     const limitScale = 1 / (FLOW.headSoft * limit);
     // Edges with the ghost conductance, of this step's conductivities.
-    for (let c = 0; c < cells; c++) {
-      if (!open[c]) continue;
-      const e = nb[c * 4]!;
-      const s = nb[c * 4 + 2]!;
-      this.edgeE[c] = e >= 0 ? harmonic(G[c]! + ghost, G[e]! + ghost) : 0;
-      this.edgeS[c] = s >= 0 ? harmonic(G[c]! + ghost, G[s]! + ghost) : 0;
-    }
+    const { eight, nbd, edgeSE, edgeSW } = this;
+    if (eight) this.edges8(ghost);
+    else
+      for (let c = 0; c < cells; c++) {
+        if (!open[c]) continue;
+        const e = nb[c * 4]!;
+        const s = nb[c * 4 + 2]!;
+        this.edgeE[c] = e >= 0 ? harmonic(G[c]! + ghost, G[e]! + ghost) : 0;
+        this.edgeS[c] = s >= 0 ? harmonic(G[c]! + ghost, G[s]! + ghost) : 0;
+      }
     const acting = Array.from(this.ports).filter((c) => c >= 0 && this.role[c] !== 0);
     const [sx, sy] = this.layout.start;
     const first = sites[0]?.[0] ?? this.cellOf(sx, sy);
@@ -2049,7 +2174,26 @@ export class Sim {
           const gw = wv >= 0 ? this.edgeE[wv]! : 0;
           const gs = s >= 0 ? this.edgeS[c]! : 0;
           const gn = nn >= 0 ? this.edgeS[nn]! : 0;
-          const sum = ge + gw + gs + gn;
+          let sum = ge + gw + gs + gn;
+          let se = -1;
+          let nw = -1;
+          let sw = -1;
+          let ne = -1;
+          let gse = 0;
+          let gnw = 0;
+          let gsw = 0;
+          let gne = 0;
+          if (eight) {
+            se = nbd[c * 4]!;
+            nw = nbd[c * 4 + 1]!;
+            sw = nbd[c * 4 + 2]!;
+            ne = nbd[c * 4 + 3]!;
+            gse = se >= 0 ? edgeSE[c]! : 0;
+            gnw = nw >= 0 ? edgeSE[nw]! : 0;
+            gsw = sw >= 0 ? edgeSW[c]! : 0;
+            gne = ne >= 0 ? edgeSW[ne]! : 0;
+            sum += gse + gnw + gsw + gne;
+          }
           const pc = P[c]!;
           let next = pc;
           if (sum > 0) {
@@ -2058,6 +2202,10 @@ export class Sim {
             if (gw > 0) acc += gw * P[wv]!;
             if (gs > 0) acc += gs * P[s]!;
             if (gn > 0) acc += gn * P[nn]!;
+            if (gse > 0) acc += gse * P[se]!;
+            if (gnw > 0) acc += gnw * P[nw]!;
+            if (gsw > 0) acc += gsw * P[sw]!;
+            if (gne > 0) acc += gne * P[ne]!;
             const code = this.role[c]!;
             let src = this.extra[c]!;
             if (code !== 0) {
@@ -2096,26 +2244,30 @@ export class Sim {
     if (n === 0) return;
     const index = new Int32Array(cells).fill(-1);
     on.forEach((c, i) => (index[c] = i));
-    const links = new Int32Array(n * 4).fill(-1);
-    const cond = new Float64Array(n * 4);
+    // The links of a cell: its 4 axis edges, and with `stencil` 8 its 4 diagonal edges (ADR 0081).
+    const K = this.eight ? 8 : 4;
+    const { axis, diag: diagonal } = STENCIL8;
+    const links = new Int32Array(n * K).fill(-1);
+    const cond = new Float64Array(n * K);
     const diag = new Float64Array(n);
     for (let i = 0; i < n; i++) {
       const c = on[i]!;
-      for (let e = 0; e < 4; e++) {
-        const m = nb[c * 4 + e]!;
+      for (let e = 0; e < K; e++) {
+        const m = e < 4 ? nb[c * 4 + e]! : this.nbd[c * 4 + e - 4]!;
         if (m < 0 || index[m]! < 0) continue;
-        const g = harmonic(G[c]!, G[m]!);
-        links[i * 4 + e] = index[m]!;
-        cond[i * 4 + e] = g;
+        const mean = harmonic(G[c]!, G[m]!);
+        const g = !this.eight ? mean : (e < 4 ? axis : diagonal) * mean;
+        links[i * K + e] = index[m]!;
+        cond[i * K + e] = g;
         diag[i]! += g;
       }
     }
     const apply = (x: Float64Array, y: Float64Array) => {
       for (let i = 0; i < n; i++) {
         let v = diag[i]! * x[i]!;
-        for (let e = 0; e < 4; e++) {
-          const j = links[i * 4 + e]!;
-          if (j >= 0) v -= cond[i * 4 + e]! * x[j]!;
+        for (let e = 0; e < K; e++) {
+          const j = links[i * K + e]!;
+          if (j >= 0) v -= cond[i * K + e]! * x[j]!;
         }
         y[i] = v;
       }
@@ -2146,8 +2298,8 @@ export class Sim {
           const a = stack.pop()!;
           s += b[a]!;
           z++;
-          for (let e = 0; e < 4; e++) {
-            const j = links[a * 4 + e]!;
+          for (let e = 0; e < K; e++) {
+            const j = links[a * K + e]!;
             if (j >= 0 && part[j]! < 0) {
               part[j] = parts;
               stack.push(j);
