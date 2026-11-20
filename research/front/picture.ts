@@ -148,3 +148,42 @@ export function look(sim: Sim, view: View, path: string) {
     }
   writePng(path, W, H, rgb);
 }
+
+/**
+ * A picture of the measure of the crown (crownProfile(), ADR 0076), cell by cell: ground that the front reached is
+ * grey, a tube body dark yellow, thick plasm bright yellow, the ridges of D that count as veins white, and the lines
+ * blue: the cells that the front reached within `line` / 2 steps of the ages `marks` (the outlines of the front then).
+ */
+export function measureLook(
+  sim: Sim,
+  view: View,
+  path: string,
+  ridge: Uint8Array,
+  marks: readonly number[],
+  line: number,
+  thick: (c: number) => boolean,
+) {
+  const { w } = sim;
+  const { open } = sim.layout;
+  const { zoom } = view;
+  const W = view.w * zoom;
+  const H = view.h * zoom;
+  const rgb = new Uint8Array(W * H * 3);
+  for (let py = 0; py < H; py++)
+    for (let px = 0; px < W; px++) {
+      const c = (view.y + Math.floor(py / zoom)) * w + view.x + Math.floor(px / zoom);
+      const reached = open[c] === 1 && sim.F[c]! > 0;
+      const age = sim.step - sim.F[c]!;
+      let col = open[c] ? [24, 24, 28] : [72, 72, 72];
+      if (reached) col = [60, 60, 66];
+      if (sim.B[c]! >= 0.05) col = [110, 92, 40];
+      if (thick(c)) col = [215, 180, 70];
+      if (ridge[c]) col = [255, 255, 255];
+      if (reached && marks.some((m) => Math.abs(age - m) < line / 2)) col = [70, 120, 255];
+      const o = (py * W + px) * 3;
+      rgb[o] = col[0]!;
+      rgb[o + 1] = col[1]!;
+      rgb[o + 2] = col[2]!;
+    }
+  writePng(path, W, H, rgb);
+}
