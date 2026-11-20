@@ -286,7 +286,9 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
     async (boundary: Boundary) => {
       const [w, h] = [46, 40];
       const n = w * h;
-      const s = stage4({ boundary, seed: 61 });
+      // The agents stay in their cells (a step size of 0): the owners are the cells that the test fills, on every GPU,
+      // so the counts below do not hang on how a GPU rounds a move.
+      const s = stage4({ boundary, seed: 61, strains: TWO.map((st) => ({ ...st, stepSize: 0 })) });
       const sim = await make({ ...s, collisions: false }, w, h, n);
       // Food dabs, each in a patch of tube of strain 0 that no other tube joins: its port lets the patch keep its
       // sinks. On the periodic grid the patches lie across the seam, and each port lies at x = 0: a sink at x = 44 or
