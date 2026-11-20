@@ -151,4 +151,3 @@ what each part holds, and what the next agent needs to know. The rules in force 
 
 - The time of a step with the rules on either backend.
 - Any scene with the rules: the speed of the front in the engine, the crown of each drift, the Y-maze, the dish (E4).
-- The tests of E2b in the image of CI (SwiftShader).

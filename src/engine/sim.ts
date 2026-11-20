@@ -2510,8 +2510,8 @@ class Kernels {
   }
 
   /**
-   * The passes of the flow in the tubes (flow.wgsl), built at their first use. `sinks`: the update and the pressure that
-   * take the sinks of the rules of stage 4 (`//#if TERRITORY`, ADR 0070), with the ports of the passes without them.
+   * The passes of the flow in the tubes (flow.wgsl), built at their first use. `sinks`: with the update and the pressure
+   * that take the sinks of the rules of stage 4 (`//#if TERRITORY`, ADR 0070); the passes of the ports stay the same.
    * Without the rules the source is the one of the code before, character for character.
    */
   flowPasses(sinks = false): FlowKernels {

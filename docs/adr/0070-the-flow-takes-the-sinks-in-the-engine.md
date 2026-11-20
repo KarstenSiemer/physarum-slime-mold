@@ -78,18 +78,20 @@ pressure of the lanes.
   and TY37, whose texts follow the code of the link and of the Jones model now
   (`research/flow/logs/engine/flow-sinks-0070/mutations.txt`). A wrong rule of WGSL keeps reading each binding: a
   binding that a pass does not read leaves its layout, and every test would then fail for that alone.
-- **Where**: the whole GPU suite (1,407 tests) on an M3 Pro; not in the image of CI.
+- **Where**: the whole GPU suite (1,407 tests) on an M3 Pro, and `flow-sinks.gpu.test.ts`, `sinks.gpu.test.ts` and
+  `territory.gpu.test.ts` in the image of CI (SwiftShader; 48 of 48 tests, the new file in 34 s).
 - **No scene changes**: the digests of every scene after 500 steps on both backends, with the state of the flow, equal
   those of the record of ADR 0069 in 62 of 62 runs (`research/flow/README.md`, part 29).
 
 ## Consequences
 
-- The rules of stage 4 now move the plasm: with them a colony streams to its front, and its tubes adapt to the flux
-  that the front takes. Part E3 pays births with that flux (`research/front/ENGINE.md`).
+- With the rules on, the agents turn down the pressure, to the sinks, and the tubes adapt to the flux that the front
+  takes. How a scene runs with that is not measured (part E4). Part E3 pays births with that flux
+  (`research/front/ENGINE.md`).
 - The agent pass of WebGL2 samples 16 textures while the rules run, the least that a device has: a new sampler there
   needs a texture less elsewhere, for example the flow textures as arrays (ADR 0067, open points).
-- Not measured: the time of a step with the rules, any scene with the rules (the crown, the speed of the front, the
-  Y-maze and the dish in the engine), and the new tests in the image of CI.
+- Not measured: the time of a step with the rules, and any scene with the rules (the crown, the speed of the front, the
+  Y-maze and the dish in the engine).
 
 ## Open points
 
