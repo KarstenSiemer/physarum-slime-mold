@@ -6,6 +6,7 @@
 - Date: 2026-11-20
 - Extends [ADR 0077](0077-a-sink-whose-share-follows-its-supply.md) and
   [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (finding 4, what the rules lack, point 2).
+- Extended by [ADR 0079](0079-veins-in-a-still-sheet.md).
 - In short: the section "A conductance that follows the thickness of the plasm" of
   [`research/front/the-crown-at-the-head.md`](../../research/front/the-crown-at-the-head.md); the raw records are in
   the archive under `logs/engine/cube-0078/`.
