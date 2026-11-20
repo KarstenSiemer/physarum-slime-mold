@@ -218,6 +218,8 @@ of the sinks before decision 8:
 - The forms of the drift of part E2d (ADR 0074), more words of `driftOn`: `take`, `mirror`, `sinks`, `rim`, `leak` and
   `extend` (the comment of `Front.driftOn` in `sim.ts` says what each reads). `shift.sh` runs the shift test,
   `forms.sh` the targets, `lane.ts` the lane and `reads.ts` what the front reads; `E2d-NOTES.md` has the commands.
+- Part E2e of the engine (ADR 0075) builds `driftOn=take` in both backends. `e2e-backends.gpu.test.ts` runs the start
+  scene with it on both backends, and `e2e-summary.ts` sums the runs up; `E2e-NOTES.md` has the commands.
 
 ## Commands
 

@@ -487,7 +487,9 @@ The agent senses only if the step senses: always sensing first; moving first in 
 - Otherwise it reads V = Σ_l A[s][l] · σ_K(T_l) + w_F[s] · C_F − w_L[s] · C_L, with σ_K(t) = t without saturation
   (section 6.8). In the Jones model w_F = w_L = A[0][0], the own weight +1 or −1 (section 6.4). So a strain that
   follows its trail turns away from a repellent, and a strain that flees its trail turns toward it.
-- While the rules of stage 4 run, it reads V minus the drift times the mean pressure of the flow of its strain (8.7).
+- While the rules of stage 4 run, it reads V minus the drift times a pressure of the flow of its strain (8.7): that of
+  its cell if the cell holds a tube of the strain, else that of the agent's cell less the drop that the flux of the
+  sink there would have over the sensor offset. An agent on a cell without a tube of its strain reads V alone.
 
 ### 7.4 Turning
 
@@ -664,10 +666,10 @@ row 4.
 
 ### 8.7 The flow with the rules of stage 4
 
-ADR 0070, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisions 3, 6, 8 and 9). Code: the lines
-between `//#if TERRITORY` and `//#endif` in `shaders/flow.wgsl` and `shaders/agents.wgsl`, and `#if TERRITORY` in
-`gl/glsl/flow.frag` and `agents.frag`; CPU reference `sinksAndSources()`, `flowUpdate()` and `drifted()` in
-`src/engine/flow-reference.ts`.
+ADR 0070, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisions 3, 6, 8 and 9), with the drift
+`take` of ADR 0074 (ADR 0075). Code: the lines between `//#if TERRITORY` and `//#endif` in `shaders/flow.wgsl` and
+`shaders/agents.wgsl`, and `#if TERRITORY` in `gl/glsl/flow.frag` and `agents.frag`; CPU reference
+`sinksAndSources()`, `flowUpdate()`, `takesOf()`, `groundOf()` and `drifted()` in `src/engine/flow-reference.ts`.
 
 While the rules of stage 4 run (6.10), the flow of each strain takes the sinks of that strain (6.11): the growth front
 draws flux, and the plasm streams to it. No scene turns the rules on yet. Without them the passes have the source of
@@ -685,16 +687,31 @@ the code before, character for character.
 - **The adaptation** of 8.4: a tube adapts also while the front of its strain took flux in the step before (its state
   of that step), as while two sites had a role. A strain without a sink and with fewer than two sites with a role keeps
   its flow memory.
-- **The drift**: a sensor of an agent of strain s that is not blocked reads V − δ · (P_0 + P_1 + P_2 + P_3) / 4, with V
-  of 7.3 and P_k the pressure of lane k of the flow of s at its cell, as the flow of the step before left it. δ is the
-  setting `drift`, a lane per strain of the parameters, as the food weight; one value for all strains now. So the plasm
-  streams down the pressure, to the sinks. The drift sets the form of the front (ADR 0065, decision 6): 0 a tree of
-  tubes with small heads, 1.25 to 1.5 a tube with a crown, 5 a fan. Its default 1.5 is provisional (ADR 0070).
+- **The drift** (ADR 0075; the form `take` of ADR 0074): take P̄ = (P_0 + P_1 + P_2 + P_3) / 4, the mean pressure of
+  the four lanes of the flow of s, and G_s, the conductivity of the memory of s, both as the flow of the step before
+  left them. A cell holds a tube of s where G_s > 0, which is where its tube body is 0.05 or more. An agent of strain s
+  on a cell a with a tube of s reads at a sensor that is not blocked V − δ · P̄(c), with V of 7.3, if the cell c of the
+  sensor holds a tube of s, and else V − δ · (P̄(a) − SO · t_a / G_s(a)): t_a is what the sink of a took in that step,
+  S · r_a / R_s as the pressure took it (0 while the front of s took no flux), and SO the sensor offset. So the flux
+  that the sink of the agent's cell takes goes on into the fresh ground, and the pressure falls by t_a / G_s(a) per
+  cell beyond it. No sensor reads the pressure of the ground beside a network, whose level only the history of the
+  solver sets (ADR 0072, finding 3): a shift of the pressure of every tube cell of s by a constant changes no move. An
+  agent on a cell without a tube of s reads V alone. δ is the setting `drift`, a lane per strain of the parameters, as
+  the food weight; one value for all strains now. So the plasm streams down the pressure, to the sinks. The drift sets
+  the form of the front (ADR 0065, decision 6): 0 a tree of tubes with small heads, 1.25 to 1.5 a tube with a crown, 5
+  a fan (measured with the form `all` of ADR 0070; ADR 0074 measured `take` at 1.5 and 5). Its default 1.5 is
+  provisional (ADR 0070).
+- **What the sensors read of the sinks**: at the start of a step, before the agent passes, a pass writes t / G_s of
+  every cell and strain from the memory, the rates and the state as the flow of the step before left them (`takes` of
+  `flow.wgsl`, PASS 5 of `flow.frag`, which also writes P̄ on WebGL2): 0 at a cell without a tube and while the front
+  takes no flux. An agent reads its own cell once for its three sensors.
 - **The order** (ADR 0067, decision 6): per strain the update, which reads the state of the step before; the sinks and
   the state of the step; then the pressure, which reads the rates and the state of the step.
 - **Memory**: no buffer more. The uniform block of the flow holds S / I0 in a slot after that of the sinks
   (`FLOW_TAKE_SLOT`), and the parameters the drift in a slot after every slot of the code before. The second lane of
-  that slot holds the growth of the budget of the paid births (9.1).
+  that slot holds the growth of the budget of the paid births (9.1). What the sensors read takes a texture: on WebGPU
+  t / G of a layer per strain, 4 B per cell and strain; on WebGL2 P̄ and t / G in two targets of a lane per strain,
+  32 B per cell (`sizing.ts` SINK_BYTES_PER_CELL, DRIFT_BYTES_PER_CELL_GL).
 
 ## 9. Growth and shrinkage
 
@@ -905,9 +922,12 @@ differ in these points:
 - The flow with the rules of stage 4 (8.7): WebGPU binds the rates and the state of the sinks as storage buffers to the
   update and the pressure, and reads the state in place, so the update of a strain still finds the state of the step
   before. WebGL2 samples the current copy of the state in the update, and the copies of the rates and of the state
-  that the step writes in the pressure. The agent pass of WebGPU reads every layer of the pressure in one texture; that
-  of WebGL2 samples 16 textures with the 4 pressures, the least that a device has. What the sinks take is a float32 on
-  both backends, compared with the CPU to a tolerance, as the flow is.
+  that the step writes in the pressure. The agent pass of WebGPU reads every layer of the pressure in one texture, and
+  t / G in a texture of a layer per strain that `takes` writes per strain at the start of the step. That of WebGL2
+  samples 14 textures: P̄ and t / G in two targets of
+  a lane per strain, which PASS 5 of `flow.frag` draws per strain into its lane, in place of the 4 pressures (16 is
+  the least that a device has). What the sinks take is a float32 on both backends, compared with the CPU to a
+  tolerance, as the flow is.
 - The paid births (9.1): WebGPU writes the keys by id after the state of 4 strains and the counts, and counts the
   agents of the front and the paid claims with atomics; its pass `rank` reads the keys in blocks of 16, and `win`
   finds a paid parent by its claim key in a neighbour. WebGL2 writes the keys into a second target of its test of growth, marks the agents of the front and the
@@ -954,6 +974,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The corner of the push (6.10)           | `territory.gpu.test.ts`: no cell across a thin diagonal wall in 40 steps, both strains; `territory.test.ts`: the CPU copy       |
 | The sinks (6.11)                        | `sinks.gpu.test.ts`: rates, sums and state against the CPU copy in each arena with thin walls, the X of walls, births, a carry  |
 | The flow with the sinks (8.7)           | `flow-sinks.gpu.test.ts`: memory and pressure against the CPU copy, 2 strains in a dish with walls; a large R; the drift        |
+| The drift `take` (8.7)                  | `flow-sinks.gpu.test.ts`: the turns of 256 agents on and off the tubes against the CPU copy; a shift of the tubes moves no one  |
 | The paid births (9.1)                   | `paid.gpu.test.ts`: keys, rank, births, budget against the CPU copy, 2 strains, light; ties; budgets above the front, below 1   |
 | The start territory (6.10, 10)          | `territory.gpu.test.ts`: the disc in each arena, with walls; `engine-env.test.ts`: the disc of each strain, the restart         |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
@@ -970,9 +991,13 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 and the pressure of two strains in a dish with walls against the CPU copy, one with a covered port and one whose tube
 cells pay, with a tube that adapts only from the step after the first step with flux; a strain without a sink and with
 one site keeps its flow memory; the sinks take S with the rates as R counted them, where their own rates would take
-more than twice S; a large R, whose low word wraps; and the turns of 256 agents of both strains down the mean pressure,
-with the drift 1.5 and 0. `flow-reference.test.ts` tests that the CPU copy lets the sinks take what the sources give, to
-10⁻⁶ of S, also when R is large.
+more than twice S; a large R, whose low word wraps; the turns of 256 agents of both strains by the drift `take`
+(ADR 0075), with the drift 1.5 and 0, against the CPU copy: on and off the tubes of their strain, with sensors on and
+off them, a sink rate on every cell, a strain whose front takes flux and one whose front takes none, and every value
+exact; a shift of the pressure of every tube cell of each strain by 200, which changes no move, where the form of
+before turns more than 20 agents otherwise; and the memory of the drift on each backend. `flow-reference.test.ts`
+tests that the CPU copy lets the sinks take what the sources give, to 10⁻⁶ of S, also when R is large, and the CPU
+copy of t / G and of the reads on cases made by hand.
 
 `paid.gpu.test.ts` tests the births that the flux pays (ADR 0071) on both backends, each case one growth step from the
 moves of a twin without growth: two colonies of two strains with a tube body under their cores, starved cells, a thin

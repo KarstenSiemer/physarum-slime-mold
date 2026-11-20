@@ -260,6 +260,7 @@ export class CpuBackend implements Backend<CpuSim> {
   coveredBytesPerCell = 0;
   tubeMapBytesPerCell = 0; // as the WebGPU backend
   sinkBytesPerCell = SINK_BYTES_PER_CELL; // as the WebGPU backend
+  driftBytesPerCell = 0; // as the WebGPU backend
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);
   /** Set by the engine; a test calls it as the WebGPU device does (Backend.onOutOfMemory). */

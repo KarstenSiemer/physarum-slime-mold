@@ -120,6 +120,13 @@ interface GlSinks {
   state: Pair<Target>;
   keys: Target;
   counts: Target;
+  /**
+   * What the sensors read of the flow of each strain (ADR 0075), lane s for strain s, which PASS 5 of flow.frag writes
+   * at the start of a step: the mean pressure of the four lanes, and what the sink of each cell takes over the
+   * conductivity of the cell.
+   */
+  pressures: Target;
+  takes: Target;
 }
 
 /** The layout of a pyramid over `n` elements, `width` texels a row (Pyramid). */
@@ -139,7 +146,8 @@ function pyramidLayout(n: number, width: number) {
 /**
  * The targets of the sinks for `strains` strains on a grid of `width` × `height` cells (GlSinks), made by `make`. Each
  * strain has two targets of rates, the levels of its pyramid, and the state two targets of 2 texels per strain. The
- * keys have a texel per agent slot, in rows of `agentWidth`.
+ * keys have a texel per agent slot, in rows of `agentWidth`. The mean pressures and take / G have a lane per strain
+ * (ADR 0075).
  */
 function makeSinks(
   make: (width: number, height: number, format: number) => Target,
@@ -158,6 +166,8 @@ function makeSinks(
     state: [make(2, strains, gl.RGBA32F), make(2, strains, gl.RGBA32F)],
     keys: make(agentWidth, agentHeight, gl.R32F),
     counts: make(2, 1, gl.RGBA32F),
+    pressures: make(width, height, gl.RGBA32F),
+    takes: make(width, height, gl.RGBA32F),
   };
 }
 
@@ -385,6 +395,8 @@ export class GlSim implements Sim {
   private sinks: GlSinks | undefined;
   /** The framebuffers of the test of growth with the keys of the paid births, by the texture of the agents (withKeys()). */
   private readonly keyFbos = new Map<WebGLTexture, WebGLFramebuffer>();
+  /** The framebuffer of PASS 5 of flow.frag, with the targets `pressures` and `takes` of the sinks (driftTarget()). */
+  private driftFbo: WebGLFramebuffer | undefined;
   private sr: Bit = 0;
   private st: Bit = 0;
   /**
@@ -1758,9 +1770,12 @@ export class GlSim implements Sim {
     const held: Record<string, WebGLTexture> = territory ? { territory: territory.copies[this.tt].texture } : {};
     // The sinks of each strain (ADR 0069), in the passes of the flow.
     const sinks = territory ? this.ensureSinks() : undefined;
-    // With the rules the sensors read the pressure of the flow of the step before, of each strain (TERRITORY in
-    // agents.frag, ADR 0070): 16 samplers in all, the least that a device has.
-    const pressures: Record<string, WebGLTexture> = territory && flow ? this.flowPressures(flow) : {};
+    // With the rules the sensors read the mean pressure of the flow of the step before and what the sink of each cell
+    // takes over its conductivity, of each strain (TERRITORY in agents.frag, ADR 0070, ADR 0075), which PASS 5 of
+    // flow.frag writes first: 14 samplers in all, of the 16 that a device has.
+    if (flow && sinks) this.encodeDrift(flow, sinks);
+    const pressures: Record<string, WebGLTexture> =
+      flow && sinks ? { pressures: sinks.pressures.texture, takes: sinks.takes.texture } : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1907,9 +1922,10 @@ export class GlSim implements Sim {
   }
 
   /**
-   * The targets of the sinks, made at their first use while the rules of stage 4 run (sizing.ts SINK_BYTES_PER_CELL_GL),
-   * for the strains of the settings: settings with another number of strains get new targets, as the flow gets new
-   * ones (ensureFlow()). New targets hold zeros: no cell was a sink.
+   * The targets of the sinks, made at their first use while the rules of stage 4 run (sizing.ts SINK_BYTES_PER_CELL_GL,
+   * and DRIFT_BYTES_PER_CELL_GL for the two targets of the drift), for the strains of the settings: settings with
+   * another number of strains get new targets, as the flow gets new ones (ensureFlow()). New targets hold zeros: no
+   * cell was a sink.
    */
   private ensureSinks(): GlSinks {
     const strains = flowStrains(this.settings);
@@ -1933,14 +1949,67 @@ export class GlSim implements Sim {
     return this.sinks;
   }
 
-  /** Frees the targets of the sinks, and the framebuffers of the test that write the keys. */
+  /** Frees the targets of the sinks, and the framebuffers of the test that write the keys and of the drift. */
   private dropSinks() {
     for (const fbo of this.keyFbos.values()) this.gl.deleteFramebuffer(fbo);
     this.keyFbos.clear();
+    if (this.driftFbo) this.gl.deleteFramebuffer(this.driftFbo);
+    this.driftFbo = undefined;
     if (!this.sinks) return;
-    const { rates, levels, state, keys, counts } = this.sinks;
-    for (const t of [...rates.flat(), ...levels.flat(), ...state, keys, counts]) destroyTarget(this.gl, t);
+    const { rates, levels, state, keys, counts, pressures, takes } = this.sinks;
+    for (const t of [...rates.flat(), ...levels.flat(), ...state, keys, counts, pressures, takes])
+      destroyTarget(this.gl, t);
     this.sinks = undefined;
+  }
+
+  /**
+   * The target of PASS 5 of flow.frag (ADR 0075): `pressures` and `takes` of the sinks as the two targets of one
+   * framebuffer, made at its first use.
+   */
+  private driftTarget(sinks: GlSinks): Target {
+    const gl = this.gl;
+    if (!this.driftFbo) {
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sinks.pressures.texture, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, sinks.takes.texture, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteFramebuffer(fbo);
+        throw new Error('The drift cannot write the mean pressures and what the sinks take at once');
+      }
+      this.driftFbo = fbo;
+    }
+    return { ...sinks.pressures, fbo: this.driftFbo };
+  }
+
+  /**
+   * What the sensors of each strain read of its flow (PASS 5 of flow.frag, ADR 0075), at the start of a step, before
+   * the agent passes: lane s of the mean pressures and of take / G, from the memory, the pressure, the rates and the
+   * state as the flow of the step before left them. Each strain draws with its block into its lane alone; then the
+   * block of the first strain, which the agent passes read, is bound again.
+   */
+  private encodeDrift(flow: NonNullable<GlSim['flow']>, sinks: GlSinks) {
+    const gl = this.gl;
+    const drift = this.prog.sinks().drift;
+    const dst = this.driftTarget(sinks);
+    for (let strain = 0; strain < sinks.strains; strain++) {
+      this.flowBlock(flow, strain);
+      gl.colorMask(strain === 0, strain === 1, strain === 2, strain === 3);
+      this.pass(
+        drift,
+        dst,
+        {
+          memory: at(flow.memory, strain)[this.flowM].texture,
+          pressureIn: at(at(flow.pressure, strain), this.flowP).texture,
+          rates: at(sinks.rates, strain)[this.sr].texture,
+          state: sinks.state[this.st].texture,
+        },
+        {},
+      );
+    }
+    gl.colorMask(true, true, true, true);
+    this.flowBlock(flow, 0);
   }
 
   /**

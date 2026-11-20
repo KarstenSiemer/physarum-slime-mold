@@ -10,6 +10,7 @@ import {
   BYTES_PER_CELL,
   BYTES_PER_CELL_HALF_FLOAT,
   COVERED_BYTES_PER_CELL_HALF_FLOAT,
+  DRIFT_BYTES_PER_CELL_GL,
   equilibrium,
   SINK_BYTES_PER_CELL_GL,
   TUBE_MAP_BYTES_PER_CELL_GL,
@@ -60,6 +61,8 @@ export class WebGl2Backend implements Backend<GlSim> {
   readonly tubeMapBytesPerCell = TUBE_MAP_BYTES_PER_CELL_GL;
   /** The sink rates in two targets and the pyramid of the sums (gl/sim.ts `sinks`), per strain. */
   readonly sinkBytesPerCell = SINK_BYTES_PER_CELL_GL;
+  /** The mean pressures and what the sinks take, for the sensors, a lane per strain (gl/sim.ts `sinks`). */
+  readonly driftBytesPerCell = DRIFT_BYTES_PER_CELL_GL;
   private readonly prog: Programs;
   /** For tests: the render programs of another version of render.frag that draw every frame (renderFrom()). */
   private fixed: [Program, Program] | undefined;

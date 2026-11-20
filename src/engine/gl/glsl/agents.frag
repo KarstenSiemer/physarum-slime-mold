@@ -101,20 +101,28 @@ bool clearPath(vec2 p, vec2 q, int clear) {
 }
 #if TERRITORY
 
-// The pressure of the four lanes of the flow of strains A to D, as the flow of the step before left it (flow.frag). A
-// scene with fewer strains binds the pressure of strain A in their place, and no agent reads it there. While the rules
-// of stage 4 run, a sensor reads it as a repellent, with the drift of the strain (`pressure` in agents.wgsl, ADR 0070).
-uniform sampler2D flowPressure;
-uniform sampler2D flowPressure1;
-uniform sampler2D flowPressure2;
-uniform sampler2D flowPressure3;
+// What the sensors read of the flow of each strain while the rules of stage 4 run, lane s for strain s, from the flow
+// of the step before (PASS 5 of flow.frag, ADR 0075): the mean pressure of its four lanes (`pressure` in agents.wgsl,
+// ADR 0070), and what the sink of each cell takes over the conductivity of the cell (`takes` in agents.wgsl). Two
+// targets in place of the four pressures, so that the pass samples 14 textures, of the 16 that every device has.
+uniform sampler2D pressures;
+uniform sampler2D takes;
 
-// The pressure of the flow of strain s at cell q.
-vec4 pressureOf(int s, ivec2 q) {
-  if (s == 1) return texelFetch(flowPressure1, q, 0);
-  if (s == 2) return texelFetch(flowPressure2, q, 0);
-  if (s == 3) return texelFetch(flowPressure3, q, 0);
-  return texelFetch(flowPressure, q, 0);
+// Whether the cell q holds a tube of strain s: a conductivity above 0, as the update of the flow of the step before
+// left it.
+bool tubeAt(ivec2 q, int s) { return flowMemoryOf(uint(s), q).z > 0.0; }
+
+// What the cell of an agent of strain s gives its sensors (driftOf in agents.wgsl, ADR 0075): whether it holds a tube
+// of s, and what a sensor on a cell without a tube of s reads, the mean pressure there less `so` times take / G.
+struct Drift {
+  bool on;
+  float ground;
+};
+
+Drift driftOf(vec2 pos, int s, float so) {
+  ivec2 q = cellXY(ivec2(floor(pos)));
+  if (q.x < 0 || !tubeAt(q, s)) return Drift(false, 0.0);
+  return Drift(true, texelFetch(pressures, q, 0)[s] - so * texelFetch(takes, q, 0)[s]);
 }
 #endif
 
@@ -144,12 +152,15 @@ float sense(vec2 pos, vec2 p, int s, int clear) {
 #if TERRITORY
 
 // What the sensor at p reads while the rules of stage 4 run: minus the drift of the strain times the mean pressure of
-// the four lanes of its flow (sense in agents.wgsl, ADR 0070). A blocked sensor stays blocked.
-float sense(vec2 pos, vec2 p, int s, int clear) {
+// its flow at the cell of the sensor if it holds a tube of the strain, else times the ground of the agent's cell `d`;
+// nothing more for an agent off the tubes (sense in agents.wgsl, ADR 0070, ADR 0075). A blocked sensor stays blocked.
+float sense(vec2 pos, vec2 p, int s, int clear, Drift d) {
   float read = sensed(pos, p, s, clear);
-  if (read == BLOCKED) return BLOCKED;
-  vec4 pr = pressureOf(s, cellXY(ivec2(floor(p))));
-  return read - P.drift[s] * ((pr.x + pr.y + pr.z + pr.w) * 0.25);
+  if (read == BLOCKED || !d.on) return read;
+  ivec2 q = cellXY(ivec2(floor(p)));
+  float v = d.ground;
+  if (tubeAt(q, s)) v = texelFetch(pressures, q, 0)[s];
+  return read - P.drift[s] * v;
 }
 #endif
 
@@ -158,9 +169,17 @@ float steer(vec4 a, int s, inout uint rng, int clear) {
   float sa = P.sensorAngle[s];
   float so = P.sensorOffset[s];
   float ra = P.rotationAngle[s];
+#if TERRITORY
+  // The cell of the agent, read once for its three sensors (ADR 0075).
+  Drift d = driftOf(a.xy, s, so);
+  float f = sense(a.xy, a.xy + so * dir(a.z), s, clear, d);
+  float l = sense(a.xy, a.xy + so * dir(a.z - sa), s, clear, d);
+  float r = sense(a.xy, a.xy + so * dir(a.z + sa), s, clear, d);
+#else
   float f = sense(a.xy, a.xy + so * dir(a.z), s, clear);
   float l = sense(a.xy, a.xy + so * dir(a.z - sa), s, clear);
   float r = sense(a.xy, a.xy + so * dir(a.z + sa), s, clear);
+#endif
   float h = a.z;
   if (f > l && f > r) {
     // keep heading

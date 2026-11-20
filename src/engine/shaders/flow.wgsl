@@ -24,6 +24,8 @@
 //   lanes; then the body from the trail, the new conductivity, and for a food site its roles.
 // - `pressure`: one damped Jacobi iteration of Kirchhoff's law with the acceleration of a second-order Richardson
 //   iteration (the pressure of the iteration before as momentum), from the pressure of the step before.
+// - `takes`, only with the rules of stage 4: what the sink of each cell takes over its conductivity, for the sensors of
+//   the next step (ADR 0075). sim.ts runs it at the start of that step, once per strain.
 //
 // The pressure stays bounded (ADR 0029, decision 6): only cells with a tube conduct, as many covered sites give as take
 // in every lane, a site gives or takes nothing against a pressure beyond its limit, and only cells that conduct take
@@ -84,6 +86,9 @@ override RECENTRE: u32 = 0u;
 // rates and the state of this step.
 @group(0) @binding(13) var<storage, read> rates: array<f32>; // per strain and cell: strain · W · H + cell
 @group(0) @binding(14) var<storage, read> states: array<vec4f>; // per strain 2 (sinks.ts SINK_STATE_LANES)
+// What the sink of each cell takes over the conductivity of the cell, for the sensors (`takes`, ADR 0075): the layer of
+// the strain of the pass.
+@group(0) @binding(15) var takeOut: texture_storage_2d<r32float, write>;
 //#endif
 
 const SITE_BLOCK = 64u;
@@ -224,11 +229,21 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
 }
 //#if TERRITORY
 
+// What the sink of the tube cell c takes in this step while the front of the strain takes flux (ADR 0070): the share
+// S · r / R of S = U.take.x · I0, with its rate r as R counted it, in steps of 2^-16 rounded to the nearest (ADR 0067,
+// decision 3), and R from the state.
+fn taken(c: i32) -> f32 {
+  let s = u32(U.f.z);
+  let total = U.take.x * U.a.x;
+  let steps = u32(abs(rates[s * W() * H() + u32(c)]) * 16777216.0);
+  let r = f32((steps + 128u) >> 8u) * (1.0 / 65536.0);
+  return total * r / states[s * 2u].x;
+}
+
 // What the sinks of the strain take and what its sources give at the cell p, whose conductivity is g, in this step
-// (ADR 0070): nothing while its front takes no flux (sinks.wgsl `state`). Else the sinks take S = U.take.x · I0
-// together, each tube cell the share S · r / R with its rate r as R counted it, in steps of 2^-16 rounded to the
-// nearest (ADR 0067, decision 3), and R from the state. The covered ports give S in equal shares, and without one every
-// tube cell gives S / C, C the tube cells. So the sources give what the sinks take, up to the rounding of the floats.
+// (ADR 0070): nothing while its front takes no flux (sinks.wgsl `state`). Else the sinks take S together, each tube
+// cell its share (taken()). The covered ports give S in equal shares, and without one every tube cell gives S / C, C
+// the tube cells. So the sources give what the sinks take, up to the rounding of the floats.
 fn sinksAndSources(p: vec2i, g: f32) -> f32 {
   let s = u32(U.f.z);
   if (states[s * 2u + 1u].x == 0.0) { return 0.0; }
@@ -238,9 +253,7 @@ fn sinksAndSources(p: vec2i, g: f32) -> f32 {
   let c = p.y * i32(W()) + p.x;
   var q = 0.0;
   if (g > 0.0) {
-    let steps = u32(abs(rates[s * W() * H() + u32(c)]) * 16777216.0);
-    let r = f32((steps + 128u) >> 8u) * (1.0 / 65536.0);
-    q -= total * r / sums.x;
+    q -= taken(c);
     if (sums.w == 0.0) { q += total / sums.y; }
   }
   // Only a cell with food is the port of a site.
@@ -433,3 +446,19 @@ fn pressure(@builtin(global_invocation_id) gid: vec3u) {
   if (RECENTRE == 1u) { next -= textureLoad(pressureIn, referenceCell(), 0); }
   textureStore(pressureOut, p, next);
 }
+//#if TERRITORY
+
+// `takes`: what the sink of each cell takes over the conductivity G of the cell, take / G, for the sensors of the agent
+// passes (agents.wgsl driftOf(), ADR 0075): 0 at a cell without a tube of the strain and while its front takes no
+// flux. sim.ts runs it at the start of a step, before the agent passes, with the memory, the rates and the state as the
+// flow of the step before left them: so it gives what that flow took.
+@compute @workgroup_size(8, 8)
+fn takes(@builtin(global_invocation_id) gid: vec3u) {
+  let p = vec2i(gid.xy);
+  if (p.x >= i32(W()) || p.y >= i32(H())) { return; }
+  let g = textureLoad(memory, p, 0).z;
+  var t = 0.0;
+  if (g > 0.0 && states[u32(U.f.z) * 2u + 1u].x != 0.0) { t = taken(p.y * i32(W()) + p.x) / g; }
+  textureStore(takeOut, p, vec4f(t, 0.0, 0.0, 0.0));
+}
+//#endif
