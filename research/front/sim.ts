@@ -208,6 +208,13 @@ export interface Front {
    * reaches badly stands low and takes less. The sink rate follows that demand with `tau`, as it follows the weight.
    */
   shareOn: 'equal' | 'supply';
+  /**
+   * The flux Q of a cell from the fluxes over its four edges (ADR 0080, a try; cellFlux()): half the sum of their
+   * sizes, as the app ('sum'), or the length of the vector of the mean sizes in x and in y ('norm'). A uniform flow of
+   * strength F at the angle θ to the grid reads F · (|cos θ| + |sin θ|) with 'sum', up to 1.41 · F on a diagonal, and F
+   * at every angle with 'norm'.
+   */
+  fluxOn: 'sum' | 'norm';
 }
 
 export interface Params {
@@ -272,6 +279,7 @@ export const noFront = (): Front => ({
   bodyFull: 0.4,
   jones: 'all',
   shareOn: 'equal',
+  fluxOn: 'sum',
 });
 
 /** The words that a text option of `Front` takes. */
@@ -291,6 +299,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   bodyOn: ['trail', 'agents', 'cube'],
   jones: ['all', 'fresh', 'edge'],
   shareOn: ['equal', 'supply'],
+  fluxOn: ['sum', 'norm'],
 };
 
 /**
@@ -433,6 +442,19 @@ export const params = (patch: Partial<Params> = {}): Params => ({
 });
 
 const harmonic = (a: number, b: number) => (a <= 0 || b <= 0 ? 0 : (2 * a * b) / (a + b));
+
+/**
+ * The flux Q of a cell (`fluxOn`, ADR 0080) from the sizes of the fluxes over its east, west, south and north edges (0
+ * for an edge that is missing). 'sum': half their sum, the throughput of the cell, as the app (flow-reference.ts).
+ * 'norm': √(ax² + ay²), with ax and ay the means of the sizes in x and in y. The sizes, not the signed fluxes: a cell
+ * into which the flow comes from both sides, as a sink, still reads its throughput. Both read the same for a flow along
+ * an axis.
+ */
+export function cellFlux(on: Front['fluxOn'], e: number, w: number, s: number, n: number): number {
+  if (on === 'sum') return (e + w + s + n) * 0.5;
+  const [ax, ay] = [0.5 * (e + w), 0.5 * (s + n)];
+  return Math.sqrt(ax * ax + ay * ay);
+}
 
 export class Sim {
   readonly w: number;
@@ -1556,7 +1578,7 @@ export class Sim {
 
   private flowPass() {
     const { open, food, sites } = this.layout;
-    const { cells, nb, D, B } = this;
+    const { cells, D, B } = this;
     const k = this.step;
     const i0 = this.p.flow;
     // The ports of this step, from the tube body before it (8.2).
@@ -1582,37 +1604,7 @@ export class Sim {
         this.P[l]!.set(this.P[0]!);
         this.Pb[l]!.set(this.Pb[0]!);
       }
-    // The flux of the last step, from the conductivity and the pressure of the last step (8.4).
-    const G = this.G;
-    for (let c = 0; c < cells; c++) {
-      if (!open[c]) continue;
-      const e = nb[c * 4]!;
-      const s = nb[c * 4 + 2]!;
-      this.edgeE[c] = e >= 0 ? harmonic(G[c]!, G[e]!) : 0;
-      this.edgeS[c] = s >= 0 ? harmonic(G[c]!, G[s]!) : 0;
-    }
-    this.fmean.fill(0);
-    this.Q.fill(0);
-    for (let l = 0; l < this.lanes; l++) {
-      const P = this.P[l]!;
-      for (let c = 0; c < cells; c++) {
-        if (!open[c]) continue;
-        const pc = P[c]!;
-        let q = 0;
-        const e = nb[c * 4]!;
-        const wv = nb[c * 4 + 1]!;
-        const s = nb[c * 4 + 2]!;
-        const nn = nb[c * 4 + 3]!;
-        if (e >= 0) q += this.edgeE[c]! * Math.abs(pc - P[e]!);
-        if (wv >= 0) q += this.edgeE[wv]! * Math.abs(pc - P[wv]!);
-        if (s >= 0) q += this.edgeS[c]! * Math.abs(pc - P[s]!);
-        if (nn >= 0) q += this.edgeS[nn]! * Math.abs(pc - P[nn]!);
-        q *= 0.5;
-        const qg = q <= 0 ? 0 : Math.pow(q, FLOW.gamma);
-        this.fmean[c]! += qg / (1 + qg) / this.lanes;
-        this.Q[c]! += q / this.lanes;
-      }
-    }
+    this.fluxOfCells();
     this.lanes = lanes;
     // The update of the memory, the body and the conductivity (8.1, 8.4).
     const Gn = this.Gnext;
@@ -1660,6 +1652,46 @@ export class Sim {
     if (this.p.front.solver === 'exact') this.exactPressure(i0);
     else this.pressure(i0);
     this.afterSolve();
+  }
+
+  /**
+   * The flux Q of every cell and the mean of f(Q) over the lanes, from the conductivity G and the pressure P of the last
+   * step (8.4), by `fluxOn` (cellFlux()). Public for the test of ADR 0080, which sets G and P by hand.
+   */
+  fluxOfCells() {
+    const { open } = this.layout;
+    const { cells, nb, G } = this;
+    const on = this.p.front.fluxOn;
+    for (let c = 0; c < cells; c++) {
+      if (!open[c]) continue;
+      const e = nb[c * 4]!;
+      const s = nb[c * 4 + 2]!;
+      this.edgeE[c] = e >= 0 ? harmonic(G[c]!, G[e]!) : 0;
+      this.edgeS[c] = s >= 0 ? harmonic(G[c]!, G[s]!) : 0;
+    }
+    this.fmean.fill(0);
+    this.Q.fill(0);
+    for (let l = 0; l < this.lanes; l++) {
+      const P = this.P[l]!;
+      for (let c = 0; c < cells; c++) {
+        if (!open[c]) continue;
+        const pc = P[c]!;
+        const e = nb[c * 4]!;
+        const wv = nb[c * 4 + 1]!;
+        const s = nb[c * 4 + 2]!;
+        const nn = nb[c * 4 + 3]!;
+        const q = cellFlux(
+          on,
+          e >= 0 ? this.edgeE[c]! * Math.abs(pc - P[e]!) : 0,
+          wv >= 0 ? this.edgeE[wv]! * Math.abs(pc - P[wv]!) : 0,
+          s >= 0 ? this.edgeS[c]! * Math.abs(pc - P[s]!) : 0,
+          nn >= 0 ? this.edgeS[nn]! * Math.abs(pc - P[nn]!) : 0,
+        );
+        const qg = q <= 0 ? 0 : Math.pow(q, FLOW.gamma);
+        this.fmean[c]! += qg / (1 + qg) / this.lanes;
+        this.Q[c]! += q / this.lanes;
+      }
+    }
   }
 
   /** The levels and the ground of the forms of the drift of part E2d (`driftOn`, ADR 0074), after the solve. */
