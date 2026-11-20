@@ -74,7 +74,7 @@ import sortWgsl from './shaders/sort.wgsl?raw';
 import territoryWgsl from './shaders/territory.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { GROWTH_BINDINGS, GROWTH_FLOW_BINDINGS, Simulation } from './sim';
+import { GROWTH_BINDINGS, GROWTH_FLOW_BINDINGS, GROWTH_TERRITORY_BINDINGS, Simulation } from './sim';
 import { equilibrium } from './sizing';
 import { SHAPE_RANGE, type AgentState, type Backend, type Sim, type Stroke, type View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -6209,20 +6209,33 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       const { device } = (backend as WebGpuBackend).gpu;
       const sim = await make({ ...GROWTH }, 16, 16, 4);
       type Passes = Record<string, GPUComputePipeline>;
-      const kernels = (sim as unknown as { kernels: { growth(flow: boolean): Passes } }).kernels;
+      const kernels = (sim as unknown as { kernels: { growth(flow: boolean, territory?: boolean): Passes } }).kernels;
       const lists = GROWTH_BINDINGS as Record<string, readonly number[]>;
       const more = GROWTH_FLOW_BINDINGS as Record<string, readonly number[]>;
+      const stage4 = GROWTH_TERRITORY_BINDINGS as Record<string, readonly number[]>;
       const buffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.UNIFORM });
       const texture = device.createTexture({
         size: [16, 16],
         format: 'rgba32float',
         usage: GPUTextureUsage.TEXTURE_BINDING,
       });
+      const territory = device.createTexture({
+        size: [4, 16],
+        format: 'r32uint',
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+      });
       // With the flow in the tubes, the passes that decide who divides also read the flow memory, a texture with a
-      // layer per strain (ADR 0031), and the uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029).
-      for (const flow of [false, true]) {
-        const passes = kernels.growth(flow);
-        expect(Object.keys(passes).sort()).toEqual(Object.keys(lists).sort());
+      // layer per strain (ADR 0031), and the uniform block of the flow (GROWTH_FLOW_BINDINGS, ADR 0029). With the rules
+      // of stage 4 they read the territory, and `test` and `rank` the sink rates and the state of the sinks with the
+      // keys of the paid births (GROWTH_TERRITORY_BINDINGS, ADR 0068 and ADR 0071); only then is there a pass `rank`.
+      for (const [flow, rules] of [
+        [false, false],
+        [true, false],
+        [true, true],
+      ] as const) {
+        const passes = kernels.growth(flow, rules);
+        const names = Object.keys(lists).filter((name) => rules || name !== 'rank');
+        expect(Object.keys(passes).sort()).toEqual(names.sort());
         for (const [name, pipeline] of Object.entries(passes)) {
           device.pushErrorScope('validation');
           const entries: GPUBindGroupEntry[] = (lists[name] ?? []).map((binding) => ({
@@ -6235,13 +6248,19 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
                 binding,
                 resource: binding === 15 ? texture.createView({ dimension: '2d-array' }) : { buffer },
               });
+          if (rules)
+            for (const binding of stage4[name] ?? [])
+              entries.push({ binding, resource: binding === 17 ? territory.createView() : { buffer } });
           device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
-          expect((await device.popErrorScope())?.message, `${name}${flow ? ' with the flow' : ''}`).toBeUndefined();
+          const at = `${name}${flow ? ' with the flow' : ''}${rules ? ' and the rules of stage 4' : ''}`;
+          expect((await device.popErrorScope())?.message, at).toBeUndefined();
         }
       }
       expect(Object.keys(more).sort()).toEqual(Object.keys(lists).sort());
+      expect(Object.keys(stage4).sort()).toEqual(Object.keys(lists).sort());
       buffer.destroy();
       texture.destroy();
+      territory.destroy();
     });
 
     // A colony of 40 agents grows to fill the box with a wall in it: one agent per cell, none lost or doubled, none

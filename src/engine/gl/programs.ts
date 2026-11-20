@@ -14,6 +14,7 @@ import ownersVert from './glsl/owners.vert?raw';
 import heightFrag from './glsl/height.frag?raw';
 import initFrag from './glsl/init.frag?raw';
 import orderFrag from './glsl/order.frag?raw';
+import paidVert from './glsl/paid.vert?raw';
 import paintFrag from './glsl/paint.frag?raw';
 import pointsFrag from './glsl/points.frag?raw';
 import pointsVert from './glsl/points.vert?raw';
@@ -124,8 +125,15 @@ export interface TerritoryPrograms {
   owners: Program;
   /** The claim points whose agents the flow brings to life only onto the territory (FLOW and TERRITORY). */
   points: Program;
-  /** PASS 2 of growth.frag with the flow and the territory (FLOW and TERRITORY in growth.frag). */
+  /**
+   * PASS 2 of growth.frag with the flow and the territory (FLOW and TERRITORY in growth.frag), which also writes the
+   * keys of the births that the flux pays into a second target (ADR 0071).
+   */
   test: Program;
+  /** PASS 5 of growth.frag: the rank of the births that the flux pays (ADR 0071). */
+  rank: Program;
+  /** The counts of the agents of the front and of the paid parents (paid.vert with points.frag, ADR 0071). */
+  paid: Program;
 }
 
 /** The passes of the sinks (sinks.frag, ADR 0069), and the passes of the flow that take them (ADR 0070). */
@@ -474,6 +482,8 @@ export function compile(gl: GL): Programs {
           ),
         ),
         test: sim(`#define PASS 2\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
+        rank: sim(`#define PASS 5\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
+        paid: wrap(gl, program(gl, V + common + growthGlsl + paidVert, V + common + pointsFrag)),
       }),
     sinks: () =>
       (sinks ??= {

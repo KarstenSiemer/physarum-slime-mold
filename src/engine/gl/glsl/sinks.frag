@@ -12,7 +12,8 @@
 // the low word of R adds 1 to the high one, so every level holds the same integers in every order.
 //
 // PASS 3, the state of the strain (`state` in sinks.wgsl), into the next copy of the state (RGBA32F, 2 texels per
-// strain, texel (k, strain)), from the top of the pyramid and the ports.
+// strain, texel (k, strain)), from the top of the pyramid, the ports, and the counts of the paid births of the step
+// (paid.vert, ADR 0071): the budget B in y of texel 1, then F and K of the step.
 
 // The uniform block of the flow (flow.frag; flow.ts packFlow()): the constants of stage 4 come after the sites
 // (territory.ts packTerritory(); ADR 0067, decision 9).
@@ -29,6 +30,9 @@ layout(std140) uniform Flow {
   // the steps of a path to ground without slime, of a path to the edge, of the mean, and the weight on slime in steps
   // of 2^-24 (sinks.ts packSinks())
   vec4 sinks;
+  // x: what the sinks take in units of the flow strength (ADR 0070); y: the growth of the budget in a step (paid.ts
+  // packPaid())
+  vec4 take;
 } U;
 
 // The weight 1 in steps of the rate (sinks.ts RATE_ONE).
@@ -173,6 +177,8 @@ out uvec4 result;
 uniform highp usampler2D sums; // the top of the pyramid of the strain: one texel
 uniform sampler2D ports; // texel (site, strain): x the port of this step, −1 for none (flow.frag)
 uniform sampler2D stateIn; // the state before the step
+// The counts of the paid births of a growth step (paid.vert): texel 0 F, texel 1 K, lane s for strain s.
+uniform sampler2D paidCounts;
 out vec4 result;
 #endif
 
@@ -228,7 +234,15 @@ void main() {
     result = vec4(r, float(v.z), float(v.w), float(covered));
   } else {
     bool takes = v.w > 0u && (v.x | v.y) != 0u && (covered > 0u || v.z > 0u);
-    result = vec4(takes ? 1.0 : 0.0, texelFetch(stateIn, q, 0).yzw);
+    // The budget of the paid births (ADR 0071), as `state` in sinks.wgsl computes it. The counts hold those of the last
+    // growth step: a step without the growth test counts no agent.
+    bool grew = P.growth.x > 0u && P.grid.w % P.growth.x == 0u;
+    float front = grew ? texelFetch(paidCounts, ivec2(0, 0), 0)[int(s)] : 0.0;
+    float claims = grew ? texelFetch(paidCounts, ivec2(1, 0), 0)[int(s)] : 0.0;
+    float budget = texelFetch(stateIn, q, 0).y;
+    if (grew && budget >= 1.0) budget = min(budget - claims, front);
+    if (takes) budget += U.take.y;
+    result = vec4(takes ? 1.0 : 0.0, budget, front, claims);
   }
 #endif
 }

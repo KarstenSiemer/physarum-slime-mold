@@ -44,13 +44,15 @@ describe('the sinks (ADR 0069)', () => {
     expect(SINKS.fresh).toBeGreaterThanOrEqual(SINKS.edge);
     expect(SINK_WINDOW).toBeGreaterThanOrEqual(SINKS.fresh);
     expect(FLOW_SINK_SLOT).toBe(FLOW_TERRITORY_SLOT + 2);
-    // The slot of what the sinks take comes last (ADR 0070): x the share of the flow strength, the rest for part E3.
+    // The slot of what the sinks take comes last (ADR 0070): x the share of the flow strength, y the growth of the
+    // budget of the paid births in a step (ADR 0071), z and w free.
     expect(FLOW_TAKE_SLOT).toBe(FLOW_SINK_SLOT + 1);
     expect(FLOW_SLOTS).toBe(FLOW_TAKE_SLOT + 1);
     const f = new Float32Array(packTerritory(packFlow(on, NO_SITES)));
     expect(f.length * 4).toBe(FLOW_BYTES);
     expect(Array.from(f.subarray(FLOW_SINK_SLOT * 4, FLOW_SINK_SLOT * 4 + 4))).toEqual([6, 2, 100, 419430]);
-    expect(Array.from(f.subarray(FLOW_TAKE_SLOT * 4, FLOW_TAKE_SLOT * 4 + 4))).toEqual([2, 0, 0, 0]);
+    const growth = Math.fround((2 * on.flowStrength) / 20);
+    expect(Array.from(f.subarray(FLOW_TAKE_SLOT * 4, FLOW_TAKE_SLOT * 4 + 4))).toEqual([2, growth, 0, 0]);
   });
 
   it('moves a rate a hundredth of the way to its weight, rounded toward it, and reaches it', () => {

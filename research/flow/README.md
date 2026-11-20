@@ -2577,6 +2577,54 @@ records are in `logs/engine/flow-sinks-0070/`:
 | `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                   |
 | `mutations.txt`       | the tests that fail for each of the wrong rules TY36, TY37 and TY102 to TY140 |
 
+### 30. Do the births that the flux pays keep the bytes of every scene? [ADR 0071]
+
+The budget of each strain, the keys in `test`, the pass `rank` and the paid parents of `win` are part E3 of the engine
+of stage 4 (`research/front/ENGINE.md`). They run only while the setting `territory` is on, which no scene turns on,
+so every scene must keep its bytes. The uniform block of the flow gains the growth of the budget in a lane that no
+pass of the code before reads.
+
+**The bytes of the scenes.** The digests as in part 29, with the name `g71-digest-branch`. The digests of the code
+before are those of part 29, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g71-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g71-digest-branch.jsonl research/flow/logs/engine/flow-sinks-0070/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the paid births, with LG3, LG8, TY15, TY26, TY31 and TY94, whose texts follow the code of
+growth and of the step now:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts LG3 LG8 TY15 TY26 TY31 TY94 $(seq -f 'TY%g' 141 213)
+```
+
+Each must fail at least one test.
+
+**The time of `rank`** (ADR 0071, on a quiet machine; `bench.gpu.test.ts` with `VITE_SCENES=three-networks
+VITE_FLOWS=on VITE_WARM=1500 VITE_BATCH=30 VITE_BATCHES=11` and `VITE_PATCH` `{"territory":true,"capacity":1}` and
+`{"territory":false,"capacity":1}` for the steps):
+
+```bash
+VITE_NAME=rank npx vitest run --config research/vitest.config.ts research/front/rank.gpu.test.ts
+```
+
+Result: 62 of 62 runs are equal, and each of the 79 wrong rules fails at least one test. The records are in
+`logs/engine/paid-0071/`:
+
+| Record                | Runs                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                         |
+| `mutations.txt`       | the tests that fail for each of TY141 to TY213, LG3, LG8, TY15, TY26, TY31 and TY94 |
+| `rank.jsonl`          | the time of `rank` in the start scene on both backends, capacities 1 and 0.25       |
+| `rank-block1.jsonl`   | the same on WebGPU with one key per round of the loop (`RANK_BLOCK` 1)              |
+| `steps.jsonl`         | the time of a step of the start scene at capacity 1, with and without the rules     |
+
 ## The logs
 
 The logs are one archive in the repository, `logs.tar.gz`: 429 files, 8.7 MB of text. Unpacked,

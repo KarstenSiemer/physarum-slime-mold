@@ -219,6 +219,9 @@ fn test(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
   let i = index(gid, groups);
   if (i >= P.grid.z) { return; }
   var a = agents[i];
+//#if TERRITORY
+  paid.keys[agentId(a)] = NO_KEY;
+//#endif
   let c = cellOf(a.pos);
   if ((a.bits & ALIVE) == 0u || c < 0) { return; }
   if (shrinkTest()) {
@@ -231,7 +234,164 @@ fn test(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
   }
   let t = divideInto(a, c);
   if (t >= 0) { atomicMax(&claims[t], key(agentId(a))); }
+//#if TERRITORY
+  if (t < 0 && growthTest()) { paidTest(a, c); }
+//#endif
 }
+//#if TERRITORY
+
+// The births that the flux pays (ADR 0071; paid.ts; ADR 0067, decision 1). In a growth step, after Jones' rule, `test`
+// counts the agents of the front of each strain and gives a key to each of them that has a free cell beside it; `rank`
+// lets the ⌊B⌋ agents of each strain with the least keys claim a child, as a parent of Jones' rule does; and `win`
+// finds them by their claims.
+@group(0) @binding(18) var<storage, read> rates: array<f32>; // the sink rates of the step before: strain · W · H + cell
+// The state of the sinks of every strain (sinks.wgsl `state`): 2 vec4 per strain, with the budget B in y of the second;
+// then F and K of each strain, the agents of the front and the paid claims of the step, which every step clears; then
+// the key of every agent, by its id.
+struct Paid {
+  states: array<vec4f, 8>,
+  counts: array<atomic<u32>, 8>,
+  keys: array<f32>,
+}
+@group(0) @binding(19) var<storage, read_write> paid: Paid;
+
+const PAID_KEY = 12u; // the key of an agent of the front
+const RANK_BLOCK = 16u; // the keys that `rank` loads at once (ADR 0071)
+// The key of an agent that cannot claim a paid child: the largest float, for an infinite key (WGSL may assume that no
+// infinity occurs).
+const NO_KEY = bitcast<f32>(0x7f7fffffu);
+
+// −ln(1 − u) for a draw u in [0, 1) (paid.ts exponential()). Up to 1 / 2 the series of 2 · atanh(t) with t = u / (2 −
+// u), since (1 + t) / (1 − t) = 1 / (1 − u), which ends below 10⁻⁸ of the sum for t ≤ 1 / 3; above it −log(1 − u).
+// `log` may err by 2^-21 near 1, where −ln(1 − u) is small, and by 3 units in the last place below 1 / 2.
+fn exponential(u: f32) -> f32 {
+  if (u > 0.5) { return -log(1.0 - u); }
+  let t = u / (2.0 - u);
+  let t2 = t * t;
+  let odd = ((((((t2 / 15.0 + 1.0 / 13.0) * t2 + 1.0 / 11.0) * t2 + 1.0 / 9.0) * t2 + 1.0 / 7.0) * t2 + 1.0 / 5.0) * t2
+    + 1.0 / 3.0) * t2 + 1.0;
+  return 2.0 * t * odd;
+}
+
+// Whether cell m holds no tube body of strain s: the y of its memory of the step before lies below the body low of
+// the flow (F.c.z).
+fn bodyless(s: u32, m: i32) -> bool {
+  return textureLoad(flowMemory, cellCoord(u32(m)), s, 0).y < F.c.z;
+}
+
+// Whether an agent of strain s on the cell at q lies at the rim of its colony: a neighbour is open, empty after the
+// moves, and holds no tube body of s.
+fn atRim(s: u32, q: vec2i) -> bool {
+  for (var k = 0u; k < 8u; k++) {
+    let m = cellAt(q + around(k));
+    if (m >= 0 && !isWall(env[m]) && occ[m] == 0u && bodyless(s, m)) { return true; }
+  }
+  return false;
+}
+
+// Bit k: neighbour k of the cell at q is free for a child of strain s, as divideInto() finds a free cell: habitable,
+// empty after the moves, not starved, of the territory of s, and no diagonal one between two walls.
+fn freeAround(s: u32, q: vec2i) -> u32 {
+  var open = 0u;
+  var walls = 0u;
+  for (var k = 0u; k < 8u; k++) {
+    let m = cellAt(q + around(k));
+    if (m < 0) { continue; }
+    if (isWall(env[m])) {
+      walls |= 1u << k;
+    } else if (occ[m] == 0u && !starved(s, cellCoord(u32(m))) && inTerritory(m, s)) {
+      open |= 1u << k;
+    }
+  }
+  for (var k = 0u; k < 8u; k++) {
+    let o = around(k);
+    if (o.x == 0 || o.y == 0) { continue; }
+    let beside = (1u << aroundIndex(vec2i(o.x, 0))) | (1u << aroundIndex(vec2i(0, o.y)));
+    if ((walls & beside) == beside) { open &= ~(1u << k); }
+  }
+  return open;
+}
+
+// The cell of the child of a paid parent a on cell c, or −1: a free cell without a tube body of its strain if one lies
+// beside it, so that the child goes out, else any free cell, picked with the draw of divideInto(); light stops the
+// birth as it stops one of Jones' rule.
+fn paidCell(a: Agent, c: i32) -> i32 {
+  let s = a.bits & 3u;
+  let q = cellCoord(u32(c));
+  let open = freeAround(s, q);
+  var out = 0u;
+  for (var k = 0u; k < 8u; k++) {
+    if ((open & (1u << k)) != 0u && bodyless(s, cellAt(q + around(k)))) { out |= 1u << k; }
+  }
+  let pool = select(open, out, out != 0u);
+  let free = countOneBits(pool);
+  if (free == 0u) { return -1; }
+  var rng = rngSeed(agentId(a), GROW);
+  var pick = min(u32(rand(&rng) * f32(free)), free - 1u);
+  for (var k = 0u; k < 8u; k++) {
+    if ((pool & (1u << k)) != 0u) {
+      if (pick == 0u) {
+        let m = cellAt(q + around(k));
+        return select(m, -1, lightStops(a, m));
+      }
+      pick--;
+    }
+  }
+  return -1;
+}
+
+// Agent a on cell c, alive and no parent of Jones' rule in a growth step, is an agent of the front of its strain s if
+// its cell has a sink rate of s that is not 0 (a sink of the step before holds it with a minus sign) and is not starved,
+// and if it lies at the rim. It counts into F of s, and with a free cell beside it it draws the key −ln(1 − u) / |r|.
+// A claim key of 0 could not be told from no claim in `win`: such an agent keeps NO_KEY.
+fn paidTest(a: Agent, c: i32) {
+  let s = a.bits & 3u;
+  let q = cellCoord(u32(c));
+  let rate = abs(rates[s * W() * H() + u32(c)]);
+  if (rate == 0.0 || starved(s, q) || !atRim(s, q)) { return; }
+  atomicAdd(&paid.counts[s * 2u], 1u);
+  let id = agentId(a);
+  if (freeAround(s, q) == 0u || key(id) == 0u) { return; }
+  var rng = rngSeed(id, PAID_KEY);
+  paid.keys[id] = exponential(rand(&rng)) / rate;
+}
+
+// The rank of the paid births, after `test` in a growth step. An agent with a key counts the agents of its strain with
+// a smaller key, or with the same key and a smaller id, and stops when the count reaches ⌊B⌋ of its strain. Below it the
+// agent claims the cell of its child with its claim key, as a parent of Jones' rule claims one, and counts the claim
+// into K. A budget below 1 pays nothing. The b agents with the least keys read every key of their strain.
+@compute @workgroup_size(256)
+fn rank(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = index(gid, groups);
+  if (i >= P.grid.z) { return; }
+  let a = agents[i];
+  let id = agentId(a);
+  let mine = paid.keys[id];
+  if (mine == NO_KEY) { return; }
+  let s = a.bits & 3u;
+  let budget = u32(paid.states[s * 2u + 1u].y);
+  let end = P.strainEnd[s];
+  var before = 0u;
+  // The keys in blocks of RANK_BLOCK: the loads of a block do not wait for each other, where a load that the count
+  // after the one before decides waits for it. A key past ⌊B⌋ changes nothing: the count only has to reach ⌊B⌋.
+  var j = select(0u, P.strainEnd[max(s, 1u) - 1u], s > 0u);
+  for (; j + RANK_BLOCK <= end && before < budget; j += RANK_BLOCK) {
+    for (var k = 0u; k < RANK_BLOCK; k++) {
+      let other = paid.keys[j + k];
+      if (other < mine || (other == mine && j + k < id)) { before++; }
+    }
+  }
+  for (; j < end && before < budget; j++) {
+    let other = paid.keys[j];
+    if (other < mine || (other == mine && j < id)) { before++; }
+  }
+  if (before >= budget) { return; }
+  let t = paidCell(a, cellOf(a.pos));
+  if (t < 0) { return; }
+  atomicMax(&claims[t], key(id));
+  atomicAdd(&paid.counts[s * 2u + 1u], 1u);
+}
+//#endif
 
 // A bijection of the cells (a Feistel network on the rectangle, new for every step), the order in which births find
 // their dead agents. When the dead agents run out, the births that get one are spread over the grid, and not the
@@ -262,6 +422,18 @@ fn win(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) group
   let t = divideInto(a, c);
   // Only the winner of cell t writes there.
   if (t >= 0 && atomicLoad(&claims[t]) == key(id)) { births[place(u32(t))] = vec2u((a.bits & 3u) + 1u, u32(t)); }
+//#if TERRITORY
+  // A paid parent (ADR 0071): an agent without a child of Jones' rule whose key a neighbour holds. The key of a claim is
+  // unique for an agent and a step, so only its paid claim put it there, onto the cell of its child (paidCell()). An
+  // agent with the claim key 0 makes no paid claim.
+  if (t < 0 && key(id) != 0u) {
+    let q = cellCoord(u32(c));
+    for (var k = 0u; k < 8u; k++) {
+      let m = cellAt(q + around(k));
+      if (m >= 0 && atomicLoad(&claims[m]) == key(id)) { births[place(u32(m))] = vec2u((a.bits & 3u) + 1u, u32(m)); }
+    }
+  }
+//#endif
 }
 
 // Nodes in level k of a pyramid over n elements: each node sums 4 nodes of the level below.

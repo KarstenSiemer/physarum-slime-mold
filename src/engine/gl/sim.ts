@@ -108,7 +108,9 @@ interface GlGrowth {
  * The sinks of each strain (ADR 0069; sinks.frag; `sinks` in ../sim.ts), while the rules of stage 4 run: per strain the
  * sink rates in two targets (R32F) that PASS 0 writes in turn, and the levels of the pyramid of its sums (RGBA32UI,
  * sizing.ts sinkLevels()), whose top of one texel holds them; the state of every strain in two targets (RGBA32F, 2
- * texels per strain) that PASS 3 writes in turn.
+ * texels per strain) that PASS 3 writes in turn. The births that the flux pays (ADR 0071; ADR 0067, decision 7): the
+ * key of every agent (R32F, a texel per agent slot), which the test of growth writes as a second target, and the
+ * counts F and K of a growth step (RGBA32F, 2 × 1 texels, a lane per strain), which paid.vert adds.
  */
 interface GlSinks {
   /** The strains of the settings that the targets were made for. */
@@ -116,6 +118,8 @@ interface GlSinks {
   rates: Pair<Target>[];
   levels: Target[][];
   state: Pair<Target>;
+  keys: Target;
+  counts: Target;
 }
 
 /** The layout of a pyramid over `n` elements, `width` texels a row (Pyramid). */
@@ -134,13 +138,16 @@ function pyramidLayout(n: number, width: number) {
 
 /**
  * The targets of the sinks for `strains` strains on a grid of `width` × `height` cells (GlSinks), made by `make`. Each
- * strain has two targets of rates, the levels of its pyramid, and the state two targets of 2 texels per strain.
+ * strain has two targets of rates, the levels of its pyramid, and the state two targets of 2 texels per strain. The
+ * keys have a texel per agent slot, in rows of `agentWidth`.
  */
 function makeSinks(
   make: (width: number, height: number, format: number) => Target,
   width: number,
   height: number,
   strains: number,
+  agentWidth: number,
+  agentHeight: number,
 ): GlSinks {
   const gl = WebGL2RenderingContext;
   const each = <T>(of: () => T) => Array.from({ length: strains }, of);
@@ -149,6 +156,8 @@ function makeSinks(
     rates: each((): Pair<Target> => [make(width, height, gl.R32F), make(width, height, gl.R32F)]),
     levels: each(() => sinkLevels(width, height).map(([w, h]) => make(w, h, gl.RGBA32UI))),
     state: [make(2, strains, gl.RGBA32F), make(2, strains, gl.RGBA32F)],
+    keys: make(agentWidth, agentHeight, gl.R32F),
+    counts: make(2, 1, gl.RGBA32F),
   };
 }
 
@@ -374,6 +383,8 @@ export class GlSim implements Sim {
   private tt: Bit = 0;
   /** The sinks of each strain (GlSinks); `sr` names the current copy of the rates, `st` that of the state. */
   private sinks: GlSinks | undefined;
+  /** The framebuffers of the test of growth with the keys of the paid births, by the texture of the agents (withKeys()). */
+  private readonly keyFbos = new Map<WebGLTexture, WebGLFramebuffer>();
   private sr: Bit = 0;
   private st: Bit = 0;
   /**
@@ -499,7 +510,7 @@ export class GlSim implements Sim {
           copies: [t(width, height, gl.R8UI), t(width, height, gl.R8UI)],
           owners: t(width, height, gl.R8UI),
         };
-        this.sinks = makeSinks(t, width, height, flowStrains(settings));
+        this.sinks = makeSinks(t, width, height, flowStrains(settings), this.agentWidth, agentHeight);
       }
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
@@ -1791,7 +1802,7 @@ export class GlSim implements Sim {
     // Growth and shrinkage after the deposits, so an agent that shrinkage deletes keeps the trail of its move, as on
     // WebGPU (ADR 0025). Only with the rule, on the steps that test them.
     const tests = growthTests(this.settings, this.step);
-    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow, held);
+    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow, held, sinks);
     // The owners after the moves and the births of the step (owners.vert).
     if (territory) this.encodeOwners(territory);
     const covered = this.settings.coveredFood;
@@ -1905,8 +1916,16 @@ export class GlSim implements Sim {
     if (this.sinks && this.sinks.strains !== strains) this.dropSinks();
     if (!this.sinks) {
       const gl = this.gl;
+      const agentHeight = Math.ceil(this.slots / this.agentWidth);
       this.sinks = allOrNothing(gl, (keep) =>
-        makeSinks((w, h, format) => keep(target(gl, w, h, format)), this.width, this.height, strains),
+        makeSinks(
+          (w, h, format) => keep(target(gl, w, h, format)),
+          this.width,
+          this.height,
+          strains,
+          this.agentWidth,
+          agentHeight,
+        ),
       );
       this.sr = 0;
       this.st = 0;
@@ -1914,12 +1933,46 @@ export class GlSim implements Sim {
     return this.sinks;
   }
 
-  /** Frees the targets of the sinks. */
+  /** Frees the targets of the sinks, and the framebuffers of the test that write the keys. */
   private dropSinks() {
+    for (const fbo of this.keyFbos.values()) this.gl.deleteFramebuffer(fbo);
+    this.keyFbos.clear();
     if (!this.sinks) return;
-    const { rates, levels, state } = this.sinks;
-    for (const t of [...rates.flat(), ...levels.flat(), ...state]) destroyTarget(this.gl, t);
+    const { rates, levels, state, keys, counts } = this.sinks;
+    for (const t of [...rates.flat(), ...levels.flat(), ...state, keys, counts]) destroyTarget(this.gl, t);
     this.sinks = undefined;
+  }
+
+  /**
+   * The target of the test of growth while the rules of stage 4 run (growth.frag PASS 2, ADR 0071): the agents `dst`
+   * and the keys of the paid births, as the two targets of one framebuffer, made at its first use for each copy of the
+   * agents.
+   */
+  private withKeys(dst: Target, sinks: GlSinks): Target {
+    const gl = this.gl;
+    let fbo = this.keyFbos.get(dst.texture);
+    if (!fbo) {
+      fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst.texture, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, sinks.keys.texture, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteFramebuffer(fbo);
+        throw new Error('The test of growth cannot write the agents and the keys of the paid births at once');
+      }
+      this.keyFbos.set(dst.texture, fbo);
+    }
+    return { ...dst, fbo };
+  }
+
+  /**
+   * The sink rates of the step before for the samplers `rates` to `rates3` of growth.frag PASS 2 (ADR 0071): strain A
+   * in the place of a strain that the scene does not have.
+   */
+  private ratesOf(sinks: GlSinks): Record<string, WebGLTexture> {
+    const rate = (s: number) => (sinks.rates[s] ?? at(sinks.rates, 0))[this.sr].texture;
+    return { rates: rate(0), rates1: rate(1), rates2: rate(2), rates3: rate(3) };
   }
 
   /**
@@ -1968,7 +2021,8 @@ export class GlSim implements Sim {
     const state = programs.state;
     gl.useProgram(state.program);
     const sums = at(levels, levels.length - 1).texture;
-    textures(gl, state.program, { sums, ports, stateIn: sinks.state[this.st].texture });
+    const stateIn = sinks.state[this.st].texture;
+    textures(gl, state.program, { sums, ports, stateIn, paidCounts: sinks.counts.texture });
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -1994,6 +2048,21 @@ export class GlSim implements Sim {
   readSinkState(): Promise<Float32Array> {
     if (!this.sinks) return Promise.resolve(new Float32Array(SINK_STATE_LANES * flowStrains(this.settings)));
     return Promise.resolve(readTarget(this.gl, this.sinks.state[this.st]) as Float32Array);
+  }
+
+  /** For tests: replaces the state of each strain (Sim.writeSinkState()), while the rules of stage 4 run. */
+  writeSinkState(data: Float32Array) {
+    if (!territoryOn(this.settings)) return;
+    const sinks = this.ensureSinks();
+    const lanes = data.subarray(0, SINK_STATE_LANES * sinks.strains);
+    writeTarget(this.gl, sinks.state[this.st], 0, 0, 2, sinks.strains, lanes);
+  }
+
+  /** For tests: the keys of the paid births of the last growth step, by agent (../sim.ts readPaidKeys()). */
+  readPaidKeys(): Promise<Float32Array> {
+    if (!this.sinks) return Promise.resolve(new Float32Array(0));
+    const rgba = readTarget(this.gl, this.sinks.keys);
+    return Promise.resolve(Float32Array.from({ length: this.agents }, (_, i) => rgba[i * 4] ?? 0));
   }
 
   /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
@@ -2130,7 +2199,7 @@ export class GlSim implements Sim {
    * pass through the tests, and on a growth step through the claims, the pyramids and the births. Then the occupancy
    * is counted anew for the next step.
    */
-  private encodeGrowth(grow: boolean, territory: Record<string, WebGLTexture>) {
+  private encodeGrowth(grow: boolean, territory: Record<string, WebGLTexture>, sinks: GlSinks | undefined) {
     const gl = this.gl;
     const g = this.ensureGrowth();
     const p = this.prog.growth();
@@ -2148,17 +2217,57 @@ export class GlSim implements Sim {
     const flow = flowOn(this.settings) ? this.flow : undefined;
     const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
     // With the rules of stage 4, the test in which a child is born only onto the territory (TERRITORY in growth.frag,
-    // ADR 0068): it reads the territory that the agent pass of the step read.
-    const test = territory.territory ? this.prog.territory().test : flow ? this.prog.growthFlowing() : p.test;
+    // ADR 0068): it reads the territory that the agent pass of the step read. It also marks the agents of the front of
+    // the births that the flux pays and writes their keys, from the sink rates of the step before (ADR 0071).
+    const paid = territory.territory ? sinks : undefined;
+    const test = paid ? this.prog.territory().test : flow ? this.prog.growthFlowing() : p.test;
     this.pass(
       test,
-      tested,
-      { agentsIn: this.agentsTex[this.a].texture, windows, occ, env, ...flowMemory, ...territory },
+      paid ? this.withKeys(tested, paid) : tested,
+      {
+        agentsIn: this.agentsTex[this.a].texture,
+        windows,
+        occ,
+        env,
+        ...flowMemory,
+        ...territory,
+        ...(paid ? this.ratesOf(paid) : {}),
+      },
       {
         agentWidth,
       },
     );
     this.a = flip(this.a);
+    if (grow && paid) {
+      // The rank of the paid births (PASS 5): a paid parent marks GROWS, PAID and the neighbour of its child, and the
+      // points below claim the neighbour for it. It reads the budget of the state of the step before.
+      const stage4 = this.prog.territory();
+      this.pass(
+        stage4.rank,
+        this.agentsTex[flip(this.a)],
+        {
+          agentsIn: this.agentsTex[this.a].texture,
+          keys: paid.keys.texture,
+          occ,
+          env,
+          ...flowMemory,
+          ...territory,
+          state: paid.state[this.st].texture,
+        },
+        { agentWidth },
+      );
+      this.a = flip(this.a);
+      // F and K of the step for the state (paid.vert): two points per agent slot.
+      clear(gl, paid.counts);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, paid.counts.fbo);
+      gl.viewport(0, 0, paid.counts.width, paid.counts.height);
+      gl.useProgram(stage4.paid.program);
+      textures(gl, stage4.paid.program, { agents: this.agentsTex[this.a].texture });
+      gl.uniform1i(stage4.paid.loc('agentWidth'), agentWidth);
+      this.blend(gl.FUNC_ADD);
+      gl.drawArrays(gl.POINTS, 0, 2 * this.agents);
+      gl.disable(gl.BLEND);
+    }
     if (grow) {
       const agents = this.agentsTex[this.a];
       const points = (kind: number, dst: Target, equation: number | null, claims: WebGLTexture) => {

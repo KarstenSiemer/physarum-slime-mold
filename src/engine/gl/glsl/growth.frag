@@ -1,9 +1,25 @@
 // The fragment passes of growth and shrinkage (ADR 0025), after growth.glsl. Mirrors ../../shaders/growth.wgsl.
 // programs.ts compiles one program per PASS, so that each binds only its own samplers:
 // 0 row sums of the occupancy over both windows, 1 window counts, 2 the tests of the agents (shrinkage deletes,
-// a parent marks GROWS and its neighbour), 3 one level of a pyramid of sums, 4 the births.
+// a parent marks GROWS and its neighbour), 3 one level of a pyramid of sums, 4 the births, and with the rules of stage
+// 4 5 the rank of the births that the flux pays (ADR 0071).
 
+// Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl), and the territory of each strain (ADR 0068;
+// `//#if TERRITORY` there): programs.ts compiles PASS 2 with them, and PASS 5 always with both.
+#ifndef FLOW
+#define FLOW 0
+#endif
+#ifndef TERRITORY
+#define TERRITORY 0
+#endif
+
+#if PASS == 2 && TERRITORY
+// With the rules of stage 4 the test writes the key of each agent too, into a second target of the agents (ADR 0071).
+layout(location = 0) out vec4 result;
+layout(location = 1) out vec4 paidKey;
+#else
 out vec4 result;
+#endif
 
 #if PASS == 0 || PASS == 1
 // The occupancy after the moves (PASS 0) or the row sums (PASS 1). A cell of the grid's rectangle, wrapped on the
@@ -46,20 +62,16 @@ void main() {
 }
 #endif
 
-#if PASS == 2
+#if PASS == 2 || PASS == 5
 uniform sampler2D agentsIn;
-uniform sampler2D windows;
 uniform sampler2D occ; // agents per cell after this step's moves
 uniform sampler2D env;
 uniform int agentWidth;
 
-// Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl): programs.ts compiles this pass with it, and
-// gl/sim.ts uses that program only while the flow is on. An agent on a cell that the flux of its strain passed by
-// does not divide. Every strain has a flow of its own (ADR 0031): the memory of strain A, and of strains B, C and D (the
-// memory of strain A in the place of a strain that the scene does not have).
-#ifndef FLOW
-#define FLOW 0
-#endif
+// Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl): gl/sim.ts uses the program of PASS 2 with it
+// only while the flow is on. An agent on a cell that the flux of its strain passed by does not divide. Every strain
+// has a flow of its own (ADR 0031): the memory of strain A, and of strains B, C and D (the memory of strain A in the
+// place of a strain that the scene does not have).
 #if FLOW
 uniform sampler2D flowMemory; // x flow memory (flow.frag), of the step before
 uniform sampler2D flowMemory1;
@@ -89,12 +101,9 @@ bool starved(uint s, ivec2 q) {
 }
 #endif
 
-// The territory of each strain (ADR 0068; `//#if TERRITORY` in ../../shaders/growth.wgsl): programs.ts compiles this
-// pass with it, and gl/sim.ts uses that program only while the rules of stage 4 run, always with the flow. A child is
-// born only onto a cell of the territory of the strain of its parent.
-#ifndef TERRITORY
-#define TERRITORY 0
-#endif
+// The territory of each strain (ADR 0068; `//#if TERRITORY` in ../../shaders/growth.wgsl): gl/sim.ts uses the program
+// of PASS 2 with it only while the rules of stage 4 run, always with the flow. A child is born only onto a cell of the
+// territory of the strain of its parent.
 #if TERRITORY
 uniform highp usampler2D territory; // bit s while the cell lies in the territory of strain s (territory.frag)
 #endif
@@ -107,6 +116,129 @@ bool lightStops(uint i, int m) {
   uint rng = rngSeed(i, SHADE);
   return rand(rng) * 255.0 < chance;
 }
+
+#if TERRITORY
+// The births that the flux pays (ADR 0071; the paid births in ../../shaders/growth.wgsl): PASS 2 marks the agents of the
+// front with FRONT and writes their keys, PASS 5 lets the ⌊B⌋ agents of each strain with the least keys claim a child
+// and marks them with GROWS and PAID, and paid.vert counts both for the state (sinks.frag PASS 3).
+
+// The key of an agent that cannot claim a paid child: the largest float, for an infinite key (paid.ts NO_KEY).
+const float NO_KEY = 3.402823466e38;
+
+// Whether cell m holds no tube body of strain s: the y of its memory of the step before lies below the body low of the
+// flow (F.c.z).
+bool bodyless(uint s, int m) { return flowMemoryOf(s, cellCoord(m)).y < F.c.z; }
+
+// Whether an agent of strain s on the cell at q lies at the rim of its colony (atRim in growth.wgsl): a neighbour is
+// open, empty after the moves, and holds no tube body of s.
+bool atRim(uint s, ivec2 q) {
+  for (uint k = 0u; k < 8u; k++) {
+    int m = cellAt(q + around(k));
+    if (m < 0 || isWall(texelFetch(env, cellCoord(m), 0)) || texelFetch(occ, cellCoord(m), 0).r >= 0.5) continue;
+    if (bodyless(s, m)) return true;
+  }
+  return false;
+}
+
+// Bit k: neighbour k of the cell at q is free for a child of strain s, as target() finds a free cell (freeAround in
+// growth.wgsl).
+uint freeAround(uint s, ivec2 q) {
+  uint open = 0u;
+  uint walls = 0u;
+  for (uint k = 0u; k < 8u; k++) {
+    int m = cellAt(q + around(k));
+    if (m < 0) continue;
+    if (isWall(texelFetch(env, cellCoord(m), 0))) {
+      walls |= 1u << k;
+    } else if (texelFetch(occ, cellCoord(m), 0).r < 0.5 && !starved(s, cellCoord(m)) &&
+               (texelFetch(territory, cellCoord(m), 0).r & (1u << s)) != 0u) {
+      open |= 1u << k;
+    }
+  }
+  for (uint k = 0u; k < 8u; k++) {
+    ivec2 o = around(k);
+    if (o.x != 0 && o.y != 0) {
+      uint beside = (1u << aroundIndex(ivec2(o.x, 0))) | (1u << aroundIndex(ivec2(0, o.y)));
+      if ((walls & beside) == beside) open &= ~(1u << k);
+    }
+  }
+  return open;
+}
+
+// The neighbour of the child of paid parent i with `bits` on cell c, or −1 (paidCell in growth.wgsl): a free cell
+// without a tube body of its strain if one lies beside it, else any free cell, picked with the draw of target(); light
+// stops the birth as it stops one of Jones' rule.
+int paidCell(uint bits, int c, uint i) {
+  uint s = bits & 3u;
+  ivec2 q = cellCoord(c);
+  uint open = freeAround(s, q);
+  uint out_ = 0u;
+  for (uint k = 0u; k < 8u; k++) {
+    if ((open & (1u << k)) != 0u && bodyless(s, cellAt(q + around(k)))) out_ |= 1u << k;
+  }
+  uint pool = out_ != 0u ? out_ : open;
+  uint free = 0u;
+  for (uint k = 0u; k < 8u; k++) free += (pool >> k) & 1u;
+  if (free == 0u) return -1;
+  uint rng = rngSeed(i, GROW);
+  uint pick = min(uint(rand(rng) * float(free)), free - 1u);
+  for (uint k = 0u; k < 8u; k++) {
+    if ((pool & (1u << k)) != 0u) {
+      if (pick == 0u) return lightStops(i, cellAt(q + around(k))) ? -1 : int(k);
+      pick--;
+    }
+  }
+  return -1;
+}
+#endif
+#endif
+
+#if PASS == 2
+uniform sampler2D windows;
+
+#if TERRITORY
+// The sink rates of the step before of strains A to D (sinks.frag PASS 0), those of strain A in the place of a strain
+// that the scene does not have: a sink of that step holds its rate with a minus sign.
+uniform sampler2D rates;
+uniform sampler2D rates1;
+uniform sampler2D rates2;
+uniform sampler2D rates3;
+
+float rateOf(uint s, ivec2 q) {
+  if (s == 1u) return texelFetch(rates1, q, 0).r;
+  if (s == 2u) return texelFetch(rates2, q, 0).r;
+  if (s == 3u) return texelFetch(rates3, q, 0).r;
+  return texelFetch(rates, q, 0).r;
+}
+
+// −ln(1 − u) for a draw u in [0, 1) (exponential in growth.wgsl): up to 1 / 2 the series of 2 · atanh(u / (2 − u)),
+// above it −log(1 − u), whose error near 1 may be 2^-21.
+float exponential(float u) {
+  if (u > 0.5) return -log(1.0 - u);
+  float t = u / (2.0 - u);
+  float t2 = t * t;
+  float odd = ((((((t2 / 15.0 + 1.0 / 13.0) * t2 + 1.0 / 11.0) * t2 + 1.0 / 9.0) * t2 + 1.0 / 7.0) * t2 + 1.0 / 5.0) *
+                 t2 + 1.0 / 3.0) * t2 + 1.0;
+  return 2.0 * t * odd;
+}
+
+// Agent i with `bits` on cell c, alive and no parent of Jones' rule in a growth step (paidTest in growth.wgsl): whether
+// it is an agent of the front of its strain s, with a sink rate of s on its cell that is not 0, a cell that is not
+// starved, and at the rim. `key`: with a free cell beside it −ln(1 − u) / |r|, else NO_KEY. Its claim key is never 0
+// here (claimKey() in common.glsl).
+bool paidTest(uint bits, int c, uint i, out float key) {
+  key = NO_KEY;
+  uint s = bits & 3u;
+  ivec2 q = cellCoord(c);
+  float rate = abs(rateOf(s, q));
+  if (rate == 0.0 || starved(s, q) || !atRim(s, q)) return false;
+  if (freeAround(s, q) != 0u) {
+    uint rng = rngSeed(i, PAID_KEY);
+    key = exponential(rand(rng)) / rate;
+  }
+  return true;
+}
+#endif
 
 // The neighbour that a living agent in cell c divides into, or −1 (divideInto in growth.wgsl): a habitable cell
 // that is empty after the moves, and a diagonal one only if the two cells beside the corner between it and cell c
@@ -167,6 +299,9 @@ void main() {
   uint bits = bitsOf(a);
   int c = cellOf(a.xy);
   result = a;
+#if TERRITORY
+  paidKey = vec4(NO_KEY);
+#endif
   if (i >= P.grid.z || (bits & ALIVE) == 0u || c < 0) return;
   if (shrinkTest()) {
     float n = texelFetch(windows, cellCoord(c), 0).g;
@@ -177,6 +312,48 @@ void main() {
   }
   int k = target(bits, c, i);
   if (k >= 0) result.w = float(bits | GROWS | (uint(k) << DIR_SHIFT));
+#if TERRITORY
+  // The births that the flux pays, after Jones' rule (ADR 0071).
+  if (k < 0 && growthTest()) {
+    float key;
+    if (paidTest(bits, c, i, key)) result.w = float(bits | FRONT);
+    paidKey = vec4(key);
+  }
+#endif
+}
+#endif
+
+#if PASS == 5
+// The rank of the births that the flux pays (rank in growth.wgsl; ADR 0071), after PASS 2 in a growth step. An agent
+// with a key counts the agents of its strain with a smaller key, or with the same key and a smaller id, and stops when
+// the count reaches ⌊B⌋ of its strain. Below it the agent marks GROWS, PAID and the neighbour of its child (paidCell()),
+// and the points of growth.vert claim the neighbour for it as for a parent of Jones' rule. A budget below 1 pays
+// nothing.
+uniform sampler2D keys; // the key of every agent of the test (PASS 2), by its texel
+uniform sampler2D state; // the state of the strains (sinks.frag PASS 3), texel (1, s): y the budget of strain s
+
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  uint i = uint(t.y * agentWidth + t.x);
+  vec4 a = texelFetch(agentsIn, t, 0);
+  result = a;
+  float mine = texelFetch(keys, t, 0).r;
+  if (i >= P.grid.z || mine == NO_KEY) return;
+  uint bits = bitsOf(a);
+  uint s = bits & 3u;
+  uint budget = uint(texelFetch(state, ivec2(1, int(s)), 0).y);
+  uint j = s > 0u ? P.strainEnd[s - 1u] : 0u;
+  ivec2 at = ivec2(int(j) % agentWidth, int(j) / agentWidth);
+  uint before = 0u;
+  for (; j < P.strainEnd[s] && before < budget; j++) {
+    float other = texelFetch(keys, at, 0).r;
+    if (other < mine || (other == mine && j < i)) before++;
+    at.x++;
+    if (at.x == agentWidth) at = ivec2(0, at.y + 1);
+  }
+  if (before >= budget) return;
+  int k = paidCell(bits, cellOf(a.xy), i);
+  if (k >= 0) result.w = float(bits | GROWS | PAID | (uint(k) << DIR_SHIFT));
 }
 #endif
 

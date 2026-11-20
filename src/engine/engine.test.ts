@@ -10,7 +10,9 @@ import {
   FLOW_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
+  PAID_BYTES_PER_AGENT,
   SITE_BYTES_PER_CELL,
+  TERRITORY_BYTES_PER_CELL,
   TUBES_BYTES_PER_CELL,
 } from './sizing';
 import type { Levels } from './types';
@@ -379,6 +381,40 @@ describe('the memory of the sinks (ADR 0069)', () => {
     // Without the rules the sinks take no memory.
     const off = { ...on, territory: false };
     expect(await largest(off, 64)).toBe(await largest(off, 0));
+  });
+
+  it('counts the key of the births that the flux pays per agent while the rules run (ADR 0071)', async () => {
+    const canvas = { width: 160, height: 100 } as HTMLCanvasElement;
+    // One agent per cell in a box: the bytes per agent count as much as bytes per cell.
+    const on: Settings = {
+      ...defaultSettings(),
+      model: 'extended',
+      boundary: 'box',
+      flow: true,
+      growth: true,
+      collisions: true,
+      territory: true,
+      density: 1,
+      capacity: 1,
+      lattice: [256, 256],
+    };
+    /** The most bytes per cell of a backend without sinks at which the lattice of `s` still fits. */
+    const most = async (s: Settings) => {
+      const backend = new CpuBackend();
+      backend.sinkBytesPerCell = 0;
+      const engine = await Engine.create(canvas, s, undefined, backend);
+      let [low, high] = [0, 2 ** 16];
+      while (high - low > 1) {
+        const mid = Math.floor((low + high) / 2);
+        backend.bytesPerCell = mid;
+        if (engine.fit(s).lattice) low = mid;
+        else high = mid;
+      }
+      return low;
+    };
+    // The rules take the territory and the owners per cell, and the key per agent.
+    const rules = (await most({ ...on, territory: false })) - (await most(on));
+    expect(rules).toBe(TERRITORY_BYTES_PER_CELL + PAID_BYTES_PER_AGENT);
   });
 });
 

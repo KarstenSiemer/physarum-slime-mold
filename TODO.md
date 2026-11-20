@@ -296,8 +296,13 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   the pressure with what the sinks take (2 times the flow strength, by the rates as R counted them) and what the
   covered ports or the tube cells give, the adaptation while the front took flux, and the drift in the sensors (a
   setting for all strains, 1.5 for now), against a CPU copy, with 39 wrong rules more; every scene keeps its bytes.
-- **Next: parts 3 and 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
-  the paid births, then the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
+- **The engine of stage 4, part 3** (ADR 0071, 2026-11-20): the births that the flux pays in both backends: the budget
+  of each strain, a key per agent of the front in the growth test, the new pass `rank` that lets the ⌊B⌋ agents with
+  the least keys claim a child, and the paid parents of `win`, against a CPU copy, with 73 wrong rules more; every
+  scene keeps its bytes. `rank` takes 0.74 ms per growth step on WebGPU and 0.05 ms on WebGL2 in the start scene at
+  147,456 agents (M3 Pro).
+- **Next: part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
+  the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
   panel, the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a
   second strain grows on the slime of the first. Then the picture: the skirt goes, or it is drawn from the plasm of the
   crown.

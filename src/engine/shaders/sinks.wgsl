@@ -18,7 +18,10 @@
 //   integers, and an addition that wraps the low word of R adds 1 to the high one.
 // - `state`: one invocation, after `sinks`. The state of the strain: R as a float, C, N, the covered ports (the sites
 //   with a port in this step), and whether the front takes flux: it has a sink, R is above 0, and a covered port or
-//   a tube cell pays. The other lanes keep what they hold: they belong to the parts after this one.
+//   a tube cell pays. Then the budget B of the paid births (ADR 0071; paid.ts nextBudget()): in a growth step with a
+//   budget of at least 1, the paid claims K of the step come off, and B becomes at most the agents F of the front of
+//   the step; then B grows by F.take.y while the front takes flux. Each operation rounds once, so every GPU gives the
+//   same float. The last two lanes hold F and K of the step.
 //
 // A cell is open when it lies in the arena and is no wall; a cell outside a closed arena is no wall.
 
@@ -37,6 +40,9 @@ struct FlowRule {
   // the steps of a path to ground without slime, of a path to the edge, of the mean, and the weight on slime in
   // steps of 2^-24 (sinks.ts packSinks())
   sinks: vec4f,
+  // x: what the sinks take in units of the flow strength (ADR 0070); y: the growth of the budget in a step (paid.ts
+  // packPaid())
+  take: vec4f,
 }
 @group(0) @binding(1) var<uniform> F: FlowRule;
 @group(0) @binding(2) var<storage, read> env: array<u32>;
@@ -47,7 +53,13 @@ struct FlowRule {
 @group(0) @binding(7) var<storage, read_write> rates: array<f32>; // per strain and cell: strain · W · H + cell
 @group(0) @binding(8) var<storage, read_write> sums: array<atomic<u32>>; // per strain: R low, R high, C, N
 @group(0) @binding(9) var<storage, read> ports: array<vec2i>; // per strain and site: x the port of this step (flow.wgsl)
-@group(0) @binding(10) var<storage, read_write> states: array<vec4f>; // per strain 2 (sinks.ts SINK_STATE_LANES)
+// The state of every strain, 2 vec4 each (sinks.ts SINK_STATE_LANES); then F and K of each strain, which growth counts
+// in the step (paid.ts PAID_COUNTS_BYTE); the keys of the paid births follow them, and no pass here reads them.
+struct States {
+  lanes: array<vec4f, 8>,
+  counts: array<atomic<u32>, 8>,
+}
+@group(0) @binding(10) var<storage, read_write> states: States;
 
 // The weight 1 in steps of the rate (sinks.ts RATE_ONE).
 const RATE_ONE = 16777216u;
@@ -217,7 +229,13 @@ fn state() {
   // so every GPU gives the same float.
   let r = (f32(high) * 65536.0 + f32(low >> 16u)) + f32(low & 0xffffu) * (1.0 / 65536.0);
   let takes = count > 0u && (low | high) != 0u && (covered > 0u || tubes > 0u);
-  states[s * 2u] = vec4f(r, f32(tubes), f32(count), f32(covered));
-  let kept = states[s * 2u + 1u];
-  states[s * 2u + 1u] = vec4f(select(0.0, 1.0, takes), kept.yzw);
+  states.lanes[s * 2u] = vec4f(r, f32(tubes), f32(count), f32(covered));
+  let front = atomicLoad(&states.counts[s * 2u]);
+  let claims = atomicLoad(&states.counts[s * 2u + 1u]);
+  var budget = states.lanes[s * 2u + 1u].y;
+  if (P.growth.x > 0u && P.grid.w % P.growth.x == 0u && budget >= 1.0) {
+    budget = min(budget - f32(claims), f32(front));
+  }
+  if (takes) { budget += F.take.y; }
+  states.lanes[s * 2u + 1u] = vec4f(select(0.0, 1.0, takes), budget, f32(front), f32(claims));
 }

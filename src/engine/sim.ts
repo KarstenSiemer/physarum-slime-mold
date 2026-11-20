@@ -34,6 +34,7 @@ import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
+import { PAID_COUNTS_BYTE, PAID_COUNTS_BYTES, PAID_KEYS_BYTE } from './paid';
 import { SINK_STATE_LANES, SINK_SUM_WORDS } from './sinks';
 import { packTerritory, territoryOn } from './territory';
 import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
@@ -139,6 +140,10 @@ interface SinkState {
   strains: number;
   rates: GPUBuffer;
   sums: GPUBuffer;
+  /**
+   * The state of each strain, then the counts F and K of the paid births of each strain, then the key of every agent
+   * (paid.ts PAID_COUNTS_BYTE and PAID_KEYS_BYTE; ADR 0067, decision 7).
+   */
   state: GPUBuffer;
 }
 /**
@@ -1615,9 +1620,13 @@ export class Simulation implements Sim {
     // pass fills the owners anew, and the push writes the next territory.
     const territory = col && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
     if (territory) enc.clearBuffer(territory.owners);
-    // The sinks of each strain (ADR 0069): the atomics of the step add their sums from 0.
+    // The sinks of each strain (ADR 0069): the atomics of the step add their sums from 0, and so the counts of the paid
+    // births (ADR 0071).
     const sinks = territory ? this.ensureSinks() : undefined;
-    if (sinks) enc.clearBuffer(sinks.sums);
+    if (sinks) {
+      enc.clearBuffer(sinks.sums);
+      enc.clearBuffer(sinks.state, PAID_COUNTS_BYTE, PAID_COUNTS_BYTES);
+    }
     let pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
     const a = this.agentParity;
@@ -1735,7 +1744,8 @@ export class Simulation implements Sim {
       );
       pass.dispatchWorkgroups(...this.groups);
       this.occParity = flip(q);
-      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform, territoryView);
+      if (growth)
+        pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform, territoryView, sinks);
       // The owners after the moves and the births of the step (territory.wgsl `fillOwners`).
       if (territory) this.encodeOwners(pass, territory);
     }
@@ -1855,7 +1865,8 @@ export class Simulation implements Sim {
         strains,
         rates: make(this.width * this.height * strains * 4),
         sums: make(SINK_SUM_WORDS * strains * 4),
-        state: make(SINK_STATE_LANES * strains * 4),
+        // The state of every strain, the counts of the paid births and a key per agent (ADR 0071).
+        state: make(PAID_KEYS_BYTE + this.agents * 4),
       };
     }
     return this.sinks;
@@ -1898,7 +1909,8 @@ export class Simulation implements Sim {
     );
     pass.dispatchWorkgroups(...groups);
     pass.setPipeline(passes.state);
-    const state = [null, uniform, null, null, null, null, null, null, sinks.sums, ports, sinks.state];
+    // The state reads the step and the test of growth in the parameters: the budget of the paid births (ADR 0071).
+    const state = [this.params, uniform, null, null, null, null, null, null, sinks.sums, ports, sinks.state];
     pass.setBindGroup(0, this.bind(`sinks-state${strain}-flow`, passes.state, state));
     pass.dispatchWorkgroups(1);
   }
@@ -1923,7 +1935,28 @@ export class Simulation implements Sim {
   /** For tests: the state of each strain of the last step, SINK_STATE_LANES floats (Sim.readSinkState()). */
   async readSinkState(): Promise<Float32Array> {
     if (!this.sinks) return new Float32Array(SINK_STATE_LANES * flowStrains(this.settings));
-    return new Float32Array(await readBuffer(this.device, this.sinks.state));
+    const all = new Float32Array(await readBuffer(this.device, this.sinks.state));
+    return all.slice(0, SINK_STATE_LANES * this.sinks.strains);
+  }
+
+  /**
+   * For tests: replaces the state of each strain, SINK_STATE_LANES floats per strain as readSinkState() returns them,
+   * while the rules of stage 4 run (Sim.writeSinkState()).
+   */
+  writeSinkState(data: Float32Array) {
+    if (!territoryOn(this.settings)) return;
+    const sinks = this.ensureSinks();
+    this.device.queue.writeBuffer(sinks.state, 0, data.subarray(0, SINK_STATE_LANES * sinks.strains));
+  }
+
+  /**
+   * For tests: the keys of the births that the flux pays of the last growth step (Sim.readPaidKeys()), one float per
+   * agent by its id, paid.ts NO_KEY for an agent without a key. Empty while the rules of stage 4 do not run.
+   */
+  async readPaidKeys(): Promise<Float32Array> {
+    if (!this.sinks) return new Float32Array(0);
+    const all = new Float32Array(await readBuffer(this.device, this.sinks.state));
+    return all.slice(PAID_KEYS_BYTE / 4, PAID_KEYS_BYTE / 4 + this.agents);
   }
 
   /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
@@ -2116,13 +2149,17 @@ export class Simulation implements Sim {
     flowMemory: GPUTextureView | null,
     flowUniform: GPUBuffer | null,
     territory: GPUTextureView | null,
+    sinks: SinkState | undefined,
   ) {
     // With the flow in the tubes, the passes in which an agent on a starved cell does not divide and no child is born
     // onto one (growth.wgsl `//#if FLOW`, ADR 0029 and ADR 0053): they read the flow memory that the agent passes of
-    // the step read. With the rules of stage 4 also the territory that they read (`//#if TERRITORY`, ADR 0068).
+    // the step read. With the rules of stage 4 also the territory that they read (`//#if TERRITORY`, ADR 0068), and the
+    // sink rates and the state of the sinks for the births that the flux pays (ADR 0071): their groups hold buffers of
+    // the sinks, which dropSinks() forgets with the key.
     const flow = flowMemory !== null;
+    const paid = territory !== null && sinks !== undefined;
     const k = this.kernels.growth(flow, territory !== null);
-    const f = flow ? `flow${this.flowM}${territory ? `terr${this.territoryT}` : ''}` : '';
+    const f = flow ? `flow${this.flowM}${territory ? `terr${this.territoryT}${paid ? '-sinks' : ''}` : ''}` : '';
     const a = this.agentParity;
     const moved = this.occParity;
     const after = this.ensureCollision().occ[moved];
@@ -2151,10 +2188,12 @@ export class Simulation implements Sim {
         ...(flow ? GROWTH_FLOW_BINDINGS[name] : []),
         ...(territory ? GROWTH_TERRITORY_BINDINGS[name] : []),
       ];
-      return [...resources, extra, flowMemory, flowUniform, territory].map((r, i) => (bindings.includes(i) ? r : null));
+      const stage4 = [flowMemory, flowUniform, territory, sinks?.rates ?? null, sinks?.state ?? null];
+      return [...resources, extra, ...stage4].map((r, i) => (bindings.includes(i) ? r : null));
     };
     const run = (name: keyof GrowthKernels, groups: [number, number]) => {
       const pipeline = k[name];
+      if (!pipeline) throw new Error(`No pass ${name} of growth`);
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, this.bind(`grow-${name}${a}${moved}${f}`, pipeline, used(name)));
       pass.dispatchWorkgroups(...groups);
@@ -2163,6 +2202,8 @@ export class Simulation implements Sim {
     run('windowSums', cellGroups);
     run('test', this.groups);
     if (grow) {
+      // The rank of the births that the flux pays, after the keys of `test` (ADR 0071).
+      if (paid) run('rank', this.groups);
       run('win', this.groups);
       const build = (name: 'buildCells' | 'buildDead', n: number) => {
         const pipeline = k[name];
@@ -2328,11 +2369,15 @@ interface Starts {
   settleStart: GPUComputePipeline;
 }
 
-/** The bindings that each pass of growth.wgsl uses: the 'auto' layout of its pipeline holds only these. */
+/**
+ * The bindings that each pass of growth.wgsl uses: the 'auto' layout of its pipeline holds only these. `rank` runs
+ * only with the rules of stage 4.
+ */
 export const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   rowSums: [0, 3, 5],
   windowSums: [0, 5, 6],
   test: [0, 1, 2, 3, 4, 6, 7],
+  rank: [0, 1, 2, 3, 7],
   win: [0, 1, 2, 3, 4, 6, 7, 8, 10],
   buildCells: [0, 8, 9, 14],
   buildDead: [0, 10, 11, 14],
@@ -2347,6 +2392,7 @@ export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]
   rowSums: [],
   windowSums: [],
   test: [15, 16],
+  rank: [15, 16],
   win: [15, 16],
   buildCells: [],
   buildDead: [],
@@ -2355,23 +2401,26 @@ export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]
 
 /**
  * The bindings that a pass of growth.wgsl uses in addition while the rules of stage 4 run (`//#if TERRITORY`): the
- * territory, in the passes that pick the cell of a child.
+ * territory, in the passes that pick the cell of a child; the sink rates and the state of the sinks with the counts
+ * and the keys of the paid births, in `test` and `rank` (ADR 0071).
  */
 export const GROWTH_TERRITORY_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   rowSums: [],
   windowSums: [],
-  test: [17],
+  test: [17, 18, 19],
+  rank: [17, 19],
   win: [17],
   buildCells: [],
   buildDead: [],
   birth: [],
 };
 
-/** The passes of growth and shrinkage (growth.wgsl, ADR 0025). */
+/** The passes of growth and shrinkage (growth.wgsl, ADR 0025). `rank`: only with the rules of stage 4 (ADR 0071). */
 interface GrowthKernels {
   rowSums: GPUComputePipeline;
   windowSums: GPUComputePipeline;
   test: GPUComputePipeline;
+  rank?: GPUComputePipeline;
   win: GPUComputePipeline;
   buildCells: GPUComputePipeline;
   buildDead: GPUComputePipeline;
@@ -2649,7 +2698,7 @@ class Kernels {
     const module = this.device.createShaderModule({ code: common + variant(growthWgsl, names) });
     const pipeline = (entryPoint: string) =>
       this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
-    const pipelines = {
+    const pipelines: GrowthKernels = {
       rowSums: pipeline('rowSums'),
       windowSums: pipeline('windowSums'),
       test: pipeline('test'),
@@ -2658,6 +2707,8 @@ class Kernels {
       buildDead: pipeline('buildDead'),
       birth: pipeline('birth'),
     };
+    // The rank of the births that the flux pays (ADR 0071): its entry point is in the source only with the rules.
+    if (territory) pipelines.rank = pipeline('rank');
     if (territory) this.growthTerritoryPipelines = pipelines;
     else if (flow) this.growthFlowPipelines = pipelines;
     else this.growthPipelines = pipelines;
