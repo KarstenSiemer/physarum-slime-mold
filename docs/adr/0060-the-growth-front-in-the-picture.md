@@ -9,6 +9,7 @@
   [ADR 0057](0057-the-film-of-the-slime.md), decision 9: the plasm hides the film. Changes
   [ADR 0009](0009-rendering-pipeline.md): the gel reads its height as a spline. Extends
   [ADR 0026](0026-scenes-of-jones-on-their-lattices.md): a copy of a lattice dims the light that the screen shows.
+- Extended by [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (no crown grows yet; what the rules lack).
 - In short: the rule of the front stamp is in `docs/model.md`, section 6.9, and the rule of the picture in
   `docs/design.md`, section 5. [`research/flow/README.md`](../../research/flow/README.md), part 22, has the commands
   and the records.

@@ -220,6 +220,12 @@ of the sinks before decision 8:
   `forms.sh` the targets, `lane.ts` the lane and `reads.ts` what the front reads; `E2d-NOTES.md` has the commands.
 - Part E2e of the engine (ADR 0075) builds `driftOn=take` in both backends. `e2e-backends.gpu.test.ts` runs the start
   scene with it on both backends, and `e2e-summary.ts` sums the runs up; `E2e-NOTES.md` has the commands.
+- The options of part E2f (ADR 0076), each off by default: `jones=edge`, Jones' births only within `reach` cells of
+  open ground outside the territory (the proposal); `jones=fresh`, only within `reach` cells of ground without slime (a
+  try); `bodyOn=agents` with `bodyFull`, the tube body follows the share of agents in the 3 × 3 block (a try).
+  `crowns.ts` runs a colony in the neck (a channel that opens onto open ground) with the measure of the crown,
+  `crown-table.ts` prints its table and the form of each run, and `crown-montage.sh` puts pictures side by side;
+  [the-crown-at-the-head.md](the-crown-at-the-head.md) tells the story, `E2f-NOTES.md` has the commands.
 
 ## Commands
 

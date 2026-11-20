@@ -51,6 +51,30 @@ export function box(w: number, h: number, foods: readonly (readonly [number, num
 }
 
 /**
+ * A box of w × h cells whose first `long` rows are wall but for a channel of `wide` cells in the middle: a colony on a
+ * food in the channel grows a tube through it and then meets open ground (ADR 0076). Foods as [x, y, radius] in cells.
+ */
+export function neck(
+  w: number,
+  h: number,
+  wide: number,
+  long: number,
+  foods: readonly (readonly [number, number, number])[],
+): Layout {
+  const open = new Uint8Array(w * h).fill(1);
+  const wall = new Uint8Array(w * h);
+  const [a, b] = [Math.round((w - wide) / 2), Math.round((w + wide) / 2)];
+  for (let y = 0; y < long; y++)
+    for (let x = 0; x < w; x++)
+      if (x < a || x >= b) {
+        open[y * w + x] = 0;
+        wall[y * w + x] = 1;
+      }
+  const [first] = foods;
+  return withFoods(w, h, open, wall, foods, first ? [first[0], first[1]] : [w / 2, h / 2]);
+}
+
+/**
  * The Y-maze of ADR 0056 with slime on the own parts of the arms `slimed`, or on every open cell when `everywhere` is
  * true (ADR 0056, target 3: slime everywhere). The left food is site 0.
  */

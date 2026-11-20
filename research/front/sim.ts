@@ -184,6 +184,20 @@ export interface Front {
    * agent 4 cells from the edge of the territory, so no agent is a sink until one walks out.
    */
   start: 'disc' | 'agents';
+  /**
+   * What sets the tube body of a cell (ADR 0076, a try): its trail, as the app does ('trail'), or the share of the
+   * open cells of its 3 × 3 block that hold an agent, full from `bodyFull` on ('agents'). With 'agents' a thin sheet
+   * conducts less than a thick one; with the trail a sheet with an agent on one cell of ten holds a full body.
+   */
+  bodyOn: 'trail' | 'agents';
+  bodyFull: number;
+  /**
+   * Where Jones' births come (ADR 0076): wherever an agent has few others near it, as the app ('all'), only within
+   * `reach` cells of ground without slime ('fresh', a try), or only within `reach` cells of open ground outside the
+   * territory ('edge', the proposal): the plasm then grows at the front, and behind it only moves. 'edge' does not read
+   * the slime, as the sinks of `sinkAt` 'edge' (ADR 0065, decision 8): a colony on slime grows at its edge too.
+   */
+  jones: 'all' | 'fresh' | 'edge';
 }
 
 export interface Params {
@@ -244,6 +258,9 @@ export const noFront = (): Front => ({
   fresh: 'chamfer',
   sums: 'float',
   start: 'disc',
+  bodyOn: 'trail',
+  bodyFull: 0.4,
+  jones: 'all',
 });
 
 /** The words that a text option of `Front` takes. */
@@ -260,6 +277,8 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   fresh: ['chamfer', 'box'],
   sums: ['float', 'fixed'],
   start: ['disc', 'agents'],
+  bodyOn: ['trail', 'agents'],
+  jones: ['all', 'fresh', 'edge'],
 };
 
 /**
@@ -962,6 +981,10 @@ export class Sim {
       if (this.counts[c] === 0) continue;
       const nG = this.windowSum(x, y, 4);
       if (nG < 1 || nG > 10 || this.D[c]! < FLOW.half) continue;
+      // `jones` (ADR 0076): Jones' births only within `reach` of ground without slime ('fresh') or of open ground
+      // outside the territory ('edge'), at the front.
+      if (front.jones === 'fresh' && !this.freshNear(c)) continue;
+      if (front.jones === 'edge' && !this.edgeNear(c)) continue;
       this.claimChild(i, c, free);
     }
     // The births that the flow paid for, in the forms of a GPU (ADR 0067): a chance per agent of the front ('chance',
@@ -1271,6 +1294,20 @@ export class Sim {
     return false;
   }
 
+  /** Whether an open cell outside the territory lies within `reach` cells of cell c (a Chebyshev distance). */
+  edgeNear(c: number): boolean {
+    const { w, h } = this;
+    const { open } = this.layout;
+    const r = this.p.front.reach;
+    const [x, y] = [c % w, Math.floor(c / w)];
+    for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)
+      for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {
+        const t = yy * w + xx;
+        if (open[t] && !this.territory[t]) return true;
+      }
+    return false;
+  }
+
   /** For tests: the distance of every cell to ground without slime before step k, from the chamfer transform. */
   freshField(k = this.step): Uint8Array {
     this.freshDistance(k);
@@ -1491,6 +1528,8 @@ export class Sim {
     // The update of the memory, the body and the conductivity (8.1, 8.4).
     const Gn = this.Gnext;
     const half2 = FLOW.half * FLOW.half;
+    const byAgents = this.p.front.bodyOn === 'agents';
+    const { w, h } = this;
     for (let c = 0; c < cells; c++) {
       if (!open[c]) {
         Gn[c] = 0;
@@ -1500,7 +1539,20 @@ export class Sim {
       const bodyOld = B[c]!;
       if (bodyOld >= FLOW.bodyLow) d = fed ? Math.max(FLOW.floor, d + FLOW.rate * (this.fmean[c]! - d)) : d;
       else d = Math.min(FLOW.fresh, Math.max(d, FLOW.floor) * (1 + this.recover));
-      const presence = Math.min(1, Math.max(0, (this.trail[c]! - this.low) * this.scale));
+      let presence = Math.min(1, Math.max(0, (this.trail[c]! - this.low) * this.scale));
+      if (byAgents) {
+        // The share of the open cells of the 3 × 3 block with an agent (bodyOn 'agents', ADR 0076).
+        const [x, y] = [c % w, Math.floor(c / w)];
+        let [a, n] = [0, 0];
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const [xx, yy] = [x + dx, y + dy];
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h || !open[yy * w + xx]) continue;
+            a += this.occ[yy * w + xx]!;
+            n++;
+          }
+        presence = Math.min(1, a / n / this.p.front.bodyFull);
+      }
       const body = bodyOld + FLOW.bodyRate * (presence - bodyOld);
       if (bodyOld >= FLOW.bodyLow && body < FLOW.bodyLow && d * d < half2) d = FLOW.floor;
       D[c] = d;

@@ -10,6 +10,7 @@
 - Accepted by the owner on 2026-11-20: `take`; the engine builds it in
   [ADR 0075](0075-the-drift-take-in-the-engine.md).
 - Extended by [ADR 0075](0075-the-drift-take-in-the-engine.md) (the drift `take` in the engine).
+- Extended by [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (the forms of the drift with `take`).
 - In short: [`research/front/the-drift-and-the-ground.md`](../../research/front/the-drift-and-the-ground.md) tells the
   story on one page; [`research/front/E2d-NOTES.md`](../../research/front/E2d-NOTES.md) has the commands, the folders
   and every number.
