@@ -507,6 +507,12 @@ export class Sim {
   readonly territory: Uint8Array;
   /** The step, plus 1, at which a tube cell first reached the flow memory VEIN (0: never): for the delay of a vein. */
   readonly veinAt: Uint32Array;
+  /**
+   * A still sheet (ADR 0079): the cells of fixed sinks of weight 1, which paidSinks() takes with the agents of the
+   * front (a still sheet has none), and the base conductance of a tube cell (8.4), FLOW.base but in a diagnostic.
+   */
+  stillSinks: readonly number[] = [];
+  base: number = FLOW.base;
   // Counts.
   births = 0;
   freshBirths = 0;
@@ -816,6 +822,15 @@ export class Sim {
     if (this.p.front.speed > 0) this.grow();
     // The marks of the paid births come with the push of the territory, after the step before a growth step.
     if (this.p.front.paid > 0 && this.p.front.paidBy === 'ahead' && (this.step + 1) % 3 === 0) this.markPaid();
+    this.step++;
+  }
+
+  /**
+   * One step of the flow alone, for a still sheet (ADR 0079): no agent moves or is born, and the trail and the slime
+   * stay, so the tube body stays where the trail holds it.
+   */
+  flowStep() {
+    this.flowPass();
     this.step++;
   }
 
@@ -1590,7 +1605,7 @@ export class Sim {
       D[c] = d;
       B[c] = body;
       if (body >= FLOW.bodyLow && d >= VEIN && this.veinAt[c] === 0) this.veinAt[c] = k + 1;
-      Gn[c] = body >= FLOW.bodyLow ? body * (food[c] ? FLOW.food : FLOW.base + d) : 0;
+      Gn[c] = body >= FLOW.bodyLow ? body * (food[c] ? FLOW.food : this.base + d) : 0;
       this.role[c] = 0;
     }
     sites.forEach((list, s) => {
@@ -1807,6 +1822,11 @@ export class Sim {
     if (front.reach > 0 && front.fresh === 'chamfer') this.freshDistance();
     const at: number[] = [];
     const weight = new Map<number, number>();
+    for (const c of this.stillSinks)
+      if (G[c]! > 0) {
+        at.push(c);
+        weight.set(c, 1);
+      }
     for (let c = 0; c < cells; c++) {
       if (!this.occ[c] || G[c]! <= 0) continue;
       const young = this.isYoung(c, k);
