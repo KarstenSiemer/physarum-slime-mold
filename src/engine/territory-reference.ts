@@ -25,6 +25,9 @@ export interface TerritoryGrid {
 /** Whether cell c (an index, or −1) is open: in the arena and no wall. */
 const open = (g: TerritoryGrid, c: number) => c >= 0 && (g.env[c * 4] ?? 0) < 128;
 
+/** Whether cell c (an index, or −1) is a wall: a cell outside a closed arena is none, as for a move and a birth. */
+export const wall = (g: TerritoryGrid, c: number) => c >= 0 && (g.env[c * 4] ?? 0) >= 128;
+
 /** The owners (territory.wgsl `fillOwners`): per cell bit s for an alive agent of strain s in it. */
 export function owners(agents: readonly AgentState[], g: TerritoryGrid): Uint8Array {
   const { cellOf } = grid(g.w, g.h, g.boundary);
@@ -40,7 +43,8 @@ export function owners(agents: readonly AgentState[], g: TerritoryGrid): Uint8Ar
  * The push of step `step` (territory.wgsl `push`): the territory after the step, from the territory before it and the
  * owners after the moves and the births. A cell joins the territory of every strain that owns it. An open cell outside
  * the territory of strain s joins it if the draw of its stream for s lies below the chance of the n agents of s among
- * its 8 neighbours (PUSH_CHANCES). A cell outside a closed arena keeps its byte.
+ * its 8 neighbours (PUSH_CHANCES). A diagonal neighbour counts only if the two cells beside the corner between it and
+ * the cell are not both walls (ADR 0069), as for a move and a birth. A cell outside a closed arena keeps its byte.
  */
 export function push(
   territory: Uint8Array,
@@ -60,6 +64,7 @@ export function push(
         const n = [0, 0, 0, 0];
         for (let dy = -1; dy <= 1; dy++)
           for (let dx = -1; dx <= 1; dx++) {
+            if (dx !== 0 && dy !== 0 && wall(g, cellAt(x + dx, y)) && wall(g, cellAt(x, y + dy))) continue;
             const m = dx === 0 && dy === 0 ? -1 : cellAt(x + dx, y + dy);
             const b = m < 0 ? 0 : (owned[m] ?? 0);
             for (let s = 0; s < 4; s++) n[s] = (n[s] ?? 0) + ((b >> s) & 1);

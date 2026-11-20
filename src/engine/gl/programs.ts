@@ -27,6 +27,7 @@ import slimeDownFrag from './glsl/slime-down.frag?raw';
 import slimeFilmFrag from './glsl/slime-film.frag?raw';
 import slimePaintFrag from './glsl/slime-paint.frag?raw';
 import slimeFrag from './glsl/slime.frag?raw';
+import sinksFrag from './glsl/sinks.frag?raw';
 import territoryFrag from './glsl/territory.frag?raw';
 import toolsGlsl from './glsl/tools.glsl?raw';
 import trailDownFrag from './glsl/trail-down.frag?raw';
@@ -127,6 +128,18 @@ export interface TerritoryPrograms {
   test: Program;
 }
 
+/** The passes of the sinks (sinks.frag, ADR 0069). */
+export interface SinkPrograms {
+  /** PASS 0: the sink rate of every cell. */
+  sinks: Program;
+  /** PASS 1: the first level of the pyramid of the sums, from the rates. */
+  first: Program;
+  /** PASS 2: a level of the pyramid above the first. */
+  level: Program;
+  /** PASS 3: the state of a strain. */
+  state: Program;
+}
+
 /** The passes of the picture of the tubes (tubes.frag, ADR 0034). */
 export interface TubePrograms {
   /** PASS 0: per cell and strain the factor of the radius of its tube. */
@@ -211,6 +224,8 @@ export interface Programs {
   flowing: (senseWalls: boolean, saturate: boolean, territory?: boolean) => Program;
   /** The passes of the territory (ADR 0068), compiled at their first use: no scene has them yet. */
   territory: () => TerritoryPrograms;
+  /** The passes of the sinks (ADR 0069), compiled at their first use: no scene has them yet. */
+  sinks: () => SinkPrograms;
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
   covered: () => Program;
@@ -377,6 +392,7 @@ export function compile(gl: GL): Programs {
   let poleShape: Program | undefined;
   let growthFlowing: Program | undefined;
   let territory: TerritoryPrograms | undefined;
+  let sinks: SinkPrograms | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
@@ -451,6 +467,13 @@ export function compile(gl: GL): Programs {
           ),
         ),
         test: sim(`#define PASS 2\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
+      }),
+    sinks: () =>
+      (sinks ??= {
+        sinks: sim('#define PASS 0\n' + sinksFrag),
+        first: sim('#define PASS 1\n' + sinksFrag),
+        level: sim('#define PASS 2\n' + sinksFrag),
+        state: sim('#define PASS 3\n' + sinksFrag),
       }),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),

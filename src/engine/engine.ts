@@ -28,6 +28,7 @@ import {
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
   slimeBytesPerCell,
+  sinkBytesPerCell,
   territoryBytesPerCell,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
@@ -324,6 +325,7 @@ export class Engine {
       slimeBytesPerCell(constrain({ ...s, collisions })) +
       // The rules of stage 4 by the rule that the backend runs: they need growth (ADR 0068).
       territoryBytesPerCell({ ...s, collisions }) +
+      sinkBytesPerCell({ ...s, collisions }, this.backend.sinkBytesPerCell) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
     const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
     const budget = memoryBudget(memory);

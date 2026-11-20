@@ -5,7 +5,7 @@ import type { Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { NO_SITES, type FlowSites } from './sites';
-import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_CELL, SINK_BYTES_PER_CELL } from './sizing';
 import { slimeModel, slimeSteps } from './slime';
 import { slimePaint } from './slime-reference';
 import { changesSlime, isPole, paintsEnv, type Backend, type Sim, type Stroke } from './types';
@@ -143,6 +143,18 @@ export class CpuSim implements Sim {
   writeTerritory() {
     // nothing to write
   }
+  readSinks() {
+    return Promise.resolve(new Float32Array(this.width * this.height));
+  }
+  readSinkSums() {
+    return Promise.resolve(new Uint32Array(0));
+  }
+  readSinkState() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  writeSinks() {
+    // nothing to write
+  }
   writeFlow() {
     // nothing to write
   }
@@ -241,6 +253,7 @@ export class CpuBackend implements Backend<CpuSim> {
   bytesPerAgent = BYTES_PER_AGENT;
   coveredBytesPerCell = 0;
   tubeMapBytesPerCell = 0; // as the WebGPU backend
+  sinkBytesPerCell = SINK_BYTES_PER_CELL; // as the WebGPU backend
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);
   /** Set by the engine; a test calls it as the WebGPU device does (Backend.onOutOfMemory). */

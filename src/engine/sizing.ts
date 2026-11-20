@@ -189,6 +189,36 @@ export const TERRITORY_BYTES_PER_CELL = 3;
 /** The bytes per cell of the rules of stage 4 of these settings: 0 while they do not run (territoryOn()). */
 export const territoryBytesPerCell = (s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>) =>
   territoryOn(s) ? TERRITORY_BYTES_PER_CELL : 0;
+/**
+ * More bytes per cell and strain for the sinks while the rules of stage 4 run (ADR 0067, decision 7; ADR 0069): the
+ * sink rate of each cell and strain, 4 B, in one buffer that the pass updates in place on WebGPU (sim.ts `sinks`).
+ */
+export const SINK_BYTES_PER_CELL = 4;
+/**
+ * The same on WebGL2 (gl/sim.ts `sinks`): the rates in two targets of 4 B, because the pass reads the rates of before
+ * the step, and the pyramid of the sums, 16 B per texel of 4 × 4 cells and less above it, 16 / 15 B.
+ */
+export const SINK_BYTES_PER_CELL_GL = 8 + 16 / 15;
+/**
+ * The bytes per cell of the sinks of these settings: `perStrain` (Backend.sinkBytesPerCell) for every strain that has
+ * a flow of its own; 0 while the rules of stage 4 do not run (territoryOn()).
+ */
+export const sinkBytesPerCell = (
+  s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions' | 'strains'>,
+  perStrain: number,
+) => (territoryOn(s) ? perStrain * flowStrains(s) : 0);
+/**
+ * The sides of the levels of a pyramid of sums over squares of 4 × 4 on a grid of `w` × `h` cells (sinks.frag PASS 1 and
+ * 2), from the first level to the top of one texel.
+ */
+export function sinkLevels(w: number, h: number): [number, number][] {
+  const out: [number, number][] = [];
+  do {
+    [w, h] = [Math.ceil(w / 4), Math.ceil(h / 4)];
+    out.push([w, h]);
+  } while (w > 1 || h > 1);
+  return out;
+}
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion' | 'model' | 'meanWindow'>) =>
   s.stepOrder === 'move-first' && diffusePlanOf(s).length >= 2;

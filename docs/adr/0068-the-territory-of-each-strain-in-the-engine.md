@@ -7,6 +7,8 @@
 - Date: 2026-11-20
 - Extends [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (decision 1: the territory and its push)
   and [ADR 0067](0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md) (decisions 4 and 6 to 9).
+- Extended by ADR 0069 ([the sinks of each strain](0069-the-sinks-of-each-strain-in-the-engine.md); it closes open
+  point 1, the corner of the push).
 - In short: [`docs/model.md`](../model.md), section 6.10, has the rule; [`research/front/ENGINE.md`](../../research/front/ENGINE.md)
   has the state of the four parts and what the next part needs.
 

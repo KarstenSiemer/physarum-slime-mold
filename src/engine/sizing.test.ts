@@ -15,6 +15,10 @@ import {
   SITE_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
+  SINK_BYTES_PER_CELL,
+  SINK_BYTES_PER_CELL_GL,
+  sinkBytesPerCell,
+  sinkLevels,
   SLIME_BYTES_PER_CELL,
   slimeBytesPerCell,
   TERRITORY_BYTES_PER_CELL,
@@ -286,5 +290,23 @@ describe('the territory of the rules of stage 4 (ADR 0068)', () => {
     expect(fitResolution(on, 16 / 10, withTerritory)).toBeLessThan(on.resolution);
     const more = { ...withTerritory, budget: budget + w * h * TERRITORY_BYTES_PER_CELL };
     expect(fitResolution(on, 16 / 10, more)).toBe(on.resolution);
+  });
+
+  it('counts the sinks per strain: one rate on WebGPU, two and the pyramid of the sums on WebGL2 (ADR 0069)', () => {
+    expect(SINK_BYTES_PER_CELL).toBe(4);
+    expect(SINK_BYTES_PER_CELL_GL).toBeCloseTo(9.067, 3);
+    // The pyramid over squares of 4 × 4: 16 B per texel of a level, a sixteenth of the cells, then a sixteenth of that.
+    const [w, h] = [1024, 640];
+    const texels = sinkLevels(w, h).reduce((sum, [x, y]) => sum + x * y, 0);
+    expect((texels * 16) / (w * h)).toBeCloseTo(SINK_BYTES_PER_CELL_GL - 8, 2);
+    const three = { ...on, strains: [defaultStrain(0, 3), defaultStrain(1, 3), defaultStrain(2, 3)] };
+    expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL)).toBe(12);
+    expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL_GL)).toBeCloseTo(27.2, 1);
+    for (const s of [
+      { ...three, territory: false },
+      { ...three, flow: false },
+      { ...three, collisions: false },
+    ])
+      expect(sinkBytesPerCell(s, SINK_BYTES_PER_CELL)).toBe(0);
   });
 });

@@ -5,7 +5,8 @@
 //
 // PASS 0, the push, into the next copy of the territory, last in a step. A cell joins the territory of strain s when
 // it holds an agent of s. An open cell outside the territory of s joins it with the chance 1 − (1 − v)^n, n the agents
-// of s among its 8 neighbours, with a draw of its own for each cell and strain. The territory never shrinks.
+// of s among its 8 neighbours, with a draw of its own for each cell and strain. A diagonal neighbour counts only if the
+// two cells beside the corner between them are not both walls (ADR 0069). The territory never shrinks.
 //
 // PASS 1, a disc, into the next copy of the territory: the open cells whose centres lie within the disc join the
 // territory of a strain (the start territory, ADR 0067, decision 4).
@@ -40,12 +41,20 @@ const uint PUSH = 11u;
 // The owners of the cell at q (cellXY()) as bits, 0 outside a closed arena.
 uint ownersOf(ivec2 q) { return q.x < 0 ? 0u : texelFetch(owners, q, 0).r; }
 
-// The strains that the push adds to the territory of the open cell at q (`pushed` in territory.wgsl).
+// Whether the cell at p is a wall; a cell outside a closed arena is none (wallAt in territory.wgsl).
+bool wallAt(ivec2 p) {
+  ivec2 q = cellXY(p);
+  return q.x >= 0 && isWall(texelFetch(env, q, 0));
+}
+
+// The strains that the push adds to the territory of the open cell at q (`pushed` in territory.wgsl): a diagonal
+// neighbour between two walls does not count.
 uint pushed(ivec2 q, uint held) {
   uvec4 n = uvec4(0u);
   for (int dy = -1; dy <= 1; dy++) {
     for (int dx = -1; dx <= 1; dx++) {
       if (dx == 0 && dy == 0) continue;
+      if (dx != 0 && dy != 0 && wallAt(q + ivec2(dx, 0)) && wallAt(q + ivec2(0, dy))) continue;
       uint b = ownersOf(cellXY(q + ivec2(dx, dy)));
       n += uvec4(b & 1u, (b >> 1u) & 1u, (b >> 2u) & 1u, (b >> 3u) & 1u);
     }

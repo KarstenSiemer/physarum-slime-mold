@@ -288,10 +288,15 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   the setting `territory`, which no scene turns on yet: moves, respawn and births only onto it, the owners, the push
   and the start territory, against a CPU copy, with 38 wrong rules; every scene keeps its bytes.
   `research/front/ENGINE.md` has the state of the four parts and what the next part needs.
-- **Next: parts 2 to 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
-  the sinks and the flow with the drift, then the paid births, then the scenes: the drift as a setting of the panel,
-  the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a second
-  strain grows on the slime of the first. Then the picture: the skirt goes, or it is drawn from the plasm of the crown.
+- **The engine of stage 4, part 2a** (ADR 0069, 2026-11-20): the push counts no diagonal neighbour between two walls,
+  and each strain has its sinks in both backends: the sink test along paths over open cells, the mean of the sink
+  rate in whole steps of 2^-24, the sums R, C and N in integers of two words, and the state, against a CPU copy
+  exactly, with 63 wrong rules more; no rule reads the sinks yet, and every scene keeps its bytes.
+- **Next: parts 2b to 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
+  the pressure with the sinks and the sources, the adaptation while the front took flux and the drift, then the paid
+  births, then the scenes: the drift as a setting of the panel, the digests of every scene and the measures of the 13
+  scenes with growth and the flow, and a test where a second strain grows on the slime of the first. Then the picture:
+  the skirt goes, or it is drawn from the plasm of the crown.
 
 Open, for the owner:
 
