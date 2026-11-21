@@ -298,12 +298,15 @@ describe('the sinks (ADR 0069)', () => {
     };
     const out = sinksStep(input);
     let r = 0;
+    // The cells whose rate is not a whole number of steps of the rate, or is below 0. One expect() for all of them:
+    // two per cell, 200,000 calls, took up to 6.6 s on a busy runner of CI, past the limit of 5 s of a test.
+    const wrong: number[] = [];
     for (let c = 0; c < n; c++) {
       const next = Math.abs(out.rates[c] ?? 0) * RATE_ONE;
-      expect(Number.isInteger(next)).toBe(true);
-      expect(out.rates[c]).toBeGreaterThanOrEqual(0);
+      if (!Number.isInteger(next) || !((out.rates[c] ?? NaN) >= 0)) wrong.push(c);
       if (c % 7 !== 0) r += Math.round(next / 256);
     }
+    expect(wrong).toEqual([]);
     const tubes = n - Math.ceil(n / 7);
     expect(out.sums).toEqual([r % 2 ** 32, Math.floor(r / 2 ** 32), tubes, 0]);
     expect(out.sums[1]).toBeGreaterThan(0);
