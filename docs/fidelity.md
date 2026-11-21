@@ -59,7 +59,7 @@ project read.
 | 20  | Two plasmodia that do not fuse stay two bodies   | Partly                                  | Rival networks, Tokyo, two networks   |
 | 21  | Growth toward the cathode of a current           | Partly: the direction only              | Electrotaxis                          |
 | 22  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
-| 23  | Avoidance of its own slime                       | Not modelled: the slime changes no run  | none                                  |
+| 23  | Avoidance of its own slime                       | Matches in the Y-maze and the dish      | the Y-maze scenes, Slime everywhere   |
 | 24  | Veins form a tree that follows Murray's law      | Not measured                            | Crown of veins                        |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
@@ -253,6 +253,10 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   (ADR 0029). So it grows about ten times as fast as the organism. Jones' growth rule has no speed of its own to set.
   In a Y-maze with arms of 4 cm a colony reaches the food of an arm 65 steps after its start, which are 2.2 min:
   agents that walk carry its front, at about 1 cell per step. At 1 to 3 cm/h the organism needs 1.3 to 4 h (ADR 0056).
+  With the rules of the growth front the colony pushes its ground open, and the scenes of Reid et al. 2012 come close
+  to the organism (ADR 0088): the colony reaches the food at the end of an arm of 4 cm after a median of 3,426 steps
+  without slime, 1.9 h (40 runs), and it crosses the dish Slime everywhere, 6.6 cm from the start to the glucose, in
+  about 11,450 steps, 6.4 h: about 1 cm/h.
   The Foraging maze reaches its far food in 10 of 10 seeds, in a median of 3,151 to 4,601 steps sensing first (ADR
   0027, Growth after the merge of ADR 0025); it has no length or time scale.
 - **Limits**: the model has no sheet at the front and no zones behind it. Its front is the arms of full plasm that
@@ -544,7 +548,10 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   agar grew over ground that they had left as often as chance gives it (Patino-Ramirez et al. 2019, Sci. Rep. 9:
   15444, p. 4 [V]). Nobody measured how long slime lasts: 3 h to 6 days are reported. The sources:
   [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "Slime".
-- **Model**: a slime field, and no rule that reads it yet (ADR 0055; `docs/model.md`, 6.9). In the extended model a
+- **Model**: a slime field (ADR 0055; `docs/model.md`, 6.9), which the rules of the growth front read (ADR 0088;
+  `docs/model.md`, 6.11): a part of the front with only slime within 6 cells takes 40 times less flux than a part near
+  ground without slime (the settings Weight on slime and Reach to fresh ground), and the plasm streams to where the
+  flux goes. Without those rules no rule reads the slime. In the extended model a
   cell gets a stamp in every step in which it holds plasm, and it has slime for the Slime life time after the last
   such step. The field is one for all strains (the owner's decision of 2026-11-16, ADR 0052). A brush paints slime, as
   Reid et al. 2012 coat their agar with it. The picture shows the slime as a wet film on the ground that is thick
@@ -560,24 +567,28 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   the organism, the one of Briard et al. 2020. It is on ground where a tube starved only, not on every cell that the
   colony left, and it stops no move. It is a mark of each strain, where Briard et al. found no difference between
   strains.
-- **Measured**: the slime changes no run: every scene keeps its bytes (ADR 0055, Results). In a Y-maze after Reid et
-  al. 2012, as research code with 40 seeds, the app has no preference: 19 runs for the blank arm and 20 for the arm
-  with slime. Rules that are not in the app ran there as variants (ADR 0056). A lower weight for slime in the pick
-  of a birth, the rule of the plan, gives 26 : 11. A rule for the moves gives 40 : 0 and no preference with slime
-  on both arms, but its colony is 3.6 times slower on slime, and the plasmodium is not slower. So no rule is built,
-  and the avoidance waits for stage 4 of the plan of 2026-11-16 (`TODO.md`). Since ADR 0054 the
+- **Measured**: without the rules of the growth front the slime changes no run: every scene keeps its bytes (ADR 0055,
+  Results). In a Y-maze after Reid et al. 2012, as research code with 40 seeds, the app without those rules has no
+  preference: 19 runs for the blank arm and 20 for the arm with slime. Rules that are not in the app ran there as
+  variants (ADR 0056). A lower weight for slime in the pick of a birth, the rule of the plan, gives 26 : 11. A rule for
+  the moves gives 40 : 0 and no preference with slime on both arms, but its colony is 3.6 times slower on slime, and
+  the plasmodium is not slower. So neither rule was built, and the avoidance came with the growth front of stage 4
+  (ADR 0088, below). Since ADR 0054 the
   mark of starved ground keeps a colony with growth out of ground that it left: in the Snail maze the blind branches
   stay empty until the mark has faded (row 2). Agents still walk onto such ground.
-- **The two scenes of Reid et al. 2012** (ADR 0066), under Experiments, are the test beds of stage 4 of the plan. The
+- **The scenes of Reid et al. 2012** (ADR 0066, ADR 0088), under Experiments, run the rules of the growth front. The
   Y-maze with slime has the layout of ADR 0056 and slime on its left arm, and its colony starts on the base without
-  food, as the plasmodium of the paper. The dish Slime everywhere is 8.6 cm wide and coated with slime; its colony
-  starts 1 cm inside the rim, and a well of glucose of 5 mm lies opposite. What the app shows today, measured on
-  WebGPU with 5 seeds and on WebGL2 with 2: in the Y-maze the colony reaches the first food after 64 to 140 steps,
-  that of the left arm in 2 of 7 runs, and the other food 5 to 111 steps later; in the dish it reaches the glucose
-  after 115 to 511 steps. With the slime and without it every run ends with the same bytes (14 of 14). So the Y-maze
-  shows no avoidance, where 39 of 40 plasmodia chose the arm without slime, and the dish keeps the time and the way,
-  as the plasmodia of the paper did (n = 13 and 16). The avoidance waits for stage 4 (ADR 0065). Not measured: the
-  positions of the start and of the well in the dish of the paper, which this app chose.
+  food, as the plasmodium of the paper; Y-maze, both slimed and Y-maze without slime are the two controls of the paper.
+  The dish Slime everywhere is 8.6 cm wide and coated with slime; its colony starts 1 cm inside the rim, and a well of
+  glucose of 5 mm lies opposite. Measured (ADR 0088; WebGPU with 40 seeds per case of the Y-maze, WebGL2 with 40, 10 and
+  10; the dish with 10 per case on each backend): with slime on one arm the colony reaches the food of the blank arm
+  first in 40 of 40 runs on each backend (the organism: 39 of 40), after a median of 3,358 steps, 1.9 h of model time.
+  With slime on both arms it shows no preference (20 : 20; 5 : 5 on WebGL2), as the organism, and it reaches the first
+  food 1.06 times as late as without slime (p 0.00007; the paper gives no time). Without slime 66 : 74 over 140 runs (p
+  0.55) and 5 : 5. In the dish the colony reaches the glucose after 11,453 and 11,518 steps with the slime and 11,418
+  and 11,387 without it (1.00 and 1.01 times; p 0.88 and 0.41), as the plasmodia of the paper (n = 13 and 16). The
+  prototype of stage 4 gives the same numbers (ADR 0074). Not measured: the positions of the start and of the well in
+  the dish of the paper, which this app chose; the trap of the paper; old slime, which the paper used.
 
 ### 24. Veins form a tree that follows Murray's law
 
@@ -619,7 +630,8 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   growing colony run off, so the radius stays (same amendment).
 - The growth front has no sheet and no zones by age, and no vein forms toward it: the flux runs only between foods
   (rows 6 and 24).
-- The slime acts on nothing: a cell keeps the step at which a colony was there last, and no rule reads it (row 23).
+- The slime acts only through the rules of the growth front, which five scenes run: a part of the front with only
+  slime around it takes less flux (row 23). Without those rules no rule reads it. Moves and births do not read it.
 - Light is a repellent source, the rule of Jones' papers for repellents such as salt. The light rule of Jones'
   papers, weaker sensors on a lit agent, is not built (row 13). Dryness is not modelled.
 - Two strains never fuse: no flux passes between strains (row 20; [ADR 0031](adr/0031-a-flow-for-every-strain.md),

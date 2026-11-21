@@ -4,7 +4,7 @@
 // the state of each strain. It follows the paths over the cells of the grid with a queue; the passes hold rows of bits.
 import { grid } from './growth-reference';
 import { nextBudget } from './paid';
-import { RATE_ONE, SINK_WINDOW, SINKS, SLIME_WEIGHT, SUM_ONE } from './sinks';
+import { RATE_ONE, SINK_WINDOW, SINKS, SUM_ONE } from './sinks';
 import { wall, type TerritoryGrid } from './territory-reference';
 
 /** What the pass of the sinks of one strain reads in a step. */
@@ -29,6 +29,13 @@ export interface SinkInput {
    * memory before the step).
    */
   ports: readonly number[];
+  /** The weight of a sink on slime in steps of the rate (sinks.ts slimeWeightOf(), the setting Weight on slime). */
+  slime: number;
+  /**
+   * The steps of a path to ground without slime (sinks.ts freshReachOf(), the setting Reach to fresh ground), from
+   * SINKS.edge to SINK_WINDOW.
+   */
+  reach: number;
 }
 
 /** Whether cell c (an index, or −1) is open: in the arena and no wall. */
@@ -106,20 +113,21 @@ export const slimeAfter = (held: number, step: number, life: number) => held !==
  * The weight of cell c for the strain of `input`, in steps of the rate (RATE_ONE is 1): 0 if it is no sink. A sink holds
  * an agent of the strain and a tube of it, has a free cell of its territory that one step reaches, lies at the edge
  * of its territory: open ground outside it lies within SINKS.edge steps, and its tube carries flux to it (tubeOut()).
- * Its weight is RATE_ONE if ground without slime lies within SINKS.fresh steps, else SLIME_WEIGHT. `tube`: false skips
- * the test of the tube, the rule of ADR 0069, for a test that counts the sinks that the test of the tube takes away.
+ * Its weight is RATE_ONE if ground without slime lies within `input.reach` steps, else `input.slime` (ADR 0088).
+ * `tube`: false skips the test of the tube, the rule of ADR 0069, for a test that counts the sinks that the test of the
+ * tube takes away.
  */
 export function sinkWeight(input: SinkInput, c: number, tube = true): number {
   const { g, owners, territory, stamps } = input;
   const mine = 1 << input.strain;
   if (!((owners[c] ?? 0) & mine) || !((input.memory[c * 4 + 2] ?? 0) > 0)) return 0;
-  const reached = [...paths(g, c, SINKS.fresh)];
+  const reached = [...paths(g, c, Math.max(SINKS.edge, input.reach))];
   const within = (steps: number) => reached.flatMap(([t, k]) => (k <= steps ? [t] : []));
   if (!within(1).some((t) => (owners[t] ?? 0) === 0 && (territory[t] ?? 0) & mine)) return 0;
   if (!within(SINKS.edge).some((t) => !((territory[t] ?? 0) & mine))) return 0;
   if (tube && !tubeOut(input, c)) return 0;
-  const fresh = within(SINKS.fresh).some((t) => !slimeAfter(stamps[t] ?? 0, input.step, input.life));
-  return fresh ? RATE_ONE : SLIME_WEIGHT;
+  const fresh = within(input.reach).some((t) => !slimeAfter(stamps[t] ?? 0, input.step, input.life));
+  return fresh ? RATE_ONE : input.slime;
 }
 
 /**

@@ -117,6 +117,8 @@ describe('presets', () => {
       'rival-networks',
       'tokyo-rivals',
       'y-maze',
+      'y-maze-both',
+      'y-maze-blank',
       'slime-everywhere',
       'crown',
     ]);
@@ -240,11 +242,14 @@ describe('presets', () => {
     expect(preset('maze').envHistory).toBeUndefined();
   });
 
-  // ADR 0066 (the owner's wish of 2026-11-19): two scenes of Reid et al. 2012, the test beds of the avoidance of slime.
-  // No rule of the app reads the slime yet (ADR 0056), and their texts say so.
-  it('rebuild the Y-maze and the dish with slime everywhere of Reid et al. 2012 (ADR 0066)', () => {
-    const [y, dish] = [preset('y-maze'), preset('slime-everywhere')];
-    for (const p of [y, dish]) {
+  // ADR 0066 (the owner's wish of 2026-11-19): the scenes of Reid et al. 2012, the test beds of the avoidance of slime.
+  // Since ADR 0088 they run the rules of the growth front, whose front takes less flux on slime, and the Y-maze has its
+  // two controls of the paper: slime on both arms, and no slime.
+  it('rebuild the Y-maze and the dish with slime everywhere of Reid et al. 2012 (ADR 0066, ADR 0088)', () => {
+    const ids = ['y-maze', 'y-maze-both', 'y-maze-blank', 'slime-everywhere'];
+    const [y, both, blank, dish] = ids.map(preset);
+    if (!y || !both || !blank || !dish) throw new Error('no scene of Reid');
+    for (const p of [y, both, blank, dish]) {
       expect([p.group, p.source, sourceKind(p)], p.id).toEqual(['experiments', 'Reid et al. 2012', 'reid']);
       expect([p.figure, p.envHistory], p.id).toEqual([undefined, undefined]);
       // One start spot, the first shape: the start layout Food places the colony there, not on a food.
@@ -253,15 +258,24 @@ describe('presets', () => {
         p.id,
       ).toHaveLength(1);
       expect([p.env?.[0]?.kind, p.env?.[0]?.r, p.settings().layout], p.id).toEqual(['start', 0, 'food']);
-      expect(p.about, p.id).toMatch(/no rule yet that reads the slime/);
-      expect(sourceText(p), p.id).toMatch(/No rule of the app reads the slime yet\.$/);
+      // The rules of the growth front with the drift 1.5 and the defaults of the avoidance of slime, over 4 neighbours
+      // with the base conductance and the flux to the front of the rules.
+      const s = p.settings();
+      expect([s.territory, s.drift, s.slimeWeight, s.freshReach], p.id).toEqual([true, 1.5, 0.025, 6]);
+      expect([s.flowEdges, s.flowBase, s.frontFlux], p.id).toEqual([4, 0.02, 1]);
+      expect(p.about, p.id).not.toMatch(/no rule yet/);
+      expect(sourceText(p), p.id).toMatch(/its front takes less flux on slime\.$/);
     }
-    // The Y-maze: the settings of the Snail maze on the lattice of the layout of ADR 0056, as y-maze.gpu.test.ts ran it.
+    // The Y-maze: the settings of the Snail maze on the lattice of the layout of ADR 0056, as y-maze.gpu.test.ts ran it,
+    // with the rules of the growth front. The three scenes share them.
     const unseeded = (s: Settings) => ({ ...s, seed: 0, lattice: null });
-    expect(unseeded(y.settings())).toEqual(unseeded(settingsOf('snail-maze')));
+    expect(unseeded(y.settings())).toEqual(unseeded({ ...settingsOf('snail-maze'), territory: true }));
+    for (const p of [both, blank]) expect(unseeded(p.settings()), p.id).toEqual(unseeded(y.settings()));
     expect(y.settings().lattice).toEqual([129, 90]);
     const maze = yMaze();
     expect(y.env).toEqual([maze.startShape, ...maze.shapes(['left']), ...maze.film(['left'])]);
+    expect(both.env).toEqual([maze.startShape, ...maze.shapes(['left', 'right']), ...maze.film(['left', 'right'])]);
+    expect(blank.env).toEqual([maze.startShape, ...maze.shapes([])]);
     // The start spot is the middle of the base, on the axis of the Y; the slime lies on the left arm alone: its runs,
     // and one stroke for its film (y-maze.test.ts holds that the film stamps no other cell).
     expect(maze.startShape.at[0]).toBe(0);
@@ -269,6 +283,12 @@ describe('presets', () => {
     const slime = y.env?.filter((e) => e.kind === 'slime') ?? [];
     expect(slime).toHaveLength(maze.slimeRuns(['left']).length + 1);
     for (const e of slime) expect(Math.max(e.at[0], e.to?.[0] ?? 0)).toBeLessThan(0);
+    // Both arms: the runs of each arm and a stroke of film for each, on both sides of the axis. None: no slime.
+    const twice = both.env?.filter((e) => e.kind === 'slime') ?? [];
+    expect(twice).toHaveLength(maze.slimeRuns(['left', 'right']).length + 2);
+    expect(twice.filter((e) => Math.max(e.at[0], e.to?.[0] ?? 0) < 0).length).toBeGreaterThan(1);
+    expect(twice.filter((e) => Math.min(e.at[0], e.to?.[0] ?? 0) > 0).length).toBeGreaterThan(1);
+    expect(blank.env?.filter((e) => e.kind === 'slime')).toEqual([]);
     // The dish: 8.6 cm wide at 0.537 mm per cell, its start at the top and the well of glucose at the bottom, both 1 cm
     // inside the rim on the vertical axis, and slime on every cell.
     const s = dish.settings();
@@ -375,6 +395,8 @@ describe('presets', () => {
       'rival-networks',
       'tokyo-rivals',
       'y-maze',
+      'y-maze-both',
+      'y-maze-blank',
       'slime-everywhere',
       'crown',
       ...jones.map((p) => p.id),
@@ -556,6 +578,8 @@ describe('presets', () => {
       'two-networks': [480, 320], // this app's choice: the same box on every screen (ADR 0064)
       light: [384, 384], // the dish of Food ring (ADR 0064)
       'y-maze': [129, 90], // the Y-maze of ADR 0056 at 0.537 mm per cell (ADR 0066)
+      'y-maze-both': [129, 90], // the same Y-maze with slime on both arms (ADR 0088)
+      'y-maze-blank': [129, 90], // and without slime
       'slime-everywhere': [169, 169], // a dish 8.6 cm wide at 0.537 mm per cell (ADR 0066)
       crown: [520, 340], // the box of the crown of the prototype (ADR 0084, ADR 0087)
       network: [200, 200], // Fig. 4, p. 135

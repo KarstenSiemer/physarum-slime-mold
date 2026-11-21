@@ -515,6 +515,9 @@ export function setModel(model: Model) {
   showNotice(text, Math.max(10_000, text.split(' ').length * 300));
 }
 
+/** The settings that a notice of a switch to Jones skips with the flow or the rules (jonesChanges()). */
+const FLOW_OR_RULES = new Set<string>(['flowStrength', 'flowBase', 'drift', 'frontFlux', 'slimeWeight', 'freshReach']);
+
 /**
  * What toJones() changed, for the notice of the switch (ADR 0022, decision 28): the strains and the agents that share
  * a cell it removed, and every number it changed, from the difference of the settings, so that the notice cannot miss
@@ -532,9 +535,10 @@ function jonesChanges(s: Settings, next: Settings): string {
   ].filter((v): v is string => typeof v === 'string');
   const changed: string[] = [];
   for (const k of Object.keys(globalSpec) as (keyof typeof globalSpec)[]) {
-    // The strength and the base conductance of the flow (ADR 0086) mean nothing without the flow, and the drift and
-    // the flux to the front nothing without the rules (ADR 0070, ADR 0086), as said above.
-    if (k === 'flowStrength' || k === 'flowBase' || k === 'drift' || k === 'frontFlux') continue;
+    // The strength and the base conductance of the flow (ADR 0086) mean nothing without the flow, and the drift, the
+    // flux to the front, the weight on slime and the reach to fresh ground nothing without the rules (ADR 0070, ADR
+    // 0086, ADR 0088), as said above.
+    if (FLOW_OR_RULES.has(k)) continue;
     const why = k === 'scentDecay' ? ' (the Decay of strain A)' : '';
     if (s[k] !== next[k]) changed.push(`${globalSpec[k].label} from ${fmt(s[k])} to ${fmt(next[k])}${why}`);
   }

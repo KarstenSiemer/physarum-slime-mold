@@ -5,6 +5,8 @@
 - Date: 2026-11-20
 - Extends [ADR 0072](0072-a-sink-lies-on-a-tube-that-carries-flux-to-it.md) (open points) and
   [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (the records of the prototype).
+- Extended by [ADR 0088](0088-the-scenes-of-reid-run-the-rules-and-the-avoidance-of-slime-is-a-setting.md)
+  (2026-11-21): the open point, measured in the engine.
 
 ## Context
 

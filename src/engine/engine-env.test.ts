@@ -909,7 +909,8 @@ describe('the start territory of the rules of stage 4', () => {
   const yEnv = yMaze.env;
   const [first] = yMaze.settings().strains;
   if (!first) throw new Error('no strain');
-  const two = { ...yMaze.settings(), strains: [first, strainLike(first, 1)] };
+  // The scene runs the rules (ADR 0088): the cases here turn them on and off themselves.
+  const two = { ...yMaze.settings(), territory: false, strains: [first, strainLike(first, 1)] };
   const radius = Math.sqrt((2 * FOOD_START) / Math.PI) + TERRITORY.rim;
   /** The discs of the start territory, and the start of every colony with the step of its tool. */
   const startsOf = (sim: CpuSim) => ({

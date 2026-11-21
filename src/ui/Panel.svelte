@@ -141,6 +141,11 @@
   const slimy = $derived(slimeSteps(s) > 0);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
   const canGrow = $derived(app.canCollide && s.collisions);
+  /**
+   * The rules of the growth front run (engine/territory.ts territoryOn(), ADR 0068): their switch, with the flow and
+   * growth, which needs the rule of one agent per cell.
+   */
+  const rules = $derived(s.flow && s.growth && canGrow && s.territory);
   /** The most Capacity can be: one agent per cell with the rule (capacityOf()). */
   const capacityMax = $derived(s.collisions ? 1 : globalSpec.capacity.max);
   /**
@@ -571,6 +576,18 @@
     <Section title="Slime">
       <!-- How long the slime stays where the colony was. At 0 the model has no slime, and the switch below goes. -->
       <Slider spec={globalSpec.slimeLife} bind:value={s.slimeLife} id="slime-life" />
+      <!-- The avoidance of slime is a part of the rules of the growth front (ADR 0088): its two settings show while the
+      rules run and the model has slime, and a line names the switch of the rules while they do not run. A change acts
+      at the next step. -->
+      {#if slimy && rules}
+        <Slider spec={globalSpec.slimeWeight} bind:value={s.slimeWeight} id="slime-weight" />
+        <Slider spec={globalSpec.freshReach} bind:value={s.freshReach} id="fresh-reach" />
+      {:else if slimy}
+        <p class="hint">
+          The avoidance of slime needs the switch Rules of the growth front in the Flow section, which shows with Flow
+          in the tubes and Growth and shrinkage.
+        </p>
+      {/if}
       {#if slimy}
         <!-- The film of the slime changes the view only (decision 8). -->
         <div class="check">

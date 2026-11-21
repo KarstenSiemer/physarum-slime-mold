@@ -961,12 +961,13 @@ describe('the model switch', () => {
 
   // ADR 0087: the Crown of veins has the rules of the growth front and the levers of the crown. The switch to Jones
   // names the rules it removed; their drift and flux to the front, and the base conductance of the flow, mean nothing
-  // without them, so the notice skips them, as it skips the flow strength.
+  // without them, so the notice skips them, as it skips the flow strength. So do the weight on slime and the reach to
+  // fresh ground of the rules (ADR 0088).
   it('to Jones takes the rules of the growth front off and names them, not their values', async () => {
     const { app, loadPreset, setModel } = await fresh();
     loadPreset('crown');
     expect([app.settings.territory, app.settings.frontFlux, app.settings.flowEdges]).toEqual([true, 2, 8]);
-    app.settings.drift = 3;
+    Object.assign(app.settings, { drift: 3, slimeWeight: 0.3, freshReach: 3 });
     setModel('jones');
     const s = app.settings;
     expect([s.model, s.territory, s.flow, s.drift, s.frontFlux, s.flowEdges, s.flowBase]).toEqual([
@@ -978,8 +979,9 @@ describe('the model switch', () => {
       4,
       0.02,
     ]);
+    expect([s.slimeWeight, s.freshReach]).toEqual([0.025, 6]);
     expect(app.notice).toContain('It removed the flow in the tubes and the rules of the growth front.');
-    for (const label of ['Drift', 'Flux to the front', 'Base conductance', 'Flow strength'])
+    for (const label of ['Drift', 'Flux to the front', 'Base conductance', 'Flow strength', 'on slime', 'fresh ground'])
       expect(app.notice, label).not.toContain(label);
   });
 

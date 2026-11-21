@@ -10,7 +10,7 @@ import { grid } from './growth-reference';
 import { growthTests, strainEnds } from './pack';
 import { BUDGET_LANE, CLAIMS_LANE, FRONT_LANE, paidIncrement } from './paid';
 import { flowSites, type FlowSites, type FoodStroke } from './sites';
-import { RATE_ONE, SINK_STATE_LANES, SINK_SUM_WORDS, SINKS, SLIME_WEIGHT } from './sinks';
+import { freshReachOf, RATE_ONE, SINK_STATE_LANES, SINK_SUM_WORDS, SINKS, slimeWeightOf } from './sinks';
 import { sinkState, sinksStep, sinkWeight, slimeAfter, type SinkInput, type SinkStep } from './sinks-reference';
 import { slimeSteps } from './slime';
 import type { TerritoryGrid } from './territory-reference';
@@ -24,6 +24,8 @@ const BACKENDS = {
 
 const ALIVE = 4;
 const TWO = [defaultStrain(0, 2), defaultStrain(1, 2)];
+/** The weight of a sink on slime of the default settings in steps of the rate (ADR 0088). */
+const SLIME_WEIGHT = slimeWeightOf(defaultSettings());
 
 /**
  * The rules of stage 4 as territoryOn() runs them: the extended model with one agent per cell, growth and the flow.
@@ -94,7 +96,7 @@ function squareWeight(input: SinkInput, c: number): number {
   };
   if (!around(1).some((t) => !owners[t] && (territory[t] ?? 0) & mine)) return 0;
   if (!around(SINKS.edge).some((t) => !((territory[t] ?? 0) & mine))) return 0;
-  return around(SINKS.fresh).some((t) => !slimeAfter(stamps[t] ?? 0, input.step, input.life)) ? RATE_ONE : SLIME_WEIGHT;
+  return around(input.reach).some((t) => !slimeAfter(stamps[t] ?? 0, input.step, input.life)) ? RATE_ONE : input.slime;
 }
 
 describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, create) => {
@@ -189,7 +191,21 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
       const rates = before[strain] ?? new Float32Array(0);
       const ports = portsOf(s, g, sites, strain, memoryBefore[strain] ?? new Float32Array(0));
       const life = slimeSteps(s);
-      const input: SinkInput = { g, strain, owners, territory, stamps, life, step: k, memory, rates, ports };
+      const [slime, reach] = [slimeWeightOf(s), freshReachOf(s)];
+      const input: SinkInput = {
+        g,
+        strain,
+        owners,
+        territory,
+        stamps,
+        life,
+        step: k,
+        memory,
+        rates,
+        ports,
+        slime,
+        reach,
+      };
       const pass = sinksStep(input);
       const at = `strain ${String(strain)}, step ${String(k)}`;
       expect(differ(await sim.readSinks(strain), pass, g.w), at).toEqual([]);
@@ -214,51 +230,60 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
     return out;
   }
 
+  /**
+   * The arena of thin walls of the first cases: two strains on a grid of 45 × 38 cells, a food dab on the right that the
+   * tube of strain 0 covers and that of strain 1 does not, slime on the left, a random territory, memory and rates.
+   * `patch` changes the settings. Returns the sim before its step 0, with the settings, the grid and the sites.
+   */
+  async function wallArena(boundary: Boundary, patch: Partial<Settings> = {}) {
+    const [w, h] = [45, 38];
+    const n = w * h;
+    const s = stage4({ boundary, seed: 41, ...patch });
+    const sim = await make({ ...s, collisions: false }, w, h, n);
+    const food: FoodStroke[] = [[{ kind: 'food', from: [35, 30], to: [35, 30], radius: 1.5 }]];
+    sim.paint(food.flat());
+    const sites = flowSites(food, w, h, boundary);
+    sim.foodSites(sites);
+    sim.paint([{ kind: 'slime', from: [11, -10], to: [11, 50], radius: 11 }]);
+    // Thin walls: a column at x = 22 between the slime and the fresh ground, a diagonal line of cells that touch at
+    // their corners, and a block.
+    const env = await sim.readEnv();
+    const walls: [number, number][] = [];
+    for (let y = 2; y <= 35; y++) walls.push([22, y]);
+    for (let i = 0; i <= 10; i++) walls.push([10 + i, 20 + i]);
+    for (let y = 5; y <= 8; y++) for (let x = 12; x <= 15; x++) walls.push([x, y]);
+    for (const [x, y] of walls) env[(y * w + x) * 4] = 255;
+    sim.writeEnv(env);
+    const rnd = random(43);
+    seed(sim, s, env, rnd, (x, y) => {
+      const left = x >= 8 && x <= 21 && y >= 2 && y <= 35 && rnd() < 0.45;
+      const right = x >= 30 && x <= 40 && y >= 10 && y <= 26 && rnd() < 0.3;
+      return left || right ? (rnd() < 0.5 ? 0 : 1) : undefined;
+    });
+    sim.update(s);
+    const foodCell = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
+    sim.writeFlow(
+      memoryOf(n, (c) => foodCell(c) || rnd() < 0.7),
+      0,
+    );
+    sim.writeFlow(
+      memoryOf(n, (c) => !foodCell(c) && rnd() < 0.7),
+      1,
+    );
+    sim.writeTerritory(randomTerritory(n, 2, 0.55, random(47)));
+    for (const strain of [0, 1])
+      sim.writeSinks(
+        Float32Array.from({ length: n }, () => Math.fround((rnd() < 0.5 ? -1 : 1) * rnd())),
+        strain,
+      );
+    const g: TerritoryGrid = { w, h, boundary, env: await sim.readEnv() };
+    return { sim, s, g, sites, n };
+  }
+
   it.each(['wrap', 'box', 'dish'] as const)(
     'finds the sinks of each strain, their rates, sums and state as the CPU copy does, with thin walls (%s)',
     async (boundary: Boundary) => {
-      const [w, h] = [45, 38];
-      const n = w * h;
-      const s = stage4({ boundary, seed: 41 });
-      const sim = await make({ ...s, collisions: false }, w, h, n);
-      // A food dab on the right that the tube of strain 0 covers and that of strain 1 does not, and slime on the left.
-      const food: FoodStroke[] = [[{ kind: 'food', from: [35, 30], to: [35, 30], radius: 1.5 }]];
-      sim.paint(food.flat());
-      const sites = flowSites(food, w, h, boundary);
-      sim.foodSites(sites);
-      sim.paint([{ kind: 'slime', from: [11, -10], to: [11, 50], radius: 11 }]);
-      // Thin walls: a column at x = 22 between the slime and the fresh ground, a diagonal line of cells that touch at
-      // their corners, and a block.
-      const env = await sim.readEnv();
-      const walls: [number, number][] = [];
-      for (let y = 2; y <= 35; y++) walls.push([22, y]);
-      for (let i = 0; i <= 10; i++) walls.push([10 + i, 20 + i]);
-      for (let y = 5; y <= 8; y++) for (let x = 12; x <= 15; x++) walls.push([x, y]);
-      for (const [x, y] of walls) env[(y * w + x) * 4] = 255;
-      sim.writeEnv(env);
-      const rnd = random(43);
-      seed(sim, s, env, rnd, (x, y) => {
-        const left = x >= 8 && x <= 21 && y >= 2 && y <= 35 && rnd() < 0.45;
-        const right = x >= 30 && x <= 40 && y >= 10 && y <= 26 && rnd() < 0.3;
-        return left || right ? (rnd() < 0.5 ? 0 : 1) : undefined;
-      });
-      sim.update(s);
-      const foodCell = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
-      sim.writeFlow(
-        memoryOf(n, (c) => foodCell(c) || rnd() < 0.7),
-        0,
-      );
-      sim.writeFlow(
-        memoryOf(n, (c) => !foodCell(c) && rnd() < 0.7),
-        1,
-      );
-      sim.writeTerritory(randomTerritory(n, 2, 0.55, random(47)));
-      for (const strain of [0, 1])
-        sim.writeSinks(
-          Float32Array.from({ length: n }, () => Math.fround((rnd() < 0.5 ? -1 : 1) * rnd())),
-          strain,
-        );
-      const g: TerritoryGrid = { w, h, boundary, env: await sim.readEnv() };
+      const { sim, s, g, sites, n } = await wallArena(boundary);
       const passes = await stepOnce(sim, s, g, sites, 0);
       // Sinks of both weights for each strain, and cells where the squares of the prototype would see through a thin
       // wall: so the test sees the paths (ADR 0067, decision 10).
@@ -277,6 +302,42 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
       const state = await sim.readSinkState();
       expect([state[3], state[SINK_STATE_LANES + 3]]).toEqual([1, 0]);
       expect([state[4], state[SINK_STATE_LANES + 4]]).toEqual([1, 1]);
+    },
+    120_000,
+  );
+
+  // ADR 0088: the weight on slime and the reach to fresh ground are settings. Each value goes into the block of the
+  // flow (packSinks()), and the pass gives the weights that the CPU copy gives with it: a weight on slime of 0.3, and
+  // the reaches 2 and 4, against which the default reach of 6 gives other weights to some sinks.
+  it.each([
+    ['wrap', 0.3, 2],
+    ['box', 0.3, 4],
+    ['dish', 1, 2],
+  ] as const)(
+    'finds the sinks with the weight on slime and the reach to fresh ground of the settings (%s, %s, %s cells)',
+    async (boundary: Boundary, slimeWeight: number, freshReach: number) => {
+      const { sim, s, g, sites, n } = await wallArena(boundary, { slimeWeight, freshReach });
+      const passes = await stepOnce(sim, s, g, sites, 0);
+      const slime = slimeWeightOf(s);
+      expect([slime, freshReachOf(s)]).toEqual([Math.round(slimeWeight * RATE_ONE), freshReach]);
+      let moved = 0;
+      for (const { input, pass } of passes) {
+        const weights = Array.from(pass.weights);
+        expect(weights.filter((v) => v > 0).length).toBeGreaterThan(20);
+        if (slime === RATE_ONE) {
+          // A weight of 1 turns the avoidance off: every sink takes the weight 1.
+          expect(weights.every((v) => v === 0 || v === RATE_ONE)).toBe(true);
+          continue;
+        }
+        expect(weights.filter((v) => v === RATE_ONE).length).toBeGreaterThan(3);
+        expect(weights.filter((v) => v === slime).length).toBeGreaterThan(3);
+        expect(weights.filter((v) => v === SLIME_WEIGHT).length).toBe(0);
+        // The reach of the settings, not that of the default, sets which sink lies near ground without slime.
+        const far = { ...input, reach: freshReachOf(defaultSettings()) };
+        for (let c = 0; c < n; c++)
+          if ((weights[c] ?? 0) > 0 && sinkWeight(far, c) === RATE_ONE && weights[c] !== RATE_ONE) moved++;
+      }
+      if (slime !== RATE_ONE) expect(moved).toBeGreaterThan(3);
     },
     120_000,
   );
