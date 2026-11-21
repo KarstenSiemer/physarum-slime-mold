@@ -174,7 +174,10 @@ to the 90th percentile, the measure of ADR 0078), and by 0.47 and 0.27 with `jon
 1. **E2o**, about 200,000 tokens of a helper. In the box of E2n with 8 edges, the base 0.002 and k = 2, a cell that the
    front reaches starts at the base level (D = 0.002) instead of D = 0.2; with `sinkOn=fed`, with `shareOn=supply`, and
    with `jones=young`. Measure whether the rim splits into heads (the head count of ADR 0084), how far the radius of
-   the rim varies by angle (lobes), and whether the veins run toward the rim.
+   the rim varies by angle (lobes), and whether the veins run toward the rim. A risk: D grows toward f(Q), and at the
+   flux of the head in E2n (Q about 0.06 to 0.07) f(Q) is about 0.007, about 3 times the threshold. A new rim cell
+   that carries that flux counts as fed again after about 30 steps (the rate 0.003), also from D = 0.002. So E2o can
+   split the rim only where new rim cells carry less than Q = 0.036, the flux at which f(Q) is the threshold.
 2. If the rim splits: pictures to the owner first, then the rule into the engine.
 3. If it does not: an isolating study of the rim (a still band with one given vein: does the part of the rim at the
    vein advance faster?), then a shuttle flow as an option (a pressure at the source that swings).
