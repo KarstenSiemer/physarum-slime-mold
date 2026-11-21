@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { dishRadius, lightByte } from '../engine/brush';
+import { fromShape, strokeOn } from '../engine/environment';
+import { flowEight } from '../engine/flow';
+import { paintReference } from '../engine/paint-reference';
 import { agentCount } from '../engine/sizing';
+import { territoryOn } from '../engine/territory';
 import { constrain, defaultSettings, jonesFits, MAX_STRAINS, meanWindowOf, sanitize, type Settings } from './params';
 import {
   BAUMGARTEN_PDF,
+  CROWN,
   ELECTROTAXIS,
   GROUPS,
   figureLattice,
@@ -113,6 +118,7 @@ describe('presets', () => {
       'tokyo-rivals',
       'y-maze',
       'slime-everywhere',
+      'crown',
     ]);
     expect(ids('jones')).toEqual(['network', 'hexagons', 'spots', 'stripes']);
     expect(ids('papers')).toEqual([
@@ -279,6 +285,64 @@ describe('presets', () => {
     expect(coat).toEqual({ kind: 'slime', at: [0, 0], r: 0.5 });
   });
 
+  // ADR 0087: the best crown of the prototype (ADR 0084, case `none`; ADR 0085) as a scene, with the rules of stage 4
+  // and the three levers of ADR 0086.
+  it('give the Crown of veins the rules of the growth front, the levers of the crown and the neck of the prototype', () => {
+    const p = preset('crown');
+    expect([p.group, p.source, sourceKind(p), p.figure, p.envHistory]).toEqual([
+      'experiments',
+      'Made for this app',
+      'app',
+      undefined,
+      undefined,
+    ]);
+    const s = p.settings();
+    // The rules of stage 4 run, with the levers of the case `none`: 8 neighbours, the base 0.002 and k = 2.
+    expect([territoryOn(s), flowEight(s)]).toEqual([true, true]);
+    expect([s.territory, s.drift, s.flowEdges, s.flowBase, s.frontFlux]).toEqual([true, 1.5, 8, 0.002, 2]);
+    // Else the settings of the Corn maze, the other box of a fixed lattice with Jones' foraging agent: the agent of
+    // the prototype (research/front/sim.ts params()), the flow strength 8 and the start on the food.
+    const others = (x: Settings) => ({
+      ...x,
+      seed: 0,
+      lattice: null,
+      territory: false,
+      drift: 0,
+      flowEdges: 4,
+      flowBase: 0,
+      frontFlux: 0,
+    });
+    expect(others(s)).toEqual(others(settingsOf('corn-maze')));
+    expect([s.lattice, s.boundary, s.layout, s.flowStrength, s.slimeLife]).toEqual([[520, 340], 'box', 'food', 8, 144]);
+    // The shapes paint the neck of the prototype (research/front/layouts.ts neck()): the food, then the walls of the
+    // first 40 rows but for the channel of the columns 253 to 266, and the food of radius 5 around (260, 8).
+    const [w, h] = CROWN.lattice;
+    expect(p.env?.[0]?.kind).toBe('food');
+    expect(p.env?.slice(1).every((e) => e.kind === 'wall')).toBe(true);
+    const env = new Uint8Array(w * h * 4);
+    const margin = { min: Infinity };
+    for (const e of p.env ?? []) {
+      const stroke = strokeOn(fromShape(e, 'box'), w, h);
+      if (!stroke) throw new Error('a shape lies outside the grid');
+      paintReference(env, w, h, stroke, 'box', margin);
+    }
+    const [walls, foods] = [new Set<number>(), new Set<number>()];
+    for (let c = 0; c < w * h; c++) {
+      if ((env[c * 4] ?? 0) >= 128) walls.add(c);
+      else if ((env[c * 4 + 1] ?? 0) >= 128) foods.add(c);
+    }
+    const wanted = (rule: (x: number, y: number) => boolean) =>
+      new Set(Array.from({ length: w * h }, (_, c) => c).filter((c) => rule(c % w, Math.floor(c / w))));
+    expect(walls).toEqual(wanted((x, y) => y < 40 && (x < 253 || x >= 267)));
+    expect(foods).toEqual(wanted((x, y) => Math.hypot(x + 0.5 - 260, y + 0.5 - 8) <= 5));
+    expect([walls.size, foods.size]).toEqual([20_240, 80]);
+    // No cell lies so near the edge of a brush that float32 on a GPU could paint it otherwise (brush.ts SLACK).
+    expect(margin.min).toBeGreaterThan(0.05);
+    // Its texts say what the scene lacks of the crown of the organism (ADR 0085).
+    expect(p.about).toMatch(/lobed rim/);
+    expect(p.about).toMatch(/moves on/);
+  });
+
   it('Jones scenes run with one agent per cell and a density of at most 1', () => {
     const jones = PRESETS.filter((p) => sourceKind(p) === 'jones');
     expect(jones.map((p) => p.id)).toEqual([
@@ -312,6 +376,7 @@ describe('presets', () => {
       'tokyo-rivals',
       'y-maze',
       'slime-everywhere',
+      'crown',
       ...jones.map((p) => p.id),
       'maze',
       'coarsening',
@@ -492,6 +557,7 @@ describe('presets', () => {
       light: [384, 384], // the dish of Food ring (ADR 0064)
       'y-maze': [129, 90], // the Y-maze of ADR 0056 at 0.537 mm per cell (ADR 0066)
       'slime-everywhere': [169, 169], // a dish 8.6 cm wide at 0.537 mm per cell (ADR 0066)
+      crown: [520, 340], // the box of the crown of the prototype (ADR 0084, ADR 0087)
       network: [200, 200], // Fig. 4, p. 135
       hexagons: [200, 200], // Fig. 5, p. 136
       spots: [200, 200], // Fig. 16 top, p. 144

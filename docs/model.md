@@ -349,7 +349,8 @@ ADR 0068, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisi
 `agents.frag` and `growth.frag`; `src/engine/territory.ts`; CPU reference `src/engine/territory-reference.ts`.
 
 The territory is the first of the rules of stage 4. They run only while the setting `territory` is on, in the extended
-model with growth, and so with one agent per cell, and with the flow (`territoryOn()`). No scene turns them on yet.
+model with growth, and so with one agent per cell, and with the flow (`territoryOn()`). The scene Crown of veins
+turns them on (ADR 0087); no other scene does.
 Without them no pass of this section runs, and every other pass has the source of the code before, character for
 character, so a scene keeps its bytes.
 
@@ -387,8 +388,8 @@ character, so a scene keeps its bytes.
 ADR 0069, the rule set of ADR 0065 (decisions 1, 5 and 8) in the forms of ADR 0067 (decisions 3, 6 to 8 and 10). Code:
 `shaders/sinks.wgsl`, `gl/glsl/sinks.frag`, `src/engine/sinks.ts`; CPU reference `src/engine/sinks-reference.ts`.
 
-The sinks are the second of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), and no scene
-turns them on yet. They find the sinks of the flow of each strain; the pressure, the tubes and the sensors of the agents
+The sinks are the second of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), in the scene
+Crown of veins (ADR 0087). They find the sinks of the flow of each strain; the pressure, the tubes and the sensors of the agents
 read them (8.7).
 
 - **A path** goes from a cell to one of its 8 neighbours that is open, across the seam of the periodic grid, and takes
@@ -571,12 +572,14 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
   trail, and its levels are lower in the same ratio: at a decay of 0.6, sensing first, a thirteenth (`trailLevels()`
   in `src/engine/flow.ts`).
 - **Conductivity**: G = B · (g0 + D) on a tube, 4 B on a tube on food, 0 elsewhere. g0 is the setting Base conductance
-  (`flowBase`, ADR 0086): 0.02 by default and in every scene, from 0.001 to 0.1. At 0.001 the weakest tube, of B = 0.05
+  (`flowBase`, ADR 0086): 0.02 by default and in every scene but the Crown of veins, which has 0.002 (ADR 0087), from
+  0.001 to 0.1. At 0.001 the weakest tube, of B = 0.05
   and D = 1e-4, still conducts 5.5 times the ghost conductance below.
 - **Edge conductance**: the harmonic mean H(a, b) = 2ab / (a + b), 0 if a or b is 0, times the weight w of the edge.
   The pressure solve uses Ĝ = w · H(G_a + 1e-5, G_b + 1e-5), so a cell holds a pressure before it joins the network.
   With 4 neighbours every edge has w = 1.
-- **The flow over 8 neighbours** (ADR 0086, the form of ADR 0081; `flowEdges` 8, 4 by default and in every scene): a
+- **The flow over 8 neighbours** (ADR 0086, the form of ADR 0081; `flowEdges` 8, 4 by default and in every scene but
+  the Crown of veins, ADR 0087): a
   cell also has an edge to each of its 4 diagonal neighbours, but only where both cells beside that edge are open, so
   no edge passes the corner of a wall. An axis edge has the weight w_a = √2 − 1 ≈ 0.414 and a diagonal edge
   w_d = 1 − 1/√2 ≈ 0.293, as float32 literals in the passes. Their ratio 1/√2 lets a broad flow read the same flux
@@ -687,12 +690,12 @@ ADR 0070, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisi
 `sinksAndSources()`, `flowUpdate()`, `takesOf()`, `groundOf()` and `drifted()` in `src/engine/flow-reference.ts`.
 
 While the rules of stage 4 run (6.10), the flow of each strain takes the sinks of that strain (6.11): the growth front
-draws flux, and the plasm streams to it. No scene turns the rules on yet. Without them the passes have the source of
-the code before, character for character.
+draws flux, and the plasm streams to it. The scene Crown of veins turns the rules on (ADR 0087). Without them the
+passes have the source of the code before, character for character.
 
 - **What the sinks take**: while the front of strain s takes flux in the step (its state, 6.11), its sinks take
-  S = 2 k · I0 together, with k the setting Flux to the front (`frontFlux`, ADR 0086): 1 by default and in every scene,
-  from 0.25 to 16. k does not change the budget of the paid births (9.1): it is the `norm` = 2 k of the prototype with
+  S = 2 k · I0 together, with k the setting Flux to the front (`frontFlux`, ADR 0086): 1 by default, 2 in the Crown
+  of veins (ADR 0087), from 0.25 to 16. k does not change the budget of the paid births (9.1): it is the `norm` = 2 k of the prototype with
   its `paid` = 20 k (`research/front/e2m.sh`). Every tube cell c of s (G_s > 0 after the update) takes S · r_c / R_s,
   with r_c its rate as R_s counted it, ⌊(|r| · 2^24 + 128) / 256⌋ / 2^16, and R_s from the state. So the sinks take
   exactly S, up to the rounding of float32 (below 10⁻⁶ of S). A cell that is no sink in the step takes the share of its
@@ -778,8 +781,8 @@ of `shaders/sinks.wgsl`; PASS 2 with `#if TERRITORY` and PASS 5 of `gl/glsl/grow
 of `gl/glsl/sinks.frag`; `src/engine/paid.ts`; CPU reference `paidClaims()` in `src/engine/growth-reference.ts` and
 `nextBudget()` in `paid.ts`.
 
-The paid births are the third of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), and no
-scene turns them on yet. The flux that the front of a strain takes becomes plasm where it goes: it pays births at the
+The paid births are the third of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), in the
+scene Crown of veins (ADR 0087). The flux that the front of a strain takes becomes plasm where it goes: it pays births at the
 rim of the colony, in the share of the sink rate of each agent there.
 
 - **The budget** of strain s is a float in its state (6.11). In every step in which the front of s takes flux (6.11),

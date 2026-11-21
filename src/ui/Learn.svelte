@@ -2,6 +2,7 @@
   import {
     collisionsHelp,
     coveredFoodHelp,
+    flowEdgesHelp,
     flowHelp,
     globalSpec,
     repellentSpec,
@@ -13,6 +14,7 @@
     frontViewHelp,
     slimeViewHelp,
     strainSpec,
+    territoryHelp,
     tubeViewHelp,
   } from '../model/params';
   import { GROUPS, JONES_PDF, PRESETS } from '../model/presets';
@@ -44,12 +46,13 @@
     'shrinkMax',
     'capacity',
   ]);
+  // The values below the switch Flow in the tubes, listed after it.
+  const FLOW_KEYS = new Set<string>(['flowStrength', 'flowBase', 'drift', 'frontFlux']);
   const specs: { label: string; help: string; ref?: string }[] = [
     ...Object.values(strainSpec),
-    // The panel offers no Drift yet: the rules of stage 4 come to the panel with part E4 of their engine (ADR 0070).
-    // Nor the base conductance and the flux to the front, which part E5b brings to the panel (ADR 0086).
+    // The values of the flow and of the rules of the growth front come after their switches, as in the panel.
     ...Object.entries(globalSpec)
-      .filter(([k]) => !GROWTH_KEYS.has(k) && !['flowStrength', 'drift', 'flowBase', 'frontFlux'].includes(k))
+      .filter(([k]) => !GROWTH_KEYS.has(k) && !FLOW_KEYS.has(k))
       .map(([, v]) => v),
     // Light strength under the name that the Jones model gives it (ADR 0044).
     repellentSpec,
@@ -62,9 +65,15 @@
     ...Object.entries(globalSpec)
       .filter(([k]) => GROWTH_KEYS.has(k))
       .map(([, v]) => v),
-    // The switch Flow in the tubes comes before its value, as in the panel.
+    // The switch Flow in the tubes comes before its values, and the rules of the growth front after them, as in the
+    // panel (ADR 0087).
     flowHelp,
     globalSpec.flowStrength,
+    flowEdgesHelp,
+    globalSpec.flowBase,
+    territoryHelp,
+    globalSpec.drift,
+    globalSpec.frontFlux,
     // The view switches last: they change only the picture.
     tubeViewHelp,
     slimeViewHelp,

@@ -239,16 +239,16 @@ export interface Programs {
    * the rules of stage 4 too (TERRITORY, ADR 0068).
    */
   flowing: (senseWalls: boolean, saturate: boolean, territory?: boolean) => Program;
-  /** The passes of the territory (ADR 0068), compiled at their first use: no scene has them yet. */
+  /** The passes of the territory (ADR 0068), compiled at their first use: one scene has them (ADR 0087). */
   territory: () => TerritoryPrograms;
   /**
    * The passes of the sinks (ADR 0069) and the passes of the flow that take them (ADR 0070), compiled at their first
-   * use: no scene has them yet.
+   * use: one scene has them (ADR 0087).
    */
   sinks: () => SinkPrograms;
   /**
    * PASS 0 and 1 of flow.frag over 8 neighbours (EIGHT, ADR 0086), with the sinks of the rules of stage 4 (`sinks`,
-   * TERRITORY) or without them, compiled at their first use: no scene has 8 neighbours yet.
+   * TERRITORY) or without them, compiled at their first use: one scene has 8 neighbours (ADR 0087).
    */
   flowEight: (sinks: boolean) => { update: Program; pressure: Program };
   /** PASS 2 of tubes.frag over 8 neighbours (EIGHT, ADR 0086), compiled at its first use. */

@@ -2826,7 +2826,7 @@ class Kernels {
     return pipelines;
   }
 
-  /** The passes of the territory (territory.wgsl, ADR 0068), built at their first use: no scene has them yet. */
+  /** The passes of the territory (territory.wgsl, ADR 0068), built at their first use: one scene has them (ADR 0087). */
   territoryPasses(): TerritoryKernels {
     if (!this.territoryPipelines) {
       const module = this.device.createShaderModule({ code: common + territoryWgsl });
@@ -2841,7 +2841,7 @@ class Kernels {
     return this.territoryPipelines;
   }
 
-  /** The passes of the sinks (sinks.wgsl, ADR 0069), built at their first use: no scene has them yet. */
+  /** The passes of the sinks (sinks.wgsl, ADR 0069), built at their first use: one scene has them (ADR 0087). */
   sinkPasses(): SinkKernels {
     if (!this.sinkPipelines) {
       const module = this.device.createShaderModule({ code: common + sinksWgsl });

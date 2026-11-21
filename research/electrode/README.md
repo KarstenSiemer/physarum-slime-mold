@@ -240,12 +240,12 @@ node --import ./research/flow/register.mjs research/electrode/outline.ts
 node --import ./research/flow/register.mjs research/electrode/fit.ts
 ```
 
-The second command fits the default settings and the 30 scenes with the 4 B and without them, on three backends, six
-hints of the memory of the device and six canvases: 3,348 cases. It runs the fit of the engine itself on the CPU
+The second command fits the default settings and the 31 scenes with the 4 B and without them, on three backends, six
+hints of the memory of the device and six canvases: 3,456 cases. It runs the fit of the engine itself on the CPU
 backend of the engine tests. Eight grids change, and the command must print:
 
 ```text
-3348 cases: 8 with another grid
+3456 cases: 8 with another grid
 three-networks on WebGL2, a memory hint of 0.5 GB, a canvas of 1600 × 1000: lattice 384 × 384 before, 256 now
 three-networks on WebGL2, a memory hint of 0.5 GB, a canvas of 1920 × 1080: lattice 384 × 384 before, 512 now
 three-networks on WebGL2, a memory hint of 0.5 GB, a canvas of 2560 × 1440: lattice 384 × 384 before, 512 now

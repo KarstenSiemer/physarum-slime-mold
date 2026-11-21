@@ -7,6 +7,7 @@
     collisionsHelp,
     coveredFoodHelp,
     decayForReach,
+    flowEdgesHelp,
     flowHelp,
     globalSpec,
     repellentSpec,
@@ -26,6 +27,7 @@
     stepOrderHelp,
     GEL_COLORS,
     STYLES,
+    territoryHelp,
     tubeViewHelp,
     type Lattice,
     type Strain,
@@ -130,6 +132,8 @@
   let coveredHelp = $state(false);
   let growthHelpOpen = $state(false);
   let flowHelpOpen = $state(false);
+  let edgesHelpOpen = $state(false);
+  let territoryHelpOpen = $state(false);
   let tubeHelpOpen = $state(false);
   let slimeHelpOpen = $state(false);
   let frontHelpOpen = $state(false);
@@ -481,6 +485,63 @@
       {/if}
       {#if s.flow}
         <Slider spec={globalSpec.flowStrength} bind:value={s.flowStrength} id="flow-strength" />
+        <!-- The neighbours and the base conductance of the flow act in every scene with the flow (ADR 0086); a change
+        acts at the next step. -->
+        <div class="check">
+          <label>
+            <input
+              type="checkbox"
+              checked={s.flowEdges === 8}
+              aria-describedby={edgesHelpOpen ? 'edges-help' : undefined}
+              onchange={(e) => {
+                s.flowEdges = e.currentTarget.checked ? 8 : 4;
+              }}
+            />
+            <span>{flowEdgesHelp.label}</span>
+          </label>
+          <button
+            class="help"
+            type="button"
+            aria-expanded={edgesHelpOpen}
+            aria-controls="edges-help"
+            aria-label="About {flowEdgesHelp.label}"
+            onclick={() => (edgesHelpOpen = !edgesHelpOpen)}>?</button
+          >
+        </div>
+        {#if edgesHelpOpen}
+          <p class="helptext" id="edges-help">{flowEdgesHelp.help}</p>
+        {/if}
+        <Slider spec={globalSpec.flowBase} bind:value={s.flowBase} id="flow-base" />
+        <!-- The rules of the growth front run only with growth, and so with one agent per cell, and the flow
+        (territoryOn(), ADR 0068); a switch restarts the scene. Their drift and their flux to the front act only with
+        them (ADR 0070, ADR 0086). -->
+        {#if s.growth && canGrow}
+          <div class="check">
+            <label>
+              <input
+                type="checkbox"
+                bind:checked={s.territory}
+                aria-describedby={territoryHelpOpen ? 'territory-help' : undefined}
+              />
+              <span>{territoryHelp.label}</span>
+            </label>
+            <button
+              class="help"
+              type="button"
+              aria-expanded={territoryHelpOpen}
+              aria-controls="territory-help"
+              aria-label="About {territoryHelp.label}"
+              onclick={() => (territoryHelpOpen = !territoryHelpOpen)}>?</button
+            >
+          </div>
+          {#if territoryHelpOpen}
+            <p class="helptext" id="territory-help">{territoryHelp.help} <cite>{territoryHelp.ref}</cite></p>
+          {/if}
+          {#if s.territory}
+            <Slider spec={globalSpec.drift} bind:value={s.drift} id="drift" />
+            <Slider spec={globalSpec.frontFlux} bind:value={s.frontFlux} id="front-flux" />
+          {/if}
+        {/if}
         <!-- The picture of the tubes changes the view only (ADR 0034). -->
         <div class="check">
           <label>

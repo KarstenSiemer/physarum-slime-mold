@@ -247,6 +247,7 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
       'tokyo-rivals',
       'y-maze',
       'slime-everywhere',
+      'crown',
     ];
     for (const p of PRESETS) {
       const s = p.settings();
@@ -382,6 +383,7 @@ describe('flow in the tubes (ADR 0029)', () => {
       'tokyo-rivals',
       'y-maze',
       'slime-everywhere',
+      'crown',
       'maze',
     ];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
@@ -861,11 +863,12 @@ describe('the mean window (ADR 0046)', () => {
   });
 });
 
-// ADR 0068: the rules of stage 4 are a setting of the extended model, off by default and in every scene.
+// ADR 0068: the rules of stage 4 are a setting of the extended model, off by default. The Crown of veins is the one
+// scene with them (ADR 0087).
 describe('the rules of stage 4 (ADR 0068)', () => {
-  it('are off by default, in every scene, and for a link without them', () => {
+  it('are off by default, in every scene but the Crown of veins, and for a link without them', () => {
     expect(defaultSettings().territory).toBe(false);
-    for (const p of PRESETS) expect(p.settings().territory, p.id).toBe(false);
+    for (const p of PRESETS) expect(p.settings().territory, p.id).toBe(p.id === 'crown');
     expect(sanitize({ model: 'extended', territory: true }).territory).toBe(true);
     for (const v of [undefined, 1, 'true', null])
       expect(sanitize({ model: 'extended', territory: v }).territory).toBe(false);
@@ -882,7 +885,8 @@ describe('the rules of stage 4 (ADR 0068)', () => {
     expect(toJones({ ...maze, territory: true }).territory).toBe(false);
   });
 
-  // ADR 0070: the drift is a setting of the rules, 1.5 (the crown of ADR 0065, decision 6) until the scenes take it up.
+  // ADR 0070: the drift is a setting of the rules, 1.5 (the crown of ADR 0065, decision 6); the Crown of veins has it
+  // too (ADR 0087).
   it('have the drift 1.5 by default and in every scene, from 0 to 5, and its default in the Jones model', () => {
     expect(defaultSettings().drift).toBe(1.5);
     for (const p of PRESETS) expect(p.settings().drift, p.id).toBe(1.5);
@@ -896,10 +900,11 @@ describe('the rules of stage 4 (ADR 0068)', () => {
     expect(constrain({ ...jones, drift: 4 }).drift).toBe(1.5);
   });
 
-  // ADR 0086: the flux to the front k is a setting of the rules: the sinks take 2 k · I0 together. 1 in every scene.
-  it('have the flux to the front 1 by default and in every scene, from 0.25 to 16, and its default in Jones', () => {
+  // ADR 0086: the flux to the front k is a setting of the rules: the sinks take 2 k · I0 together. 1 in every scene
+  // but the Crown of veins, which has the k = 2 of the crown of ADR 0084 (ADR 0087).
+  it('have the flux to the front 1 by default and in the scenes, from 0.25 to 16, and its default in Jones', () => {
     expect(defaultSettings().frontFlux).toBe(1);
-    for (const p of PRESETS) expect(p.settings().frontFlux, p.id).toBe(1);
+    for (const p of PRESETS) expect(p.settings().frontFlux, p.id).toBe(p.id === 'crown' ? 2 : 1);
     expect(sanitize({ model: 'extended', frontFlux: 40 }).frontFlux).toBe(16);
     expect(sanitize({ model: 'extended', frontFlux: 0 }).frontFlux).toBe(0.25);
     expect(sanitize({ model: 'extended', frontFlux: 'x' }).frontFlux).toBe(1);
@@ -913,12 +918,14 @@ describe('the rules of stage 4 (ADR 0068)', () => {
 });
 
 // ADR 0086: the neighbours of a cell in the flow and the base conductance of a tube are settings of the flow, in force
-// in every scene with Flow in the tubes. Every scene has 4 neighbours and 0.02.
+// in every scene with Flow in the tubes. Every scene but the Crown of veins has 4 neighbours and 0.02; the Crown has
+// the 8 and 0.002 of the crown of ADR 0084 (ADR 0087).
 describe('the neighbours and the base conductance of the flow (ADR 0086)', () => {
-  it('are 4 and 0.02 by default and in every scene', () => {
+  it('are 4 and 0.02 by default and in every scene but the Crown of veins', () => {
     const d = defaultSettings();
     expect([d.flowEdges, d.flowBase]).toEqual([4, 0.02]);
-    for (const p of PRESETS) expect([p.settings().flowEdges, p.settings().flowBase], p.id).toEqual([4, 0.02]);
+    for (const p of PRESETS)
+      expect([p.settings().flowEdges, p.settings().flowBase], p.id).toEqual(p.id === 'crown' ? [8, 0.002] : [4, 0.02]);
   });
 
   it('read 4 or 8 neighbours and a base from 0.001 to 0.1 from a link, and the defaults otherwise', () => {

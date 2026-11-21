@@ -257,3 +257,60 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
   expect((await differs()).cells).toBe(0);
   expect(errors).toEqual([]);
 });
+
+// The Crown of veins (ADR 0087): the rules of the growth front with the levers of the crown of ADR 0084, which the Flow
+// section shows. The colony starts on the food at the closed end of the neck and leaves the neck. In 12 runs of the
+// scene on WebGPU and WebGL2 on the GPU of an M3 Pro (seeds 1 to 6, `bash research/front/e5b.sh neck`) the first
+// agent stood below the neck at step 1,150 to 1,400, and at step 2,000 the agents reached 11 to 17 rows below it.
+const NECK = 1800;
+test('the Crown of veins shows its rules and levers in the Flow section, and its colony leaves the neck', async ({
+  page,
+}) => {
+  test.setTimeout(LIMIT);
+  const errors = watchErrors(page);
+  await open(page, await smallScene({ resolution: 256 }));
+  await page.getByRole('combobox', { name: 'Preset' }).selectOption('crown');
+  await colonyScene(page, 520);
+  const card = page.getByRole('region', { name: 'Scene', exact: true });
+  await expect(card.getByRole('heading', { name: 'Crown of veins' })).toBeVisible();
+  await expect(card.getByText('changed', { exact: true })).toHaveCount(0);
+  // The Flow section shows the rules and the levers with the values of the scene.
+  await page.locator('summary', { hasText: 'Flow' }).click();
+  await expect(page.getByRole('checkbox', { name: 'Flow over 8 neighbours', exact: true })).toBeChecked();
+  await expect(page.getByLabel('Base conductance value')).toHaveValue('0.002');
+  await expect(page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true })).toBeChecked();
+  await expect(page.getByLabel('Drift value')).toHaveValue('1.50');
+  await expect(page.getByLabel('Flux to the front value')).toHaveValue('2');
+  // The alive agents below the neck, whose last row is row 39, and a step that the simulation had reached at most
+  // when it read them.
+  const below = () =>
+    page.evaluate(async () => {
+      const sim = globalThis.physarum?.sim;
+      if (!sim) return { agents: -1, step: -1 };
+      const agents = (await sim.readAgents()).filter((a) => (a.bits & 4) !== 0 && a.y >= 40).length;
+      return { agents, step: sim.step };
+    });
+  expect((await below()).agents).toBe(0);
+  await grow(page, NECK);
+  const out = await below();
+  expect(out.step).toBeGreaterThanOrEqual(NECK);
+  expect(out.agents).toBeGreaterThan(0);
+  // The link holds the rules and the levers of the scene.
+  await expect
+    .poll(async () => {
+      const s = await linked(page);
+      return s && [s.territory, s.drift, s.flowEdges, s.flowBase, s.frontFlux];
+    })
+    .toEqual([true, 1.5, 8, 0.002, 2]);
+  // Each control shows only where it acts: the drift and the flux to the front with the rules, the rules and the
+  // levers of the flow with the flow.
+  await page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true }).uncheck();
+  await expect(page.getByLabel('Drift value')).toHaveCount(0);
+  await expect(page.getByLabel('Flux to the front value')).toHaveCount(0);
+  await expect(page.getByLabel('Base conductance value')).toHaveValue('0.002');
+  await page.getByRole('checkbox', { name: 'Flow in the tubes', exact: true }).uncheck();
+  await expect(page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Flow over 8 neighbours', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Base conductance value')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
