@@ -260,8 +260,10 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   ADR 0060 the picture draws a skirt around young ground, a thin veil of slime, by the age of the front stamp of each
   cell. That is the picture alone: no run changes, and the picture draws no vein. In the organism the veins form in
   the crown at the head of a tube and stay behind the front; the model must grow them (stage 4 in `TODO.md`). The
-  front stamps hold the step at which the front reached each cell. Nobody measured with them how long after the front
-  a tube between two foods shows, or how a front splits.
+  prototype of stage 4 grows such veins in a sheet at the head of a tube, but no crown: the rim of the sheet is one
+  smooth arc that does not split, and the sheet does not move on. The crown research is paused since 2026-11-21
+  ([ADR 0085](adr/0085-the-crown-so-far.md)). The front stamps hold the step at which the front reached each cell.
+  Nobody measured with them how long after the front a tube between two foods shows, or how a front splits.
 
 ### 7. Speed of the flow
 

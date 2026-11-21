@@ -6,6 +6,8 @@
   dish (README step 7 of `research/front/`).
 - Date: 2026-11-20
 - Extended by ADR 0077
+- Extended by [ADR 0085](0085-the-crown-so-far.md) (2026-11-21): the crown research pauses with the best form so far;
+  the state with pictures.
 - Decided by the owner on 2026-11-20: option 3, first as a small try (ADR 0077)
 - Extends [ADR 0065](0065-the-growth-front-takes-the-flow-a-prototype.md) (decision 6, the forms of the drift; decision
   7, the births) and [ADR 0074](0074-a-drift-that-does-not-read-the-level-of-the-ground.md) (the drift `take`, built

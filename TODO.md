@@ -372,7 +372,9 @@ Open, for the owner:
     6 main veins that fork toward the rim, but one half disc with one smooth rim. A fed sink (`sinkOn=fed`) and Jones'
     births only on ground younger than 1,500 steps (`jones=young`, ADR 0084, to step 16,000): the rim does not split
     in 8 runs; `jones=young` gives a crescent of sheet at the rim fed by 1 to 3 thick tubes, bare ground behind.
-    Open: what makes one part of the rim fall behind, so that the front splits into crowns.
+    Open: what makes one part of the rim fall behind, so that the front splits into crowns. **Paused on 2026-11-21**
+    by the owner, with the best form so far: E2n with both options off (ADR 0085, with pictures, the coordinator's
+    guess of what is missing, and the next steps). The next part, E2o, is open below.
 
 The stages:
 
@@ -394,6 +396,7 @@ Open, and to answer by the prototype of stage 4:
 - From stage 0 (de Almeida 2021, Sec. 5.2.2): two foods that both give all the time lose the link between them, and foods that take turns keep it. The app draws the roles of its foods again every 300 steps. Do the links between the foods of Tokyo stay with sinks at the front?
 - From stage 0 (the same thesis, p. 63): on regular lattices his fronts showed the lattice. Does the front of the app show its square cells?
 - From stage 0 (an inference, not measured): by the relation n = 4/μ of Akita et al. 2017, the exponent 1.8 of the app gives n = 2.2 at small flux, below the organism's 2.53 to 3.29. The rule of the tubes stays, so the prototype must show which exponent the app reaches.
+- The crown, paused since 2026-11-21 (ADR 0085). Next when it goes on, E2o: in the box of E2n with 8 edges, the base 0.002 and k = 2, a cell that the front reaches starts at the base level (D = 0.002) instead of D = 0.2; with `sinkOn=fed`, with `shareOn=supply`, and with `jones=young`. Does the rim split into heads, does its radius vary by angle (lobes), do the veins run toward the rim? If it splits, pictures to the owner first; if not, an isolating study of the rim, then a shuttle flow as an option. The zigzag of the veins is not studied yet.
 
 ## From the papers read on 2026-11-15
 
