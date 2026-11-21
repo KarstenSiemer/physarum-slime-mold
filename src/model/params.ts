@@ -339,11 +339,31 @@ export const globalSpec = {
   slimeLife: {
     label: 'Slime life time',
     unit: 'hours',
-    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain there is strong enough for a tube to grow. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. The picture shows the slime as a wet film on the ground, which gets thinner until this time is over (the switch Show slime). No rule reads the slime yet, so the slime changes no run. With Flow in the tubes the setting does one more thing: it says how long the ground that a starved tube left stays marked. That ground is fresh again after about this time, and children can be born onto it after about six tenths of this time: after 6 days and 3.7 days at the default of 144 hours. At 0 the mark keeps these times. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
+    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain there is strong enough for a tube to grow. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. The picture shows the slime as a wet film on the ground, which gets thinner until this time is over (the switch Show slime). Without the rules of the growth front no rule reads the slime, so the slime changes no run. With the rules, the growth front takes less flux on slime (Weight on slime). With Flow in the tubes the setting does one more thing: it says how long the ground that a starved tube left stays marked. That ground is fresh again after about this time, and children can be born onto it after about six tenths of this time: after 6 days and 3.7 days at the default of 144 hours. At 0 the mark keeps these times. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
     min: 0,
     max: 240,
     step: 1,
     ref: 'Reid et al. 2012, PNAS 109: 17490; Reid et al. 2013, Behav. Ecol. 24: 812, as Tröger et al. 2024 cite it',
+  },
+  // The avoidance of slime of the rules of stage 4 (ADR 0088): the weight of a sink on slime (ADR 0065, decision 5)
+  // and the reach of its test for ground without slime (ADR 0067, decision 10), only with the rules. The panel shows
+  // both in the Slime section below Slime life time while the rules run. One value for all strains.
+  slimeWeight: {
+    label: 'Weight on slime',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front takes flux from the foods at its parts with free ground beside them. A part near ground without slime (Reach to fresh ground) takes it with the weight 1, and a part with only slime around it with this weight. So at 0.025 a part on slime takes 40 times less flux than a part near fresh ground, and the plasm streams to the fresh ground: the colony avoids slime. In a Y-maze with slime on one arm it takes the other arm. At 1 the slime changes nothing. The weight sets only the shares: where every part of the front lies on slime, as in a dish with slime everywhere, each takes as much as without slime, and the colony grows as fast. 0.025 is the value of the rules.',
+    min: 0.001,
+    max: 1,
+    step: 0.001,
+    log: true,
+    ref: 'Reid et al. 2012, PNAS 109: 17490',
+  },
+  freshReach: {
+    label: 'Reach to fresh ground',
+    unit: 'cells',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. A part of the growth front counts as near fresh ground, ground without slime, when a path of at most this many cells reaches such ground. A path goes from a cell to one of its 8 neighbours and not past the corner of a wall. A part near fresh ground takes flux with the weight 1, and a part with only slime around it with the Weight on slime. The colony leaves fresh slime right around its front: on blank ground about a sixth of the front sees fresh ground within 2 cells, three quarters within 4, and nearly all within 6. 2 is the least reach: a part of the front lies at most 2 cells from ground outside the colony, and within 1 cell every part sees only its own slime. 6 is the value of the rules and the most that the passes on the GPU hold.',
+    min: 2,
+    max: 6,
+    step: 1,
   },
   // Flow in the tubes (ADR 0029): the extended model only. Tero et al. 2010 call the total flux between a source
   // and a sink I0, in units of the flux at which a tube grows at half its top rate.
@@ -503,7 +523,7 @@ export const flowEdgesHelp = {
  */
 export const territoryHelp = {
   label: 'Rules of the growth front',
-  help: 'Only the extended model has these rules, and only with Growth and shrinkage and Flow in the tubes. They follow the growth front of the slime mold. Each strain has a ground of its own: its agents move, come back to life and are born only there. The agents at the edge push the ground open: a cell beside it joins it with a chance of about 0.4 % per step for each agent of the strain next to the cell, so the front moves faster where more plasm lies at it. The agents at the edge with free ground beside them take flux from the foods, 40 times less on slime than near ground without slime. The tubes carry this flux to the front, and it pays births there. The plasm streams down the pressure of the flow, to the front (Drift). A switch of the rules restarts the scene.',
+  help: 'Only the extended model has these rules, and only with Growth and shrinkage and Flow in the tubes. They follow the growth front of the slime mold. Each strain has a ground of its own: its agents move, come back to life and are born only there. The agents at the edge push the ground open: a cell beside it joins it with a chance of about 0.4 % per step for each agent of the strain next to the cell, so the front moves faster where more plasm lies at it. The agents at the edge with free ground beside them take flux from the foods, 40 times less on slime than near ground without slime by default (Weight on slime and Reach to fresh ground, in the Slime section). The tubes carry this flux to the front, and it pays births there. The plasm streams down the pressure of the flow, to the front (Drift). A switch of the rules restarts the scene.',
   ref: 'Kuroda et al. 2015, J. Exp. Biol. 218: 3729',
 } as const;
 
@@ -718,6 +738,10 @@ export function defaultSettings(): Settings {
     drift: 1.5,
     // The sinks take 2 · I0 together (ADR 0065, decision 1; ADR 0086).
     frontFlux: 1,
+    // A sink on slime has the weight 0.025, the owner's decision of 2026-11-19 (ADR 0065, decision 5), and ground
+    // without slime counts within 6 steps (ADR 0067, decision 10; ADR 0088).
+    slimeWeight: 0.025,
+    freshReach: 6,
     speed: 120,
     exposure: 0,
     bloom: 1,
@@ -832,6 +856,9 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   out.flowEdges = raw.flowEdges === 8 ? 8 : 4;
   // So with the rules of stage 4 (ADR 0068): a link without the setting runs without them, as it was made.
   out.territory = raw.territory === true;
+  // The reach to fresh ground counts the steps of a path, a whole number (ADR 0088). A link without it, or without the
+  // weight on slime, runs with the default, the constant of before.
+  out.freshReach = Math.round(out.freshReach);
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);
@@ -975,9 +1002,10 @@ function asJones(s: Settings): Settings {
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
   // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
   // So are the rules of stage 4 (ADR 0068): they need the flow, and a link of the Jones model holds none of them, nor
-  // their drift (ADR 0070), nor the flux of their front (ADR 0086). Nor the neighbours and the base conductance of the
-  // flow (ADR 0086).
-  const stage4 = !s.territory && s.drift === d.drift && s.frontFlux === d.frontFlux;
+  // their drift (ADR 0070), nor the flux of their front (ADR 0086), nor their weight on slime and reach to fresh ground
+  // (ADR 0088). Nor the neighbours and the base conductance of the flow (ADR 0086).
+  const slime = s.slimeWeight === d.slimeWeight && s.freshReach === d.freshReach;
+  const stage4 = !s.territory && s.drift === d.drift && s.frontFlux === d.frontFlux && slime;
   const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && stage4;
   const flow = !s.flow && s.flowStrength === d.flowStrength && s.flowEdges === d.flowEdges && s.flowBase === d.flowBase;
   const ok = strainOk && bound && flow && own;
@@ -992,6 +1020,8 @@ function asJones(s: Settings): Settings {
     territory: false,
     drift: d.drift,
     frontFlux: d.frontFlux,
+    slimeWeight: d.slimeWeight,
+    freshReach: d.freshReach,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
     slimeLife: d.slimeLife,

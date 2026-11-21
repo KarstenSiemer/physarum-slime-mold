@@ -8,6 +8,8 @@
   [ADR 0025](0025-growth-and-shrinkage.md) and [ADR 0032](0032-scenes-for-the-flow.md) (the start layout At the
   first food). Changes decision 3 of [ADR 0056](0056-the-avoidance-of-slime-waits-for-the-growth-front.md): the
   Y-maze is a scene of the app now.
+- Extended by [ADR 0088](0088-the-scenes-of-reid-run-the-rules-and-the-avoidance-of-slime-is-a-setting.md)
+  (2026-11-21): both scenes run the rules of the growth front, and the Y-maze has its two controls as scenes.
 - In short: the scenes are in `src/model/presets.ts` and the layout of the Y-maze in `src/model/y-maze.ts`.
   [`research/flow/README.md`](../../research/flow/README.md), part 26, has the commands and the records.
 

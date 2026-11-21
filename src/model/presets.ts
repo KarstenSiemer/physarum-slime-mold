@@ -536,10 +536,16 @@ function crownShapes(): EnvShape[] {
 }
 
 /**
- * The Y-maze of Reid et al. 2012 with slime on its left arm (ADR 0066): the layout of ADR 0056, and the start spot of
- * the colony on the middle of its base.
+ * The Y-maze of Reid et al. 2012 (ADR 0066): the layout of ADR 0056, and the start spot of the colony on the middle of
+ * its base. Three scenes run it: slime on the left arm, on both arms, and on neither (ADR 0088).
  */
 const Y = yMaze();
+
+/**
+ * The settings of the scenes of the Y-maze (ADR 0066, ADR 0088): those of the Snail maze on the lattice of the layout,
+ * with the rules of the growth front, the drift 1.5 and the defaults of the avoidance of slime.
+ */
+const yMazeSettings = () => forager({ lattice: [...Y_MAZE.lattice], boundary: 'box', territory: true });
 
 /**
  * The dish of the scene Slime everywhere (ADR 0066): Reid et al. 2012 without the trap. Their dish is 8.6 cm wide,
@@ -1158,17 +1164,49 @@ SCENES.push(
     name: 'Y-maze with slime',
     group: 'experiments',
     source: 'Reid et al. 2012',
-    summary: 'Slime on one arm of a Y-maze: the slime mold takes the other arm, and the app fills both.',
+    summary: 'Slime on one arm of a Y-maze: like the slime mold, the colony takes the other arm.',
     watch:
-      'The colony starts on the base, without food, and grows into both arms at once. It reaches the first food after about 100 steps and the other one soon after: the slime on the left arm changes nothing yet. Then the flow keeps one tube between the two foods, and the rest of the base starves.',
+      'The colony starts on the base, without food, and pushes its ground open into both arms. Its front takes 40 times less flux on the slime, so the plasm streams into the blank arm. It reaches the food there after about 3,400 steps, close to 2 hours, and the food on the slime about 1,700 steps later.',
     about:
-      'Reid and colleagues set a slime mold on the base of a Y-maze with food at the end of each arm. With slime on one arm, 39 of 40 chose the arm without slime; with slime on both arms they showed no preference. This app has no rule yet that reads the slime, so its colony takes both arms alike. The avoidance will come with a rule for the growth front.',
+      'Reid and colleagues set a slime mold on the base of a Y-maze with food at the end of each arm. With slime on one arm, 39 of 40 chose the arm without slime. The growth front of this app takes less flux where only slime lies around it, so the colony grows into the blank arm: in 40 of 40 runs it reached that food first.',
     strainRoles: ['Jones’ foraging agent, starts on the base without food'],
-    why: 'Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 8, as in the Snail maze. The maze has the paper’s sizes at 0.54 mm per cell, on 129 × 90 cells: a base of 1 cm² and arms of 4 cm. The paper gives no width and no angle of the arms: 1 cm and 45° are this app’s. The slime is new at the start; the paper’s was 8 to 12 hours old.',
-    settings: () => forager({ lattice: [...Y_MAZE.lattice], boundary: 'box' }),
+    why: 'Jones’ foraging agent with growth and shrinkage, Flow in the tubes with a strength of 8, and the rules of the growth front with a drift of 1.5. The maze has the paper’s sizes at 0.54 mm per cell, on 129 × 90 cells: a base of 1 cm² and arms of 4 cm. Their width of 1 cm and their angle of 45° are this app’s. The slime is new at the start; the paper’s was 8 to 12 hours old.',
+    settings: yMazeSettings,
     // The start layout 'food' places the colony on the start spot: the middle of the base. The foods follow, the left
     // one first, then the walls, the slime of the left arm and its film.
     env: [Y.startShape, ...Y.shapes(['left']), ...Y.film(['left'])],
+  },
+  {
+    id: 'y-maze-both',
+    name: 'Y-maze, both slimed',
+    group: 'experiments',
+    source: 'Reid et al. 2012',
+    summary: 'Slime on both arms of a Y-maze: the colony takes either arm, and a little later.',
+    watch:
+      'As in the Y-maze with slime, but both arms have slime, and only the base is fresh. The front takes as little flux in each arm, so neither arm wins. The colony reaches the first food after about 3,600 steps, 6 % later than without slime, and the other food soon after.',
+    about:
+      'Reid and colleagues also put slime on both arms of the Y-maze: their slime molds then showed no preference. The front of this app takes as little flux in each arm, so in 40 runs the colony reached the left food first 20 times and the right one 20 times.',
+    strainRoles: ['Jones’ foraging agent, starts on the base without food'],
+    why: 'The settings of the Y-maze with slime: Jones’ foraging agent with growth and shrinkage, Flow in the tubes with a strength of 8, and the rules of the growth front with a drift of 1.5, on 129 × 90 cells at 0.54 mm per cell. Slime lies on the own part of each arm, beyond the cells that the two arms share. It is new at the start.',
+    settings: yMazeSettings,
+    // As the Y-maze with slime on one arm, with the slime and the film on both arms.
+    env: [Y.startShape, ...Y.shapes(['left', 'right']), ...Y.film(['left', 'right'])],
+  },
+  {
+    id: 'y-maze-blank',
+    name: 'Y-maze without slime',
+    group: 'experiments',
+    source: 'Reid et al. 2012',
+    summary: 'A Y-maze without slime: the control, in which the colony has no cue for an arm.',
+    watch:
+      'The colony starts on the base, without food, and grows into both arms at once. It reaches the first food after about 3,400 steps, close to 2 hours, and the other food about 170 steps later.',
+    about:
+      'The control of Reid and colleagues: the same Y-maze without slime. Here the colony has nothing to choose by: in 40 runs it reached the left food first 15 times and the right one 25 times, which a binomial test does not tell from chance (p 0.15).',
+    strainRoles: ['Jones’ foraging agent, starts on the base without food'],
+    why: 'The settings of the Y-maze with slime, on the same 129 × 90 cells at 0.54 mm per cell: Jones’ foraging agent with growth and shrinkage, Flow in the tubes with a strength of 8, and the rules of the growth front with a drift of 1.5. No cell has slime.',
+    settings: yMazeSettings,
+    // As the Y-maze with slime on one arm, without slime.
+    env: [Y.startShape, ...Y.shapes([])],
   },
   {
     id: 'slime-everywhere',
@@ -1177,12 +1215,12 @@ SCENES.push(
     source: 'Reid et al. 2012',
     summary: 'A dish coated with slime: the colony grows to the glucose as fast as on blank agar.',
     watch:
-      'The colony starts at the top of the dish, on slime like all of its ground. Arms grow out on all sides, and one reaches the glucose at the bottom after about 400 steps, as it does without the slime. With one food no flux runs in the tubes, and a network of loops remains.',
+      'The colony starts at the top of the dish, on slime like all of its ground, and pushes its ground open on all sides. Every part of its front lies on slime, so each takes the share of the flux that it takes on blank agar. It reaches the glucose after about 11,500 steps, 6.4 hours, as without slime.',
     about:
-      'Reid and colleagues coated the agar of a dish with slime and let a slime mold find a well of glucose. Without a trap the slime changed neither the time to the glucose, nor the way, nor the speed. This app has no rule yet that reads the slime, so here too the colony grows as on blank agar. A rule for the avoidance of slime must keep this.',
+      'Reid and colleagues coated the agar of a dish with slime and let a slime mold find a well of glucose. Without a trap the slime changed neither the time to the glucose, nor the way, nor the speed. The growth front of this app takes less flux on slime only where other parts of it lie near fresh ground, so the dish full of slime grows as a blank one: in 10 runs the colony took as long to the glucose as without slime.',
     strainRoles: ['Jones’ foraging agent, starts at the top, drawn to food'],
-    why: 'Jones’ foraging agent with growth and shrinkage, and Flow in the tubes with a strength of 8. The dish is 8.6 cm wide at 0.54 mm per cell, on 169 × 169 cells, and its food is a well of glucose 5 mm wide. The places of the start and of the well are this app’s: 1 cm inside the rim, at the top and at the bottom. The slime covers the dish and is new at the start.',
-    settings: () => forager({ lattice: [SLIME_DISH.side, SLIME_DISH.side] }),
+    why: 'Jones’ foraging agent with growth and shrinkage, Flow in the tubes with a strength of 8, and the rules of the growth front with a drift of 1.5. The dish is 8.6 cm wide at 0.54 mm per cell, on 169 × 169 cells, and its food is a well of glucose 5 mm wide. The start and the well lie 1 cm inside the rim, at the top and at the bottom: this app’s choice. The slime covers the dish and is new at the start.',
+    settings: () => forager({ lattice: [SLIME_DISH.side, SLIME_DISH.side], territory: true }),
     // The start layout 'food' places the colony on the start spot at the top, not on the glucose.
     env: slimeDishShapes(),
   },
@@ -1440,8 +1478,12 @@ export function sourceText(p: Preset): string {
     case 'voronoi':
       return 'Jones and Adamatzky, “Slime mould inspired generalised Voronoi diagrams with repulsive fields” (2015, arXiv:1503.06973), add repellents to Jones’ model: sources below zero in the trail map. With them the agents draw the Voronoi diagram of a set of points. This scene uses the model of the paper. Its lattice and its strengths are read from the figures or chosen for this app.';
     case 'reid': {
-      const what = p.id === 'y-maze' ? 'their Y-maze' : 'their dish without the trap';
-      return `Reid, Latty, Dussutour and Beekman, PNAS 109: 17490 (2012): a real slime mold avoids ground with its own slime, and it uses the slime as a memory to find its way out of a trap. This scene rebuilds ${what}, at 0.54 mm per cell. The agents, their growth and the flow in the tubes are this app’s. No rule of the app reads the slime yet.`;
+      const what: Record<string, string> = {
+        'y-maze': 'their Y-maze with slime on one arm',
+        'y-maze-both': 'their Y-maze with slime on both arms',
+        'y-maze-blank': 'their Y-maze without slime',
+      };
+      return `Reid, Latty, Dussutour and Beekman, PNAS 109: 17490 (2012): a real slime mold avoids ground with its own slime, and it uses the slime as a memory to find its way out of a trap. This scene rebuilds ${what[p.id] ?? 'their dish without the trap'}, at 0.54 mm per cell. The agents, their growth, the flow in the tubes and the rules of the growth front are this app’s: its front takes less flux on slime.`;
     }
     case 'app':
       return 'This scene was made for this app. Its settings are not taken from a paper.';

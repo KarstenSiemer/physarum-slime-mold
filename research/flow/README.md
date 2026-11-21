@@ -2852,9 +2852,79 @@ slower. The records are in `logs/engine/crown-scene-0087/`:
 | `steps-*-r*.jsonl`    | the time of a step: the scene and the Corn maze from step 3,000, the scene from 15,000 |
 | `turns.txt`           | the order of the runs, with the load of the machine at the start of each               |
 
+### 35. Do the scenes of Reid et al. 2012 avoid slime with the rules of the growth front? [ADR 0088]
+
+Part E4 of the engine of stage 4 (`research/front/ENGINE.md`): the Y-maze with slime and Slime everywhere turn the rules
+on, the Y-maze gets its two controls (slime on both arms, no slime), and the weight on slime and the reach to fresh
+ground become settings with the constants of before as their defaults. So every other scene must keep its bytes, and
+the four scenes must give what the prototype and the paper give. `research/front/E4-NOTES.md` has the story.
+
+**The bytes of the scenes.** The digests as in part 34, with the name `g88-digest-branch`, against the record of part
+34:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g88-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g88-digest-branch.jsonl research/flow/logs/engine/crown-scene-0087/digest-branch.jsonl
+```
+
+It prints that 60 of the 64 runs in both files are equal. The 4 others are the Y-maze with slime and Slime everywhere
+on both backends, which run the rules now; the 4 runs of the two new scenes have no partner. The Crown of veins, the
+other scene with the rules, keeps its bytes: the defaults of the two settings are the constants of before.
+
+**The scenes in the engine** (`research/front/e4.sh`, which runs `research/front/e4-reid.gpu.test.ts`; the runs lie in
+`research/front/out/e4/`, and `bash research/front/e4.sh table` prints the tables of ADR 0088):
+
+```bash
+bash research/front/e4.sh backends   # both backends, seeds 1 to 6, to step 1,500 (about 1.5 minutes)
+bash research/front/e4.sh y          # WebGPU, 40 seeds per case of the Y-maze (about 30 minutes)
+bash research/front/e4.sh ygl        # WebGL2, 40 seeds with slime on one arm, 10 on both and on neither
+bash research/front/e4.sh dish       # both backends, 10 seeds: the dish with and without slime, the open dish
+bash research/front/e4.sh reach      # the study of the reach: the steps from each sink to fresh ground
+bash research/front/e4.sh pics       # the pictures at the first food and at the glucose
+bash research/front/e4.sh montage    # docs/images/reid-y-maze.jpg and docs/images/reid-dish.jpg
+bash research/front/e4.sh times      # the time of a step, both backends, with the rules and without, in turns
+bash research/front/e4.sh table
+```
+
+The prototype's numbers are the records of ADR 0074 (`logs/engine/drift-0074/y/take/` and `dish/take/`):
+
+```bash
+node --import ./research/flow/register.mjs research/front/tables.ts research/flow/logs/engine/drift-0074/y/take
+node --import ./research/flow/register.mjs research/front/dish.ts table=research/flow/logs/engine/drift-0074/dish/take
+```
+
+Result: the four scenes give what the prototype and the paper give, on both backends (ADR 0088 has the tables). With
+slime on one arm the colony takes the blank arm 40 : 0 on each backend (Reid: 39 of 40), with slime on both arms it
+shows no preference (20 : 20) and reaches the first food 1.06 times as late as without slime (the prototype 1.05),
+without slime 15 : 25 (p 0.15); the dish takes as long with slime as without (1.00 and 1.01 times), and the open dish
+of the prototype is half covered after 5,600 to 5,800 steps (the prototype 5,882.5). The colony's own slime lies on
+every cell within one step of each sink, so the least reach with a meaning is 2. A step of the Y-maze takes about 0.5
+ms on WebGPU and 1.5 ms on WebGL2 with the rules, against 0.2 and 1.2 ms without them. SwiftShader runs the Y-maze at
+2.15 steps per second in the app and at 16.2 without the picture, in the image of CI on 4 cores; the e2e test passes
+there in 2.6 minutes. The records are in `logs/engine/reid-0088/`:
+
+| Record                | Runs                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                                      |
+| `backends/`           | the four scenes on both backends, seeds 1 to 6, every 500 steps to step 1,500                    |
+| `y/`                  | the Y-maze: WebGPU 40 seeds per case, WebGL2 40, 10 and 10, every 50 steps                       |
+| `dish/`               | Slime everywhere with and without slime, and the open dish: both backends, 10 seeds              |
+| `reach/`              | the steps from each sink to fresh ground at the steps 1,500 and 3,000                            |
+| `reach2/`, `reach4/`  | the Y-maze with slime on one arm at the reaches 2 and 4, WebGPU, 10 seeds                        |
+| `weight1/`            | the same at the weight 1, the avoidance off                                                      |
+| `gap-*/`              | the open dish on both backends to step 1,000: seeds 1 to 10 with and without the rules, 11 to 40 |
+| `run-check/`          | seeds 1 to 3 with `Sim.run()`, the same records as with `Engine.frame()`                         |
+| `steps-*-r*.jsonl`    | the time of a step: the four scenes with the rules and without them, and the Corn maze           |
+| `image-*.txt`         | SwiftShader in the image of CI: steps per second, and the e2e test                               |
+| `mutations.txt`       | the tests that fail for each of the wrong rules SA1 to SA23                                      |
+| `turns.txt`           | the order of the runs, with the load of the machine at the start of each                         |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 879 files, 16.7 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 926 files, 21.2 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2902,6 +2972,7 @@ asks for the new digest.
 | `logs/engine/take-0075/`                             | the runs of part 32 (ADR 0075): the digests of every scene, the start scene with `take` on both backends, the wrong rules                                                                                                       |
 | `logs/engine/levers-0086/`                           | the runs of part 33 (ADR 0086): the digests of every scene, the wrong rules LV1 to LV35, the time of a step of the Maze                                                                                                         | 2026-11-21, M3 Pro                                    |
 | `logs/engine/crown-scene-0087/`                      | the runs of part 34 (ADR 0087): the digests of every scene, the Crown of veins on both backends and against the prototype, SwiftShader, the time of a step                                                                      | 2026-11-21, M3 Pro                                    |
+| `logs/engine/reid-0088/`                             | the runs of part 35 (ADR 0088): the digests of every scene, the scenes of Reid et al. 2012 on both backends, the reach, SwiftShader, the time of a step, the wrong rules SA1 to SA23                                            | 2026-11-21, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

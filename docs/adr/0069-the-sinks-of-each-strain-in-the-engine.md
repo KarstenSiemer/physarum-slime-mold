@@ -10,6 +10,8 @@
   [ADR 0068](0068-the-territory-of-each-strain-in-the-engine.md) (open point 1).
 - Extended by ADR 0070 ([the flow takes the sinks](0070-the-flow-takes-the-sinks-in-the-engine.md)).
 - Extended by ADR 0071 ([the births that the flux pays in the engine](0071-the-births-that-the-flux-pays-in-the-engine.md)).
+- Extended by [ADR 0088](0088-the-scenes-of-reid-run-the-rules-and-the-avoidance-of-slime-is-a-setting.md)
+  (2026-11-21): the weight on slime and the reach to ground without slime are settings.
 - In short: [`docs/model.md`](../model.md), sections 6.10 and 6.11, has the rules;
   [`research/front/ENGINE.md`](../../research/front/ENGINE.md) has the state of the parts and what part E2b needs.
 

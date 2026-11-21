@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { FLOW, FLOW_EIGHT, FLOW_ITERATIONS, FLOW_SITES, packFlow, pcg } from '../../src/engine/flow';
 import { flowFlux, flowPressure, type FlowGrid } from '../../src/engine/flow-reference';
+import { freshReachOf, slimeWeightOf } from '../../src/engine/sinks';
 import { tubeOut, type SinkInput } from '../../src/engine/sinks-reference';
 import { flowSites, type FoodStroke } from '../../src/engine/sites';
 import { defaultSettings } from '../../src/model/params';
@@ -526,6 +527,7 @@ describe('the CPU prototype of stage 4', () => {
     const input: SinkInput = {
       ...{ g: { w, h, boundary: 'box', env }, strain: 0, owners: new Uint8Array(n), territory: new Uint8Array(n) },
       ...{ stamps: new Uint32Array(n), life: 0, step: 0, memory, rates: new Float32Array(n), ports: [port] },
+      ...{ slime: slimeWeightOf(defaultSettings()), reach: freshReachOf(defaultSettings()) },
     };
     let [cut, kept] = [0, 0];
     for (let c = 0; c < sim.cells; c++) {

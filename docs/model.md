@@ -350,7 +350,7 @@ ADR 0068, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisi
 
 The territory is the first of the rules of stage 4. They run only while the setting `territory` is on, in the extended
 model with growth, and so with one agent per cell, and with the flow (`territoryOn()`). The scene Crown of veins
-turns them on (ADR 0087); no other scene does.
+(ADR 0087), the three scenes of the Y-maze and Slime everywhere (ADR 0088) turn them on; no other scene does.
 Without them no pass of this section runs, and every other pass has the source of the code before, character for
 character, so a scene keeps its bytes.
 
@@ -388,9 +388,9 @@ character, so a scene keeps its bytes.
 ADR 0069, the rule set of ADR 0065 (decisions 1, 5 and 8) in the forms of ADR 0067 (decisions 3, 6 to 8 and 10). Code:
 `shaders/sinks.wgsl`, `gl/glsl/sinks.frag`, `src/engine/sinks.ts`; CPU reference `src/engine/sinks-reference.ts`.
 
-The sinks are the second of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), in the scene
-Crown of veins (ADR 0087). They find the sinks of the flow of each strain; the pressure, the tubes and the sensors of the agents
-read them (8.7).
+The sinks are the second of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), in the scenes
+that turn them on (6.10). They find the sinks of the flow of each strain; the pressure, the tubes and the sensors of the
+agents read them (8.7). Their weight on slime is the avoidance of slime (ADR 0088).
 
 - **A path** goes from a cell to one of its 8 neighbours that is open, across the seam of the periodic grid, and takes
   a diagonal step only where the two cells beside its corner are not both walls, as a move does (7.5). A cell outside a
@@ -400,7 +400,15 @@ read them (8.7).
 - **A sink** of strain s in step k is a cell that holds an agent of s (the owners, 6.10) and a tube of s (G_s > 0 after
   the update of the step, 8.1), that has room, a free cell of the territory of s within 1 step (a free cell holds no
   agent), and that lies at the edge of the territory of s: an open cell outside it lies within 2 steps. Its weight w
-  is 1 if ground without slime lies within 6 steps, else 0.025. Every other cell has the weight 0 for s.
+  is 1 if ground without slime lies within r_F steps, else w_S. Every other cell has the weight 0 for s.
+- **The avoidance of slime** (ADR 0088): r_F and w_S are the settings Reach to fresh ground (`freshReach`, a whole
+  number from 2 to 6, 6 by default) and Weight on slime (`slimeWeight`, from 0.001 to 1, 0.025 by default, the owner's
+  decision of 2026-11-19 in ADR 0065, decision 5), one value for all strains. w_S = 1 turns the avoidance off: every
+  sink then takes the weight 1. The weights set only the shares of the sinks (8.7): where every sink of a strain lies
+  on slime, the strain takes as much flux as without slime. The passes go on from the paths of the edge to those of
+  r_F, so r_F is at least 2; they hold the cells within 6 steps (13 rows of 13 bits), so r_F is at most 6
+  (`freshReachOf()` in `sinks.ts` keeps every value there). They read both from the block of the flow
+  (`FLOW_SINK_SLOT`: r_F in x, the weight in steps of the rate in w).
 - **The tube of a sink** (ADR 0072): a sink must also lie on a tube that carries flux to it. The tube cells of s that
   a path between 4-neighbours over tube cells of s reaches from the cell, inside the square of 13 × 13 cells around
   it, must include a cell on the edge of the square or a port of s of the step (8.2). A step of such a path crosses
@@ -690,7 +698,7 @@ ADR 0070, the rule set of ADR 0065 (decision 1) in the forms of ADR 0067 (decisi
 `sinksAndSources()`, `flowUpdate()`, `takesOf()`, `groundOf()` and `drifted()` in `src/engine/flow-reference.ts`.
 
 While the rules of stage 4 run (6.10), the flow of each strain takes the sinks of that strain (6.11): the growth front
-draws flux, and the plasm streams to it. The scene Crown of veins turns the rules on (ADR 0087). Without them the
+draws flux, and the plasm streams to it. The scenes of 6.10 turn the rules on (ADR 0087, ADR 0088). Without them the
 passes have the source of the code before, character for character.
 
 - **What the sinks take**: while the front of strain s takes flux in the step (its state, 6.11), its sinks take
@@ -782,7 +790,7 @@ of `gl/glsl/sinks.frag`; `src/engine/paid.ts`; CPU reference `paidClaims()` in `
 `nextBudget()` in `paid.ts`.
 
 The paid births are the third of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), in the
-scene Crown of veins (ADR 0087). The flux that the front of a strain takes becomes plasm where it goes: it pays births at the
+scenes of 6.10. The flux that the front of a strain takes becomes plasm where it goes: it pays births at the
 rim of the colony, in the share of the sink rate of each agent there.
 
 - **The budget** of strain s is a float in its state (6.11). In every step in which the front of s takes flux (6.11),
@@ -846,8 +854,8 @@ gives a simulation no stroke of one, and both backends would leave one out (`pai
 `src/engine/types.ts`). The sweep keeps it under an erase and a wall: nothing on the grid shows it, so no stroke
 clears it. Clear removes it with the rest of the list, and a reset then starts no colony there. A link holds it as it
 holds every shape of its scene, by the bit of the shape; no link holds one as a stroke. Its radius is not read. The
-scenes Y-maze with slime and Slime everywhere start their colony so: on the middle of the base of the Y-maze, and 1 cm
-inside the rim of the dish, opposite the glucose.
+three scenes of the Y-maze and Slime everywhere start their colony so: on the middle of the base of the Y-maze, and
+1 cm inside the rim of the dish, opposite the glucose.
 
 While the rules of stage 4 run, the start layout food gives each strain its start territory just before the step
 that places its colony (6.10).
@@ -895,6 +903,8 @@ checks that this table names every key.
 | `drift`             | δ        | weight of the pressure in a sensor, 0 to 5 (the rules of stage 4)    | 1.5               | extended | 8.7     |
 | `frontFlux`         | k        | the sinks take S = 2 k · I0, 0.25 to 16 (the rules of stage 4)       | 1                 | extended | 8.7     |
 | `slimeLife`         | L        | hours of model time, 0 to 240; 0 is no slime                         | 144               | extended | 6.9     |
+| `slimeWeight`       | w_S      | weight of a sink on slime, 0.001 to 1; 1 is no avoidance (stage 4)   | 0.025             | extended | 6.11    |
+| `freshReach`        | r_F      | steps of a path to ground without slime, 2 to 6 (stage 4)            | 6                 | extended | 6.11    |
 | `model`             |          | jones, extended                                                      | extended          |          | 2       |
 | `stepOrder`         |          | move-first, sense-first                                              | sense-first       | both     | 5       |
 | `boundary`          |          | wrap, box, dish                                                      | wrap              | both     | 1, 6.3  |
@@ -1001,6 +1011,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The territory (6.10, 7.2, 7.6, 9)       | `territory.gpu.test.ts`: moves, respawn and births only onto it, two strains; the owners and the push in each arena; the start  |
 | The corner of the push (6.10)           | `territory.gpu.test.ts`: no cell across a thin diagonal wall in 40 steps, both strains; `territory.test.ts`: the CPU copy       |
 | The sinks (6.11)                        | `sinks.gpu.test.ts`: rates, sums and state against the CPU copy in each arena with thin walls, the X of walls, births, a carry  |
+| The avoidance of slime (6.11)           | `sinks.gpu.test.ts`: the weights at a weight on slime of 0.3 and 1 and the reaches 2 and 4, against the CPU copy                |
 | The flow with the sinks (8.7)           | `flow-sinks.gpu.test.ts`: memory and pressure against the CPU copy, 2 strains in a dish with walls; a large R; the drift        |
 | The drift `take` (8.7)                  | `flow-sinks.gpu.test.ts`: the turns of 256 agents on and off the tubes against the CPU copy; a shift of the tubes moves no one  |
 | The paid births (9.1)                   | `paid.gpu.test.ts`: keys, rank, births, budget against the CPU copy, 2 strains, light; ties; budgets above the front, below 1   |

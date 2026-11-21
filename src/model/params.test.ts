@@ -27,6 +27,7 @@ import {
   type Spec,
   type Strain,
 } from './params';
+import { SINK_WINDOW, SINKS } from '../engine/sinks';
 import { presetById, PRESETS } from './presets';
 
 const inRange = (v: number, s: Spec) => v >= s.min && v <= s.max;
@@ -246,6 +247,8 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
       'rival-networks',
       'tokyo-rivals',
       'y-maze',
+      'y-maze-both',
+      'y-maze-blank',
       'slime-everywhere',
       'crown',
     ];
@@ -382,6 +385,8 @@ describe('flow in the tubes (ADR 0029)', () => {
       'rival-networks',
       'tokyo-rivals',
       'y-maze',
+      'y-maze-both',
+      'y-maze-blank',
       'slime-everywhere',
       'crown',
       'maze',
@@ -440,9 +445,10 @@ describe('Slime life time (ADR 0055)', () => {
     expect(globalSpec.slimeLife).toMatchObject({ label: 'Slime life time', min: 0, max: 240, step: 1 });
     // The help says what 0 means, and what the time does with the flow.
     expect(globalSpec.slimeLife.help).toContain('At 0 the model has no slime.');
-    // The picture draws the slime (decision 8), and still no rule reads it.
+    // The picture draws the slime (decision 8), and only the rules of the growth front read it (ADR 0088).
     expect(globalSpec.slimeLife.help).toContain('as a wet film on the ground');
-    expect(globalSpec.slimeLife.help).toContain('No rule reads the slime yet');
+    expect(globalSpec.slimeLife.help).toContain('Without the rules of the growth front no rule reads the slime');
+    expect(globalSpec.slimeLife.help).toContain('the growth front takes less flux on slime (Weight on slime)');
     expect(globalSpec.slimeLife.help).toContain('With Flow in the tubes');
   });
 
@@ -863,12 +869,13 @@ describe('the mean window (ADR 0046)', () => {
   });
 });
 
-// ADR 0068: the rules of stage 4 are a setting of the extended model, off by default. The Crown of veins is the one
-// scene with them (ADR 0087).
+// ADR 0068: the rules of stage 4 are a setting of the extended model, off by default. The Crown of veins (ADR 0087)
+// and the scenes of Reid et al. 2012 (ADR 0088) have them.
 describe('the rules of stage 4 (ADR 0068)', () => {
-  it('are off by default, in every scene but the Crown of veins, and for a link without them', () => {
+  it('are off by default, in every scene but the Crown of veins and those of Reid, and for a link without them', () => {
     expect(defaultSettings().territory).toBe(false);
-    for (const p of PRESETS) expect(p.settings().territory, p.id).toBe(p.id === 'crown');
+    const rules = ['y-maze', 'y-maze-both', 'y-maze-blank', 'slime-everywhere', 'crown'];
+    for (const p of PRESETS) expect(p.settings().territory, p.id).toBe(rules.includes(p.id));
     expect(sanitize({ model: 'extended', territory: true }).territory).toBe(true);
     for (const v of [undefined, 1, 'true', null])
       expect(sanitize({ model: 'extended', territory: v }).territory).toBe(false);
@@ -913,6 +920,32 @@ describe('the rules of stage 4 (ADR 0068)', () => {
     if (!jones) throw new Error('no Network');
     const bound = constrain({ ...jones, frontFlux: 4 });
     expect([bound.model, bound.frontFlux]).toEqual(['jones', 1]);
+    expect(constrain(bound)).toBe(bound);
+  });
+
+  // ADR 0088: the weight on slime and the reach to fresh ground are settings of the rules: 0.025 (the owner's decision
+  // of 2026-11-19, ADR 0065, decision 5) and 6 (ADR 0067, decision 10), the constants of before, in every scene.
+  it('have the weight on slime 0.025 and the reach to fresh ground 6 in the scenes, and their defaults in Jones', () => {
+    const d = defaultSettings();
+    expect([d.slimeWeight, d.freshReach]).toEqual([0.025, 6]);
+    for (const p of PRESETS) expect([p.settings().slimeWeight, p.settings().freshReach], p.id).toEqual([0.025, 6]);
+    // A weight of 1 is the weight near fresh ground: the slime then changes no sink.
+    expect(globalSpec.slimeWeight).toMatchObject({ label: 'Weight on slime', min: 0.001, max: 1, log: true });
+    // Whole steps of a path, from the edge of the territory to the window of the passes (sinks.ts).
+    expect(globalSpec.freshReach).toMatchObject({ label: 'Reach to fresh ground', min: SINKS.edge, step: 1 });
+    expect(globalSpec.freshReach.max).toBe(SINK_WINDOW);
+    expect(sanitize({ model: 'extended', slimeWeight: 5 }).slimeWeight).toBe(1);
+    expect(sanitize({ model: 'extended', slimeWeight: 0 }).slimeWeight).toBe(0.001);
+    expect(sanitize({ model: 'extended', slimeWeight: 'x' }).slimeWeight).toBe(0.025);
+    expect(sanitize({ model: 'extended', territory: true, slimeWeight: 0.3 }).slimeWeight).toBe(0.3);
+    expect(sanitize({ model: 'extended', freshReach: 9 }).freshReach).toBe(6);
+    expect(sanitize({ model: 'extended', freshReach: 1 }).freshReach).toBe(2);
+    expect(sanitize({ model: 'extended', freshReach: 3.6 }).freshReach).toBe(4);
+    expect(sanitize({ model: 'extended', freshReach: null }).freshReach).toBe(6);
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    const bound = constrain({ ...jones, slimeWeight: 0.5, freshReach: 3 });
+    expect([bound.model, bound.slimeWeight, bound.freshReach]).toEqual(['jones', 0.025, 6]);
     expect(constrain(bound)).toBe(bound);
   });
 });

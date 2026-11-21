@@ -13,6 +13,8 @@
 - Extended by [ADR 0075](0075-the-drift-take-in-the-engine.md) (the drift `take`: decisions 6 and 7).
 - Extended by [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (2026-11-21): the sinks take S = 2 k · I0,
   with k the setting Flux to the front.
+- Extended by [ADR 0088](0088-the-scenes-of-reid-run-the-rules-and-the-avoidance-of-slime-is-a-setting.md)
+  (2026-11-21): the drift of the scenes of Reid et al. 2012 (decision 5).
 - In short: [`docs/model.md`](../model.md), section 8.7, has the rules;
   [`research/front/ENGINE.md`](../../research/front/ENGINE.md) has the state of the parts and what part E3 needs.
 

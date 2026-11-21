@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSettings, type Boundary, type Settings } from '../model/params';
 import { FLOW_BYTES, FLOW_SINK_SLOT, FLOW_SLOTS, FLOW_TAKE_SLOT, FLOW_TERRITORY_SLOT, packFlow } from './flow';
 import { NO_SITES } from './sites';
-import { RATE_ONE, SINK_WINDOW, SINKS, SLIME_WEIGHT, SUM_ONE } from './sinks';
+import { freshReachOf, RATE_ONE, SINK_WINDOW, SINKS, slimeWeightOf, SUM_ONE } from './sinks';
 import { paths, sinkState, sinksStep, sinkWeight, sumOf, toward, tubeOut, type SinkInput } from './sinks-reference';
 import { sinkLevels } from './sizing';
 import { packTerritory } from './territory';
@@ -32,17 +32,22 @@ function square(g: TerritoryGrid, c: number, k: number): number[] {
   return out;
 }
 
+/** The weight of a sink on slime of the default settings in steps of the rate: 419,430 for 0.025 (ADR 0088). */
+const SLIME_WEIGHT = slimeWeightOf(defaultSettings());
+/** The reach to ground without slime of the default settings: 6 steps. */
+const REACH = freshReachOf(defaultSettings());
+
 describe('the sinks (ADR 0069)', () => {
   const on: Settings = { ...defaultSettings(), territory: true, flow: true, growth: true, collisions: true };
 
   it('holds the constants of the rule set of ADR 0065 in the slot after the push, as whole numbers', () => {
-    expect(SINKS).toEqual({ edge: 2, fresh: 6, slime: 0.025, tau: 100, take: 2 });
-    expect([RATE_ONE, SUM_ONE, SLIME_WEIGHT]).toEqual([16777216, 65536, 419430]);
+    expect(SINKS).toEqual({ edge: 2, tau: 100, take: 2 });
+    expect([RATE_ONE, SUM_ONE, SLIME_WEIGHT, REACH]).toEqual([16777216, 65536, 419430, 6]);
     expect(SINK_WINDOW).toBe(6);
     // The passes hold a window of 13 × 13 cells: no reach of the block may leave it, and the edge lies nearer.
     expect(SINKS.edge).toBeGreaterThanOrEqual(1);
-    expect(SINKS.fresh).toBeGreaterThanOrEqual(SINKS.edge);
-    expect(SINK_WINDOW).toBeGreaterThanOrEqual(SINKS.fresh);
+    expect(REACH).toBeGreaterThanOrEqual(SINKS.edge);
+    expect(SINK_WINDOW).toBeGreaterThanOrEqual(REACH);
     expect(FLOW_SINK_SLOT).toBe(FLOW_TERRITORY_SLOT + 2);
     // The slot of what the sinks take comes last (ADR 0070): x the share of the flow strength, y the growth of the
     // budget of the paid births in a step (ADR 0071), z and w free.
@@ -60,12 +65,41 @@ describe('the sinks (ADR 0069)', () => {
   it('lets the sinks take 2 k times the flow strength, and the budget grow as with k = 1', () => {
     const one = new Float32Array(packTerritory(packFlow(on, NO_SITES), on));
     for (const k of [0.25, 2, 3.3, 16]) {
-      const f = new Float32Array(packTerritory(packFlow(on, NO_SITES), { frontFlux: k }));
+      const f = new Float32Array(packTerritory(packFlow(on, NO_SITES), { ...on, frontFlux: k }));
       expect(f[FLOW_TAKE_SLOT * 4], `k ${String(k)}`).toBe(Math.fround(SINKS.take * k));
       const [norm, paid] = [2 * k, 20 * k];
       expect(f[FLOW_TAKE_SLOT * 4 + 1], `k ${String(k)}`).toBeCloseTo((norm * on.flowStrength) / paid, 6);
       f.forEach((v, i) => {
         if (i !== FLOW_TAKE_SLOT * 4) expect(v, `value ${String(i)} at k ${String(k)}`).toBe(one[i]);
+      });
+    }
+  });
+
+  // ADR 0088: the weight on slime and the reach to fresh ground are settings, in the lanes w and x of the slot of the
+  // sinks. The weight counts in steps of the rate, rounded to the nearest; 1 is the weight near fresh ground. The reach
+  // is a whole number from the edge to the window of the passes, whatever the settings hold.
+  it('packs the weight on slime and the reach to fresh ground of the settings, and changes nothing else', () => {
+    const one = new Float32Array(packTerritory(packFlow(on, NO_SITES), on));
+    const lanes = (f: Float32Array) => Array.from(f.subarray(FLOW_SINK_SLOT * 4, FLOW_SINK_SLOT * 4 + 4));
+    const cases: [number, number, number[]][] = [
+      [0.025, 6, [6, 2, 100, 419430]],
+      [1, 6, [6, 2, 100, RATE_ONE]],
+      [0.001, 2, [2, 2, 100, 16777]],
+      [0.3, 4, [4, 2, 100, 5033165]],
+      [0.5, 3.4, [3, 2, 100, 8388608]],
+      // Outside the range of the setting: the passes still read a reach inside their window.
+      [0.025, 1, [2, 2, 100, 419430]],
+      [0.025, 9, [6, 2, 100, 419430]],
+    ];
+    for (const [slimeWeight, freshReach, want] of cases) {
+      const s = { ...on, slimeWeight, freshReach };
+      const f = new Float32Array(packTerritory(packFlow(s, NO_SITES), s));
+      const at = `weight ${String(slimeWeight)}, reach ${String(freshReach)}`;
+      expect(lanes(f), at).toEqual(want);
+      expect([slimeWeightOf(s), freshReachOf(s)], at).toEqual([want[3], want[0]]);
+      f.forEach((v, i) => {
+        if (i !== FLOW_SINK_SLOT * 4 && i !== FLOW_SINK_SLOT * 4 + 3)
+          expect(v, `value ${String(i)}, ${at}`).toBe(one[i]);
       });
     }
   });
@@ -121,7 +155,7 @@ describe('the sinks (ADR 0069)', () => {
     (boundary) => {
       const g = gridOf(21, 17, boundary);
       for (const c of [0, 5, 10 * 21 + 10, 16 * 21 + 20]) {
-        for (const k of [1, SINKS.edge, SINKS.fresh]) {
+        for (const k of [1, SINKS.edge, REACH]) {
           const reached = [...paths(g, c, k).keys()].sort((a, b) => a - b);
           if (boundary === 'box') expect(reached).toEqual(square(g, c, k).sort((a, b) => a - b));
           else if (boundary === 'wrap') expect(reached.length).toBe(Math.min(21, 2 * k + 1) * Math.min(17, 2 * k + 1));
@@ -140,7 +174,7 @@ describe('the sinks (ADR 0069)', () => {
     const walls = Array.from({ length: 21 }, (_, i): [number, number] => [i, i]);
     const g = gridOf(21, 21, 'box', walls);
     const c = 10 * 21 + 11; // (11, 10), above the wall
-    const reached = paths(g, c, SINKS.fresh);
+    const reached = paths(g, c, REACH);
     for (const t of reached.keys()) expect(t % 21).toBeGreaterThan(Math.floor(t / 21));
     expect(reached.has(11 * 21 + 10)).toBe(false); // (10, 11): beside it across the corner
     // A wall of one row with a gap: the path goes through the gap.
@@ -178,9 +212,33 @@ describe('the sinks (ADR 0069)', () => {
       memory,
       rates: new Float32Array(n),
       ports: [],
+      slime: SLIME_WEIGHT,
+      reach: REACH,
       ...patch,
     };
   }
+
+  // ADR 0088: the weight on slime and the reach to fresh ground come from the input, as the passes read them from the
+  // block of the flow.
+  it('takes the weight on slime and the reach to fresh ground of its input', () => {
+    const c = 4 * 15 + 7; // (7, 4): beside the free cell (6, 4), at the edge x = 8
+    expect(sinkWeight(caseOf({ slime: 1234 }), c)).toBe(1234);
+    expect(sinkWeight(caseOf({ slime: RATE_ONE }), c)).toBe(RATE_ONE);
+    // Ground without slime 3 cells right of the sink: within the reach 3 and above, not within 2.
+    const at = (reach: number) => {
+      const input = caseOf({ reach });
+      input.stamps[4 * 15 + 10] = 0;
+      return sinkWeight(input, c);
+    };
+    expect([2, 3, 4, 6].map(at)).toEqual([SLIME_WEIGHT, RATE_ONE, RATE_ONE, RATE_ONE]);
+    // 5 cells away: only the reaches 5 and 6 see it.
+    const far = (reach: number) => {
+      const input = caseOf({ reach });
+      input.stamps[4 * 15 + 12] = 0;
+      return sinkWeight(input, c);
+    };
+    expect([2, 4, 5, 6].map(far)).toEqual([SLIME_WEIGHT, SLIME_WEIGHT, RATE_ONE, RATE_ONE]);
+  });
 
   it('makes a sink of an agent with room at the edge of the territory, with the weight of its ground', () => {
     const c = 4 * 15 + 7; // (7, 4): beside the free cell (6, 4), at the edge x = 8
@@ -295,6 +353,8 @@ describe('the sinks (ADR 0069)', () => {
       memory,
       rates,
       ports: [],
+      slime: SLIME_WEIGHT,
+      reach: REACH,
     };
     const out = sinksStep(input);
     let r = 0;

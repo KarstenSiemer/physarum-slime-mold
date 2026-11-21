@@ -336,12 +336,18 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   step 16,000: the same agents, reach, sheet behind the rim and veins toward the rim, one smooth rim. The panel shows
   the rules of the growth front, the drift, the flow over 8 neighbours, the base conductance and the flux to the front
   where each acts, and Learn lists them; the help of the drift names a tree and a sheet. Part 4 has its first scene.
-- **Next: part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
-  the other scenes: the drift of each scene and whether each strain gets its own, the digests of every scene and the
-  measures of the 13 scenes with growth and the flow, the e2e tests of Reid et al., and a test where a second strain
-  grows on the slime of the first. The Crown of veins (ADR 0087) is the first scene with the rules, and the panel
-  offers the rules and the drift. Then the picture: the skirt goes, or it is drawn from the plasm of the
-  crown.
+- **The scenes of Reid et al. 2012 with the rules** (ADR 0088, 2026-11-21, part E4; the owner's words of that day:
+  "Ja, danach starten" and the settings for the avoidance of slime in the panel): the Y-maze with slime and Slime
+  everywhere run the rules of the growth front, and the Y-maze has its two controls as scenes (Y-maze, both slimed;
+  Y-maze without slime). With slime on one arm the colony takes the blank arm 40 : 0 on each backend (Reid: 39 of 40),
+  with slime on both arms it shows no preference and is 1.06 times slower, and the dish takes as long with slime as
+  without; the prototype gives the same. Weight on slime (0.025) and Reach to fresh ground (6 cells, at least 2) are
+  settings now, in the Slime section of the panel while the rules run. Without slime the engine gives 15 : 25 and 5 : 5
+  (together p 0.20): the open point of ADR 0073 shows no preference.
+- **Next: the rest of part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the
+  state): the other scenes with growth and the flow, their drift and whether each strain gets its own, their measures,
+  and a test where a second strain grows on the slime of the first. The Crown of veins (ADR 0087) and the four scenes
+  of Reid (ADR 0088) run the rules. Then the picture: the skirt goes, or it is drawn from the plasm of the crown.
 
 Open, for the owner:
 

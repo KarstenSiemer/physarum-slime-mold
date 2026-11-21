@@ -3,7 +3,7 @@
 The rules of stage 4 (ADR 0065, decision 1) come into the engine in parts, in the forms of ADR 0067. This page says
 what each part holds, and what the next agent needs to know. The rules in force are in `docs/model.md`, sections 6.10,
 6.11, 8.1, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070, ADR 0071, ADR 0072, ADR 0075,
-ADR 0086 and ADR 0087.
+ADR 0086, ADR 0087 and ADR 0088.
 
 ## The parts
 
@@ -15,18 +15,19 @@ ADR 0086 and ADR 0087.
 | E3   | the paid births: the keys in `test`, the new pass `rank`, the budget in the state        | done (ADR 0071) |
 | E2c  | the tube of a sink; the gap between the backends was a chance of six seeds               | done (ADR 0072) |
 | E2e  | the drift `take` of ADR 0074: a sensor off the tubes reads the ground of the agent       | done (ADR 0075) |
-| E4   | scenes turn the rules on, the panel, digests, measures, the e2e tests of Reid et al.     | begun (E5b)     |
+| E4   | scenes turn the rules on, the panel, digests, measures, the e2e tests of Reid et al.     | Reid (ADR 0088) |
 | E5a  | the levers of the crown: the flow over 8 neighbours, the base conductance, the flux k    | done (ADR 0086) |
 | E5b  | the crown scene, the panel controls and the help in Learn for the levers                 | done (ADR 0087) |
 
 ## The setting
 
-- `Settings.territory` (`src/model/params.ts`), off by default and in every scene but the Crown of veins (ADR 0087),
-  with its switch Rules of the growth front in the Flow section of the panel. It turns on every rule of stage 4:
+- `Settings.territory` (`src/model/params.ts`), off by default and in every scene but the Crown of veins (ADR 0087)
+  and the four scenes of Reid et al. 2012 (ADR 0088), with its switch Rules of the growth front in the Flow section of
+  the panel. It turns on every rule of stage 4:
   each part adds its rules to it and needs no switch of its own.
 - `Settings.drift` (`globalSpec.drift`): the weight of the pressure in the sensors, 0 to 5, one value for all strains,
-  1.5 by default. The default is provisional (ADR 0070, decision 5): E4 picks the value of each scene and decides
-  whether each strain gets its own. `packParams()` writes it into the lane of each strain of `P.drift`, the slot after
+  1.5 by default. The default is provisional (ADR 0070, decision 5): the five scenes with the rules have 1.5 (ADR
+  0087, ADR 0088); whether each strain gets its own is open. `packParams()` writes it into the lane of each strain of `P.drift`, the slot after
   every slot of before. A link holds it only while the rules are on, and the Jones model sets its default. The panel
   shows it while the rules are on, and Learn lists its help (ADR 0087).
 - `territoryOn(s)` (`src/engine/territory.ts`): the setting in the extended model with growth (so with one agent per
@@ -84,6 +85,26 @@ the values of the crown (E5b, ADR 0087).
 - The e2e test: the last test of `tests/e2e/tubes.spec.ts`, in shard 3 of 4 with three tests of the flow and 17 of
   `ui.spec.ts`. It waits 30 steps: SwiftShader runs the scene at about one step per second in the image of CI, and
   the colony leaves the neck after 1,150 to 1,450 steps (ADR 0087, decision 9).
+
+## The scenes of Reid et al. 2012 and the avoidance of slime (E4, ADR 0088)
+
+- The scenes `y-maze` (Y-maze with slime), `y-maze-both` (Y-maze, both slimed), `y-maze-blank` (Y-maze without
+  slime) and `slime-everywhere` run the rules with the drift 1.5, 4 neighbours, the base 0.02 and k = 1
+  (`yMazeSettings()` in `src/model/presets.ts`). They meet the targets of the prototype and of the paper on both
+  backends (the tables of ADR 0088; `bash research/front/e4.sh table`).
+- Two settings took the place of `SINKS.slime` and `SINKS.fresh`: `slimeWeight` (Weight on slime, 0.001 to 1, log,
+  0.025) and `freshReach` (Reach to fresh ground, 2 to 6 cells, 6). `slimeWeightOf()` and `freshReachOf()` in
+  `sinks.ts` give them in the units of the passes; `packSinks(f, s)` writes them into the lanes w and x of
+  `FLOW_SINK_SLOT`; the passes read those lanes as before, and the CPU copy reads `SinkInput.slime` and `.reach`. The
+  pattern of the drift holds: a link holds them only while `territory` is on, the Jones model sets the defaults, the
+  notice of a switch to Jones skips them, and the panel shows them in the Slime section while the rules run.
+- The reach is at least 2: the passes go on from the paths of the edge, and the colony's own slime lies on every cell
+  within one step of each sink, so a reach of 1 gives every sink the weight on slime.
+- The measure: `research/front/e4-reid.gpu.test.ts` and `research/front/e4.sh`; the story in `E4-NOTES.md`. It steps
+  with `Sim.run()`; `VITE_FRAME=1` steps with `Engine.frame()`, which gives the same run.
+- The e2e test: `tests/e2e/y-maze.spec.ts`, the last file, so CI runs it in shard 4 of 4 (ADR 0088, decision 7).
+- Left for part 4: the drift of the other scenes and a drift per strain, the other scenes with growth and the flow,
+  and a test where a second strain grows on the slime of the first.
 
 ## The state on the GPU
 
@@ -295,8 +316,10 @@ the values of the crown (E5b, ADR 0087).
 
 - The time of `test` and `win` with the rules apart from the step; the time of a step with the rules in any scene but
   the start scene.
-- Any scene with the rules but the start scene: the speed of the front in the engine, the crown of each drift, the
-  Y-maze, the dish (E4). The drift `take` at the weights 0 to 5 in the engine.
+- The scenes with the rules but the start scene, the Crown of veins and the four scenes of Reid (ADR 0088): the speed
+  of the front in the engine, the crown of each drift. The drift `take` at the weights 0 to 5 in the engine; the
+  scenes of Reid at other drifts, and the weight on slime and the reach beyond 10 seeds at the reaches 2 and 4 and the
+  weight 1.
 - The time of `takes` and PASS 5 apart from the step: the step of the start scene at capacity 1 with the rules takes
   about 2 to 3 % more with `take` than with `all` (ADR 0075, finding 4), and the agents differ between the two.
 - How often two keys within a few units in the last place change the births between the backends.
