@@ -12,6 +12,13 @@ const CORNER = 1e-3;
 const DEG = Math.PI / 180;
 /** The flow memory from which a tube cell counts as a vein: where the flow starts to bring dead agents to life (8.5). */
 export const VEIN = FLOW.birthFrom;
+/**
+ * The level of the flow memory D, in units of the base conductance, above which the rule of the tubes makes a vein grow
+ * (ADR 0076, finding 4; ADR 0084): a cell of a sheet gets flux in proportion to its conductance base + D, and D follows
+ * the flux to the power gamma, so D grows at about rate · (gamma · D / (D + base) − 1), above 0 from D = base / (gamma − 1)
+ * on: 1.25 times the base.
+ */
+export const FED_D = 1 / (FLOW.gamma - 1);
 
 // Random streams, numbered as in the app where the app has them (docs/model.md, 7.7), and new ones above 10.
 const [STEER, BLOCK, GROW, ORDER, RESPAWN, STARVE, HOLD_MOVE, HOLD_BIRTH, START] = [0, 3, 4, 6, 8, 9, 11, 12, 13];
@@ -198,8 +205,24 @@ export interface Front {
    * `reach` cells of ground without slime ('fresh', a try), or only within `reach` cells of open ground outside the
    * territory ('edge', the proposal): the plasm then grows at the front, and behind it only moves. 'edge' does not read
    * the slime, as the sinks of `sinkAt` 'edge' (ADR 0065, decision 8): a colony on slime grows at its edge too.
+   * 'young' (ADR 0084, a try): only on ground that the front reached less than `jonesAge` steps before (its front
+   * stamp, 6.9; a cell without a stamp is the youngest ground), so the thin sheet behind the front thins away after a
+   * time (Le Verge-Serandour and Alim 2023, Sec. 4.1).
    */
-  jones: 'all' | 'fresh' | 'edge';
+  jones: 'all' | 'fresh' | 'edge' | 'young';
+  /**
+   * The age of the ground in steps up to which `jones` 'young' gives births (ADR 0084): 1,500, the delay after which
+   * the main vein of the organism shows at a spot that the front passed (about 50 min, Schenz 2019, Sec. 3.1.3; a step
+   * is about 2 s, `docs/fidelity.md` row 6).
+   */
+  jonesAge: number;
+  /**
+   * Which rim cells are sinks (ADR 0084, a try): every rim cell that the rules of `sinkAt` take, as before ('all'), or
+   * only those whose flow memory D is at least FED_D times the base conductance ('fed'), the level above which the
+   * rule of the tubes makes a vein grow. The fed sinks share the total as all sinks do. A rim without one
+   * fed sink takes all its sinks, as 'all' does (fedFallback counts those flow passes).
+   */
+  sinkOn: 'all' | 'fed';
   /**
    * The share of a sink (ADR 0077, a try): its weight alone, so that every sink of one weight takes an equal share, as
    * before ('equal'), or its weight times the supply that reaches it ('supply'): the flux that its cell would pass at
@@ -285,6 +308,8 @@ export const noFront = (): Front => ({
   bodyOn: 'trail',
   bodyFull: 0.4,
   jones: 'all',
+  jonesAge: 1500,
+  sinkOn: 'all',
   shareOn: 'equal',
   fluxOn: 'sum',
   stencil: 4,
@@ -305,7 +330,8 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   sums: ['float', 'fixed'],
   start: ['disc', 'agents'],
   bodyOn: ['trail', 'agents', 'cube'],
-  jones: ['all', 'fresh', 'edge'],
+  jones: ['all', 'fresh', 'edge', 'young'],
+  sinkOn: ['all', 'fed'],
   shareOn: ['equal', 'supply'],
   fluxOn: ['sum', 'norm'],
 };
@@ -561,6 +587,10 @@ export class Sim {
   demand = 0;
   /** The cells of those sinks (`paid`), for sinkPressures(). */
   private sinkCells: readonly number[] = [];
+  /** `sinkOn` 'fed' (ADR 0084): the rim cells that the rules of `sinkAt` take in the last flow pass, fed or not. */
+  rimCandidates = 0;
+  /** `sinkOn` 'fed': the flow passes in which no rim cell was fed, so that all of them were sinks. */
+  fedFallback = 0;
   /** The sum of the sink rates of the tube cells in the last flow pass. */
   sinkTotal = 0;
   /** The cells whose agent could claim a paid child after the last flow pass before a growth step (`paidBy` 'ahead'). */
@@ -1145,6 +1175,8 @@ export class Sim {
       // outside the territory ('edge'), at the front.
       if (front.jones === 'fresh' && !this.freshNear(c)) continue;
       if (front.jones === 'edge' && !this.edgeNear(c)) continue;
+      // 'young' (ADR 0084): only on ground that the front reached less than `jonesAge` steps before.
+      if (front.jones === 'young' && this.F[c] !== 0 && this.step + 1 - this.F[c]! >= front.jonesAge) continue;
       this.claimChild(i, c, free);
     }
     // The births that the flow paid for, in the forms of a GPU (ADR 0067): a chance per agent of the front ('chance',
@@ -2017,12 +2049,14 @@ export class Sim {
     const k = this.step + 1;
     if (front.reach > 0 && front.fresh === 'chamfer') this.freshDistance();
     const at: number[] = [];
+    const unfed: number[] = [];
     const weight = new Map<number, number>();
     for (const c of this.stillSinks)
       if (G[c]! > 0) {
         at.push(c);
         weight.set(c, 1);
       }
+    const still = at.length;
     for (let c = 0; c < cells; c++) {
       if (!this.occ[c] || G[c]! <= 0) continue;
       const young = this.isYoung(c, k);
@@ -2045,8 +2079,22 @@ export class Sim {
       if ((atEdge || !young) && !this.territoryEdge(c)) continue;
       // A patch of tube that no tube joins to the network takes no flux (`sinkTube`, ADR 0072).
       if (front.sinkTube && !this.tubeOut(c)) continue;
-      at.push(c);
       weight.set(c, young ? 1 : front.slimeWeight);
+      // `sinkOn` 'fed' (ADR 0084): only a rim cell with D of at least FED_D times the base conductance is a sink.
+      if (front.sinkOn === 'fed' && this.D[c]! < FED_D * this.base) {
+        unfed.push(c);
+        continue;
+      }
+      at.push(c);
+    }
+    if (front.sinkOn === 'fed') {
+      this.rimCandidates = at.length + unfed.length;
+      // A rim without one fed sink takes all its sinks, as 'all' does: the food feeds the colony as a whole, so the
+      // flux must go to its rim, and a colony whose whole rim fell below the level would else never start again.
+      if (at.length === still && unfed.length > 0) {
+        at.push(...unfed);
+        this.fedFallback++;
+      }
     }
     this.demand = at.length;
     this.sinkCells = at;

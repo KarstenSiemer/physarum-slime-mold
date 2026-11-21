@@ -5,7 +5,8 @@
 //     name=<file> <the rules of stage 4>
 // `layout`: neck (a box of `side` × `long` cells; its first `neckLong` rows are wall but for a channel `neckWide` cells
 // wide, the food at its closed end), edge (the same box without the walls) or dish (a dish of `side` cells, the food
-// in the middle). `scent`: the steps of the food scent before the colony starts, 0 as the app (ADR 0073).
+// in the middle). `scent`: the steps of the food scent before the colony starts, 0 as the app (ADR 0073). `base`: the
+// base conductance of a tube cell, FLOW.base (0.02) but in a diagnostic (ADR 0083, the hook of ADR 0079).
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -138,7 +139,7 @@ if (isMain) {
     process.exit(0);
   }
   const own = ['layout', 'side', 'long', 'neckWide', 'neckLong', 'seeds', 'steps', 'every', 'pics', 'dump', 'name'];
-  own.push('scent');
+  own.push('scent', 'base');
   const front: Front = frontFrom(args, own);
   const layoutName = args.layout ?? 'neck';
   if (layoutName !== 'neck' && layoutName !== 'edge' && layoutName !== 'dish') throw new Error(`layout=${layoutName}`);
@@ -152,7 +153,8 @@ if (isMain) {
   const steps = Number(args.steps ?? 8000);
   const every = Number(args.every ?? 500);
   const scent = Number(args.scent ?? 0);
-  for (const n of [o.side, o.long, o.neckWide, o.neckLong, steps, every, scent])
+  const base = args.base === undefined ? undefined : Number(args.base);
+  for (const n of [o.side, o.long, o.neckWide, o.neckLong, steps, every, scent, base ?? 0])
     if (!Number.isFinite(n)) throw new Error('a number does not parse');
   const pics = (args.pics ?? '').split(',').filter(Boolean).map(Number);
   const dumps = (args.dump ?? '').split(',').filter(Boolean).map(Number);
@@ -164,6 +166,7 @@ if (isMain) {
   for (let seed = from; seed <= to; seed++) {
     const layout = crownLayout(o);
     const sim = new Sim(layout, params({ seed, front, scentSteps: scent }));
+    if (base !== undefined) sim.base = base;
     const rows: CrownRow[] = [];
     const t0 = performance.now();
     for (let k = 1; k <= steps; k++) {
@@ -175,7 +178,9 @@ if (isMain) {
         const { food, sinks, ports } = sim.sinkPressures();
         const drop = food - sinks.reduce((a, b) => a + b, 0) / sinks.length;
         const spread = sinkSpread(food, sinks);
-        appendFileSync(sinkFile, JSON.stringify({ seed, k, sinks: sinks.length, ports, drop, spread }) + '\n');
+        // With `sinkOn` 'fed' (ADR 0084) also the rim cells that could be sinks and the passes without a fed one.
+        const fed = front.sinkOn === 'fed' ? { candidates: sim.rimCandidates, fallback: sim.fedFallback } : {};
+        appendFileSync(sinkFile, JSON.stringify({ seed, k, sinks: sinks.length, ports, drop, spread, ...fed }) + '\n');
       }
       if (dumps.includes(k)) {
         const dir = `research/front/out/${name}-state`;
@@ -204,7 +209,9 @@ if (isMain) {
       }
     }
     const ms = Math.round(performance.now() - t0);
-    appendFileSync(file, JSON.stringify({ seed, o, front, rows, ms }) + '\n');
+    // The base conductance only when it is set, so that the records of the default keep their form.
+    const record = base === undefined ? { seed, o, front, rows, ms } : { seed, o, front, base, rows, ms };
+    appendFileSync(file, JSON.stringify(record) + '\n');
     const end = rows.at(-1);
     console.log(`seed ${String(seed)}: ${JSON.stringify(end)} (${String(ms)} ms)`);
   }
