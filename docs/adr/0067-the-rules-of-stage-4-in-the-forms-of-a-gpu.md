@@ -12,6 +12,7 @@
 - Extended by ADR 0069 ([the sinks of each strain in the engine](0069-the-sinks-of-each-strain-in-the-engine.md)).
 - Extended by ADR 0070 ([the flow takes the sinks of each strain in the engine](0070-the-flow-takes-the-sinks-in-the-engine.md)).
 - Extended by ADR 0071 ([the births that the flux pays in the engine](0071-the-births-that-the-flux-pays-in-the-engine.md)).
+- Extended by ADR 0089 ([the rules stay in their five scenes for now](0089-the-rules-of-the-growth-front-stay-in-their-five-scenes-for-now.md)).
 - In short: [`research/front/README.md`](../../research/front/README.md), step 9, tells the story and has the
   commands. No engine code yet: the engine follows this design in a later pull request.
 

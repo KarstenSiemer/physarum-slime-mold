@@ -104,7 +104,11 @@ the values of the crown (E5b, ADR 0087).
   with `Sim.run()`; `VITE_FRAME=1` steps with `Engine.frame()`, which gives the same run.
 - The e2e test: `tests/e2e/y-maze.spec.ts`, the last file, so CI runs it in shard 4 of 4 (ADR 0088, decision 7).
 - Left for part 4: the drift of the other scenes and a drift per strain, the other scenes with growth and the flow,
-  and a test where a second strain grows on the slime of the first.
+  and a test where a second strain grows on the slime of the first. It waits: the owner tried the crown on 2026-11-21
+  and found most things not right yet, so no other scene turns the rules on until the owner finds them ready (ADR
+  0089). The plan was E4b the three mazes, E4c `tokyo` and `tokyo-light`, E4d `light` and `food-ring`, and E4e the
+  scenes with several strains. E4b stopped before its first measurement; its notes and its runner lie outside git in
+  `research/front/out/e4b-start/`.
 
 ## The state on the GPU
 

@@ -12,4 +12,6 @@ extend-ignore-re = [
   '"nehm gerne einfach deine empfehlungen und frage\s+mich weniger oder gar nicht"',
   # The owner's wish of 2026-11-21, quoted in German in ADR 0086.
   '"mindestens eine neue Szene und das Verhalten einstellbar"',
+  # The owner's stop of 2026-11-21, quoted in German in ADR 0089.
+  '"ich probiere gerade\s+die growth Front Krone aus und denke, dass das feature noch nicht bereit ist es in andere mazes einzubauen, die\s+meisten Sachen funktionieren noch nicht so richtig\. Also noch nicht in anderen presets einschalten bitte"',
 ]
