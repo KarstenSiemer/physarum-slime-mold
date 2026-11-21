@@ -3,6 +3,8 @@
 - Status: accepted. A study of an agent under the owner's delegation of 2026-11-12; the coordinator asked for it.
 - Date: 2026-11-20
 - Extends [ADR 0083](0083-more-flux-for-the-veins-of-the-growing-colony.md) (not measured there: steps after 8,000).
+- Extended by [ADR 0085](0085-the-crown-so-far.md) (2026-11-21): the crown research pauses, with the case `none` as
+  the best form so far; the state with pictures.
 - The scripts: `research/front/e2n.sh` (runs, montages), `e2n.ts` (the measures). The raw records are in the archive
   under `logs/engine/crown-0084/`.
 

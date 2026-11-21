@@ -285,3 +285,10 @@ In `out/e2f/montage/` (git ignores it), each picture of 260 × 240 cells cut to 
   low drifts kept the ridge test without the rule of 5 body cells (their forms do not depend on it).
 - The forms after step 8,000: the old ground of `jones=edge` still thins at step 8,000 (a body on 52 to 58 % of it).
 - Murray's exponent, the delay of the main vein against the 1,500 steps of the organism, a lobed rim.
+
+## The crown so far (ADR 0085)
+
+The owner paused the crown research on 2026-11-21. [ADR 0085](../../docs/adr/0085-the-crown-so-far.md) records the
+state: the best form so far (E2n with both options off, step 16,000) with pictures in `docs/images/crown-*.jpg`, what
+it shows and lacks against the owner's crown, the coordinator's guess of what is missing (a cell that the front
+reaches starts with the fresh D of 0.2, so the whole rim conducts like a tube), and the next part, E2o.
