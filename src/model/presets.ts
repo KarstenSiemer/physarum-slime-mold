@@ -487,6 +487,55 @@ function cornShapes(): EnvShape[] {
 }
 
 /**
+ * The scene Crown of veins (ADR 0087), in cells of its lattice of 520 × 340: the neck of the prototype of stage 4
+ * (research/front/layouts.ts neck(), crowns.ts; ADR 0084). Its first `long` rows are wall but for a channel `wide`
+ * cells wide in the middle, and the food of radius `foodR` lies `foodY` cells from the top, in the middle of the
+ * channel. The colony starts on the food.
+ */
+export const CROWN = { lattice: [520, 340], wide: 14, long: 40, foodY: 8, foodR: 5 } as const;
+
+/**
+ * The shapes of the Crown of veins: the food, then the walls of each side of the channel. A wall is the cells within
+ * the radius of a stroke, and the picture lights the wall by the distance to the outline of its strokes (paint.wgsl),
+ * so a block of thin strokes would show a rib per stroke. Each block is therefore thick strokes of radius R = 8 cells:
+ * rows of them 8 cells apart, the lowest one with its outline on the lower edge of the block, and one stroke down the
+ * edge at the channel. They end R before the channel and before the lower edge, so they cover no cell outside the
+ * block, and every cell inside it lies at least 4 cells (the depth that the picture lights) inside one of them, or as
+ * deep as it lies in the block. Their round end leaves the corner at the mouth of the neck open: two strokes of 1.5
+ * cells along the last 3 rows and the last 3 columns fill it (√2 < 1.5 < 2, so they cover no cell beside the block).
+ * The cells are those of neck() in research/front/layouts.ts, cell for cell (presets.test.ts).
+ */
+function crownShapes(): EnvShape[] {
+  const { lattice, wide, long, foodY, foodR } = CROWN;
+  const [w] = lattice;
+  const cells = boxCells([...lattice]);
+  const R = 8;
+  // The channel: the columns from a to b − 1, as neck() in research/front/layouts.ts has them.
+  const [a, b] = [Math.round((w - wide) / 2), Math.round((w + wide) / 2)];
+  const wall = (x1: number, y1: number, x2: number, y2: number, r: number): EnvShape => ({
+    kind: 'wall',
+    at: cells.at(x1, y1),
+    to: cells.at(x2, y2),
+    r: cells.r(r),
+  });
+  // One side: `edge` is the x of the edge at the channel, `out` the x beyond the grid, `s` the side (−1 left).
+  const side = (edge: number, out: number, s: number): EnvShape[] => {
+    const rows = Array.from({ length: Math.floor((long - R) / R) + 1 }, (_, i) => long - R - i * R);
+    return [
+      ...rows.map((y) => wall(out, y, edge + s * R, y, R)),
+      wall(edge + s * R, -2 * R, edge + s * R, long - R, R),
+      wall(edge + s * 11.5, long - 1.5, edge + s * 1.5, long - 1.5, 1.5),
+      wall(edge + s * 1.5, long - 11.5, edge + s * 1.5, long - 1.5, 1.5),
+    ];
+  };
+  return [
+    { kind: 'food', at: cells.at(w / 2, foodY), r: cells.r(foodR) },
+    ...side(a, -2 * R, -1),
+    ...side(b, w + 2 * R, 1),
+  ];
+}
+
+/**
  * The Y-maze of Reid et al. 2012 with slime on its left arm (ADR 0066): the layout of ADR 0056, and the start spot of
  * the colony on the middle of its base.
  */
@@ -1136,6 +1185,31 @@ SCENES.push(
     settings: () => forager({ lattice: [SLIME_DISH.side, SLIME_DISH.side] }),
     // The start layout 'food' places the colony on the start spot at the top, not on the glucose.
     env: slimeDishShapes(),
+  },
+  {
+    id: 'crown',
+    name: 'Crown of veins',
+    group: 'experiments',
+    source: 'Made for this app',
+    summary: 'A colony grows out of a neck as one sheet, with veins that fork toward its rim.',
+    watch:
+      'The colony fills the neck and leaves it after about 1,300 steps. Then it spreads as a half disc. By step 8,000 a few main veins run from the neck toward the rim and fork there. Later these forks go, and new ones grow at the new rim. The rim stays one smooth arc.',
+    about:
+      'The rules of the growth front: the colony pushes its ground open, its rim takes the flux of the tubes, and that flux pays its births. With the flow over 8 neighbours, a low base conductance and twice the flux to the front, the veins of a crown grow in one sheet. The crown of a real slime mold has more: a lobed rim, and a sheet that moves on ahead of its tube and leaves the veins behind. This scene has neither.',
+    strainRoles: ['Jones’ foraging agent with the rules of the growth front'],
+    why: 'The best crown of this app’s research so far, in its box of 520 × 340 cells on every screen: a neck 14 cells wide and 40 cells long, and a food at its closed end. Jones’ foraging agent with growth and shrinkage, Sensor distance 7, Food weight 0.03 and a Flow strength of 8. The rules of the growth front with a drift of 1.5, the flow over 8 neighbours, a base conductance of 0.002 and twice the flux to the front.',
+    settings: () =>
+      forager({
+        lattice: [...CROWN.lattice],
+        boundary: 'box',
+        territory: true,
+        drift: 1.5,
+        flowEdges: 8,
+        flowBase: 0.002,
+        frontFlux: 2,
+      }),
+    // The start layout 'food' places the colony on the food at the closed end of the neck.
+    env: crownShapes(),
   },
 );
 

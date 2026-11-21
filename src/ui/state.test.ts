@@ -619,6 +619,24 @@ describe('a shared link', () => {
     setEngine(undefined);
   });
 
+  // ADR 0087: a link holds the rules of the growth front and the levers of the crown while they are on (linkSettings()),
+  // so a link of the Crown of veins opens the scene as it is.
+  it('of the Crown of veins opens it with its rules and its levers, unchanged', async () => {
+    const first = await fresh();
+    first.loadPreset('crown');
+    const { hash, dropped } = await encodeLink(structuredClone(first.app.settings), first.currentDrawing());
+    expect(dropped).toBe(false);
+    const { app, openLink, sceneChanged } = await fresh();
+    const link = await decodeLink(hash);
+    if (!link) throw new Error('no link');
+    openLink(link);
+    expect(app.scene).toBe('crown');
+    expect(app.settings).toEqual(first.app.settings);
+    expect(sceneChanged()).toBe(false);
+    const s = app.settings;
+    expect([s.territory, s.drift, s.flowEdges, s.flowBase, s.frontFlux]).toEqual([true, 1.5, 8, 0.002, 2]);
+  });
+
   // ADR 0027: a link made before a scene's shapes changed paints the shapes it was made with, and says that it changes
   // the scene; Reload scene loads the scene's shapes of now.
   it("of an earlier revision of the scene's shapes paints those shapes, and Reload scene the newest", async () => {
@@ -939,6 +957,30 @@ describe('the model switch', () => {
     // Back in the extended model the flow stays off until the user turns it on.
     setModel('extended');
     expect([app.settings.model, app.settings.flow]).toEqual(['extended', false]);
+  });
+
+  // ADR 0087: the Crown of veins has the rules of the growth front and the levers of the crown. The switch to Jones
+  // names the rules it removed; their drift and flux to the front, and the base conductance of the flow, mean nothing
+  // without them, so the notice skips them, as it skips the flow strength.
+  it('to Jones takes the rules of the growth front off and names them, not their values', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('crown');
+    expect([app.settings.territory, app.settings.frontFlux, app.settings.flowEdges]).toEqual([true, 2, 8]);
+    app.settings.drift = 3;
+    setModel('jones');
+    const s = app.settings;
+    expect([s.model, s.territory, s.flow, s.drift, s.frontFlux, s.flowEdges, s.flowBase]).toEqual([
+      'jones',
+      false,
+      false,
+      1.5,
+      1,
+      4,
+      0.02,
+    ]);
+    expect(app.notice).toContain('It removed the flow in the tubes and the rules of the growth front.');
+    for (const label of ['Drift', 'Flux to the front', 'Base conductance', 'Flow strength'])
+      expect(app.notice, label).not.toContain(label);
   });
 
   // Every value that toJones() changes is in the notice, also those that the panel of the extended model shows

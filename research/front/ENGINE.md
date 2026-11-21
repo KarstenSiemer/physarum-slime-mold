@@ -2,8 +2,8 @@
 
 The rules of stage 4 (ADR 0065, decision 1) come into the engine in parts, in the forms of ADR 0067. This page says
 what each part holds, and what the next agent needs to know. The rules in force are in `docs/model.md`, sections 6.10,
-6.11, 8.1, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070, ADR 0071, ADR 0072, ADR 0075
-and ADR 0086.
+6.11, 8.1, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070, ADR 0071, ADR 0072, ADR 0075,
+ADR 0086 and ADR 0087.
 
 ## The parts
 
@@ -15,19 +15,20 @@ and ADR 0086.
 | E3   | the paid births: the keys in `test`, the new pass `rank`, the budget in the state        | done (ADR 0071) |
 | E2c  | the tube of a sink; the gap between the backends was a chance of six seeds               | done (ADR 0072) |
 | E2e  | the drift `take` of ADR 0074: a sensor off the tubes reads the ground of the agent       | done (ADR 0075) |
-| E4   | scenes turn the rules on, the panel, digests, measures, the e2e tests of Reid et al.     | next            |
+| E4   | scenes turn the rules on, the panel, digests, measures, the e2e tests of Reid et al.     | begun (E5b)     |
 | E5a  | the levers of the crown: the flow over 8 neighbours, the base conductance, the flux k    | done (ADR 0086) |
-| E5b  | the crown scene, the panel controls and the help in Learn for the levers                 | next (ADR 0087) |
+| E5b  | the crown scene, the panel controls and the help in Learn for the levers                 | done (ADR 0087) |
 
 ## The setting
 
-- `Settings.territory` (`src/model/params.ts`), off by default and in every scene. It turns on every rule of stage 4:
+- `Settings.territory` (`src/model/params.ts`), off by default and in every scene but the Crown of veins (ADR 0087),
+  with its switch Rules of the growth front in the Flow section of the panel. It turns on every rule of stage 4:
   each part adds its rules to it and needs no switch of its own.
 - `Settings.drift` (`globalSpec.drift`): the weight of the pressure in the sensors, 0 to 5, one value for all strains,
   1.5 by default. The default is provisional (ADR 0070, decision 5): E4 picks the value of each scene and decides
   whether each strain gets its own. `packParams()` writes it into the lane of each strain of `P.drift`, the slot after
-  every slot of before. A link holds it only while the rules are on, the Jones model sets its default, and Learn shows
-  no help for it (`Learn.svelte`) until the panel offers it.
+  every slot of before. A link holds it only while the rules are on, and the Jones model sets its default. The panel
+  shows it while the rules are on, and Learn lists its help (ADR 0087).
 - `territoryOn(s)` (`src/engine/territory.ts`): the setting in the extended model with growth (so with one agent per
   cell) and the flow. Every pass of stage 4 runs only then. Use it, not `s.territory`.
 - A link holds the setting only while it is on (`linkSettings()` in `src/model/url.ts`). The Jones model sets it off
@@ -37,8 +38,8 @@ and ADR 0086.
 ## The levers of the crown (E5a, ADR 0086)
 
 The crown of ADR 0084 (case `none` of `research/front/e2n.sh`) runs the rules of stage 4 with three levers more. Each
-is a setting in `src/model/params.ts` whose default keeps the bytes of every scene; no scene and no panel control has
-another value yet (E5b).
+is a setting in `src/model/params.ts` whose default keeps the bytes of every scene but the Crown of veins, which has
+the values of the crown (E5b, ADR 0087).
 
 | Setting     | Default, range          | In force                  | In the passes                                                |
 | ----------- | ----------------------- | ------------------------- | ------------------------------------------------------------ |
@@ -49,8 +50,9 @@ another value yet (E5b).
 - The crown of ADR 0084 is `flowEdges` 8, `flowBase` 0.002 and `frontFlux` 2 (`norm=4 paid=40`), with the rules on.
 - The pattern of `drift` and `territory`: the Jones model sets the defaults (`asJones()`); a link holds `flowEdges`
   and `flowBase` only while the flow is on, and `frontFlux` only while `territory` is on (`linkSettings()`); a link
-  without them runs with the defaults. Learn shows none of them (`Learn.svelte`), and the notice of a switch to Jones
-  skips the base conductance with the flow strength (`jonesChanges()` in `src/ui/state.svelte.ts`).
+  without them runs with the defaults. The panel and Learn show them (E5b), and the notice of a switch to Jones skips
+  the base conductance with the flow strength, and the flux to the front and the drift with the rules
+  (`jonesChanges()` in `src/ui/state.svelte.ts`).
 - `flowEight(s)` (`src/engine/flow.ts`): the setting 8 while the flow runs. Both sims pick the passes by it in every
   step, so a change acts at the next step and restarts nothing.
 - The 8 edges: `//#if EIGHT` in `shaders/flow.wgsl` (`diagonalXY()`, `diagonalFlux()`, AXIS and DIAG; the update, and
@@ -62,6 +64,26 @@ another value yet (E5b).
   (`eightOf()` in `src/engine/flow-reference.ts`). `tubeStream(…, eight)` in `src/engine/tubes-reference.ts`.
 - Readers of the edges that stay as they are, as the prototype has them: the tube of a sink (`tubeOut()`, 4
   neighbours), the drift (`takes`, take / G), the ports, the roles and the paths of the sinks.
+
+## The crown scene and the panel (E5b, ADR 0087)
+
+- The scene `crown`, "Crown of veins" (`src/model/presets.ts`, group Experiments): the case `none` of
+  `research/front/e2n.sh` word for word, the table of ADR 0087. `CROWN` holds its lattice of 520 × 340 cells and its
+  neck; `crownShapes()` paints the cells of `neck()` of `research/front/layouts.ts`, cell for cell, with thick strokes
+  so that the walls show no ribs (ADR 0087, decision 2). It is the one scene with `territory`, 8 neighbours, the base
+  0.002 and k = 2.
+- The panel (`src/ui/Panel.svelte`, the Flow section below Flow strength): the switch Flow over 8 neighbours and the
+  slider Base conductance while the flow is on; the switch Rules of the growth front (`territoryHelp` in `params.ts`)
+  while growth is on too; Drift and Flux to the front while the rules are on. Learn lists them in this order.
+- The notice of a switch to Jones names the rules (`jonesChanges()`), and skips the drift and the flux to the front.
+- The engine compares with the prototype through `research/front/e5b-crown.gpu.test.ts`, which saves the fields of
+  `CrownFields` in the format of `saveState()`, and `research/front/e5b.ts`, which turns them into a campaign of
+  `crowns.ts` for `e2n.ts`; `bash research/front/e5b.sh backends|neck|long|measure|montage` runs it all. The engine
+  counts the step that places the colony as its first step: its step k + 1 is the prototype's step k.
+- The pictures of the app: `tests/pictures/crown.spec.ts`; the montage `docs/images/crown-app.jpg`.
+- The e2e test: the last test of `tests/e2e/tubes.spec.ts`, in shard 3 of 4 with three tests of the flow and 17 of
+  `ui.spec.ts`. It waits 30 steps: SwiftShader runs the scene at about one step per second in the image of CI, and
+  the colony leaves the neck after 1,150 to 1,450 steps (ADR 0087, decision 9).
 
 ## The state on the GPU
 
@@ -267,7 +289,8 @@ another value yet (E5b).
 
 ## Not measured
 
-- The levers of ADR 0086 in a scene: no scene turns them on (E5b). The crown of ADR 0084 in the engine.
+- The Crown of veins (ADR 0087): more than 2 seeds to step 16,000 on WebGPU and 1 on WebGL2; the scene on SwiftShader
+  beyond 30 steps; other values of the levers and of the drift in the scene.
 - The time of the stream over 8 neighbours; the 8 edges on SwiftShader beside the GPU tests of CI.
 
 - The time of `test` and `win` with the rules apart from the step; the time of a step with the rules in any scene but

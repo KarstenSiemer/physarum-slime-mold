@@ -357,30 +357,31 @@ export const globalSpec = {
     ref: 'Tero et al. 2010, Science 327: 439, Fig. 3 and S1',
   },
   // The base conductance of a tube (ADR 0086): a lever of the crown of the prototype (ADR 0083, ADR 0084), in every
-  // scene with the flow. The panel and Learn take it up with part E5b of the engine (research/front/ENGINE.md).
+  // scene with the flow. The panel shows it below Flow strength, and the scene Crown of veins has 0.002 (ADR 0087).
   flowBase: {
     label: 'Base conductance',
-    help: 'Only the extended model has this setting, and only with Flow in the tubes. The conductivity of a cell with a tube is its tube body times the sum of this value and its flow memory. The flow memory grows where much flux runs. So at a low value a tube with much flux conducts far better than the thin sheet beside it, and the flux gathers in fewer veins. At a high value the sheet carries more of the flux. 0.02 is the value of the model. With the rules of the growth front, the flow over 8 neighbours and twice the flux to the front, 0.002 gave a growing colony a few main veins that fork toward its rim.',
+    help: 'Only the extended model has this setting, and only with Flow in the tubes. The conductivity of a cell with a tube is its tube body times the sum of this value and its flow memory. The flow memory grows where much flux runs. So at a low value a tube with much flux conducts far better than the thin sheet beside it, and the flux gathers in fewer veins. At a high value the sheet carries more of the flux. 0.02 is the value of the model. With the rules of the growth front, the flow over 8 neighbours and twice the flux to the front, 0.002 gives a growing colony a few main veins that fork toward its rim, as in the scene Crown of veins.',
     min: 0.001,
     max: 0.1,
     step: 0.0001,
     log: true,
   },
   // The drift of the rules of stage 4 (ADR 0065, decision 6; ADR 0070): the weight of the pressure of the flow in the
-  // sensors of an agent. Its default and the form of the setting (one for all strains) are provisional: the panel and
-  // the scenes take it up with part E4 of the engine (research/front/ENGINE.md), and until then Learn shows no help.
+  // sensors of an agent. The panel shows it with the rules (ADR 0087). Whether each strain gets a weight of its own
+  // stays open (part E4 of the engine, research/front/ENGINE.md). The forms that the help names are those that the
+  // drift `take` gives in the neck (ADR 0076, finding 3; ADR 0087).
   drift: {
     label: 'Drift',
-    help: 'Only the extended model has this setting, and only with the rules of the growth front. Each sensor of an agent reads the pressure of the flow of its strain as a repellent, with this weight: the plasm streams down the pressure, to the growth front that takes the flux. The weight sets the form of the front: 0 gives a tree of tubes with small heads, 1.25 to 1.5 a tube with a crown, and 5 a fan that moves as a whole.',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. Each sensor of an agent reads the pressure of the flow of its strain as a repellent, with this weight: the plasm streams down the pressure, to the growth front that takes the flux. The weight sets the form of the front: 0 gives a tree of tubes, and 1.25 to 5 a sheet at the head of a tube, whose width the weight sets. No weight gave a crown that moves on ahead of its tube.',
     min: 0,
     max: 5,
     step: 0.05,
   },
   // The flux that the front of a strain takes, k (ADR 0086; ADR 0083): a lever of the crown of the prototype, only with
-  // the rules of stage 4. The panel and Learn take it up with part E5b of the engine (research/front/ENGINE.md).
+  // the rules of stage 4. The panel shows it with the rules, and the scene Crown of veins has 2 (ADR 0087).
   frontFlux: {
     label: 'Flux to the front',
-    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front of a strain takes this many times twice the Flow strength from the foods, and the tubes carry it to the front. The births that this flux pays stay as many: one birth costs this many times more flux. So the flux changes the tubes and the sheet toward the front, and not the number of the births that it pays. 1 is the value of the rules. With the base conductance 0.002 and the flow over 8 neighbours, 2 gave a growing colony a few main veins that fork toward its rim.',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front of a strain takes this many times twice the Flow strength from the foods, and the tubes carry it to the front. The births that this flux pays stay as many: one birth costs this many times more flux. So the flux changes the tubes and the sheet toward the front, and not the number of the births that it pays. 1 is the value of the rules. With the base conductance 0.002 and the flow over 8 neighbours, 2 gives a growing colony a few main veins that fork toward its rim, as in the scene Crown of veins.',
     min: 0.25,
     max: 16,
     step: 0.05,
@@ -490,13 +491,20 @@ export const flowHelp = {
   ref: 'Tero, Kobayashi and Nakagaki 2007, J. Theor. Biol. 244: 553; Tero et al. 2010, Science 327: 439; Marbach et al. 2023, eLife 12: e78100',
 } as const;
 
-/**
- * Help for the choice of the neighbours of the flow (`flowEdges`, ADR 0086). The panel and Learn take it up with part
- * E5b of the engine (research/front/ENGINE.md).
- */
+/** Help for the switch "Flow over 8 neighbours" (`flowEdges`, ADR 0086) below Flow strength (ADR 0087). */
 export const flowEdgesHelp = {
   label: 'Flow over 8 neighbours',
-  help: 'Only the extended model has this setting, and only with Flow in the tubes. With 4 neighbours the flux runs from each cell to the 4 cells that share a side with it. With 8 it also runs to the 4 cells at its corners, but not past the corner of a wall. With 4, a broad flow reads up to 1.41 times more flux along a diagonal of the grid than along an axis, and a thin vein on a diagonal is a staircase, so the veins prefer the directions of the grid. With 8, a broad flow and a thin vein read their flux the same in every direction to within 8 %, and the veins follow the flow, not the grid. Every scene has 4.',
+  help: 'Only the extended model has this setting, and only with Flow in the tubes. With 4 neighbours the flux runs from each cell to the 4 cells that share a side with it. With 8 it also runs to the 4 cells at its corners, but not past the corner of a wall. With 4, a broad flow reads up to 1.41 times more flux along a diagonal of the grid than along an axis, and a thin vein on a diagonal is a staircase, so the veins prefer the directions of the grid. With 8, a broad flow and a thin vein read their flux the same in every direction to within 8 %, and the veins follow the flow, not the grid. Every scene but the Crown of veins has 4.',
+} as const;
+
+/**
+ * Help for the switch "Rules of the growth front" (`territory`, ADR 0068 to ADR 0075) below the switch of the flow over
+ * 8 neighbours (ADR 0087): the rules of stage 4 of docs/model.md, 6.10, 6.11, 8.7 and 9.1.
+ */
+export const territoryHelp = {
+  label: 'Rules of the growth front',
+  help: 'Only the extended model has these rules, and only with Growth and shrinkage and Flow in the tubes. They follow the growth front of the slime mold. Each strain has a ground of its own: its agents move, come back to life and are born only there. The agents at the edge push the ground open: a cell beside it joins it with a chance of about 0.4 % per step for each agent of the strain next to the cell, so the front moves faster where more plasm lies at it. The agents at the edge with free ground beside them take flux from the foods, 40 times less on slime than near ground without slime. The tubes carry this flux to the front, and it pays births there. The plasm streams down the pressure of the flow, to the front (Drift). A switch of the rules restarts the scene.',
+  ref: 'Kuroda et al. 2015, J. Exp. Biol. 218: 3729',
 } as const;
 
 /** Help for the switch "Draw the tubes by their flow" below Flow in the tubes (ADR 0034); Learn → Controls lists it. */
@@ -590,7 +598,8 @@ export interface Settings extends Record<GlobalKey, number> {
   /**
    * The rules of stage 4 (ADR 0065, ADR 0067, ADR 0068), named for their first rule: each strain has a territory,
    * agents move, come to life and are born only onto the territory of their strain, and the agents push it open. They
-   * run only in the extended model with growth and the flow (engine/territory.ts territoryOn()). No scene has them yet.
+   * run only in the extended model with growth and the flow (engine/territory.ts territoryOn()). The scene Crown of
+   * veins has them (ADR 0087).
    */
   territory: boolean;
   style: Style;

@@ -42,7 +42,7 @@ project read.
 | 3   | Tubes with much flow get thicker                 | Partly                                  | Maze, Tokyo rail network              |
 | 4   | Time scales of a tube                            | Fitted                                  | every scene with the flow             |
 | 5   | Shortest path through a maze                     | Partly                                  | Maze, Corn maze                       |
-| 6   | Growth front and its speed                       | Partly: about ten times too fast        | Tokyo rail network, Foraging maze     |
+| 6   | Growth front and its speed                       | Partly: about ten times too fast        | Tokyo, Foraging maze, Crown of veins  |
 | 7   | Speed of the flow                                | Fitted with the time scale              | Tokyo rail network                    |
 | 8   | Network formation and coarsening                 | Partly: coverage, degree, β; not widths | Coarsening network, Transport network |
 | 9   | Shortest path and Steiner tree between foods     | Matches the model only                  | Shortest path, Steiner tree           |
@@ -60,7 +60,7 @@ project read.
 | 21  | Growth toward the cathode of a current           | Partly: the direction only              | Electrotaxis                          |
 | 22  | A network around repellents: a Voronoi diagram   | Matches the model only                  | Voronoi diagram                       |
 | 23  | Avoidance of its own slime                       | Not modelled: the slime changes no run  | none                                  |
-| 24  | Veins form a tree that follows Murray's law      | Not measured; no tree toward a front    | none                                  |
+| 24  | Veins form a tree that follows Murray's law      | Not measured                            | Crown of veins                        |
 
 Behaviours of the model without a counterpart in the organism: Turing spots and stripes (chemorepulsion) match Jones'
 figures (ADR 0027, Measurements: stripes 15.7 cells against 16.2, 19.7 spots against 20). Several strains with a table
@@ -263,7 +263,12 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   prototype of stage 4 grows such veins in a sheet at the head of a tube, but no crown: the rim of the sheet is one
   smooth arc that does not split, and the sheet does not move on. The crown research is paused since 2026-11-21
   ([ADR 0085](adr/0085-the-crown-so-far.md)). The front stamps hold the step at which the front reached each cell.
-  Nobody measured with them how long after the front a tube between two foods shows, or how a front splits.
+  Nobody measured with them how long after the front a tube between two foods shows, or how a front splits. The
+  scene Crown of veins runs the rules of that prototype with the levers of its best form in the app
+  ([ADR 0087](adr/0087-the-crown-as-a-scene.md)): its colony leaves a neck of 14 cells and grows as one half disc
+  whose main veins fork toward the rim, as the prototype's does in numbers (the live agents, the reach, the sheet
+  behind the rim and the veins on arcs around the mouth, to step 16,000), and it has the same limits: one smooth rim,
+  no lobes, no crown that moves on.
 
 ### 7. Speed of the flow
 
@@ -587,8 +592,9 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   [slime-mazes-and-the-front.md](knowledge-base/slime-mazes-and-the-front.md), "The front" and "Models of a front".
 - **Model**: the flow (ADR 0029). Flux runs only between food sites with a role (`docs/model.md`, 8.2 and 8.4). A
   tube that leads only to a growing front carries no flux, so no tree forms toward a front. Between foods the tubes
-  do branch. The thickness of a tube is a number of agents, and the picture draws a radius from the flow memory (row
-  3; ADR 0034). The rule has f(Q) = Q^1.8 / (1 + Q^1.8). By the relation n = 4/μ of Akita et al. (Eq. 7), a rule
+  do branch. With the rules of the growth front of stage 4 the front is a sink of the flow, and in the scene Crown of
+  veins main veins fork toward the rim of one sheet (row 6; ADR 0087). The thickness of a tube is a number of agents,
+  and the picture draws a radius from the flow memory (row 3; ADR 0034). The rule has f(Q) = Q^1.8 / (1 + Q^1.8). By the relation n = 4/μ of Akita et al. (Eq. 7), a rule
   f = Q^μ gives Murray's law at μ = 4/3; an exponent of 1.8 gives n = 2.2 where the flux is small, and no fixed n
   where f saturates. This is an inference of this project, not a measurement.
 - **Measured**: nothing. Nobody measured an exponent at the branchings of the app.

@@ -527,11 +527,14 @@ function jonesChanges(s: Settings, next: Settings): string {
     !s.collisions && 'agents that share a cell',
     // The Jones model never has the flow (ADR 0029); its strength then means nothing, so the list of changes skips it.
     s.flow && 'the flow in the tubes',
+    // Nor the rules of the growth front (ADR 0068), which the panel switches since ADR 0087.
+    s.territory && 'the rules of the growth front',
   ].filter((v): v is string => typeof v === 'string');
   const changed: string[] = [];
   for (const k of Object.keys(globalSpec) as (keyof typeof globalSpec)[]) {
-    // The strength and the base conductance of the flow (ADR 0086) mean nothing without the flow, as said above.
-    if (k === 'flowStrength' || k === 'flowBase') continue;
+    // The strength and the base conductance of the flow (ADR 0086) mean nothing without the flow, and the drift and
+    // the flux to the front nothing without the rules (ADR 0070, ADR 0086), as said above.
+    if (k === 'flowStrength' || k === 'flowBase' || k === 'drift' || k === 'frontFlux') continue;
     const why = k === 'scentDecay' ? ' (the Decay of strain A)' : '';
     if (s[k] !== next[k]) changed.push(`${globalSpec[k].label} from ${fmt(s[k])} to ${fmt(next[k])}${why}`);
   }

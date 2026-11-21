@@ -119,11 +119,12 @@ describe('the record of the look of the electrodes (ADR 0058)', () => {
   // One grid when ADR 0058 was built, with 26 scenes and 2,916 cases. Then the slime counted 11 B more per cell
   // (ADR 0057, ADR 0060), and two other grids changed in its place. Since ADR 0064 the list holds 28 scenes: the new
   // start scene adds six cases. Since ADR 0066 it holds 30 scenes: the two scenes of Reid et al. 2012 add
-  // 216 cases, and no grid changes in them.
-  it('changes eight grids of 3,348 cases with the 4 B per cell of the outlines of the poles', async () => {
+  // 216 cases, and no grid changes in them. Since ADR 0087 it holds 31: the Crown of veins adds 108 cases, and no grid
+  // changes in them.
+  it('changes eight grids of 3,456 cases with the 4 B per cell of the outlines of the poles', async () => {
     const lines = await fitReport();
     const text = [ADR, './README.md'].map((file) => readFileSync(here(file), 'utf8').replace(/\s+/g, ' '));
-    expect(lines[0]).toBe('3348 cases: 8 with another grid');
+    expect(lines[0]).toBe('3456 cases: 8 with another grid');
     // The start scene of ADR 0064 loses its lattice on WebGL2 with a memory hint of 0.5 GB, on all six canvases.
     const start = lines.slice(1).filter((line) => line.startsWith('three-networks on WebGL2, a memory hint of 0.5 GB'));
     expect(start).toHaveLength(6);
@@ -134,11 +135,14 @@ describe('the record of the look of the electrodes (ADR 0058)', () => {
       'maze on WebGL2, a memory hint of 0.5 GB, a canvas of 1000 × 1000: 512 before, 256 now',
     ]);
     for (const t of text) {
-      expect(t).toContain('3,348 cases');
       expect(t).toContain('2,916 cases');
       expect(t).toContain('from 512 to 256');
       expect(t).toContain('from 1024 to 768');
     }
+    // README.md holds the count of now. The ADR keeps the count of its last sentence, of ADR 0066: a new scene goes into
+    // its own ADR (ADR 0040), and ADR 0087 holds the count with the Crown of veins.
+    expect(text[0]).toContain('3,348 cases');
+    expect(text[1]).toContain('3,456 cases');
     // README.md prints the lines of the command.
     for (const line of lines) expect(text[1]).toContain(line);
   }, 120_000);

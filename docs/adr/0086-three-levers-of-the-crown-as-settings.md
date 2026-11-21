@@ -11,6 +11,8 @@
   [ADR 0083](0083-more-flux-for-the-veins-of-the-growing-colony.md) (the base 0.002 and k),
   [ADR 0084](0084-a-front-that-splits-into-crowns-that-move-on.md) (the case `none`) and
   [ADR 0070](0070-the-flow-takes-the-sinks-in-the-engine.md) (S = 2 · I0).
+- Extended by [ADR 0087](0087-the-crown-as-a-scene.md) (2026-11-21): the scene Crown of veins sets the three levers,
+  and the panel and Learn show them.
 - In short: [`docs/model.md`](../model.md), sections 8.1, 8.3, 8.4, 8.7 and 9.1, has the rules;
   [`research/front/ENGINE.md`](../../research/front/ENGINE.md) has the part E5a;
   [`research/flow/README.md`](../../research/flow/README.md), part 33, has the checks and their commands. The records
