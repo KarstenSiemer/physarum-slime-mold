@@ -578,17 +578,17 @@ of attraction (Fogleman 2020) are an extension for the look, not biology; row 20
   stay empty until the mark has faded (row 2). Agents still walk onto such ground.
 - **The scenes of Reid et al. 2012** (ADR 0066, ADR 0088), under Experiments, run the rules of the growth front. The
   Y-maze with slime has the layout of ADR 0056 and slime on its left arm, and its colony starts on the base without
-  food, as the plasmodium of the paper; Y-maze, both slimed and Y-maze without slime are the two controls of the
-  paper. The dish Slime everywhere is 8.6 cm wide and coated with slime; its colony starts 1 cm inside the rim, and a
-  well of glucose of 5 mm lies opposite. Measured (ADR 0088; WebGPU with 40 seeds per case of the Y-maze, WebGL2 with
-  40, 10 and 10; the dish with 10 per case on each backend): with slime on one arm the colony reaches the food of the
-  blank arm first in 40 of 40 runs on each backend (the organism: 39 of 40), after a median of 3,358 steps, 1.9 h of
-  model time. With slime on both arms it shows no preference (20 : 20; 5 : 5 on WebGL2), as the organism, and it
-  reaches the first food 1.06 times as late as without slime (p 0.00007; the paper gives no time). Without slime
-  15 : 25 (p 0.15) and 5 : 5. In the dish the colony reaches the glucose after 11,453 and 11,518 steps with the slime
-  and 11,418 and 11,387 without it (1.00 and 1.01 times; p 0.88 and 0.41), as the plasmodia of the paper (n = 13 and
-  16). The prototype of stage 4 gives the same numbers (ADR 0074). Not measured: the positions of the start and of
-  the well in the dish of the paper, which this app chose; the trap of the paper; old slime, which the paper used.
+  food, as the plasmodium of the paper; Y-maze, both slimed and Y-maze without slime are the two controls of the paper.
+  The dish Slime everywhere is 8.6 cm wide and coated with slime; its colony starts 1 cm inside the rim, and a well of
+  glucose of 5 mm lies opposite. Measured (ADR 0088; WebGPU with 40 seeds per case of the Y-maze, WebGL2 with 40, 10 and
+  10; the dish with 10 per case on each backend): with slime on one arm the colony reaches the food of the blank arm
+  first in 40 of 40 runs on each backend (the organism: 39 of 40), after a median of 3,358 steps, 1.9 h of model time.
+  With slime on both arms it shows no preference (20 : 20; 5 : 5 on WebGL2), as the organism, and it reaches the first
+  food 1.06 times as late as without slime (p 0.00007; the paper gives no time). Without slime 66 : 74 over 140 runs (p
+  0.55) and 5 : 5. In the dish the colony reaches the glucose after 11,453 and 11,518 steps with the slime and 11,418
+  and 11,387 without it (1.00 and 1.01 times; p 0.88 and 0.41), as the plasmodia of the paper (n = 13 and 16). The
+  prototype of stage 4 gives the same numbers (ADR 0074). Not measured: the positions of the start and of the well in
+  the dish of the paper, which this app chose; the trap of the paper; old slime, which the paper used.
 
 ### 24. Veins form a tree that follows Murray's law
 

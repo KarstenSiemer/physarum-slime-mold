@@ -4,6 +4,8 @@
 #   bash research/front/e4.sh backends   both backends, seeds 1 to 6, to step 1,500: the four scenes
 #   bash research/front/e4.sh y          WebGPU, seeds 1 to 40, the Y-maze with slime on one arm, on both and on neither
 #   bash research/front/e4.sh ygl        WebGL2, seeds 1 to 40 with slime on one arm, 1 to 10 on both and on neither
+#   bash research/front/e4.sh ymore      WebGPU, seeds 41 to 140 of the Y-maze without slime: is the 15 : 25 of the
+#                                        seeds 1 to 40 a lean? (the coordinator; 51 : 49, so no)
 #   bash research/front/e4.sh dish       both backends, seeds 1 to 10: Slime everywhere, the same dish without slime,
 #                                        and the open dish of the prototype
 #   bash research/front/e4.sh reach      WebGPU, seeds 1 to 10 of each case of the Y-maze and of the open dish: the
@@ -29,6 +31,9 @@ case "${1:-}" in
   ygl)
     VITE_CASES=one VITE_KINDS=webgl2 VITE_SEEDS=1-40 VITE_OUT=e4/y $RUN
     VITE_CASES=both,none VITE_KINDS=webgl2 VITE_SEEDS=1-10 VITE_OUT=e4/y $RUN
+    ;;
+  ymore)
+    VITE_CASES=none VITE_KINDS=webgpu VITE_SEEDS=41-140 VITE_OUT=e4/y-more $RUN
     ;;
   dish)
     VITE_CASES=dish,dish-blank,open VITE_KINDS=webgpu,webgl2 VITE_SEEDS=1-10 VITE_OUT=e4/dish $RUN
@@ -63,7 +68,7 @@ case "${1:-}" in
     node --import ./research/flow/register.mjs research/front/e4.ts out="$OUT"
     ;;
   *)
-    echo "usage: bash research/front/e4.sh backends|y|ygl|dish|reach|pics|montage|times|table" >&2
+    echo "usage: bash research/front/e4.sh backends|y|ygl|ymore|dish|reach|pics|montage|times|table" >&2
     exit 1
     ;;
 esac

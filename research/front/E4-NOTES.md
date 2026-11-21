@@ -41,9 +41,10 @@ three cases of the Y-maze are equal to step 500: the colony is still on the base
 | No slime          | 15 : 25 (p 0.15), 3,426  | 15 : 24, 1 split (p 0.20), 3,438.5 | the control      |
 | Both against none | 1.06 times (p 0.000069)  | 1.05 times (p 0.0000072)           | not given        |
 
-The layout is a mirror image about its middle column (checked: no open cell, arm cell or food cell off the mirror),
-so the lean of 15 : 25 without slime is not the layout's. The territory of the blank arm over that of the arm with
-slime, the least of the 40 runs: 1.07 at step 1,500, 1.47 at 1,800, 1.54 at 2,000 (for the e2e test).
+The layout is a mirror image about its middle column (checked: no open cell, arm cell or food cell off the mirror), so a
+lean without slime would not be the layout's. The seeds 41 to 140 (the coordinator, `e4.sh ymore`) give 51 : 49, and all
+140 seeds 66 : 74 (p 0.55): no lean. The territory of the blank arm over that of the arm with slime, the least of the 40
+runs: 1.07 at step 1,500, 1.47 at 1,800, 1.54 at 2,000 (for the e2e test).
 
 The campaign on WebGPU stepped the scenes with `Engine.frame()`, which draws a picture in every step. On WebGL2 that
 took about 100 s a run, so the test steps with `Sim.run()` now, as the digests do (`VITE_FRAME=1` keeps the old way).
@@ -110,4 +111,4 @@ veins, which runs the rules with the defaults of the two settings, keeps its byt
   copy end at the reach already); it now cuts the paths at the edge.
 - `npm run test:gpu` 1,448 tests and `RESEARCH=full npm test` 1,009 tests pass. The grid fit of ADR 0058 holds 33
   scenes and 3,672 cases now (`research/electrode/research.test.ts`); the same 8 grids change. The archive of the logs
-  holds 926 files.
+  holds 927 files.

@@ -2899,12 +2899,12 @@ node --import ./research/flow/register.mjs research/front/dish.ts table=research
 Result: the four scenes give what the prototype and the paper give, on both backends (ADR 0088 has the tables). With
 slime on one arm the colony takes the blank arm 40 : 0 on each backend (Reid: 39 of 40), with slime on both arms it
 shows no preference (20 : 20) and reaches the first food 1.06 times as late as without slime (the prototype 1.05),
-without slime 15 : 25 (p 0.15); the dish takes as long with slime as without (1.00 and 1.01 times), and the open dish
-of the prototype is half covered after 5,600 to 5,800 steps (the prototype 5,882.5). The colony's own slime lies on
-every cell within one step of each sink, so the least reach with a meaning is 2. A step of the Y-maze takes about 0.5
-ms on WebGPU and 1.5 ms on WebGL2 with the rules, against 0.2 and 1.2 ms without them. SwiftShader runs the Y-maze at
-2.15 steps per second in the app and at 16.2 without the picture, in the image of CI on 4 cores; the e2e test passes
-there in 2.6 minutes. The records are in `logs/engine/reid-0088/`:
+without slime 66 : 74 over 140 runs (p 0.55); the dish takes as long with slime as without (1.00 and 1.01 times), and
+the open dish of the prototype is half covered after 5,600 to 5,800 steps (the prototype 5,882.5). The colony's own
+slime lies on every cell within one step of each sink, so the least reach with a meaning is 2. A step of the Y-maze
+takes about 0.5 ms on WebGPU and 1.5 ms on WebGL2 with the rules, against 0.2 and 1.2 ms without them. SwiftShader runs
+the Y-maze at 2.15 steps per second in the app and at 16.2 without the picture, in the image of CI on 4 cores; the e2e
+test passes there in 2.6 minutes. The records are in `logs/engine/reid-0088/`:
 
 | Record                | Runs                                                                                             |
 | --------------------- | ------------------------------------------------------------------------------------------------ |
@@ -2924,7 +2924,7 @@ there in 2.6 minutes. The records are in `logs/engine/reid-0088/`:
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 926 files, 21.2 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 927 files, 22.6 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.

@@ -1201,7 +1201,7 @@ SCENES.push(
     watch:
       'The colony starts on the base, without food, and grows into both arms at once. It reaches the first food after about 3,400 steps, close to 2 hours, and the other food about 170 steps later.',
     about:
-      'The control of Reid and colleagues: the same Y-maze without slime. Here the colony has nothing to choose by: in 40 runs it reached the left food first 15 times and the right one 25 times, which a binomial test does not tell from chance (p 0.15).',
+      'The control of Reid and colleagues: the same Y-maze without slime. Here the colony has nothing to choose by: in 140 runs it reached the left food first 66 times and the right one 74 times, which a binomial test does not tell from chance (p 0.55).',
     strainRoles: ['Jones’ foraging agent, starts on the base without food'],
     why: 'The settings of the Y-maze with slime, on the same 129 × 90 cells at 0.54 mm per cell: Jones’ foraging agent with growth and shrinkage, Flow in the tubes with a strength of 8, and the rules of the growth front with a drift of 1.5. No cell has slime.',
     settings: yMazeSettings,

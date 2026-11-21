@@ -122,10 +122,11 @@ everywhere 0.97 times as fast as without (5,708.5 against 5,882.5).
   WebGL2 10 runs each do not resolve 6 % (1.01 times, p 0.94). The dish takes as long with slime as without on each
   backend, and the open dish is half covered after 5,600 to 5,800 steps, as the prototype's 5,882.5 (Mann-Whitney p
   0.36 and 0.15 against the prototype; ADR 0073 had about 5,500 with the drift `all`).
-- **Without slime** (the open point of ADR 0073): 15 : 25 on WebGPU (binomial p 0.15) and 5 : 5 on WebGL2; together
-  20 : 30 (p 0.20). The prototype with the same rules gave 15 : 24 and a split. The layout is a mirror image about its
-  middle column (no open cell, cell of an arm or food cell lies off the mirror), so a lean is not the layout's; none
-  is shown.
+- **Without slime** (the open point of ADR 0073): 15 : 25 on WebGPU over the seeds 1 to 40 (binomial p 0.15) and
+  5 : 5 on WebGL2. The prototype with the same rules gave 15 : 24 and a split. Together these looked like a lean to the
+  right, so the coordinator ran the seeds 41 to 140 on WebGPU (`bash research/front/e4.sh ymore`): 51 : 49. Over all
+  140 seeds the engine gives 66 : 74 (binomial p 0.55): no lean. The layout is a mirror image about its middle column
+  (no open cell, cell of an arm or food cell lies off the mirror).
 - **The first food against the prototype**: WebGPU 1.02 times with slime on one arm (p 0.082), 1.00 without slime (p
   0.95), 1.01 with slime on both arms (p 0.88). Between the backends: 0.98 (p 0.34), 0.98 (p 0.55), 1.03 (p 0.073).
 - **The other food**, with slime on one arm, holds plasm within 2,000 steps after the first in 10 of 40 runs on each
