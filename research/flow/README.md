@@ -2825,15 +2825,20 @@ bash research/front/e5b.sh montage
 `node --import ./research/flow/register.mjs research/front/e5b-walls.ts` checks the walls of the scene against
 `neck()` of the prototype.
 
-**The time of a step** of the scene, both backends, in turns (`research/flow/engine/turns.sh`):
+**The time of a step** of the scene and of the Corn maze from step 3,000, and of the scene from step 15,000, both
+backends, 4 rounds in turns (`research/flow/engine/turns.sh`; about 30 minutes):
 
-TIMES
+```bash
+bash research/front/e5b.sh times
+```
 
 Result: 62 of 62 runs are equal. Both backends grow alike to step 1,500 (the means of 6 seeds differ by 1 % in the
 live agents, the reach and the territory, by 8 % in the sinks), the colony leaves the neck at step 1,150 to 1,450,
 and to step 16,000 the engine gives the prototype's numbers: 7,207 to 7,471 agents against 7,235 and 7,328, a reach of
 209 to 214 cells against 209 and 210, one head, the same sheet behind the rim and the same veins on the arcs (ADR
-0087 has the tables). TIMES_RESULT The records are in `logs/engine/crown-scene-0087/`:
+0087 has the tables). A step of the scene takes 2.85 ms on WebGPU and 6.18 ms on WebGL2 from step 3,000 in the one
+quiet round, against 1.42 and 1.87 ms of the Corn maze; in the other rounds the machine ran both scenes 2 to 3 times
+slower. The records are in `logs/engine/crown-scene-0087/`:
 
 | Record                | Runs                                                                                   |
 | --------------------- | -------------------------------------------------------------------------------------- |
@@ -2849,7 +2854,7 @@ and to step 16,000 the engine gives the prototype's numbers: 7,207 to 7,471 agen
 
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 860 files, 16.6 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 879 files, 16.7 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2896,6 +2901,7 @@ asks for the new digest.
 | `logs/engine/tube-0072/`                             | the runs of part 31 (ADR 0072): the start scene on both backends, the spikes, the CPU checks, the prototype, digests, wrong rules                                                                                               |
 | `logs/engine/take-0075/`                             | the runs of part 32 (ADR 0075): the digests of every scene, the start scene with `take` on both backends, the wrong rules                                                                                                       |
 | `logs/engine/levers-0086/`                           | the runs of part 33 (ADR 0086): the digests of every scene, the wrong rules LV1 to LV35, the time of a step of the Maze                                                                                                         | 2026-11-21, M3 Pro                                    |
+| `logs/engine/crown-scene-0087/`                      | the runs of part 34 (ADR 0087): the digests of every scene, the Crown of veins on both backends and against the prototype, SwiftShader, the time of a step                                                                      | 2026-11-21, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on

@@ -159,7 +159,21 @@ gone, and new ones lie at the new rim; one smooth rim. The two looks differ in t
 
 ## The time of a step
 
-TIME
+`bench.gpu.test.ts` in turns (`bash research/front/e5b.sh times`), 4 rounds, each the median of 21 samples of 50
+steps, on an M3 Pro, with the Corn maze as the reference: a box of 480 × 320 cells with the flow over 4 neighbours and
+without the rules. Round 1 ran at a load of 3.7:
+
+| Steps 3,000 to 4,050, round 1 | WebGPU  | WebGL2  |
+| ----------------------------- | ------- | ------- |
+| Crown of veins (1,585 agents) | 2.85 ms | 6.18 ms |
+| Corn maze (9,719 and 11,942)  | 1.42 ms | 1.87 ms |
+
+From round 2 on the machine ran both scenes 2 to 3 times slower (the Corn maze 3.9 to 4.1 ms on WebGPU in rounds 3
+and 4, and 6.0 to 6.2 ms on WebGL2 in rounds 2 to 4), with no other Vitest process and a load of 2 to 7. Those rounds
+do not give the time of the scene, and the coordinator's budget left no time to run them again. In that state a step of
+the scene from step 15,000 on, with 7,341 and 7,496 agents, took 6.2 to 7.0 ms on WebGPU and 13.0 to 14.8 ms on
+WebGL2, as from step 3,000 (5.9 to 6.8 and 13.3 to 13.9 ms): the time of a step hardly grows with the colony. The
+rules of stage 4 cost most on WebGL2, as in the start scene (ADR 0075).
 
 ## Checks
 
@@ -173,7 +187,9 @@ TIME
 - **The e2e test** (decision 9) passes in the image of CI in 1.3 minutes; the other tests of the flow there take 0.3
   to 1.0 minutes. The pictures of the app: `tests/pictures/crown.spec.ts`.
 - **No rule changes**, so no wrong rule is new; `mutate.ts check` finds the code of all 991 wrong rules.
-- VERIFY
+- `npm run lint`, `npm run check`, `RESEARCH=full npm test` (1,003 tests), `npm run test:gpu` (1,442 tests on both
+  backends) and the 85 e2e tests pass on the M3 Pro; the e2e tests ran on port 4391, as `npm run verify` would start
+  its server on port 4173, which this machine keeps free.
 
 ## Not measured
 

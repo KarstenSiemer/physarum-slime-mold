@@ -330,10 +330,17 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   tree, 1.25 to 5 a sheet (50 of 50 runs). Jones' births refill the ground behind the front, and its thin sheet holds a
   full tube body. Jones' births only near the edge of the territory (`jones=edge`) leave tubes on bare ground, but the
   veins near the head run along the rim. The owner chooses (below).
+- **The crown as a scene** (ADR 0087, 2026-11-21, part E5b; the owner's wish of that day): the scene Crown of veins
+  under Experiments runs the best crown of the prototype, the case `none` of ADR 0084, word for word, in a box of
+  520 × 340 cells with the neck of the prototype, cell for cell. On both backends it grows as the prototype grew, to
+  step 16,000: the same agents, reach, sheet behind the rim and veins toward the rim, one smooth rim. The panel shows
+  the rules of the growth front, the drift, the flow over 8 neighbours, the base conductance and the flux to the front
+  where each acts, and Learn lists them; the help of the drift names a tree and a sheet. Part 4 has its first scene.
 - **Next: part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the state):
-  the scenes: the drift of each scene and whether each strain gets its own, as a setting of the
-  panel, the digests of every scene and the measures of the 13 scenes with growth and the flow, and a test where a
-  second strain grows on the slime of the first. Then the picture: the skirt goes, or it is drawn from the plasm of the
+  the other scenes: the drift of each scene and whether each strain gets its own, the digests of every scene and the
+  measures of the 13 scenes with growth and the flow, the e2e tests of Reid et al., and a test where a second strain
+  grows on the slime of the first. The Crown of veins (ADR 0087) is the first scene with the rules, and the panel
+  offers the rules and the drift. Then the picture: the skirt goes, or it is drawn from the plasm of the
   crown.
 
 Open, for the owner:
@@ -346,7 +353,8 @@ Open, for the owner:
   tree (0) and a sheet (1.25 to 5), no crown and no fan (10 seeds each, step 8,000, in a channel that opens onto open
   ground). The numbers for each choice, at drift 1.5:
   - Keep the rules: a sheet with a band of thick plasm at the rim and a thin sheet behind (agents on 15 % of its cells,
-    a tube body on about nine of ten), 2 veins; the help text of the drift then names a tree and a sheet.
+    a tube body on about nine of ten), 2 veins; the help text of the drift then names a tree and a sheet. Since ADR
+    0087, which shows the drift in the panel, its help names them: the forms that the rules give now.
   - `jones=edge`, the agent's proposal as a step (Jones' births only within 6 cells of the edge of the territory): a band
     at the rim and tubes on bare ground (agents on 4 % of the old ground), the veins near the head along the rim (|cos|
     0.24), no crown. The Y-maze keeps its choices; the dish is 1.09 times slower and as fast on slime everywhere; a full

@@ -6,6 +6,8 @@
 - Date: 2026-11-21
 - Extends [ADR 0084](0084-a-front-that-splits-into-crowns-that-move-on.md) (part E2n, the best form) and
   [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (part E2f, the start of the crown research).
+- Extended by [ADR 0087](0087-the-crown-as-a-scene.md) (2026-11-21): the best form as the scene Crown of veins, with
+  its levers in the panel.
 - The story of all parts is on one page:
   [`research/front/the-crown-at-the-head.md`](../../research/front/the-crown-at-the-head.md). The raw records of each
   part are in the archive, in the folder that its ADR names.
