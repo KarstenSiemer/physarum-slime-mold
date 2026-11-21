@@ -47,8 +47,9 @@
   const specs: { label: string; help: string; ref?: string }[] = [
     ...Object.values(strainSpec),
     // The panel offers no Drift yet: the rules of stage 4 come to the panel with part E4 of their engine (ADR 0070).
+    // Nor the base conductance and the flux to the front, which part E5b brings to the panel (ADR 0086).
     ...Object.entries(globalSpec)
-      .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength' && k !== 'drift')
+      .filter(([k]) => !GROWTH_KEYS.has(k) && !['flowStrength', 'drift', 'flowBase', 'frontFlux'].includes(k))
       .map(([, v]) => v),
     // Light strength under the name that the Jones model gives it (ADR 0044).
     repellentSpec,

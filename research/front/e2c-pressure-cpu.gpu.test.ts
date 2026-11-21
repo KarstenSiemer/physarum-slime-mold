@@ -74,7 +74,7 @@ it('computes the pressure of each strain as the CPU copy', { timeout: 3_600_000 
           const memory = await sim.readFlow(s);
           const rates = await sim.readSinks(s);
           const got = await sim.readPressure(s);
-          const u = new Float32Array(packTerritory(packFlow(s0, sites, undefined, s)));
+          const u = new Float32Array(packTerritory(packFlow(s0, sites, undefined, s), s0));
           const b = before[s]!;
           const ports = flowPorts(grid, u, sites.cells, {
             memory: b.memory,

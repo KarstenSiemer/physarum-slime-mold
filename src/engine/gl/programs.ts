@@ -246,6 +246,13 @@ export interface Programs {
    * use: no scene has them yet.
    */
   sinks: () => SinkPrograms;
+  /**
+   * PASS 0 and 1 of flow.frag over 8 neighbours (EIGHT, ADR 0086), with the sinks of the rules of stage 4 (`sinks`,
+   * TERRITORY) or without them, compiled at their first use: no scene has 8 neighbours yet.
+   */
+  flowEight: (sinks: boolean) => { update: Program; pressure: Program };
+  /** PASS 2 of tubes.frag over 8 neighbours (EIGHT, ADR 0086), compiled at its first use. */
+  tubeStreamEight: () => Program;
   diffuse: Program;
   /** The diffusion pass with covered food (COVERED in diffuse.frag, ADR 0022), compiled at its first use. */
   covered: () => Program;
@@ -413,6 +420,8 @@ export function compile(gl: GL): Programs {
   let growthFlowing: Program | undefined;
   let territory: TerritoryPrograms | undefined;
   let sinks: SinkPrograms | undefined;
+  const flowEight = new Map<boolean, { update: Program; pressure: Program }>();
+  let tubeStreamEight: Program | undefined;
   const flowing = new Map<string, Program>();
   let trailDown: Program | undefined;
   const growthPass = (pass: number) => sim(`#define PASS ${String(pass)}\n${growthGlsl}${growthFrag}`);
@@ -500,6 +509,19 @@ export function compile(gl: GL): Programs {
         pressure: sim('#define PASS 1\n#define TERRITORY 1\n' + flowFrag),
         drift: sim('#define PASS 5\n#define TERRITORY 1\n' + flowFrag),
       }),
+    flowEight: (withSinks) => {
+      let p = flowEight.get(withSinks);
+      if (!p) {
+        const defines = `#define EIGHT 1\n${withSinks ? '#define TERRITORY 1\n' : ''}`;
+        p = {
+          update: sim(`#define PASS 0\n${defines}${flowFrag}`),
+          pressure: sim(`#define PASS 1\n${defines}${flowFrag}`),
+        };
+        flowEight.set(withSinks, p);
+      }
+      return p;
+    },
+    tubeStreamEight: () => (tubeStreamEight ??= sim(`#define PASS 2\n#define EIGHT 1\n${TUBE_DEFINES}${tubesFrag}`)),
     diffuse: diffuseProgram(gl, diffuseFrag, false),
     covered: () => (covered ??= diffuseProgram(gl, diffuseFrag, true)),
     view: () => (viewDiffuse ??= diffuseProgram(gl, diffuseFrag, false, true)),

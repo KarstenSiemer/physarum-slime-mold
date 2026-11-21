@@ -38,7 +38,7 @@ describe('the territory (ADR 0068)', () => {
 
   it('writes the chances and the constants of the sinks after the sites of the uniform block of the flow', () => {
     const plain = new Float32Array(packFlow(on, NO_SITES).slice(0));
-    const f = new Float32Array(packTerritory(packFlow(on, NO_SITES)));
+    const f = new Float32Array(packTerritory(packFlow(on, NO_SITES), on));
     expect(f.length * 4).toBe(FLOW_BYTES);
     const at = FLOW_TERRITORY_SLOT * 4;
     expect(Array.from(f.subarray(at, at + 8))).toEqual(PUSH_CHANCES);

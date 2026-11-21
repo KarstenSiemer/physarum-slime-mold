@@ -129,6 +129,29 @@ describe('the rules of stage 4 in flow.wgsl', () => {
   });
 });
 
+// The flow over 8 neighbours (ADR 0086): without the name EIGHT the sources of the flow and of the picture of the tubes
+// are the ones of the code before, also with the rules of stage 4, and with it they add lines. In flow.wgsl it replaces
+// one line after a `//#else`: the sum of the edges of a cell in `pressure`.
+describe.each([
+  ['./flow.wgsl', 1],
+  ['./tubes.wgsl', 0],
+] as const)('the flow over 8 neighbours in %s', (path, replaced) => {
+  const source = read(path);
+
+  it('is in the source only with the name EIGHT, and adds lines to it', () => {
+    const skip = elseLines(source, 'EIGHT');
+    expect(skip.size).toBe(replaced);
+    for (const names of [[], ['TERRITORY']]) {
+      const [off, on] = [variant(source, names), variant(source, [...names, 'EIGHT'])];
+      for (const word of ['const AXIS', 'const DIAG']) {
+        expect(off.includes(word), `${word} without the 8 neighbours`).toBe(false);
+        expect(on.includes(word), word).toBe(true);
+      }
+      inOrder(off, on, skip);
+    }
+  });
+});
+
 describe('the random streams of the agent passes', () => {
   const streams = (path: string, pattern: RegExp) =>
     [...read(path).matchAll(pattern)].map((m) => [m[1] ?? '', Number(m[2])] as const);

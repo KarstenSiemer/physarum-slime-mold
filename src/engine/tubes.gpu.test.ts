@@ -1054,6 +1054,50 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     },
   );
 
+  // ADR 0086: over 8 neighbours the stream follows the 8 edges of the flow. A thin diagonal wall, whose cells touch
+  // only at their corners, bars every diagonal edge across it, and a wall along a column has two ends.
+  it.each(['box', 'wrap', 'dish'] as const)(
+    'gives the stream of the CPU reference over 8 neighbours on a %s grid with walls',
+    async (boundary) => {
+      const [w, h] = [40, 32];
+      const sim = await make(flowing({ boundary, flowEdges: 8, strains: [0, 1].map((i) => defaultStrain(i)) }), w, h);
+      sim.paint([
+        { kind: 'wall', from: [6, 4], to: [20, 18], radius: 0.5 },
+        { kind: 'wall', from: [30.5, 2], to: [30.5, 28], radius: 0.5 },
+      ]);
+      const grid: TubeGrid = { width: w, height: h, boundary, shape: await sim.readShape() };
+      const wall = (c: number) => (grid.shape[c * 4] ?? 0) >= 128;
+      // The thin wall: (10, 8) and (11, 9) are walls, the cells beside them at the corner, (11, 8) and (10, 9), are not.
+      expect([wall(8 * w + 10), wall(9 * w + 11), wall(8 * w + 11), wall(9 * w + 10)]).toEqual([
+        true,
+        true,
+        false,
+        false,
+      ]);
+      const [memories, pressures] = [
+        [0, 1].map(() => new Float32Array(w * h * 4)),
+        [0, 1].map(() => new Float32Array(w * h * 4)),
+      ];
+      for (let s = 0; s < 2; s++) {
+        const [memory, pressure] = [memories[s] ?? new Float32Array(0), pressures[s] ?? new Float32Array(0)];
+        for (let c = 0; c < w * h; c++) {
+          // A tube on most cells, none on a wall, and pressures that give speeds below 1 and above it.
+          const body = wall(c) || noise(c, 70 + s) < 0.2 ? 0 : noise(c, 80 + s);
+          const d = 10 ** (-4 * noise(c, 90 + s));
+          memory.set([d, body, body > 0 ? body * (0.02 + d) : 0, 0], c * 4);
+          for (let lane = 0; lane < 4; lane++) pressure[c * 4 + lane] = 25 * noise(c, 100 + 4 * s + lane) ** 2;
+        }
+        sim.writeFlow(memory, s);
+        sim.writePressure(pressure, s);
+      }
+      const want = tubeStream(grid, memories, pressures, true);
+      const got = await sim.readStream();
+      expect(worst(got, want, 1)).toBeLessThan(1e-4);
+      // The stream over 4 neighbours is another one: the test sees the diagonal edges.
+      expect(worst(tubeStream(grid, memories, pressures), want, 1)).toBeGreaterThan(0.05);
+    },
+  );
+
   it('gives a stream from high to low pressure, as fast as the flux over the root of the conductivity', async () => {
     const [w, h] = [24, 12];
     const sim = await make(flowing({ strains: [defaultStrain(0), defaultStrain(1)] }), w, h);

@@ -1,15 +1,19 @@
 // The births that the flux pays, the third part of the rules of stage 4 (ADR 0071; ADR 0065, decisions 1 and 7; ADR
-// 0067, decisions 1 and 6 to 8). While the front of a strain takes flux, the budget B of the strain grows by S / 20 in
-// a step. In a growth step, after Jones' births, each agent of the front with a free cell of its territory beside it
-// draws a key −ln(1 − u) / r, r the sink rate of its cell, and the ⌊B⌋ agents of the strain with the least keys claim
-// a child as a parent of Jones' rule does: the weighted order of Efraimidis and Spirakis that the prototype runs
+// 0067, decisions 1 and 6 to 8). While the front of a strain takes flux, the budget B of the strain grows by 2 · I0 / 20
+// in a step: S / 20 with the flux to the front k = 1, S / (20 k) with another k (ADR 0086). In a growth step, after
+// Jones' births, each agent of the front with a free cell of its territory beside it draws a key −ln(1 − u) / r, r the
+// sink rate of its cell, and the ⌊B⌋ agents of the strain with the least keys claim a child as a parent of Jones' rule
+// does: the weighted order of Efraimidis and Spirakis that the prototype runs
 // (`paidByRank()` in research/front/sim.ts). The passes are `test`, `rank` and `win` in shaders/growth.wgsl and PASS 2
 // and 5 of gl/glsl/growth.frag with gl/glsl/paid.vert; the budget is in the pass `state` of shaders/sinks.wgsl and in
 // PASS 3 of gl/glsl/sinks.frag. The CPU copy is in growth-reference.ts.
 import { FLOW_TAKE_SLOT } from './flow';
 import { SINK_STATE_LANES, SINKS } from './sinks';
 
-/** The flux that pays one birth (ADR 0065, decision 7): the budget grows by S / PAID_FLUX in a step. */
+/**
+ * The flux that pays one birth (ADR 0065, decision 7) with the flux to the front k = 1: the budget grows by S / PAID_FLUX
+ * in a step. With another k one birth costs k · PAID_FLUX (ADR 0086): the budget grows as with k = 1.
+ */
 export const PAID_FLUX = 20;
 
 /** The random stream of the key of an agent: one draw per agent and growth step (docs/model.md, 7.7). */
@@ -22,9 +26,11 @@ export const PAID_KEY = 12;
 export const NO_KEY = 3.4028234663852886e38;
 
 /**
- * The births by which the budget of a strain grows in a step while its front takes flux: S / PAID_FLUX with S =
- * SINKS.take · I0, the flow strength I0 as float32. The CPU computes it once and rounds it to float32, so both backends
- * and the CPU copy add the same number (ADR 0071).
+ * The births by which the budget of a strain grows in a step while its front takes flux: SINKS.take · I0 / PAID_FLUX,
+ * the flow strength I0 as float32, so S / PAID_FLUX with the flux to the front k = 1. The prototype pays a birth with
+ * `paid` = 20 k of flux while its front takes `norm` = 2 k times I0 (research/front/e2m.sh), so k does not change the
+ * number (ADR 0086). The CPU computes it once and rounds it to float32, so both backends and the CPU copy add the same
+ * number (ADR 0071).
  */
 export const paidIncrement = (flowStrength: number): number =>
   Math.fround((SINKS.take * Math.fround(flowStrength)) / PAID_FLUX);

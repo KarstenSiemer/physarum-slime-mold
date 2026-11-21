@@ -11,6 +11,11 @@
 #ifndef TERRITORY
 #define TERRITORY 0
 #endif
+// The flow over 8 neighbours (ADR 0086; `//#if EIGHT` in ../../shaders/flow.wgsl): programs.ts compiles the update and
+// the pressure with it, and gl/sim.ts uses them only then.
+#ifndef EIGHT
+#define EIGHT 0
+#endif
 layout(std140) uniform Flow {
   vec4 a; // I0, gamma, rate, recover
   vec4 b; // base, food conductivity, ghost conductivity, omega
@@ -104,6 +109,20 @@ float edge(float a, float b) {
   if (a <= 0.0 || b <= 0.0) return 0.0;
   return 2.0 * a * b / (a + b);
 }
+#if EIGHT && PASS < 2
+
+// The weights of an axis edge and of a diagonal edge over 8 neighbours (AXIS and DIAG in flow.wgsl, ADR 0086). U.g.w is
+// 1 then: no pass reads it, the CPU copy does.
+const float AXIS = 0.414213568; // √2 − 1
+const float DIAG = 0.292893231; // 1 − 1/√2
+
+// The diagonal neighbour of the cell p at p + o, as openXY() gives it, if the two cells beside the edge, a and b, are
+// open too (diagonalXY in flow.wgsl); else (−1, −1).
+ivec2 diagonalXY(ivec2 p, ivec2 o, ivec2 a, ivec2 b) {
+  if (a.x < 0 || b.x < 0) return ivec2(-1);
+  return openXY(p + o);
+}
+#endif
 #if TERRITORY && (PASS == 1 || PASS == 5)
 
 // What the sink of the tube cell p takes while the front of the strain takes flux (taken in flow.wgsl, ADR 0070).
@@ -122,6 +141,16 @@ float conductivity(ivec2 q) {
   if (q.x < 0) return 0.0;
   return texelFetch(memory, q, 0).z;
 }
+#if EIGHT
+
+// The size of the flux per lane over the diagonal edge from the cell whose conductivity is g and whose pressure is pc to
+// the cell q (diagonalXY()), without its weight; 0 without the edge (diagonalFlux in flow.wgsl).
+vec4 diagonalFlux(float g, vec4 pc, ivec2 q) {
+  float e = edge(g, conductivity(q));
+  if (e <= 0.0) return vec4(0.0);
+  return abs(e * (pc - texelFetch(pressureIn, q, 0)));
+}
+#endif
 
 // Whether the plasmodium covers site i: a cell of the site held food and a tube in the step before (covered in
 // flow.wgsl).
@@ -212,6 +241,14 @@ void main() {
   if (gw > 0.0) flux += abs(gw * (pc - texelFetch(pressureIn, qw, 0)));
   if (gs > 0.0) flux += abs(gs * (pc - texelFetch(pressureIn, qs, 0)));
   if (gn > 0.0) flux += abs(gn * (pc - texelFetch(pressureIn, qn, 0)));
+#if EIGHT
+  // Over 8 edges (ADR 0086): the 4 axis edges with the weight AXIS, the 4 diagonal edges with DIAG (update in flow.wgsl).
+  vec4 across = diagonalFlux(m.z, pc, diagonalXY(p, ivec2(1, 1), qe, qs))
+    + diagonalFlux(m.z, pc, diagonalXY(p, ivec2(-1, -1), qw, qn))
+    + diagonalFlux(m.z, pc, diagonalXY(p, ivec2(-1, 1), qw, qs))
+    + diagonalFlux(m.z, pc, diagonalXY(p, ivec2(1, -1), qe, qn));
+  flux = AXIS * flux + DIAG * across;
+#endif
   flux *= 0.5;
   // f(Q) per lane and its mean. pow(0, gamma) is 0 by hand: GLSL leaves it undefined.
   vec4 qg = mix(pow(max(flux, vec4(1e-30)), vec4(U.a.y)), vec4(0.0), lessThanEqual(flux, vec4(0.0)));
@@ -331,7 +368,21 @@ void main() {
   float ew = ghostEdge(m.z, qw);
   float es = ghostEdge(m.z, qs);
   float en = ghostEdge(m.z, qn);
+#if EIGHT
+  // Over 8 edges (ADR 0086): the axis edges with the weight AXIS, the diagonal edges with DIAG, each with the ghost
+  // conductivity on both cells (pressure in flow.wgsl).
+  ivec2 qse = diagonalXY(p, ivec2(1, 1), qe, qs);
+  ivec2 qnw = diagonalXY(p, ivec2(-1, -1), qw, qn);
+  ivec2 qsw = diagonalXY(p, ivec2(-1, 1), qw, qs);
+  ivec2 qne = diagonalXY(p, ivec2(1, -1), qe, qn);
+  float ese = ghostEdge(m.z, qse);
+  float enw = ghostEdge(m.z, qnw);
+  float esw = ghostEdge(m.z, qsw);
+  float ene = ghostEdge(m.z, qne);
+  float sum = AXIS * (ee + ew + es + en) + DIAG * (ese + enw + esw + ene);
+#else
   float sum = ee + ew + es + en;
+#endif
   vec4 pc = texelFetch(pressureIn, p, 0);
   vec4 before = texelFetch(pressureBefore, p, 0);
   vec4 next = pc;
@@ -341,6 +392,14 @@ void main() {
     if (ew > 0.0) acc += ew * texelFetch(pressureIn, qw, 0);
     if (es > 0.0) acc += es * texelFetch(pressureIn, qs, 0);
     if (en > 0.0) acc += en * texelFetch(pressureIn, qn, 0);
+#if EIGHT
+    vec4 across = vec4(0.0);
+    if (ese > 0.0) across += ese * texelFetch(pressureIn, qse, 0);
+    if (enw > 0.0) across += enw * texelFetch(pressureIn, qnw, 0);
+    if (esw > 0.0) across += esw * texelFetch(pressureIn, qsw, 0);
+    if (ene > 0.0) across += ene * texelFetch(pressureIn, qne, 0);
+    acc = AXIS * acc + DIAG * across;
+#endif
     // Kirchhoff's law of the cell, with the flux that a site gives or takes.
     vec4 given = vec4(0.0);
     if (m.w != 0.0) {

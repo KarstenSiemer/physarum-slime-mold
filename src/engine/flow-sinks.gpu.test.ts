@@ -104,7 +104,7 @@ const stateOf = (all: Float32Array, strain: number) =>
 
 /** The uniform block of the flow of a strain with the constants of stage 4, as the simulations write it. */
 const blockOf = (s: Settings, sites: FlowSites, strain: number) =>
-  new Float32Array(packTerritory(packFlow(s, sites, undefined, strain)));
+  new Float32Array(packTerritory(packFlow(s, sites, undefined, strain), s));
 
 /**
  * The pressure of a step from `fields` with what the sinks take and the sources give at each cell given by `extra`:
@@ -185,82 +185,93 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       }
   }
 
-  it('takes the sinks and the sources in the pressure and adapts while the front took flux, as the CPU copy', async () => {
-    // Two strains in a dish with a wall that has a gap. Strain 0 covers a food dab: one covered port gives what its
-    // sinks take, and it has no roles (one site). Strain 1 covers no food: its tube cells give it. Neither strain has
-    // two sites with a role, so a tube adapts only while the front of its strain took flux in the step before.
-    const [w, h] = [48, 40];
-    const n = w * h;
-    const s = stage4({ boundary: 'dish', seed: 19 });
-    const sim = await make({ ...s, collisions: false }, w, h, n);
-    const food: FoodStroke[] = [[{ kind: 'food', from: [30, 26], to: [30, 26], radius: 1.5 }]];
-    sim.paint(food.flat());
-    const sites = flowSites(food, w, h, 'dish');
-    sim.foodSites(sites);
-    sim.paint([{ kind: 'wall', from: [24, 4], to: [24, 18], radius: 0.5 }]);
-    sim.paint([{ kind: 'wall', from: [24, 24], to: [24, 36], radius: 0.5 }]);
-    const env = await sim.readEnv();
-    const rnd = random(29);
-    seed(sim, s, env, rnd, (x, y) => (Math.hypot(x - 23.5, y - 19.5) < 17 && rnd() < 0.3 ? (x + y) % 2 : undefined));
-    sim.update(s);
-    const foodCell = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
-    const grid: FlowGrid = { width: w, height: h, boundary: 'dish', env };
-    const fields = [0, 1].map((strain) => {
-      const f = flowStart(grid, FLOW.fresh);
-      f.memory = memoryOf(n, (c) => (strain === 0 ? foodCell(c) || rnd() < 0.8 : !foodCell(c) && rnd() < 0.8));
-      sim.writeFlow(f.memory, strain);
-      return f;
-    });
-    sim.writeTerritory(randomTerritory(n, 2, 0.55, random(31)));
-    for (const strain of [0, 1])
-      sim.writeSinks(
-        Float32Array.from({ length: n }, () => Math.fround((rnd() < 0.5 ? -1 : 1) * rnd())),
-        strain,
-      );
-    // Per strain the tube cells whose flow memory changed in the first step, and in the steps after it.
-    const frozen = [0, 0];
-    const adapted = [0, 0];
-    for (let step = 0; step < 5; step++) {
-      const before = await sim.readSinkState();
-      const prior = [await sim.readFlow(0), await sim.readFlow(1)];
-      sim.run(1);
-      const [trail, state] = [await sim.readTrail(), await sim.readSinkState()];
-      for (const strain of [0, 1]) {
-        const at = `strain ${String(strain)}, step ${String(step)}`;
-        const u = blockOf(s, sites, strain);
-        const old = fields[strain] ?? flowStart(grid, FLOW.fresh);
-        const took = stateOf(before, strain)[4] === 1;
-        const sinks = { took, rates: await sim.readSinks(strain), state: stateOf(state, strain) };
-        // Every step the front of each strain takes flux; before the first step it took none.
-        expect(sinks.state[4], at).toBe(1);
-        expect(took, at).toBe(step > 0);
-        const next = flowStep(grid, u, old, trail, step, s.seed, sites.cells, sinks);
-        const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
-        expect(worstOf(memory, next.memory), `memory, ${at}`).toBeLessThan(1e-3);
-        const { off, top } = offOf(pressure, next.pressure);
-        expect(top, `a pressure, ${at}`).toBeGreaterThan(0);
-        expect(off, `pressure, ${at}`).toBeLessThan(1e-3);
-        // The CPU copy without the sinks gives another pressure: the test sees them.
-        const without = flowStep(grid, u, old, trail, step, s.seed, sites.cells);
-        expect(offOf(without.pressure, next.pressure).off, `without the sinks, ${at}`).toBeGreaterThan(0.1);
-        // The open tube cells whose flow memory changed in the step: none in the first step, many from the second on.
-        const was = prior[strain] ?? new Float32Array(0);
-        let moved = 0;
-        for (let c = 0; c < n; c++) {
-          const tube = (was[c * 4 + 1] ?? 0) >= FLOW.bodyLow && openCell(grid, c % w, Math.floor(c / w)) >= 0;
-          if (tube && memory[c * 4] !== was[c * 4]) moved++;
+  // Also with the levers of the crown (ADR 0086): 8 neighbours, the base conductance 0.002 and the flux to the front 2.
+  it.each([
+    ['', {}],
+    [
+      ' over 8 neighbours, with the base 0.002 and the flux to the front 2',
+      { flowEdges: 8, flowBase: 0.002, frontFlux: 2 },
+    ],
+  ] as const)(
+    'takes the sinks and the sources in the pressure and adapts while the front took flux, as the CPU copy%s',
+    async (_, patch) => {
+      // Two strains in a dish with a wall that has a gap. Strain 0 covers a food dab: one covered port gives what its
+      // sinks take, and it has no roles (one site). Strain 1 covers no food: its tube cells give it. Neither strain has
+      // two sites with a role, so a tube adapts only while the front of its strain took flux in the step before.
+      const [w, h] = [48, 40];
+      const n = w * h;
+      const s = stage4({ boundary: 'dish', seed: 19, ...patch });
+      const sim = await make({ ...s, collisions: false }, w, h, n);
+      const food: FoodStroke[] = [[{ kind: 'food', from: [30, 26], to: [30, 26], radius: 1.5 }]];
+      sim.paint(food.flat());
+      const sites = flowSites(food, w, h, 'dish');
+      sim.foodSites(sites);
+      sim.paint([{ kind: 'wall', from: [24, 4], to: [24, 18], radius: 0.5 }]);
+      sim.paint([{ kind: 'wall', from: [24, 24], to: [24, 36], radius: 0.5 }]);
+      const env = await sim.readEnv();
+      const rnd = random(29);
+      seed(sim, s, env, rnd, (x, y) => (Math.hypot(x - 23.5, y - 19.5) < 17 && rnd() < 0.3 ? (x + y) % 2 : undefined));
+      sim.update(s);
+      const foodCell = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
+      const grid: FlowGrid = { width: w, height: h, boundary: 'dish', env };
+      const fields = [0, 1].map((strain) => {
+        const f = flowStart(grid, FLOW.fresh);
+        f.memory = memoryOf(n, (c) => (strain === 0 ? foodCell(c) || rnd() < 0.8 : !foodCell(c) && rnd() < 0.8));
+        sim.writeFlow(f.memory, strain);
+        return f;
+      });
+      sim.writeTerritory(randomTerritory(n, 2, 0.55, random(31)));
+      for (const strain of [0, 1])
+        sim.writeSinks(
+          Float32Array.from({ length: n }, () => Math.fround((rnd() < 0.5 ? -1 : 1) * rnd())),
+          strain,
+        );
+      // Per strain the tube cells whose flow memory changed in the first step, and in the steps after it.
+      const frozen = [0, 0];
+      const adapted = [0, 0];
+      for (let step = 0; step < 5; step++) {
+        const before = await sim.readSinkState();
+        const prior = [await sim.readFlow(0), await sim.readFlow(1)];
+        sim.run(1);
+        const [trail, state] = [await sim.readTrail(), await sim.readSinkState()];
+        for (const strain of [0, 1]) {
+          const at = `strain ${String(strain)}, step ${String(step)}`;
+          const u = blockOf(s, sites, strain);
+          const old = fields[strain] ?? flowStart(grid, FLOW.fresh);
+          const took = stateOf(before, strain)[4] === 1;
+          const sinks = { took, rates: await sim.readSinks(strain), state: stateOf(state, strain) };
+          // Every step the front of each strain takes flux; before the first step it took none.
+          expect(sinks.state[4], at).toBe(1);
+          expect(took, at).toBe(step > 0);
+          const next = flowStep(grid, u, old, trail, step, s.seed, sites.cells, sinks);
+          const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
+          expect(worstOf(memory, next.memory), `memory, ${at}`).toBeLessThan(1e-3);
+          const { off, top } = offOf(pressure, next.pressure);
+          expect(top, `a pressure, ${at}`).toBeGreaterThan(0);
+          expect(off, `pressure, ${at}`).toBeLessThan(1e-3);
+          // The CPU copy without the sinks gives another pressure: the test sees them.
+          const without = flowStep(grid, u, old, trail, step, s.seed, sites.cells);
+          expect(offOf(without.pressure, next.pressure).off, `without the sinks, ${at}`).toBeGreaterThan(0.1);
+          // The open tube cells whose flow memory changed in the step: none in the first step, many from the second on.
+          const was = prior[strain] ?? new Float32Array(0);
+          let moved = 0;
+          for (let c = 0; c < n; c++) {
+            const tube = (was[c * 4 + 1] ?? 0) >= FLOW.bodyLow && openCell(grid, c % w, Math.floor(c / w)) >= 0;
+            if (tube && memory[c * 4] !== was[c * 4]) moved++;
+          }
+          if (step === 0) frozen[strain] = moved;
+          else adapted[strain] = (adapted[strain] ?? 0) + moved;
+          fields[strain] = next;
         }
-        if (step === 0) frozen[strain] = moved;
-        else adapted[strain] = (adapted[strain] ?? 0) + moved;
-        fields[strain] = next;
       }
-    }
-    // The covered port of strain 0, and none of strain 1.
-    const state = await sim.readSinkState();
-    expect([stateOf(state, 0)[3], stateOf(state, 1)[3]]).toEqual([1, 0]);
-    expect(frozen).toEqual([0, 0]);
-    for (const k of adapted) expect(k).toBeGreaterThan(500);
-  }, 120_000);
+      // The covered port of strain 0, and none of strain 1.
+      const state = await sim.readSinkState();
+      expect([stateOf(state, 0)[3], stateOf(state, 1)[3]]).toEqual([1, 0]);
+      expect(frozen).toEqual([0, 0]);
+      for (const k of adapted) expect(k).toBeGreaterThan(500);
+    },
+    120_000,
+  );
 
   it('keeps the flow memory of a tube while its strain has no sink and fewer than two sites with a role', async () => {
     const [w, h] = [40, 32];
@@ -395,12 +406,12 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
    * strain 1 with R = 8 takes none. `shift`: a pressure added to every lane of every tube cell, + for strain 0 and −
    * for strain 1. The memory 0.5 lets almost no agent starve and no dead agent come to life.
    */
-  async function driftCase(drift: number, shift = 0) {
+  async function driftCase(drift: number, shift = 0, frontFlux = 1) {
     const [w, h] = [64, 64];
     const n = w * h;
     const RA = 30;
     const strains = TWO.map((st) => ({ ...st, sensorAngle: 45, rotationAngle: RA, sensorOffset: 9, randomTurn: 0 }));
-    const s = stage4({ seed: 53, strains, drift });
+    const s = stage4({ seed: 53, strains, drift, frontFlux });
     const sim = await make({ ...s, collisions: false }, w, h, 512);
     const ends = strainEnds(s.strains, sim.agents);
     const placed: { id: number; x: number; y: number; strain: number }[] = [];
@@ -485,8 +496,13 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
     f > l && f > r ? 0 : f < l && f < r ? 2 : l < r ? 1 : r < l ? -1 : 0;
 
   it('turns an agent by the pressure on the tubes of its strain and by what its sink takes, times the drift', async () => {
-    for (const drift of [1.5, 0]) {
-      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift);
+    // With the flux to the front 2 (ADR 0086) every sink takes twice its share of the flow strength.
+    for (const [drift, frontFlux] of [
+      [1.5, 1],
+      [0, 1],
+      [1.5, 2],
+    ] as const) {
+      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift, 0, frontFlux);
       const ra = Math.fround((RA * Math.PI) / 180);
       const counts = { keep: 0, left: 0, right: 0, random: 0, offTube: 0, byTake: 0, dead: 0 };
       for (const { id, x, y, strain } of placed) {
@@ -507,7 +523,7 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
         const want = turn === 0 ? 0 : turn > 0 ? ra : 2 * Math.PI - ra;
         expect(
           Math.abs(agent.heading - want),
-          `agent ${String(id)} at (${String(x)}, ${String(y)}), drift ${String(drift)}`,
+          `agent ${String(id)} at (${String(x)}, ${String(y)}), drift ${String(drift)}, k ${String(frontFlux)}`,
         ).toBeLessThan(1e-5);
       }
       expect(counts.dead, `drift ${String(drift)}`).toBeLessThan(3);

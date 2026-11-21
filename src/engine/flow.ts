@@ -29,7 +29,8 @@ export const STEPS_PER_MINUTE = 30;
  *   share of ADR 0029, decision 19). A starved tube that vanishes leaves its ground at `floor` (flow.wgsl update).
  *   This is the share at the default of the setting Slime life time, 144 hours; recoverShare() gives the share of the
  *   settings (ADR 0055, decision 5).
- * - `base`: conductivity of a tube without flow memory; `food`: conductivity of a food cell.
+ * - `base`: conductivity of a tube without flow memory, the default of the setting Base conductance (`flowBase`, ADR
+ *   0086), which packFlow() packs in its place; `food`: conductivity of a food cell.
  * - `ghost`: a conductivity that every open cell has for the pressure only, so that a cell beside the network holds
  *   the pressure of its neighbours before it joins.
  * - `weight`, `radius`: the damped Jacobi iteration and the spectral radius that its acceleration is tuned for. Only
@@ -68,6 +69,21 @@ export const FLOW = {
   head: 4096,
   headSoft: 0.25,
 } as const;
+
+/**
+ * Whether the flow of the settings runs over 8 neighbours (ADR 0086): the setting, while the flow runs. The passes then
+ * compile the lines of EIGHT (flow.wgsl, flow.frag, tubes.wgsl, tubes.frag).
+ */
+export const flowEight = (s: Pick<Settings, 'flow' | 'model' | 'flowEdges'>) => flowOn(s) && s.flowEdges === 8;
+
+/**
+ * The weights of the edges of a cell with the flow over 8 neighbours (ADR 0086, the form of ADR 0081): an axis edge
+ * conducts `axis` times the harmonic mean of its two cells, a diagonal edge `diag` times. Their ratio 1/√2 lets a broad
+ * uniform flow read the same flux at 0° and at 45° (and at most 1.08 times more between, at 22.5°), and a vein of one
+ * cell conduct the same along an axis and along a diagonal; axis + 2 · diag = 1 keeps the conductance of a uniform
+ * sheet. The passes hold them as float32 literals, AXIS and DIAG; a test holds the literals to these numbers.
+ */
+export const FLOW_EIGHT = { axis: Math.SQRT2 - 1, diag: 1 - Math.SQRT1_2 } as const;
 
 /** Pressure iterations per step, the pressure fields that run side by side, and the steps that a field keeps its roles. */
 export const FLOW_ITERATIONS = 16;
@@ -192,10 +208,13 @@ export function recoverShare(s: Pick<Settings, 'slimeLife'>): number {
  * cells (sites.ts FlowSites). The
  * passes take the step and the seed from the parameters of the simulation. The levels of the trail are those of the
  * strain (trailLevels()). Every strain has the same sites and the same other constants: the agent passes read the
- * constants from the block of any strain, and the pass of the ports reads the sites from the block of the first.
+ * constants from the block of any strain, and the pass of the ports reads the sites from the block of the first. The
+ * base conductance is the setting (ADR 0086). The last lane of the slot of the pressure limit is 1 while the flow runs
+ * over 8 neighbours (ADR 0086), else 0: the passes compile the lines of EIGHT for it (flowEight()), and the CPU copy
+ * (flow-reference.ts) reads it here.
  */
 export function packFlow(
-  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder' | 'slimeLife'>,
+  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder' | 'slimeLife' | 'flowEdges' | 'flowBase'>,
   sites: FlowSites,
   buf = new ArrayBuffer(FLOW_BYTES),
   strain = 0,
@@ -207,13 +226,13 @@ export function packFlow(
   const n = Math.min(sites.list.length, FLOW_SITES);
   const limit = FLOW.head * s.flowStrength;
   f.set([s.flowStrength, FLOW.gamma, FLOW.rate, recoverShare(s)], 0);
-  f.set([FLOW.base, FLOW.food, FLOW.ghost, omega], 4);
+  f.set([s.flowBase, FLOW.food, FLOW.ghost, omega], 4);
   f.set([FLOW.weight, FLOW.bodyRate, FLOW.bodyLow, FLOW.fresh], 8);
   f.set([FLOW.floor, low, 1 / (full - low), n], 12);
   f.set([FLOW.death, FLOW.half * FLOW.half, FLOW.birth, FLOW.birthFrom], 16);
   const ref = sites.list[0];
   f.set([ref?.x ?? 0, ref?.y ?? 0, strain, sites.cells.length / SITE_BLOCK], 20);
-  f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), 0], 24);
+  f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), s.flowEdges === 8 ? 1 : 0], 24);
   for (let i = 0; i < n; i++) {
     const site = sites.list[i];
     if (site) f.set([site.x, site.y, site.offset, site.count], FLOW_CONSTANT_SLOTS * 4 + i * 4);

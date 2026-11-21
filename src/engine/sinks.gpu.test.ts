@@ -377,47 +377,56 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
     expect(seen).toBeGreaterThan(20);
   }, 120_000);
 
-  it('follows the rates of the sinks over the steps of a run with births, as the CPU copy does', async () => {
-    const [w, h] = [47, 40];
-    const n = w * h;
-    // A growth test every third step: the births change the owners and the sinks. Slime lives 4 steps: ground that
-    // held plasm 3 steps before has none for the sinks.
-    const growth = { growthEvery: 3, growthWindow: 7, growthMin: 1, growthMax: 30 };
-    const s = stage4({ seed: 53, ...growth, slimeLife: 4 / 1800 });
-    expect(slimeSteps(s)).toBe(4);
-    const sim = await make({ ...s, collisions: false }, w, h, n);
-    const food: FoodStroke[] = [[{ kind: 'food', from: [6, 30], to: [6, 30], radius: 1.5 }]];
-    sim.paint(food.flat());
-    const sites = flowSites(food, w, h, 'wrap');
-    sim.foodSites(sites);
-    sim.paint([{ kind: 'wall', from: [20, 5], to: [20, 30], radius: 0.5 }]);
-    const env = await sim.readEnv();
-    const rnd = random(59);
-    seed(sim, s, env, rnd, (x, y) =>
-      x >= 4 && x <= 36 && y >= 8 && y <= 32 && rnd() < 0.35 ? (x + y) % 2 : undefined,
-    );
-    sim.update(s);
-    const foodCell = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
-    sim.writeFlow(
-      memoryOf(n, (c) => foodCell(c) || rnd() < 0.8),
-      0,
-    );
-    sim.writeFlow(
-      memoryOf(n, (c) => !foodCell(c) && rnd() < 0.8),
-      1,
-    );
-    sim.writeTerritory(randomTerritory(n, 2, 0.55, random(61)));
-    const g: TerritoryGrid = { w, h, boundary: 'wrap', env };
-    let last: { input: SinkInput; pass: SinkStep }[] = [];
-    for (let k = 0; k < 9; k++) last = await stepOnce(sim, s, g, sites, k);
-    // A sink has a minus sign, and a cell that was a sink before and is none now keeps a rate that falls.
-    for (const { pass } of last) {
-      const sinks = Array.from(pass.rates).filter((r) => r < 0);
-      expect(sinks.length).toBeGreaterThan(20);
-      expect(Array.from(pass.rates).filter((r) => r > 0).length).toBeGreaterThan(20);
-      expect(Math.min(...sinks)).toBeLessThan(-0.005);
-    }
-  }, 120_000);
+  // Also with the levers of the crown (ADR 0086): with the flux to the front 2 the sinks take twice as much, and the
+  // budget of the paid births grows as with 1.
+  it.each([
+    ['', {}],
+    [', also with the levers of the crown', { flowEdges: 8, flowBase: 0.002, frontFlux: 2 }],
+  ] as const)(
+    'follows the rates of the sinks over the steps of a run with births, as the CPU copy does%s',
+    async (_, patch) => {
+      const [w, h] = [47, 40];
+      const n = w * h;
+      // A growth test every third step: the births change the owners and the sinks. Slime lives 4 steps: ground that
+      // held plasm 3 steps before has none for the sinks.
+      const growth = { growthEvery: 3, growthWindow: 7, growthMin: 1, growthMax: 30 };
+      const s = stage4({ seed: 53, ...growth, slimeLife: 4 / 1800, ...patch });
+      expect(slimeSteps(s)).toBe(4);
+      const sim = await make({ ...s, collisions: false }, w, h, n);
+      const food: FoodStroke[] = [[{ kind: 'food', from: [6, 30], to: [6, 30], radius: 1.5 }]];
+      sim.paint(food.flat());
+      const sites = flowSites(food, w, h, 'wrap');
+      sim.foodSites(sites);
+      sim.paint([{ kind: 'wall', from: [20, 5], to: [20, 30], radius: 0.5 }]);
+      const env = await sim.readEnv();
+      const rnd = random(59);
+      seed(sim, s, env, rnd, (x, y) =>
+        x >= 4 && x <= 36 && y >= 8 && y <= 32 && rnd() < 0.35 ? (x + y) % 2 : undefined,
+      );
+      sim.update(s);
+      const foodCell = (c: number) => (env[c * 4 + 1] ?? 0) > 0;
+      sim.writeFlow(
+        memoryOf(n, (c) => foodCell(c) || rnd() < 0.8),
+        0,
+      );
+      sim.writeFlow(
+        memoryOf(n, (c) => !foodCell(c) && rnd() < 0.8),
+        1,
+      );
+      sim.writeTerritory(randomTerritory(n, 2, 0.55, random(61)));
+      const g: TerritoryGrid = { w, h, boundary: 'wrap', env };
+      let last: { input: SinkInput; pass: SinkStep }[] = [];
+      for (let k = 0; k < 9; k++) last = await stepOnce(sim, s, g, sites, k);
+      // A sink has a minus sign, and a cell that was a sink before and is none now keeps a rate that falls.
+      for (const { pass } of last) {
+        const sinks = Array.from(pass.rates).filter((r) => r < 0);
+        expect(sinks.length).toBeGreaterThan(20);
+        expect(Array.from(pass.rates).filter((r) => r > 0).length).toBeGreaterThan(20);
+        expect(Math.min(...sinks)).toBeLessThan(-0.005);
+      }
+    },
+    120_000,
+  );
 
   it('reads the slime after the stamps of the step: slime whose life ends in the step is ground without slime', async () => {
     // Slime lives 2 steps and covers every cell before step 0 (its stamp is 1, as a stamp of step 0). In step 1 a

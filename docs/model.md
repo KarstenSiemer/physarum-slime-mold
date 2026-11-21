@@ -870,7 +870,9 @@ checks that this table names every key.
 | `shrinkMin`         | Smin     | agents, 0 to 225                                                     | 0                 | both     | 9       |
 | `shrinkMax`         | Smax     | agents, 1 to 225                                                     | 20                | both     | 9       |
 | `flowStrength`      | I0       | the flux of each strain at a site, 0.1 to 32                         | 8                 | extended | 8.2     |
+| `flowBase`          | g0       | conductivity of a tube without flow memory, 0.001 to 0.1             | 0.02              | extended | 8.1     |
 | `drift`             | δ        | weight of the pressure in a sensor, 0 to 5 (the rules of stage 4)    | 1.5               | extended | 8.7     |
+| `frontFlux`         | k        | the sinks take S = 2 k · I0, 0.25 to 16 (the rules of stage 4)       | 1                 | extended | 8.7     |
 | `slimeLife`         | L        | hours of model time, 0 to 240; 0 is no slime                         | 144               | extended | 6.9     |
 | `model`             |          | jones, extended                                                      | extended          |          | 2       |
 | `stepOrder`         |          | move-first, sense-first                                              | sense-first       | both     | 5       |
@@ -879,6 +881,7 @@ checks that this table names every key.
 | `coveredFood`       |          | on or off                                                            | off               | both     | 6.5     |
 | `growth`            |          | on or off (needs one agent per cell)                                 | off               | both     | 9       |
 | `flow`              |          | on or off                                                            | off               | extended | 8       |
+| `flowEdges`         |          | neighbours of a cell in the flow, 4 or 8                             | 4                 | extended | 8.1     |
 | `territory`         |          | the rules of stage 4, on or off (they need growth and the flow)      | off               | extended | 6.10    |
 | `layout`            |          | section 10                                                           | mixed             | both     | 10      |
 | `seed`              |          | integer                                                              | 1                 | both     | 7.7     |

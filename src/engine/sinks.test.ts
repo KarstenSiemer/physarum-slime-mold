@@ -48,11 +48,26 @@ describe('the sinks (ADR 0069)', () => {
     // budget of the paid births in a step (ADR 0071), z and w free.
     expect(FLOW_TAKE_SLOT).toBe(FLOW_SINK_SLOT + 1);
     expect(FLOW_SLOTS).toBe(FLOW_TAKE_SLOT + 1);
-    const f = new Float32Array(packTerritory(packFlow(on, NO_SITES)));
+    const f = new Float32Array(packTerritory(packFlow(on, NO_SITES), on));
     expect(f.length * 4).toBe(FLOW_BYTES);
     expect(Array.from(f.subarray(FLOW_SINK_SLOT * 4, FLOW_SINK_SLOT * 4 + 4))).toEqual([6, 2, 100, 419430]);
     const growth = Math.fround((2 * on.flowStrength) / 20);
     expect(Array.from(f.subarray(FLOW_TAKE_SLOT * 4, FLOW_TAKE_SLOT * 4 + 4))).toEqual([2, growth, 0, 0]);
+  });
+
+  // ADR 0086: the flux to the front k. The prototype takes `norm` = 2 k times I0 and pays a birth with `paid` = 20 k of
+  // flux (research/front/e2m.sh), so the budget grows by norm · I0 / paid = I0 / 10, as with k = 1.
+  it('lets the sinks take 2 k times the flow strength, and the budget grow as with k = 1', () => {
+    const one = new Float32Array(packTerritory(packFlow(on, NO_SITES), on));
+    for (const k of [0.25, 2, 3.3, 16]) {
+      const f = new Float32Array(packTerritory(packFlow(on, NO_SITES), { frontFlux: k }));
+      expect(f[FLOW_TAKE_SLOT * 4], `k ${String(k)}`).toBe(Math.fround(SINKS.take * k));
+      const [norm, paid] = [2 * k, 20 * k];
+      expect(f[FLOW_TAKE_SLOT * 4 + 1], `k ${String(k)}`).toBeCloseTo((norm * on.flowStrength) / paid, 6);
+      f.forEach((v, i) => {
+        if (i !== FLOW_TAKE_SLOT * 4) expect(v, `value ${String(i)} at k ${String(k)}`).toBe(one[i]);
+      });
+    }
   });
 
   it('moves a rate a hundredth of the way to its weight, rounded toward it, and reaches it', () => {

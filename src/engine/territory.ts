@@ -39,13 +39,14 @@ export const PUSH_CHANCES: readonly number[] = Array.from({ length: 8 }, (_, k) 
 
 /**
  * Writes the constants of stage 4 into the uniform block of the flow (`buf` from flow.ts packFlow()), after its sites
- * (FLOW_TERRITORY_SLOT; ADR 0067, decision 9): PUSH_CHANCES, then the constants of the sinks (sinks.ts packSinks()),
- * then the growth of the budget of the paid births (paid.ts packPaid()). Returns `buf`.
+ * (FLOW_TERRITORY_SLOT; ADR 0067, decision 9): PUSH_CHANCES, then the constants of the sinks with the flux to the front
+ * of the settings (sinks.ts packSinks(), ADR 0086), then the growth of the budget of the paid births (paid.ts
+ * packPaid()). Returns `buf`.
  */
-export function packTerritory(buf: ArrayBuffer): ArrayBuffer {
+export function packTerritory(buf: ArrayBuffer, s: Pick<Settings, 'frontFlux'>): ArrayBuffer {
   const f = new Float32Array(buf);
   f.set(PUSH_CHANCES, FLOW_TERRITORY_SLOT * 4);
-  packSinks(f);
+  packSinks(f, s.frontFlux);
   packPaid(f);
   return buf;
 }
