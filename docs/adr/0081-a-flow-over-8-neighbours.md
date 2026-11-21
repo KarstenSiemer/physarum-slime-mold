@@ -6,6 +6,8 @@
 - The scripts: `research/front/sim.ts` (`stencil`), `still.ts`, `flux-angle.ts`, `stencil-time.ts`. The raw records are
   in the archive under `logs/engine/still-0081/`.
 - Extended by [ADR 0082](0082-the-growing-colony-with-a-flow-over-8-neighbours.md).
+- Extended by [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (2026-11-21): the 8 neighbours in the
+  engine, as the setting `flowEdges`, 4 in every scene.
 
 ## The option
 

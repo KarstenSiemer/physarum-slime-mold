@@ -373,6 +373,10 @@ Open, for the owner:
     births only on ground younger than 1,500 steps (`jones=young`, ADR 0084, to step 16,000): the rim does not split
     in 8 runs; `jones=young` gives a crescent of sheet at the rim fed by 1 to 3 thick tubes, bare ground behind.
     Open: what makes one part of the rim fall behind, so that the front splits into crowns.
+- Whether every scene with the flow moves to the flow over 8 neighbours (ADR 0086). The engine has it as the setting
+  `flowEdges`, 4 in every scene, for the crown of ADR 0084: with 8 the veins follow the flow and not the grid (ADR
+  0081). It changes the bytes of every scene with the flow, so each one needs its campaign again, and a step of the
+  Maze takes 28 % more time on WebGPU and 38 % more on WebGL2 (M3 Pro).
 
 The stages:
 

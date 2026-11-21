@@ -561,7 +561,7 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 
 ### 8.1 The network on the grid
 
-- Every open cell is a node; its 4 neighbours are its edges.
+- Every open cell is a node; its 4 neighbours are its edges, or its 8 neighbours with the setting `flowEdges` 8 (below).
 - **Tube body**: B ← B + 0.02 · (π − B), with π = clamp((T_s − 0.2 · u_s) / (0.8 · u_s), 0, 1) from the trail of the
   strain after this step's diffusion. A cell holds a tube of the strain while B ≥ 0.05.
 - **The unit of the trail** u_s = depT_s · κ(decT_s) / κ(0.1), with depT_s the deposit of the strain (at least 1e-6)
@@ -570,9 +570,21 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
   inside [1e-4, 0.9]. At Jones' decay of 0.1 the unit is one deposit. A strain whose trail decays faster holds less
   trail, and its levels are lower in the same ratio: at a decay of 0.6, sensing first, a thirteenth (`trailLevels()`
   in `src/engine/flow.ts`).
-- **Conductivity**: G = B · (0.02 + D) on a tube, 4 B on a tube on food, 0 elsewhere.
-- **Edge conductance**: the harmonic mean H(a, b) = 2ab / (a + b), 0 if a or b is 0. The pressure solve uses
-  Ĝ = H(G_a + 1e-5, G_b + 1e-5), so a cell holds a pressure before it joins the network.
+- **Conductivity**: G = B · (g0 + D) on a tube, 4 B on a tube on food, 0 elsewhere. g0 is the setting Base conductance
+  (`flowBase`, ADR 0086): 0.02 by default and in every scene, from 0.001 to 0.1. At 0.001 the weakest tube, of B = 0.05
+  and D = 1e-4, still conducts 5.5 times the ghost conductance below.
+- **Edge conductance**: the harmonic mean H(a, b) = 2ab / (a + b), 0 if a or b is 0, times the weight w of the edge.
+  The pressure solve uses Ĝ = w · H(G_a + 1e-5, G_b + 1e-5), so a cell holds a pressure before it joins the network.
+  With 4 neighbours every edge has w = 1.
+- **The flow over 8 neighbours** (ADR 0086, the form of ADR 0081; `flowEdges` 8, 4 by default and in every scene): a
+  cell also has an edge to each of its 4 diagonal neighbours, but only where both cells beside that edge are open, so
+  no edge passes the corner of a wall. An axis edge has the weight w_a = √2 − 1 ≈ 0.414 and a diagonal edge
+  w_d = 1 − 1/√2 ≈ 0.293, as float32 literals in the passes. Their ratio 1/√2 lets a broad flow read the same flux
+  at 0° and 45° (1.08 times more at 22.5°) and a vein of one cell conduct the same along an axis and along a diagonal;
+  w_a + 2 w_d = 1 keeps the conductance of a uniform sheet. The pressure (8.3), the flux of a cell (8.4) and the stream
+  of the picture of the tubes ([design.md](design.md), section 5) take all 8 edges. The tube of a sink (6.11) keeps
+  its path over 4 neighbours, as the prototype has it, and the drift (8.7) reads no edge. On a periodic grid a
+  diagonal edge wraps as an axis edge does, and in the dish a cell outside it is closed.
 - **Flow memory** D ∈ [1e-4, 1], 0.2 at the start and on closed cells.
 
 ### 8.2 Food sites and their roles
@@ -606,11 +618,12 @@ bytes that it had with the flow of ADR 0029 (18 runs checked, ADR 0031).
 
 ### 8.3 The pressure
 
-Kirchhoff's law Σ_n Ĝ_cn (P_c − P_n) = σ_c · I0 · h_c, solved with 16 iterations per step of damped Jacobi with
-momentum, in each lane, from the pressure of the last step:
+Kirchhoff's law Σ_n Ĝ_cn (P_c − P_n) = σ_c · I0 · h_c over the edges of c (8.1), solved with 16 iterations per step of
+damped Jacobi with momentum, in each lane, from the pressure of the last step:
 
 - P* = (Σ_n Ĝ_cn P_n + σ_c I0 h_c) / Σ_n Ĝ_cn; while the rules of stage 4 run, the sources and the sinks of 8.7 add
-  q_c to the sum above the line;
+  q_c to the sum above the line. Over 8 neighbours the passes sum the axis edges and the diagonal edges apart, and
+  weigh each sum once: Σ = w_a Σ_axis + w_d Σ_diagonal;
 - J = P + 0.9 (P* − P);
 - P_new = ω J + (1 − ω) P_old, with ω = 2 / (1 + √(1 − 0.99999²)) ≈ 1.991 on cells that conduct, and ω = 1 elsewhere.
 
@@ -621,7 +634,9 @@ shifts the whole history and changes no difference.
 
 ### 8.4 Flux and adaptation
 
-- Flux of a cell: Q = ½ · Σ_{n ∈ N4} H(G_c, G_n) · |P_c − P_n|, per lane, with G and P of the last step.
+- Flux of a cell: Q = ½ · Σ_n w_n · H(G_c, G_n) · |P_c − P_n| over the edges of c (8.1), per lane, with G and P of the
+  last step: N4 with w = 1, or the 8 edges with w_a and w_d. A vein of one cell along a diagonal then reads its flux as
+  one along an axis does.
 - f(Q) = Q^1.8 / (1 + Q^1.8) (Tero et al. 2010, γ = 1.8), averaged over the 4 lanes.
 - On a tube, while at least 2 sites had a role in the flow of the strain in the last step (at their ports of that step):
   D ← max(1e-4, D + 0.003 · (f − D)), Tero's dD/dt = f(|Q|) − D at a rate of 0.003 per step. While the rules of
@@ -676,10 +691,12 @@ draws flux, and the plasm streams to it. No scene turns the rules on yet. Withou
 the code before, character for character.
 
 - **What the sinks take**: while the front of strain s takes flux in the step (its state, 6.11), its sinks take
-  S = 2 · I0 together. Every tube cell c of s (G_s > 0 after the update) takes S · r_c / R_s, with r_c its rate as R_s
-  counted it, ⌊(|r| · 2^24 + 128) / 256⌋ / 2^16, and R_s from the state. So the sinks take exactly S, up to the rounding
-  of float32 (below 10⁻⁶ of S). A cell that is no sink in the step takes the share of its rate, which falls over about
-  100 steps (6.11).
+  S = 2 k · I0 together, with k the setting Flux to the front (`frontFlux`, ADR 0086): 1 by default and in every scene,
+  from 0.25 to 16. k does not change the budget of the paid births (9.1): it is the `norm` = 2 k of the prototype with
+  its `paid` = 20 k (`research/front/e2m.sh`). Every tube cell c of s (G_s > 0 after the update) takes S · r_c / R_s,
+  with r_c its rate as R_s counted it, ⌊(|r| · 2^24 + 128) / 256⌋ / 2^16, and R_s from the state. So the sinks take
+  exactly S, up to the rounding of float32 (below 10⁻⁶ of S). A cell that is no sink in the step takes the share of its
+  rate, which falls over about 100 steps (6.11).
 - **What the sources give**: S in equal shares at the ports of the sites that s covers in the step (8.2), and while it
   covers none, S / C_s at each of its C_s tube cells (the colony pays).
 - **Kirchhoff's law** of 8.3 takes both in every lane: q_c is what the sources give at c minus what its sinks take. The
@@ -707,7 +724,7 @@ the code before, character for character.
   takes no flux. An agent reads its own cell once for its three sensors.
 - **The order** (ADR 0067, decision 6): per strain the update, which reads the state of the step before; the sinks and
   the state of the step; then the pressure, which reads the rates and the state of the step.
-- **Memory**: no buffer more. The uniform block of the flow holds S / I0 in a slot after that of the sinks
+- **Memory**: no buffer more. The uniform block of the flow holds S / I0 = 2 k in a slot after that of the sinks
   (`FLOW_TAKE_SLOT`), and the parameters the drift in a slot after every slot of the code before. The second lane of
   that slot holds the growth of the budget of the paid births (9.1). What the sensors read takes a texture: on WebGPU
   t / G of a layer per strain, 4 B per cell and strain; on WebGL2 P̄ and t / G in two targets of a lane per strain,
@@ -766,7 +783,8 @@ scene turns them on yet. The flux that the front of a strain takes becomes plasm
 rim of the colony, in the share of the sink rate of each agent there.
 
 - **The budget** of strain s is a float in its state (6.11). In every step in which the front of s takes flux (6.11),
-  it grows by S / 20 = 2 · I0 / 20 births. The CPU computes this number once and gives it to the passes as float32
+  it grows by 2 · I0 / 20 births: S / 20 with the flux to the front k = 1 (8.7), and S / (20 k) with another k, so one
+  birth costs 20 k of flux (ADR 0086). The CPU computes this number once and gives it to the passes as float32
   (`paidIncrement()`). In a growth step with a budget of at least 1, the paid claims of the step come off it, and it
   becomes at most the number of the agents of the front of the step: min(budget − claims, agents of the front). Then
   it grows as above. A budget below 1 pays nothing and keeps what it has. Each operation rounds to float32 once, so
@@ -939,6 +957,10 @@ differ in these points:
   float of `log` and a division, so a key of a GPU differs from that of the CPU by a few units in the last place: the
   tests compare the keys to 10⁻⁵ and the rank of the keys of the GPU exactly.
 
+- The flow over 8 neighbours (8.1): both backends compile the update, the pressure and the stream as a variant
+  (`//#if EIGHT` in `flow.wgsl` and `tubes.wgsl`, `#if EIGHT` in `flow.frag` and `tubes.frag`), and hold the weights
+  as the same float32 literals. Without the variant each source is the one of the code before.
+
 No test compares the bytes of the two backends; the ADRs quote digests of runs made off-line.
 
 ## 13. Tests of the rules
@@ -984,6 +1006,9 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |
 | The time of the mark (8.4)              | `flow.gpu.test.ts`: eight times the share at a Slime life time of 18 hours; `flow.test.ts`: the share of each life time         |
 | Flow (8)                                | `flow.gpu.test.ts`: both passes against the CPU copy, Kirchhoff, the dead end, the pressure limit, starvation and respawn rates |
+| The flow over 8 neighbours (8.1)        | `flow.gpu.test.ts`: both passes against the CPU copy, base 0.002; a diagonal vein over 8 and 4; no edge past a corner           |
+| Base and flux to the front (8.1, 8.7)   | `flow-sinks.gpu.test.ts`: the flow with the sinks, base 0.002 and k = 2, the drift at k = 2; `sinks.gpu.test.ts`: budget        |
+| The CPU copy over 8 neighbours (8.1)    | `research/front/research.test.ts`: the pressure and Q of the prototype with `stencil=8 solver=app`, to float32                  |
 | Food sites (8.2)                        | `sites.test.ts`: strokes and cells; `flow.gpu.test.ts`: a drag is one site, ports, two strains, touching dabs, an old link      |
 | The unit of the trail (8.1)             | `flow.test.ts`: κ, and the levels at Jones' decay; `flow.gpu.test.ts`: a tube on a weak trail that decays fast                  |
 | A colony for each strain (10)           | `engine.gpu.test.ts`: three strains in the Foraging maze start two colonies on the two foods                                    |
@@ -1000,7 +1025,17 @@ off them, a sink rate on every cell, a strain whose front takes flux and one who
 exact; a shift of the pressure of every tube cell of each strain by 200, which changes no move, where the form of
 before turns more than 20 agents otherwise; and the memory of the drift on each backend. `flow-reference.test.ts`
 tests that the CPU copy lets the sinks take what the sources give, to 10⁻⁶ of S, also when R is large, and the CPU
-copy of t / G and of the reads on cases made by hand.
+copy of t / G and of the reads on cases made by hand. The flow with the sinks and the drift run again with the levers of
+the crown (ADR 0086): 8 neighbours, the base conductance 0.002 and the flux to the front 2.
+
+`flow.gpu.test.ts` tests the flow over 8 neighbours (ADR 0086) on both backends: both passes against the CPU copy for 6
+steps with the base conductance 0.002, a wall with two ends and a dab under it; a vein of one cell along a diagonal
+between two foods, which carries the whole I0 over 8 neighbours (Kirchhoff with the weights, Q = I0, the memory of
+f(I0)) and nothing over 4 (Q = 0, it starves); and a wall of one cell beside one step of that vein, which stops both
+foods at their pressure limit. `tubes.gpu.test.ts` tests the stream over 8 neighbours against the CPU copy in each
+arena with a thin diagonal wall. `sinks.gpu.test.ts` runs the sinks with births at k = 2: the budget grows as at
+k = 1. `research/front/research.test.ts` holds the CPU copy to the prototype (`stencil=8 solver=app`, and 4 edges): the
+pressure after 16 iterations to 1e-5 of its largest value, and Q to 1e-6.
 
 `paid.gpu.test.ts` tests the births that the flux pays (ADR 0071) on both backends, each case one growth step from the
 moves of a twin without growth: two colonies of two strains with a tube body under their cores, starved cells, a thin

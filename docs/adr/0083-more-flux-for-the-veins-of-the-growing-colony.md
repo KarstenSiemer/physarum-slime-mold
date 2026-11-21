@@ -5,6 +5,8 @@
 - Extends [ADR 0082](0082-the-growing-colony-with-a-flow-over-8-neighbours.md) (not measured there: k above 4, the
   base 0.002).
 - Extended by ADR 0084 (2026-11-20): a fed sink and a sheet that thins after a time, to step 16,000; no split.
+- Extended by [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (2026-11-21): the base conductance and k as
+  settings of the engine.
 - The scripts: `research/front/e2m.sh` (runs, montages), `crowns.ts` (`base=` sets the base conductance), `e2m.ts`
   (the measures). The raw records are in the archive under `logs/engine/crown-0083/`; notes: `E2m-NOTES.md`.
 

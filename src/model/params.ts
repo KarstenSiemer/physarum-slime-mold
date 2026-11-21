@@ -360,7 +360,7 @@ export const globalSpec = {
   // scene with the flow. The panel and Learn take it up with part E5b of the engine (research/front/ENGINE.md).
   flowBase: {
     label: 'Base conductance',
-    help: 'Only the extended model has this setting, and only with Flow in the tubes. The conductivity of a cell with a tube is its tube body times the sum of this value and its flow memory. The flow memory grows where much flux runs. So at a low value a tube with much flux conducts far better than the thin sheet beside it, and the flux gathers in fewer veins. At a high value the sheet carries more of the flux. 0.02 is the value of the model. With the rules of the growth front, 0.002 gave a growing colony a few main veins that fork toward its rim.',
+    help: 'Only the extended model has this setting, and only with Flow in the tubes. The conductivity of a cell with a tube is its tube body times the sum of this value and its flow memory. The flow memory grows where much flux runs. So at a low value a tube with much flux conducts far better than the thin sheet beside it, and the flux gathers in fewer veins. At a high value the sheet carries more of the flux. 0.02 is the value of the model. With the rules of the growth front, the flow over 8 neighbours and twice the flux to the front, 0.002 gave a growing colony a few main veins that fork toward its rim.',
     min: 0.001,
     max: 0.1,
     step: 0.0001,
@@ -380,7 +380,7 @@ export const globalSpec = {
   // the rules of stage 4. The panel and Learn take it up with part E5b of the engine (research/front/ENGINE.md).
   frontFlux: {
     label: 'Flux to the front',
-    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front of a strain takes this many times twice the Flow strength from the foods, and the tubes carry it to the front. The births that this flux pays stay as many: one birth costs this many times more flux. So the flux changes the tubes and the sheet toward the front, and not the number of the births that it pays. 1 is the value of the rules. With the base conductance 0.002, 2 gave a growing colony a few main veins that fork toward its rim.',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front of a strain takes this many times twice the Flow strength from the foods, and the tubes carry it to the front. The births that this flux pays stay as many: one birth costs this many times more flux. So the flux changes the tubes and the sheet toward the front, and not the number of the births that it pays. 1 is the value of the rules. With the base conductance 0.002 and the flow over 8 neighbours, 2 gave a growing colony a few main veins that fork toward its rim.',
     min: 0.25,
     max: 16,
     step: 0.05,

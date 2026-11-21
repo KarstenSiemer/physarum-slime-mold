@@ -2737,9 +2737,58 @@ WebGL2 8.06 and 7.96 ms against 7.84 and 7.80 ms). The records are in `logs/engi
 | `mutations.txt`       | the tests that fail for each of the 59 wrong rules                      |
 | `steps-*.jsonl`       | the time of a step at capacity 1: this branch, `main`, and no rules     |
 
+### 33. Do the levers of the crown keep the bytes of every scene, and what does a step over 8 neighbours cost? [ADR 0086]
+
+Part E5a of the engine of stage 4 (`research/front/ENGINE.md`): the flow over 8 neighbours, the base conductance and
+the flux to the front as settings (`flowEdges`, `flowBase`, `frontFlux`). Their defaults, 4, 0.02 and 1, are those of
+before, and no scene has another value, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 32, with the name `g86-digest-branch`, against the record of part
+32, whose engine `main` has:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g86-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g86-digest-branch.jsonl research/flow/logs/engine/take-0075/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the levers, and the five rules and FP1 whose texts follow the new code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f 'LV%g' 1 35) TY37 TY126 TY128 TY129 TY134 FP1
+```
+
+Each must fail at least one test.
+
+**The time of a step** of the Maze with the flow, both backends, in turns: `main`, the flow over 8 neighbours as a
+branch on a uniform at 4 neighbours (`research/front/e5a-uniform.ts`), and this branch at 4 and at 8 neighbours. The
+copies lie at the root of the checkout; delete them before `npm run lint`:
+
+```bash
+zsh research/front/e5a-times.sh copies
+zsh research/front/e5a-times.sh run 8
+node research/front/e5a-times.ts
+```
+
+Result: 62 of 62 runs are equal, and each of the 41 wrong rules fails at least one test. A step of the Maze takes
+1.579 ms on WebGPU and 2.047 ms on WebGL2 on `main`, as many with this branch at 4 neighbours (1.579 and 2.037 ms),
+3.2 and 5.1 % more with the branch on a uniform, and 27.9 and 38.2 % more at 8 neighbours (2.020 and 2.829 ms; the
+median of 8 rounds, M3 Pro). The records are in `logs/engine/levers-0086/`:
+
+| Record                | Runs                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                         |
+| `mutations.txt`       | the tests that fail for each of the 41 wrong rules                                  |
+| `steps-*-r*.jsonl`    | the time of a step of the Maze: `main`, `uniform4`, `edges4` and `edges8`, 8 rounds |
+| `turns.txt`           | the order of the runs, with the load of the machine at the start of each            |
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 601 files, 10.9 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 860 files, 16.6 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -2785,6 +2834,7 @@ asks for the new digest.
 | `logs/engine/paid-0071/`                             | the runs of part 30 (ADR 0071): the digests of every scene, the wrong rules, the time of `rank` and of a step                                                                                                                   |
 | `logs/engine/tube-0072/`                             | the runs of part 31 (ADR 0072): the start scene on both backends, the spikes, the CPU checks, the prototype, digests, wrong rules                                                                                               |
 | `logs/engine/take-0075/`                             | the runs of part 32 (ADR 0075): the digests of every scene, the start scene with `take` on both backends, the wrong rules                                                                                                       |
+| `logs/engine/levers-0086/`                           | the runs of part 33 (ADR 0086): the digests of every scene, the wrong rules LV1 to LV35, the time of a step of the Maze                                                                                                         | 2026-11-21, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
