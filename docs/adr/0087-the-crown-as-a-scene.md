@@ -37,7 +37,8 @@ the engine behind the setting `territory` (ADR 0068 to ADR 0075), and its three 
    mouth, which look a little rounded. No cell lies within 0.05 cells of the edge of a stroke.
 3. **The settings of the case `none`, word for word** (the coordinator: the lines `RULES` and `BIG` of `e2n.sh` with
    `jones=all`, and the agent of `params()` of `research/front/sim.ts`). The table below maps each word. Every word has
-   its equal in the engine; two forms differ, as ADR 0067 and ADR 0069 decided, and the comparison below shows no
+   its equal in the engine. Two forms differ: the two tests of a sink follow paths over open cells, where the words
+   `fresh=box` and `sinkAt=edge` of the prototype take squares (ADR 0067, decision 10); the comparison below shows no
    effect of them. `forager()` gives the agent, so the scene has the settings of the Corn maze but for the lattice,
    the rules and the levers (`presets.test.ts`).
 4. **The panel shows each control only where it acts** (the coordinator). In the Flow section, below Flow strength:
@@ -59,28 +60,47 @@ the engine behind the setting `territory` (ADR 0068 to ADR 0075), and its three 
    9.1), the comments of `params.ts`, `sim.ts` and `programs.ts`, and the tests that held every scene to the defaults
    (`params.test.ts`). No rule changes. The fit of the grids of ADR 0058 holds 31 scenes, 3,456 cases, and the scene
    keeps its grid in every case (`research/electrode/README.md`).
+9. **The e2e test does not wait for the colony to leave the neck** (an agent's choice: the coordinator asked for a
+   test that waits for it).
+   The colony leaves the neck after 1,150 to 1,450 steps (below), and SwiftShader, the GPU of CI, runs the scene at
+   0.96 steps per second in the app and at 1.98 steps per second without the picture, in the image of CI on 4 cores
+   of an M3 Pro: 10 to 25 minutes for the wait, and GitHub is about three times slower (ADR 0010). A shard of the e2e
+   tests stops after 30 minutes (ADR 0061). So the test waits 30 steps, as the other tests of the flow do: the scene
+   loads from the panel, the Flow section shows its rules and levers with their values, the colony grows by more than
+   20 agents and its front has sinks, the link holds the settings, and each control goes where it does not act. In 12
+   runs on the M3 Pro the colony grew by 27 to 38 agents from step 10 to step 40 and had 16 to 29 sinks at step 30.
+   The exit from the neck is measured on the GPU of the M3 Pro, on both backends (`e5b.sh neck`). The test is the last
+   one of `tests/e2e/tubes.spec.ts`, so CI runs it in shard 3 of 4; the first test of the Tokyo scene moves to shard 2.
 
-| The prototype (`e2n.sh`, case `none`)                                                                                                                                                                           | The engine                                                                                                                     |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `layout=neck side=520 long=340` (`neckWide` 14, `neckLong` 40)                                                                                                                                                  | `lattice` [520, 340], `boundary` box, `crownShapes()`, `layout` food (decision 2)                                              |
-| `speed=0.004 speedOn=push`                                                                                                                                                                                      | the push, `TERRITORY.speed` 0.004 (`docs/model.md` 6.10)                                                                       |
-| `reach=6 fresh=box`                                                                                                                                                                                             | `SINKS.fresh` 6; the engine follows paths over open cells, the prototype the square (ADR 0067, decision 10)                    |
-| `sinkAt=edge`                                                                                                                                                                                                   | `SINKS.edge` 2, the edge of the territory (6.11), also over paths                                                              |
-| `slimeWeight=0.025`                                                                                                                                                                                             | `SINKS.slime` 0.025                                                                                                            |
-| `rim=1`                                                                                                                                                                                                         | an agent of the front lies at the rim, and its child goes out (9.1)                                                            |
-| `colony=1`                                                                                                                                                                                                      | the colony pays while it covers no food (8.7)                                                                                  |
-| `paidOn=sinks paidBy=rank sums=fixed`                                                                                                                                                                           | the paid births (9.1) and the sums of 6.11                                                                                     |
-| `sinkTube=1`                                                                                                                                                                                                    | the tube of a sink (6.11, ADR 0072)                                                                                            |
-| `solver=app`                                                                                                                                                                                                    | 16 iterations per step (8.3)                                                                                                   |
-| `scent=0`                                                                                                                                                                                                       | the app starts without a food scent                                                                                            |
-| `driftOn=take drift=1.5`                                                                                                                                                                                        | the drift `take` (8.7, ADR 0075), `drift` 1.5                                                                                  |
-| `stencil=8`                                                                                                                                                                                                     | `flowEdges` 8                                                                                                                  |
-| `base=0.002`                                                                                                                                                                                                    | `flowBase` 0.002                                                                                                               |
-| `norm=4 paid=40`                                                                                                                                                                                                | `frontFlux` 2: S = 2 k · I0 = 4 · I0, one birth for 20 k = 40 of flux (ADR 0086, decision 8)                                   |
-| `jones=all`                                                                                                                                                                                                     | Jones' births wherever the window allows them, the growth of every scene (section 9)                                           |
-| the defaults of `noFront()` that act: `tau` 100, `start` disc, `bodyOn` trail, `sinkOn` all, `shareOn` equal, `fluxOn` sum, `refOn` roles                                                                       | `SINKS.tau` 100, the start territory (6.10), the tube body of 8.1, every sink with its weight, Q of 8.4, the zero point of 8.3 |
-| `params()`: I0 8, slime life 144 h, sensor offset 7, angles 22.5° and 45°, step 1, deposit 5, decay 0.1, food weight 1, food strength 0.03, scent decay 0.1, covered 1, capacity 0.25 per cell, 50 start agents | `forager()`: the same values; `coveredFood` off; the start layout food places about 50 agents on a disc of about 100 cells     |
-| `every`, `steps`, `pics`, `dump`                                                                                                                                                                                | the records of a run, no rule                                                                                                  |
+| `e2n.sh`, case `none`                 | The engine                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------ |
+| `layout=neck side=520 long=340`       | `lattice` [520, 340], `boundary` box, `crownShapes()`, `layout` food (dec. 2)  |
+| `speed=0.004 speedOn=push`            | the push, `TERRITORY.speed` 0.004 (`docs/model.md` 6.10)                       |
+| `reach=6 fresh=box`                   | `SINKS.fresh` 6, over paths of open cells, not the square (ADR 0067, dec. 10)  |
+| `sinkAt=edge`                         | `SINKS.edge` 2, the edge of the territory (6.11), over paths too               |
+| `slimeWeight=0.025`                   | `SINKS.slime` 0.025                                                            |
+| `rim=1`                               | an agent of the front lies at the rim, and its child goes out (9.1)            |
+| `colony=1`                            | the colony pays while it covers no food (8.7)                                  |
+| `paidOn=sinks paidBy=rank sums=fixed` | the paid births (9.1) and the sums of 6.11                                     |
+| `sinkTube=1`                          | the tube of a sink (6.11, ADR 0072)                                            |
+| `solver=app`                          | 16 iterations per step (8.3)                                                   |
+| `scent=0`                             | the app starts without a food scent                                            |
+| `driftOn=take drift=1.5`              | the drift `take` (8.7, ADR 0075), `drift` 1.5                                  |
+| `stencil=8`                           | `flowEdges` 8                                                                  |
+| `base=0.002`                          | `flowBase` 0.002                                                               |
+| `norm=4 paid=40`                      | `frontFlux` 2: S = 2 k · I0 = 4 · I0, a birth for 20 k = 40 of flux (ADR 0086) |
+| `jones=all`                           | Jones' births wherever the window allows them, as in every scene (section 9)   |
+| `every`, `steps`, `pics`, `dump`      | the records of a run, no rule                                                  |
+
+- `crowns.ts` gives the neck its defaults, `neckWide` 14 and `neckLong` 40, and the food [`side` / 2, 8, 5].
+- The defaults of `noFront()` that act: `tau` 100 (`SINKS.tau`), `start` disc (the start territory of 6.10, the disc
+  and 3 cells), `bodyOn` trail (the tube body of 8.1), `sinkOn` all and `shareOn` equal (every sink with its weight),
+  `fluxOn` sum (Q of 8.4), `refOn` roles (the zero point of 8.3). The others (`sink`, `unit`, `hold`, `young`,
+  `jonesAge`) act on no run with `paid` above 0, `speed` above 0 and `reach` above 0.
+- `params()`, the agent: I0 8, a slime life of 144 hours, sensor offset 7, angles 22.5° and 45°, step 1, deposit 5,
+  decay 0.1, food weight 1, food strength 0.03, scent decay 0.1, covered food 1 (no rule), capacity 0.25 of the cells,
+  50 start agents on a disc of about 100 cells. `forager()` has the same values; the start layout food places about
+  50 agents there (section 10). The random streams of the two differ, so a seed gives another run in each.
 
 ## The comparison with the prototype
 
@@ -98,7 +118,7 @@ means over the seeds, and the least and the most.
 | WebGL2          | 316 (299 to 337) | 36.1 (34.7 to 38.2)            | 610 (582 to 648)  | 28 (13–38) |
 | WebGL2 / WebGPU | 0.99             | 1.00                           | 1.01              | 0.92       |
 
-The records of steps 500 and 1,000 agree as closely (ratios 0.98 to 1.02 but for the sinks, 0.86 to 1.04). The colony
+The records of steps 500 and 1,000 agree as closely (ratios 0.99 to 1.03, but 0.86 and 1.04 for the sinks). The colony
 leaves the neck at step 1,100 to 1,350 (its territory), 1,150 to 1,400 (its first agent below the neck) and 1,150 to
 1,450 (its tube body), in 12 runs of both backends (records every 50 steps).
 
@@ -126,8 +146,8 @@ records of ADR 0084): live agents / reach in cells.
 
 The form "tubes" of WebGPU seed 1 is the threshold of `form()` in `crown-table.ts`: a sheet needs agents on 0.08 of
 the old ground, and that run has 0.079; the prototype's runs have 0.089 and 0.085, the engine's others 0.082 and
-0.091. No measure lies outside the spread of the prototype's seeds by more than the engine's seeds spread among
-themselves.
+0.091. The largest difference: WebGL2 seed 1 has a rim of 769 cells and a reach of 214 cells, against 746 to 753
+cells and 209 to 210 cells of the other four runs, 2 % more.
 
 ![The prototype and the app, seed 1, steps 8,000 and 16,000](../images/crown-app.jpg)
 
@@ -143,7 +163,17 @@ TIME
 
 ## Checks
 
-CHECKS
+- **The bytes of the scenes**: the digests of every scene after 500 steps, both backends, with the state of the flow,
+  against the record of ADR 0086: 62 of 62 runs are equal. The two runs of the scene are new (`research/flow/README.md`,
+  part 34).
+- **The walls**: `research/front/e5b-walls.ts` and `presets.test.ts` (decision 2).
+- **Unit tests**: the scene (its group, its settings against the Corn maze, its cells against `neck()`, its texts),
+  the scene in the lists of the scenes with growth, with the flow and with the rule, the rules and the levers of every
+  scene (`params.test.ts`), a link of the scene, and the notice of a switch to Jones (`state.test.ts`).
+- **The e2e test** (decision 9) passes in the image of CI in 1.3 minutes; the other tests of the flow there take 0.3
+  to 1.0 minutes. The pictures of the app: `tests/pictures/crown.spec.ts`.
+- **No rule changes**, so no wrong rule is new; `mutate.ts check` finds the code of all 991 wrong rules.
+- VERIFY
 
 ## Not measured
 

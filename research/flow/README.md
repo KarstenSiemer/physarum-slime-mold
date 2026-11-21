@@ -2786,6 +2786,67 @@ median of 8 rounds, M3 Pro). The records are in `logs/engine/levers-0086/`:
 | `steps-*-r*.jsonl`    | the time of a step of the Maze: `main`, `uniform4`, `edges4` and `edges8`, 8 rounds |
 | `turns.txt`           | the order of the runs, with the load of the machine at the start of each            |
 
+### 34. Does the crown of the prototype grow in the app, and does every other scene keep its bytes? [ADR 0087]
+
+Part E5b of the engine of stage 4 (`research/front/ENGINE.md`): the scene Crown of veins, the case `none` of
+`research/front/e2n.sh` (ADR 0084) word for word, and the panel controls of the rules and of the levers. No rule and no
+pass changes, so every other scene must keep its bytes, and the scene must grow as the prototype grew.
+
+**The bytes of the scenes.** The digests as in part 33, with the name `g87-digest-branch`, against the record of part
+33:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g87-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g87-digest-branch.jsonl research/flow/logs/engine/levers-0086/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal; the two runs of the new scene have no partner in the record.
+
+**The scene against the prototype and between the backends** (`research/front/e5b.sh`; the runs lie in
+`research/front/out/e5b/`): both backends, seeds 1 to 6, to step 1,500 (`backends`, about 2 minutes); the same to step
+2,000 with a record every 50 steps, for the step at which the colony leaves the neck (`neck`); WebGPU seeds 1 and 2 and
+WebGL2 seed 1 to step 16,000 with the states of the steps 8,000, 12,000 and 16,000 (`long`, about 4 minutes); then the
+measures of `e2n.ts` and the pictures of D (`measure`), and the montage with the app's pictures (`montage`, after
+`npx playwright test --project=pictures tests/pictures/crown.spec.ts` on a built app):
+
+```bash
+bash research/front/e5b.sh backends
+node --import ./research/flow/register.mjs research/front/e5b.ts backends=research/front/out/e5b/backends
+bash research/front/e5b.sh neck
+bash research/front/e5b.sh long
+bash research/front/e5b.sh measure
+node --import ./research/flow/register.mjs research/front/e5b.ts growth=research/front/out/e5b/c1 proto=research/flow/logs/engine/crown-0084/c1/none/runs.jsonl
+bash research/front/e5b.sh montage
+```
+
+`node --import ./research/flow/register.mjs research/front/e5b-walls.ts` checks the walls of the scene against
+`neck()` of the prototype.
+
+**The time of a step** of the scene, both backends, in turns (`research/flow/engine/turns.sh`):
+
+TIMES
+
+Result: 62 of 62 runs are equal. Both backends grow alike to step 1,500 (the means of 6 seeds differ by 1 % in the
+live agents, the reach and the territory, by 8 % in the sinks), the colony leaves the neck at step 1,150 to 1,450,
+and to step 16,000 the engine gives the prototype's numbers: 7,207 to 7,471 agents against 7,235 and 7,328, a reach of
+209 to 214 cells against 209 and 210, one head, the same sheet behind the rim and the same veins on the arcs (ADR
+0087 has the tables). TIMES_RESULT The records are in `logs/engine/crown-scene-0087/`:
+
+| Record                | Runs                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                            |
+| `backends.jsonl`      | both backends, seeds 1 to 6, every 500 steps to step 1,500                             |
+| `start.jsonl`         | the same, every 10 steps to step 60: the numbers of the e2e test                       |
+| `neck.jsonl`          | the same, every 50 steps to step 2,000: the exit from the neck                         |
+| `long.jsonl`          | WebGPU seeds 1 and 2 and WebGL2 seed 1, every 500 steps to step 16,000                 |
+| `measures-*.jsonl`    | the measures of `e2n.ts` of the three long runs at the steps 8,000 and 16,000          |
+| `image-*.txt`         | SwiftShader in the image of CI: steps per second, and the e2e tests of the flow        |
+| `steps-*-r*.jsonl`    | the time of a step: the scene and the Corn maze from step 3,000, the scene from 15,000 |
+| `turns.txt`           | the order of the runs, with the load of the machine at the start of each               |
+
 ## The logs
 
 The logs are one archive in the repository, `logs.tar.gz`: 860 files, 16.6 MB of text. Unpacked,

@@ -118,7 +118,7 @@ it('runs the Crown of veins on both backends', { timeout: 14_400_000 }, async ()
       const rows: string[] = [];
       const t0 = performance.now();
       for (let done = 0; done < STEPS;) {
-        const n = Math.min(50 - (done % 50), STEPS - done);
+        const n = Math.min(EVERY - (done % EVERY), 50 - (done % 50), STEPS - done);
         sim.run(n);
         await sim.finish();
         done += n;

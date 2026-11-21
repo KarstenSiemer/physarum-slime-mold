@@ -5,6 +5,8 @@
 #                                         steps 8,000, 12,000 and 16,000 for the measures of the crown (e2n.ts)
 #   bash research/front/e5b.sh neck       both backends, seeds 1 to 6, to step 2,000: when the colony leaves the neck
 #   bash research/front/e5b.sh measure    the measures of e2n.ts at the steps 8,000 and 16,000, and the pictures of D
+#   bash research/front/e5b.sh montage    docs/images/crown-app.jpg, after tests/pictures/crown.spec.ts
+#   bash research/front/e5b.sh times      the time of a step, both backends, in turns
 # The runs lie in research/front/out/e5b/ (git ignores it).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -25,6 +27,12 @@ case "${1:-}" in
       VITE_OUT=e5b/c1 $RUN
     VITE_KINDS=webgl2 VITE_SEEDS=1 VITE_STEPS=16000 VITE_EVERY=500 VITE_DUMP=8000,12000,16000 \
       VITE_OUT=e5b/c1 $RUN
+    ;;
+  times)
+    # The time of a step (bench.gpu.test.ts), both backends, 4 rounds each (turns.sh): the scene and the Corn maze from
+    # step 3,000 on, and the scene from step 15,000 on, its colony 7 times as large. Records in research/flow/out/engine/.
+    VITE_SCENES=crown,corn-maze VITE_FLOWS=on VITE_WARM=3000 zsh research/flow/engine/turns.sh 4 e5b-3k=.
+    VITE_SCENES=crown VITE_FLOWS=on VITE_WARM=15000 zsh research/flow/engine/turns.sh 4 e5b-15k=.
     ;;
   all)
     mkdir -p "$OUT"
@@ -63,7 +71,7 @@ case "${1:-}" in
     ls -l docs/images/crown-app.jpg
     ;;
   *)
-    echo "usage: bash research/front/e5b.sh backends|long|measure|montage" >&2
+    echo "usage: bash research/front/e5b.sh backends|neck|long|measure|montage|times" >&2
     exit 1
     ;;
 esac
