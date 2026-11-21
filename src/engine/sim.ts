@@ -1,7 +1,7 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { at } from './at';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from './flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowEight, flowOn, flowStrains, packFlow } from './flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -562,13 +562,16 @@ export class Simulation implements Sim {
       ]),
     );
     pass.dispatchWorkgroups(...groups);
-    pass.setPipeline(k.stream);
+    // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the wall bytes (ADR 0086).
+    const eight = flowEight(this.settings);
+    const stream = eight ? this.kernels.tubeStreamEight() : k.stream;
+    pass.setPipeline(stream);
     pass.setBindGroup(
       0,
-      this.bind(`tubeStream${this.flowM}${String(this.flowP)}`, k.stream, [
+      this.bind(`tubeStream${this.flowM}${String(this.flowP)}${eight ? '-e8' : ''}`, stream, [
         this.params,
         null,
-        null,
+        eight ? this.shapeBuffer : null,
         flow.memoryArrays[this.flowM],
         null,
         null,
@@ -1652,7 +1655,7 @@ export class Simulation implements Sim {
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
     // The block of each strain holds the constants of stage 4 after its sites (packTerritory(); ADR 0067, decision 9).
     flow?.uniforms.forEach((block, strain) => {
-      const data = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain));
+      const data = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain), this.settings);
       this.device.queue.writeBuffer(block, 0, data);
     });
     // With the rules of stage 4, the passes of the flow with the lines of the territory (agents.wgsl `//#if TERRITORY`).
@@ -2094,10 +2097,12 @@ export class Simulation implements Sim {
   ) {
     // While the rules of stage 4 run, the update and the pressure that take the sinks (flow.wgsl `//#if TERRITORY`, ADR
     // 0070): they bind the state of the sinks, and the pressure their rates. Their groups hold buffers of the sinks:
-    // dropSinks() forgets them.
-    const passes = this.kernels.flowPasses(stage4 !== undefined);
+    // dropSinks() forgets them. Over 8 neighbours (`//#if EIGHT`, ADR 0086), the update and the pressure of that
+    // variant: the key of a group names it, since a group of an 'auto' layout belongs to its pipeline.
+    const eight = flowEight(this.settings);
+    const passes = this.kernels.flowPasses(stage4 !== undefined, eight);
     const taking = stage4 ? [null, null, stage4.sinks.rates, stage4.sinks.state] : [];
-    const taken = stage4 ? '-sinks' : '';
+    const taken = `${stage4 ? '-sinks' : ''}${eight ? '-e8' : ''}`;
     const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
@@ -2557,7 +2562,11 @@ class Kernels {
   private flowPipelines?: FlowKernels;
   /** The update and the pressure of the flow with the sinks (flow.wgsl `//#if TERRITORY`, ADR 0070), and `takes`. */
   private flowSinkPipelines?: FlowSinkKernels;
+  /** The flow over 8 neighbours (flow.wgsl `//#if EIGHT`, ADR 0086), by whether it takes the sinks. */
+  private readonly flowEightPipelines = new Map<boolean, FlowKernels>();
   private tubePipelines?: TubeKernels;
+  /** The stream of the picture of the tubes over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086). */
+  private tubeStreamEightPipeline?: GPUComputePipeline;
   private slimePipeline?: GPUComputePipeline;
   private slimeBrushPipeline?: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout };
 
@@ -2614,9 +2623,11 @@ class Kernels {
   /**
    * The passes of the flow in the tubes (flow.wgsl), built at their first use. `sinks`: with the update and the pressure
    * that take the sinks of the rules of stage 4 (`//#if TERRITORY`, ADR 0070); the passes of the ports stay the same.
-   * Without the rules the source is the one of the code before, character for character.
+   * Without the rules the source is the one of the code before, character for character. `eight`: the update and the
+   * pressure over 8 neighbours (`//#if EIGHT`, ADR 0086).
    */
-  flowPasses(sinks = false): FlowKernels {
+  flowPasses(sinks = false, eight = false): FlowKernels {
+    if (eight) return this.flowEightPasses(sinks);
     if (sinks) return this.flowSinkPasses();
     if (!this.flowPipelines) {
       const pipeline = this.flowBuild([]);
@@ -2645,6 +2656,25 @@ class Kernels {
       };
     }
     return this.flowSinkPipelines;
+  }
+
+  /**
+   * The update and the pressure over 8 neighbours (flow.wgsl `//#if EIGHT`, ADR 0086), built at their first use, with
+   * the sinks of the rules of stage 4 (`sinks`) or without them. The passes of the ports are those of flowPasses();
+   * `takes` reads no edge and stays that of flowSinkPasses().
+   */
+  private flowEightPasses(sinks: boolean): FlowKernels {
+    let p = this.flowEightPipelines.get(sinks);
+    if (!p) {
+      const pipeline = this.flowBuild(sinks ? ['TERRITORY', 'EIGHT'] : ['EIGHT']);
+      p = {
+        ...this.flowPasses(),
+        update: pipeline('update'),
+        pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
+      };
+      this.flowEightPipelines.set(sinks, p);
+    }
+    return p;
   }
 
   /** The pipelines of an entry point of the source of the flow with the blocks of `names` (variant.ts). */
@@ -2700,26 +2730,13 @@ class Kernels {
     return this.slimeBrushPipeline;
   }
 
-  /** The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. */
+  /**
+   * The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. The
+   * source without the lines of EIGHT is the one of the code before, character for character.
+   */
   tubes(): TubeKernels {
     if (!this.tubePipelines) {
-      const module = this.device.createShaderModule({ code: common + tubesWgsl });
-      const constants = {
-        RADIUS: TUBES.radius,
-        EDGE: TUBES.edge,
-        SHEET: TUBES.sheet,
-        SPAN: TUBES.span,
-        BODY_LOW: FLOW.bodyLow,
-        FAST: STREAM.fast,
-        TILE: TUBE_TILE,
-        WINDOW: TUBE_WINDOW,
-      };
-      // A pipeline takes only the constants that its entry point uses.
-      const pipeline = (entryPoint: string, names: (keyof typeof constants)[]) =>
-        this.device.createComputePipeline({
-          layout: 'auto',
-          compute: { module, entryPoint, constants: Object.fromEntries(names.map((n) => [n, constants[n]])) },
-        });
+      const pipeline = this.tubeBuild([]);
       this.tubePipelines = {
         roots: pipeline('roots', ['SPAN', 'BODY_LOW', 'TILE']),
         picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET', 'TILE', 'WINDOW']),
@@ -2727,6 +2744,36 @@ class Kernels {
       };
     }
     return this.tubePipelines;
+  }
+
+  /**
+   * The stream of the picture of the tubes over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086), as the flow then
+   * runs, built at its first use. It also binds the wall bytes (binding 2).
+   */
+  tubeStreamEight(): GPUComputePipeline {
+    this.tubeStreamEightPipeline ??= this.tubeBuild(['EIGHT'])('stream', ['BODY_LOW', 'FAST', 'TILE']);
+    return this.tubeStreamEightPipeline;
+  }
+
+  /** The pipelines of an entry point of tubes.wgsl with the blocks of `names` (variant.ts) and the numbers of tubes.ts. */
+  private tubeBuild(names: string[]) {
+    const module = this.device.createShaderModule({ code: common + variant(tubesWgsl, names) });
+    const constants = {
+      RADIUS: TUBES.radius,
+      EDGE: TUBES.edge,
+      SHEET: TUBES.sheet,
+      SPAN: TUBES.span,
+      BODY_LOW: FLOW.bodyLow,
+      FAST: STREAM.fast,
+      TILE: TUBE_TILE,
+      WINDOW: TUBE_WINDOW,
+    };
+    // A pipeline takes only the constants that its entry point uses.
+    return (entryPoint: string, keys: (keyof typeof constants)[]) =>
+      this.device.createComputePipeline({
+        layout: 'auto',
+        compute: { module, entryPoint, constants: Object.fromEntries(keys.map((n) => [n, constants[n]])) },
+      });
   }
 
   /**

@@ -72,6 +72,7 @@ import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
 import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
 import territoryWgsl from './shaders/territory.wgsl?raw';
+import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { GROWTH_BINDINGS, GROWTH_FLOW_BINDINGS, GROWTH_TERRITORY_BINDINGS, Simulation } from './sim';
@@ -156,6 +157,12 @@ describe('WGSL', () => {
       flow: common + variant(flowWgsl),
       // The update and the pressure that take the sinks of the rules of stage 4 (ADR 0070).
       flowSinks: common + variant(flowWgsl, ['TERRITORY']),
+      // The flow over 8 neighbours (ADR 0086), without and with the sinks, and the picture of the tubes with its stream
+      // over 4 and over 8 neighbours.
+      flowEight: common + variant(flowWgsl, ['EIGHT']),
+      flowSinksEight: common + variant(flowWgsl, ['TERRITORY', 'EIGHT']),
+      tubes: common + variant(tubesWgsl),
+      tubesEight: common + variant(tubesWgsl, ['EIGHT']),
       init: common + initWgsl,
       diffuse: common + diffuseWgsl,
       // The brush on the environment and the brush on the slime field share the segment of brush.wgsl (ADR 0055).

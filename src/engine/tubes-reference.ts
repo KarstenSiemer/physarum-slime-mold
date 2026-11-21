@@ -2,7 +2,7 @@
 // tubes.gpu.test.ts checks both backends against it. tubes.ts states the rule.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
-import { FLOW } from './flow';
+import { FLOW, FLOW_EIGHT } from './flow';
 import { STREAM, TUBES, TUBE_REACH, TUBE_WINDOW } from './tubes';
 
 /** The grid as the passes see it: 4 bytes per cell as Sim.readShape() returns them (the first is the wall byte). */
@@ -151,20 +151,37 @@ const NEIGHBOURS = [
   [0, -1],
 ] as const;
 
+/** The four diagonal neighbours of a cell over 8 neighbours (ADR 0086): south-east, south-west, north-east, north-west. */
+const DIAGONALS = [
+  [1, 1],
+  [-1, 1],
+  [1, -1],
+  [-1, -1],
+] as const;
+
+/** The weights of the edges over 8 neighbours as the passes hold them, float32 (AXIS and DIAG in tubes.wgsl). */
+const [AXIS, DIAG] = [Math.fround(FLOW_EIGHT.axis), Math.fround(FLOW_EIGHT.diag)];
+
 /**
  * The stream of the plasm (tubes.ts, point 6; `stream` in tubes.wgsl): per cell the direction of the flow of the
  * plasm times its speed, 4 values per cell (x, y, 0, 0). `memories` and `pressures`: per strain 4 values per cell, as
  * Sim.readFlow() and Sim.readPressure() return them. The sums are 32-bit floats, as on the GPU, so the same lane has
- * the largest flux.
+ * the largest flux. `eight`: over 8 neighbours (ADR 0086), as the flow then runs: the axis edges with the weight AXIS,
+ * and the diagonal edges with DIAG where both cells beside the edge are open (in the arena and no cell of a wall).
  */
 export function tubeStream(
   grid: TubeGrid,
   memories: readonly Float32Array[],
   pressures: readonly Float32Array[],
+  eight = false,
 ): Float32Array {
   const { width: w, height: h } = grid;
   const f = Math.fround;
   const out = new Float32Array(w * h * 4);
+  const open = (qx: number, qy: number) => {
+    const q = arenaCell(grid, qx, qy);
+    return q >= 0 && wallByte(grid, q) < WALL_BYTE;
+  };
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const c = arenaCell(grid, x, y);
@@ -187,6 +204,26 @@ export function tubeStream(
             flux[lane] = (flux[lane] ?? 0) + Math.abs(leaves);
             alongX[lane] = (alongX[lane] ?? 0) + ox * leaves;
             alongY[lane] = (alongY[lane] ?? 0) + oy * leaves;
+          }
+        }
+        if (eight) {
+          for (let lane = 0; lane < 4; lane++) {
+            flux[lane] = AXIS * (flux[lane] ?? 0);
+            alongX[lane] = AXIS * (alongX[lane] ?? 0);
+            alongY[lane] = AXIS * (alongY[lane] ?? 0);
+          }
+          for (const [ox, oy] of DIAGONALS) {
+            if (!open(x + ox, y) || !open(x, y + oy)) continue;
+            const n = arenaCell(grid, x + ox, y + oy);
+            const gn = n < 0 ? 0 : (memory[n * 4 + 2] ?? 0);
+            if (gn <= 0) continue;
+            const edge = f(DIAG * f(f(f(2 * g) * gn) / f(g + gn)));
+            for (let lane = 0; lane < 4; lane++) {
+              const leaves = f(edge * f((pressure[c * 4 + lane] ?? 0) - (pressure[n * 4 + lane] ?? 0)));
+              flux[lane] = (flux[lane] ?? 0) + Math.abs(leaves);
+              alongX[lane] = (alongX[lane] ?? 0) + ox * leaves;
+              alongY[lane] = (alongY[lane] ?? 0) + oy * leaves;
+            }
           }
         }
         let lane = 0;

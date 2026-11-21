@@ -147,6 +147,12 @@ export const MODELS = ['jones', 'extended'] as const;
  */
 export const STEP_ORDERS = ['move-first', 'sense-first'] as const;
 export type StepOrder = (typeof STEP_ORDERS)[number];
+/**
+ * The neighbours of a cell in the flow in the tubes (ADR 0086): 4, the cells that share a side with it, or 8, also the
+ * cells at its corners (ADR 0081). Only with the flow; every scene has 4.
+ */
+export const FLOW_EDGES = [4, 8] as const;
+export type FlowEdges = (typeof FLOW_EDGES)[number];
 
 export type Layout = (typeof LAYOUTS)[number];
 export type Boundary = (typeof BOUNDARIES)[number];
@@ -350,6 +356,16 @@ export const globalSpec = {
     log: true,
     ref: 'Tero et al. 2010, Science 327: 439, Fig. 3 and S1',
   },
+  // The base conductance of a tube (ADR 0086): a lever of the crown of the prototype (ADR 0083, ADR 0084), in every
+  // scene with the flow. The panel and Learn take it up with part E5b of the engine (research/front/ENGINE.md).
+  flowBase: {
+    label: 'Base conductance',
+    help: 'Only the extended model has this setting, and only with Flow in the tubes. The conductivity of a cell with a tube is its tube body times the sum of this value and its flow memory. The flow memory grows where much flux runs. So at a low value a tube with much flux conducts far better than the thin sheet beside it, and the flux gathers in fewer veins. At a high value the sheet carries more of the flux. 0.02 is the value of the model. With the rules of the growth front, the flow over 8 neighbours and twice the flux to the front, 0.002 gave a growing colony a few main veins that fork toward its rim.',
+    min: 0.001,
+    max: 0.1,
+    step: 0.0001,
+    log: true,
+  },
   // The drift of the rules of stage 4 (ADR 0065, decision 6; ADR 0070): the weight of the pressure of the flow in the
   // sensors of an agent. Its default and the form of the setting (one for all strains) are provisional: the panel and
   // the scenes take it up with part E4 of the engine (research/front/ENGINE.md), and until then Learn shows no help.
@@ -359,6 +375,16 @@ export const globalSpec = {
     min: 0,
     max: 5,
     step: 0.05,
+  },
+  // The flux that the front of a strain takes, k (ADR 0086; ADR 0083): a lever of the crown of the prototype, only with
+  // the rules of stage 4. The panel and Learn take it up with part E5b of the engine (research/front/ENGINE.md).
+  frontFlux: {
+    label: 'Flux to the front',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front of a strain takes this many times twice the Flow strength from the foods, and the tubes carry it to the front. The births that this flux pays stay as many: one birth costs this many times more flux. So the flux changes the tubes and the sheet toward the front, and not the number of the births that it pays. 1 is the value of the rules. With the base conductance 0.002 and the flow over 8 neighbours, 2 gave a growing colony a few main veins that fork toward its rim.',
+    min: 0.25,
+    max: 16,
+    step: 0.05,
+    log: true,
   },
   speed: {
     label: 'Speed',
@@ -464,6 +490,15 @@ export const flowHelp = {
   ref: 'Tero, Kobayashi and Nakagaki 2007, J. Theor. Biol. 244: 553; Tero et al. 2010, Science 327: 439; Marbach et al. 2023, eLife 12: e78100',
 } as const;
 
+/**
+ * Help for the choice of the neighbours of the flow (`flowEdges`, ADR 0086). The panel and Learn take it up with part
+ * E5b of the engine (research/front/ENGINE.md).
+ */
+export const flowEdgesHelp = {
+  label: 'Flow over 8 neighbours',
+  help: 'Only the extended model has this setting, and only with Flow in the tubes. With 4 neighbours the flux runs from each cell to the 4 cells that share a side with it. With 8 it also runs to the 4 cells at its corners, but not past the corner of a wall. With 4, a broad flow reads up to 1.41 times more flux along a diagonal of the grid than along an axis, and a thin vein on a diagonal is a staircase, so the veins prefer the directions of the grid. With 8, a broad flow and a thin vein read their flux the same in every direction to within 8 %, and the veins follow the flow, not the grid. Every scene has 4.',
+} as const;
+
 /** Help for the switch "Draw the tubes by their flow" below Flow in the tubes (ADR 0034); Learn → Controls lists it. */
 export const tubeViewHelp = {
   label: 'Draw the tubes by their flow',
@@ -548,6 +583,11 @@ export interface Settings extends Record<GlobalKey, number> {
   /** Flow in the tubes (flowHelp, ADR 0029), with `flowStrength`. Only in the extended model (constrain()). */
   flow: boolean;
   /**
+   * The neighbours of a cell in the flow (flowEdgesHelp, ADR 0086), with `flowBase`: in force while the flow is on.
+   * The Jones model binds it to 4 (constrain()).
+   */
+  flowEdges: FlowEdges;
+  /**
    * The rules of stage 4 (ADR 0065, ADR 0067, ADR 0068), named for their first rule: each strain has a territory,
    * agents move, come to life and are born only onto the territory of their strain, and the agents push it open. They
    * run only in the extended model with growth and the flow (engine/territory.ts territoryOn()). No scene has them yet.
@@ -626,6 +666,7 @@ export function defaultSettings(): Settings {
     growth: false,
     stepOrder: 'sense-first',
     flow: false,
+    flowEdges: 4,
     territory: false,
     style: 'gel',
     gelColor: 'mild',
@@ -662,8 +703,12 @@ export function defaultSettings(): Settings {
     slimeLife: 144,
     // Tero et al. 2010 use I0 = 2 per tube (Fig. 4); a tube of this app is about 4 cells wide (ADR 0029).
     flowStrength: 8,
+    // The base conductance of ADR 0029 (engine/flow.ts FLOW.base; ADR 0086).
+    flowBase: 0.02,
     // The crown of ADR 0065, decision 6: provisional until the scenes take the rules of stage 4 up (ADR 0070).
     drift: 1.5,
+    // The sinks take 2 · I0 together (ADR 0065, decision 1; ADR 0086).
+    frontFlux: 1,
     speed: 120,
     exposure: 0,
     bloom: 1,
@@ -774,6 +819,8 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   out.stepOrder = oneOf(raw.stepOrder, STEP_ORDERS, order);
   // A link from before the flow holds none: it stays off (ADR 0029).
   out.flow = raw.flow === true;
+  // So with the neighbours of the flow (ADR 0086): a link without them runs with 4, as it was made.
+  out.flowEdges = raw.flowEdges === 8 ? 8 : 4;
   // So with the rules of stage 4 (ADR 0068): a link without the setting runs without them, as it was made.
   out.territory = raw.territory === true;
 
@@ -919,17 +966,23 @@ function asJones(s: Settings): Settings {
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
   // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
   // So are the rules of stage 4 (ADR 0068): they need the flow, and a link of the Jones model holds none of them, nor
-  // their drift (ADR 0070).
-  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && !s.territory && s.drift === d.drift;
-  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && own;
+  // their drift (ADR 0070), nor the flux of their front (ADR 0086). Nor the neighbours and the base conductance of the
+  // flow (ADR 0086).
+  const stage4 = !s.territory && s.drift === d.drift && s.frontFlux === d.frontFlux;
+  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && stage4;
+  const flow = !s.flow && s.flowStrength === d.flowStrength && s.flowEdges === d.flowEdges && s.flowBase === d.flowBase;
+  const ok = strainOk && bound && flow && own;
   if (ok) return s;
   return {
     ...s,
     scentDecay: st.decay,
     trailSaturation: 0,
     flow: false,
+    flowEdges: d.flowEdges,
+    flowBase: d.flowBase,
     territory: false,
     drift: d.drift,
+    frontFlux: d.frontFlux,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
     slimeLife: d.slimeLife,

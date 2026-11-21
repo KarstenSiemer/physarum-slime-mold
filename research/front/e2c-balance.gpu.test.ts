@@ -65,7 +65,7 @@ it('balances each component of each network', { timeout: 3_600_000 }, async () =
           if (first[s]! < 0) first[s] = sim.step;
           const memory = await sim.readFlow(s);
           const rates = await sim.readSinks(s);
-          const u = new Float32Array(packTerritory(packFlow(s0, sites, undefined, s)));
+          const u = new Float32Array(packTerritory(packFlow(s0, sites, undefined, s), s0));
           const ports = flowPorts(grid, u, sites.cells, {
             memory: before[s]!,
             pressure: new Float32Array(0),

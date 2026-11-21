@@ -2,7 +2,8 @@
 
 The rules of stage 4 (ADR 0065, decision 1) come into the engine in parts, in the forms of ADR 0067. This page says
 what each part holds, and what the next agent needs to know. The rules in force are in `docs/model.md`, sections 6.10,
-6.11, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070, ADR 0071, ADR 0072 and ADR 0075.
+6.11, 8.1, 8.7 and 9.1; the decisions of the parts are in ADR 0068, ADR 0069, ADR 0070, ADR 0071, ADR 0072, ADR 0075
+and ADR 0086.
 
 ## The parts
 
@@ -15,6 +16,8 @@ what each part holds, and what the next agent needs to know. The rules in force 
 | E2c  | the tube of a sink; the gap between the backends was a chance of six seeds               | done (ADR 0072) |
 | E2e  | the drift `take` of ADR 0074: a sensor off the tubes reads the ground of the agent       | done (ADR 0075) |
 | E4   | scenes turn the rules on, the panel, digests, measures, the e2e tests of Reid et al.     | next            |
+| E5a  | the levers of the crown: the flow over 8 neighbours, the base conductance, the flux k    | done (ADR 0086) |
+| E5b  | the crown scene, the panel controls and the help in Learn for the levers                 | next (ADR 0087) |
 
 ## The setting
 
@@ -30,6 +33,35 @@ what each part holds, and what the next agent needs to know. The rules in force 
 - A link holds the setting only while it is on (`linkSettings()` in `src/model/url.ts`). The Jones model sets it off
   (`asJones()`).
 - A change of `territoryOn()` restarts the run (`apply()` in `src/engine/engine.ts`).
+
+## The levers of the crown (E5a, ADR 0086)
+
+The crown of ADR 0084 (case `none` of `research/front/e2n.sh`) runs the rules of stage 4 with three levers more. Each
+is a setting in `src/model/params.ts` whose default keeps the bytes of every scene; no scene and no panel control has
+another value yet (E5b).
+
+| Setting     | Default, range          | In force                  | In the passes                                                |
+| ----------- | ----------------------- | ------------------------- | ------------------------------------------------------------ |
+| `flowEdges` | 4; 4 or 8               | every scene with the flow | the variant EIGHT of the update, the pressure and the stream |
+| `flowBase`  | 0.02; 0.001 to 0.1, log | every scene with the flow | `U.b.x` of the block of the flow (packFlow())                |
+| `frontFlux` | 1; 0.25 to 16, log      | the rules of stage 4      | `U.take.x` = 2 k (packSinks()); the budget `U.take.y` stays  |
+
+- The crown of ADR 0084 is `flowEdges` 8, `flowBase` 0.002 and `frontFlux` 2 (`norm=4 paid=40`), with the rules on.
+- The pattern of `drift` and `territory`: the Jones model sets the defaults (`asJones()`); a link holds `flowEdges`
+  and `flowBase` only while the flow is on, and `frontFlux` only while `territory` is on (`linkSettings()`); a link
+  without them runs with the defaults. Learn shows none of them (`Learn.svelte`), and the notice of a switch to Jones
+  skips the base conductance with the flow strength (`jonesChanges()` in `src/ui/state.svelte.ts`).
+- `flowEight(s)` (`src/engine/flow.ts`): the setting 8 while the flow runs. Both sims pick the passes by it in every
+  step, so a change acts at the next step and restarts nothing.
+- The 8 edges: `//#if EIGHT` in `shaders/flow.wgsl` (`diagonalXY()`, `diagonalFlux()`, AXIS and DIAG; the update, and
+  the pressure with one line after a `//#else`) and in `shaders/tubes.wgsl` (`flowOpen()`, the stream); `#if EIGHT` in
+  `gl/glsl/flow.frag` and `gl/glsl/tubes.frag`. Without EIGHT each source is the one of before. The pipelines are
+  `Kernels.flowPasses(sinks, true)` and `Kernels.tubeStreamEight()`; the programs `Programs.flowEight(sinks)` and
+  `Programs.tubeStreamEight()`. The stream over 8 binds the wall bytes (`shape`, binding 2 on WebGPU).
+- The CPU copy reads the edges from the block: `U.g.w` is 1 with 8 edges (packFlow()), and no pass reads it
+  (`eightOf()` in `src/engine/flow-reference.ts`). `tubeStream(…, eight)` in `src/engine/tubes-reference.ts`.
+- Readers of the edges that stay as they are, as the prototype has them: the tube of a sink (`tubeOut()`, 4
+  neighbours), the drift (`takes`, take / G), the ports, the roles and the paths of the sinks.
 
 ## The state on the GPU
 
@@ -134,6 +166,11 @@ what each part holds, and what the next agent needs to know. The rules in force 
 
 ## Traps for E4
 
+- **The levers** (ADR 0086): the groups of the update and the pressure over 8 neighbours end in `-e8` (`flowUpdate…`,
+  `flowPressure…`), and so does the group of the stream (`tubeStream…-e8`). `variant.test.ts` lets EIGHT replace one
+  line of `flow.wgsl` after a `//#else` (the sum of the pressure) and none of `tubes.wgsl`. The weights are float32
+  literals in four files; `flow.test.ts` holds them to `FLOW_EIGHT`.
+
 - **Bind groups** of WebGPU are cached by key. A key of a group that holds the territory must contain `terr`
   (`dropTerritory()` deletes those), one that holds a buffer of the flow must contain `flow` (`dropFlow()`), one that
   holds the slime field must start with `slime` (`dropSlime()`), and one that holds a buffer of the sinks must contain
@@ -222,8 +259,16 @@ what each part holds, and what the next agent needs to know. The rules in force 
   `research/front/E2c-NOTES.md`.
 - The measure of ADR 0075: `research/front/e2e-backends.gpu.test.ts` (the start scene with `take` on both backends)
   and `research/front/e2e-summary.ts`; the commands and the numbers in `research/front/E2e-NOTES.md`.
+- The levers (ADR 0086), both backends: `flow.gpu.test.ts` (the CPU copy over 8 neighbours with the base 0.002, a
+  diagonal vein over 8 and 4, a wall corner), `tubes.gpu.test.ts` (the stream over 8 in each arena),
+  `flow-sinks.gpu.test.ts` (the flow with the sinks and the drift with the levers), `sinks.gpu.test.ts` (the budget at
+  k = 2). The CPU copy against the prototype: `research/front/research.test.ts`. The digests, the wrong rules LV1 to
+  LV35 and the time of a step: `research/flow/README.md`, part 33.
 
 ## Not measured
+
+- The levers of ADR 0086 in a scene: no scene turns them on (E5b). The crown of ADR 0084 in the engine.
+- The time of the stream over 8 neighbours; the 8 edges on SwiftShader beside the GPU tests of CI.
 
 - The time of `test` and `win` with the rules apart from the step; the time of a step with the rules in any scene but
   the start scene.

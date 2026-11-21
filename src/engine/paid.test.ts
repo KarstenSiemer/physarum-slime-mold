@@ -80,7 +80,7 @@ describe('the births that the flux pays (ADR 0071)', () => {
     expect(paidIncrement(8)).toBe(f(0.8));
     expect(paidIncrement(1)).toBe(f(0.1));
     const s = { ...defaultSettings(), flowStrength: 3 };
-    const block = new Float32Array(packTerritory(packFlow(s, NO_SITES)));
+    const block = new Float32Array(packTerritory(packFlow(s, NO_SITES), s));
     expect(block[FLOW_TAKE_SLOT * 4 + 1]).toBe(paidIncrement(3));
   });
 

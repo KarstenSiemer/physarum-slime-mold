@@ -6,7 +6,8 @@
 // (ADR 0055), of the amount of slime and the film that the picture draws from it (ADR 0057), of the outlines and
 // the picture of the electrodes (ADR 0058), of the black level below the plasm (ADR 0062), of the density when the
 // rule of one agent per cell goes on (ADR 0063), of the start spot of a scene (ADR 0066), of the forms of a GPU for
-// the growth front in the prototype on the CPU (ADR 0067) and of the territory of each strain (ADR 0068). The script
+// the growth front in the prototype on the CPU (ADR 0067), of the territory of each strain (ADR 0068) and of the levers
+// of the crown: the flow over 8 neighbours, the base conductance and the flux to the front (ADR 0086). The script
 // puts one wrong rule at a time into a source file of the app,
 // runs the GPU tests of the flow, of the picture or of the agents on the backend of that file, and puts the file back.
 // A wrong rule of the food sites on the CPU (decision 17, sites.ts) runs the unit tests of its file, and so does one of
@@ -217,6 +218,24 @@ const [PAID_GPU, PAID_GL] = ['the births that the flux pays on webgpu', 'the bir
 /** The forms of a GPU for the rules of stage 4 in the prototype on the CPU (ADR 0067), with its unit tests. */
 const STAGE4_SIM = 'research/front/sim.ts';
 const STAGE4_SPEC = 'research/front/research.test.ts';
+/**
+ * The levers of the crown (ADR 0086): the passes of the flow, of the sinks and of the stream on each backend with the
+ * GPU tests that use them (8 neighbours, the base 0.002, the flux to the front 2); the CPU copy against the prototype
+ * of stage 4, and the block, the settings and the link with their unit tests.
+ */
+const TUBES_WGSL_FILE = 'src/engine/shaders/tubes.wgsl';
+const TUBES_FRAG_FILE = 'src/engine/gl/glsl/tubes.frag';
+const FLOW_UNIT = 'src/engine/flow.test.ts';
+const [EIGHT_GPU, EIGHT_GL] = ['on webgpu .*(8 neighbours|diagonal)', 'on webgl2 .*(8 neighbours|diagonal)'];
+const [CROWN_GPU, CROWN_GL] = [
+  'on webgpu .*(8 neighbours|times the drift)',
+  'on webgl2 .*(8 neighbours|times the drift)',
+];
+const [BUDGET_GPU, BUDGET_GL] = [
+  'the sinks on webgpu .*levers of the crown',
+  'the sinks on webgl2 .*levers of the crown',
+];
+const PROTOTYPE_CHECK = 'CPU copy of the engine over 8 neighbours';
 
 /**
  * A wrong rule: its name, the file, the text of the right rule in it, the wrong text, the tests to run (a part of their
@@ -5805,8 +5824,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'TY37 params: the Jones model keeps the setting',
     PARAMS_TS,
-    '  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && !s.territory && s.drift === d.drift;',
-    '  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && s.drift === d.drift;',
+    '  const stage4 = !s.territory && s.drift === d.drift && s.frontFlux === d.frontFlux;',
+    '  const stage4 = s.drift === d.drift && s.frontFlux === d.frontFlux;',
     'stage 4',
     PARAMS_SPEC,
   ],
@@ -6521,8 +6540,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'TY126 sim.ts: the flow runs its update and its pressure without the sinks',
     GPU_SIM,
-    '    const passes = this.kernels.flowPasses(stage4 !== undefined);',
-    '    const passes = this.kernels.flowPasses();',
+    '    const passes = this.kernels.flowPasses(stage4 !== undefined, eight);',
+    '    const passes = this.kernels.flowPasses(false, eight);',
     TAKE_GPU,
     TAKE_SPEC,
   ],
@@ -6537,16 +6556,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'TY128 gl/sim.ts: the update of the flow adapts without the front',
     GL_SIM,
-    '        taking?.update ?? programs.update,',
-    '        programs.update,',
+    '    const update = eight?.update ?? taking?.update ?? programs.update;',
+    '    const update = eight?.update ?? programs.update;',
     TAKE_GL,
     TAKE_SPEC,
   ],
   [
     'TY129 gl/sim.ts: the pressure takes no sink',
     GL_SIM,
-    '          taking?.pressure ?? programs.pressure,',
-    '          programs.pressure,',
+    '    const iterate = eight?.pressure ?? taking?.pressure ?? programs.pressure;',
+    '    const iterate = eight?.pressure ?? programs.pressure;',
     TAKE_GL,
     TAKE_SPEC,
   ],
@@ -6585,8 +6604,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'TY134 sinks.ts: the sinks take the flow strength once',
     SINKS_TS,
-    '  f.set([SINKS.take, 0, 0, 0], FLOW_TAKE_SLOT * 4);',
-    '  f.set([1, 0, 0, 0], FLOW_TAKE_SLOT * 4);',
+    '  f.set([SINKS.take * frontFlux, 0, 0, 0], FLOW_TAKE_SLOT * 4);',
+    '  f.set([frontFlux, 0, 0, 0], FLOW_TAKE_SLOT * 4);',
     '',
     SINKS_UNIT,
   ],
@@ -7668,8 +7687,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'FP1 front: the box of a sink looks one cell less far for ground without slime',
     STAGE4_SIM,
-    'for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)',
-    'for (let yy = Math.max(0, y - r + 1); yy <= Math.min(h - 1, y + r - 1); yy++)',
+    'for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++)\n      for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {\n        const t = yy * w + xx;\n        if (open[t] && !this.hasSlime(t, k)) return true;',
+    'for (let yy = Math.max(0, y - r + 1); yy <= Math.min(h - 1, y + r - 1); yy++)\n      for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {\n        const t = yy * w + xx;\n        if (open[t] && !this.hasSlime(t, k)) return true;',
     'by the box as by the distance field',
     STAGE4_SPEC,
   ],
@@ -7792,6 +7811,274 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'this.budget = Math.min(this.budget, atFront);',
     'paidBy=rank',
     STAGE4_SPEC,
+  ],
+  [
+    'LV1 wgsl: a diagonal edge has the weight of an axis edge',
+    WGSL,
+    'const DIAG = 0.292893231; // 1 − 1/√2',
+    'const DIAG = 0.414213568; // 1 − 1/√2',
+    EIGHT_GPU,
+  ],
+  [
+    'LV2 wgsl: a diagonal edge passes the corner of a wall where one cell beside it is open',
+    WGSL,
+    '  if (a.x < 0 || b.x < 0) { return vec2i(-1); }',
+    '  if (a.x < 0 && b.x < 0) { return vec2i(-1); }',
+    EIGHT_GPU,
+  ],
+  [
+    'LV3 wgsl: Q of a cell sums its 4 axis edges only',
+    WGSL,
+    '  flux = AXIS * flux + DIAG * across;',
+    '  flux = AXIS * flux + 0.0 * across;',
+    EIGHT_GPU,
+  ],
+  [
+    'LV4 wgsl: the pressure leaves the diagonal edges out of the sum of the conductances',
+    WGSL,
+    '  let sum = AXIS * (ee + ew + es + en) + DIAG * (ese + enw + esw + ene);',
+    '  let sum = AXIS * (ee + ew + es + en);',
+    EIGHT_GPU,
+  ],
+  [
+    'LV5 wgsl: the pressure weighs no edge in the sum of the neighbours',
+    WGSL,
+    '    acc = AXIS * acc + DIAG * across;',
+    '    acc = acc + across;',
+    EIGHT_GPU,
+  ],
+  [
+    'LV6 wgsl: a tube takes the base conductance 0.02 whatever the setting',
+    WGSL,
+    'if (body >= U.c.z) { g = body * select(U.b.x + d, U.b.y, food); }',
+    'if (body >= U.c.z) { g = body * select(0.02 + d, U.b.y, food); }',
+    EIGHT_GPU,
+  ],
+  [
+    'LV7 wgsl: a sink takes its share of 2 · I0 whatever the flux to the front',
+    WGSL,
+    '  let total = U.take.x * U.a.x;\n  let steps = u32(abs(rates',
+    '  let total = 2.0 * U.a.x;\n  let steps = u32(abs(rates',
+    CROWN_GPU,
+    TAKE_SPEC,
+  ],
+  [
+    'LV8 sinks.wgsl: the flux to the front scales the budget of the paid births',
+    SINKS_WGSL,
+    '  if (takes) { budget += F.take.y; }',
+    '  if (takes) { budget += F.take.y * F.take.x * 0.5; }',
+    BUDGET_GPU,
+    SINKS_SPEC,
+  ],
+  [
+    'LV9 glsl: a diagonal edge has the weight of an axis edge',
+    FRAG,
+    'const float DIAG = 0.292893231; // 1 − 1/√2',
+    'const float DIAG = 0.414213568; // 1 − 1/√2',
+    EIGHT_GL,
+  ],
+  [
+    'LV10 glsl: a diagonal edge passes the corner of a wall where one cell beside it is open',
+    FRAG,
+    '  if (a.x < 0 || b.x < 0) return ivec2(-1);',
+    '  if (a.x < 0 && b.x < 0) return ivec2(-1);',
+    EIGHT_GL,
+  ],
+  [
+    'LV11 glsl: Q of a cell sums its 4 axis edges only',
+    FRAG,
+    '  flux = AXIS * flux + DIAG * across;',
+    '  flux = AXIS * flux + 0.0 * across;',
+    EIGHT_GL,
+  ],
+  [
+    'LV12 glsl: the pressure leaves the diagonal edges out of the sum of the conductances',
+    FRAG,
+    '  float sum = AXIS * (ee + ew + es + en) + DIAG * (ese + enw + esw + ene);',
+    '  float sum = AXIS * (ee + ew + es + en);',
+    EIGHT_GL,
+  ],
+  [
+    'LV13 glsl: a tube takes the base conductance 0.02 whatever the setting',
+    FRAG,
+    'if (body >= U.c.z) g = body * (food ? U.b.y : U.b.x + d);',
+    'if (body >= U.c.z) g = body * (food ? U.b.y : 0.02 + d);',
+    EIGHT_GL,
+  ],
+  [
+    'LV14 glsl: a sink takes its share of 2 · I0 whatever the flux to the front',
+    FRAG,
+    '  float total = U.take.x * U.a.x;\n  uint steps',
+    '  float total = 2.0 * U.a.x;\n  uint steps',
+    CROWN_GL,
+    TAKE_SPEC,
+  ],
+  [
+    'LV15 sinks.frag: the flux to the front scales the budget of the paid births',
+    SINKS_FRAG,
+    '    if (takes) budget += U.take.y;',
+    '    if (takes) budget += U.take.y * U.take.x * 0.5;',
+    BUDGET_GL,
+    SINKS_SPEC,
+  ],
+  [
+    'LV16 tubes.wgsl: the stream takes a diagonal edge past the corner of a wall',
+    TUBES_WGSL_FILE,
+    '    if (!flowOpen(p + vec2i(o.x, 0)) || !flowOpen(p + vec2i(0, o.y))) { continue; }',
+    '    if (!flowOpen(p + vec2i(o.x, 0)) && !flowOpen(p + vec2i(0, o.y))) { continue; }',
+    EIGHT_GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'LV17 tubes.wgsl: the stream weighs a diagonal edge as an axis edge',
+    TUBES_WGSL_FILE,
+    '    let leaves = DIAG * (2.0 * g * gn / (g + gn)) * (own - textureLoad(pressure, n, s, 0));',
+    '    let leaves = AXIS * (2.0 * g * gn / (g + gn)) * (own - textureLoad(pressure, n, s, 0));',
+    EIGHT_GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'LV18 tubes.frag: the stream takes a diagonal edge past the corner of a wall',
+    TUBES_FRAG_FILE,
+    '    if (!flowOpen(p + ivec2(o.x, 0)) || !flowOpen(p + ivec2(0, o.y))) continue;',
+    '    if (!flowOpen(p + ivec2(o.x, 0)) && !flowOpen(p + ivec2(0, o.y))) continue;',
+    EIGHT_GL,
+    TUBES_SPEC,
+  ],
+  [
+    'LV19 tubes.frag: the stream gives the axis edges no weight in its speed',
+    TUBES_FRAG_FILE,
+    '  flux *= AXIS;\n  x *= AXIS;',
+    '  flux *= 1.0;\n  x *= AXIS;',
+    EIGHT_GL,
+    TUBES_SPEC,
+  ],
+  [
+    'LV20 CPU copy: a diagonal edge has the weight of an axis edge',
+    FLOW_REF,
+    'const [AXIS, DIAG] = [Math.fround(FLOW_EIGHT.axis), Math.fround(FLOW_EIGHT.diag)];',
+    'const [AXIS, DIAG] = [Math.fround(FLOW_EIGHT.axis), Math.fround(FLOW_EIGHT.axis)];',
+    PROTOTYPE_CHECK,
+    STAGE4_SPEC,
+  ],
+  [
+    'LV21 CPU copy: the diagonal edge to the south-east passes the corner of a wall',
+    FLOW_REF,
+    '    e >= 0 && s >= 0 ? openCell(grid, x + 1, y + 1) : -1,',
+    '    openCell(grid, x + 1, y + 1),',
+    PROTOTYPE_CHECK,
+    STAGE4_SPEC,
+  ],
+  [
+    'LV22 CPU copy: Q of a cell sums its 4 axis edges only',
+    FLOW_REF,
+    'flux[c * 4 + k] = 0.5 * (AXIS * sizes(nbs, k) + DIAG * sizes(across, k));',
+    'flux[c * 4 + k] = 0.5 * AXIS * sizes(nbs, k);',
+    PROTOTYPE_CHECK,
+    STAGE4_SPEC,
+  ],
+  [
+    'LV23 flow.ts: the block names 4 neighbours with the setting 8',
+    FLOW_TS,
+    '  f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), s.flowEdges === 8 ? 1 : 0], 24);',
+    '  f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), 0], 24);',
+    '',
+    FLOW_UNIT,
+  ],
+  [
+    'LV24 flow.ts: the block holds the base 0.02 whatever the setting',
+    FLOW_TS,
+    '  f.set([s.flowBase, FLOW.food, FLOW.ghost, omega], 4);',
+    '  f.set([FLOW.base, FLOW.food, FLOW.ghost, omega], 4);',
+    '',
+    FLOW_UNIT,
+  ],
+  [
+    'LV25 flow.ts: the flow over 8 neighbours also without the flow and in the Jones model',
+    FLOW_TS,
+    "export const flowEight = (s: Pick<Settings, 'flow' | 'model' | 'flowEdges'>) => flowOn(s) && s.flowEdges === 8;",
+    "export const flowEight = (s: Pick<Settings, 'flow' | 'model' | 'flowEdges'>) => s.flowEdges === 8;",
+    '',
+    FLOW_UNIT,
+  ],
+  [
+    'LV26 territory.ts: the flux to the front scales the budget of the paid births',
+    TERRITORY_TS,
+    '  packPaid(f);\n  return buf;',
+    '  packPaid(f);\n  f[(FLOW_TERRITORY_SLOT + 3) * 4 + 1] *= s.frontFlux;\n  return buf;',
+    '',
+    SINKS_UNIT,
+  ],
+  [
+    'LV27 params: the Jones model keeps 8 neighbours',
+    PARAMS_TS,
+    '    flowEdges: d.flowEdges,',
+    '    flowEdges: s.flowEdges,',
+    'neighbours and the base conductance',
+    PARAMS_SPEC,
+  ],
+  [
+    'LV28 params: a link reads any value but 0 as 8 neighbours',
+    PARAMS_TS,
+    '  out.flowEdges = raw.flowEdges === 8 ? 8 : 4;',
+    '  out.flowEdges = raw.flowEdges ? 8 : 4;',
+    'neighbours and the base conductance',
+    PARAMS_SPEC,
+  ],
+  [
+    'LV29 params: the Jones model keeps the flux to the front',
+    PARAMS_TS,
+    '    frontFlux: d.frontFlux,',
+    '    frontFlux: s.frontFlux,',
+    'flux to the front',
+    PARAMS_SPEC,
+  ],
+  [
+    'LV30 url.ts: a link holds the neighbours of the flow while the flow is off',
+    URL_TS,
+    '    delete held.flowEdges;\n    delete held.flowBase;',
+    '    delete held.flowBase;',
+    '',
+    URL_SPEC,
+  ],
+  [
+    'LV31 url.ts: a link holds the flux to the front while the rules are off',
+    URL_TS,
+    '    delete held.drift;\n    delete held.frontFlux;',
+    '    delete held.drift;',
+    '',
+    URL_SPEC,
+  ],
+  [
+    'LV32 sim.ts: the flow runs over 4 neighbours with the setting 8',
+    GPU_SIM,
+    '    const eight = flowEight(this.settings);\n    const passes',
+    '    const eight = false;\n    const passes',
+    EIGHT_GPU,
+  ],
+  [
+    'LV33 gl/sim.ts: the flow over 8 neighbours takes no sink',
+    GL_SIM,
+    '    const eight = flowEight(this.settings) ? this.prog.flowEight(stage4 !== undefined) : undefined;',
+    '    const eight = flowEight(this.settings) ? this.prog.flowEight(false) : undefined;',
+    CROWN_GL,
+    TAKE_SPEC,
+  ],
+  [
+    'LV34 sim.ts: the stream runs over 4 neighbours with the setting 8',
+    GPU_SIM,
+    '    const stream = eight ? this.kernels.tubeStreamEight() : k.stream;',
+    '    const stream = k.stream;',
+    EIGHT_GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'LV35 gl/sim.ts: the stream runs over 4 neighbours with the setting 8',
+    GL_SIM,
+    '      this.pass(this.prog.tubeStreamEight(), tubes.stream, { ...flows, shape }, { strains: flow.memory.length });',
+    '      this.pass(k.stream, tubes.stream, { ...flows, shape }, { strains: flow.memory.length });',
+    EIGHT_GL,
+    TUBES_SPEC,
   ],
 ];
 

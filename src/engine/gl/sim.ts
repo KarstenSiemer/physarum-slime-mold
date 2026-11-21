@@ -1,7 +1,7 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../../model/params';
 import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from '../flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowEight, flowOn, flowStrains, packFlow } from '../flow';
 import { NO_CELL, NO_SITES, SITE_BLOCK, type FlowSites } from '../sites';
 import { slimeModel, slimeSteps } from '../slime';
 import {
@@ -669,7 +669,10 @@ export class GlSim implements Sim {
     this.pass(k.tiles, tubes.tiles, { rows: tubes.rows.texture }, {});
     this.pass(k.picture, tubes.picture, { trail, shape, roots, tiles: tubes.tiles.texture }, {});
     const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
-    this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
+    // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the walls (ADR 0086).
+    if (flowEight(this.settings))
+      this.pass(this.prog.tubeStreamEight(), tubes.stream, { ...flows, shape }, { strains: flow.memory.length });
+    else this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
     this.tubesStale = false;
     return tubes;
   }
@@ -1014,7 +1017,7 @@ export class GlSim implements Sim {
     const gl = this.gl;
     gl.bindBufferBase(gl.UNIFORM_BUFFER, FLOW_BINDING, flow.ubo);
     // The constants of stage 4 after the sites (territory.ts packTerritory(); ADR 0067, decision 9).
-    const block = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain));
+    const block = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain), this.settings);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(block));
   }
 
@@ -2194,6 +2197,11 @@ export class GlSim implements Sim {
     // 0070): the update reads the current copy of the state, whether the front took flux in the step before; the
     // pressure reads the next copies of the rates and of the state, which encodeSinks() writes for its strain.
     const taking = stage4 ? this.prog.sinks() : undefined;
+    // Over 8 neighbours (EIGHT in flow.frag, ADR 0086), the update and the pressure of that variant, with the sinks or
+    // without them.
+    const eight = flowEight(this.settings) ? this.prog.flowEight(stage4 !== undefined) : undefined;
+    const update = eight?.update ?? taking?.update ?? programs.update;
+    const iterate = eight?.pressure ?? taking?.pressure ?? programs.pressure;
     const env = this.env.texture;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
@@ -2216,7 +2224,7 @@ export class GlSim implements Sim {
       p = this.flowP;
       const took = stage4 ? { state: stage4.sinks.state[this.st].texture } : {};
       this.pass(
-        taking?.update ?? programs.update,
+        update,
         memories[next],
         {
           env,
@@ -2240,7 +2248,7 @@ export class GlSim implements Sim {
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
         const [behind, out] = [(p + 2) % 3, (p + 1) % 3];
         this.pass(
-          taking?.pressure ?? programs.pressure,
+          iterate,
           at(pressure, out),
           {
             env,

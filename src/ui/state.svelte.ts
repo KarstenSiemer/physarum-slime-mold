@@ -530,7 +530,8 @@ function jonesChanges(s: Settings, next: Settings): string {
   ].filter((v): v is string => typeof v === 'string');
   const changed: string[] = [];
   for (const k of Object.keys(globalSpec) as (keyof typeof globalSpec)[]) {
-    if (k === 'flowStrength') continue;
+    // The strength and the base conductance of the flow (ADR 0086) mean nothing without the flow, as said above.
+    if (k === 'flowStrength' || k === 'flowBase') continue;
     const why = k === 'scentDecay' ? ' (the Decay of strain A)' : '';
     if (s[k] !== next[k]) changed.push(`${globalSpec[k].label} from ${fmt(s[k])} to ${fmt(next[k])}${why}`);
   }

@@ -26,7 +26,7 @@ const on: Settings = { ...defaultSettings(), territory: true, flow: true, growth
  */
 function sinkCase(n: number, tubes: number, rate: (rnd: () => number) => number, ports: number, seed: number) {
   const rnd = random(seed);
-  const u = new Float32Array(packTerritory(packFlow(on, NO_SITES)));
+  const u = new Float32Array(packTerritory(packFlow(on, NO_SITES), on));
   // The sites that the ports belong to: the passes read the count of the block.
   u[15] = ports;
   const memory = new Float32Array(n * 4);

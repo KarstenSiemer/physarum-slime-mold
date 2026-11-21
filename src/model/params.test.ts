@@ -895,4 +895,52 @@ describe('the rules of stage 4 (ADR 0068)', () => {
     expect(jones.model).toBe('jones');
     expect(constrain({ ...jones, drift: 4 }).drift).toBe(1.5);
   });
+
+  // ADR 0086: the flux to the front k is a setting of the rules: the sinks take 2 k · I0 together. 1 in every scene.
+  it('have the flux to the front 1 by default and in every scene, from 0.25 to 16, and its default in Jones', () => {
+    expect(defaultSettings().frontFlux).toBe(1);
+    for (const p of PRESETS) expect(p.settings().frontFlux, p.id).toBe(1);
+    expect(sanitize({ model: 'extended', frontFlux: 40 }).frontFlux).toBe(16);
+    expect(sanitize({ model: 'extended', frontFlux: 0 }).frontFlux).toBe(0.25);
+    expect(sanitize({ model: 'extended', frontFlux: 'x' }).frontFlux).toBe(1);
+    expect(sanitize({ model: 'extended', territory: true, frontFlux: 2 }).frontFlux).toBe(2);
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    const bound = constrain({ ...jones, frontFlux: 4 });
+    expect([bound.model, bound.frontFlux]).toEqual(['jones', 1]);
+    expect(constrain(bound)).toBe(bound);
+  });
+});
+
+// ADR 0086: the neighbours of a cell in the flow and the base conductance of a tube are settings of the flow, in force
+// in every scene with Flow in the tubes. Every scene has 4 neighbours and 0.02.
+describe('the neighbours and the base conductance of the flow (ADR 0086)', () => {
+  it('are 4 and 0.02 by default and in every scene', () => {
+    const d = defaultSettings();
+    expect([d.flowEdges, d.flowBase]).toEqual([4, 0.02]);
+    for (const p of PRESETS) expect([p.settings().flowEdges, p.settings().flowBase], p.id).toEqual([4, 0.02]);
+  });
+
+  it('read 4 or 8 neighbours and a base from 0.001 to 0.1 from a link, and the defaults otherwise', () => {
+    expect(sanitize({ model: 'extended', flow: true, flowEdges: 8 }).flowEdges).toBe(8);
+    for (const v of [4, 6, '8', 16, 0, null, true, [8]])
+      expect(sanitize({ model: 'extended', flow: true, flowEdges: v }).flowEdges, JSON.stringify(v)).toBe(4);
+    expect(sanitize({ model: 'extended', flowBase: 1 }).flowBase).toBe(0.1);
+    expect(sanitize({ model: 'extended', flowBase: 0 }).flowBase).toBe(0.001);
+    expect(sanitize({ model: 'extended', flowBase: 'x' }).flowBase).toBe(0.02);
+    expect(sanitize({ model: 'extended', flow: true, flowBase: 0.002 }).flowBase).toBe(0.002);
+    expect(globalSpec.flowBase).toMatchObject({ min: 0.001, max: 0.1, log: true });
+  });
+
+  it('have their defaults in the Jones model', () => {
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    const s = constrain({ ...jones, flowEdges: 8, flowBase: 0.002 });
+    expect([s.model, s.flowEdges, s.flowBase]).toEqual(['jones', 4, 0.02]);
+    expect(constrain(s)).toBe(s);
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    expect(toJones({ ...maze, flowEdges: 8, flowBase: 0.002 })).toMatchObject({ flow: false, flowEdges: 4 });
+    expect(toJones({ ...maze, flowEdges: 8, flowBase: 0.002 }).flowBase).toBe(0.02);
+  });
 });

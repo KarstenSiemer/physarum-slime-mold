@@ -2,8 +2,11 @@
 // its measures must keep working. These runs are short: the long runs of the story are commands of the README.
 // CI runs them about five times slower than a laptop, and a unit test has 5 s: keep each one below 0.5 s here.
 import { describe, expect, it } from 'vitest';
-import { FLOW, pcg } from '../../src/engine/flow';
+import { FLOW, FLOW_EIGHT, FLOW_ITERATIONS, FLOW_SITES, packFlow, pcg } from '../../src/engine/flow';
+import { flowFlux, flowPressure, type FlowGrid } from '../../src/engine/flow-reference';
 import { tubeOut, type SinkInput } from '../../src/engine/sinks-reference';
+import { flowSites, type FoodStroke } from '../../src/engine/sites';
+import { defaultSettings } from '../../src/model/params';
 import { box, dish, yMazeLayout } from './layouts';
 import { alignment, crown, murray, ridgeCells, rows, veinDelay, type CrownFields } from './measure';
 import {
@@ -745,5 +748,102 @@ describe('the CPU prototype of stage 4', () => {
         expect(off.length).toBeGreaterThan(20);
         expect(Math.max(...off)).toBeLessThan(0.5);
       }
+  });
+
+  // ADR 0086: the CPU copy of the flow of the engine (src/engine/flow-reference.ts) gives the numbers of the prototype
+  // with `stencil=8 solver=app`: the flux Q of every cell from a pressure, and the pressure after the 16 iterations of a
+  // step, from the same conductivities, roles, sinks and pressures, in a box with a thin diagonal wall and a wall of one
+  // cell. Both hold their fields as float32; the prototype adds the 8 weighted edges of a cell one by one, the engine
+  // the axis and the diagonal edges apart, so they agree to a float32 tolerance. With 4 edges as well.
+  it('gives the pressures and the flux of the CPU copy of the engine over 8 neighbours (ADR 0086)', () => {
+    interface Inside {
+      lanes: number;
+      ports: Int32Array;
+      Pb: Float32Array[];
+      pressure(i0: number): void;
+    }
+    const [w, h] = [14, 11];
+    const cells = w * h;
+    const i0 = 8;
+    const walls = [5 + 3 * w, 6 + 4 * w, 7 + 5 * w, 10 + 7 * w];
+    const [a, b] = [2 + 8 * w, 12 + 2 * w];
+    let r = 7;
+    const rnd = () => (r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 2 ** 32;
+    const g = Float32Array.from({ length: cells }, (_, c) =>
+      walls.includes(c) ? 0 : c === a || c === b ? 4 : rnd() < 0.25 ? 0 : 0.02 + 1.5 * rnd() ** 2,
+    );
+    // Lane by lane: a gives, takes, gives and rests; b the other way round (flow.ts flowRoles(), digits in base 3).
+    const role = Float32Array.from({ length: cells }, (_, c) =>
+      c === a ? 1 + 2 * 3 + 9 : c === b ? 2 + 3 + 2 * 9 : 0,
+    );
+    // Sinks on three tube cells and a source that pays them, as the rules of stage 4 put them in.
+    const extra = new Float32Array(cells);
+    const tubeCells = Array.from(g, (v, c) => (v > 0 && c !== a && c !== b ? c : -1)).filter((c) => c >= 0);
+    for (const c of tubeCells.slice(5, 8)) extra[c] = -0.75;
+    extra[tubeCells[20] ?? 0] = 2.25;
+    const lanes = [0, 1, 2, 3].map(() => Float32Array.from({ length: cells }, () => 100 * rnd() - 50));
+    const before = [0, 1, 2, 3].map(() => Float32Array.from({ length: cells }, () => 100 * rnd() - 50));
+    for (const stencil of [4, 8] as const) {
+      // The prototype.
+      const layout = box(w, h, []);
+      for (const c of walls) [layout.open[c], layout.wall[c]] = [0, 1];
+      const front = frontFrom({ stencil: String(stencil), solver: 'app' });
+      const sim = new Sim(layout, params({ scentSteps: 0, startAgents: 0, flow: i0, front }));
+      const inside = sim as unknown as Inside;
+      inside.lanes = 4;
+      inside.ports = Int32Array.from([a, b]);
+      for (let c = 0; c < cells; c++) {
+        if (!layout.open[c]) continue;
+        [sim.G[c], sim.role[c], sim.extra[c]] = [g[c]!, role[c]!, extra[c]!];
+        for (let l = 0; l < 4; l++) [sim.P[l]![c], inside.Pb[l]![c]] = [lanes[l]![c]!, before[l]![c]!];
+      }
+      sim.fluxOfCells();
+      const q = Float32Array.from(sim.Q);
+      inside.pressure(i0);
+      // The engine: the same fields as Sim.readFlow() and Sim.readPressure() hold them, 4 values per cell.
+      const env = new Uint8Array(cells * 4);
+      for (const c of walls) env[c * 4] = 255;
+      const grid: FlowGrid = { width: w, height: h, boundary: 'box', env };
+      const dab = (c: number): FoodStroke => {
+        const at: [number, number] = [(c % w) + 0.5, Math.floor(c / w) + 0.5];
+        return [{ kind: 'food', from: at, to: at, radius: 0.5 }];
+      };
+      const sites = flowSites([dab(a), dab(b)], w, h, 'box');
+      const u = new Float32Array(packFlow({ ...defaultSettings(), flowStrength: i0, flowEdges: stencil }, sites));
+      const ports = new Int32Array(FLOW_SITES * 2).fill(-1);
+      [ports[0], ports[2]] = [a, b];
+      const memory = new Float32Array(cells * 4);
+      const [pressure0, before0] = [new Float32Array(cells * 4), new Float32Array(cells * 4)];
+      for (let c = 0; c < cells; c++) {
+        if (!layout.open[c]) continue;
+        memory.set([0.5, 1, g[c]!, role[c]!], c * 4);
+        for (let l = 0; l < 4; l++) [pressure0[c * 4 + l], before0[c * 4 + l]] = [lanes[l]![c]!, before[l]![c]!];
+      }
+      const flux = flowFlux(grid, memory, pressure0, stencil === 8);
+      let pressure: Float32Array = pressure0;
+      let past: Float32Array = before0;
+      for (let i = 0; i < FLOW_ITERATIONS; i++) {
+        const next = flowPressure(grid, u, memory, pressure, past, i === 0 ? 1 : i === 1 ? 2 : 0, ports, extra);
+        [past, pressure] = [pressure, next];
+      }
+      // Q, the mean of the 4 lanes, and the pressure of every lane on every open cell.
+      let [top, off, qTop, qOff] = [0, 0, 0, 0];
+      for (let c = 0; c < cells; c++) {
+        if (!layout.open[c]) continue;
+        const mean =
+          ((flux[c * 4] ?? 0) + (flux[c * 4 + 1] ?? 0) + (flux[c * 4 + 2] ?? 0) + (flux[c * 4 + 3] ?? 0)) / 4;
+        [qTop, qOff] = [Math.max(qTop, Math.abs(q[c]!)), Math.max(qOff, Math.abs(mean - q[c]!))];
+        for (let l = 0; l < 4; l++) {
+          const p = sim.P[l]![c]!;
+          [top, off] = [Math.max(top, Math.abs(p)), Math.max(off, Math.abs((pressure[c * 4 + l] ?? 0) - p))];
+        }
+      }
+      expect(qTop, `stencil ${String(stencil)}`).toBeGreaterThan(1);
+      expect(qOff / qTop, `Q, stencil ${String(stencil)}`).toBeLessThan(1e-6);
+      expect(top, `stencil ${String(stencil)}`).toBeGreaterThan(10);
+      expect(off / top, `pressure, stencil ${String(stencil)}`).toBeLessThan(1e-5);
+    }
+    // The weights of the engine are those of the prototype.
+    expect(FLOW_EIGHT).toEqual(STENCIL8);
   });
 });

@@ -324,7 +324,9 @@ the arrows.
   glow, the auto levels, the coarse map of the trail and PNG read the picture in place of the trail; the strand of
   the scent view stays a level of the trail of the model; the agents style has no picture of the tubes. A third pass
   writes the stream of the plasm per cell: the direction of the flux of the lane with the largest flux, times its
-  speed, which is the flux over the root of the conductivity of the cell, over 2 and at most 1. The render pass
+  speed, which is the flux over the root of the conductivity of the cell, over 2 and at most 1. The flux runs over the
+  edges of the flow: with the flow over 8 neighbours also over the diagonal ones, with their weights, and only where
+  both cells beside a diagonal edge are open (model.md, section 8.1; ADR 0086). The render pass
   draws grains that go back and forth along the stream, 12 cells to each side in 60 steps where the speed is 1, and
   go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
   switch on or off, so the switch never changes the grid. The simulation never reads the picture.

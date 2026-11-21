@@ -17,7 +17,10 @@ export const SINKS = {
   slime: 0.025,
   /** The steps of the exponential mean of the sink rate. */
   tau: 100,
-  /** The sinks of a strain take together this many times the flow strength, S = 2 · I0 (ADR 0065, decision 1). */
+  /**
+   * The sinks of a strain take together this many times the flow strength, S = 2 · I0 (ADR 0065, decision 1), times the
+   * setting Flux to the front k (`frontFlux`, ADR 0086): S = 2 k · I0.
+   */
   take: 2,
 } as const;
 
@@ -50,10 +53,11 @@ export const SINK_SUM_WORDS = 4;
  * those of the push (FLOW_SINK_SLOT): the steps of the path to ground without slime, the steps of the path to the edge,
  * the steps of the mean, and the weight on slime in steps of the rate. Each is a whole number, exact as a float32. In
  * the slot after it (FLOW_TAKE_SLOT, ADR 0070): x what the sinks of a strain take together in units of the flow
- * strength; y is the growth of the budget of the paid births (paid.ts packPaid(), ADR 0071); z and w stay 0.
+ * strength, 2 k with k the setting Flux to the front (ADR 0086); y is the growth of the budget of the paid births
+ * (paid.ts packPaid(), ADR 0071), which k does not change; z and w stay 0.
  */
-export function packSinks(f: Float32Array): Float32Array {
+export function packSinks(f: Float32Array, frontFlux: number): Float32Array {
   f.set([SINKS.fresh, SINKS.edge, SINKS.tau, SLIME_WEIGHT], FLOW_SINK_SLOT * 4);
-  f.set([SINKS.take, 0, 0, 0], FLOW_TAKE_SLOT * 4);
+  f.set([SINKS.take * frontFlux, 0, 0, 0], FLOW_TAKE_SLOT * 4);
   return f;
 }

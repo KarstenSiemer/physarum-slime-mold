@@ -5,7 +5,9 @@
 // passes from the tubes of one strain into the tubes of another.
 //
 // The network: every open cell (inside the arena, no wall) is a node with a conductivity g, and two cells that share a
-// side are joined by an edge whose conductance is the harmonic mean of their conductivities. A food site is one
+// side are joined by an edge whose conductance is the harmonic mean of their conductivities. With the flow over 8
+// neighbours (`//#if EIGHT`, ADR 0086) two cells that share a corner are joined too, where both cells beside the corner
+// are open, and every edge has a weight (AXIS, DIAG). A food site is one
 // painted food stroke, with the cells that it paints (ADR 0029, decision 17; sites.ts). A site that the plasmodium of
 // the strain covers gives or takes the flux I0 at its port: the covered cell nearest the centre of the stroke, which
 // the pass `sites` finds in every step. The pressure p follows Kirchhoff's law (Tero, Kobayashi and Nakagaki 2007,
@@ -119,6 +121,33 @@ fn ghostEdge(a: f32, q: vec2i) -> f32 {
   if (q.x < 0) { return 0.0; }
   return edge(a + U.b.z, textureLoad(memory, q, 0).z + U.b.z);
 }
+//#if EIGHT
+
+// The flow over 8 neighbours (ADR 0086, the form of ADR 0081). The lines between `//#if EIGHT` and `//#endif` are part
+// of the source only with it (variant.ts); without them the source is the one of the code before, character for
+// character. An axis edge conducts AXIS times the harmonic mean of its two cells, a diagonal edge DIAG times: their
+// ratio 1/√2 lets a broad flow read the same flux at 0° and 45°, and a vein of one cell conduct the same along an axis
+// and along a diagonal; AXIS + 2 · DIAG = 1 keeps the conductance of a uniform sheet (flow.ts FLOW_EIGHT). U.g.w is 1
+// then: no pass reads it, the CPU copy does (flow.ts packFlow()).
+const AXIS = 0.414213568; // √2 − 1
+const DIAG = 0.292893231; // 1 − 1/√2
+
+// The diagonal neighbour of the cell p at p + o, as openXY() gives it, if the two cells beside the edge are open too: a
+// at (p.x + o.x, p.y) and b at (p.x, p.y + o.y), as openXY() gave them. Else (−1, −1): a diagonal edge passes no corner
+// of a wall.
+fn diagonalXY(p: vec2i, o: vec2i, a: vec2i, b: vec2i) -> vec2i {
+  if (a.x < 0 || b.x < 0) { return vec2i(-1); }
+  return openXY(p + o);
+}
+
+// The size of the flux per lane over the diagonal edge from the cell whose conductivity is g and whose pressure is pc to
+// the cell q (diagonalXY()), without its weight; 0 without the edge.
+fn diagonalFlux(g: f32, pc: vec4f, q: vec2i) -> vec4f {
+  let e = edge(g, conductivity(q));
+  if (e <= 0.0) { return vec4f(0.0); }
+  return abs(e * (pc - textureLoad(pressureIn, q, 0)));
+}
+//#endif
 
 // The port of site i for the strain of the pass in this step, or −1: the first cell of its list that held food and a
 // tube of the strain in the step before (`sites`).
@@ -366,6 +395,14 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   if (gw > 0.0) { flux += abs(gw * (pc - textureLoad(pressureIn, qw, 0))); }
   if (gs > 0.0) { flux += abs(gs * (pc - textureLoad(pressureIn, qs, 0))); }
   if (gn > 0.0) { flux += abs(gn * (pc - textureLoad(pressureIn, qn, 0))); }
+//#if EIGHT
+  // Over 8 edges (ADR 0086): the 4 axis edges with the weight AXIS, the 4 diagonal edges with DIAG.
+  let across = diagonalFlux(m.z, pc, diagonalXY(p, vec2i(1, 1), qe, qs))
+    + diagonalFlux(m.z, pc, diagonalXY(p, vec2i(-1, -1), qw, qn))
+    + diagonalFlux(m.z, pc, diagonalXY(p, vec2i(-1, 1), qw, qs))
+    + diagonalFlux(m.z, pc, diagonalXY(p, vec2i(1, -1), qe, qn));
+  flux = AXIS * flux + DIAG * across;
+//#endif
   flux *= 0.5;
   // f(Q) per lane and its mean. pow(0, gamma) is 0 by hand: not every GPU gives it.
   let qg = select(pow(flux, vec4f(U.a.y)), vec4f(0.0), flux <= vec4f(0.0));
@@ -414,7 +451,22 @@ fn pressure(@builtin(global_invocation_id) gid: vec3u) {
   let ew = ghostEdge(m.z, qw);
   let es = ghostEdge(m.z, qs);
   let en = ghostEdge(m.z, qn);
+//#if EIGHT
+  // Over 8 edges (ADR 0086): the 4 axis edges with the weight AXIS, the 4 diagonal edges with DIAG, each with the ghost
+  // conductivity on both cells. A diagonal edge needs both cells beside it open, so their axis edges conduct: `sum` is
+  // above 0 exactly where it is with 4 edges.
+  let qse = diagonalXY(p, vec2i(1, 1), qe, qs);
+  let qnw = diagonalXY(p, vec2i(-1, -1), qw, qn);
+  let qsw = diagonalXY(p, vec2i(-1, 1), qw, qs);
+  let qne = diagonalXY(p, vec2i(1, -1), qe, qn);
+  let ese = ghostEdge(m.z, qse);
+  let enw = ghostEdge(m.z, qnw);
+  let esw = ghostEdge(m.z, qsw);
+  let ene = ghostEdge(m.z, qne);
+  let sum = AXIS * (ee + ew + es + en) + DIAG * (ese + enw + esw + ene);
+//#else
   let sum = ee + ew + es + en;
+//#endif
   let pc = textureLoad(pressureIn, p, 0);
   var before = textureLoad(pressureBefore, p, 0);
   var next = pc;
@@ -424,6 +476,14 @@ fn pressure(@builtin(global_invocation_id) gid: vec3u) {
     if (ew > 0.0) { acc += ew * textureLoad(pressureIn, qw, 0); }
     if (es > 0.0) { acc += es * textureLoad(pressureIn, qs, 0); }
     if (en > 0.0) { acc += en * textureLoad(pressureIn, qn, 0); }
+//#if EIGHT
+    var across = vec4f(0.0);
+    if (ese > 0.0) { across += ese * textureLoad(pressureIn, qse, 0); }
+    if (enw > 0.0) { across += enw * textureLoad(pressureIn, qnw, 0); }
+    if (esw > 0.0) { across += esw * textureLoad(pressureIn, qsw, 0); }
+    if (ene > 0.0) { across += ene * textureLoad(pressureIn, qne, 0); }
+    acc = AXIS * acc + DIAG * across;
+//#endif
     // Kirchhoff's law of the cell, with the flux that a site gives or takes.
     var given = vec4f(0.0);
     if (m.w != 0.0) {

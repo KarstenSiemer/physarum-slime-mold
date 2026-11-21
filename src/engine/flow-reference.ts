@@ -3,10 +3,11 @@
 // whose flow this is (ADR 0031), and the fields are those of that strain. The cells of the sites are those of the
 // list that the simulation holds (sites.ts FlowSites). With the rules of stage 4 the update and the pressure take the
 // sinks (ADR 0070; `//#if TERRITORY` in the shaders): sinks.gpu.test.ts checks both backends against that. So do the
-// sensors, by what the sinks take (ADR 0075): flow-sinks.gpu.test.ts.
+// sensors, by what the sinks take (ADR 0075): flow-sinks.gpu.test.ts. With the flow over 8 neighbours (ADR 0086;
+// `//#if EIGHT` in the shaders), which the block names, the update and the pressure take the diagonal edges too.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
-import { FLOW_CONSTANT_SLOTS, FLOW_ITERATIONS, FLOW_SITES, FLOW_TAKE_SLOT, flowRoles } from './flow';
+import { FLOW_CONSTANT_SLOTS, FLOW_EIGHT, FLOW_ITERATIONS, FLOW_SITES, FLOW_TAKE_SLOT, flowRoles } from './flow';
 import { RATE_ONE, SINK_STATE_LANES, SUM_ONE } from './sinks';
 import { sumOf } from './sinks-reference';
 
@@ -76,15 +77,53 @@ const neighbours = (grid: FlowGrid, x: number, y: number) => [
   openCell(grid, x, y - 1),
 ];
 
-/** The flux through each open cell per lane, from a pressure and the conductivities of a memory (4 values per cell). */
-export function flowFlux(grid: FlowGrid, memory: Float32Array, pressure: Float32Array): Float32Array {
+/**
+ * The four diagonal neighbours of a cell over 8 neighbours (ADR 0086): south-east, north-west, south-west, north-east,
+ * from its four neighbours `nbs` (neighbours()). A diagonal neighbour is one only if both cells beside the edge are
+ * open, so no edge passes the corner of a wall (diagonalXY() in flow.wgsl); −1 for none.
+ */
+const diagonals = (grid: FlowGrid, x: number, y: number, nbs: readonly number[]) => {
+  const [e = -1, w = -1, s = -1, n = -1] = nbs;
+  return [
+    e >= 0 && s >= 0 ? openCell(grid, x + 1, y + 1) : -1,
+    w >= 0 && n >= 0 ? openCell(grid, x - 1, y - 1) : -1,
+    w >= 0 && s >= 0 ? openCell(grid, x - 1, y + 1) : -1,
+    e >= 0 && n >= 0 ? openCell(grid, x + 1, y - 1) : -1,
+  ];
+};
+
+/** Whether the uniform block `u` names the flow over 8 neighbours (ADR 0086): the last lane of its slot g. */
+export const eightOf = (u: Float32Array) => (u[27] ?? 0) !== 0;
+
+/** The weights of the edges over 8 neighbours as the passes hold them, float32 (AXIS and DIAG in flow.wgsl). */
+const [AXIS, DIAG] = [Math.fround(FLOW_EIGHT.axis), Math.fround(FLOW_EIGHT.diag)];
+
+/**
+ * The flux through each open cell per lane, from a pressure and the conductivities of a memory (4 values per cell): half
+ * the sum of the sizes of the fluxes over its edges. `eight`: over 8 neighbours (ADR 0086), the 4 axis edges with the
+ * weight AXIS and the 4 diagonal edges with DIAG, as `update` of flow.wgsl sums them.
+ */
+export function flowFlux(grid: FlowGrid, memory: Float32Array, pressure: Float32Array, eight = false): Float32Array {
   const { width: w, height: h } = grid;
   const flux = new Float32Array(w * h * 4);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const c = openCell(grid, x, y);
       if (c < 0) continue;
-      for (const nb of neighbours(grid, x, y)) {
+      const nbs = neighbours(grid, x, y);
+      if (eight) {
+        // The sizes of the fluxes over the edges of each kind, per lane, then the weights.
+        const sizes = (cells: readonly number[], k: number) =>
+          cells.reduce((sum, nb) => {
+            if (nb < 0) return sum;
+            const g = edge(memory[c * 4 + 2] ?? 0, memory[nb * 4 + 2] ?? 0);
+            return g > 0 ? sum + Math.abs(g * ((pressure[c * 4 + k] ?? 0) - (pressure[nb * 4 + k] ?? 0))) : sum;
+          }, 0);
+        const across = diagonals(grid, x, y, nbs);
+        for (let k = 0; k < 4; k++) flux[c * 4 + k] = 0.5 * (AXIS * sizes(nbs, k) + DIAG * sizes(across, k));
+        continue;
+      }
+      for (const nb of nbs) {
         if (nb < 0) continue;
         const g = edge(memory[c * 4 + 2] ?? 0, memory[nb * 4 + 2] ?? 0);
         for (let k = 0; k < 4; k++)
@@ -152,7 +191,7 @@ export function flowUpdate(
   /** The square of the flow memory below which a cell is starved (FLOW.half). */
   const half2 = u[17] ?? 0;
   const strain = Math.trunc(u[22] ?? 0);
-  const flux = flowFlux(grid, fields.memory, fields.pressure);
+  const flux = flowFlux(grid, fields.memory, fields.pressure, eightOf(u));
   // A flux runs between foods while at least two food sites gave or took in the step before, at their ports of that
   // step (fed in flow.wgsl).
   let roled = 0;
@@ -279,7 +318,8 @@ export function takesOf(
 /**
  * `pressure`: one iteration. `recentre`: 1 and 2 in the first two iterations of a step (flow.wgsl RECENTRE). `ports`:
  * those of the step (flowPorts()). `extra`: with the rules of stage 4, what the sinks take and the sources give at
- * each cell (sinksAndSources()), in every lane.
+ * each cell (sinksAndSources()), in every lane. Over 8 neighbours (ADR 0086, the block names it) the sums take the 4
+ * axis edges with the weight AXIS and the 4 diagonal edges with DIAG, as `pressure` of flow.wgsl sums them.
  */
 export function flowPressure(
   grid: FlowGrid,
@@ -302,6 +342,7 @@ export function flowPressure(
   const level = [0, 1, 2, 3].map((k) =>
     acting.length > 0 ? acting.reduce((a, c) => a + (pressure[c * 4 + k] ?? 0), 0) / acting.length : 0,
   );
+  const eight = eightOf(u);
   const out = new Float32Array(w * h * 4);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
@@ -310,8 +351,12 @@ export function flowPressure(
       const i = c * 4;
       const gc = memory[i + 2] ?? 0;
       const nbs = neighbours(grid, x, y);
-      const edges = nbs.map((nb) => (nb < 0 ? 0 : edge(gc + ghost, (memory[nb * 4 + 2] ?? 0) + ghost)));
-      const sum = edges.reduce((a, b) => a + b, 0);
+      const ghostEdge = (nb: number) => (nb < 0 ? 0 : edge(gc + ghost, (memory[nb * 4 + 2] ?? 0) + ghost));
+      const edges = nbs.map(ghostEdge);
+      const across = eight ? diagonals(grid, x, y, nbs) : [];
+      const diagonal = across.map(ghostEdge);
+      const axisSum = edges.reduce((a, b) => a + b, 0);
+      const sum = eight ? AXIS * axisSum + DIAG * diagonal.reduce((a, b) => a + b, 0) : axisSum;
       const signs = roleSigns(memory[i + 3] ?? 0);
       for (let k = 0; k < 4; k++) {
         const pc = pressure[i + k] ?? 0;
@@ -321,6 +366,13 @@ export function flowPressure(
           nbs.forEach((nb, e) => {
             if ((edges[e] ?? 0) > 0) acc += (edges[e] ?? 0) * (pressure[nb * 4 + k] ?? 0);
           });
+          if (eight) {
+            let diagonalAcc = 0;
+            across.forEach((nb, e) => {
+              if ((diagonal[e] ?? 0) > 0) diagonalAcc += (diagonal[e] ?? 0) * (pressure[nb * 4 + k] ?? 0);
+            });
+            acc = AXIS * acc + DIAG * diagonalAcc;
+          }
           // A site gives or takes its flux only within its pressure limit. With the rules of stage 4 the sinks take
           // and the sources give in every lane (ADR 0070).
           const sign = signs[k] ?? 0;

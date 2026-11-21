@@ -5,6 +5,8 @@
 - Extends [ADR 0083](0083-more-flux-for-the-veins-of-the-growing-colony.md) (not measured there: steps after 8,000).
 - Extended by [ADR 0085](0085-the-crown-so-far.md) (2026-11-21): the crown research pauses, with the case `none` as
   the best form so far; the state with pictures.
+- Extended by [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (2026-11-21): the levers of the case `none`
+  as settings of the engine.
 - The scripts: `research/front/e2n.sh` (runs, montages), `e2n.ts` (the measures). The raw records are in the archive
   under `logs/engine/crown-0084/`.
 
