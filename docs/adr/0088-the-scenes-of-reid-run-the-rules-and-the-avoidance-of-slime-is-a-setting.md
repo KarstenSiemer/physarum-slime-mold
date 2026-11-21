@@ -12,6 +12,8 @@
   to ground without slime are settings now), [ADR 0070](0070-the-flow-takes-the-sinks-in-the-engine.md) (decision 5:
   the drift of these scenes) and [ADR 0073](0073-a-colony-with-the-rules-starts-as-the-app-starts.md) (the open
   point: the Y-maze without slime over 40 seeds in the engine).
+- Extended by [ADR 0089](0089-the-rules-of-the-growth-front-stay-in-their-five-scenes-for-now.md) (2026-11-21): no
+  other scene turns the rules on until the owner finds them ready.
 - In short: [`research/front/ENGINE.md`](../../research/front/ENGINE.md) has the part E4;
   [`research/flow/README.md`](../../research/flow/README.md), part 35, has the checks and their commands. The records
   are in the archive under `logs/engine/reid-0088/`.

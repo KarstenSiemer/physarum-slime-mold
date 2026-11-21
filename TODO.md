@@ -344,10 +344,13 @@ Prototype of stage 4 on 2026-11-19 (ADR 0065; `research/front/README.md` has the
   prototype gives the same. Weight on slime (0.025) and Reach to fresh ground (6 cells, at least 2) are settings now, in
   the Slime section of the panel while the rules run. Without slime the engine gives 66 : 74 over 140 runs on WebGPU (p
   0.55) and 5 : 5 on WebGL2: the open point of ADR 0073 shows no preference.
-- **Next: the rest of part 4 of the engine of stage 4** (the design of ADR 0067; `research/front/ENGINE.md` has the
-  state): the other scenes with growth and the flow, their drift and whether each strain gets its own, their measures,
-  and a test where a second strain grows on the slime of the first. The Crown of veins (ADR 0087) and the four scenes
-  of Reid (ADR 0088) run the rules. Then the picture: the skirt goes, or it is drawn from the plasm of the crown.
+- **Waits for the owner: the rest of part 4 of the engine of stage 4** (the design of ADR 0067;
+  `research/front/ENGINE.md` has the state): the other scenes with growth and the flow, their drift and whether each
+  strain gets its own, their measures, and a test where a second strain grows on the slime of the first. The Crown of
+  veins (ADR 0087) and the four scenes of Reid (ADR 0088) run the rules. The owner stopped this part on 2026-11-21
+  while trying the crown ("die meisten Sachen funktionieren noch nicht so richtig": most things do not work right
+  yet): no other scene turns the rules on until the owner finds them ready (ADR 0089). The next work is what the owner
+  finds wrong with the crown. Then the picture: the skirt goes, or it is drawn from the plasm of the crown.
 
 Open, for the owner:
 
