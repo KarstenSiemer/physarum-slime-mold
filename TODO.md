@@ -429,9 +429,12 @@ approved phase 0 on 2026-11-22 ("Ja, Phase 0"). After phase 0 the owner looks at
 - [x] Phase 0a, the floor of the white level (plan 1.3, option A; ADR 0090, 2026-11-22): the white level is never
       below the median trail of the cells that hold an agent, and the strand of the scent view stands on the same
       floor. The picture changes, and no rule of the model.
-- [ ] Phase 0b, the survey of the growth (plan 3.3, option 1): every scene with growth, the rules of the growth front
-      off and on by a patch, one seed, 20,000 steps; a table that names the limit that acts in each scene. A pull
-      request of its own.
+- [x] Phase 0b, the survey of the growth (plan 3.3, option 1; [GROWTH-SURVEY.md](research/front/GROWTH-SURVEY.md),
+      2026-11-22): every scene with growth, the rules of the growth front off and on by a patch, one seed, 20,000
+      steps. Without the rules the flow stops the growth: it closes the ground of the starved tubes. With the rules
+      the budget of the paid births stops it, and Flow strength sets that budget. The capacity and the food stop no
+      scene. The help texts of the growth settings now name these limits with numbers of the survey, so a rule of
+      phase 2 that changes the growth measures them again.
 - [ ] Phase 1a, the credit of fresh ground (plan 2.4, option 2) in the prototype: pictures of the neck and of a dish
       at a zoom of 5 and more, and the four measures of plan 2.5 on 6 seeds.
 - [ ] Phase 1b, the boom at a new food (plan 2.4, option 3): the prototype and probes of the engine; the rule that

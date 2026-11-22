@@ -1,6 +1,6 @@
 # What stops the growth: a survey of the scenes
 
-Phase 0b of the plan of 2026-11-22 (its option 1 of section 3.3; the plan is not in git), which the owner approved on
+Phase 0b of the [plan of 2026-11-22](PLAN-2026-11-22.md) (its option 1 of section 3.3), which the owner approved on
 2026-11-22. The owner sees many experiments stop near 25,000 agents with food and room left. This survey runs every
 scene with growth and names the rule that stops it. It measures only: no rule, pass or scene changed. An agent ran it
 on 2026-11-22.
