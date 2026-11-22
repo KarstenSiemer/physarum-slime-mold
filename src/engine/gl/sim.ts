@@ -796,6 +796,15 @@ export class GlSim implements Sim {
     return this.settings.collisions ? this.occupancyTexture : undefined;
   }
 
+  /**
+   * The agents that moved into each cell in the last step, one strain per channel (`counts`), while agents share
+   * cells: the auto levels keep the white level above their trail (exposure.ts levels(), ADR 0090). Nothing with the
+   * rule of one agent per cell: agentCells is the plasm then.
+   */
+  get movedCells(): WebGLTexture | undefined {
+    return this.settings.collisions ? undefined : this.counts.texture;
+  }
+
   update(settings: Settings) {
     const switchedOn = settings.collisions && !this.settings.collisions;
     // Moving first new settings make a new view of the same state, and the scent view's coarse map counts it as a change

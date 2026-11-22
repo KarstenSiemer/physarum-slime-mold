@@ -1,8 +1,10 @@
-// The black level of the auto levels on both backends (ADR 0062), in Chromium with real GPU APIs (ADR 0010): with one
-// agent per cell it stays below the plasm, which is the cells that hold an agent.
+// The auto levels on both backends, in Chromium with real GPU APIs (ADR 0010): with one agent per cell the black level
+// stays below the plasm, which is the cells that hold an agent (ADR 0062), and the white level never lies below the
+// median trail of those cells, nor of the cells that an agent moved into without the rule (ADR 0090).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defaultSettings, defaultStrain, type Settings } from '../model/params';
-import { levels, PLASM_EDGE } from './exposure';
+import { levels, type Measured, PLASM_EDGE, strandLevel, whiteFloor } from './exposure';
+import { AgentToolKind } from './pack';
 import { WebGl2Backend } from './gl/backend';
 import type { Backend, Sim } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -52,7 +54,7 @@ async function state(sim: Sim) {
   return { trail, holds, bins, held, under: trail.filter((_, c) => holds[c]) };
 }
 
-describe.each(Object.entries(BACKENDS))('the black level on %s', (_kind, create) => {
+describe.each(Object.entries(BACKENDS))('the auto levels on %s', (_kind, create) => {
   let backend: Backend;
   const live: Sim[] = [];
 
@@ -144,5 +146,85 @@ describe.each(Object.entries(BACKENDS))('the black level on %s', (_kind, create)
     expect(levels(bins, CELLS, held)?.black).toBeLessThan(0.9 * (without?.black ?? NaN));
     expect(l.black / (without?.black ?? NaN)).toBeCloseTo(1, 2);
     expect(l.gain / (without?.gain ?? NaN)).toBeCloseTo(1, 2);
+  }, 120_000);
+
+  /**
+   * A colony of about 50 agents, put by the Inoculate tool on an empty grid four times as wide as the samples of
+   * WebGL2, after 40 steps: the trail that the diffusion spreads around it covers more than 1 % of the grid. Its
+   * histograms on the CPU, over all cells and over the cells that hold an agent or that an agent moved into, and the
+   * median trail of those cells.
+   */
+  async function colony(collisions: boolean) {
+    const [w, h] = [4 * W, 4 * H];
+    const sim = await backend.createSim(scene({ collisions, layout: 'empty' }), w, h, 200);
+    live.push(sim);
+    sim.run(1, {
+      kind: AgentToolKind.inoculate,
+      x: w / 2,
+      y: h / 2,
+      radius: 5,
+      strain: 0,
+      revive: (Math.PI * 25) / 200,
+    });
+    sim.run(40);
+    await sim.finish();
+    const picture = await sim.readPicture();
+    const counts = await sim.readCounts();
+    const holds = new Uint8Array(w * h);
+    for (const a of await sim.readAgents()) if (a.bits & 4) holds[Math.floor(a.y) * w + Math.floor(a.x)] = 1;
+    const bins = new Array<number>(64).fill(0);
+    const held = new Array<number>(64).fill(0);
+    const under: number[] = [];
+    for (let c = 0; c < w * h; c++) {
+      const t = [0, 1, 2, 3].reduce((s, k) => s + (picture[c * 4 + k] ?? 0), 0);
+      if (t > 0) bins[binOf(t)] = (bins[binOf(t)] ?? 0) + 1;
+      const moved = [0, 1, 2, 3].reduce((n, k) => n + (counts[c * 4 + k] ?? 0), 0) > 0;
+      if (!(collisions ? holds[c] : moved)) continue;
+      held[t > 0 ? binOf(t) : 0] = (held[t > 0 ? binOf(t) : 0] ?? 0) + 1;
+      under.push(t);
+    }
+    return { sim, cells: w * h, bins, held, median: quantile(under, 0.5), n: under.length };
+  }
+
+  it('keeps the white level at the plasm of a small colony', async () => {
+    const { sim, cells, bins, held, median, n } = await colony(true);
+    expect(n).toBeGreaterThan(30);
+    // Without the floor the white level lies on the faint trail around the colony (ADR 0090).
+    expect((levels(bins, cells)?.gain ?? NaN) * median).toBeGreaterThan(5);
+    expect(levels(bins, cells, held)?.white).toBe(whiteFloor(held));
+    const l = await backend.measured(sim);
+    // 1.3 maps the median to the white level. WebGL2 reads it from the blocks of its samples (sample.frag).
+    expect(l.gain * median).toBeGreaterThan(1.3 / 1.25);
+    expect(l.gain * median).toBeLessThan(1.3 * 1.25);
+    // The strand of the scent view stands on the same floor.
+    expect(l.strand / median).toBeGreaterThan(0.8);
+    expect(strandLevel(bins, cells) / median).toBeLessThan(0.5);
+  }, 120_000);
+
+  it('keeps the white level at the trail of the cells that an agent moved into without the rule', async () => {
+    const { sim, cells, bins, held, median, n } = await colony(false);
+    expect(n).toBeGreaterThan(30);
+    expect((levels(bins, cells)?.gain ?? NaN) * median).toBeGreaterThan(5);
+    expect(levels(bins, cells, held, false)?.white).toBe(whiteFloor(held));
+    const l = await backend.measured(sim);
+    expect(l.gain * median).toBeGreaterThan(1.3 / 1.25);
+    expect(l.gain * median).toBeLessThan(1.3 * 1.25);
+  }, 120_000);
+
+  it('reads every cell of the block of a sample of WebGL2', async () => {
+    // Every cell holds an agent. The cells that WebGL2 samples on a grid four times as wide (x and y at 2 modulo 4)
+    // hold a trail of 1, the 15 others of each block of 4 × 4 cells a trail of 4: the median is 4.
+    const [w, h] = [4 * W, 4 * H];
+    const sim = await backend.createSim(scene({ collisions: true, density: 1 }), w, h, w * h);
+    live.push(sim);
+    sim.run(0);
+    await sim.finish();
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = (c % w) % 4 === 2 && Math.floor(c / w) % 4 === 2 ? 1 : 4;
+    sim.writeTrail(trail);
+    const l = (await backend.measured(sim)) as Measured;
+    // Within the bins of half a power of two; the block means of WebGL2 are 61 / 16.
+    expect(l.floor).toBeGreaterThan(2.8);
+    expect(l.floor).toBeLessThan(5.7);
   }, 120_000);
 });

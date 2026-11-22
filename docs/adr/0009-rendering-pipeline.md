@@ -8,6 +8,7 @@
 - Extended by ADR 0060 (2026-11-17): the gel reads its height as a quadratic B-spline while the view is zoomed in, so
   that its edge has no tooth for each cell, and the sheet of the growth front adds to its height.
 - Extended by ADR 0062 (2026-11-19): with one agent per cell the black level stays below the plasm.
+- Extended by ADR 0090 (2026-11-22): the white level is never below the plasm.
 
 ## Context
 
