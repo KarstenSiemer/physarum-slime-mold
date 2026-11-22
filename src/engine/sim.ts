@@ -37,7 +37,7 @@ import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
 import { PAID_COUNTS_BYTE, PAID_COUNTS_BYTES, PAID_KEYS_BYTE } from './paid';
 import { SINK_STATE_LANES, SINK_SUM_WORDS } from './sinks';
 import { packTerritory, territoryOn } from './territory';
-import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
+import { grainsShown, STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import {
   changesSlime,
   EnvKind,
@@ -157,13 +157,19 @@ interface SinkState {
 }
 /**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
- * strain the factor of the radius of its tube, and the trail that the view draws; per cell the stream of the plasm.
+ * strain the factor of the radius of its tube, and the trail that the view draws.
  */
 interface TubeState {
   roots: GPUTexture;
   rootsView: GPUTextureView;
   picture: GPUTexture;
   pictureView: GPUTextureView;
+}
+/**
+ * The texture of the stream of the plasm (tubes.wgsl `stream`), allocated while the view draws the grains (tubes.ts
+ * grainsShown(), ADR 0095), with the picture of the tubes or without it.
+ */
+interface StreamState {
   stream: GPUTexture;
   streamView: GPUTextureView;
 }
@@ -220,6 +226,9 @@ export class Simulation implements Sim {
   /** The picture of the tubes (pictureTexture), and whether a change of the state since made it stale. */
   private tubes?: TubeState | undefined;
   private tubesStale = true;
+  /** The stream of the grains (streamTexture), and whether a change of the state since made it stale. */
+  private stream?: StreamState | undefined;
+  private streamStale = true;
   readonly counts: GPUBuffer;
   readonly env: GPUBuffer;
   /** Outline distances, light and the walls' shadow, for the renderer only (paint.wgsl `outline`). */
@@ -494,10 +503,11 @@ export class Simulation implements Sim {
     return this.viewThird;
   }
 
-  /** A change of the state: the view's map and the picture of the tubes are made anew at their next use. */
+  /** A change of the state: the view's map, the picture of the tubes and the stream are made anew at their next use. */
   private changed() {
     this.viewStale = true;
     this.tubesStale = true;
+    this.streamStale = true;
   }
 
   /**
@@ -513,16 +523,17 @@ export class Simulation implements Sim {
   }
 
   /**
-   * The stream of the plasm of the state that pictureTexture draws (tubes.ts, point 6): per cell the direction of the
-   * flow times its speed. Undefined while the view draws no picture of the tubes.
+   * The stream of the plasm of the state that the view draws (tubes.ts, point 6): per cell the direction of the flow
+   * times its speed, for the grains. Made once for each state while the view draws the grains (tubes.ts grainsShown()),
+   * with the picture of the tubes or without it (ADR 0095). Undefined while the view draws no grains.
    */
   get streamTexture(): GPUTexture | undefined {
-    if (!tubesShown(this.settings) || !this.flow) return undefined;
-    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).stream;
-    return this.tubes.stream;
+    if (!grainsShown(this.settings) || !this.flow) return undefined;
+    if (this.streamStale || !this.stream) return this.encodeStream(this.flow).stream;
+    return this.stream.stream;
   }
 
-  /** The passes of pictureTexture: the factor of the radius of every tube, the picture, and the stream. */
+  /** The passes of pictureTexture: the factor of the radius of every tube, and the picture. */
   private encodeTubes(flow: FlowState): TubeState {
     this.syncShape();
     // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
@@ -562,13 +573,26 @@ export class Simulation implements Sim {
       ]),
     );
     pass.dispatchWorkgroups(...groups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.tubesStale = false;
+    return tubes;
+  }
+
+  /** The pass of streamTexture. It reads the flow, and not the picture of the tubes. */
+  private encodeStream(flow: FlowState): StreamState {
+    this.syncShape();
+    this.writeParams();
+    const stream = this.ensureStream();
     // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the wall bytes (ADR 0086).
     const eight = flowEight(this.settings);
-    const stream = eight ? this.kernels.tubeStreamEight() : k.stream;
-    pass.setPipeline(stream);
+    const pipeline = eight ? this.kernels.tubeStreamEight() : this.kernels.tubeStream();
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipeline);
     pass.setBindGroup(
       0,
-      this.bind(`tubeStream${this.flowM}${String(this.flowP)}${eight ? '-e8' : ''}`, stream, [
+      this.bind(`tubeStream${this.flowM}${String(this.flowP)}${eight ? '-e8' : ''}`, pipeline, [
         this.params,
         null,
         eight ? this.shapeBuffer : null,
@@ -577,47 +601,63 @@ export class Simulation implements Sim {
         null,
         null,
         at(flow.pressureArrays, this.flowP),
-        tubes.streamView,
+        stream.streamView,
       ]),
     );
-    pass.dispatchWorkgroups(...groups);
+    pass.dispatchWorkgroups(Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE));
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    this.tubesStale = false;
-    return tubes;
+    this.streamStale = false;
+    return stream;
   }
 
   /** The textures of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
   private ensureTubes(): TubeState {
     if (!this.tubes) {
-      const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
-      const make = () => this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
-      const [roots, picture, stream] = [make(), make(), make()];
-      this.tubes = {
-        roots,
-        rootsView: roots.createView(),
-        picture,
-        pictureView: picture.createView(),
-        stream,
-        streamView: stream.createView(),
-      };
+      const [roots, picture] = [this.cellTexture(), this.cellTexture()];
+      this.tubes = { roots, rootsView: roots.createView(), picture, pictureView: picture.createView() };
     }
     return this.tubes;
   }
 
-  /** Frees the textures of the picture of the tubes, and every bind group that holds a part of the picture's passes. */
+  /** The texture of the stream, made at its first use (sizing.ts TUBES_BYTES_PER_CELL counts it with the picture). */
+  private ensureStream(): StreamState {
+    if (!this.stream) {
+      const stream = this.cellTexture();
+      this.stream = { stream, streamView: stream.createView() };
+    }
+    return this.stream;
+  }
+
+  /** A texture of 4 floats per cell, for the picture of the tubes and for the stream. */
+  private cellTexture(): GPUTexture {
+    const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
+    return this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
+  }
+
+  /** Frees the textures of the picture of the tubes, and every bind group of the passes of the picture and the stream. */
   private dropTubes() {
     this.tubes?.roots.destroy();
     this.tubes?.picture.destroy();
-    this.tubes?.stream.destroy();
     this.tubes = undefined;
     this.forgetTubes();
   }
 
-  /** Drops the bind groups of the picture's passes: they hold the memory of the flow and the trail of the view. */
+  /** Frees the texture of the stream, and every bind group of the passes of the picture and the stream. */
+  private dropStream() {
+    this.stream?.stream.destroy();
+    this.stream = undefined;
+    this.forgetTubes();
+  }
+
+  /**
+   * Drops the bind groups of the passes of the picture and of the stream: they hold the memory of the flow, the trail
+   * of the view and the textures of both. Both are made anew at their next use.
+   */
   private forgetTubes() {
     for (const key of [...this.bindCache.keys()]) if (key.startsWith('tube')) this.bindCache.delete(key);
     this.tubesStale = true;
+    this.streamStale = true;
   }
 
   /** For tests: the trail that the picture draws (pictureTexture), 4 lanes per cell. */
@@ -625,7 +665,7 @@ export class Simulation implements Sim {
     return readTexture(this.device, this.pictureTexture, 4);
   }
 
-  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty without the picture of the tubes. */
+  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty while the view draws no grains. */
   async readStream(): Promise<Float32Array> {
     const stream = this.streamTexture;
     return stream ? readTexture(this.device, stream, 4) : new Float32Array(0);
@@ -757,9 +797,11 @@ export class Simulation implements Sim {
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
       this.forgetTubes();
     }
-    // The picture of the tubes holds its textures only while the settings show it (tubes.ts). The memory fit counts
-    // them with the flow, shown or not (sizing.ts tubesBytesPerCell()).
+    // The picture of the tubes holds its textures only while the settings show it, and the stream only while the view
+    // draws the grains (tubes.ts). The memory fit counts them with the flow, shown or not (sizing.ts
+    // tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
+    if (!grainsShown(settings)) this.dropStream();
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
     if (!flowOn(settings)) this.dropFlow();
     // The memory fit counts the slime field only in the model that has it (sizing.ts): the Jones model has no slime.
@@ -1029,7 +1071,7 @@ export class Simulation implements Sim {
     const texture = at(this.ensureFlow().pressure, this.flowP);
     const size = [this.width, this.height];
     this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
-    // The picture of the tubes shows the stream of the plasm (ADR 0034).
+    // The grains show the stream of the plasm (ADR 0034, ADR 0095).
     this.changed();
     this.revision++;
   }
@@ -1586,6 +1628,7 @@ export class Simulation implements Sim {
     this.viewThird?.scent.destroy();
     this.dropFlow();
     this.dropTubes();
+    this.dropStream();
     this.dropSlime();
     // The territory and the sinks of the rules of stage 4 (ADR 0068, ADR 0069).
     this.dropTerritory();
@@ -2526,11 +2569,10 @@ interface FlowSinkKernels extends FlowKernels {
   takes: GPUComputePipeline;
 }
 
-/** The passes of the picture of the tubes (tubes.wgsl, ADR 0034). */
+/** The passes of the picture of the tubes (tubes.wgsl, ADR 0034). The stream of the grains is apart (ADR 0095). */
 interface TubeKernels {
   roots: GPUComputePipeline;
   picture: GPUComputePipeline;
-  stream: GPUComputePipeline;
 }
 
 /** The pipelines for an environment that may hold walls (Kernels.walled()). */
@@ -2574,8 +2616,12 @@ class Kernels {
   /** The flow over 8 neighbours (flow.wgsl `//#if EIGHT`, ADR 0086), by whether it takes the sinks. */
   private readonly flowEightPipelines = new Map<boolean, FlowKernels>();
   private tubePipelines?: TubeKernels;
-  /** The stream of the picture of the tubes over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086). */
+  /** The stream of the grains (tubes.wgsl `stream`): the view draws it with the picture of the tubes or without it. */
+  private tubeStreamPipeline?: GPUComputePipeline;
+  /** The stream over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086). */
   private tubeStreamEightPipeline?: GPUComputePipeline;
+  /** The modules of tubes.wgsl by the blocks of variant.ts in them: the passes of one source share its module. */
+  private readonly tubeModules = new Map<string, GPUShaderModule>();
   private slimePipeline?: GPUComputePipeline;
   private slimeBrushPipeline?: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout };
 
@@ -2749,15 +2795,23 @@ class Kernels {
       this.tubePipelines = {
         roots: pipeline('roots', ['SPAN', 'BODY_LOW', 'TILE']),
         picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET', 'TILE', 'WINDOW']),
-        stream: pipeline('stream', ['BODY_LOW', 'FAST', 'TILE']),
       };
     }
     return this.tubePipelines;
   }
 
   /**
-   * The stream of the picture of the tubes over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086), as the flow then
-   * runs, built at its first use. It also binds the wall bytes (binding 2).
+   * The stream of the grains (tubes.wgsl `stream`), built at its first use. The view draws the grains with the picture
+   * of the tubes or without it (ADR 0095): a start without the picture builds this pass alone.
+   */
+  tubeStream(): GPUComputePipeline {
+    this.tubeStreamPipeline ??= this.tubeBuild([])('stream', ['BODY_LOW', 'FAST', 'TILE']);
+    return this.tubeStreamPipeline;
+  }
+
+  /**
+   * The stream of the grains over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086), as the flow then runs, built at
+   * its first use. It also binds the wall bytes (binding 2).
    */
   tubeStreamEight(): GPUComputePipeline {
     this.tubeStreamEightPipeline ??= this.tubeBuild(['EIGHT'])('stream', ['BODY_LOW', 'FAST', 'TILE']);
@@ -2766,7 +2820,10 @@ class Kernels {
 
   /** The pipelines of an entry point of tubes.wgsl with the blocks of `names` (variant.ts) and the numbers of tubes.ts. */
   private tubeBuild(names: string[]) {
-    const module = this.device.createShaderModule({ code: common + variant(tubesWgsl, names) });
+    const key = names.join(' ');
+    const module =
+      this.tubeModules.get(key) ?? this.device.createShaderModule({ code: common + variant(tubesWgsl, names) });
+    this.tubeModules.set(key, module);
     const constants = {
       RADIUS: TUBES.radius,
       EDGE: TUBES.edge,

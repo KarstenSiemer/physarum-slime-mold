@@ -7287,22 +7287,25 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
   // The grains of the stream of the plasm (render.wgsl `streaming`, gl/glsl/render.frag; ADR 0034, amendment
   // 2026-11-14): the colours of a frame against the CPU reference above. A band of tubes with a pressure that falls
-  // across the grid in two lanes, so the stream has every direction and speeds below 1 and at 1.
+  // across the grid in two lanes, so the stream has every direction and speeds below 1 and at 1. Without the picture of
+  // the tubes the grains lie on the trail of the view (ADR 0095).
   describe('the stream of the plasm', () => {
     const SIZE = 192;
 
     it.each([
-      ['box', 30, 22, 1 / 4, 5],
-      ['wrap', 0, 0, 1 / 8, 21],
-      ['wrap', 32, 24, 1.25, 12],
+      ['box', 30, 22, 1 / 4, 5, 'with'],
+      ['wrap', 0, 0, 1 / 8, 21, 'with'],
+      ['wrap', 32, 24, 1.25, 12, 'with'],
+      ['box', 30, 22, 1 / 4, 5, 'without'],
     ] as const)(
-      'draws the grains of the reference (%s, centre %i, %i, scale %f, step %i)',
-      async (boundary, cx, cy, scale, step) => {
+      'draws the grains of the reference (%s, centre %i, %i, scale %f, step %i, %s the picture of the tubes)',
+      async (boundary, cx, cy, scale, step, picture) => {
         const [w, h] = [64, 48];
         const base: Settings = {
           ...defaultSettings(),
           model: 'extended',
           flow: true,
+          showTubes: picture === 'with',
           boundary,
           layout: 'empty',
           strains: [defaultStrain(0), defaultStrain(1)],
@@ -7317,9 +7320,9 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           for (let x = 0; x < w; x++) {
             const c = y * w + x;
             // A smooth trail, and tubes that conduct but have no flow memory, so they are no discs: the picture is a
-            // quarter of the trail. At a steep rim of the gel the height that the GPU filters decides how much the
-            // gel covers, and SwiftShader filters it a little differently: there a frame is up to 5 of 255 from the
-            // reference (ADR 0010).
+            // quarter of the trail, and the trail itself without the picture of the tubes. At a steep rim of the gel
+            // the height that the GPU filters decides how much the gel covers, and SwiftShader filters it a little
+            // differently: there a frame is up to 5 of 255 from the reference (ADR 0010).
             const across = y - 24 - 6 * Math.sin(x / 7);
             const tube = Math.abs(across) < 6 || Math.abs(x - 2) < 3;
             trail[c * 4] = 1 + 30 * Math.exp(-(across * across) / 18) + 30 * Math.exp(-((x - 2) ** 2) / 8);
@@ -7343,6 +7346,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const exposure = levels.gain * 2 ** settings.exposure;
           const stream = { field, phase: (step % 32) / 32, swing: (step % 60) / 60 };
           const drawn = { trail: await sim.readPicture(), stream };
+          if (picture === 'without') expect([...drawn.trail], style).toEqual([...(await sim.readView())]);
           const sizes: [number, number] = [SIZE, SIZE];
           const ref = styleReference(drawn, [w, h], settings, view, { exposure, black: levels.black }, sizes);
           let [max, sum] = [0, 0];

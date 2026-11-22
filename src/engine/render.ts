@@ -182,6 +182,11 @@ interface Groups {
   front?: { group: GPUBindGroup; stamps: GPUBuffer };
   /** The buffer at the binding of the outline distances of the electrodes (encode()). */
   poles: GPUBuffer;
+  /**
+   * The stream of the grains in `group`, or none. The grains show with the picture of the tubes or without it
+   * (ADR 0095), so the trail does not say which stream a frame reads, and a simulation frees the stream while it lives.
+   */
+  stream: GPUTexture | undefined;
 }
 
 /** The maps of the scent view: `scentDown`. The render passes with the view are apart (Renderer.viewNow()). */
@@ -522,7 +527,7 @@ export class Renderer {
     // Collision mode keeps the occupancy up to date (WebGPU allocates it with every simulation).
     const occupancy = f.settings.collisions;
     const { exposure, black, strand } = f;
-    // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
+    // The stream of the plasm, while the view draws the grains: with the picture of the tubes or without it (ADR 0095).
     const stream = sim.streamTexture;
     // The film of the slime and the skirt of the growth front, while the settings show them and the simulation holds
     // the field (slimeParts()).
@@ -585,7 +590,12 @@ export class Renderer {
     // Without a pole the simulation holds no outline distances of the electrodes (ADR 0058), and no pass reads their
     // binding then: those of walls and food stand in.
     const poles = sim.poleField ?? sim.shape;
-    if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.poles !== poles) {
+    if (
+      cached?.bloom !== f.bloom ||
+      cached.sampler !== f.sampler ||
+      cached.poles !== poles ||
+      cached.stream !== stream
+    ) {
       const trailView = trail.createView();
       const scentView = scent.createView();
       const group = this.device.createBindGroup({
@@ -604,7 +614,7 @@ export class Renderer {
           { binding: 9, resource: scentView },
           { binding: 10, resource: this.coarse?.view ?? this.noCoarse.createView() },
           { binding: 11, resource: this.trailCoarse?.view ?? this.noCoarse.createView() },
-          // The stream belongs to the picture of the tubes, which is the trail here: one texture for each trail.
+          // The stream of the grains, with the picture of the tubes or without it (Groups.stream).
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
           // The outline distances of the electrodes (ADR 0058).
           { binding: 16, resource: { buffer: poles } },
@@ -633,7 +643,7 @@ export class Renderer {
           { binding: 9, resource: scentView },
         ],
       });
-      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, poles };
+      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, poles, stream };
       byOcc.set(occ, cached);
     }
     if (wet && stamps && amounts && cached.film?.stamps !== stamps) {

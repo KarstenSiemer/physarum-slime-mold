@@ -239,8 +239,8 @@ export interface Sim {
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */
   writePressure(data: Float32Array, strain?: number): void;
   /**
-   * For tests: the stream of the plasm in the picture of the tubes, 4 values per cell (x, y, 0, 0); empty without
-   * that picture (tubes.ts, point 6).
+   * For tests: the stream of the plasm that the grains follow, 4 values per cell (x, y, 0, 0); empty while the view
+   * draws no grains (tubes.ts grainsShown()), with the picture of the tubes or without it.
    */
   readStream(): Promise<Float32Array>;
   /** Wall, food, light, electrode per cell (0–255; the electrode byte is POLE_BYTE). */

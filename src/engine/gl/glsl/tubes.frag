@@ -1,8 +1,9 @@
 // The picture of the tubes (ADR 0034), after common.glsl. Mirrors ../../shaders/tubes.wgsl, where the passes are
 // described: PASS 0 is `roots` (per cell and strain the factor of the radius of its tube), PASS 1 is `picture` (the
-// trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed).
-// PASS 3 and PASS 4, the map of the tiles, run between PASS 0 and PASS 1: per tile of TILE × TILE cells what the
-// window of the tile holds, which a workgroup of `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
+// trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed, for
+// the grains, which show with the picture or without it: ADR 0095). PASS 3 and PASS 4, the map of the tiles, run
+// between PASS 0 and PASS 1: per tile of TILE × TILE cells what the window of the tile holds, which a workgroup of
+// `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
 // The window is a rectangle of cells, so PASS 3 looks along the rows and PASS 4 along the columns: one pass of 14 × 14
 // reads per tile took 0.6 ms more on the Tokyo rail network than the skip saves there.
 // programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW, FAST, TILE and WINDOW from ../../tubes.ts, and EIGHT for the

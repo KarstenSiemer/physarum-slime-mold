@@ -87,7 +87,8 @@ it('measures the passes of the picture of an old checkout against these, in turn
         sim.run(50);
         await sim.finish();
       }
-      // The passes of each checkout, and how to put them in place. The code around them stays this checkout's.
+      // The passes of each checkout, and how to put them in place. The code around them stays this checkout's. Since
+      // ADR 0095 the stream is a pass apart from those of the picture: `stream` below puts it in its own place.
       type Passes = Record<string, unknown>;
       let use: (passes: Passes) => void;
       let ours: Passes;
@@ -95,10 +96,10 @@ it('measures the passes of the picture of an old checkout against these, in turn
       if (kind === 'webgpu') {
         const inner = sim as unknown as {
           device: GPUDevice;
-          kernels: { tubes(): Passes; tubePipelines?: Passes };
+          kernels: { tubes(): Passes; tubeStream(): unknown; tubePipelines?: Passes; tubeStreamPipeline?: unknown };
           forgetTubes(): void;
         };
-        ours = inner.kernels.tubes();
+        ours = { ...inner.kernels.tubes(), stream: inner.kernels.tubeStream() };
         const module = inner.device.createShaderModule({ code: wgslCommon + oldWgsl });
         const pipeline = (entryPoint: string, constants: Record<string, number>) =>
           inner.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
@@ -107,14 +108,15 @@ it('measures the passes of the picture of an old checkout against these, in turn
           picture: pipeline('picture', { RADIUS: TUBES.radius, EDGE: TUBES.edge, SHEET: TUBES.sheet }),
           stream: pipeline('stream', { BODY_LOW: FLOW.bodyLow, FAST: STREAM.fast }),
         };
-        use = (passes) => {
-          inner.kernels.tubePipelines = passes;
-          // The bind groups of the passes belong to their pipelines. It marks the picture as stale too.
+        use = ({ stream, ...picture }) => {
+          inner.kernels.tubePipelines = picture;
+          inner.kernels.tubeStreamPipeline = stream;
+          // The bind groups of the passes belong to their pipelines. It marks the picture and the stream as stale too.
           inner.forgetTubes();
         };
       } else {
-        const inner = sim as unknown as { gl: GL; prog: { tubes(): Passes } };
-        ours = inner.prog.tubes();
+        const inner = sim as unknown as { gl: GL; prog: { tubes(): Passes; tubeStream(): unknown } };
+        ours = { ...inner.prog.tubes(), stream: inner.prog.tubeStream() };
         const gl = inner.gl;
         // The old checkout has no map of the tiles: a pass that writes nothing in the place of each of its passes.
         const nothing = glProgram(gl, 'out vec4 result;\nvoid main() { result = vec4(0.0); }\n');
@@ -124,19 +126,26 @@ it('measures the passes of the picture of an old checkout against these, in turn
           picture: glProgram(gl, `#define PASS 1\n${GL_DEFINES}${oldFrag}`),
           stream: glProgram(gl, `#define PASS 2\n${GL_DEFINES}${oldFrag}`),
         };
-        use = (passes) => {
-          inner.prog.tubes = () => passes;
-          (sim as unknown as { tubesStale: boolean }).tubesStale = true;
+        use = ({ stream, ...picture }) => {
+          inner.prog.tubes = () => picture;
+          inner.prog.tubeStream = () => stream;
+          Object.assign(sim, { tubesStale: true, streamStale: true });
         };
       }
       const pictures = sim as unknown as {
         tubesStale: boolean;
+        streamStale: boolean;
         pictureTexture?: unknown;
+        streamTexture?: unknown;
         pictureTarget?: () => unknown;
+        streamTarget?: () => unknown;
       };
       const draw = (): unknown => {
         pictures.tubesStale = true;
-        return kind === 'webgpu' ? pictures.pictureTexture : pictures.pictureTarget?.();
+        pictures.streamStale = true;
+        return kind === 'webgpu'
+          ? [pictures.pictureTexture, pictures.streamTexture]
+          : [pictures.pictureTarget?.(), pictures.streamTarget?.()];
       };
       /** `count` pictures, or frames with VITE_FRAME, and the wait for the GPU. */
       const run = async (count: number) => {

@@ -157,7 +157,7 @@ export interface SinkPrograms {
   drift: Program;
 }
 
-/** The passes of the picture of the tubes (tubes.frag, ADR 0034). */
+/** The passes of the picture of the tubes (tubes.frag, ADR 0034). The stream of the grains is apart (ADR 0095). */
 export interface TubePrograms {
   /** PASS 0: per cell and strain the factor of the radius of its tube. */
   roots: Program;
@@ -167,8 +167,6 @@ export interface TubePrograms {
   tiles: Program;
   /** PASS 1: the trail that the view draws. */
   picture: Program;
-  /** PASS 2: per cell the stream of the plasm. */
-  stream: Program;
 }
 
 /** The programs of growth and shrinkage (growth.frag, growth.vert, ADR 0025). */
@@ -210,6 +208,11 @@ export interface Programs {
   flow: () => FlowPrograms;
   /** The passes of the picture of the tubes, compiled at their first use, with the numbers of tubes.ts. */
   tubes: () => TubePrograms;
+  /**
+   * PASS 2 of tubes.frag, the stream of the grains, compiled at its first use. The view draws the grains with the
+   * picture of the tubes or without it (ADR 0095): a start without the picture compiles this pass alone.
+   */
+  tubeStream: () => Program;
   /**
    * The pass of the stamps of the slime field (slime.frag, ADR 0055), compiled at its first use: a scene of the Jones
    * model never runs it.
@@ -410,6 +413,7 @@ export function compile(gl: GL): Programs {
   let growth: Growth | undefined;
   let flow: FlowPrograms | undefined;
   let tubes: TubePrograms | undefined;
+  let tubeStream: Program | undefined;
   let slime: Program | undefined;
   let slimeAmount: Program | undefined;
   let slimeBrush: Program | undefined;
@@ -465,8 +469,8 @@ export function compile(gl: GL): Programs {
         rows: sim(`#define PASS 3\n${TUBE_DEFINES}${tubesFrag}`),
         tiles: sim(`#define PASS 4\n${TUBE_DEFINES}${tubesFrag}`),
         picture: sim(`#define PASS 1\n${TUBE_DEFINES}${tubesFrag}`),
-        stream: sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`),
       }),
+    tubeStream: () => (tubeStream ??= sim(`#define PASS 2\n${TUBE_DEFINES}${tubesFrag}`)),
     slime: () => (slime ??= sim(`#define PASS 0\n${slimeFrag}`)),
     slimeAmount: () => (slimeAmount ??= sim(`#define PASS 1\n${amountGlsl}${slimeFrag}`)),
     slimeBrush: () => (slimeBrush ??= sim(`#define PASS 0\n${brushGlsl}${slimePaintFrag}`)),

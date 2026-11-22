@@ -928,8 +928,9 @@ light had no effect in the Jones model (`sanitize()`, the mark `rules` of a link
 the Slime life time to its default, and its passes get a life time of 0 (`slimeSteps()` in `src/engine/slime.ts`).
 
 `speed`, `exposure`, `bloom`, `style`, `gelColor`, `showScent`, `showTubes`, `showSlime` and `showFront` change only
-the view and the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain,
-and grains that move with the flux of each strain; its rule is in [design.md](design.md), section 5, and in ADR 0034.
+the view and the playback, not the model. `showTubes` draws the picture of the tubes from the trail and the flow memory of each strain;
+its rule is in [design.md](design.md), section 5, and in ADR 0034. While the flow is on, the view also draws grains that
+move with the flux of each strain, with `showTubes` on or off (ADR 0095).
 `showSlime` draws the slime field as a wet film on the ground; its rule is in the same section, and in ADR 0057.
 `showFront` draws a skirt around young ground while growth is on, from the front stamps of section
 6.9; its rule is in the same section of design.md, and in ADR 0060.

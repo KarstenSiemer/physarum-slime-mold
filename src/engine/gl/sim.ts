@@ -18,7 +18,7 @@ import {
 import { SINK_STATE_LANES, SINK_SUM_WORDS } from '../sinks';
 import { diffusePlanOf, sinkLevels, viewTrailOn } from '../sizing';
 import { packTerritory, territoryOn } from '../territory';
-import { TUBE_TILE, tubesShown } from '../tubes';
+import { grainsShown, TUBE_TILE, tubesShown } from '../tubes';
 import {
   changesSlime,
   EnvKind,
@@ -430,12 +430,19 @@ export class GlSim implements Sim {
   private viewStale = true;
   /**
    * The targets of the picture of the tubes (tubes.frag, ADR 0034), allocated while the settings show it: per cell and
-   * strain the factor of the radius of its tube, the trail that the view draws, and the stream; per tile of the
-   * picture (tubes.ts TUBE_TILE) what its window holds, and that per tile column and row of cells on the way.
-   * `tubesStale`: a change of the state since made the picture stale.
+   * strain the factor of the radius of its tube, and the trail that the view draws; per tile of the picture (tubes.ts
+   * TUBE_TILE) what its window holds, and that per tile column and row of cells on the way. `tubesStale`: a change of
+   * the state since made the picture stale.
    */
-  private tubes: { roots: Target; picture: Target; stream: Target; rows: Target; tiles: Target } | undefined;
+  private tubes: { roots: Target; picture: Target; rows: Target; tiles: Target } | undefined;
   private tubesStale = true;
+  /**
+   * The target of the stream of the plasm (tubes.frag PASS 2), allocated while the view draws the grains (tubes.ts
+   * grainsShown(), ADR 0095), with the picture of the tubes or without it. `streamStale`: a change of the state since
+   * made it stale.
+   */
+  private stream: Target | undefined;
+  private streamStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
@@ -627,10 +634,11 @@ export class GlSim implements Sim {
     this.viewThird = undefined;
   }
 
-  /** A change of the state: the view's map and the picture of the tubes are made anew at their next use. */
+  /** A change of the state: the view's map, the picture of the tubes and the stream are made anew at their next use. */
   private changed() {
     this.viewStale = true;
     this.tubesStale = true;
+    this.streamStale = true;
   }
 
   /**
@@ -644,16 +652,19 @@ export class GlSim implements Sim {
     return this.tubes.picture;
   }
 
-  /** The stream of the plasm of the state that pictureTarget() draws (../sim.ts streamTexture); undefined without it. */
+  /**
+   * The stream of the plasm of the state that the view draws, for the grains (../sim.ts streamTexture): made once for
+   * each state while the view draws the grains (tubes.ts grainsShown(), ADR 0095); undefined while it draws none.
+   */
   streamTarget(): Target | undefined {
-    if (!tubesShown(this.settings) || !this.flow) return undefined;
-    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).stream;
-    return this.tubes.stream;
+    if (!grainsShown(this.settings) || !this.flow) return undefined;
+    if (this.streamStale || !this.stream) return this.encodeStream(this.flow);
+    return this.stream;
   }
 
   /**
-   * The passes of pictureTarget(): the factor of the radius of every tube, the map of the tiles of the picture, the
-   * picture, and the stream.
+   * The passes of pictureTarget(): the factor of the radius of every tube, the map of the tiles of the picture, and the
+   * picture.
    */
   private encodeTubes(flow: NonNullable<GlSim['flow']>) {
     this.syncShape();
@@ -668,13 +679,25 @@ export class GlSim implements Sim {
     this.pass(k.rows, tubes.rows, { shape, roots }, {});
     this.pass(k.tiles, tubes.tiles, { rows: tubes.rows.texture }, {});
     this.pass(k.picture, tubes.picture, { trail, shape, roots, tiles: tubes.tiles.texture }, {});
-    const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
-    // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the walls (ADR 0086).
-    if (flowEight(this.settings))
-      this.pass(this.prog.tubeStreamEight(), tubes.stream, { ...flows, shape }, { strains: flow.memory.length });
-    else this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
     this.tubesStale = false;
     return tubes;
+  }
+
+  /** The pass of streamTarget(). It reads the flow, and not the picture of the tubes. */
+  private encodeStream(flow: NonNullable<GlSim['flow']>) {
+    this.syncShape();
+    this.writeParams();
+    // Made at its first use (sizing.ts TUBES_BYTES_PER_CELL counts it with the picture). A target that does not fit
+    // frees its own texture (gl.ts target()).
+    const stream = (this.stream ??= target(this.gl, this.width, this.height, this.gl.RGBA32F));
+    const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
+    const strains = { strains: flow.memory.length };
+    // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the walls (ADR 0086).
+    if (flowEight(this.settings))
+      this.pass(this.prog.tubeStreamEight(), stream, { ...flows, shape: this.shape.texture }, strains);
+    else this.pass(this.prog.tubeStream(), stream, flows, strains);
+    this.streamStale = false;
+    return stream;
   }
 
   /** The targets of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
@@ -683,7 +706,7 @@ export class GlSim implements Sim {
       const gl = this.gl;
       const made: Target[] = [];
       try {
-        for (let i = 0; i < 3; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
+        for (let i = 0; i < 2; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
         // The map of the tiles and its rows hold 0 or 1 per value.
         const [w, h] = [Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE)];
         made.push(target(gl, w, this.height, gl.RGBA8));
@@ -693,13 +716,7 @@ export class GlSim implements Sim {
         for (const t of made) destroyTarget(gl, t);
         throw error;
       }
-      this.tubes = {
-        roots: at(made, 0),
-        picture: at(made, 1),
-        stream: at(made, 2),
-        rows: at(made, 3),
-        tiles: at(made, 4),
-      };
+      this.tubes = { roots: at(made, 0), picture: at(made, 1), rows: at(made, 2), tiles: at(made, 3) };
     }
     return this.tubes;
   }
@@ -709,11 +726,18 @@ export class GlSim implements Sim {
     if (!this.tubes) return;
     destroyTarget(this.gl, this.tubes.roots);
     destroyTarget(this.gl, this.tubes.picture);
-    destroyTarget(this.gl, this.tubes.stream);
     destroyTarget(this.gl, this.tubes.rows);
     destroyTarget(this.gl, this.tubes.tiles);
     this.tubes = undefined;
     this.tubesStale = true;
+  }
+
+  /** Frees the target of the stream. */
+  private dropStream() {
+    if (!this.stream) return;
+    destroyTarget(this.gl, this.stream);
+    this.stream = undefined;
+    this.streamStale = true;
   }
 
   /** For tests: the trail that the picture draws (pictureTarget()), 4 lanes per cell. */
@@ -721,7 +745,7 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.pictureTarget()) as Float32Array);
   }
 
-  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty without the picture of the tubes. */
+  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty while the view draws no grains. */
   readStream(): Promise<Float32Array> {
     const stream = this.streamTarget();
     return Promise.resolve(stream ? (readTarget(this.gl, stream) as Float32Array) : new Float32Array(0));
@@ -834,9 +858,11 @@ export class GlSim implements Sim {
     if (!slimeModel(settings)) this.dropSlime();
     // It counts the territory only while the rules of stage 4 run (sizing.ts territoryBytesPerCell()).
     if (!territoryOn(settings)) this.dropTerritory();
-    // The picture of the tubes holds its targets only while the settings show it (tubes.ts). The memory fit counts them
-    // with the flow, shown or not (sizing.ts tubesBytesPerCell()).
+    // The picture of the tubes holds its targets only while the settings show it, and the stream only while the view
+    // draws the grains (tubes.ts). The memory fit counts them with the flow, shown or not (sizing.ts
+    // tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
+    if (!grainsShown(settings)) this.dropStream();
   }
 
   foodSites(sites: FlowSites) {
@@ -1074,7 +1100,7 @@ export class GlSim implements Sim {
     if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
     const pressure = at(at(this.ensureFlow().pressure, strain), this.flowP);
     writeTarget(this.gl, pressure, 0, 0, this.width, this.height, data);
-    // The picture of the tubes shows the stream of the plasm (ADR 0034).
+    // The grains show the stream of the plasm (ADR 0034, ADR 0095).
     this.changed();
     this.revision++;
   }
@@ -1638,6 +1664,7 @@ export class GlSim implements Sim {
     this.dropViewThird();
     this.dropFlow();
     this.dropTubes();
+    this.dropStream();
     this.dropSlime();
     // The territory and the sinks of the rules of stage 4 (ADR 0068, ADR 0069).
     this.dropTerritory();
