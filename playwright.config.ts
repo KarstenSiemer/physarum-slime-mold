@@ -3,7 +3,7 @@ import { webgpuLaunch } from './tests/browser';
 
 const ci = !!process.env.CI;
 // Not 4173, 5173 or 5001: this machine keeps those free (AGENTS.md). E2E_PORT picks another port.
-const port = Number(process.env.E2E_PORT ?? 4219);
+export const port = Number(process.env.E2E_PORT ?? 4219);
 
 export default defineConfig({
   testDir: 'tests',
