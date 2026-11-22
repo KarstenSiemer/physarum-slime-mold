@@ -419,6 +419,40 @@ Open, and to answer by the prototype of stage 4:
 - From stage 0 (an inference, not measured): by the relation n = 4/μ of Akita et al. 2017, the exponent 1.8 of the app gives n = 2.2 at small flux, below the organism's 2.53 to 3.29. The rule of the tubes stays, so the prototype must show which exponent the app reaches.
 - The crown, paused since 2026-11-21 (ADR 0085). Next when it goes on, E2o: in the box of E2n with 8 edges, the base 0.002 and k = 2, a cell that the front reaches starts at the base level (D = 0.002) instead of D = 0.2; with `sinkOn=fed`, with `shareOn=supply`, and with `jones=young`. Does the rim split into heads, does its radius vary by angle (lobes), do the veins run toward the rim? If it splits, pictures to the owner first; if not, an isolating study of the rim, then a shuttle flow as an option. The zigzag of the veins is not studied yet.
 
+## The owner's feedback of 2026-11-22 (plan of 2026-11-22)
+
+The owner watched the app on 2026-11-22 and saw three things: a small colony flops from thin arms to a thick blob and
+back; a circle without arms, with no tubes between its core and its rim; and too little growth. The plan, with its
+measures, options and costs, is [research/front/PLAN-2026-11-22.md](research/front/PLAN-2026-11-22.md). The owner
+approved phase 0 on 2026-11-22 ("Ja, Phase 0"). After phase 0 the owner looks at the running app again (gate 0).
+
+- [x] Phase 0a, the floor of the white level (plan 1.3, option A; ADR 0090, 2026-11-22): the white level is never
+      below the median trail of the cells that hold an agent, and the strand of the scent view stands on the same
+      floor. The picture changes, and no rule of the model.
+- [ ] Phase 0b, the survey of the growth (plan 3.3, option 1): every scene with growth, the rules of the growth front
+      off and on by a patch, one seed, 20,000 steps; a table that names the limit that acts in each scene. A pull
+      request of its own.
+- [ ] Phase 1a, the credit of fresh ground (plan 2.4, option 2) in the prototype: pictures of the neck and of a dish
+      at a zoom of 5 and more, and the four measures of plan 2.5 on 6 seeds.
+- [ ] Phase 1b, the boom at a new food (plan 2.4, option 3): the prototype and probes of the engine; the rule that
+      makes it, with the births by kind.
+- [ ] Phase 1c, the food pays the growth (plan 3.3, option 2) in the prototype, with a source for its rate: the
+      measures of plan 3.4 on 6 seeds, pictures with one food and with nine.
+- [ ] Phase 2, each rule that passed phase 1, in a pull request of its own: both backends, `docs/model.md`, wrong
+      rules, the digests of every scene, then the numbers of ADR 0087 and ADR 0088. The owner watches the scenes run.
+- [ ] Phase 3, only if the rim is still smooth: a rim that advances where the flux arrives (plan 2.4, option 4), the
+      prototype first.
+
+The owner's open decisions (plan, section 6):
+
+1. The physiological engine of the texts of ChatGPT. The plan says: not now, and the five small steps of its part 4.3
+   instead. The other choices: the reading task first (about 150,000 tokens), or the engine (about 7 million tokens).
+2. Growth that goes on comes only with the rules of the growth front. The scenes without the rules keep their pruning,
+   so Tokyo, the mazes and Food ring still shrink to a lean network. The other choice opens the closed ground sooner,
+   which reopens ADR 0054.
+3. The cost of phases 1 and 2: about 1.5 million tokens of helpers and about 6 hours of GPU. The smallest cut is
+   phase 0 and the study 1a: about 490,000 tokens.
+
 ## From the papers read on 2026-11-15
 
 Findings of three readers of the papers in `papers/` (untracked) and of later papers of Jones and colleagues; the free links and licences are in [docs/knowledge-base/papers.md](docs/knowledge-base/papers.md). Ordered by value. Check every value on its page before it goes into code.

@@ -1,6 +1,6 @@
 import type { Settings } from '../../model/params';
 import { at } from '../at';
-import { levels, STRAND_BLEND, strandLevel } from '../exposure';
+import { levels, type Measured, measureSoon, smooth, strandLevel, whiteFloor } from '../exposure';
 import { GpuUnavailableError, OutOfMemoryError } from '../gpu';
 import { FRONT_LEVEL, packView, trailLevel, VIEW_BYTES } from '../render';
 import { levelSize, scentLevel, scentLevelSize } from '../scent';
@@ -97,6 +97,10 @@ export class WebGl2Backend implements Backend<GlSim> {
   private strand = 0;
   /** The auto-levels measurement whose readback is still on its way. */
   private measuring: Promise<void> | undefined;
+  /** Measure in the next frame, not only in every 15th one (exposure.ts measureSoon()). */
+  private soon = true;
+  /** A turn of every 15th frame has come, and no measurement has taken its share yet (exposure.ts smooth()). */
+  private due = true;
   /** Counts forget() calls: a readback of a replaced simulation must not change the new levels. */
   private generation = 0;
 
@@ -179,7 +183,18 @@ export class WebGl2Backend implements Backend<GlSim> {
 
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
-    if (measure && this.frame % 15 === 0 && !this.measuring) void this.measure(sim, this.gain === 0 ? 1 : 0.25);
+    if (measure) {
+      // As on WebGPU (exposure.ts AutoExposure.update()): the frames start from the fixed gain, and a measurement
+      // brightens them by a quarter of the way. A first measurement that jumped drew a new colony, whose trail
+      // doubles from frame to frame, up to three times too bright (ADR 0090).
+      const fixed = 0.4 / equilibrium(settings);
+      if (this.gain === 0) this.gain = fixed;
+      if (this.frame % 15 === 0) this.due = true;
+      if (!this.measuring && (this.due || this.soon)) {
+        void this.measure(sim, this.due ? 0.25 : 0, fixed);
+        this.due = false;
+      }
+    }
     const ready = this.encode(sim, settings, view, gl.drawingBufferWidth, gl.drawingBufferHeight);
     this.frame++;
     return ready;
@@ -242,6 +257,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.trailHolds = undefined;
     [this.filmHolds, this.filmCoarseHolds] = [undefined, undefined];
     this.youngHolds = undefined;
+    this.soon = true;
+    this.due = true;
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
@@ -264,12 +281,10 @@ export class WebGl2Backend implements Backend<GlSim> {
    * Auto levels from a grid of trail samples (no compute shaders in WebGL2), read back without blocking.
    * Waits for a measurement that is still running, so `blend` 1 (settle) always gets its own.
    */
-  private async measure(sim: GlSim, blend: number): Promise<void> {
+  private async measure(sim: GlSim, blend: number, fixed?: number): Promise<void> {
     const l = await this.read(sim);
-    if (!l) return;
-    this.gain += (l.gain - this.gain) * blend;
-    this.black += (l.black - this.black) * blend;
-    this.strand += (l.strand - this.strand) * (blend === 1 || this.strand === 0 ? 1 : STRAND_BLEND);
+    this.soon = measureSoon(l);
+    if (l) ({ gain: this.gain, black: this.black, strand: this.strand } = smooth(this.levels(), l, blend, fixed));
   }
 
   /**
@@ -277,7 +292,7 @@ export class WebGl2Backend implements Backend<GlSim> {
    * the scent view goes on from its smoothed strand (ADR 0009). Undefined for an (almost) empty field, a replaced
    * simulation or a lost context.
    */
-  private async read(sim: GlSim): Promise<Levels | undefined> {
+  private async read(sim: GlSim): Promise<Measured | undefined> {
     while (this.measuring) await this.measuring;
     // A rebuild can destroy the simulation while this waits: then nothing asks it for its targets.
     if (sim.destroyed) return undefined;
@@ -298,7 +313,7 @@ export class WebGl2Backend implements Backend<GlSim> {
    * the plasm (exposure.ts levels(), ADR 0062). Both sets of samples are drawn before any wait: a target may be freed
    * while the readback is on its way.
    */
-  private async sample(sim: GlSim): Promise<Levels | undefined> {
+  private async sample(sim: GlSim): Promise<Measured | undefined> {
     const gl = this.gl;
     const generation = this.generation;
     const h = Math.max(1, Math.round((SAMPLES * sim.height) / sim.width));
@@ -310,20 +325,22 @@ export class WebGl2Backend implements Backend<GlSim> {
     // Before the target is bound: the passes of the view and of the picture (gl/sim.ts) bind their own.
     const [drawn, model] = [sim.pictureTarget().texture, sim.viewTargets().trail.texture];
     const agentCells = sim.agentCells;
+    // Without the rule: the cells that an agent moved into in the step (ADR 0090).
+    const occ = agentCells ?? sim.movedCells;
     const p = this.prog.sample;
-    const read = (trail: WebGLTexture, occ?: WebGLTexture) => {
+    const read = (trail: WebGLTexture) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
       gl.viewport(0, 0, t.width, t.height);
       gl.useProgram(p.program);
       // A sampler that the program does not read still needs a texture: the trail stands in for the agents per cell.
       textures(gl, p.program, { trail, occ: occ ?? trail });
-      gl.uniform1i(p.loc('held'), occ ? 1 : 0);
+      gl.uniform1i(p.loc('held'), agentCells ? 1 : occ ? 2 : 0);
       gl.uniform2f(p.loc('outSize'), t.width, t.height);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       // The pixels go to a buffer of their own now, so the next draw into the target does not change them.
       return readTargetAsync(gl, t);
     };
-    const reads = drawn === model ? [read(drawn, agentCells)] : [read(drawn, agentCells), read(model)];
+    const reads = drawn === model ? [read(drawn)] : [read(drawn), read(model)];
     let px: Float32Array[];
     try {
       px = await Promise.all(reads);
@@ -331,21 +348,24 @@ export class WebGl2Backend implements Backend<GlSim> {
       return undefined; // context lost: nothing to measure
     }
     if (generation !== this.generation) return undefined;
-    // `held`: only the samples whose cell holds an agent, and one without trail counts in the lowest bin, as in
-    // histogram.wgsl `held`.
+    // `held`: the mean trail of the cells with an agent in the block of each sample (sample.frag), counted once for
+    // each of those cells, and a mean without trail counts in the lowest bin, as in histogram.wgsl `held`.
     const binsOf = (samples: Float32Array, held = false) => {
       const bins = new Array<number>(BINS).fill(0);
       for (let i = 0; i < samples.length; i += 4) {
-        const v = samples[i] ?? 0;
+        const v = samples[i + (held ? 2 : 0)] ?? 0;
         if (held ? (samples[i + 1] ?? 0) < 0.5 : v <= 0) continue;
         const b = v > 0 ? Math.min(BINS - 1, Math.max(0, Math.floor((Math.log2(v) + 10) * 2))) : 0;
-        bins[b] = (bins[b] ?? 0) + 1;
+        bins[b] = (bins[b] ?? 0) + (held ? (samples[i + 1] ?? 0) : 1);
       }
       return bins;
     };
+    const n = t.width * t.height;
     const bins = binsOf(at(px, 0));
-    const l = levels(bins, t.width * t.height, agentCells && binsOf(at(px, 0), true));
-    return l && { ...l, strand: strandLevel(px[1] ? binsOf(px[1]) : bins, t.width * t.height) };
+    const held = occ && binsOf(at(px, 0), true);
+    const l = levels(bins, n, held, agentCells !== undefined);
+    const strand = strandLevel(px[1] ? binsOf(px[1]) : bins, n, whiteFloor(px[1] ? occ && binsOf(px[1], true) : held));
+    return l && { ...l, strand, floor: whiteFloor(held) };
   }
 
   /**

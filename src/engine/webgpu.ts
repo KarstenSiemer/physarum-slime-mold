@@ -117,7 +117,7 @@ export class WebGpuBackend implements Backend<Simulation> {
    */
   private trailsOf(sim: Simulation) {
     return (): Trails | undefined =>
-      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells];
+      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells, sim.movedCells];
   }
 
   async settle(sim: Simulation): Promise<Levels> {

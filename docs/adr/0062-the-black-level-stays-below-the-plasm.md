@@ -4,6 +4,7 @@
 - Date: 2026-11-19
 - Extends [ADR 0009](0009-rendering-pipeline.md), decision 2 (the auto levels). The white level, the percentiles
   and the smoothing stay.
+- Extended by ADR 0090 (2026-11-22): the white level is never below the plasm.
 - In short: the rule of the picture is in `docs/design.md`, section 5 (Auto levels). The tool
   `tests/pictures/levels.spec.ts` makes the pictures and the numbers of this record again.
 
