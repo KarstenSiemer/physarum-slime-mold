@@ -62,3 +62,18 @@ Option 1, decided by the coordinator on 2026-11-22. The agent chose parts 2 to 6
   the picture against the CPU copy of the styles). The wrong rules V94 and V95 (the grains go off with the switch, on
   each backend) and V96 (a frame keeps the stream of an earlier frame, WebGPU) are in
   `research/flow/engine/mutate.ts`.
+
+## Results
+
+On 2026-11-22, on this machine:
+
+- `npm run test:gpu`: 1,457 tests passed and 8 skipped. `npm test`: 1,013 passed and 7 skipped.
+- The wrong rules, each against `tubes.gpu.test.ts`: V94 fails 2 tests on WebGPU (the stream with the switch on or off,
+  and the grains that move), V95 the same 2 on WebGL2, V96 1 (the frames while the flow frees the stream, in the error
+  scope of WebGPU). LV34 and LV35, whose text changed, still fail 3 tests each (the stream over 8 neighbours).
+- The pictures: `research/front/grains.gpu.test.ts` with `VITE_NAME=food-ring-4000 VITE_PATCH='{}' VITE_STEPS=4000`
+  draws Food ring on WebGPU at step 4,000: the whole dish and a close view of 200 cells with the switch on and off,
+  three frames 3 steps apart without the switch, and 24 frames one step apart. Without the switch the grains show and
+  move along the tubes, over the trail. The files lie in `research/front/out/grains/`, which git ignores; the command
+  makes them again. The same run with the rules of the growth front at step 3,000 showed only a small colony on its
+  food, so the pictures use the scene as it is.

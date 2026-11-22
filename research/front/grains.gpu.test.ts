@@ -81,7 +81,15 @@ it('draws the grains with the switch of the picture of the tubes on and off', { 
       const sum = at(x + half, y + half) - at(x - half, y + half) - at(x + half, y - half) + at(x - half, y - half);
       if (sum > best.sum) best = { sum, x, y };
     }
-  const close: View = { center: [best.x, best.y], scale: SCALE };
+  // Windows that hold the same stream tie, and the first of them can hold it in a corner: the view is centred on the
+  // middle of the stream in the window.
+  let [mass, mx, my] = [0, 0, 0];
+  for (let y = best.y - half; y < best.y + half; y++)
+    for (let x = best.x - half; x < best.x + half; x++) {
+      const own = at(x + 1, y + 1) - at(x, y + 1) - at(x + 1, y) + at(x, y);
+      [mass, mx, my] = [mass + own, mx + own * (x + 0.5), my + own * (y + 0.5)];
+    }
+  const close: View = { center: mass > 0 ? [mx / mass, my / mass] : [best.x, best.y], scale: SCALE };
   const write = async (name: string) =>
     commands.writeFile(`${OUT}/${NAME}-${name}.png`, await png(await engine.capture()), 'base64');
   /** The picture of the moment with the switch on or off, with the levels of that picture, as the app settles them. */
