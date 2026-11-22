@@ -226,6 +226,10 @@ of the sinks before decision 8:
   `crowns.ts` runs a colony in the neck (a channel that opens onto open ground) with the measure of the crown,
   `crown-table.ts` prints its table and the form of each run, and `crown-montage.sh` puts pictures side by side;
   [the-crown-at-the-head.md](the-crown-at-the-head.md) tells the story, `E2f-NOTES.md` has the commands.
+- Study 1c of the plan of 2026-11-22 (ADR 0093): `feed`, what pays the births of the front: `fixed` (today), `foods`
+  (the budget grows by today's rate per covered food) or `flux` (the sinks take the flux of one food per covered food).
+  `feed.ts` runs the dish of Food ring with one food or nine and keeps a ledger of the births and deaths;
+  [P1C-NOTES.md](P1C-NOTES.md) tells the story and has the commands.
 
 ## Commands
 
