@@ -6,6 +6,8 @@
 - Date: 2026-11-22
 - Extends [ADR 0009](0009-rendering-pipeline.md), decision 2 (the auto levels), and
   [ADR 0062](0062-the-black-level-stays-below-the-plasm.md). The percentiles and the black level stay.
+- Extended by ADR 0094 (2026-11-22): item 7 is gone; the frames draw the build-up of a new colony with the floor of its
+  next frame.
 - In short: the rule of the picture is in `docs/design.md`, section 5 (Auto levels). The plan is
   [research/front/PLAN-2026-11-22.md](../../research/front/PLAN-2026-11-22.md), part 1. The runner
   `research/front/levels.gpu.test.ts` makes the numbers and the pictures of this record again.

@@ -119,21 +119,33 @@ export function levels(
 export type Measured = Levels & { white: number; floor: number };
 
 /**
+ * The levels of the frames, the floor of their last measurement (0 before the first), and whether the trail under a
+ * new colony still builds up (smooth(), ADR 0094).
+ */
+export type Frames = Levels & { floor: number; building: boolean };
+
+/**
  * The levels of the frames after a measurement `l`: they take the share `blend` of it, so the picture changes slowly,
  * and the strand the share STRAND_BLEND (none with a `blend` of 0). But the floor of the white level holds at once
- * (ADR 0090): where the white level of the frames lies below it, they take the whole measurement. And while the floor
- * sets the white level, the frames brighten no higher than the gain `fixed` with which they start. The trail of a new
- * colony grows from nothing to its plasm in a few steps, by up to 2.6 times from one frame to the next: a gain from
- * its first steps would draw it white, and the smoothing would hold such a gain for a while.
+ * (ADR 0090): where the white level of the frames lies below it, they take the whole measurement.
+ * The build-up of a new colony (ADR 0094): its floor sets the white level and rises at every measurement, from a
+ * measurement without a floor to the first whose floor does not rise. Its trail grows by up to 2.6 times from one frame
+ * to the next, and a measurement reaches the frames one frame late. So the frames take each measurement of the
+ * build-up as if its floor were the floor grown once more by its last rise: the floor of the next frame. A `blend` of
+ * 1 takes the measurement as it is.
  */
-export function smooth(now: Levels, l: Measured, blend: number, fixed = Infinity): Levels {
-  const jump = blend === 1 || TARGET / now.gain + now.black < l.floor;
+export function smooth(now: Frames, l: Measured, blend: number): Frames {
+  const building = l.white <= l.floor && l.floor > now.floor && (now.floor === 0 || now.building);
+  const ahead = building && now.floor > 0 && blend < 1 ? (l.floor * l.floor) / now.floor : l.floor;
+  const gain = ahead === l.floor ? l.gain : TARGET / (ahead - l.black);
+  const jump = blend === 1 || TARGET / now.gain + now.black < ahead;
   const share = jump ? 1 : blend;
-  const gain = now.gain + (l.gain - now.gain) * share;
   return {
-    gain: jump || l.white > l.floor ? gain : Math.min(gain, Math.max(now.gain, fixed)),
+    gain: now.gain + (gain - now.gain) * share,
     black: now.black + (l.black - now.black) * share,
     strand: now.strand + (l.strand - now.strand) * (jump || now.strand === 0 ? 1 : blend && STRAND_BLEND),
+    floor: l.floor,
+    building,
   };
 }
 
@@ -185,6 +197,10 @@ export class AutoExposure {
   black = 0;
   /** The trail of a strand (Levels.strand). */
   strand = 0;
+  /** The floor of the last measurement (Frames). */
+  floor = 0;
+  /** The trail under a new colony still builds up (Frames). */
+  building = false;
 
   constructor(private readonly device: GPUDevice) {
     this.module = device.createShaderModule({ code: histogramWgsl });
@@ -203,7 +219,7 @@ export class AutoExposure {
   }
 
   /**
-   * Call once per frame; `fallback` is used until the first measurement. `trails`: see read(). It is the source of
+   * Call once per frame; `fallback` is the gain of the frames until the first measurement. `trails`: see read(). It is the source of
    * every measurement, so the frames, a PNG and a test measure the same textures and the same agents.
    */
   update(trails: () => Trails | undefined, fallback: number): number {
@@ -212,7 +228,7 @@ export class AutoExposure {
     if (this.pending || !(this.due || this.soon)) return this.gain;
     // No measurement is running, so this one encodes at once, with the textures of this frame. Between two turns it
     // only holds the floor of the white level (measureSoon()).
-    void this.measure(trails, this.due ? 0.25 : 0, fallback);
+    void this.measure(trails, this.due ? 0.25 : 0);
     this.due = false;
     return this.gain;
   }
@@ -221,9 +237,9 @@ export class AutoExposure {
    * Measures now; `blend` 1 jumps to the result (tests), smaller values smooth. Waits for a measurement that is still
    * running, so `blend` 1 always gets its own. `trails`: see read().
    */
-  async measure(trails: () => Trails | undefined, blend = 1, fixed?: number): Promise<void> {
+  async measure(trails: () => Trails | undefined, blend = 1): Promise<void> {
     const l = await this.read(trails);
-    if (l) this.apply(l, blend, fixed);
+    if (l) this.apply(l, blend);
     this.soon = measureSoon(l);
   }
 
@@ -250,8 +266,14 @@ export class AutoExposure {
     return run;
   }
 
-  private apply(l: Measured, blend: number, fixed?: number) {
-    ({ gain: this.gain, black: this.black, strand: this.strand } = smooth(this, l, blend, fixed));
+  private apply(l: Measured, blend: number) {
+    ({
+      gain: this.gain,
+      black: this.black,
+      strand: this.strand,
+      floor: this.floor,
+      building: this.building,
+    } = smooth(this, l, blend));
   }
 
   /**
@@ -323,6 +345,8 @@ export class AutoExposure {
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
+    this.floor = 0;
+    this.building = false;
     this.generation++;
   }
 

@@ -5,6 +5,9 @@
 // The median is counted on the CPU from the picture and the agents, not from the histogram of the engine. The run steps as the app
 // steps (2 steps per frame) and waits for the GPU after every frame, as the app does with 16 ms between frames.
 // Pictures at the steps of VITE_PICS: the frame as the app draws it. Not a test of the app.
+// `m` is a measurement of the state after the frame that changes no level of the frames (Backend.measured()): its
+// gain, white level, floor and black level (ADR 0094). The frame's own measurement reads the same state, so `m` shows
+// what the frames take, and research/front/levels-rules.ts plays the rules of the smoothing over these records.
 //
 // The owner's link (research/front/out/owner/owner.gpu.test.ts), one dab of the Inoculate tool in the middle:
 //   VITE_NAME=link-webgpu npx vitest run --config research/vitest.config.ts research/front/levels.gpu.test.ts
@@ -17,6 +20,7 @@
 import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../src/engine/engine';
+import type { Measured } from '../../src/engine/exposure';
 import { WebGl2Backend } from '../../src/engine/gl/backend';
 import { AgentToolKind } from '../../src/engine/pack';
 import { equilibrium } from '../../src/engine/sizing';
@@ -109,6 +113,7 @@ it('measures the gain of each frame against the plasm', { timeout: 7_200_000 }, 
     const pic = PICS.has(k) || PICS.has(k - 1);
     if (k > UNTIL && !pic) continue;
     const l = backend.levels();
+    const m = (await backend.measured(sim)) as Partial<Measured>;
     const drawn = await sim.readPicture();
     const agents = await sim.readAgents();
     const held = new Uint8Array(w * h);
@@ -125,7 +130,11 @@ it('measures the gain of each frame against the plasm', { timeout: 7_200_000 }, 
     const product = gain * median;
     if (k <= UNTIL && product > worst.product) worst = { product, step: k };
     const after = l.gain || fallback;
-    lines.push(JSON.stringify({ step: k, gain, after, black: l.black, cells: trails.length, median, product }));
+    const measured =
+      m.floor === undefined ? undefined : { gain: m.gain, white: m.white, floor: m.floor, black: m.black };
+    lines.push(
+      JSON.stringify({ step: k, gain, after, black: l.black, cells: trails.length, median, product, m: measured }),
+    );
     if (pic) {
       await commands.writeFile(`${OUT}/pic-${String(k).padStart(5, '0')}.png.b64`, await png(await engine.capture()));
       await commands.writeFile(`${OUT}/record.jsonl`, lines.join('\n') + '\n');
