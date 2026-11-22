@@ -5,6 +5,7 @@ import { chromium, test, type Page } from '@playwright/test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { port } from '../../playwright.config';
 import { webgpuLaunch } from '../../tests/browser';
 import { smallScene } from '../../tests/e2e/helpers';
 
@@ -73,7 +74,7 @@ test('a second start', async ({ page }) => {
   const profile = mkdtempSync(join(tmpdir(), 'start-profile-'));
   for (const label of ['a profile on disk', 'the same profile again']) {
     const persistent = await chromium.launchPersistentContext(profile, webgpuLaunch);
-    await start(await persistent.newPage(), label, `http://localhost:4173${await smallScene()}`);
+    await start(await persistent.newPage(), label, `http://localhost:${port}${await smallScene()}`);
     await persistent.close();
   }
   for (const flag of [
@@ -89,7 +90,7 @@ test('a second start', async ({ page }) => {
     else args[at] = `${args[at] ?? ''},${value}`;
     const browser = await chromium.launch({ ...webgpuLaunch, args });
     const p = await browser.newPage();
-    await start(p, flag, `http://localhost:4173${await smallScene()}`);
+    await start(p, flag, `http://localhost:${port}${await smallScene()}`);
     await start(p, `${flag}, the same page again`);
     await browser.close();
   }

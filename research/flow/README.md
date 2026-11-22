@@ -1046,7 +1046,7 @@ RULE=largest WINDOW=4 REF=3 PANELS=view node --import ./research/flow/register.m
 The pictures of the app with the switch off and on (3 minutes), written to
 `test-results/pictures/`. A file has the name of its scene, its step, its style, and `off` or
 `on`. You must see what "The pictures" of the ADR says for each scene. The command starts the
-built app on port 4173:
+built app on port 4219 (`E2E_PORT`):
 
 ```bash
 npm run build && npx playwright test --project=pictures tests/pictures/tubes.spec.ts

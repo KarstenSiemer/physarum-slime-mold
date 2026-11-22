@@ -249,7 +249,7 @@ Built in stage 3 on 2026-11-17 (ADR 0060; the commands are part 22 of `research/
 - **The front is the plasm that comes onto ground without slime.** The front stamp of a cell holds the step of that, plus 1, and stays while the cell has slime (`docs/model.md`, 6.9; `Sim.readSlimeFront()`). So the picture and the sink of stage 4 have one meaning of a front. A measure of the delay of the main vein behind the front can read the stamps.
 - **The model grows arms, not a sheet.** In Tokyo at step 600 the colony is arms of full plasm, 8 to 15 cells wide, with blunt ends, and the front runs about 0.12 cells per step. No fine mesh lies at the front. The picture adds a skirt around the young arms, a thin veil of slime: it shows no plasm of the model, and it draws no vein (ADR 0060, decision 14). The crown of a tree that the owner asked for needs plasm that the model spreads at the front, so it needs stage 4.
 - **The tubes move sideways** while the network gets shorter, onto fresh ground too. Such a cell gets a front stamp, and by the plan a birth there will be a sink.
-- Tools: `tests/pictures/front.spec.ts` makes pictures of a scene at given steps in each style, fitted and close. A Playwright config with another port and `webServer.command: 'npx vite preview --port <port> --strictPort'` runs it without a server on port 4173.
+- Tools: `tests/pictures/front.spec.ts` makes pictures of a scene at given steps in each style, fitted and close. It runs on the e2e port 4219 (`E2E_PORT`), never on 4173.
 
 Handover for stage 4: the veins must come from the crown at the head of a tube (the owner, 2026-11-18; ADR 0060, decision 14):
 
