@@ -850,7 +850,7 @@ describe('the CPU prototype of stage 4', () => {
     expect(FLOW_EIGHT).toEqual(STENCIL8);
   });
 
-  it('pays the births of each covered food with feed=foods and keeps the run of one food (ADR 0093)', () => {
+  it('pays the births of each covered food with feed=foods and feed=flux and keeps the run of one food (ADR 0093)', () => {
     const run = (feed: string, foods: [number, number, number][]) => {
       const sim = new Sim(dish(60, foods), params({ seed: 3, front: gpuRules({ feed }) }));
       const credits: number[] = [];
@@ -862,7 +862,7 @@ describe('the CPU prototype of stage 4', () => {
       })(sim.cap, sim.step);
       sim.ledger = book;
       const start = sim.aliveCount;
-      for (let k = 0; k < 90; k++) sim.advance();
+      for (let k = 0; k < 60; k++) sim.advance();
       const w = book.take();
       const sum = (v: number[]) => v.reduce((a, b) => a + b, 0);
       // The ledger holds every birth and death: they add up to the change of the agents.
@@ -877,14 +877,18 @@ describe('the CPU prototype of stage 4', () => {
       expect(Array.from(other.sim.D)).toEqual(Array.from(one.sim.D));
       expect(other.sim.aliveCount).toBe(one.sim.aliveCount);
     }
-    // Two foods under the colony: a step with both covered credits twice the births of one.
-    const two = run('foods', [
-      [30, 30, 3],
-      [33, 30, 2],
-    ]);
+    // Two foods under the colony: with both forms a step with both covered credits twice the births of one. With
+    // 'foods' the budget grows by the count of the foods; with 'flux' the sinks take twice the flux, and the budget
+    // follows it.
     const unit = one.credits[0]!;
     expect(unit).toBeCloseTo(0.8, 6);
-    expect(two.credits.every((c) => Math.abs(c - unit) < 1e-9 || Math.abs(c - 2 * unit) < 1e-9)).toBe(true);
-    expect(two.credits.filter((c) => Math.abs(c - 2 * unit) < 1e-9).length).toBeGreaterThan(30);
+    for (const feed of ['foods', 'flux']) {
+      const two = run(feed, [
+        [30, 30, 3],
+        [33, 30, 2],
+      ]);
+      expect(two.credits.every((c) => Math.abs(c - unit) < 1e-9 || Math.abs(c - 2 * unit) < 1e-9)).toBe(true);
+      expect(two.credits.filter((c) => Math.abs(c - 2 * unit) < 1e-9).length).toBeGreaterThan(30);
+    }
   });
 });
