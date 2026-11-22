@@ -12,7 +12,7 @@
 
 ## Context
 
-The owner put a colony on an empty dish with the Inoculate tool (his link of 2026-11-22: Food ring on an empty dish of
+The owner put a colony on an empty dish with the Inoculate tool (the link of 2026-11-22: Food ring on an empty dish of
 1536 × 1536 cells). For about 40 steps the slime looked fine. Then its thin arms turned into a thick blob and a cross,
 and they thinned out again by about step 700. The model held fine arms the whole time.
 
