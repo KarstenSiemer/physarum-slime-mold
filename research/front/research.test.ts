@@ -24,6 +24,7 @@ import {
   supplyLevel,
   type Front,
 } from './sim';
+import { Book } from './feed';
 import { veinAxis } from './still';
 import { runY, slimedOf } from './ymaze';
 
@@ -847,5 +848,47 @@ describe('the CPU prototype of stage 4', () => {
     }
     // The weights of the engine are those of the prototype.
     expect(FLOW_EIGHT).toEqual(STENCIL8);
+  });
+
+  it('pays the births of each covered food with feed=foods and feed=flux and keeps the run of one food (ADR 0093)', () => {
+    const run = (feed: string, foods: [number, number, number][]) => {
+      const sim = new Sim(dish(60, foods), params({ seed: 3, front: gpuRules({ feed }) }));
+      const credits: number[] = [];
+      const book = new (class extends Book {
+        override budget(credited: number, truncated: number) {
+          if (credited > 0) credits.push(credited);
+          super.budget(credited, truncated);
+        }
+      })(sim.cap, sim.step);
+      sim.ledger = book;
+      const start = sim.aliveCount;
+      for (let k = 0; k < 60; k++) sim.advance();
+      const w = book.take();
+      const sum = (v: number[]) => v.reduce((a, b) => a + b, 0);
+      // The ledger holds every birth and death: they add up to the change of the agents.
+      expect(sum(w.born) - sum(w.starve) - sum(w.crowd)).toBe(sim.aliveCount - start);
+      return { sim, credits };
+    };
+    // One food: each form of study 1c gives the run of today's rule, step by step.
+    const one = run('fixed', [[30, 30, 3]]);
+    for (const feed of ['foods', 'flux']) {
+      const other = run(feed, [[30, 30, 3]]);
+      expect(other.credits).toEqual(one.credits);
+      expect(Array.from(other.sim.D)).toEqual(Array.from(one.sim.D));
+      expect(other.sim.aliveCount).toBe(one.sim.aliveCount);
+    }
+    // Two foods under the colony: with both forms a step with both covered credits twice the births of one. With
+    // 'foods' the budget grows by the count of the foods; with 'flux' the sinks take twice the flux, and the budget
+    // follows it.
+    const unit = one.credits[0]!;
+    expect(unit).toBeCloseTo(0.8, 6);
+    for (const feed of ['foods', 'flux']) {
+      const two = run(feed, [
+        [30, 30, 3],
+        [33, 30, 2],
+      ]);
+      expect(two.credits.every((c) => Math.abs(c - unit) < 1e-9 || Math.abs(c - 2 * unit) < 1e-9)).toBe(true);
+      expect(two.credits.filter((c) => Math.abs(c - 2 * unit) < 1e-9).length).toBeGreaterThan(30);
+    }
   });
 });

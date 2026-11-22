@@ -239,6 +239,13 @@ export interface Front {
    */
   fluxOn: 'sum' | 'norm';
   /**
+   * What pays the births of the front (study 1c, ADR 0093): 'fixed', the budget grows by S / `paid` in a step while
+   * the front takes flux, as the engine (docs/model.md 9.1); 'foods', the same times max(1, P), P the covered sites of
+   * the step, so that each covered food pays as many births as one does today; 'flux', the sinks take S times max(1,
+   * P), so that each covered food gives the front the flux of one, and the budget follows that flux.
+   */
+  feed: 'fixed' | 'foods' | 'flux';
+  /**
    * The edges of the flow (ADR 0081, a try): 4, the axis neighbours, as the app; or 8, also the diagonal neighbours,
    * in the solve of the pressure, in the fluxes and in the flux of a cell. With 8 an axis edge has the weight
    * STENCIL8.axis and a diagonal edge STENCIL8.diag, and Q is half the sum of the sizes of the fluxes over the 8
@@ -312,8 +319,20 @@ export const noFront = (): Front => ({
   sinkOn: 'all',
   shareOn: 'equal',
   fluxOn: 'sum',
+  feed: 'fixed',
   stencil: 4,
 });
+
+/**
+ * Study 1c (ADR 0093): a ledger of the births and deaths, by the kind of birth (1 Jones' rule, 2 paid by the flux, 3 a
+ * respawn; 0 the start), and of the budget of the paid births. Only feed.ts sets one; without it nothing is counted.
+ */
+export interface Ledger {
+  born(id: number, kind: 1 | 2 | 3, step: number): void;
+  died(id: number, cause: 'starve' | 'crowd', closed: boolean, step: number): void;
+  /** What the budget gained in a step, and what the cap of the agents of the front took off it. */
+  budget(credited: number, truncated: number): void;
+}
 
 /** The words that a text option of `Front` takes. */
 const FRONT_TEXT: Record<string, readonly string[]> = {
@@ -334,6 +353,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   sinkOn: ['all', 'fed'],
   shareOn: ['equal', 'supply'],
   fluxOn: ['sum', 'norm'],
+  feed: ['fixed', 'foods', 'flux'],
 };
 
 /**
@@ -624,6 +644,10 @@ export class Sim {
    */
   stillSinks: readonly number[] = [];
   base: number = FLOW.base;
+  /** Study 1c (ADR 0093): the ledger of feed.ts, and the agents whose claim of this growth step the flux paid. */
+  ledger?: Ledger;
+  private paidWant?: Uint8Array;
+  private winner?: Int32Array;
   // Counts.
   births = 0;
   freshBirths = 0;
@@ -1046,6 +1070,7 @@ export class Sim {
           this.alive[i] = 0;
           this.aliveCount--;
           this.starved++;
+          this.ledger?.died(i, 'starve', d < FLOW.half, k);
         }
       }
       if (!this.alive[i]) {
@@ -1107,6 +1132,7 @@ export class Sim {
           this.alive[i] = 1;
           this.aliveCount++;
           this.respawned++;
+          this.ledger?.born(i, 3, k);
           this.occNext[c]!++;
         }
       } else if (kind === 1) {
@@ -1165,6 +1191,7 @@ export class Sim {
         this.alive[i] = 0;
         this.aliveCount--;
         this.shrunk++;
+        this.ledger?.died(i, 'crowd', this.D[c]! < FLOW.half, k);
         after[c]!--;
         continue;
       }
@@ -1230,9 +1257,13 @@ export class Sim {
     }
     // The births in a random order, each to the next dead agent by id.
     const births: number[] = [];
+    if (this.ledger) this.winner ??= new Int32Array(this.cells);
     for (let i = 0; i < cap; i++) {
       const t = this.want[i]!;
-      if (t >= 0 && this.claims[t] === this.key(i)) births.push(t, this.cellOf(this.ax[i]!, this.ay[i]!));
+      if (t >= 0 && this.claims[t] === this.key(i)) {
+        births.push(t, this.cellOf(this.ax[i]!, this.ay[i]!));
+        if (this.winner) this.winner[t] = i;
+      }
     }
     seedFor(0, ORDER, k, seed);
     const m = births.length / 2;
@@ -1257,6 +1288,7 @@ export class Sim {
       this.alive[id] = 1;
       this.aliveCount++;
       this.births++;
+      if (this.ledger && this.winner) this.ledger.born(id, this.paidWant?.[this.winner[t]!] ? 2 : 1, k);
       after[t]!++;
       // A birth onto fresh ground: the cell of the child has no slime before this step (6.9).
       const s = this.S[t]!;
@@ -1344,13 +1376,18 @@ export class Sim {
     }
     this.frontAgents = atFront;
     this.paidClaims = 0;
+    if (this.ledger) (this.paidWant ??= new Uint8Array(cap)).fill(0);
     if (this.budget < 1) return;
     // The rank of an agent: the agents with a smaller key, or with the same key and a smaller id.
     const ranked = [...this.paidKeys].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     for (const [, i] of ranked.slice(0, Math.floor(this.budget))) {
-      if (this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free, front.rim)) this.paidClaims++;
+      if (this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free, front.rim)) {
+        this.paidClaims++;
+        if (this.paidWant) this.paidWant[i] = 1;
+      }
     }
     this.paidBirths += this.paidClaims;
+    this.ledger?.budget(0, Math.max(0, this.budget - this.paidClaims - atFront));
     this.budget = Math.min(this.budget - this.paidClaims, atFront);
   }
 
@@ -2134,7 +2171,9 @@ export class Sim {
     let sources = portList.length;
     if (sources === 0 && front.colony) for (let c = 0; c < cells; c++) if (G[c]! > 0) sources++;
     if (sources === 0) return;
-    const S = front.norm * this.p.flow;
+    // `feed` (study 1c, ADR 0093): 'flux' gives the front the flux of one food for each covered food.
+    const fed = Math.max(1, portList.length);
+    const S = front.norm * this.p.flow * (front.feed === 'flux' ? fed : 1);
     // With `sums` 'fixed' a sink takes its share with the rate that the sum counted, in steps of 1 / FIXED: so the sinks
     // take exactly the S that the sources give. With its own rate they would miss S by the rounding of the sum, and the
     // pressure of a network with a sink more than its sources drifts from the ground beside it (ADR 0067).
@@ -2149,7 +2188,9 @@ export class Sim {
     else for (let c = 0; c < cells; c++) if (G[c]! > 0) this.extra[c]! += S / sources;
     this.frontActive = true;
     this.frontTotal = S;
-    this.budget += S / front.paid;
+    const credit = (S / front.paid) * (front.feed === 'foods' ? fed : 1);
+    this.budget += credit;
+    this.ledger?.budget(credit, 0);
   }
 
   /**
