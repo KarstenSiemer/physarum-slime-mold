@@ -30,7 +30,7 @@ are in the ADRs it names.
 ## Commands
 
 - `npm test` (unit), `npm run test:gpu` (both backends, headless Chromium), `npm run lint`, `npm run check`.
-- `npm run test:e2e` after `npm run build`; `npm run verify` runs all of it.
+- `npm run test:e2e` after `npm run build`; `npm run verify` runs all of it. It serves on port 4219 (`E2E_PORT`).
 - Research runs: `npx vitest run --config research/vitest.config.ts research/flow/engine/<file>` (never in `npm test`).
 - Logs: `node --import ./research/flow/register.mjs research/flow/logs.ts` unpacks `research/flow/logs.tar.gz` to
   `research/flow/logs/`; add `pack` to pack it again.

@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test';
 import { webgpuLaunch } from './tests/browser';
 
 const ci = !!process.env.CI;
+// Not 4173, 5173 or 5001: this machine keeps those free (AGENTS.md). E2E_PORT picks another port.
+const port = Number(process.env.E2E_PORT ?? 4219);
 
 export default defineConfig({
   testDir: 'tests',
@@ -24,10 +26,15 @@ export default defineConfig({
   retries: ci ? 1 : 0,
   reporter: ci ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: `http://localhost:${port}`,
     channel: webgpuLaunch.channel,
     launchOptions: { args: webgpuLaunch.args },
     trace: 'retain-on-failure',
   },
-  webServer: { command: 'npm run preview', url: 'http://localhost:4173', reuseExistingServer: !ci },
+  // A busy port fails at once (--strictPort, no reuse): the tests never run against another server.
+  webServer: {
+    command: `npx vite preview --port ${port} --strictPort`,
+    url: `http://localhost:${port}`,
+    reuseExistingServer: false,
+  },
 });
