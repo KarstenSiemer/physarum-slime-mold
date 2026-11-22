@@ -670,6 +670,15 @@ export class Simulation implements Sim {
     return this.settings.collisions ? this.occupancy : undefined;
   }
 
+  /**
+   * The agents that moved into each cell in the last step, per strain (`counts`), while agents share cells: the auto
+   * levels keep the white level above their trail (exposure.ts levels(), ADR 0090). Nothing with the rule of one
+   * agent per cell: agentCells is the plasm then.
+   */
+  get movedCells(): GPUBuffer | undefined {
+    return this.settings.collisions ? undefined : this.counts;
+  }
+
   /** Outline distances, light and the walls' shadow for the renderer; call syncShape() before reading it. */
   get shape(): GPUBuffer {
     return this.shapeBuffer;

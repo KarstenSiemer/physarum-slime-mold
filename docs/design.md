@@ -280,7 +280,15 @@ the arrows.
   (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009). With one agent per cell the agents
   are the plasm, and the black level is at most half of the median trail of the cells that hold an agent: at the edge
   of a band of plasm the trail is half of the trail inside it, so a higher black level would draw plasm black
-  (ADR 0062). Where the plasm covers more than 35 % of the grid, the 65th percentile alone tore it.
+  (ADR 0062). Where the plasm covers more than 35 % of the grid, the 65th percentile alone tore it. The white level is
+  never below the median trail of the cells that hold an agent, or without the rule of the cells that an agent moved
+  into in the step, and the strand of the scent view stands on the same floor (ADR 0090). A colony on less than 1 % of
+  the grid puts the 99th percentile on the faint trail that the diffusion spreads around it, and the picture drew its
+  plasm as a blob. The frames reach the floor at once, not by the smoothing, and they measure in every frame while the
+  floor sets the white level; such a measurement between two turns only holds the floor. While the floor sets the
+  white level the frames brighten no higher than the fixed gain with which they start: the trail of a new colony is
+  still building up. WebGL2 reads the agents of the block of cells of each sample, so a small colony between its
+  samples counts too, and its frames start from the fixed gain as those of WebGPU do.
 - Bloom: thresholded, normalised mip chain on a half-resolution `rgba16float` target.
 - Gel relief style: the trail as a wet gel on dark agar. A thick tube is higher than a thin one, has the full colour
   of its strain and hides the ground. Thin gel is pale and clear, a little with the mild gel color and much with the

@@ -1055,14 +1055,15 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: paused frames (ADR 0028)', (
     engine.panBy(5, 3);
     expect(await frame(), 'after a pan').toBe(true);
     expect(await rest()).toBeLessThan(2 * SETTLE_FRAMES);
-    // Measurements that move the levels keep the frames drawing: three times the trail, and the levels go a quarter
-    // of the way with each measurement, for more frames than this.
-    engine.sim.writeTrail((await engine.sim.readTrail()).map((v) => 3 * v));
+    // Measurements that move the levels keep the frames drawing: a third of the trail, and the levels go a quarter
+    // of the way with each measurement, for more frames than this. (A trail that rises above the white level of the
+    // frames gets its levels at once, ADR 0090.)
+    engine.sim.writeTrail((await engine.sim.readTrail()).map((v) => v / 3));
     const before = engine.levels().gain;
     let moving = 0;
     for (let k = 0; k < 3 * SETTLE_FRAMES; k++) if (await frame()) moving++;
     expect(moving, 'while the levels move').toBe(3 * SETTLE_FRAMES);
-    expect(engine.levels().gain).toBeLessThan(before);
+    expect(engine.levels().gain).toBeGreaterThan(before);
     // Back to levels at rest for the next part.
     await engine.settle();
     await rest();
