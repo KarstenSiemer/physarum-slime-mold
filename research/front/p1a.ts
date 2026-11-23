@@ -7,7 +7,7 @@
 //     at=4000,8000,12000,16000 pics=4000,10000,16000 name=p1a/box/c020/s1 [credit=0.02 creditJobs=all creditOn=const]
 //   node --import ./research/flow/register.mjs research/front/p1a.ts table=research/front/out/p1a/box
 // A run writes `research/front/out/<name>.json`; `table` prints the measures of every run below a folder by case.
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { saveState } from './crowns';
 import { dPicture } from './e2l';
@@ -222,11 +222,12 @@ function runOne(args: Record<string, string>) {
 /** Every run below a folder, by case (the folder that holds the seeds). */
 function table(root: string) {
   const runs: Run[] = [];
+  // Each entry carries its type, so the walk does not look at a path a second time before it reads the file.
   const walk = (dir: string) => {
-    for (const f of readdirSync(dir)) {
-      const p = join(dir, f);
-      if (statSync(p).isDirectory()) walk(p);
-      else if (f.endsWith('.json')) runs.push(JSON.parse(readFileSync(p, 'utf8')) as Run);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith('.json')) runs.push(JSON.parse(readFileSync(p, 'utf8')) as Run);
     }
   };
   walk(root);
