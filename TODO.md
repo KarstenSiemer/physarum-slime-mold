@@ -428,21 +428,30 @@ approved phase 0 on 2026-11-22 ("Ja, Phase 0"). After phase 0 the owner looks at
 
 - [x] Phase 0a, the floor of the white level (plan 1.3, option A; ADR 0090, 2026-11-22): the white level is never
       below the median trail of the cells that hold an agent, and the strand of the scent view stands on the same
-      floor. The picture changes, and no rule of the model.
+      floor. The picture changes, and no rule of the model. Its cap of the gain kept a dense young colony too dark,
+      so the tubes looked milky until the colony covered about 2 % of the grid, and then their colours popped out.
+      ADR 0094 (2026-11-23) removes the cap: the gain of a young colony does not depend on the density.
 - [x] Phase 0b, the survey of the growth (plan 3.3, option 1; [GROWTH-SURVEY.md](research/front/GROWTH-SURVEY.md),
       2026-11-22): every scene with growth, the rules of the growth front off and on by a patch, one seed, 20,000
       steps. Without the rules the flow stops the growth: it closes the ground of the starved tubes. With the rules
       the budget of the paid births stops it, and Flow strength sets that budget. The capacity and the food stop no
       scene. The help texts of the growth settings now name these limits with numbers of the survey, so a rule of
       phase 2 that changes the growth measures them again.
-- [ ] Phase 1a, the credit of fresh ground (plan 2.4, option 2) in the prototype: pictures of the neck and of a dish
-      at a zoom of 5 and more, and the four measures of plan 2.5 on 6 seeds.
-- [ ] Phase 1b, the boom at a new food (plan 2.4, option 3): the prototype and probes of the engine; the rule that
-      makes it, with the births by kind.
-- [ ] Phase 1c, the food pays the growth (plan 3.3, option 2) in the prototype, with a source for its rate: the
-      measures of plan 3.4 on 6 seeds, pictures with one food and with nine.
+- [x] Phase 1a, the credit of fresh ground (plan 2.4, option 2; ADR 0091, proposed, 2026-11-23): the prototype, 6
+      seeds to step 12,000, in the box of E2n and in a dish with a ring of foods. A lower start of fresh ground gives
+      more and finer veins that fork toward the rim, and a faster colony. No case thins the sheet, splits the rim into
+      arms or ends the boom. Of the three jobs of `FLOW.fresh`, only the start acts.
+- [x] Phase 1b, the boom at a new food (plan 2.4, option 3; ADR 0092, proposed, 2026-11-22): the respawn does not make
+      the boom. At the second covered food the starvation stops, and Jones' births go on. No remedy of the plan passes.
+      The proposal: while the rules run, every birth comes from the budget of the paid births. The measure No boom
+      reads the rise from the second covered food.
+- [x] Phase 1c, the food pays the growth (plan 3.3, option 2; ADR 0093, proposed, 2026-11-22): with `feed=flux` each
+      covered food gives the front the flux of one food, and 9 foods give 3.7 to 4.4 times the mass of 1 food on 6
+      seeds. The rate has a source (Mohberg and Rusch 1969). The pictures show a band at the wall. The proposal of 1b
+      needs the deaths to give their plasm back to the budget: without that, the colony shrinks to about 100 agents.
 - [ ] Phase 2, each rule that passed phase 1, in a pull request of its own: both backends, `docs/model.md`, wrong
       rules, the digests of every scene, then the numbers of ADR 0087 and ADR 0088. The owner watches the scenes run.
+      At gate 1 the owner decides on the proposals of ADR 0091, ADR 0092 and ADR 0093.
 - [ ] Phase 3, only if the rim is still smooth: a rim that advances where the flux arrives (plan 2.4, option 4), the
       prototype first.
 
