@@ -1,8 +1,10 @@
-// The picture of the tubes (ADR 0034), while the flow in the tubes is on and the setting shows it. Prepended with
-// common.wgsl. Display only: no pass of the simulation reads what these passes write. tubes.ts states the rule and
-// holds the numbers; sim.ts sets them as the constants of the pipelines.
+// The picture of the tubes (ADR 0034), while the flow in the tubes is on and the setting shows it, and the stream of
+// the grains, while the flow is on, with the setting or without it (ADR 0095). Prepended with common.wgsl. Display
+// only: no pass of the simulation reads what these passes write. tubes.ts states the rule and holds the numbers;
+// sim.ts sets them as the constants of the pipelines.
 //
-// `roots` runs first, then `picture` and `stream`, once for each state that a frame draws:
+// `roots` runs first, then `picture`, once for each state that a frame draws with the picture. `stream` runs once for
+// each state that a frame draws with the grains, with the picture or without it:
 // - `roots`: per cell and strain the fourth root of the strength across the tube, the factor of the radius and of the
 //   brightness of the tube that the cell holds; 0 on a cell without a tube of the strain and on a cell of a wall.
 // - `picture`: per cell and strain the trail that the view draws. A workgroup draws a tile of TILE × TILE cells: it

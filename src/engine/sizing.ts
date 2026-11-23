@@ -138,8 +138,9 @@ export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>
 
 /**
  * More bytes per cell for the picture of the tubes (tubes.ts, ADR 0034): per cell and strain the factor of the radius
- * of its tube, the picture, and per cell the stream of the plasm, 16 B per cell each (sim.ts TubeState, gl/sim.ts
- * `tubes`). Both backends hold the same.
+ * of its tube, the picture, and per cell the stream of the plasm for the grains, 16 B per cell each (sim.ts TubeState
+ * and StreamState, gl/sim.ts `tubes` and `stream`). Both backends hold the same. Without the picture they hold the
+ * stream alone (ADR 0095), and the fit counts all three, so the switch never changes the grid.
  */
 export const TUBES_BYTES_PER_CELL = 48;
 

@@ -1637,6 +1637,31 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
     'counts the memory of the picture',
     'src/engine/engine.test.ts',
   ],
+  // The grains without the picture of the tubes (ADR 0095): the switch of the picture changes only the tubes.
+  [
+    'V94 webgpu: the grains go off with the switch',
+    'src/engine/sim.ts',
+    'if (!grainsShown(this.settings) || !this.flow) return undefined;',
+    'if (!tubesShown(this.settings) || !this.flow) return undefined;',
+    GPU,
+    TUBES_SPEC,
+  ],
+  [
+    'V95 webgl2: the grains go off with the switch',
+    'src/engine/gl/sim.ts',
+    'if (!grainsShown(this.settings) || !this.flow) return undefined;',
+    'if (!tubesShown(this.settings) || !this.flow) return undefined;',
+    GL,
+    TUBES_SPEC,
+  ],
+  [
+    'V96 webgpu: a frame keeps the stream of the frame that built its bind group',
+    'src/engine/render.ts',
+    '      cached.poles !== poles ||\n      cached.stream !== stream\n',
+    '      cached.poles !== poles\n',
+    GPU,
+    TUBES_SPEC,
+  ],
   // An agent under a painted wall (ADR 0038), against the tests of the agents in sim.gpu.test.ts.
   [
     'U1 wgsl: an agent under a wall stays on it',
@@ -2709,8 +2734,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'EL74 webgpu: the picture keeps the bind group of outlines that the simulation freed',
     RENDER_TS,
-    'if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler || cached.poles !== poles) {',
-    'if (cached?.bloom !== f.bloom || cached.sampler !== f.sampler) {',
+    '      cached.sampler !== f.sampler ||\n      cached.poles !== poles ||\n',
+    '      cached.sampler !== f.sampler ||\n',
     POLES_GPU,
     ELECTRODE_SPEC,
   ],
@@ -8189,16 +8214,16 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'LV34 sim.ts: the stream runs over 4 neighbours with the setting 8',
     GPU_SIM,
-    '    const stream = eight ? this.kernels.tubeStreamEight() : k.stream;',
-    '    const stream = k.stream;',
+    '    const pipeline = eight ? this.kernels.tubeStreamEight() : this.kernels.tubeStream();',
+    '    const pipeline = this.kernels.tubeStream();',
     EIGHT_GPU,
     TUBES_SPEC,
   ],
   [
     'LV35 gl/sim.ts: the stream runs over 4 neighbours with the setting 8',
     GL_SIM,
-    '      this.pass(this.prog.tubeStreamEight(), tubes.stream, { ...flows, shape }, { strains: flow.memory.length });',
-    '      this.pass(k.stream, tubes.stream, { ...flows, shape }, { strains: flow.memory.length });',
+    '      this.pass(this.prog.tubeStreamEight(), stream, { ...flows, shape: this.shape.texture }, strains);',
+    '      this.pass(this.prog.tubeStream(), stream, { ...flows, shape: this.shape.texture }, strains);',
     EIGHT_GL,
     TUBES_SPEC,
   ],

@@ -409,7 +409,7 @@ export class WebGl2Backend implements Backend<GlSim> {
     const bloom = this.runBloom(sim, s, exposure, black, trail);
     // Collision mode keeps the occupancy up to date; without float blending there is none (and no collisions).
     const occ = s.collisions ? sim.occupancyTexture : undefined;
-    // The stream of the plasm, while the view draws the picture of the tubes (ADR 0034).
+    // The stream of the plasm, while the view draws the grains: with the picture of the tubes or without it (ADR 0095).
     const stream = sim.streamTarget()?.texture;
     const streamStep = stream ? sim.step : undefined;
     // The film of the slime (ADR 0055, decision 8), while the settings show it and the simulation holds the field:
@@ -570,7 +570,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       bloom: bloom.texture,
       heights: heights.texture,
       trailLevels,
-      // Without the picture of the tubes no frame reads the stream: the trail stands in.
+      // Without the grains no frame reads the stream: the trail stands in.
       stream: stream ?? trail,
       // The outline distances of the electrodes (ADR 0058): only the program with ENV reads them, and only while a
       // pole may be painted. Without a pole the simulation holds none: those of walls and food stand in.

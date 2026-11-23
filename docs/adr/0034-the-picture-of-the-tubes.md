@@ -3,6 +3,7 @@
 - Status: accepted. The owner asked for it on 2026-11-13. Every decision here is the coordinator's
   choice under the owner's delegation of 2026-11-12, with its date and reason.
 - Date: 2026-11-13
+- Extended by ADR 0095 ([the grains show without the picture of the tubes](0095-the-grains-show-without-the-picture-of-the-tubes.md)).
 - In short: while the flow in the tubes is on, the view draws every tube as wide and as bright as
   its flow memory says. The flow memory of a tube grows where much flow runs, and it falls where
   little flow runs. So a tube that keeps much flow stays thick, and a tube with little flow gets

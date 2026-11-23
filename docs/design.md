@@ -338,8 +338,12 @@ the arrows.
   edges of the flow: with the flow over 8 neighbours also over the diagonal ones, with their weights, and only where
   both cells beside a diagonal edge are open (model.md, section 8.1; ADR 0086). The render pass
   draws grains that go back and forth along the stream, 12 cells to each side in 60 steps where the speed is 1, and
-  go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
-  switch on or off, so the switch never changes the grid. The simulation never reads the picture.
+  go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The switch changes only the tubes (ADR 0095): the
+  third pass runs once for each drawn state while the flow is on and the style draws the trail, with the switch on or
+  off (`grainsShown()` in `tubes.ts`), and without the picture the grains lie on the trail of the view. Then only the
+  third pass is built and run, and the GPU holds only its texture. The fit of the grid to the memory of the GPU counts
+  the three textures while the flow is on, with the switch on or off, so the switch never changes the grid. The
+  simulation never reads the picture or the stream.
 - Film of the slime (ADR 0055, decision 8; ADR 0057): while the model has slime, the view draws the slime as a wet film
   on the ground, with a switch below the Slime life time that is on at the start. The flake of food, the trail, the
   tubes, the light, the walls and the electrodes lie on the film. The slime of a cell is as thick as

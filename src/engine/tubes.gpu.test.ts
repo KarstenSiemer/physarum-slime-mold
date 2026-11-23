@@ -161,10 +161,12 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
 
   beforeAll(async () => {
     backend = await create(document.createElement('canvas'));
-    // The first picture compiles its pipelines: here, under a long timeout (flow.gpu.test.ts has the times).
+    // The first picture and the first stream compile their pipelines: here, under a long timeout (flow.gpu.test.ts has
+    // the times).
     const sim = await backend.createSim(flowing(), 16, 16, 8);
     sim.writeFlow(new Float32Array(16 * 16 * 4));
     await sim.readPicture();
+    await sim.readStream();
     sim.destroy();
   }, 600_000);
   afterEach(() => {
@@ -721,6 +723,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     await check(moving({ stepOrder: 'sense-first' }), 'sensing first');
     await check(moving({ strains: [strain, { ...defaultStrain(1), sensorOffset: 5 }] }), 'two strains');
     await check(moving({ showTubes: false }), 'without the picture');
+    // Without the picture the frames draw the grains from a stream of their own (ADR 0095). The flow frees the stream
+    // and makes it again, and a frame must not keep the stream of a frame before.
+    await check(moving({ showTubes: false, flow: false }), 'without the picture and the flow');
+    await check(moving({ showTubes: false }), 'without the picture, with the flow again');
     await check(moving({}), 'with the picture again');
     expect((await device?.popErrorScope())?.message).toBeUndefined();
   }, 120_000);
@@ -1152,6 +1158,36 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(worst(await sim.readStream(), await streamReference(sim, 'box', 2), 1)).toBeLessThan(1e-5);
   });
 
+  it('gives the stream with the switch of the picture on or off, and none in the agents style or without the flow', async () => {
+    // ADR 0095: the switch changes only the tubes, and the grains follow the stream without the picture too.
+    const [w, h] = [24, 12];
+    const sim = await make(flowing(), w, h);
+    const at = (stream: Float32Array) => near(stream[(6 * w + 10) * 4]);
+    const east = pressing(w, h, (x) => [0, 0, -2 * x, 0]);
+    sim.writeFlow(conducting(w, h, (x, y) => (y === 6 && x >= 4 && x <= 19 ? 0.25 : 0)));
+    sim.writePressure(east);
+    const on = await sim.readStream();
+    expect(at(on)).toBe(0.5);
+    sim.update(flowing({ showTubes: false }));
+    expect([...(await sim.readStream())]).toEqual([...on]);
+    // No picture of the tubes: the picture is the trail of the view.
+    expect((await sim.readTubeRoots()).length).toBe(0);
+    expect([...(await sim.readPicture())]).toEqual([...(await sim.readView())]);
+    // The stream follows a new pressure without the picture.
+    sim.writePressure(pressing(w, h, (x) => [0, 0, 2 * x, 0]));
+    expect(at(await sim.readStream())).toBe(-0.5);
+    sim.writePressure(east);
+    // The agents style draws no grains, with the switch on or off, and the stream comes back with a style of the trail.
+    for (const showTubes of [true, false]) {
+      sim.update(flowing({ showTubes, style: 'agents' }));
+      expect((await sim.readStream()).length, `agents, switch ${String(showTubes)}`).toBe(0);
+      sim.update(flowing({ showTubes }));
+      expect([...(await sim.readStream())], `glow, switch ${String(showTubes)}`).toEqual([...on]);
+    }
+    sim.update(flowing({ showTubes: false, flow: false }));
+    expect((await sim.readStream()).length).toBe(0);
+  });
+
   it('moves grains along the stream in every style that draws the trail, and draws none without a flow', async () => {
     const [w, h] = [64, 48];
     const sim = await make(flowing({ bloom: 0 }), w, h);
@@ -1165,10 +1201,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(near((await sim.readStream())[(24 * w + 32) * 4])).toBe(0.5);
     // 8 pixels per cell around the cell (32, 24).
     const view: View = { center: [32, 24], scale: 1 / 8 };
-    const frame = async (step: number, style: Settings['style'] = 'glow') => {
+    const frame = async (step: number, style: Settings['style'] = 'glow', showTubes = true) => {
       // The pattern of the grains follows the step of the state (render.ts packView()).
       (sim as unknown as { step: number }).step = step;
-      const settings = flowing({ bloom: 0, style });
+      const settings = flowing({ bloom: 0, style, showTubes });
       sim.update(settings);
       return backend.capture(sim, settings, view, 512, 384, LEVELS);
     };
@@ -1221,13 +1257,19 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       for (let x = 32; x < 480; x++) if (pixelDiff(on, off, x, 192) > 12) differ++;
       expect(differ, style).toBeGreaterThan(40);
     }
+    // Without the picture of the tubes the grains move over the trail of the view, as far as with it (ADR 0095).
+    const plain = [band(await frame(4, 'glow', false)), band(await frame(6, 'glow', false))] as const;
+    expect([...(await sim.readPicture())]).toEqual([...(await sim.readView())]);
+    expect(shift(...plain)).toBeGreaterThanOrEqual(10);
+    expect(shift(...plain)).toBeLessThanOrEqual(12);
+    expect(spread(plain[0])).toBeGreaterThan(40);
     // Without a fall of the pressure nothing flows: the frames of two steps are the same but for the dither.
     sim.writePressure(pressing(w, h, () => [0, 0, 0, 0]));
     for (const style of ['glow', 'gel', 'paper'] as const)
       expect(frameDiff(await frame(4, style), await frame(8, style)), style).toBeLessThanOrEqual(2);
   });
 
-  it.runIf(kind === 'webgl2').each([2, 3, 4, 5])(
+  it.runIf(kind === 'webgl2').each([2, 3, 4])(
     'frees the targets of the picture that are made when target %i cannot be made',
     async (failing) => {
       const [w, h] = [32, 24];
@@ -1237,9 +1279,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       sim.writeTrail(trail);
       sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
       const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
-      // The picture needs five targets: three of the cells, and the map of its tiles and the rows of that map. The
-      // framebuffer of one is not complete, as when the GPU is short of memory: the target frees its own texture, and
-      // the simulation must free the textures of the targets before it.
+      // The picture needs four targets: two of the cells, and the map of its tiles and the rows of that map. The stream
+      // of the grains has a target of its own (ADR 0095). The framebuffer of one is not complete, as when the GPU is
+      // short of memory: the target frees its own texture, and the simulation must free the textures of the targets
+      // before it.
       const [check, drop] = [gl.checkFramebufferStatus.bind(gl), gl.deleteTexture.bind(gl)];
       let [checks, freed] = [0, 0];
       gl.checkFramebufferStatus = (target) => (++checks === failing ? gl.FRAMEBUFFER_UNSUPPORTED : check(target));
