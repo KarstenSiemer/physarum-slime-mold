@@ -245,6 +245,23 @@ export interface Front {
    * edges (fluxOn must be 'sum'). A diagonal edge passes no corner of a wall: both cells beside it must be open.
    */
   stencil: number;
+  /**
+   * The credit of fresh ground (study 1a of the plan of 2026-11-22, ADR 0091): the flow memory D that ground without a
+   * tube holds, FLOW.fresh (0.2) as the app. It has three jobs, and `creditJobs` says which of them take `credit`; the
+   * others keep FLOW.fresh. 'start': ground that never held a tube starts at `credit` and keeps it. 'cap': ground that
+   * held a tube and starved comes back up to `credit`. 'fall': ground without a tube holds at most `credit`, so a tube
+   * that vanishes with more falls to it. 'all': the three at once, as the probes of the plan patched FLOW.fresh.
+   */
+  credit: number;
+  creditJobs: 'all' | 'start' | 'cap' | 'fall';
+  /**
+   * The forms without a constant (ADR 0091): 'const', the credit above. 'feeder', form (i): a cell that joins the
+   * territory takes the D of the tube cell that feeds it, its neighbour with a tube and the highest pressure (or, if no
+   * neighbour holds a tube, the highest D of its neighbours in the territory). 'births', form (ii): the agents read a
+   * level of their own (E), which follows the rule of D with the credit, and D, which only the flow reads, starts at
+   * the floor, so a new tube cell conducts at the base conductance.
+   */
+  creditOn: 'const' | 'feeder' | 'births';
 }
 
 export interface Params {
@@ -313,6 +330,9 @@ export const noFront = (): Front => ({
   shareOn: 'equal',
   fluxOn: 'sum',
   stencil: 4,
+  credit: FLOW.fresh,
+  creditJobs: 'all',
+  creditOn: 'const',
 });
 
 /** The words that a text option of `Front` takes. */
@@ -334,6 +354,8 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   sinkOn: ['all', 'fed'],
   shareOn: ['equal', 'supply'],
   fluxOn: ['sum', 'norm'],
+  creditJobs: ['all', 'start', 'cap', 'fall'],
+  creditOn: ['const', 'feeder', 'births'],
 };
 
 /**
@@ -542,6 +564,12 @@ export class Sim {
   private readonly eight: boolean;
   // The flow (section 8): memory D, tube body B, conductivity G, the role code of a port, pressure per lane.
   readonly D: Float32Array;
+  /** The level that the agents read (ADR 0091): D itself, but its own field with `creditOn` 'births'. */
+  readonly E: Float32Array;
+  /** The credit options (ADR 0091): whether any acts, the three levels, and whether a cell ever held a tube. */
+  private readonly credited: boolean;
+  private readonly creditLevels: { start: number; cap: number; fall: number };
+  private readonly held: Uint8Array;
   readonly B: Float32Array;
   G: Float32Array;
   private Gnext: Float32Array;
@@ -676,7 +704,15 @@ export class Sim {
     this.occNext = new Uint8Array(n);
     this.counts = new Uint8Array(n);
     this.claims = new Uint32Array(n);
-    this.D = new Float32Array(n).fill(FLOW.fresh);
+    const cr = p.front;
+    const job = (j: 'start' | 'cap' | 'fall') =>
+      cr.creditJobs === 'all' || cr.creditJobs === j ? cr.credit : FLOW.fresh;
+    this.creditLevels = { start: job('start'), cap: job('cap'), fall: job('fall') };
+    this.credited = cr.credit !== FLOW.fresh || cr.creditOn !== 'const';
+    this.held = new Uint8Array(this.credited ? n : 0);
+    const births = cr.creditOn === 'births';
+    this.D = new Float32Array(n).fill(births ? FLOW.floor : this.creditLevels.start);
+    this.E = births ? new Float32Array(n).fill(this.creditLevels.start) : this.D;
     this.B = new Float32Array(n);
     this.G = new Float32Array(n);
     this.Gnext = new Float32Array(n);
@@ -1025,7 +1061,16 @@ export class Sim {
       const chance = on === 'push' ? 1 - Math.pow(1 - v, pushers) : v;
       if (rand() < chance) add.push(c);
     }
-    for (const c of add) t[c] = 1;
+    if (this.p.front.creditOn !== 'feeder') {
+      for (const c of add) t[c] = 1;
+      return;
+    }
+    // Form (i) of ADR 0091: a new cell of the territory starts at the D of the tube cell that feeds it.
+    const given = add.map((c) => this.feederD(c));
+    add.forEach((c, i) => {
+      t[c] = 1;
+      this.D[c] = given[i]!;
+    });
   }
 
   private agentPass() {
@@ -1040,7 +1085,7 @@ export class Sim {
       this.claimed[i] = 0;
       if (this.alive[i]) {
         const c = this.cellOf(this.ax[i]!, this.ay[i]!);
-        const d = this.D[c]!;
+        const d = this.E[c]!;
         seedFor(i, STARVE, k, seed);
         if (rand() < (FLOW.death * half2) / (d * d + half2)) {
           this.alive[i] = 0;
@@ -1056,7 +1101,7 @@ export class Sim {
         const c = this.cellOf(px, py);
         if (c < 0 || !open[c] || this.occ[c] || this.B[c]! < FLOW.bodyLow) continue;
         if (front.speed > 0 && !this.territory[c]) continue;
-        const d = this.D[c]!;
+        const d = this.E[c]!;
         if (rand() >= (FLOW.birth * (d - FLOW.birthFrom)) / (1 - FLOW.birthFrom)) continue;
         this.kind[i] = 2;
         this.tx[i] = px;
@@ -1170,7 +1215,7 @@ export class Sim {
       }
       if (this.counts[c] === 0) continue;
       const nG = this.windowSum(x, y, 4);
-      if (nG < 1 || nG > 10 || this.D[c]! < FLOW.half) continue;
+      if (nG < 1 || nG > 10 || this.E[c]! < FLOW.half) continue;
       // `jones` (ADR 0076): Jones' births only within `reach` of ground without slime ('fresh') or of open ground
       // outside the territory ('edge'), at the front.
       if (front.jones === 'fresh' && !this.freshNear(c)) continue;
@@ -1189,7 +1234,7 @@ export class Sim {
       for (let i = 0; i < cap; i++) {
         if (!this.alive[i] || this.want[i]! >= 0) continue;
         const c = this.cellOf(this.ax[i]!, this.ay[i]!);
-        if (!this.marks[c] || this.D[c]! < FLOW.half) continue;
+        if (!this.marks[c] || this.E[c]! < FLOW.half) continue;
         if (front.rim && !this.atRim(c)) continue;
         if (this.claimChild(i, c, free, front.rim)) {
           this.paidClaims++;
@@ -1205,7 +1250,7 @@ export class Sim {
       for (let i = 0; i < cap; i++) {
         if (!this.alive[i] || this.want[i]! >= 0) continue;
         const c = this.cellOf(this.ax[i]!, this.ay[i]!);
-        if (this.D[c]! < FLOW.half) continue;
+        if (this.E[c]! < FLOW.half) continue;
         if (atSinks ? this.sinkRate[c]! <= 0 : !this.isYoung(c, k)) continue;
         if (!front.rim || this.atRim(c)) at.push(i);
       }
@@ -1288,7 +1333,7 @@ export class Sim {
     for (let i = 0; i < cap; i++) {
       if (!this.alive[i] || this.want[i]! >= 0) continue;
       const c = this.cellOf(this.ax[i]!, this.ay[i]!);
-      if (this.sinkRate[c]! <= 0 || this.D[c]! < FLOW.half) continue;
+      if (this.sinkRate[c]! <= 0 || this.E[c]! < FLOW.half) continue;
       if (front.rim && !this.atRim(c)) continue;
       atFront++;
       if (!this.roomFor(c, this.occNext)) continue;
@@ -1335,7 +1380,7 @@ export class Sim {
     for (let i = 0; i < cap; i++) {
       if (!this.alive[i] || this.want[i]! >= 0) continue;
       const c = this.cellOf(this.ax[i]!, this.ay[i]!);
-      if (this.sinkRate[c]! <= 0 || this.D[c]! < FLOW.half) continue;
+      if (this.sinkRate[c]! <= 0 || this.E[c]! < FLOW.half) continue;
       if (front.rim && !this.atRim(c)) continue;
       atFront++;
       if (!this.roomFor(c, this.occNext)) continue;
@@ -1440,7 +1485,7 @@ export class Sim {
    */
   canPay(c: number): boolean {
     const front = this.p.front;
-    if (!this.occ[c] || this.sinkRate[c]! <= 0 || this.D[c]! < FLOW.half) return false;
+    if (!this.occ[c] || this.sinkRate[c]! <= 0 || this.E[c]! < FLOW.half) return false;
     if (front.rim && !this.atRim(c, this.occ)) return false;
     return this.roomFor(c, this.occ);
   }
@@ -1460,7 +1505,7 @@ export class Sim {
         const [xx, yy] = [x + dx, y + dy];
         if ((dx === 0 && dy === 0) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
         const t = yy * w + xx;
-        if (!open[t] || occ[t] || this.D[t]! < FLOW.half) continue;
+        if (!open[t] || occ[t] || this.E[t]! < FLOW.half) continue;
         if (front.speed > 0 && !this.territory[t]) continue;
         if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;
         return true;
@@ -1559,7 +1604,7 @@ export class Sim {
       const [xx, yy] = [x + dx, y + dy];
       if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
       const t = yy * w + xx;
-      if (!open[t] || occ[t] || this.D[t]! < FLOW.half) continue;
+      if (!open[t] || occ[t] || this.E[t]! < FLOW.half) continue;
       if (front.speed > 0 && !this.territory[t]) continue;
       if (dx !== 0 && dy !== 0 && isWall(x + dx, y) && isWall(x, y + dy)) continue;
       free.push(t);
@@ -1652,6 +1697,38 @@ export class Sim {
   }
 
   /** Whether a cell has slime before step k (6.9). */
+  /**
+   * The flow memory of ground without a tube with the credit options (ADR 0091). Ground that never held a tube keeps
+   * its start (or the D that its feeder gave it). Ground that held one holds at most the level `fall`, and below the
+   * level `cap` it comes back as the app's ground does. With the three levels at FLOW.fresh this is the rule of the app.
+   */
+  private bareMemory(c: number, d: number): number {
+    if (!this.held[c]) return d;
+    const { cap, fall } = this.creditLevels;
+    if (d > fall) return fall;
+    return d < cap ? Math.min(cap, Math.max(d, FLOW.floor) * (1 + this.recover)) : d;
+  }
+
+  /**
+   * Form (i) of ADR 0091: the D of the tube cell that feeds cell c as it joins the territory, its neighbour in the
+   * territory with a tube and the highest pressure; without one, the highest D of its neighbours in the territory.
+   */
+  private feederD(c: number): number {
+    const { w, h, territory: t, G, D } = this;
+    const [x, y] = [c % w, Math.floor(c / w)];
+    let [feeder, high, top] = [-1, -Infinity, -1];
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const [xx, yy] = [x + dx, y + dy];
+        if ((dx === 0 && dy === 0) || xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const m = yy * w + xx;
+        if (!t[m]) continue;
+        top = Math.max(top, D[m]!);
+        if (G[m]! > 0 && this.pm(m) > high) [feeder, high] = [m, this.pm(m)];
+      }
+    return feeder >= 0 ? D[feeder]! : top >= 0 ? top : D[c]!;
+  }
+
   hasSlime(c: number, k = this.step): boolean {
     const s = this.S[c]!;
     return s !== 0 && k + 1 - s < this.life;
@@ -1700,6 +1777,7 @@ export class Sim {
       let d = D[c]!;
       const bodyOld = B[c]!;
       if (bodyOld >= FLOW.bodyLow) d = fed ? Math.max(FLOW.floor, d + FLOW.rate * (this.fmean[c]! - d)) : d;
+      else if (this.credited) d = this.bareMemory(c, d);
       else d = Math.min(FLOW.fresh, Math.max(d, FLOW.floor) * (1 + this.recover));
       let presence = Math.min(1, Math.max(0, (this.trail[c]! - this.low) * this.scale));
       if (bodyOn !== 'trail') {
@@ -1718,6 +1796,15 @@ export class Sim {
       const body = bodyOld + FLOW.bodyRate * (presence - bodyOld);
       if (bodyOld >= FLOW.bodyLow && body < FLOW.bodyLow && d * d < half2) d = FLOW.floor;
       D[c] = d;
+      if (this.E !== D) {
+        // `creditOn` 'births' (ADR 0091): the level of the agents follows the rule of D from its own start.
+        let e = this.E[c]!;
+        if (bodyOld >= FLOW.bodyLow) e = fed ? Math.max(FLOW.floor, e + FLOW.rate * (this.fmean[c]! - e)) : e;
+        else e = this.bareMemory(c, e);
+        if (bodyOld >= FLOW.bodyLow && body < FLOW.bodyLow && e * e < half2) e = FLOW.floor;
+        this.E[c] = e;
+      }
+      if (this.credited && body >= FLOW.bodyLow) this.held[c] = 1;
       B[c] = body;
       if (body >= FLOW.bodyLow && d >= VEIN && this.veinAt[c] === 0) this.veinAt[c] = k + 1;
       Gn[c] = body >= FLOW.bodyLow ? body * (food[c] ? FLOW.food : this.base + d) : 0;
