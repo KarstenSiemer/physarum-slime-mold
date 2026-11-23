@@ -14,7 +14,12 @@
 #   nopay-f9             the band: `feed=flux`, and the flux pays no birth (a birth costs 10^12 of flux)
 #   wide-f9              the band: `feed=flux` in a dish of 512 cells, the foods where they lie in Food ring
 #   nodrift-f9           the band: `feed=flux` without the drift
-#   drift9-f9            the band: `feed=flux` with a ninth of the drift, so that it reads the pressure of one food
+#   drift9-f9            the band: `feed=flux` with a ninth of the drift, from the start
+#   drift1-f9            the band: `feed=flux`, the drift over the covered foods: it reads the pressure of one food
+#   fast-f1, fast-f9     rules 1 and 2 (the front first) under a doubling of 2,640 steps: a check, not a rule (P1D-NOTES)
+#   cap-f1, cap-f9       rules 1 and 2 (the front first), the food credits only up to the agents of the front
+#   jcap-f9              the same with Jones' births first
+#   edge-f1, edge-f9     cap-f1 and cap-f9 with Jones' births only at the edge of the territory (`jones=edge`, ADR 0076)
 #   foods-f9, fixed-f9   the band: the flux of one food, with the births of nine (`feed=foods`) or of one (today)
 #   long-f9              the band: `feed=flux` as base-f9, to step 26,000, after the territory fills the dish
 set -euo pipefail
@@ -40,6 +45,11 @@ words() {
     wide) echo "feed=flux side=512 ring=0.225 foodR=5.376 foods=$foods" ;;
     nodrift) echo "feed=flux drift=0 foods=$foods" ;;
     drift9) echo "feed=flux drift=0.1667 foods=$foods" ;;
+    drift1) echo "feed=flux driftPerFood=1 foods=$foods" ;;
+    fast) echo "feed=flux payAll=front refund=1 double=2640 foods=$foods" ;;
+    cap) echo "feed=flux payAll=front refund=1 feedCap=1 foods=$foods" ;;
+    jcap) echo "feed=flux payAll=jones refund=1 feedCap=1 foods=$foods" ;;
+    edge) echo "feed=flux payAll=front refund=1 feedCap=1 jones=edge foods=$foods" ;;
     foods) echo "feed=foods foods=$foods" ;;
     fixed) echo "feed=fixed foods=$foods" ;;
     long) echo "feed=flux steps=26000 pics=5000,10000,15000,20000,22000,24000,26000 foods=$foods" ;;

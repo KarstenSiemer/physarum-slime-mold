@@ -997,8 +997,8 @@ describe('the CPU prototype of stage 4', () => {
     };
     // Rules 1 and 2, in both orders: every birth costs one, every death gives one back, so the agents and the budget
     // change only by what the food credits.
-    for (const payAll of ['jones', 'front']) {
-      const { sim, start, w, births } = run({ payAll, refund: '1' });
+    const both = ['jones', 'front'].map((payAll) => run({ payAll, refund: '1' }));
+    for (const { sim, start, w, births } of both) {
       expect(births).toBeGreaterThan(100);
       expect(sim.aliveCount + sim.budget - start).toBeCloseTo(w.credited, 9);
     }
@@ -1013,5 +1013,26 @@ describe('the CPU prototype of stage 4', () => {
     expect(mass).toBeGreaterThan(slow.start);
     expect(mass).toBeLessThanOrEqual(slow.start * (1 + Math.LN2 / double) ** 100 + 1e-9);
     expect(slow.w.credited).toBeLessThan(0.01 * 100 * 0.8);
+    // The cap of 9.1 on the credit stops the food while the budget is above the agents of the front, and keeps the
+    // plasm: the mass still changes only by the credit.
+    const free = both[1]!;
+    const capped = run({ payAll: 'front', refund: '1', feedCap: '1' });
+    expect(capped.w.credited).toBeLessThan(free.w.credited);
+    expect(capped.sim.aliveCount + capped.sim.budget - capped.start).toBeCloseTo(capped.w.credited, 9);
+  });
+
+  it('reads the drift over the covered foods with driftPerFood, and keeps the run of one food (ADR 0097)', () => {
+    const end = (foods: [number, number, number][], more: Record<string, string>) => {
+      const sim = new Sim(dish(60, foods), params({ seed: 3, front: gpuRules({ feed: 'flux', ...more }) }));
+      for (let k = 0; k < 80; k++) sim.advance();
+      return Array.from(sim.ax);
+    };
+    const one: [number, number, number][] = [[30, 30, 3]];
+    expect(end(one, { driftPerFood: '1' })).toEqual(end(one, {}));
+    const two: [number, number, number][] = [
+      [30, 30, 3],
+      [33, 30, 2],
+    ];
+    expect(end(two, { driftPerFood: '1' })).not.toEqual(end(two, {}));
   });
 });

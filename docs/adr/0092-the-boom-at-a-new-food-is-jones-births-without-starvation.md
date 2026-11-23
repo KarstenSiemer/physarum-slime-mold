@@ -5,6 +5,9 @@
 - Date: 2026-11-22
 - Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d
   before a port.
+- Extended by [ADR 0097](0097-paid-births-thin-the-sheet-and-fill-the-dish.md) (2026-11-23): study 1d measured
+  option 3 with rule 2 and `feed=flux`. Paid by the front first, the births thin the sheet; at nine foods the rise
+  stays, as the credit of nine foods.
 - In short: the story and the tables are in [research/front/P1B-NOTES.md](../../research/front/P1B-NOTES.md). The
   runner `research/front/boom.gpu.test.ts`, the cases `research/front/boom.sh` and the tables `research/front/boom.ts`
   make the numbers again. No rule, pass or scene of the app changed.

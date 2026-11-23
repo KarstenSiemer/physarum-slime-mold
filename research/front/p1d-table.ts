@@ -80,9 +80,16 @@ function band(bins: Bin[] | undefined) {
   );
 }
 
+/** The dish is full when at most this many open cells lie beside the territory (a few cells that it never reaches). */
+const FULL = 50;
+/** The window of the ledger: `ledger=5000-10000` on the command line, else the steps 10,001 to 20,000. */
+const [FROM, TO] = (process.argv.find((a) => a.startsWith('ledger='))?.slice(7) ?? '10000-20000')
+  .split('-')
+  .map(Number) as [number, number];
+
 const isMain = process.argv[1]?.endsWith('p1d-table.ts');
 if (isMain) {
-  const cases = readCases(process.argv.slice(2));
+  const cases = readCases(process.argv.slice(2).filter((a) => !a.startsWith('ledger=')));
   const row = (r: Run, k: number) => r.rows.find((x) => x.k === k);
   const keys = [...cases.keys()].sort();
   console.log(
@@ -100,10 +107,16 @@ if (isMain) {
       };
       const b = boom(r);
       const maxB = Math.max(...(r.fine ?? r.rows).map((x) => x.budget));
+      // The dish is full at the first row with at most FULL open cells beside the territory; the row before it.
+      const full = r.rows.findIndex((x) => x.room <= FULL);
+      const before = full > 0 ? r.rows[full - 1]! : undefined;
+      const end = row(r, 20000);
       console.log(
         `${key} s${String(r.seed)}: ${ab(5000)} | ${ab(10000)} | ${ab(20000)}; budget max ${maxB.toFixed(0)}; ` +
-          `covered ${String(row(r, 20000)?.covered)}, second food ${String(b.second)}; rise ${pc(b.rise)}, ` +
-          `fall ${pc(b.fall)}; stalls [${stalls(r.rows).join(',')}]; sheet ${sheet(10000)} ${sheet(20000)}`,
+          `covered ${String(end?.covered)}, second food ${String(b.second)}; rise ${pc(b.rise)}, ` +
+          `fall ${pc(b.fall)}; stalls [${stalls(r.rows).join(',')}]; sheet ${sheet(10000)} ${sheet(20000)}; full ` +
+          `${full >= 0 ? String(r.rows[full]!.k) : '–'}${before ? ` (${String(before.alive)} agents at ${String(before.k)})` : ''}` +
+          `; mass at 20,000 ${end ? (end.alive + end.budget).toFixed(0) : '–'}`,
       );
     }
   console.log('Nine foods against one at step 20,000, seed by seed:');
@@ -116,11 +129,13 @@ if (isMain) {
     });
     console.log(`${key}: ${ratios.join(', ') || '–'}`);
   }
-  console.log('Steps 10,001 to 20,000, per step: births by kind, deaths by cause; then the agents on old ground:');
+  console.log(
+    `Steps ${String(FROM + 1)} to ${String(TO)}, per step: births by kind, deaths by cause; the agents on old ground:`,
+  );
   for (const key of keys)
     for (const r of cases.get(key)!) {
-      const late = r.rows.filter((x) => x.k > 10000);
-      const per = (f: (x: FeedRow) => number) => (sum(late.map(f)) / 10000).toFixed(1);
+      const late = r.rows.filter((x) => x.k > FROM && x.k <= TO);
+      const per = (f: (x: FeedRow) => number) => (sum(late.map(f)) / (TO - FROM)).toFixed(1);
       const ages = sum(late.map((x) => sum(x.age)));
       const deaths = sum(late.map((x) => sum(x.starve) + sum(x.crowd)));
       const old = (k: number) => {

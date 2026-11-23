@@ -452,11 +452,13 @@ any port (ADR 0096).
       covered food gives the front the flux of one food, and 9 foods give 3.7 to 4.4 times the mass of 1 food on 6
       seeds. The rate has a source (Mohberg and Rusch 1969). The pictures show a band at the wall. The proposal of 1b
       needs the deaths to give their plasm back to the budget: without that, the colony shrinks to about 100 agents.
-- [ ] Phase 1d, the three rules together (ADR 0096, 2026-11-23): in the prototype, the dish of Food ring with one
-      food and with nine, 6 seeds to step 20,000. The rules: `feed=flux` of 1c, every birth paid from the budget (1b),
-      and the plasm of a dying agent back to the budget. The measures: More food, more mass, No stall, No boom from
-      the second covered food, and the sheet. Also the cause of the band at the wall. About 400,000 tokens, CPU only.
-      Its record will be ADR 0097.
+- [x] Phase 1d, the three rules together (ADR 0096; ADR 0097, proposed, 2026-11-23): the prototype, the dish of Food
+      ring with one food and with nine, to step 20,000; seeds 1 to 3 for today and for the front first, seed 1 for the
+      other cases. Paid by the front first, the births thin the sheet (0.09 to 0.16 with one food), and the mass comes
+      from the food alone. But the colony fills the dish by step 10,000 to 15,000 and then falls by half or more, and
+      nine foods still rise by 102 to 114 % within 1,000 steps. The rate of Mohberg and Rusch stops a young colony
+      (130 agents at step 20,000). The band at the wall is the zone behind the front that the drift of nine foods
+      fills. No form reaches the aims; the agent recommends no port until the owner decides whether an agent is mass.
 - [ ] Phase 2, each rule that passed phase 1, in a pull request of its own: both backends, `docs/model.md`, wrong
       rules, the digests of every scene, then the numbers of ADR 0087 and ADR 0088. The owner watches the scenes run.
       It waits for study 1d: then the owner decides which rules go into the engine (ADR 0096).
@@ -469,6 +471,11 @@ any port (ADR 0096).
 - Not measured in phase 1, as each record says: the zigzag of the veins and the steps beyond 12,000 (ADR 0091); the
   study 1b in the prototype (ADR 0092); `feed=flux` in the engine, on WebGL2, in other dishes and at other strengths
   (ADR 0093). Phase 2 measures each rule that it ports in the engine, on both backends.
+- [ ] Not measured in study 1d (ADR 0097), each in the prototype on the CPU: six seeds of every case (about 20 runs of
+      15 to 35 minutes, about 30,000 tokens); the rules in a dish that they do not fill in 20,000 steps, to read More
+      food and No stall without the full dish (640 to 768 cells, 1 to 2 hours a run); a stored budget spent at a food
+      that comes after the dish is full (2 runs); Jones' births first with the cap of 9.1 on the credit (1 run). And
+      the engine and WebGL2.
 
 The owner's open decisions (plan, section 6):
 
@@ -479,6 +486,9 @@ The owner's open decisions (plan, section 6):
    which reopens ADR 0054.
 3. The cost of phase 2: about 850,000 tokens of helpers and about 6 hours of GPU (plan, section 5). The coordinator
    names the cost of each port before it starts. Phase 1 is approved, study 1d too (ADR 0096).
+4. Whether an agent of the model is mass (ADR 0097). If it is, every birth is paid and the dead give their plasm back,
+   the rate of the organism binds the growth (one doubling in 8 hours), and the scenes with growth start with the mass
+   that covers their arena. If it is not, an agent stands for an area of plasm, and no rate of the organism binds it.
 
 Also open for the owner:
 

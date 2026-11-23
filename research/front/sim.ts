@@ -138,6 +138,11 @@ export interface Front {
    */
   driftOn: 'all' | 'net' | 'mirror' | 'take' | 'sinks' | 'rim' | 'leak' | 'extend';
   /**
+   * Study 1d (ADR 0097), a check of the band at the wall: the drift reads the pressure over the covered foods of the
+   * last flow pass, max(1, P), so that with `feed` 'flux' it reads the pressure of one food. Off: as before.
+   */
+  driftPerFood: boolean;
+  /**
    * A sink lies on a tube that carries flux to it (ADR 0072): the tube cells that a path between 4-neighbours over tube
    * cells reaches from it, within the square of 13 × 13 cells around it, include a cell on the edge of the square or a
    * port. A patch of tube inside that square without a port takes no flux.
@@ -266,6 +271,12 @@ export interface Front {
    */
   double: number;
   /**
+   * Study 1d, question 1: the food credits the budget only up to the agents of the front of the last growth step, F:
+   * at most max(0, F − B) in a step. This is the cap of docs/model.md 9.1 (the budget never exceeds the agents of the
+   * front), put on the credit, so that it stops the food while the front cannot spend and destroys no plasm.
+   */
+  feedCap: boolean;
+  /**
    * The edges of the flow (ADR 0081, a try): 4, the axis neighbours, as the app; or 8, also the diagonal neighbours,
    * in the solve of the pressure, in the fluxes and in the flux of a cell. With 8 an axis edge has the weight
    * STENCIL8.axis and a diagonal edge STENCIL8.diag, and Q is half the sum of the sizes of the fluxes over the 8
@@ -339,6 +350,7 @@ export const noFront = (): Front => ({
   rim: false,
   drift: 0,
   driftOn: 'all',
+  driftPerFood: false,
   sinkTube: false,
   refOn: 'roles',
   solver: 'app',
@@ -360,6 +372,7 @@ export const noFront = (): Front => ({
   payAll: 'off',
   refund: false,
   double: 0,
+  feedCap: false,
   stencil: 4,
   credit: FLOW.fresh,
   creditJobs: 'all',
@@ -652,6 +665,8 @@ export class Sim {
   private frontActive = false;
   /** The total sink of the front in the last step. */
   frontTotal = 0;
+  /** `driftPerFood`: 1 over the covered foods of the last flow pass; else 1. */
+  private driftScale = 1;
   /** Births that the flow paid for and that are not born yet. */
   budget = 0;
   paidBirths = 0;
@@ -726,7 +741,8 @@ export class Sim {
     // The rules of study 1d pay the front by its ranks, and give plasm back or limit it only while every birth costs.
     if (p.front.payAll !== 'off' && (p.front.paidBy !== 'rank' || !(p.front.paid > 0)))
       throw new Error('payAll needs paid > 0 and paidBy=rank');
-    if ((p.front.refund || p.front.double > 0) && p.front.payAll === 'off') throw new Error('refund, double: payAll');
+    if ((p.front.refund || p.front.double > 0 || p.front.feedCap) && p.front.payAll === 'off')
+      throw new Error('refund, double, feedCap: payAll');
     const stencil = p.front.stencil;
     if (stencil !== 4 && stencil !== 8) throw new Error(`stencil=${String(stencil)}: 4 or 8`);
     // The 8 edges cover the solve, the fluxes and the flux of a cell; the ground of the drift keeps its 4 edges.
@@ -957,7 +973,7 @@ export class Sim {
     if (!this.clearPath(px, py, qx, qy)) return BLOCKED;
     const drift = this.p.front.drift;
     let v = this.trail[c]! + this.p.foodWeight * this.scent[c]!;
-    if (drift > 0) v -= drift * this.driftPressure(px, py, qx, qy, c);
+    if (drift > 0) v -= drift * this.driftScale * this.driftPressure(px, py, qx, qy, c);
     return v;
   }
 
@@ -2233,6 +2249,7 @@ export class Sim {
     this.take.fill(0);
     this.frontActive = false;
     this.frontTotal = 0;
+    if (front.driftPerFood) this.driftScale = 1 / Math.max(1, this.ports.filter((c) => c >= 0).length);
     if (front.paid > 0) {
       this.paidSinks();
       return;
@@ -2377,6 +2394,7 @@ export class Sim {
     // `double` (study 1d): the mass, the agents and the budget, grows by at most mass · ln 2 / `double` in a step.
     if (front.double > 0)
       credit = Math.min(credit, ((this.aliveCount + Math.max(0, this.budget)) * Math.LN2) / front.double);
+    if (front.feedCap) credit = Math.min(credit, Math.max(0, this.frontAgents - this.budget));
     this.budget += credit;
     this.ledger?.budget(credit, 0);
   }
