@@ -51,7 +51,8 @@ run shows a stored budget spent at once; the rise at the new foods is the credit
 the budget of `docs/model.md` 9.1 never exceeds the agents of the front. Put on the credit (`feedCap`), it stops the food
 while the front cannot spend, and it destroys no plasm. With nine foods it keeps the budget at 51 to 525 while the
 colony has a front (cap-f9). It does not end the rise (+119 %), and it does not touch the plasm of a full dish (18,020
-at step 20,000): no credit flows then. No rate of spending follows from the model; the only rate with a source is that
+at step 20,000): no credit flows then. With one food it changes little (7,282 agents and a sheet of 0.17 at step
+10,000), and so do Jones' births only at the edge of the territory (`jones=edge`, ADR 0076). No rate of spending follows from the model; the only rate with a source is that
 of question 2.
 
 **Question 2: the rate of Mohberg and Rusch.** Under the limit (`double=14400`) the mass grows by at most
@@ -100,6 +101,8 @@ Dish of Food ring, Flow strength 8, `feed=flux` unless named. Seeds 1 to 3 where
 | Rules 1 and 2, front first, nine foods      | 3     | 27,578–29,631    | 2,895–3,166      | 35,290–38,164    | 0.76–1.17        | +102 to +114 %; −50 to −55 %    | none (no room)         | 0.75–0.79; 0.14–0.15    |
 | Rules 1 and 2, Jones first, one; nine       | 1     | 7,911; 14,677    | 2,711; 3,504     | 9,828; 40,128    | 1.29             | nine: +44 %; −60 %, −59 %       | 2; 3                   | 0.51, 0.92; 0.13, 0.17  |
 | Front first, cap of 9.1 on the credit, nine | 1     | 21,228           | 3,608            | 18,020           | –                | +119 %; −49 %                   | 5                      | 0.65; 0.17              |
+| The same, one food                          | 1     | 7,282            | 3,526            | 6,463            | –                | –; −64 %                        | 4                      | 0.17; 0.18              |
+| The same, Jones' births at the edge, one    | 1     | 7,285            | 2,026            | 7,743            | –                | –; −70 %                        | 3                      | 0.12; 0.10              |
 | Rule 1 alone, one food                      | 1     | 195              | 357              | about 0          | –                | –                               | 1                      | 0.29; 0.30              |
 | Doubling of 14,400 steps, one; nine         | 1     | 80; 80           | 130; 130         | about 0          | 1.00             | –                               | none                   | 0.54; 0.36              |
 | Check: doubling of 2,640, one; nine         | 1     | 679; 688         | 6,413; 9,349     | 103; 162         | 1.46             | nine: +32 %; 0 %                | none                   | 0.64, 0.67; 0.06, 0.33  |
@@ -136,6 +139,20 @@ The band: agents per cell by the distance from the edge of the territory, and th
 
 A dash: the run was made before the runner counted the fed cells.
 
+## The pictures
+
+Seed 1, in `research/front/out/p1d/` (git ignores it), each with a copy `*-small.png` of 2,000 pixels in width:
+
+- `p1d-seed1-f1.png`, one food at the steps 5,000, 10,000 and 20,000. Rows: today; rules 1 and 2 with Jones first; with
+  the front first; with the cap; with the cap and Jones' births at the edge; rule 1 alone; the doubling of 14,400
+  steps; the check of 2,640 steps. With the front first the colony is a ring of plasm at its rim with veins inside; at
+  step 20,000, after the full dish, a net of tubes.
+- `p1d-seed1-f9.png`, nine foods, the same columns. Rows: today's `feed=flux`; Jones first; the front first; the cap;
+  the doubling of 14,400 steps; the check of 2,640 steps. After the full dish a ring of tubes joins the foods.
+- `p1d-band-seed1.png`, nine foods at the steps 10,000, 15,000 and 20,000. Rows: `feed=flux`; no paid birth; the dish of
+  512 cells (scaled); the drift of one food; `feed=foods`; today's rule; and `feed=flux` at the steps 22,000, 24,000
+  and 26,000, after the dish is full.
+
 ## Not measured
 
 - Six seeds: today and the front first ran on seeds 1 to 3, every other case on seed 1. All rules fail at step 20,000
@@ -144,7 +161,9 @@ A dash: the run was made before the runner counted the fed cells.
   A dish of 640 to 768 cells, 1 to 2 hours per run on the CPU.
 - A stored budget spent at a new food: no run had a food that came after the budget grew. A scene with a food that
   appears after the dish is full, 2 runs.
-- Jones first with the cap (`jcap-f9`): stopped unfinished to close the study.
+- Nine foods with the cap and Jones' births first (`jcap-f9`), and with the cap and Jones' births only at the edge
+  (`edge-f9`): both stopped unfinished to close the study. The second could keep the plasm that the front cannot place
+  off the fed ground behind it. One run each, about 30 minutes.
 - The engine and WebGL2.
 
 ## Commands

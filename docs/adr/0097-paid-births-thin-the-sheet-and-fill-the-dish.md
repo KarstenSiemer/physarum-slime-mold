@@ -97,4 +97,5 @@ recommends it; the owner decides at the next gate.
 - The runner `research/front/feed.ts` records the sheet, the agents on old ground by origin, the band, and every 100
   steps the agents, the budget and the covered foods.
 - `TODO.md` holds what was not measured: six seeds, a dish that the rules do not fill, a stored budget spent at a new
-  food, Jones first with the cap, the engine and WebGL2.
+  food, nine foods with the cap and Jones' births first or only at the edge (`jones=edge`; both runs stopped to close
+  the study), the engine and WebGL2.

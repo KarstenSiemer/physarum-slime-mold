@@ -474,8 +474,9 @@ any port (ADR 0096).
 - [ ] Not measured in study 1d (ADR 0097), each in the prototype on the CPU: six seeds of every case (about 20 runs of
       15 to 35 minutes, about 30,000 tokens); the rules in a dish that they do not fill in 20,000 steps, to read More
       food and No stall without the full dish (640 to 768 cells, 1 to 2 hours a run); a stored budget spent at a food
-      that comes after the dish is full (2 runs); Jones' births first with the cap of 9.1 on the credit (1 run). And
-      the engine and WebGL2.
+      that comes after the dish is full (2 runs); nine foods with the cap of 9.1 on the credit and Jones' births first,
+      or only at the edge of the territory (`jones=edge`), which could keep the plasm that the front cannot place off
+      the fed ground behind it (1 run each, about 30 minutes). And the engine and WebGL2.
 
 The owner's open decisions (plan, section 6):
 
