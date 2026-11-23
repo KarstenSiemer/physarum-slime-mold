@@ -5,6 +5,8 @@
   which rules go into the engine.
 - Date: 2026-11-23
 - Extends [ADR 0085](0085-the-crown-so-far.md) (part E2o, widened).
+- Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d
+  before a port.
 - In short: the story and the tables are in [research/front/P1A-NOTES.md](../../research/front/P1A-NOTES.md). The plan
   is [research/front/PLAN-2026-11-22.md](../../research/front/PLAN-2026-11-22.md), sections 2.2 B, 2.4 option 2 and
   2.5. `research/front/p1a.sh` makes the runs again.
