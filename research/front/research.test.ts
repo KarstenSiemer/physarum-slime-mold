@@ -891,4 +891,68 @@ describe('the CPU prototype of stage 4', () => {
       expect(two.credits.filter((c) => Math.abs(c - 2 * unit) < 1e-9).length).toBeGreaterThan(30);
     }
   });
+
+  it('gives each job and form of the credit its level, and keeps the rule of the app at FLOW.fresh (ADR 0091)', () => {
+    const make = (more: Record<string, string>) =>
+      new Sim(dish(40, [[20, 20, 3]]), params({ seed: 3, front: gpuRules(more) }));
+    // The flow memory of ground without a tube at cell 0, for ground that held a tube or never held one.
+    const memory = (sim: Sim, held: boolean, d: number) => {
+      sim.held[0] = held ? 1 : 0;
+      return sim.bareMemory(0, d);
+    };
+    const back = (sim: Sim, up: number, d: number) => Math.min(up, Math.max(d, FLOW.floor) * (1 + sim.recover));
+    const f32 = Math.fround;
+    const sweep = [0, FLOW.floor / 2, 0.001, 0.01, 0.0199, 0.02, 0.1, FLOW.fresh, 0.3, 0.9];
+    // With the three levels at FLOW.fresh, ground that held a tube follows the rule of the app.
+    const same = make({ creditOn: 'feeder' });
+    for (const d of sweep) expect(memory(same, true, d)).toBe(back(same, FLOW.fresh, d));
+    // 'all': ground starts at the credit and keeps it; ground that held a tube holds at most the credit.
+    const all = make({ credit: '0.02' });
+    expect(all.D.every((d) => d === f32(0.02))).toBe(true);
+    expect(all.E).toBe(all.D);
+    for (const d of sweep) {
+      expect(memory(all, false, d)).toBe(d);
+      expect(memory(all, true, d)).toBe(d > 0.02 ? 0.02 : back(all, 0.02, d));
+    }
+    // 'start': only ground that never held a tube starts at the credit; ground that held one follows the app.
+    const start = make({ credit: '0.02', creditJobs: 'start' });
+    expect(start.D.every((d) => d === f32(0.02))).toBe(true);
+    for (const d of sweep) expect(memory(start, true, d)).toBe(back(start, FLOW.fresh, d));
+    // 'cap': starved ground comes back only up to the credit, and ground up to FLOW.fresh keeps its D.
+    const cap = make({ credit: '0.02', creditJobs: 'cap' });
+    expect(cap.D.every((d) => d === f32(FLOW.fresh))).toBe(true);
+    for (const d of sweep)
+      expect(memory(cap, true, d)).toBe(d > FLOW.fresh ? FLOW.fresh : d < 0.02 ? back(cap, 0.02, d) : d);
+    // 'fall': ground that held a tube holds at most the credit, and below it comes back as in the app.
+    const fall = make({ credit: '0.02', creditJobs: 'fall' });
+    for (const d of sweep) expect(memory(fall, true, d)).toBe(d > 0.02 ? 0.02 : back(fall, FLOW.fresh, d));
+    // Form (ii): the agents read a level E of their own that starts at the credit; D, which only the flow reads,
+    // starts at the floor.
+    const births = make({ credit: '0.02', creditOn: 'births' });
+    expect(births.E).not.toBe(births.D);
+    expect(births.D.every((d) => d === f32(FLOW.floor))).toBe(true);
+    expect(births.E.every((e) => e === f32(0.02))).toBe(true);
+    // Form (i): a cell that joins the territory takes the D of its neighbour with a tube and the highest pressure;
+    // without a tube near, the highest D of its neighbours in the territory; without those, its own D.
+    const feeder = make({ creditOn: 'feeder' });
+    const c = 10 * feeder.w + 10;
+    feeder.territory.fill(0);
+    feeder.G.fill(0);
+    const near: [number, number, number, number][] = [
+      [c - 1, 0.7, 1, 1],
+      [c + 1, 0.4, 1, 2],
+      [c + feeder.w, 0.9, 0, 3],
+    ];
+    for (const [m, d, g, p] of near) {
+      feeder.territory[m] = 1;
+      feeder.D[m] = d;
+      feeder.G[m] = g;
+      for (const lane of feeder.P) lane[m] = p;
+    }
+    expect(feeder.feederD(c)).toBe(f32(0.4));
+    feeder.G.fill(0);
+    expect(feeder.feederD(c)).toBe(f32(0.9));
+    feeder.territory.fill(0);
+    expect(feeder.feederD(c)).toBe(feeder.D[c]);
+  });
 });

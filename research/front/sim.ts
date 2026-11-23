@@ -589,7 +589,7 @@ export class Sim {
   /** The credit options (ADR 0091): whether any acts, the three levels, and whether a cell ever held a tube. */
   private readonly credited: boolean;
   private readonly creditLevels: { start: number; cap: number; fall: number };
-  private readonly held: Uint8Array;
+  readonly held: Uint8Array;
   readonly B: Float32Array;
   G: Float32Array;
   private Gnext: Float32Array;
@@ -687,7 +687,7 @@ export class Sim {
   aliveCount = 0;
   private readonly low: number;
   private readonly scale: number;
-  private readonly recover: number;
+  readonly recover: number;
 
   constructor(
     readonly layout: Layout,
@@ -1733,13 +1733,12 @@ export class Sim {
     }
   }
 
-  /** Whether a cell has slime before step k (6.9). */
   /**
    * The flow memory of ground without a tube with the credit options (ADR 0091). Ground that never held a tube keeps
    * its start (or the D that its feeder gave it). Ground that held one holds at most the level `fall`, and below the
    * level `cap` it comes back as the app's ground does. With the three levels at FLOW.fresh this is the rule of the app.
    */
-  private bareMemory(c: number, d: number): number {
+  bareMemory(c: number, d: number): number {
     if (!this.held[c]) return d;
     const { cap, fall } = this.creditLevels;
     if (d > fall) return fall;
@@ -1750,7 +1749,7 @@ export class Sim {
    * Form (i) of ADR 0091: the D of the tube cell that feeds cell c as it joins the territory, its neighbour in the
    * territory with a tube and the highest pressure; without one, the highest D of its neighbours in the territory.
    */
-  private feederD(c: number): number {
+  feederD(c: number): number {
     const { w, h, territory: t, G, D } = this;
     const [x, y] = [c % w, Math.floor(c / w)];
     let [feeder, high, top] = [-1, -Infinity, -1];
@@ -1766,6 +1765,7 @@ export class Sim {
     return feeder >= 0 ? D[feeder]! : top >= 0 ? top : D[c]!;
   }
 
+  /** Whether a cell has slime before step k (6.9). */
   hasSlime(c: number, k = this.step): boolean {
     const s = this.S[c]!;
     return s !== 0 && k + 1 - s < this.life;
