@@ -163,7 +163,7 @@ export type Model = (typeof MODELS)[number];
 export const globalSpec = {
   density: {
     label: 'Agents per cell',
-    help: 'Agents per cell of the grid. In a dish it counts the cells of the square around the dish, as Jones counts his population (%p) over a square lattice. His dish spans 0.945 of its side, and so does this app’s. Jones uses 0.03–0.15 (%p 3–15) with one agent per cell; GPU versions without the rule use 1–5.',
+    help: 'Agents per cell of the grid. In a dish it counts the cells of the square around the dish, as Jones counts his population (%p) over a square lattice. His dish spans 0.945 of its side, and so does this app’s. Jones uses 0.03–0.15 (%p 3–15) with one agent per cell; GPU versions without the rule use 1–5. With One agent per cell, a value near 1 blocks almost every agent. Jones’ networks need free cells: a blocked agent turns, and its turns start new branches. With Growth on, this value sets only the start: Growth then sets the size of the colony, up to Capacity.',
     min: 0.01,
     max: 8,
     step: 0.01,

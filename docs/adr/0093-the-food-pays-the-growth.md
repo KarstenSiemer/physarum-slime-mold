@@ -6,6 +6,8 @@
 - Date: 2026-11-22
 - Would extend [ADR 0071](0071-the-births-that-the-flux-pays-in-the-engine.md) (the births that the flux pays) and
   [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (the flux to the front).
+- Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d
+  before a port.
 - In short: the story is [research/front/P1C-NOTES.md](../../research/front/P1C-NOTES.md). `research/front/p1c.sh`
   and `research/front/feed.ts` make its numbers again; `research/front/feed-table.ts` prints the table.
 

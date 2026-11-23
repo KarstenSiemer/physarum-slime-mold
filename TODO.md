@@ -425,7 +425,9 @@ Open, and to answer by the prototype of stage 4:
 The owner watched the app on 2026-11-22 and saw three things: a small colony flops from thin arms to a thick blob and
 back; a circle without arms, with no tubes between its core and its rim; and too little growth. The plan, with its
 measures, options and costs, is [research/front/PLAN-2026-11-22.md](research/front/PLAN-2026-11-22.md). The owner
-approved phase 0 on 2026-11-22 ("Ja, Phase 0"). After phase 0 the owner looks at the running app again (gate 0).
+approved phase 0 on 2026-11-22 ("Ja, Phase 0"), and all three studies of phase 1 on the same day. After
+phase 0 the owner looks at the running app again (gate 0). At gate 1, on 2026-11-23, the owner chose study 1d before
+any port (ADR 0096).
 
 - [x] Phase 0a, the floor of the white level (plan 1.3, option A; ADR 0090, 2026-11-22): the white level is never
       below the median trail of the cells that hold an agent, and the strand of the scent view stands on the same
@@ -450,11 +452,23 @@ approved phase 0 on 2026-11-22 ("Ja, Phase 0"). After phase 0 the owner looks at
       covered food gives the front the flux of one food, and 9 foods give 3.7 to 4.4 times the mass of 1 food on 6
       seeds. The rate has a source (Mohberg and Rusch 1969). The pictures show a band at the wall. The proposal of 1b
       needs the deaths to give their plasm back to the budget: without that, the colony shrinks to about 100 agents.
+- [ ] Phase 1d, the three rules together (ADR 0096, 2026-11-23): in the prototype, the dish of Food ring with one
+      food and with nine, 6 seeds to step 20,000. The rules: `feed=flux` of 1c, every birth paid from the budget (1b),
+      and the plasm of a dying agent back to the budget. The measures: More food, more mass, No stall, No boom from
+      the second covered food, and the sheet. Also the cause of the band at the wall. About 400,000 tokens, CPU only.
+      Its record will be ADR 0097.
 - [ ] Phase 2, each rule that passed phase 1, in a pull request of its own: both backends, `docs/model.md`, wrong
       rules, the digests of every scene, then the numbers of ADR 0087 and ADR 0088. The owner watches the scenes run.
-      At gate 1 the owner decides on the proposals of ADR 0091, ADR 0092 and ADR 0093.
-- [ ] Phase 3, only if the rim is still smooth: a rim that advances where the flux arrives (plan 2.4, option 4), the
-      prototype first.
+      It waits for study 1d: then the owner decides which rules go into the engine (ADR 0096).
+- [ ] Phase 3, after study 1d and only if the rim is still smooth: a rim that advances where the flux arrives (plan
+      2.4, option 4), the prototype first.
+- [ ] Phase 4, the scenes: a dish with the rules, and the parts E4b to E4e of ADR 0089, when the owner finds the rules
+      ready (plan, section 5).
+- Later (plan, section 5): a thick vein (plan 3.3, option 3), the axes of the grid (2.4, option 6) and the pulse (2.4,
+  option 7). Food that is eaten is an item of the section "From the papers read on 2026-11-15".
+- Not measured in phase 1, as each record says: the zigzag of the veins and the steps beyond 12,000 (ADR 0091); the
+  study 1b in the prototype (ADR 0092); `feed=flux` in the engine, on WebGL2, in other dishes and at other strengths
+  (ADR 0093). Phase 2 measures each rule that it ports in the engine, on both backends.
 
 The owner's open decisions (plan, section 6):
 
@@ -463,8 +477,16 @@ The owner's open decisions (plan, section 6):
 2. Growth that goes on comes only with the rules of the growth front. The scenes without the rules keep their pruning,
    so Tokyo, the mazes and Food ring still shrink to a lean network. The other choice opens the closed ground sooner,
    which reopens ADR 0054.
-3. The cost of phases 1 and 2: about 1.5 million tokens of helpers and about 6 hours of GPU. The smallest cut is
-   phase 0 and the study 1a: about 490,000 tokens.
+3. The cost of phase 2: about 850,000 tokens of helpers and about 6 hours of GPU (plan, section 5). The coordinator
+   names the cost of each port before it starts. Phase 1 is approved, study 1d too (ADR 0096).
+
+Also open for the owner:
+
+- The plasm of a large colony is drawn paler than its brightest strands. From about 2 % of the grid on, the 99th
+  percentile sets the white level (ADR 0009), and ADR 0094 left that as it was. The owner says whether that look is
+  right.
+- The description of pull request #126 keeps an old revision with a `Signed-off-by:` line in its edit history. GitHub
+  keeps every edit of a description, so only a deletion of that revision on GitHub removes it.
 
 ## From the papers read on 2026-11-15
 
