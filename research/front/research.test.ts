@@ -1,6 +1,7 @@
 // The prototype of stage 4 (README.md of this folder) must keep the rules of the app when its own rules are off, and
 // its measures must keep working. These runs are short: the long runs of the story are commands of the README.
 // CI runs them about five times slower than a laptop, and a unit test has 5 s: keep each one below 0.5 s here.
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { FLOW, FLOW_EIGHT, FLOW_ITERATIONS, FLOW_SITES, packFlow, pcg } from '../../src/engine/flow';
 import { flowFlux, flowPressure, type FlowGrid } from '../../src/engine/flow-reference';
@@ -954,5 +955,63 @@ describe('the CPU prototype of stage 4', () => {
     expect(feeder.feederD(c)).toBe(f32(0.9));
     feeder.territory.fill(0);
     expect(feeder.feederD(c)).toBe(feeder.D[c]);
+  });
+
+  it('keeps the bytes of every run without the rules of study 1d (ADR 0097)', () => {
+    // SHA-256 of the agents, the flow memory and the budget after some steps, from the code before study 1d. The rules
+    // of study 1d are off by default, so the runs of the other studies keep their bytes.
+    const digest = (more: Record<string, string> | null, foods: [number, number, number][], steps: number) => {
+      const front = more === null ? noFront() : gpuRules(more);
+      const sim = new Sim(dish(60, foods), params({ seed: 3, front }));
+      for (let k = 0; k < steps; k++) sim.advance();
+      const hash = createHash('sha256');
+      for (const a of [sim.alive, sim.ax, sim.ay, sim.D]) hash.update(new Uint8Array(a.buffer));
+      hash.update(new Uint8Array(Float64Array.of(sim.budget, sim.aliveCount).buffer));
+      return hash.digest('hex').slice(0, 16);
+    };
+    const two: [number, number, number][] = [
+      [30, 30, 3],
+      [33, 30, 2],
+    ];
+    expect([
+      digest(null, [[30, 30, 3]], 100),
+      digest({ feed: 'flux' }, two, 150),
+      digest({ feed: 'fixed', paidBy: 'order' }, two, 100),
+    ]).toEqual(['f036887d539b4791', '74169360585bd7fa', '6356461c62d81d45']);
+  });
+
+  it('pays every birth from the budget, gives the plasm of the dead back and limits the doubling (ADR 0097)', () => {
+    const two: [number, number, number][] = [
+      [30, 30, 3],
+      [33, 30, 2],
+    ];
+    const run = (more: Record<string, string>) => {
+      const sim = new Sim(dish(60, two), params({ seed: 3, front: gpuRules({ feed: 'flux', ...more }) }));
+      const book = new Book(sim.cap, sim.step);
+      sim.ledger = book;
+      const start = sim.aliveCount + sim.budget;
+      for (let k = 0; k < 100; k++) sim.advance();
+      const w = book.take();
+      const sum = (v: number[]) => v.reduce((a, b) => a + b, 0);
+      return { sim, start, w, births: sum(w.born), deaths: sum(w.starve) + sum(w.crowd) };
+    };
+    // Rules 1 and 2, in both orders: every birth costs one, every death gives one back, so the agents and the budget
+    // change only by what the food credits.
+    for (const payAll of ['jones', 'front']) {
+      const { sim, start, w, births } = run({ payAll, refund: '1' });
+      expect(births).toBeGreaterThan(100);
+      expect(sim.aliveCount + sim.budget - start).toBeCloseTo(w.credited, 9);
+    }
+    // Rule 1 alone: the deaths take their plasm with them.
+    const alone = run({ payAll: 'jones' });
+    expect(alone.sim.aliveCount + alone.sim.budget - alone.start).toBeCloseTo(alone.w.credited - alone.deaths, 9);
+    // The doubling: each credit is at most the mass times ln 2 / double, so the mass grows at most by that factor in a
+    // step. The colony of 50 is far below the 0.8 of the food, so the limit binds.
+    const double = 14400;
+    const slow = run({ payAll: 'jones', refund: '1', double: String(double) });
+    const mass = slow.sim.aliveCount + slow.sim.budget;
+    expect(mass).toBeGreaterThan(slow.start);
+    expect(mass).toBeLessThanOrEqual(slow.start * (1 + Math.LN2 / double) ** 100 + 1e-9);
+    expect(slow.w.credited).toBeLessThan(0.01 * 100 * 0.8);
   });
 });

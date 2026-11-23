@@ -80,19 +80,34 @@ export interface Measures {
   standShare: number;
 }
 
-export function measures(f: CrownFields, place: Place, low: number): Measures {
-  const { w, cells, step: k } = f;
+/** Whether the front reached cell c more than BEHIND steps before the step of `f`: old ground (2.5). */
+export const isOld = (f: Pick<CrownFields, 'F' | 'step'>, c: number): boolean =>
+  f.F[c] !== 0 && f.step + 1 - f.F[c]! > BEHIND;
+
+/**
+ * The open cells from the row `top` on that the front reached, those of old ground, and of these the cells with plasm
+ * (a trail of at least `low`), with a tube body and with an agent: the counts of the measure No sheet (2.5).
+ */
+export function sheetCounts(f: CrownFields, top: number, low: number) {
+  const { w, cells } = f;
   const open = f.layout.open;
   let [reached, old, plasm, body, agents] = [0, 0, 0, 0, 0];
   for (let c = 0; c < cells; c++) {
-    if (!open[c] || f.F[c] === 0 || Math.floor(c / w) < place.top) continue;
+    if (!open[c] || f.F[c] === 0 || Math.floor(c / w) < top) continue;
     reached++;
-    if (k + 1 - f.F[c]! <= BEHIND) continue;
+    if (!isOld(f, c)) continue;
     old++;
     if (f.trail[c]! >= low) plasm++;
     if (f.B[c]! >= FLOW.bodyLow) body++;
     if (f.occ[c]) agents++;
   }
+  return { reached, old, plasm, body, agents };
+}
+
+export function measures(f: CrownFields, place: Place, low: number): Measures {
+  const { w, cells, step: k } = f;
+  const open = f.layout.open;
+  const { reached, old, plasm, body, agents } = sheetCounts(f, place.top, low);
   const rim = rimDistance(f);
   const dist = (c: number) => Math.hypot((c % w) + 0.5 - place.cx, Math.floor(c / w) + 0.5 - place.cy);
   const radii: number[] = [];
