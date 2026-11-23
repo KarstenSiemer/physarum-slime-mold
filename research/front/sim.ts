@@ -26,6 +26,8 @@ const [STEER, BLOCK, GROW, ORDER, RESPAWN, STARVE, HOLD_MOVE, HOLD_BIRTH, START]
 const MARK = 15;
 /** The draw of a paid birth of `paidBy` 'chance' and 'fill', per agent. */
 const PAID = 16;
+/** The draws of `payAll` (study 1d): whether a respawn, or a parent of Jones' rule, is paid in its pass. */
+const [PAY_RESPAWN, PAY_JONES] = [17, 18];
 /** The most rounds that `paidBy` 'fill' takes to find its scale (fillScale()). */
 const FILL_ROUNDS = 8;
 /** A sum in the form of a GPU (`sums` 'fixed') counts a sink rate in steps of 1 / FIXED, as an integer. */
@@ -135,6 +137,11 @@ export interface Front {
    * With every form but 'all', 'leak' and 'extend' an agent off the tubes reads no drift, as 'net'.
    */
   driftOn: 'all' | 'net' | 'mirror' | 'take' | 'sinks' | 'rim' | 'leak' | 'extend';
+  /**
+   * Study 1d (ADR 0097), a check of the band at the wall: the drift reads the pressure over the covered foods of the
+   * last flow pass, max(1, P), so that with `feed` 'flux' it reads the pressure of one food. Off: as before.
+   */
+  driftPerFood: boolean;
   /**
    * A sink lies on a tube that carries flux to it (ADR 0072): the tube cells that a path between 4-neighbours over tube
    * cells reaches from it, within the square of 13 × 13 cells around it, include a cell on the edge of the square or a
@@ -246,6 +253,30 @@ export interface Front {
    */
   feed: 'fixed' | 'foods' | 'flux';
   /**
+   * Rule 1 of study 1d (ADR 0097; ADR 0092, option 3): every birth costs one from the budget of the paid births, Jones'
+   * births and the respawn too. 'off': only the births of the front cost, as the engine (docs/model.md 9.1). 'jones'
+   * and 'front' say what the budget pays first in a growth step; the respawn of a step comes before both, as the agent
+   * pass comes before the growth pass. A pass sees the budget that the pass before it left. The forms of a GPU: the
+   * respawns and Jones' births of a pass are counted, and each one claims with the chance min(1, B / n), a draw of its
+   * own; the front takes the whole part of what is left by the ranks of paid.ts. There is no cap at the agents of the
+   * front: with `refund` the budget is plasm, and a cap would destroy it.
+   */
+  payAll: 'off' | 'jones' | 'front';
+  /** Rule 2 of study 1d (ADR 0093, consequence 3): a dying agent gives its plasm back to the budget, at the end of its pass. */
+  refund: boolean;
+  /**
+   * Study 1d: the steps in which the mass, the agents plus the budget, may at most double. The food credits the budget
+   * at most mass · ln 2 / `double` in a step. 14,400: the doubling of Mohberg and Rusch (1969), about 8 hours at 30
+   * steps a minute. 0: no limit.
+   */
+  double: number;
+  /**
+   * Study 1d, question 1: the food credits the budget only up to the agents of the front of the last growth step, F:
+   * at most max(0, F − B) in a step. This is the cap of docs/model.md 9.1 (the budget never exceeds the agents of the
+   * front), put on the credit, so that it stops the food while the front cannot spend and destroys no plasm.
+   */
+  feedCap: boolean;
+  /**
    * The edges of the flow (ADR 0081, a try): 4, the axis neighbours, as the app; or 8, also the diagonal neighbours,
    * in the solve of the pressure, in the fluxes and in the flux of a cell. With 8 an axis edge has the weight
    * STENCIL8.axis and a diagonal edge STENCIL8.diag, and Q is half the sum of the sizes of the fluxes over the 8
@@ -319,6 +350,7 @@ export const noFront = (): Front => ({
   rim: false,
   drift: 0,
   driftOn: 'all',
+  driftPerFood: false,
   sinkTube: false,
   refOn: 'roles',
   solver: 'app',
@@ -337,6 +369,10 @@ export const noFront = (): Front => ({
   shareOn: 'equal',
   fluxOn: 'sum',
   feed: 'fixed',
+  payAll: 'off',
+  refund: false,
+  double: 0,
+  feedCap: false,
   stencil: 4,
   credit: FLOW.fresh,
   creditJobs: 'all',
@@ -376,6 +412,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   creditJobs: ['all', 'start', 'cap', 'fall'],
   creditOn: ['const', 'feeder', 'births'],
   feed: ['fixed', 'foods', 'flux'],
+  payAll: ['off', 'jones', 'front'],
 };
 
 /**
@@ -628,6 +665,8 @@ export class Sim {
   private frontActive = false;
   /** The total sink of the front in the last step. */
   frontTotal = 0;
+  /** `driftPerFood`: 1 over the covered foods of the last flow pass; else 1. */
+  private driftScale = 1;
   /** Births that the flow paid for and that are not born yet. */
   budget = 0;
   paidBirths = 0;
@@ -660,6 +699,9 @@ export class Sim {
   paidScale = 0;
   /** The keys and ids of the agents that could claim a child in the last growth step (`paidBy` 'rank'). */
   readonly paidKeys: [number, number][] = [];
+  /** `payAll`: the respawns of the agent pass and the parents of Jones' rule of the growth pass that wait for a chance. */
+  private readonly waiting: number[] = [];
+  private readonly parents: number[] = [];
   /** The Chebyshev distance of each cell to ground without slime, at most 255 (with `reach`). */
   private readonly toFresh: Uint8Array;
   /** 1 for a cell of the territory of the colony (`speed`). */
@@ -696,6 +738,11 @@ export class Sim {
     const { w, h } = layout;
     // The marks of `paidBy` 'chance' follow the sink rates: they are the form of `paidOn` 'sinks'.
     if (p.front.paidBy !== 'order' && p.front.paidOn !== 'sinks') throw new Error('paidBy needs paidOn=sinks');
+    // The rules of study 1d pay the front by its ranks, and give plasm back or limit it only while every birth costs.
+    if (p.front.payAll !== 'off' && (p.front.paidBy !== 'rank' || !(p.front.paid > 0)))
+      throw new Error('payAll needs paid > 0 and paidBy=rank');
+    if ((p.front.refund || p.front.double > 0 || p.front.feedCap) && p.front.payAll === 'off')
+      throw new Error('refund, double, feedCap: payAll');
     const stencil = p.front.stencil;
     if (stencil !== 4 && stencil !== 8) throw new Error(`stencil=${String(stencil)}: 4 or 8`);
     // The 8 edges cover the solve, the fluxes and the flux of a cell; the ground of the drift keeps its 4 edges.
@@ -926,7 +973,7 @@ export class Sim {
     if (!this.clearPath(px, py, qx, qy)) return BLOCKED;
     const drift = this.p.front.drift;
     let v = this.trail[c]! + this.p.foodWeight * this.scent[c]!;
-    if (drift > 0) v -= drift * this.driftPressure(px, py, qx, qy, c);
+    if (drift > 0) v -= drift * this.driftScale * this.driftPressure(px, py, qx, qy, c);
     return v;
   }
 
@@ -1103,6 +1150,11 @@ export class Sim {
     const { seed, stepSize, front } = this.p;
     const k = this.step;
     const half2 = FLOW.half * FLOW.half;
+    // `payAll` (study 1d): the respawns that passed their test wait for the chance of the budget after the loop.
+    const pay = front.payAll !== 'off';
+    const waiting = this.waiting;
+    waiting.length = 0;
+    let died = 0;
     this.claims.fill(0);
     for (let i = 0; i < cap; i++) {
       this.kind[i] = 0;
@@ -1115,6 +1167,7 @@ export class Sim {
           this.alive[i] = 0;
           this.aliveCount--;
           this.starved++;
+          died++;
           this.ledger?.died(i, 'starve', d < FLOW.half, k);
         }
       }
@@ -1133,6 +1186,10 @@ export class Sim {
         this.ty[i] = py;
         this.ah[i] = rand() * TAU;
         this.tc[i] = c;
+        if (pay) {
+          waiting.push(i);
+          continue;
+        }
         const key = this.key(i);
         if (key > this.claims[c]!) this.claims[c] = key;
         continue;
@@ -1165,6 +1222,21 @@ export class Sim {
       const key = this.key(i);
       if (key > this.claims[c]!) this.claims[c] = key;
     }
+    // `payAll`: n respawns passed their test, and each claims its point with the chance min(1, B / n). A GPU counts
+    // them with an atomic add in one pass and draws in the next; a claim keeps the largest key, in any order.
+    if (pay) {
+      const chance = waiting.length > 0 ? Math.min(1, Math.max(0, this.budget) / waiting.length) : 0;
+      for (const i of waiting) {
+        seedFor(i, PAY_RESPAWN, k, seed);
+        if (rand() >= chance) {
+          this.kind[i] = 0;
+          continue;
+        }
+        const [c, key] = [this.tc[i]!, this.key(i)];
+        if (key > this.claims[c]!) this.claims[c] = key;
+      }
+    }
+    let reborn = 0;
     this.occNext.fill(0);
     this.counts.fill(0);
     for (let i = 0; i < cap; i++) {
@@ -1177,6 +1249,7 @@ export class Sim {
           this.alive[i] = 1;
           this.aliveCount++;
           this.respawned++;
+          reborn++;
           this.ledger?.born(i, 3, k);
           this.occNext[c]!++;
         }
@@ -1197,6 +1270,16 @@ export class Sim {
         }
       }
     }
+    if (pay) this.settle(reborn, died);
+  }
+
+  /**
+   * `payAll` (study 1d): the budget after a pass, which paid `born` births and saw `died` deaths. Each birth cost one;
+   * with `refund` each death gave one back. A GPU adds both counts with atomics in the pass and settles them in the
+   * next, so no birth of a pass is paid by a death of the same pass.
+   */
+  private settle(born: number, died: number) {
+    this.budget += (this.p.front.refund ? died : 0) - born;
   }
 
   /** The agents in the square of side 2r + 1 around (x, y), from the table of sums of the occupancy after the moves. */
@@ -1227,6 +1310,11 @@ export class Sim {
     after.set(occ);
     this.claims.fill(0);
     const free: number[] = [];
+    // `payAll` (study 1d): the parents of Jones' rule with room wait for the chance of the budget after the loop.
+    const pay = front.payAll !== 'off';
+    const parents = this.parents;
+    parents.length = 0;
+    let died = 0;
     for (let i = 0; i < cap; i++) {
       this.want[i] = -1;
       if (!this.alive[i]) continue;
@@ -1236,6 +1324,7 @@ export class Sim {
         this.alive[i] = 0;
         this.aliveCount--;
         this.shrunk++;
+        died++;
         this.ledger?.died(i, 'crowd', this.E[c]! < FLOW.half, k);
         after[c]!--;
         continue;
@@ -1249,13 +1338,32 @@ export class Sim {
       if (front.jones === 'edge' && !this.edgeNear(c)) continue;
       // 'young' (ADR 0084): only on ground that the front reached less than `jonesAge` steps before.
       if (front.jones === 'young' && this.F[c] !== 0 && this.step + 1 - this.F[c]! >= front.jonesAge) continue;
+      if (pay) {
+        // roomFor() finds a cell where claimChild() finds one: the hold of stage 4 needs `speed` 0, `payAll` a front.
+        if (this.roomFor(c, occ)) parents.push(i);
+        continue;
+      }
       this.claimChild(i, c, free);
+    }
+    // `payAll`: the budget B that the agent pass left pays the births of this pass. 'front': the front first, the whole
+    // part of B by its ranks; then each of the n parents of Jones' rule that wait (no parent of the front) claims with
+    // the chance min(1, B' / n), B' what is left. 'jones': Jones' parents first, then the front with what is left.
+    if (pay) {
+      let left = Math.max(0, this.budget);
+      if (front.payAll === 'front') left -= this.paidByRank(free, left);
+      const able = parents.filter((i) => this.want[i]! < 0);
+      const chance = able.length > 0 ? Math.min(1, left / able.length) : 0;
+      for (const i of able) {
+        seedFor(i, PAY_JONES, k, seed);
+        if (rand() < chance && this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free)) left -= 1;
+      }
+      if (front.payAll === 'jones') this.paidByRank(free, left);
     }
     // The births that the flow paid for, in the forms of a GPU (ADR 0067): a chance per agent of the front ('chance',
     // 'fill'), or the agent of the front on a marked cell claims a child ('ahead'; the flow pass of this step takes the
     // claims off the budget).
     if (front.paid > 0 && (front.paidBy === 'chance' || front.paidBy === 'fill')) this.paidByChance(free);
-    if (front.paid > 0 && front.paidBy === 'rank') this.paidByRank(free);
+    if (front.paid > 0 && front.paidBy === 'rank' && !pay) this.paidByRank(free);
     if (front.paid > 0 && front.paidBy === 'ahead') {
       this.paidClaims = 0;
       for (let i = 0; i < cap; i++) {
@@ -1320,10 +1428,11 @@ export class Sim {
       births[2 * b] = t;
       births[2 * b + 1] = pc;
     }
-    let id = 0;
+    let [id, born] = [0, 0];
     for (let r = 0; r < m; r++) {
       while (id < cap && this.alive[id]) id++;
       if (id >= cap) break;
+      born++;
       const t = births[2 * r]!;
       const parent = births[2 * r + 1]!;
       seedFor(id, 5, k, seed);
@@ -1345,6 +1454,7 @@ export class Sim {
       }
       id++;
     }
+    if (pay) this.settle(born, died);
   }
 
   /**
@@ -1400,9 +1510,11 @@ export class Sim {
    * of them with the least keys claim a child: the order of Efraimidis and Spirakis, as in growthPass(). A GPU writes
    * the keys in one pass over the agents, and in the next each of these agents counts the agents of its strain with a
    * smaller key, and stops at the whole part of B. As with the order, a budget below 1 pays nothing, and after the
-   * claims the budget never exceeds the number of agents of the front.
+   * claims the budget never exceeds the number of agents of the front. With `payAll` (study 1d) the caller gives the
+   * part of the budget that the front may spend and settles the budget after the births; there is no cap. Returns the
+   * claims.
    */
-  private paidByRank(free: number[]) {
+  private paidByRank(free: number[], budget = this.budget): number {
     const { cap } = this;
     const front = this.p.front;
     const k = this.step;
@@ -1422,18 +1534,20 @@ export class Sim {
     this.frontAgents = atFront;
     this.paidClaims = 0;
     if (this.ledger) (this.paidWant ??= new Uint8Array(cap)).fill(0);
-    if (this.budget < 1) return;
+    if (budget < 1) return 0;
     // The rank of an agent: the agents with a smaller key, or with the same key and a smaller id.
     const ranked = [...this.paidKeys].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    for (const [, i] of ranked.slice(0, Math.floor(this.budget))) {
+    for (const [, i] of ranked.slice(0, Math.floor(budget))) {
       if (this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free, front.rim)) {
         this.paidClaims++;
         if (this.paidWant) this.paidWant[i] = 1;
       }
     }
     this.paidBirths += this.paidClaims;
+    if (front.payAll !== 'off') return this.paidClaims;
     this.ledger?.budget(0, Math.max(0, this.budget - this.paidClaims - atFront));
     this.budget = Math.min(this.budget - this.paidClaims, atFront);
+    return this.paidClaims;
   }
 
   /**
@@ -2135,6 +2249,7 @@ export class Sim {
     this.take.fill(0);
     this.frontActive = false;
     this.frontTotal = 0;
+    if (front.driftPerFood) this.driftScale = 1 / Math.max(1, this.ports.filter((c) => c >= 0).length);
     if (front.paid > 0) {
       this.paidSinks();
       return;
@@ -2275,7 +2390,11 @@ export class Sim {
     else for (let c = 0; c < cells; c++) if (G[c]! > 0) this.extra[c]! += S / sources;
     this.frontActive = true;
     this.frontTotal = S;
-    const credit = (S / front.paid) * (front.feed === 'foods' ? fed : 1);
+    let credit = (S / front.paid) * (front.feed === 'foods' ? fed : 1);
+    // `double` (study 1d): the mass, the agents and the budget, grows by at most mass · ln 2 / `double` in a step.
+    if (front.double > 0)
+      credit = Math.min(credit, ((this.aliveCount + Math.max(0, this.budget)) * Math.LN2) / front.double);
+    if (front.feedCap) credit = Math.min(credit, Math.max(0, this.frontAgents - this.budget));
     this.budget += credit;
     this.ledger?.budget(credit, 0);
   }

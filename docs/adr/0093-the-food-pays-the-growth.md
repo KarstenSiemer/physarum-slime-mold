@@ -8,6 +8,9 @@
   [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (the flux to the front).
 - Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d
   before a port.
+- Extended by [ADR 0097](0097-paid-births-thin-the-sheet-and-fill-the-dish.md) (2026-11-23): study 1d measured `feed=flux`
+  with rules 1 and 2. The rate of Mohberg and Rusch stops a young colony, and the band at the wall comes from the
+  drift of nine foods.
 - In short: the story is [research/front/P1C-NOTES.md](../../research/front/P1C-NOTES.md). `research/front/p1c.sh`
   and `research/front/feed.ts` make its numbers again; `research/front/feed-table.ts` prints the table.
 

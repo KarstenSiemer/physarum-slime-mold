@@ -4,6 +4,7 @@
   "Wie empfohlen weiter machen. Dokumentieren was noch fehlt bitte" (go on as recommended; please write down what is
   still missing). The recommendation was the coordinator's, under the owner's delegation of 2026-11-12.
 - Date: 2026-11-23
+- Extended by [ADR 0097](0097-paid-births-thin-the-sheet-and-fill-the-dish.md) (2026-11-23): the record of study 1d.
 - Extends [ADR 0091](0091-the-credit-of-fresh-ground.md),
   [ADR 0092](0092-the-boom-at-a-new-food-is-jones-births-without-starvation.md) and
   [ADR 0093](0093-the-food-pays-the-growth.md): the owner's answer to their proposals at gate 1.
