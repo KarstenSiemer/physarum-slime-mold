@@ -3,6 +3,8 @@
 - Status: proposed. Study 1b of phase 1 of the plan of 2026-11-22, which the owner approved on that day for all
   three studies side by side. Done by an agent under the owner's delegation of 2026-11-12. The owner decides at gate 1.
 - Date: 2026-11-22
+- Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d
+  before a port.
 - In short: the story and the tables are in [research/front/P1B-NOTES.md](../../research/front/P1B-NOTES.md). The
   runner `research/front/boom.gpu.test.ts`, the cases `research/front/boom.sh` and the tables `research/front/boom.ts`
   make the numbers again. No rule, pass or scene of the app changed.
