@@ -231,6 +231,12 @@ of the sinks before decision 8:
   `feed.ts` runs the dish of Food ring with one food or nine and keeps a ledger of the births and deaths;
   [P1C-NOTES.md](P1C-NOTES.md) tells the story and has the commands.
 
+- The options of study 1a (ADR 0091), each off by default: `credit` (the D of fresh ground, FLOW.fresh), `creditJobs`
+  (which of its three jobs take it: `all`, `start`, `cap`, `fall`) and `creditOn` (`feeder`, form (i): a new cell of
+  the territory takes the D of the tube cell that feeds it; `births`, form (ii): the agents read a level of their own
+  and D starts at the floor). `p1a.ts` runs the box of E2n or a dish with a ring of foods with the four measures of
+  the plan, `p1a.sh` the campaign, `p1a-why.ts` the isolating measures; [P1A-NOTES.md](P1A-NOTES.md) tells the story.
+
 ## Commands
 
 From the root of the repository. Pictures and records go to `research/front/out/`, which git ignores.
