@@ -285,9 +285,11 @@ the arrows.
   into in the step, and the strand of the scent view stands on the same floor (ADR 0090). A colony on less than 1 % of
   the grid puts the 99th percentile on the faint trail that the diffusion spreads around it, and the picture drew its
   plasm as a blob. The frames reach the floor at once, not by the smoothing, and they measure in every frame while the
-  floor sets the white level; such a measurement between two turns only holds the floor. While the floor sets the
-  white level the frames brighten no higher than the fixed gain with which they start: the trail of a new colony is
-  still building up. WebGL2 reads the agents of the block of cells of each sample, so a small colony between its
+  floor sets the white level; such a measurement between two turns only holds the floor. While the trail under a new
+  colony builds up, from a measurement without a floor to the first whose floor does not rise, the frames take each
+  measurement as if its floor were the floor grown once more by its last rise: that trail grows by up to 2.6 times
+  from frame to frame, and a measurement reaches the frames one frame late (ADR 0094). The fixed gain from the density
+  is the gain of the frames until the first measurement, and no limit after it. WebGL2 reads the agents of the block of cells of each sample, so a small colony between its
   samples counts too, and its frames start from the fixed gain as those of WebGPU do.
 - Bloom: thresholded, normalised mip chain on a half-resolution `rgba16float` target.
 - Gel relief style: the trail as a wet gel on dark agar. A thick tube is higher than a thin one, has the full colour

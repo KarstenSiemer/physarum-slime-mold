@@ -95,6 +95,9 @@ export class WebGl2Backend implements Backend<GlSim> {
   private black = 0;
   /** The trail of a strand (Levels.strand). */
   private strand = 0;
+  /** The floor of the last measurement, and whether the trail under a new colony still builds up (exposure.ts Frames). */
+  private floor = 0;
+  private building = false;
   /** The auto-levels measurement whose readback is still on its way. */
   private measuring: Promise<void> | undefined;
   /** Measure in the next frame, not only in every 15th one (exposure.ts measureSoon()). */
@@ -184,14 +187,13 @@ export class WebGl2Backend implements Backend<GlSim> {
   draw(sim: GlSim, settings: Settings, view: View, measure: boolean) {
     const gl = this.gl;
     if (measure) {
-      // As on WebGPU (exposure.ts AutoExposure.update()): the frames start from the fixed gain, and a measurement
-      // brightens them by a quarter of the way. A first measurement that jumped drew a new colony, whose trail
-      // doubles from frame to frame, up to three times too bright (ADR 0090).
-      const fixed = 0.4 / equilibrium(settings);
-      if (this.gain === 0) this.gain = fixed;
+      // As on WebGPU (exposure.ts AutoExposure.update()): the frames start from the fixed gain until the first
+      // measurement, and a measurement brightens them by a quarter of the way. A first measurement that jumped drew a
+      // new colony, whose trail doubles from frame to frame, up to three times too bright (ADR 0090).
+      if (this.gain === 0) this.gain = 0.4 / equilibrium(settings);
       if (this.frame % 15 === 0) this.due = true;
       if (!this.measuring && (this.due || this.soon)) {
-        void this.measure(sim, this.due ? 0.25 : 0, fixed);
+        void this.measure(sim, this.due ? 0.25 : 0);
         this.due = false;
       }
     }
@@ -262,6 +264,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     this.gain = 0;
     this.black = 0;
     this.strand = 0;
+    this.floor = 0;
+    this.building = false;
     this.generation++;
   }
 
@@ -281,10 +285,18 @@ export class WebGl2Backend implements Backend<GlSim> {
    * Auto levels from a grid of trail samples (no compute shaders in WebGL2), read back without blocking.
    * Waits for a measurement that is still running, so `blend` 1 (settle) always gets its own.
    */
-  private async measure(sim: GlSim, blend: number, fixed?: number): Promise<void> {
+  private async measure(sim: GlSim, blend: number): Promise<void> {
     const l = await this.read(sim);
     this.soon = measureSoon(l);
-    if (l) ({ gain: this.gain, black: this.black, strand: this.strand } = smooth(this.levels(), l, blend, fixed));
+    if (!l) return;
+    const now = { ...this.levels(), floor: this.floor, building: this.building };
+    ({
+      gain: this.gain,
+      black: this.black,
+      strand: this.strand,
+      floor: this.floor,
+      building: this.building,
+    } = smooth(now, l, blend));
   }
 
   /**
