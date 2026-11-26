@@ -3,6 +3,8 @@ import {
   attractionSpec,
   capacityOf,
   constrain,
+  CROWN_LEVERS,
+  crownLevers,
   decayForReach,
   defaultSettings,
   defaultStrain,
@@ -947,6 +949,22 @@ describe('the rules of stage 4 (ADR 0068)', () => {
     const bound = constrain({ ...jones, slimeWeight: 0.5, freshReach: 3 });
     expect([bound.model, bound.slimeWeight, bound.freshReach]).toEqual(['jones', 0.025, 6]);
     expect(constrain(bound)).toBe(bound);
+  });
+});
+
+// ADR 0098: the switch of the rules in the panel sets the levers of the Crown of veins. They are the values of that
+// scene, so the scene and the switch cannot drift apart.
+describe('the levers that the switch of the rules sets (ADR 0098)', () => {
+  it('are the levers of the Crown of veins', () => {
+    const crown = presetById('crown')?.settings();
+    if (!crown) throw new Error('no Crown of veins');
+    const { flowEdges, flowBase, frontFlux, flowStrength } = crown;
+    expect({ flowEdges, flowBase, frontFlux, flowStrength }).toEqual(CROWN_LEVERS);
+  });
+
+  it('raise a lower Flow strength to 8 and keep a higher one', () => {
+    expect(crownLevers({ flowStrength: 2 })).toEqual({ flowEdges: 8, flowBase: 0.002, frontFlux: 2, flowStrength: 8 });
+    expect(crownLevers({ flowStrength: 12 }).flowStrength).toBe(12);
   });
 });
 
