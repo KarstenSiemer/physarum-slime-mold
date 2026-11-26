@@ -1986,6 +1986,30 @@ export class GlSim implements Sim {
     gl.disable(gl.BLEND);
   }
 
+  /**
+   * Adds the steps of the rate of each agent with a key of the growth test to the sum P of its strain (paid.vert SHARE,
+   * ADR 0100, part A): two points per agent slot, the steps / 64 to PAID_COUNTS shareHigh and the rest to shareLow.
+   */
+  private countShare(sinks: GlSinks) {
+    const gl = this.gl;
+    const p = this.prog.territory().share;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sinks.counts.fbo);
+    gl.viewport(0, 0, sinks.counts.width, sinks.counts.height);
+    gl.useProgram(p.program);
+    textures(gl, p.program, {
+      agents: this.agentsTex[this.a].texture,
+      keys: sinks.keys.texture,
+      ...this.ratesOf(sinks),
+    });
+    gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
+    gl.uniform1i(p.loc('parts'), 2);
+    gl.uniform1i(p.loc('lanes'), PAID_COUNT_LANES);
+    gl.uniform1iv(p.loc('texels'), Int32Array.of(PAID_COUNTS.shareHigh, PAID_COUNTS.shareLow, 0, 0));
+    this.blend(gl.FUNC_ADD);
+    gl.drawArrays(gl.POINTS, 0, 2 * this.agents);
+    gl.disable(gl.BLEND);
+  }
+
   /** The owners of every cell from the agents after the moves and the births (owners.vert, PASS 2 of territory.frag). */
   private encodeOwners(territory: { owners: Target }) {
     const gl = this.gl;
@@ -2441,6 +2465,8 @@ export class GlSim implements Sim {
       },
     );
     this.a = flip(this.a);
+    // The sum P of the rates of the agents with a key, which the rank reads (paid.vert SHARE, ADR 0100, part A).
+    if (grow && paid) this.countShare(paid);
     if (grow && paid) {
       // The rank of the paid births (PASS 5): a paid parent marks GROWS, PAID and the neighbour of its child, and the
       // points below claim the neighbour for it. It reads the budget of the state of the step before.

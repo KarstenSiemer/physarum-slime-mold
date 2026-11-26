@@ -5,14 +5,17 @@
 // The respawns of a step wait for B: each of the n of them comes to life with the chance min(1, B / n). In a growth
 // step each agent of the front with a free cell of its territory beside it draws a key −ln(1 − u) / r, r the sink rate
 // of its cell, and the ⌊B⌋ agents of the strain with the least keys claim a child: the weighted order of Efraimidis and
-// Spirakis that the prototype runs (`paidByRank()` in research/front/sim.ts). Then each of the n parents of Jones' rule
+// Spirakis that the prototype runs (`paidByRank()` in research/front/sim.ts). An agent claims only if its key k also
+// lies below B / P, P the sum of the rates of the agents with a key (k · P < B, ADR 0100, part A): so each is paid with
+// the chance 1 − e^(−B · r / P) at most, B times the share of its sink, also while B covers every agent of the front,
+// and a sink on slime is not paid as one near fresh ground. Then each of the n parents of Jones' rule
 // that the front did not pay claims its child with the chance min(1, B' / n), B' what the front left. The passes are
 // `claim`, `pay` and `settle` in shaders/agents.wgsl, `test`, `rank`, `jones`, `win` and `birth` in shaders/growth.wgsl
 // and their PASSES in gl/glsl/agents.frag and growth.frag with gl/glsl/paid.vert; the budget is in the pass `state` of
 // shaders/sinks.wgsl and in PASS 3 of gl/glsl/sinks.frag. The CPU copies are in growth-reference.ts and
 // territory-reference.ts.
 import { FLOW_TAKE_SLOT } from './flow';
-import { SINK_STATE_LANES, SINKS } from './sinks';
+import { RATE_ONE, SINK_STATE_LANES, SINKS } from './sinks';
 
 /**
  * The flux that pays one birth (ADR 0065, decision 7) with the flux to the front k = 1: the budget grows by S / PAID_FLUX
@@ -57,6 +60,32 @@ export const exponential = (u: number): number => -Math.log1p(-u);
  * key to a few units in the last place (ADR 0071): the tests compare keys with a tolerance.
  */
 export const paidKey = (u: number, rate: number): number => Math.fround(exponential(u) / Math.abs(rate));
+
+/**
+ * The sum P of the sink rates of the agents of the front with a key counts each rate in steps of 1 / SHARE_ONE, rounded
+ * to the nearest (ADR 0100, part A). It goes into two counts of the step (PAID_COUNTS shareHigh and shareLow): the
+ * steps / SHARE_SPLIT and the rest, so that WebGL2, which adds the counts as floats, keeps every sum a whole number
+ * below 2^24 for fewer than 2^18 agents with a key. The sum of the steps fits a u32 for fewer than 2^20 such agents.
+ */
+export const SHARE_ONE = 2 ** 12;
+export const SHARE_SPLIT = 64;
+
+/** The steps of a sink rate in the sum P: |rate| in steps of 2^-24 (RATE_ONE), then rounded to steps of 2^-12. */
+export const shareSteps = (rate: number): number => {
+  const step = RATE_ONE / SHARE_ONE;
+  return Math.floor((Math.round(Math.abs(rate) * RATE_ONE) + step / 2) / step);
+};
+
+/** The sum P of the rates from its two counts, as the passes compute it: (high · SHARE_SPLIT + low) / SHARE_ONE, in float32. */
+export const shareSum = (high: number, low: number): number =>
+  Math.fround(Math.fround(high * SHARE_SPLIT + low) / SHARE_ONE);
+
+/**
+ * Whether an agent of the front with the key `key` may be paid from the budget B (ADR 0100, part A): k · P < max(0, B),
+ * P the sum of the rates of the agents of its strain with a key (shareSum()), in float32 as the passes compute it.
+ */
+export const sharePays = (key: number, sum: number, budget: number): boolean =>
+  Math.fround(key * sum) < Math.max(0, Math.fround(budget));
 
 /** The random streams of the draws of the paid respawns and of the paid parents of Jones' rule (ADR 0100; 7.7). */
 export const PAY_RESPAWN = 13;
@@ -120,7 +149,8 @@ export const STATE_STRAINS = 4;
  * The counts of the paid births of a strain in a step (ADR 0071, ADR 0100), whole numbers that every step clears: F,
  * the agents of the front; K, the paid claims; the respawns that wait for the budget, and those that came to life;
  * the deaths of the agent pass that give plasm back; the parents of Jones' rule that wait for the budget; the births
- * of the growth pass; and its deaths by shrinkage. On WebGPU PAID_COUNT_LANES words per strain, on WebGL2 a texel each
+ * of the growth pass; its deaths by shrinkage; and the sum P of the rates of the agents with a key in two parts
+ * (shareSteps()). On WebGPU PAID_COUNT_LANES words per strain, on WebGL2 a texel each
  * with a lane per strain.
  */
 export const PAID_COUNTS = {
@@ -132,8 +162,10 @@ export const PAID_COUNTS = {
   parents: 5,
   born: 6,
   crowded: 7,
+  shareHigh: 8,
+  shareLow: 9,
 } as const;
-export const PAID_COUNT_LANES = 8;
+export const PAID_COUNT_LANES = 10;
 
 /**
  * WebGPU: the buffer of the state of the sinks (sim.ts `sinks.state`; ADR 0067, decision 7). From byte 0 the state of

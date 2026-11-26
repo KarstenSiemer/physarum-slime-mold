@@ -444,8 +444,16 @@ export function groundOf(tube: boolean, lanes: ArrayLike<number>, take: number, 
 }
 
 /**
+ * The drift of one food (agents.wgsl driftOf(), ADR 0100, part B): the drift of a strain over the foods that its last
+ * flow pass covered (`covered`, lane w of the first vec4 of its state), at least one, in float32.
+ */
+export const driftOfFoods = (drift: number, covered: number): number =>
+  Math.fround(Math.fround(drift) / Math.max(1, covered));
+
+/**
  * The value that a sensor of an agent reads while the rules of stage 4 run (agents.wgsl sense(), ADR 0070, ADR 0075),
- * in float32 as the passes compute it: `read`, what it reads without the rules (not blocked), minus the drift times the
+ * in float32 as the passes compute it: `read`, what it reads without the rules (not blocked), minus the drift of one
+ * food (driftOfFoods()) times the
  * mean pressure of the cell of the sensor (`lanes`) if that cell holds a tube of the strain (`tube`), else times the
  * ground of the agent's cell (groundOf()). An agent on a cell without a tube of its strain (`ground` undefined) reads
  * no drift.

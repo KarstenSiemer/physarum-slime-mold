@@ -15,7 +15,11 @@ import {
   paidIncrement,
   paidKey,
   payChance,
+  sharePays,
+  shareSteps,
+  shareSum,
 } from './paid';
+import { RATE_ONE } from './sinks';
 import { NO_SITES } from './sites';
 import { packTerritory } from './territory';
 import type { AgentState } from './types';
@@ -188,12 +192,13 @@ describe('the births that the flux pays (ADR 0071)', () => {
     expect(keys).toEqual([paidKey(u(0), 0.5), NO_KEY, NO_KEY, paidKey(u(3), 0.25), NO_KEY, NO_KEY, paidKey(u(6), 0.5)]);
     // A budget below 1 claims nothing.
     expect(step?.claims).toEqual([0]);
-    // A budget of 1.5 pays the agent with the least key; a budget of 9 every agent with a key.
+    // A budget of 1.5 pays the agent with the least key; a budget of 99 every agent with a key: k · P < B for each
+    // (ADR 0100, part A).
     paid.budget[0] = 1.5;
     const one = growthStep(input).paid;
     const least = [0, 3, 6].reduce((a, b) => ((keys[b] ?? 0) < (keys[a] ?? 0) ? b : a));
     expect([...(one?.parents.keys() ?? [])]).toEqual([least]);
-    paid.budget[0] = 9;
+    paid.budget[0] = 99;
     expect([...(growthStep(input).paid?.parents.keys() ?? [])].sort()).toEqual([0, 3, 6]);
   });
 
@@ -218,6 +223,43 @@ describe('the births that the flux pays (ADR 0071)', () => {
         expect(d[t * 4 + 1]).toBe(0);
       }
     }
+  });
+
+  it('sums the rates of the agents with a key in steps of 2^-12, in two counts (ADR 0100, part A)', () => {
+    expect(shareSteps(1)).toBe(4096);
+    expect(shareSteps(-0.5)).toBe(2048);
+    // 0.025 in steps of 2^-24, as the sinks hold it: 102.4 steps of 2^-12, rounded to the nearest.
+    expect(shareSteps(Math.round(0.025 * RATE_ONE) / RATE_ONE)).toBe(102);
+    expect(shareSteps(2048 / RATE_ONE)).toBe(1);
+    expect(shareSteps(2047 / RATE_ONE)).toBe(0);
+    expect(shareSum(64, 63)).toBe(f(4159 / 4096));
+    expect(sharePays(1, 3, 3.5)).toBe(true);
+    expect(sharePays(1, 3, 3)).toBe(false);
+    expect(sharePays(0, 3, -1)).toBe(false);
+  });
+
+  it('pays an agent of the front only while its key lies below B / P, also with a budget that covers the front', () => {
+    // As the case of the tied keys: five agents of the front in a row, three near fresh ground (rate 1) and two on
+    // slime (rate 0.025). The budget 5.5 covers all five; P = 3.05 in steps of 2^-12, so the threshold B / P is 1.80:
+    // the keys 0.5, 1.0 and 1.5 pass, the keys 2.0 and 40 do not, the second on slime.
+    const at: [number, number][] = [2, 5, 8, 11, 14].map((x) => [x, 4]);
+    const { input, cell } = gridCase(17, 9, at);
+    const slime = Math.round(0.025 * RATE_ONE) / RATE_ONE;
+    const rates = input.paid.rates[0] ?? new Float32Array(0);
+    [1, 1, 1, slime, slime].forEach((r, k) => {
+      const [x, y] = at[k] ?? [0, 0];
+      rates[cell(x, y)] = r;
+    });
+    const keys = new Float32Array(input.agents.length).fill(NO_KEY);
+    keys.set([0.5, 1.0, 2.0, 1.5, 40]);
+    const step = growthStep({ ...input, paid: { ...input.paid, budget: [5.5], keys } }).paid;
+    // Each agent adds its steps / 64 and the rest: 4096 = 64 · 64 + 0, and 102 = 1 · 64 + 38.
+    expect(step?.shareHigh).toEqual([3 * 64 + 2 * 1]);
+    expect(step?.shareLow).toEqual([2 * 38]);
+    expect([...(step?.parents.keys() ?? [])].sort()).toEqual([0, 1, 3]);
+    // A budget far above every key pays all five.
+    const all = growthStep({ ...input, paid: { ...input.paid, budget: [500.5], keys } }).paid;
+    expect([...(all?.parents.keys() ?? [])].sort()).toEqual([0, 1, 2, 3, 4]);
   });
 
   it('makes no paid claim where light stops the birth', () => {

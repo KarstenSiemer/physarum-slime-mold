@@ -12,7 +12,9 @@
 - In short: while the rules of the growth front run, every birth costs one from the budget of the paid births, the
   births at the front first, then Jones' births and the respawns with the chance min(1, B / n); a death that the model
   makes gives one back; each covered food gives the front the flux of one food; and the food credits the budget only
-  up to the agents of the front. Both backends, `docs/model.md` 7.1, 7.2, 7.7, 8.7, 9 and 9.1.
+  up to the agents of the front. An agent of the front is paid only while its key k lies below B / P, P the sum of the
+  rates of the agents with a key (decision 4), and the drift reads the pressure of one food (decision 5). Both
+  backends, `docs/model.md` 7.1, 7.2, 7.3, 7.7, 8.7, 9 and 9.1.
 
 ## Context
 
@@ -44,6 +46,83 @@ port. The exact case of the prototype is `feed=flux payAll=front refund=1 feedCa
 3. **Known and accepted, and open**: the boom at a new food stays (+100 to +119 % in the prototype); a full dish falls
    by about half in agents while the budget holds the rest; the sheet at step 10,000 with nine foods stays above the
    aim of 0.3.
+
+4. **The share of a sink limits its births** (an agent under the delegation of 2026-11-12, on the evidence below; the
+   coordinator set the target on 2026-11-26: the Y-maze with slime on one arm must take the blank arm again, at least
+   36 : 4 in the prototype, without a rule that changes the look of option 1 in Food ring). In a growth step the ⌊B⌋
+   agents of the front with the least keys k = −ln(1 − u) / r claim, as before, but only those with k · P < B, P the
+   sum of the rates r of the agents of the strain with a key. So each agent of the front is paid with the chance
+   1 − e^(−B · r / P) at most: B times the share of its sink. What the front does not spend goes on to Jones' births and
+   the respawns, as before. See "Part A" below.
+5. **The drift of one food** (the coordinator, 2026-11-26; the owner approved its look on the same day: "Drift einer
+   Nahrung sieht sehr gut aus! Dran bleiben!", in English: the drift of one food looks very good, keep at it). While
+   the rules run, the drift of a strain is divided by the foods that its last flow pass covered, at least one
+   (`driftPerFood` of the prototype, ADR 0097, finding 7). See "Part B" below.
+
+## Part A: the Y-maze lost its choice, and why
+
+On 2026-11-26 the port gave 5 : 5 with slime on one arm, seeds 1 to 10 on each backend (`main`: 10 : 0 on WebGL2; ADR
+0088: 40 : 0; Reid et al. 2012: 39 : 1). The coordinator guessed that the budget, which the plasm of the dead keeps
+full, pays every agent of the front, on slime as near fresh ground.
+
+**The study** (`research/front/ywhy.sh`, `ymaze-why.ts`, `ywhy-table.ts`; CPU prototype, the rules in force of ADR
+0088 with the drift `take` at 1.5, slime on one arm, seeds 1 to 40, the run ends at the first food). Each case changes
+one rule. The births are summed from the start of the colony to the first food; "covers" is the share of the steps in
+which the budget is at least the agents of the front.
+
+| Case                                         | Blank : slime | First food (median) | Budget covers | Front births, blank; slime | Jones, blank; slime |
+| -------------------------------------------- | ------------- | ------------------- | ------------- | -------------------------- | ------------------- |
+| Today (`main`)                               | 40 : 0        | 3,292               | 0.00          | 1,565; 129                 | 516; 1,155          |
+| Every birth from the budget, no refund       | 40 : 0        | 3,535               | 0.00          | 1,543; 69                  | 208; 26             |
+| And the dead give back (refund)              | 24 : 16       | 2,955               | 0.96          | 2,509; 3,745               | 295; 890            |
+| And the cap and the flux per food (the port) | 28 : 12       | 2,978               | 0.66          | 2,519; 3,808               | 292; 837            |
+| The port with Jones' births first            | 27 : 13       | 3,013               | 0.67          | 2,535; 3,403               | 292; 1,120          |
+
+So the refund is the cause, as the coordinator guessed. Without it the budget never covers the front, and the rank of
+the keys gives the paid births to the sinks with the larger rates: 1,543 on the blank arm, 69 on the arm with slime.
+With it the budget covers the front in 66 to 96 % of the steps, the rank then pays every agent of the front, and the
+arm with slime gets more paid births than the blank arm (3,808 against 2,519). A probe of seed 1 shows why: the budget
+holds 31 to 41 and the agents of the front number 19 to 36, many of them on cells of the arm with slime whose rate
+is near 0 (sinks on slime and old sinks whose rate decays). The cap and the order are not the cause.
+
+**The forms that limit the front** (the same 40 seeds; Food ring with nine foods, seed 1, with the rules of the port
+and the drift of one food, `research/front/p1f.sh`; the case `all` is the coordinator's `capdrift-f9` of the same day):
+
+| Form of the limit (`frontPay` of `research/front/sim.ts`)       | Blank : slime | First food | Food ring at step 10,000                         |
+| --------------------------------------------------------------- | ------------- | ---------- | ------------------------------------------------ |
+| None (`all`, the port)                                          | 28 : 12       | 2,978      | 18,439 agents, a mesh of veins over the dish     |
+| What the flux of the front earned (`take`, the first candidate) | 40 : 0        | 3,342      | a colony on one side, far from the ring of foods |
+| At most the sum of the rates of the front (`rates`)             | 40 : 0        | 4,324      | a small disc, far from the ring                  |
+| Each agent with the chance 1 − e^(−r) at most (`step`)          | 40 : 0        | 3,933      | a small disc, far from the ring                  |
+| At most the sum of the weights of the sinks (`weights`)         | 28 : 12       | 2,987      | not run: the limit never binds in the Y-maze     |
+| k · P < B, P the sum of the rates with a key (`shareR`: P = R)  | 40 : 0        | 4,283      | 2,669 agents, a small network                    |
+| k · P < B, P the sum of the rates of the agents with a key      | 40 : 0        | 3,057      | 10,847 agents, a mesh of veins with holes        |
+
+The candidate of the coordinator, a sink paid at most what its own flux earns, keeps the Y-maze as it was on `main`
+(3,342 steps against 3,292), but the plasm of the dead then pays no birth at the front, and the colony in Food ring
+grows only by the credit of the food: the look of option 1 goes. Each limit with an absolute scale (`rates`, `step`,
+`shareR`) starves the front of Food ring: a sink at a moving front is young, and its rate, a mean over 100 steps,
+is small. The weights of the sinks sum to more than the agents of the front, so they limit nothing. The last form has
+no scale of its own: it compares each rate with the rates of the other agents of the front. Where all of them have
+like rates, as at the rim of Food ring, a full budget pays most of them; where some sit on slime, with 40 times less
+rate, it pays those seldom. Food ring with it (seed 1, nine foods), against `capdrift-f9`: 2,926 and 3,328 agents at
+step 5,000, 10,847 and 18,439 at 10,000, 5,062 and 3,393 at 20,000; a rise of +78 % and +119 % at the second food;
+a sheet of 0.58 and 0.61 at step 10,000 and 0.24 and 0.16 at 20,000; the dish full at step 15,500 and 12,500. The
+picture keeps the look: a mesh of veins with holes at 10,000, a polygonal network between the foods at 20,000.
+`research/front/out/p1f/` of the worktree has the records, the main checkout the copies in
+`research/front/out/owner/port2/`.
+
+## Part B: the drift of one food
+
+The coordinator ran the prototype with the rules of the port and `driftPerFood=1` on 2026-11-26 (Food ring, nine
+foods, seed 1; `research/front/out/p1e/capdrift-f9*` and `p1e-drift.png` of the main checkout): no sheet and no band at
+the wall at step 10,000, a mesh of veins with holes over the dish, and a polygonal network between the foods at 15,000
+to 20,000; 18,439 agents at step 10,000 and 3,393 at 20,000, a rise of +119 %, a sheet of 0.61 and 0.16. ADR 0097,
+finding 7, found that this drift keeps the zone behind the front narrow: with `feed=flux` the front takes the flux of
+each covered food, and the pressure that the drift reads grows with them. The engine divides the drift of each strain
+by the covered ports of its state of the step before (lane w of its first vec4), at least one: in `driftOf()` of
+`agents.wgsl` and `agents.frag`, and `driftOfFoods()` of `flow-reference.ts`. The pass of the agents reads the state
+already, so no memory is added.
 
 ## The agent's choices
 

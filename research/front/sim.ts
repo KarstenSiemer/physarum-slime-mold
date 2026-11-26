@@ -277,6 +277,19 @@ export interface Front {
    */
   feedCap: boolean;
   /**
+   * ADR 0100, part A: what the front may spend of the budget in a growth step with `payAll`. 'all': the whole part of
+   * it, as the port of option 1. 'take': at most what the flux that the front took has earned, an allowance that
+   * grows by S / `paid` in a flow pass and holds at most the agents of the front, as the budget of the engine before
+   * ADR 0100 (the candidate of the coordinator). 'rates': at most the sum of the sink rates of the agents of the front
+   * that draw a key, so that a sink on slime is paid at most its weight. 'weights': at most the sum of the weights of
+   * the sinks of the last flow pass (1 near ground without slime, `slimeWeight` elsewhere). 'share': only an agent
+   * whose key lies below B / P, P the sum of the sink rates of the agents that draw a key, so that each is paid with
+   * the chance 1 − e^(−B · r / P) at most, B times the share of its sink; 'shareR' the same with P the sum of the sink
+   * rates of all tube cells (the sum R of the flow). 'step': only an agent whose key lies below 1,
+   * so that each agent of the front is paid with the chance 1 − e^(−r) at most.
+   */
+  frontPay: 'all' | 'take' | 'rates' | 'weights' | 'share' | 'shareR' | 'step';
+  /**
    * The edges of the flow (ADR 0081, a try): 4, the axis neighbours, as the app; or 8, also the diagonal neighbours,
    * in the solve of the pressure, in the fluxes and in the flux of a cell. With 8 an axis edge has the weight
    * STENCIL8.axis and a diagonal edge STENCIL8.diag, and Q is half the sum of the sizes of the fluxes over the 8
@@ -373,6 +386,7 @@ export const noFront = (): Front => ({
   refund: false,
   double: 0,
   feedCap: false,
+  frontPay: 'all',
   stencil: 4,
   credit: FLOW.fresh,
   creditJobs: 'all',
@@ -413,6 +427,7 @@ const FRONT_TEXT: Record<string, readonly string[]> = {
   creditOn: ['const', 'feeder', 'births'],
   feed: ['fixed', 'foods', 'flux'],
   payAll: ['off', 'jones', 'front'],
+  frontPay: ['all', 'take', 'rates', 'weights', 'share', 'shareR', 'step'],
 };
 
 /**
@@ -667,6 +682,10 @@ export class Sim {
   frontTotal = 0;
   /** `driftPerFood`: 1 over the covered foods of the last flow pass; else 1. */
   private driftScale = 1;
+  /** `frontPay` 'take': what the flux of the front has earned and the front has not spent (ADR 0100, part A). */
+  private frontEarn = 0;
+  /** `frontPay` 'weights': the sum of the weights of the sinks of the last flow pass (ADR 0100, part A). */
+  private sinkWeights = 0;
   /** Births that the flow paid for and that are not born yet. */
   budget = 0;
   paidBirths = 0;
@@ -1534,9 +1553,30 @@ export class Sim {
     this.frontAgents = atFront;
     this.paidClaims = 0;
     if (this.ledger) (this.paidWant ??= new Uint8Array(cap)).fill(0);
+    // `frontPay` (ADR 0100, part A): what the front may spend of the budget with `payAll`.
+    let keys = this.paidKeys;
+    if (front.payAll !== 'off' && front.frontPay === 'take') budget = Math.min(budget, this.frontEarn);
+    if (front.payAll !== 'off' && front.frontPay === 'rates') {
+      let sum = 0;
+      for (const [, i] of keys) sum += this.sinkRate[this.cellOf(this.ax[i]!, this.ay[i]!)]!;
+      budget = Math.min(budget, sum);
+    }
+    if (front.payAll !== 'off' && front.frontPay === 'weights') {
+      budget = Math.min(budget, this.sinkWeights);
+    }
+    if (front.payAll !== 'off' && (front.frontPay === 'share' || front.frontPay === 'shareR')) {
+      let sum = this.sinkTotal;
+      if (front.frontPay === 'share') {
+        sum = 0;
+        for (const [, i] of keys) sum += this.sinkRate[this.cellOf(this.ax[i]!, this.ay[i]!)]!;
+      }
+      const t = Math.max(0, budget) / sum;
+      keys = keys.filter(([key]) => key < t);
+    }
+    if (front.payAll !== 'off' && front.frontPay === 'step') keys = keys.filter(([key]) => key < 1);
     if (budget < 1) return 0;
     // The rank of an agent: the agents with a smaller key, or with the same key and a smaller id.
-    const ranked = [...this.paidKeys].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const ranked = [...keys].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     for (const [, i] of ranked.slice(0, Math.floor(budget))) {
       if (this.claimChild(i, this.cellOf(this.ax[i]!, this.ay[i]!), free, front.rim)) {
         this.paidClaims++;
@@ -1544,6 +1584,7 @@ export class Sim {
       }
     }
     this.paidBirths += this.paidClaims;
+    if (front.payAll !== 'off' && front.frontPay === 'take') this.frontEarn -= this.paidClaims;
     if (front.payAll !== 'off') return this.paidClaims;
     this.ledger?.budget(0, Math.max(0, this.budget - this.paidClaims - atFront));
     this.budget = Math.min(this.budget - this.paidClaims, atFront);
@@ -2346,6 +2387,9 @@ export class Sim {
     let total = 0;
     if (front.shareOn === 'supply') this.supplyCounts(at, weight);
     else for (const c of at) this.sinkCount[c] = weight.get(c) ?? 1;
+    // `frontPay` 'weights' (ADR 0100, part A): the sum of the weights of the sinks of this pass.
+    this.sinkWeights = 0;
+    for (const c of at) this.sinkWeights += weight.get(c) ?? 1;
     for (let c = 0; c < cells; c++) {
       const r = this.sinkRate[c]! + (this.sinkCount[c]! - this.sinkRate[c]!) / tau;
       this.sinkRate[c] = r;
@@ -2394,6 +2438,8 @@ export class Sim {
     // `double` (study 1d): the mass, the agents and the budget, grows by at most mass · ln 2 / `double` in a step.
     if (front.double > 0)
       credit = Math.min(credit, ((this.aliveCount + Math.max(0, this.budget)) * Math.LN2) / front.double);
+    // `frontPay` 'take' (ADR 0100, part A): the allowance of the front, before the caps on the credit.
+    if (front.frontPay === 'take') this.frontEarn = Math.min(this.frontEarn + credit, this.frontAgents);
     if (front.feedCap) credit = Math.min(credit, Math.max(0, this.frontAgents - this.budget));
     this.budget += credit;
     this.ledger?.budget(credit, 0);

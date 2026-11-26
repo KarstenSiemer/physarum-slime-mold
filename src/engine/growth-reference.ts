@@ -6,7 +6,7 @@ import type { Boundary, Settings } from '../model/params';
 import { DISH_FILL } from './brush';
 import { FLOW, pcg } from './flow';
 import { strainEnds } from './pack';
-import { NO_KEY, PAID_KEY, PAY_JONES, payChance, paidKey } from './paid';
+import { NO_KEY, PAID_KEY, PAY_JONES, SHARE_SPLIT, payChance, paidKey, sharePays, shareSteps, shareSum } from './paid';
 import type { AgentState } from './types';
 
 const ALIVE = 4;
@@ -186,6 +186,9 @@ export interface PaidStep {
   /** The births and the deaths by shrinkage of each strain in the step (paid.ts PAID_COUNTS born and crowded). */
   born: number[];
   crowded: number[];
+  /** The sum P of the rates of the agents with a key of each strain, in its two counts (paid.ts shareSteps()). */
+  shareHigh: number[];
+  shareLow: number[];
 }
 
 /**
@@ -308,7 +311,8 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
  * may be one. It draws the key −ln(1 − u) / |r| (paid.ts paidKey()) if a free cell of the territory of s lies
  * beside it, as Jones' rule finds one, and if its claim key is not 0 (a claim with the key 0 could not be told from no
  * claim); every other agent has the key NO_KEY. The ⌊B⌋ agents of the strain with the least keys claim, the same key
- * and a smaller id first: each the cell of its child with its claim key, a free cell without a tube body of s if one
+ * and a smaller id first, but only those whose key k lies below B / P, k · P < B (paid.ts sharePays(); ADR 0100, part
+ * A), P the sum of the rates of the agents of the strain with a key in steps of 2^-12 (paid.ts shareSteps()): each the cell of its child with its claim key, a free cell without a tube body of s if one
  * lies beside it (the child goes out), else any free cell, picked with the draw of Jones' rule. Light may stop the
  * birth as it stops one of Jones' rule; then the agent makes no claim. A budget below 1 pays nothing. Then each of the n
  * parents of Jones' rule of s that made no paid claim claims the cell of its child with the chance min(1, max(0, B − K)
@@ -380,15 +384,25 @@ function paidClaims(
   });
   const ranked = paid.keys ?? keys;
   const ends = strainEnds(s.strains, agents.length);
+  const shareHigh = Array.from({ length: strains }, () => 0);
+  const shareLow = Array.from({ length: strains }, () => 0);
   for (let strain = 0; strain < strains; strain++) {
     const budget = Math.floor(Math.max(0, Math.fround(paid.budget[strain] ?? 0)));
     const ids: number[] = [];
     for (let id = strain > 0 ? (ends[strain - 1] ?? 0) : 0; id < (ends[strain] ?? 0); id++)
       if ((ranked[id] ?? NO_KEY) < NO_KEY) ids.push(id);
+    // The sum P of the rates of the agents with a key (ADR 0100, part A).
+    for (const id of ids) {
+      const a = agents[id];
+      const steps = a ? shareSteps(paid.rates[strain]?.[cellOf(a)] ?? 0) : 0;
+      shareHigh[strain] = (shareHigh[strain] ?? 0) + Math.floor(steps / SHARE_SPLIT);
+      shareLow[strain] = (shareLow[strain] ?? 0) + (steps % SHARE_SPLIT);
+    }
+    const sum = shareSum(shareHigh[strain] ?? 0, shareLow[strain] ?? 0);
     ids.sort((p, q) => (ranked[p] ?? 0) - (ranked[q] ?? 0) || p - q);
     for (const id of ids.slice(0, budget)) {
       const a = agents[id];
-      if (!a) continue;
+      if (!a || !sharePays(ranked[id] ?? NO_KEY, sum, paid.budget[strain] ?? 0)) continue;
       const t = childCell(id, strain, cellOf(a));
       if (t < 0) continue;
       parents.set(id, t);
@@ -415,5 +429,5 @@ function paidClaims(
     claims.set(t, Math.max(claims.get(t) ?? 0, claimKey(kind, id, step, seed)));
   }
   const none = () => Array.from({ length: strains }, () => 0);
-  return { keys, front, claims: counted, parents, waiting, jones, born: none(), crowded: none() };
+  return { keys, front, claims: counted, parents, waiting, jones, born: none(), crowded: none(), shareHigh, shareLow };
 }

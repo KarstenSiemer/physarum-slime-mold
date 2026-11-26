@@ -504,7 +504,8 @@ The agent senses only if the step senses: always sensing first; moving first in 
 - Otherwise it reads V = Σ_l A[s][l] · σ_K(T_l) + w_F[s] · C_F − w_L[s] · C_L, with σ_K(t) = t without saturation
   (section 6.8). In the Jones model w_F = w_L = A[0][0], the own weight +1 or −1 (section 6.4). So a strain that
   follows its trail turns away from a repellent, and a strain that flees its trail turns toward it.
-- While the rules of stage 4 run, it reads V minus the drift times a pressure of the flow of its strain (8.7): that of
+- While the rules of stage 4 run, it reads V minus the drift of one food times a pressure of the flow of its strain
+  (8.7): that of
   its cell if the cell holds a tube of the strain, else that of the agent's cell less the drop that the flux of the
   sink there would have over the sensor offset. An agent on a cell without a tube of its strain reads V alone.
 
@@ -737,7 +738,12 @@ passes have the source of the code before, character for character.
   cell beyond it. No sensor reads the pressure of the ground beside a network, whose level only the history of the
   solver sets (ADR 0072, finding 3): a shift of the pressure of every tube cell of s by a constant changes no move. An
   agent on a cell without a tube of s reads V alone. δ is the setting `drift`, a lane per strain of the parameters, as
-  the food weight; one value for all strains now. So the plasm streams down the pressure, to the sinks. The drift sets
+  the food weight; one value for all strains now, divided by the foods n_s that the flow of s covered in the step
+  before, at least one (the drift of one food, ADR 0100, part B): δ / max(1, n_s), in float32. With `feed=flux` each
+  covered food gives the front the flux of one food (9.1), so the pressure grows with the covered foods; the division
+  lets the sensors read the pressure of one food, and the zone behind the front stays narrow (ADR 0097, finding 7).
+  The passes read n_s from lane w of the first vec4 of the state of s (`driftOfFoods()` in flow-reference.ts). So the
+  plasm streams down the pressure, to the sinks. The drift sets
   the form of the front (ADR 0065, decision 6): 0 a tree of tubes with small heads, 1.25 to 1.5 a tube with a crown, 5
   a fan (measured with the form `all` of ADR 0070; ADR 0074 measured `take` at 1.5 and 5). Its default 1.5 is
   provisional (ADR 0070).
@@ -835,10 +841,18 @@ gives one back. So the agents and the budget of a strain change together only by
   largest float32. The passes compute −ln(1 − u) up to u = 1/2 as the series of 2 · atanh(u / (2 − u)) and above it
   as −log(1 − u): so the key is right to a few units in the last place also for a small u, where `log` near 1 may err
   by 2^-21 (WGSL and GLSL).
+- **The sum P** (ADR 0100, part A): the test adds the rate of each agent with a key to P of its strain, in steps of
+  2^-12 rounded to the nearest, (|r| · 2^24 + 2048) >> 12 (`shareSteps()`), in two counts: the steps / 64 and the rest.
+  P is (high · 64 + low) / 4096 in float32 (`shareSum()`). So each count stays a whole number below 2^24 for fewer than
+  2^18 agents with a key, which the float blending of WebGL2 adds without error.
 - **The rank**: the ⌊max(0, B')⌋ agents of s with the least keys claim a child; of two agents with the same key the
   one with the smaller id comes first. This is the weighted order of Efraimidis and Spirakis: an agent comes early with
   odds in its sink rate. A GPU lets each agent with a key count the agents of its strain with a smaller key, and stop
-  when the count reaches ⌊max(0, B')⌋. Those agents read every key of their strain.
+  when the count reaches ⌊max(0, B')⌋. Those agents read every key of their strain. Of them, only an agent whose key k
+  satisfies k · P < max(0, B') in float32 claims (`sharePays()`): so each agent of the front is paid with the chance
+  1 − e^(−B' · r / P) at most, B' times the share of its sink in the rates of the front. Without it the rank pays every
+  agent of the front once B' covers them, which the plasm of the dead does: then a sink on slime (weight 0.025, 8.7) is
+  paid as one near fresh ground, and the Y-maze with slime on one arm lost its choice (5 : 5; ADR 0100, part A).
 - **The claim**: an agent below the rank picks a free neighbour with the draw of Jones' rule (stream 4): among the
   free neighbours without a tube body of s if there is one, so that the child goes out, and else among all of them.
   Light stops the birth as it stops one of Jones' rule (section 9): the agent then makes no claim. It claims the cell
@@ -856,8 +870,10 @@ gives one back. So the agents and the budget of a strain change together only by
 - **The state** of s after the step holds the budget, F of the last growth step and the paid claims of the step in its
   last three lanes (6.11); in a step without the growth test K is 0, and F stays.
 - **Memory**: 4 B per agent for the keys (`PAID_BYTES_PER_AGENT`): on WebGPU after the state of 4 strains and the
-  counts in the buffer of the state of the sinks, by id; on WebGL2 a target of the agents (`R32F`). The counts are 8
-  whole numbers per strain (`PAID_COUNTS`): on WebGPU 32 words in the same buffer, on WebGL2 a target of 8 × 1 texels.
+  counts in the buffer of the state of the sinks, by id; on WebGL2 a target of the agents (`R32F`). The counts are 10
+  whole numbers per strain (`PAID_COUNTS`, the last two the parts of P): on WebGPU 40 words in the same buffer, on
+  WebGL2 a target of 10 × 1 texels. On WebGL2 the points of `paid.vert` with SHARE add the parts of P after the test
+  and before the rank.
   The marks of the paid parents of the rank for the parents of Jones' rule reuse the buffer of the dead agents of
   growth on WebGPU, which `win` writes anew; on WebGL2 they are bits of the agents.
 

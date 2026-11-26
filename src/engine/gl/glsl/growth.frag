@@ -337,8 +337,10 @@ void main() {
 // The rank of the births that the flux pays (rank in growth.wgsl; ADR 0071), after PASS 2 in a growth step. An agent
 // with a key counts the agents of its strain with a smaller key, or with the same key and a smaller id, and stops when
 // the count reaches ⌊B⌋ of its strain. Below it the agent marks GROWS, PAID and the neighbour of its child (paidCell()),
-// and the points of growth.vert claim the neighbour for it as for a parent of Jones' rule. A budget below 1 pays
-// nothing.
+// and the points of growth.vert claim the neighbour for it as for a parent of Jones' rule. An agent whose key k is not
+// below B / P (k · P < B), P the sum of the rates of the agents of its strain with a key (paid.vert SHARE, texels
+// shareHigh and shareLow of the counts), claims nothing either (paid.ts sharePays(); ADR 0100, part A). A budget below
+// 1 pays nothing.
 uniform sampler2D keys; // the key of every agent of the test (PASS 2), by its texel
 uniform sampler2D state; // the state of the strains (sinks.frag PASS 3), texel (1, s): y the budget of strain s
 uniform sampler2D paidCounts; // the counts of the step (paid.vert): texel j count j of paid.ts PAID_COUNTS
@@ -354,7 +356,13 @@ void main() {
   uint s = bits & 3u;
   // The budget after the agent pass (budgetOf in growth.wgsl): plus its deaths, less its respawns.
   float died = texelFetch(paidCounts, ivec2(4, 0), 0)[int(s)] - texelFetch(paidCounts, ivec2(3, 0), 0)[int(s)];
-  uint budget = uint(max(0.0, texelFetch(state, ivec2(1, int(s)), 0).y + died));
+  float left = max(0.0, texelFetch(state, ivec2(1, int(s)), 0).y + died);
+  // P from its two counts (paid.ts shareSum()): whole numbers below 2^24 in each texel.
+  uint high = uint(texelFetch(paidCounts, ivec2(8, 0), 0)[int(s)]);
+  uint low = uint(texelFetch(paidCounts, ivec2(9, 0), 0)[int(s)]);
+  float share = float(high * 64u + low) * (1.0 / 4096.0);
+  if (!(mine * share < left)) return;
+  uint budget = uint(left);
   uint j = s > 0u ? P.strainEnd[s - 1u] : 0u;
   ivec2 at = ivec2(int(j) % agentWidth, int(j) / agentWidth);
   uint before = 0u;

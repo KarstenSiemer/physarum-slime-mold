@@ -10,7 +10,8 @@ uniform int agentWidth;
 uniform int mode;
 #if TERRITORY
 // Mode 3, the respawns that the budget pays (`pay` in agents.wgsl, ADR 0100): the state of the sinks (sinks.frag PASS
-// 3), texel (1, s) with the budget of strain s in y, and the counts of the step (paid.vert), texel 2 the respawns that
+// 3), texel (1, s) with the budget of strain s in y (and texel (0, s) with its covered foods in w, for the drift of
+// mode 1), and the counts of the step (paid.vert), texel 2 the respawns that
 // wait, a lane per strain.
 uniform sampler2D paidState;
 uniform sampler2D paidCounts;
@@ -120,16 +121,20 @@ uniform sampler2D takes;
 bool tubeAt(ivec2 q, int s) { return flowMemoryOf(uint(s), q).z > 0.0; }
 
 // What the cell of an agent of strain s gives its sensors (driftOf in agents.wgsl, ADR 0075): whether it holds a tube
-// of s, and what a sensor on a cell without a tube of s reads, the mean pressure there less `so` times take / G.
+// of s, and what a sensor on a cell without a tube of s reads, the mean pressure there less `so` times take / G; and the
+// drift of one food (ADR 0100, part B): the drift of s over the foods that its last flow pass covered, at least one
+// (texel (0, s) of the state, w; sinks.frag PASS 3).
 struct Drift {
   bool on;
   float ground;
+  float weight;
 };
 
 Drift driftOf(vec2 pos, int s, float so) {
   ivec2 q = cellXY(ivec2(floor(pos)));
-  if (q.x < 0 || !tubeAt(q, s)) return Drift(false, 0.0);
-  return Drift(true, texelFetch(pressures, q, 0)[s] - so * texelFetch(takes, q, 0)[s]);
+  if (q.x < 0 || !tubeAt(q, s)) return Drift(false, 0.0, 0.0);
+  float weight = P.drift[s] / max(1.0, texelFetch(paidState, ivec2(0, s), 0).w);
+  return Drift(true, texelFetch(pressures, q, 0)[s] - so * texelFetch(takes, q, 0)[s], weight);
 }
 #endif
 
@@ -158,7 +163,7 @@ float sense(vec2 pos, vec2 p, int s, int clear) {
 }
 #if TERRITORY
 
-// What the sensor at p reads while the rules of stage 4 run: minus the drift of the strain times the mean pressure of
+// What the sensor at p reads while the rules of stage 4 run: minus the drift of one food (`d.weight`) times the mean pressure of
 // its flow at the cell of the sensor if it holds a tube of the strain, else times the ground of the agent's cell `d`;
 // nothing more for an agent off the tubes (sense in agents.wgsl, ADR 0070, ADR 0075). A blocked sensor stays blocked.
 float sense(vec2 pos, vec2 p, int s, int clear, Drift d) {
@@ -167,7 +172,7 @@ float sense(vec2 pos, vec2 p, int s, int clear, Drift d) {
   ivec2 q = cellXY(ivec2(floor(p)));
   float v = d.ground;
   if (tubeAt(q, s)) v = texelFetch(pressures, q, 0)[s];
-  return read - P.drift[s] * v;
+  return read - d.weight * v;
 }
 #endif
 

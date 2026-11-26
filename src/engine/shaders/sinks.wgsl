@@ -63,7 +63,7 @@ struct FlowRule {
 // reads them.
 struct States {
   lanes: array<vec4f, 8>,
-  counts: array<atomic<u32>, 32>,
+  counts: array<atomic<u32>, 40>,
 }
 @group(0) @binding(10) var<storage, read_write> states: States;
 
@@ -299,7 +299,7 @@ fn state() {
   states.lanes[s * 2u] = vec4f(r, f32(tubes), f32(count), f32(covered));
   // The counts of the step (paid.ts PAID_COUNTS): F, K, the respawns that waited and came to life, the deaths of the
   // agent pass, the parents of Jones' rule, the births and the deaths of growth.
-  let n = s * 8u;
+  let n = s * 10u;
   let before = states.lanes[s * 2u + 1u];
   var front = before.z;
   if (P.growth.x > 0u && P.grid.w % P.growth.x == 0u) { front = f32(atomicLoad(&states.counts[n])); }

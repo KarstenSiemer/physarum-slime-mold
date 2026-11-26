@@ -231,7 +231,7 @@ fn test(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
       agents[i] = a;
 //#if TERRITORY
       // The plasm of the agent goes back to the budget (ADR 0100).
-      atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 7u], 1u);
+      atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 7u], 1u);
 //#endif
       return;
     }
@@ -241,7 +241,7 @@ fn test(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
   // While the rules of stage 4 run, every birth costs one from the budget (ADR 0100): a parent of Jones' rule waits
   // for what the front leaves of it (`jones`), and every agent of the front may be paid first, a parent of Jones' rule
   // too. A parent with the claim key 0 makes no claim.
-  if (t >= 0 && key(agentId(a)) != 0u) { atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 5u], 1u); }
+  if (t >= 0 && key(agentId(a)) != 0u) { atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 5u], 1u); }
   if (growthTest()) { paidTest(a, c); }
 //#else
   if (t >= 0) { atomicMax(&claims[t], key(agentId(a))); }
@@ -262,7 +262,7 @@ fn test(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
 // the key of every agent, by its id.
 struct Paid {
   states: array<vec4f, 8>,
-  counts: array<atomic<u32>, 32>,
+  counts: array<atomic<u32>, 40>,
   keys: array<f32>,
 }
 @group(0) @binding(19) var<storage, read_write> paid: Paid;
@@ -273,7 +273,7 @@ const PAY_JONES = 14u; // the draw of a parent of Jones' rule that waits for the
 // The budget of strain s that growth spends (paid.ts budgetAfterMoves()): the budget before the step, plus the deaths
 // and less the respawns of the agent passes of this step.
 fn budgetOf(s: u32) -> f32 {
-  let n = s * 8u;
+  let n = s * 10u;
   return paid.states[s * 2u + 1u].y + f32(i32(atomicLoad(&paid.counts[n + 4u])) - i32(atomicLoad(&paid.counts[n + 3u])));
 }
 const RANK_BLOCK = 16u; // the keys that `rank` loads at once (ADR 0071)
@@ -362,26 +362,38 @@ fn paidCell(a: Agent, c: i32) -> i32 {
 
 // Agent a on cell c, alive and no parent of Jones' rule in a growth step, is an agent of the front of its strain s if
 // its cell has a sink rate of s that is not 0 (a sink of the step before holds it with a minus sign) and is not starved,
-// and if it lies at the rim. It counts into F of s, and with a free cell beside it it draws the key −ln(1 − u) / |r|.
+// and if it lies at the rim. It counts into F of s, and with a free cell beside it it draws the key −ln(1 − u) / |r|
+// and adds its rate to the sum P of s in steps of 2^-12, in two counts (paid.ts shareSteps(); ADR 0100, part A).
 // A claim key of 0 could not be told from no claim in `win`: such an agent keeps NO_KEY.
 fn paidTest(a: Agent, c: i32) {
   let s = a.bits & 3u;
   let q = cellCoord(u32(c));
   let rate = abs(rates[s * W() * H() + u32(c)]);
   if (rate == 0.0 || starved(s, q) || !atRim(s, q)) { return; }
-  atomicAdd(&paid.counts[s * 8u], 1u);
+  atomicAdd(&paid.counts[s * 10u], 1u);
   let id = agentId(a);
   if (freeAround(s, q) == 0u || key(id) == 0u) { return; }
   var rng = rngSeed(id, PAID_KEY);
   paid.keys[id] = exponential(rand(&rng)) / rate;
+  // The rate is a whole number of steps of 2^-24 (sinks.wgsl): the product is exact.
+  let steps = (u32(rate * 16777216.0) + 2048u) >> 12u;
+  atomicAdd(&paid.counts[s * 10u + 8u], steps >> 6u);
+  atomicAdd(&paid.counts[s * 10u + 9u], steps & 63u);
+}
+
+// The sum P of the rates of the agents of strain s with a key (paid.ts shareSum()), from its two counts.
+fn shareSum(s: u32) -> f32 {
+  let n = s * 10u;
+  return f32(atomicLoad(&paid.counts[n + 8u]) * 64u + atomicLoad(&paid.counts[n + 9u])) * (1.0 / 4096.0);
 }
 
 // The rank of the paid births, after `test` in a growth step. An agent with a key counts the agents of its strain with
 // a smaller key, or with the same key and a smaller id, and stops when the count reaches ⌊B⌋ of its strain, B the
 // budget after the agent passes (budgetOf()). Below it the agent claims the cell of its child with its claim key, as a
 // parent of Jones' rule claims one, counts the claim into K, and marks itself in `dead`; a parent of Jones' rule then
-// leaves the parents that wait. A budget below 1 pays nothing. The b agents with the least keys read every key of
-// their strain.
+// leaves the parents that wait. An agent whose key k is not below B / P (k · P < B), P the sum of the rates of the
+// agents of its strain with a key (shareSum()), claims nothing either (paid.ts sharePays(); ADR 0100, part A). A
+// budget below 1 pays nothing. The b agents with the least keys read every key of their strain.
 @compute @workgroup_size(256)
 fn rank(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
   let i = index(gid, groups);
@@ -391,7 +403,9 @@ fn rank(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
   let mine = paid.keys[id];
   if (mine == NO_KEY) { return; }
   let s = a.bits & 3u;
-  let budget = u32(max(0.0, budgetOf(s)));
+  let left = max(0.0, budgetOf(s));
+  if (!(mine * shareSum(s) < left)) { return; }
+  let budget = u32(left);
   let end = P.strainEnd[s];
   var before = 0u;
   // The keys in blocks of RANK_BLOCK: the loads of a block do not wait for each other, where a load that the count
@@ -412,9 +426,9 @@ fn rank(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) grou
   let t = paidCell(a, c);
   if (t < 0) { return; }
   atomicMax(&claims[t], key(id));
-  atomicAdd(&paid.counts[s * 8u + 1u], 1u);
+  atomicAdd(&paid.counts[s * 10u + 1u], 1u);
   dead[id] = 1u;
-  if (divideInto(a, c) >= 0) { atomicSub(&paid.counts[s * 8u + 5u], 1u); }
+  if (divideInto(a, c) >= 0) { atomicSub(&paid.counts[s * 10u + 5u], 1u); }
 }
 
 // The parents of Jones' rule that the budget pays (ADR 0100), after `rank` in a growth step: each of the n parents of
@@ -431,8 +445,8 @@ fn jones(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   let t = divideInto(a, c);
   if (t < 0) { return; }
   let s = a.bits & 3u;
-  let left = max(0.0, budgetOf(s)) - f32(atomicLoad(&paid.counts[s * 8u + 1u]));
-  let chance = min(1.0, max(0.0, left) / f32(atomicLoad(&paid.counts[s * 8u + 5u])));
+  let left = max(0.0, budgetOf(s)) - f32(atomicLoad(&paid.counts[s * 10u + 1u]));
+  let chance = min(1.0, max(0.0, left) / f32(atomicLoad(&paid.counts[s * 10u + 5u])));
   var rng = rngSeed(id, PAY_JONES);
   if (rand(&rng) < chance) { atomicMax(&claims[t], key(id)); }
 }
@@ -614,7 +628,7 @@ fn birth(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
         agents[i] = a;
 //#if TERRITORY
         // A birth costs one from the budget (ADR 0100).
-        atomicAdd(&paid.counts[s * 8u + 6u], 1u);
+        atomicAdd(&paid.counts[s * 10u + 6u], 1u);
 //#endif
       }
     }

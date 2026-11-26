@@ -72,10 +72,10 @@ fn inTerritory(c: i32, s: u32) -> bool { return c >= 0 && inTerritoryAt(cellCoor
 @group(0) @binding(16) var takes: texture_2d_array<f32>;
 // The state of the sinks of every strain (sinks.wgsl `state`), with the budget B of the paid births in y of the second
 // vec4 of a strain, then the counts of each strain (paid.ts PAID_COUNTS), which every step clears (ADR 0100). The keys
-// of growth follow them; no agent pass reads them.
+// of growth follow them; no agent pass reads them. The sensors read the covered foods of each strain (driftOf()).
 struct Paid {
   states: array<vec4f, 8>,
-  counts: array<atomic<u32>, 32>,
+  counts: array<atomic<u32>, 40>,
 }
 @group(0) @binding(17) var<storage, read_write> paid: Paid;
 const PAY_RESPAWN = 13u; // the draw of a respawn that waits for the budget (paid.ts PAY_RESPAWN)
@@ -208,20 +208,24 @@ fn tubeAt(q: vec2i, s: u32) -> bool { return textureLoad(flowMemory, q, s, 0).z 
 // What the cell of an agent of strain s gives its sensors while the rules of stage 4 run (ADR 0075; ADR 0074, the form
 // `take`): whether it holds a tube of s, and `ground`, what a sensor on a cell without a tube of s reads: the mean
 // pressure of the agent's cell less the sensor offset `so` times take / G there. Fresh ground holds no pressure of its
-// own, and the flux that the sink of the cell takes would fall by take / G per cell beyond it.
+// own, and the flux that the sink of the cell takes would fall by take / G per cell beyond it. And `weight`, the drift
+// of one food (ADR 0100, part B): the drift of the strain over the foods that its last flow pass covered, at least one
+// (lane w of the first vec4 of its state, sinks.wgsl `state`), so that the drift reads the pressure of one food.
 struct Drift {
   on: bool,
   ground: f32,
+  weight: f32,
 }
 
 fn driftOf(pos: vec2f, s: u32, so: f32) -> Drift {
   let q = cellXY(vec2i(floor(pos)));
-  if (q.x < 0 || !tubeAt(q, s)) { return Drift(false, 0.0); }
-  return Drift(true, meanPressure(q, s) - so * textureLoad(takes, q, s, 0).x);
+  if (q.x < 0 || !tubeAt(q, s)) { return Drift(false, 0.0, 0.0); }
+  let weight = P.drift[s] / max(1.0, paid.states[s * 2u].w);
+  return Drift(true, meanPressure(q, s) - so * textureLoad(takes, q, s, 0).x, weight);
 }
 
 // What the sensor at p reads while the rules of stage 4 run (ADR 0070; ADR 0075): what it reads without them, minus
-// the drift of the strain times the mean pressure of the four lanes of its flow at the cell of the sensor if that cell
+// the drift of one food (`d.weight`) times the mean pressure of the four lanes of its flow at the cell of the sensor if that cell
 // holds a tube of the strain, else times the ground of the agent's cell `d`. An agent on a cell without a tube of its
 // strain reads no drift. A blocked sensor stays blocked, and its cell is not read.
 fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32, d: Drift) -> f32 {
@@ -230,7 +234,7 @@ fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32, d: Drift) -> f32 {
   let q = cellXY(vec2i(floor(p)));
   var v = d.ground;
   if (tubeAt(q, s)) { v = meanPressure(q, s); }
-  return read - P.drift[s] * v;
+  return read - d.weight * v;
 }
 //#endif
 
@@ -473,13 +477,13 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
 //#if TERRITORY
   // While the rules of stage 4 run, a death that the model makes gives its plasm back to the budget (ADR 0100); the cut
   // and a wall take it away (removed()).
-  if ((found.bits & ALIVE) != 0u && !alive && !removed(found)) { atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 4u], 1u); }
+  if ((found.bits & ALIVE) != 0u && !alive && !removed(found)) { atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 4u], 1u); }
 //#endif
   let spot = placement(a, id);
 //#if TERRITORY
   if (spot.cell >= 0 && respawns(a, id)) {
     // A respawn waits for the budget: `pay` draws for it (ADR 0100).
-    atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 2u], 1u);
+    atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 2u], 1u);
   } else if (spot.cell >= 0) {
 //#else
   if (spot.cell >= 0) {
@@ -565,7 +569,7 @@ fn pay(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) group
   let spot = placement(a, id);
   if (spot.cell < 0 || !respawns(a, id)) { return; }
   let s = a.bits & 3u;
-  let waiting = atomicLoad(&paid.counts[s * 8u + 2u]);
+  let waiting = atomicLoad(&paid.counts[s * 10u + 2u]);
   let chance = min(1.0, max(0.0, paid.states[s * 2u + 1u].y) / f32(waiting));
   var rng = rngSeed(id, PAY_RESPAWN);
   if (rand(&rng) < chance) { atomicMax(&claims[spot.cell], key(id)); }
@@ -581,7 +585,7 @@ fn reborn(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
   let id = agentId(a);
   let spot = placement(a, id);
   if (spot.cell < 0 || !respawns(a, id) || atomicLoad(&claims[spot.cell]) != key(id)) { return; }
-  atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 3u], 1u);
+  atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 3u], 1u);
 }
 //#endif
 

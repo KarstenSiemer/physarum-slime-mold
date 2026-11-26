@@ -20,6 +20,8 @@ extend-ignore-re = [
   # The owner's feedback of 2026-11-26, quoted in German in ADR 0098.
   '"Wir\s+wollen\s+dichter\s+an\s+echte\s+Schleimpilze\s+rankommen,\s+ich\s+habe\s+zu\s+wenig\s+Wachstum\s+beobachtet\."',
   '"Wachstumsfront\s+soll\s+sich\s+wie\s+echter\s+Physarum\s+verhalten\.\s+So\s+unterschiede\s+wie\s+39:1\s+beim\s+Y\s+maze\s+sind\s+aber\s+dann\s+doch\s+egal,\s+40:0\s+ist\s+ok\.\s+Das\s+aussehen\s+ist\s+das\s+wichtigste\."',
+  # The owner's approval of the drift of one food of 2026-11-26, quoted in German in ADR 0100.
+  '"Drift\s+einer\s+Nahrung\s+sieht\s+sehr\s+gut\s+aus!\s+Dran\s+bleiben!"',
   # The owner's stop of 2026-11-21, quoted in German in ADR 0089.
   '"ich probiere gerade\s+die growth Front Krone aus und denke, dass das feature noch nicht bereit ist es in andere mazes einzubauen, die\s+meisten Sachen funktionieren noch nicht so richtig\. Also noch nicht in anderen presets einschalten bitte"',
 ]

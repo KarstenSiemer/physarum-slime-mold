@@ -6,6 +6,7 @@ import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import { FLOW, FLOW_ITERATIONS, packFlow } from './flow';
 import {
   drifted,
+  driftOfFoods,
   flowPorts,
   flowPressure,
   flowStart,
@@ -432,9 +433,11 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
    * rate of k / 16 on every cell (k from 0 to 15, with a sign and a rest that R rounds away), and a pressure of whole
    * numbers in every lane: so take / G and every value that a sensor reads are exact. Strain 0 takes flux with R = 16,
    * strain 1 with R = 8 takes none. `shift`: a pressure added to every lane of every tube cell, + for strain 0 and −
-   * for strain 1. The memory 0.5 lets almost no agent starve and no dead agent come to life.
+   * for strain 1. The memory 0.5 lets almost no agent starve and no dead agent come to life. `covered`: the foods that
+   * the last flow pass of strain 0 covered, which divide its drift (ADR 0100, part B); with it a trail of whole numbers
+   * 0 to 3 in the lane of strain 0, which the sensors read against the drift, so that the size of the drift counts.
    */
-  async function driftCase(drift: number, shift = 0, frontFlux = 1) {
+  async function driftCase(drift: number, shift = 0, frontFlux = 1, covered = 0) {
     const [w, h] = [64, 64];
     const n = w * h;
     const RA = 30;
@@ -452,6 +455,12 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       }
     sim.update(s);
     sim.writeTerritory(new Uint8Array(n).fill(3));
+    const trail = new Float32Array(n * 4);
+    if (covered > 0) {
+      const t = random(67);
+      for (let c = 0; c < n; c++) trail[c * 4] = Math.floor(t() * 4);
+      sim.writeTrail(trail);
+    }
     const rnd = random(61);
     const memories = [0, 1].map((strain) => {
       const m = new Float32Array(n * 4);
@@ -471,7 +480,7 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       return r;
     });
     const state = new Float32Array(SINK_STATE_LANES * 2);
-    state.set([16, 0, 0, 0, 1, 0, 0, 0], 0);
+    state.set([16, 0, 0, covered, 1, 0, 0, 0], 0);
     state.set([8, 0, 0, 0, 0, 0, 0, 0], SINK_STATE_LANES);
     sim.writeSinkState(state);
     const pressures = [0, 1].map((strain) => {
@@ -502,10 +511,14 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       const lanes = (c: number) => p.subarray(c * 4, c * 4 + 4);
       const a = at(x, y);
       const ground = groundOf(tube(a), lanes(a), form === 'no take' ? 0 : (t[a] ?? 0), 9);
+      const weight = driftOfFoods(drift, strain === 0 ? covered : 0);
+      // What a sensor reads without the rules: the trail of strain 0 times the weight of the strain for it.
+      const attraction = s.strains[strain]?.attraction[0] ?? 0;
+      const read = (c: number) => Math.fround((trail[c * 4] ?? 0) * attraction);
       return [at(x + 9, y), at(x + 6, y - 6), at(x + 6, y + 6)].map((c) =>
         form === 'all'
-          ? drifted(0, Math.fround(drift), 0, true, lanes(c))
-          : drifted(0, Math.fround(drift), ground, tube(c), lanes(c)),
+          ? drifted(read(c), weight, 0, true, lanes(c))
+          : drifted(read(c), weight, ground, tube(c), lanes(c)),
       );
     };
     const tubeAgent = (x: number, y: number, strain: number) => (memories[strain]?.[(y * w + x) * 4 + 2] ?? 0) > 0;
@@ -525,12 +538,14 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
 
   it('turns an agent by the pressure on the tubes of its strain and by what its sink takes, times the drift', async () => {
     // With the flux to the front 2 (ADR 0086) every sink takes twice its share of the flow strength.
-    for (const [drift, frontFlux] of [
-      [1.5, 1],
-      [0, 1],
-      [1.5, 2],
+    // With 3 covered foods strain 0 reads the drift of one food, 0.5 (ADR 0100, part B).
+    for (const [drift, frontFlux, covered] of [
+      [1.5, 1, 0],
+      [0, 1, 0],
+      [1.5, 2, 0],
+      [1.5, 1, 3],
     ] as const) {
-      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift, 0, frontFlux);
+      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift, 0, frontFlux, covered);
       const ra = Math.fround((RA * Math.PI) / 180);
       const counts = { keep: 0, left: 0, right: 0, random: 0, offTube: 0, byTake: 0, dead: 0 };
       for (const { id, x, y, strain } of placed) {

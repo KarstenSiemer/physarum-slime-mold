@@ -138,6 +138,8 @@ export interface TerritoryPrograms {
   birth: Program;
   /** The counts of the births and deaths that the budget settles (paid.vert with points.frag, ADR 0071, ADR 0100). */
   paid: Program;
+  /** The sum P of the rates of the agents with a key (paid.vert with SHARE, ADR 0100, part A). */
+  share: Program;
 }
 
 /** The passes of the sinks (sinks.frag, ADR 0069), and the passes of the flow that take them (ADR 0070). */
@@ -508,6 +510,7 @@ export function compile(gl: GL): Programs {
         jones: sim(`#define PASS 6\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
         birth: sim(`#define PASS 4\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
         paid: wrap(gl, program(gl, V + common + growthGlsl + paidVert, V + common + pointsFrag)),
+        share: wrap(gl, program(gl, V + common + growthGlsl + '#define SHARE 1\n' + paidVert, V + common + pointsFrag)),
       }),
     sinks: () =>
       (sinks ??= {

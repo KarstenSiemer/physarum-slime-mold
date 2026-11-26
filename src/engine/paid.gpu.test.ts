@@ -19,6 +19,8 @@ import {
   PAID_KEY,
   nextBudget,
   paidIncrement,
+  sharePays,
+  shareSum,
 } from './paid';
 import { RATE_ONE, SINK_STATE_LANES } from './sinks';
 import type { AgentState, Backend, Sim, Stroke } from './types';
@@ -258,6 +260,9 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
       expect(count(strain, 'parents'), at).toBe(paid.waiting[strain]);
       expect(count(strain, 'born'), at).toBe(paid.born[strain]);
       expect(count(strain, 'crowded'), at).toBe(paid.crowded[strain]);
+      // The sum P of the rates of the agents with a key, in its two counts (ADR 0100, part A).
+      expect(count(strain, 'shareHigh'), at).toBe(paid.shareHigh[strain]);
+      expect(count(strain, 'shareLow'), at).toBe(paid.shareLow[strain]);
     }
     return {
       sim: a,
@@ -348,6 +353,8 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
     expect(keysDiffer(keys, own.keys)).toEqual([]);
     expect(got).toEqual(expected.agents);
     expect(lanesOf(state, 2)).toEqual(budgets(c, state, tally));
+    const count = (strain: number, name: keyof typeof PAID_COUNTS) =>
+      tally[strain * PAID_COUNT_LANES + PAID_COUNTS[name]] ?? 0;
     // The case reaches every part of the rule: in each strain agents of the front without a key and more keys than the
     // budget pays, claims that light stops, parents of Jones' rule that the front pays, births of Jones' rule that the
     // rest of the budget pays with a chance below 1 (ADR 0100), and a front that takes flux.
@@ -357,11 +364,25 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
       expect(withKey[strain]).toBeGreaterThan(Math.floor(budget[strain] ?? 0));
       expect(state[strain * SINK_STATE_LANES + 4]).toBe(1);
     }
-    expect(paid.claims[0]).toBe(Math.floor(budget[0] ?? 0));
+    expect(paid.claims[0]).toBeLessThanOrEqual(Math.floor(budget[0] ?? 0));
     expect(paid.claims[1]).toBeLessThan(Math.floor(budget[1] ?? 0));
+    // The threshold k · P < B stops an agent that the rank would pay (ADR 0100, part A), and lets others pass.
+    const ends = strainEnds(s.strains, keys.length);
+    const stopped = [0, 1].map((strain) => {
+      const own = Array.from(keys.subarray(strain > 0 ? (ends[0] ?? 0) : 0, ends[strain] ?? 0)).filter(
+        (k) => k !== NO_KEY,
+      );
+      own.sort((p, q) => p - q);
+      const top = own.slice(0, Math.floor(budget[strain] ?? 0));
+      const sum = shareSum(count(strain, 'shareHigh'), count(strain, 'shareLow'));
+      const passes = top.filter((k) => sharePays(k, sum, budget[strain] ?? 0)).length;
+      expect(passes, `strain ${String(strain)}`).toBeGreaterThan(0);
+      return top.length - passes;
+    });
+    expect(stopped[0]).toBeGreaterThan(0);
     expect([...paid.parents.keys()].some((id) => input.agents[id] && paid.jones.has(id))).toBe(false);
     expect(paid.jones.size).toBeGreaterThan(0);
-    // In strain 0 the front spends the whole part of the budget: its parents of Jones' rule get a chance below 1.
+    // In strain 0 the parents of Jones' rule get what the front left, with a chance below 1.
     expect(paid.waiting[0]).toBeGreaterThan((budget[0] ?? 0) - (paid.claims[0] ?? 0));
     // Every child counts into the births of its strain.
     expect(children(got, input.agents)).toBe(paid.born.reduce((p, q) => p + q, 0));
@@ -491,7 +512,9 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
           if (k < key) below++;
           if (Math.abs(k - key) < 1e-4 * key) near = true;
         }
-        if (!near && below > 10) found = { seed, ids: [other, id], below };
+        // The threshold k · P < B of the rule (ADR 0100, part A) lets both pass: the rank alone tells them apart.
+        const sum = shareSum(step.shareHigh[0] ?? 0, step.shareLow[0] ?? 0);
+        if (!near && below > 10 && sharePays(key, sum, below + 1.5)) found = { seed, ids: [other, id], below };
       }
     }
     if (!found) throw new Error('No seed of 200 gives two agents of the front with the same key');
@@ -513,6 +536,75 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
     // A budget above the agents of the front keeps what the births left: no cap takes it down, and the food credits
     // nothing (ADR 0100).
     expect(state[SINK_STATE_LANES + BUDGET_LANE]).toBeGreaterThan(paid.front[1] ?? 0);
+  }, 300_000);
+
+  it('pays a sink near fresh ground and seldom one on slime, also with a budget that covers the front', async () => {
+    // The Y-maze of ADR 0100, part A: with the plasm of the dead back in the budget, the budget covers every agent of
+    // the front, and the rank alone would pay every one of them, on slime as near fresh ground. The threshold k · P < B
+    // pays each with the chance 1 − e^(−B · r / P) at most. No parent of Jones' rule, no tube body; strain 0 has the
+    // weight 1 on the left half and the weight on slime 0.025 on the right half (in steps of 2^-24), strain 1 none.
+    const [w, h] = [96, 64];
+    const n = w * h;
+    const slime = Math.round(0.025 * RATE_ONE) / RATE_ONE;
+    const layout = random(59);
+    const at = Uint8Array.from({ length: n }, () => (layout() < 0.4 ? 1 : 0));
+    const rateOf = (x: number) => (x < w / 2 ? 1 : slime);
+    const settings = stage4({ seed: 7, growthWindow: 7, growthMin: 1000, growthMax: 2000 });
+    const ends = strainEnds(settings.strains, n);
+    // The agents with a key of strain 0, from the CPU copy of the step: the moves keep every agent in its cell.
+    const agents: AgentState[] = Array.from({ length: n }, () => ({ x: 0, y: 0, heading: 0, bits: 0 }));
+    let next = 0;
+    for (let c = 0; c < n && next < (ends[0] ?? 0); c++)
+      if (at[c]) agents[next++] = { x: (c % w) + 0.5, y: Math.floor(c / w) + 0.5, heading: 0, bits: ALIVE };
+    const memory = [0, 1].map(() => Float32Array.from({ length: n * 4 }, (_, i) => (i % 4 === 0 ? 0.9 : 0)));
+    const rates = [Float32Array.from({ length: n }, (_, c) => rateOf(c % w)), new Float32Array(n)];
+    const first = growthStep({
+      kind: kind as 'webgpu' | 'webgl2',
+      settings,
+      w,
+      h,
+      env: new Uint8Array(n * 4),
+      step: 0,
+      agents,
+      counts: new Float32Array(n * 4),
+      memory,
+      territory: new Uint8Array(n).fill(3),
+      paid: { rates, budget: [0, 0] },
+    }).paid;
+    const withKey = first ? (keyed(first.keys, settings)[0] ?? 0) : 0;
+    const c: Case = {
+      settings,
+      w,
+      h,
+      place: (x, y) => (at[y * w + x] ? 0 : undefined),
+      memory: () => [0.9, 0],
+      rate: (strain, x) => (strain === 0 ? rateOf(x) : 0),
+      inside: () => true,
+      budget: [withKey + 0.5, 0],
+    };
+    const { keys, own, expected, paid, tally, got, state } = await step(c);
+    expect(keysDiffer(keys, own.keys)).toEqual([]);
+    expect(got).toEqual(expected.agents);
+    expect(lanesOf(state, 2)).toEqual(budgets(c, state, tally));
+    // The budget covers every agent with a key, and the threshold pays fewer.
+    const side = (id: number) => ((got[id]?.x ?? 0) < w / 2 ? 0 : 1);
+    const counted = [0, 0];
+    const paidOn = [0, 0];
+    for (let id = 0; id < (ends[0] ?? 0); id++) {
+      if (keys[id] === NO_KEY) continue;
+      const k = side(id);
+      counted[k] = (counted[k] ?? 0) + 1;
+      if (paid.parents.has(id)) paidOn[k] = (paidOn[k] ?? 0) + 1;
+    }
+    expect(keyed(keys, settings)[0]).toBe(withKey);
+    expect(counted[0]).toBeGreaterThan(200);
+    expect(counted[1]).toBeGreaterThan(200);
+    expect(paid.claims[0]).toBeLessThan(withKey);
+    // B / P is about 1.95: a sink near fresh ground is paid with the chance 0.86, one on slime with 0.05.
+    const [fresh, slimed] = [(paidOn[0] ?? 0) / (counted[0] ?? 1), (paidOn[1] ?? 0) / (counted[1] ?? 1)];
+    expect(fresh).toBeGreaterThan(0.7);
+    expect(slimed).toBeGreaterThan(0);
+    expect(slimed).toBeLessThan(0.15);
   }, 300_000);
 
   it('pays no child across the corner between two walls, in each of the four diagonal directions', async () => {
@@ -593,8 +685,11 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
     expect(paid.claims).toEqual([0, 0]);
     expect(lanesOf(state, 2)).toEqual(budgets(c, state, tally));
     // A budget below 1 keeps what it has: strain 0 has no agent of the front, so the food credits it nothing (ADR 0100).
-    // No agent died or was born.
-    expect(Array.from(tally).every((v, k) => k % PAID_COUNT_LANES < PAID_COUNTS.waiting || v === 0)).toBe(true);
+    // No agent died or was born (the sum P of the rates is no birth or death).
+    const lane = (k: number) => k % PAID_COUNT_LANES;
+    expect(
+      Array.from(tally).every((v, k) => lane(k) < PAID_COUNTS.waiting || lane(k) >= PAID_COUNTS.shareHigh || v === 0),
+    ).toBe(true);
     const inc = paidIncrement(c.settings.flowStrength);
     const kept = [0, 1].map((strain) => {
       const lanes = strain * SINK_STATE_LANES;
