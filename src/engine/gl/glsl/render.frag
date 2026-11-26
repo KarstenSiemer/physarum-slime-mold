@@ -6,6 +6,9 @@ uniform sampler2D bloom;
 uniform sampler2D heights; // gel style: written by height.frag each frame
 uniform sampler2D stream;  // the direction of the flow of the plasm times its speed (tubes.frag PASS 2)
 uniform sampler2D trailLevels; // the trail on a coarser map (trail-down.frag), zoomed out
+// The fourth root of the strength across the tube of each cell and strain (tubes.frag PASS 0); read for the veins only
+// (V.gelFx.z, ADR 0099).
+uniform sampler2D veins;
 
 // On the periodic grid one wrap serves the 4 cells (see bilinear in render.wgsl).
 vec4 bilinear(vec2 p) {
@@ -87,6 +90,32 @@ vec3 tint(vec4 v) {
   return c;
 }
 
+// ---- The veins (ADR 0099; see render.wgsl) ----
+const float VEIN_DEEP = 0.8;  // how far a whole vein goes from the colour of its strain to the deep shade
+const float VEIN_DARK = 0.8;  // the deep shade: the colour of the strain squared, which is more saturated, times this
+const float VEIN_LOW = 0.2;   // the strength of a vein at which the shade begins
+const float VEIN_HIGH = 0.7;  // and at which it is whole
+const float VEIN_RISE = 1.0;  // gel style: the height of the ridge of a whole vein, in cells
+
+struct Veins {
+  vec4 deep;  // per strain: how far the colour goes to the deep shade, 0 to VEIN_DEEP
+  vec2 slope; // the slope of the ridge, per cell: the gradient of the sum of `deep`
+};
+
+// The colour of strain s where its colour goes `deep` of the way to the deep shade.
+vec3 shade(int s, float deep) {
+  vec3 c = V.colors[s].rgb;
+  if (deep <= 0.0) return c;
+  return mix(c, VEIN_DARK * c * c, deep);
+}
+
+// tint() with the veins: each strain in its shade (`deep`: Veins.deep).
+vec3 veined(vec4 v, vec4 deep) {
+  vec3 c = vec3(0.0);
+  for (int s = 0; s < int(V.frame.y); s++) c += v[s] * shade(s, deep[s]);
+  return c;
+}
+
 vec3 srgb(vec3 c) {
   return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, 12.92 * c, vec3(lessThanEqual(c, vec3(0.0031308))));
 }
@@ -105,14 +134,14 @@ float cover(float sd) {
 }
 
 // `base` is what lies below the trail: the background, or food on it.
-vec3 glow(vec4 v, vec4 halo, vec3 base) {
-  vec3 l = 1.0 - exp(-(tint(v) * V.exposure + tint(halo) * V.fx.x * 0.2));
+vec3 glow(vec4 v, vec4 halo, vec3 base, vec4 vein) {
+  vec3 l = 1.0 - exp(-(veined(v, vein) * V.exposure + tint(halo) * V.fx.x * 0.2));
   return base + (1.0 - base) * l;
 }
 
-vec3 paper(vec4 v, vec3 base) {
+vec3 paper(vec4 v, vec3 base, vec4 vein) {
   vec3 absorb = vec3(0.0);
-  for (int s = 0; s < int(V.frame.y); s++) absorb += v[s] * (0.15 + 0.85 * (1.0 - V.colors[s].rgb));
+  for (int s = 0; s < int(V.frame.y); s++) absorb += v[s] * (0.15 + 0.85 * (1.0 - shade(s, vein[s])));
   return base * exp(-absorb * V.exposure);
 }
 
@@ -166,7 +195,7 @@ const float GEL_CLEAR = 0.6; // how much of a flake of food shows through the ge
 const float GEL_HIGH = 4.0;  // cells of height for one unit of the gel's thickness
 
 // A gel with a wet surface (see gel in render.wgsl). Over a flake of food the gel takes in its colour.
-vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
+vec3 gel(vec2 p, vec4 v, vec3 base, Flake f, Veins vein) {
   float a = 1.25 * max(V.scale, 1.0);
   float b = 0.5 * max(V.scale, 1.0);
   vec2 east = vec2(thick(heightFiltered(p + vec2(a, b))), thick(heightFiltered(p + vec2(a, -b))));
@@ -174,13 +203,14 @@ vec3 gel(vec2 p, vec4 v, vec3 base, Flake f) {
   vec2 south = vec2(thick(heightFiltered(p + vec2(b, a))), thick(heightFiltered(p + vec2(-b, a))));
   vec2 north = vec2(thick(heightFiltered(p + vec2(b, -a))), thick(heightFiltered(p + vec2(-b, -a))));
   vec2 rise = vec2(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
-  vec3 n = normalize(vec3(-GEL_HIGH * rise, 1.0));
+  // A vein is a low ridge on the gel (ADR 0099).
+  vec3 n = normalize(vec3(-GEL_HIGH * rise - VEIN_RISE * vein.slope, 1.0));
   vec3 l = normalize(vec3(-0.45, -0.6, 0.65));
   float diffuse = clamp((dot(n, l) + 0.35) / 1.35, 0.0, 1.0);
   float shine = max(dot(n, normalize(l + vec3(0.0, 0.0, 1.0))), 0.0);
   float spec = 0.9 * pow(shine, 120.0) + 0.1 * pow(shine, 14.0);
   float total = v.x + v.y + v.z + v.w;
-  vec3 albedo = total > 1e-6 ? tint(v) / total : V.colors[0].rgb;
+  vec3 albedo = total > 1e-6 ? veined(v, vein.deep) / total : V.colors[0].rgb;
 #if ENV
   if (f.cover > 0.0) albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover);
 #endif
@@ -253,6 +283,51 @@ const vec3 SUN = vec3(-0.45, -0.6, 0.65) / sqrt(0.985); // toward the light, as 
 // Quadratic B-spline weights and their derivatives (see render.wgsl).
 vec3 spline(float u) { return vec3(0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)); }
 vec3 splineSlope(float u) { return vec3(u - 0.5, -2.0 * u, u + 0.5); }
+
+// The strength across the tube of cell c, per strain: 0 outside the arena (veinCell in render.wgsl).
+vec4 veinCell(ivec2 c) {
+  ivec2 q = cellXY(c);
+  if (q.x < 0) return vec4(0.0);
+  vec4 r = texelFetch(veins, q, 0);
+  vec4 a = r * r;
+  return a * a;
+}
+
+// The veins at p: the strength across the tube as a quadratic B-spline over the 3 × 3 cells around p, and its gradient
+// from the same cells (veinsAt in render.wgsl).
+Veins veinsAt(vec2 p) {
+  vec2 q = p - 0.5;
+  ivec2 c = ivec2(floor(q + 0.5));
+  vec2 u = q - vec2(c);
+  vec3 wx = spline(u.x);
+  vec3 wy = spline(u.y);
+  vec3 sx = splineSlope(u.x);
+  vec3 sy = splineSlope(u.y);
+  vec4 sum = vec4(0.0);
+  vec4 gx = vec4(0.0);
+  vec4 gy = vec4(0.0);
+  for (int j = 0; j < 3; j++) {
+    vec4 row = vec4(0.0);
+    vec4 rowSlope = vec4(0.0);
+    for (int i = 0; i < 3; i++) {
+      vec4 a = veinCell(c + ivec2(i - 1, j - 1));
+      row += wx[i] * a;
+      rowSlope += sx[i] * a;
+    }
+    sum += wy[j] * row;
+    gx += wy[j] * rowSlope;
+    gy += sy[j] * row;
+  }
+  vec4 v = sqrt(sum);
+  vec4 t = clamp((v - VEIN_LOW) / (VEIN_HIGH - VEIN_LOW), vec4(0.0), vec4(1.0));
+  Veins r;
+  r.deep = VEIN_DEEP * t * t * (3.0 - 2.0 * t);
+  // d deep / d sum: the slope of the smoothstep times that of the square root.
+  // Below VEIN_LOW t is 0, and so is the slope.
+  vec4 k = VEIN_DEEP * 6.0 * t * (1.0 - t) / ((VEIN_HIGH - VEIN_LOW) * 2.0 * max(v, vec4(1e-30)));
+  r.slope = vec2(dot(k, gx), dot(k, gy));
+  return r;
+}
 
 float lattice(ivec2 c) {
   uint x = uint(c.x) * 1664525u + uint(c.y) * 1013904223u;
@@ -1083,10 +1158,13 @@ vec3 scene(vec2 p, vec2 s) {
   if (near) base = substrate(f, base);
 #endif
   vec3 c;
-  if (V.style == 1u) c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain);
-  else if (V.style == 2u) c = paper(v, base);
-  else if (V.style == 3u) c = glow(dots, vec4(0.0), base);
-  else c = glow(v, halo, base);
+  // The veins, while the picture of the tubes shows (ADR 0099). The agents style draws none.
+  Veins vein = Veins(vec4(0.0), vec2(0.0));
+  if (V.gelFx.z != 0.0 && V.style != 3u) vein = veinsAt(p);
+  if (V.style == 1u) c = gel(p, v, base, f, vein) * (1.0 - STREAM_DARK * grain);
+  else if (V.style == 2u) c = paper(v, base, vein.deep);
+  else if (V.style == 3u) c = glow(dots, vec4(0.0), base, vec4(0.0));
+  else c = glow(v, halo, base, vein.deep);
 #if ENV
   if (near) {
     c += e.light * (V.style == 2u ? vec3(-0.04, -0.03, -0.12) : vec3(0.22, 0.2, 0.12));

@@ -4,6 +4,7 @@ import { hexToLinear } from '../model/color';
 import { defaultSettings, STYLES, type Settings } from '../model/params';
 import { BACKGROUND, packView, SLIME_BEAD, SLIME_LOOK, SLIME_RELIEF, VIEW_BYTES } from './render';
 import { slimeSteps } from './slime';
+import { VEINS } from './tubes';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -152,5 +153,42 @@ describe('the film of the slime in the uniform of the view', () => {
     }
     // The agents style has the film of the glow style.
     expect(SLIME_LOOK.agents).toEqual(SLIME_LOOK.glow);
+  });
+});
+
+// ADR 0099: the veins of the picture of the tubes.
+describe('the veins in the uniform of the view and in the render passes', () => {
+  const view = { center: [32, 24] as [number, number], scale: 1 };
+  const pack = (veins: boolean) => {
+    const data = new ArrayBuffer(VIEW_BYTES);
+    packView(data, 64, 48, view, 1, 0, defaultSettings(), 0, true, false, 0, 5, false, undefined, veins);
+    return new Float32Array(data);
+  };
+
+  it('marks the veins in gelFx.z, and changes nothing else of the uniform', () => {
+    const [on, off] = [pack(true), pack(false)];
+    expect([on[42], off[42]]).toEqual([1, 0]);
+    on[42] = 0;
+    expect(on).toEqual(off);
+  });
+
+  it('draws the veins with the numbers of VEINS on both backends', () => {
+    const numbers = {
+      VEIN_DEEP: VEINS.deep,
+      VEIN_DARK: VEINS.dark,
+      VEIN_LOW: VEINS.low,
+      VEIN_HIGH: VEINS.high,
+      VEIN_RISE: VEINS.rise,
+    };
+    for (const [path, decl] of [
+      ['./shaders/render.wgsl', 'const'],
+      ['./gl/glsl/render.frag', 'const float'],
+    ] as const) {
+      const source = read(path);
+      for (const [name, value] of Object.entries(numbers)) {
+        const m = new RegExp(`${decl} ${name} = ([0-9.]+);`).exec(source);
+        expect(Number(m?.[1]), `${name} in ${path}`).toBe(value);
+      }
+    }
   });
 });

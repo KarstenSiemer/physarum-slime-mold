@@ -1,13 +1,24 @@
 // The picture of the tubes on both backends (ADR 0034), in Chromium with real GPU APIs (ADR 0010): the passes against
 // the CPU reference, the rule in plain cases, and the frames that the view draws from the picture.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { hexToLinear } from '../model/color';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
+import { BACKGROUND } from './render';
 import { flowSites, type FoodStroke } from './sites';
 import { TUBE_MAP_BYTES_PER_CELL_GL } from './sizing';
-import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES } from './tubes';
-import { arenaCell, tubePicture, tubeRoots, tubeStream, wallOnLine, type TubeGrid } from './tubes-reference';
+import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES, VEINS } from './tubes';
+import {
+  arenaCell,
+  tubePicture,
+  tubeRoots,
+  tubeStream,
+  veinDeep,
+  veinShade,
+  wallOnLine,
+  type TubeGrid,
+} from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -40,6 +51,12 @@ function noise(c: number, salt: number): number {
 
 /** The red value of a pixel of a drawn frame, 0 to 255. Strain A is yellow: its trail is red and green. */
 const red = (img: ImageData, x: number, y: number) => img.data[(y * img.width + x) * 4] ?? 0;
+
+/** Linear light → sRGB byte, without the dither (render.wgsl `srgb`). */
+const toByte = (c: number) => {
+  const x = Math.min(1, Math.max(0, c));
+  return Math.round((x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055) * 255);
+};
 
 /** The largest difference of one pixel of two frames in red, green or blue. */
 const pixelDiff = (a: ImageData, b: ImageData, x: number, y: number) =>
@@ -597,8 +614,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       // Three cells beside the trail: the tube with the switch, the ground without it.
       expect(pixelDiff(on, off, 260, 220), `${style}, beside the trail`).toBeGreaterThan(40);
       // On the trail both frames hold plasmodium. The gel style lights a ridge and a plateau in other ways, so only
-      // the flat styles are compared there.
-      if (style !== 'gel') expect(pixelDiff(on, off, 260, 196), `${style}, on the trail`).toBeLessThan(40);
+      // the flat styles are compared there, and only in red: the tube is a whole vein, whose deeper shade has less
+      // green and blue (ADR 0099).
+      if (style !== 'gel')
+        expect(Math.abs(red(on, 260, 196) - red(off, 260, 196)), `${style}, on the trail`).toBeLessThan(40);
     }
     const [on, off] = [await frame({}, near8), await frame({ showTubes: false }, near8)];
     expect([red(on, 260, 220), red(off, 260, 220)].map((v) => v > 120)).toEqual([true, false]);
@@ -639,6 +658,72 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     const [dark, darkOff] = [await frame({ bloom: 0 }), await frame({ bloom: 0, showTubes: false })];
     expect(Math.abs(red(dark, 260, y) - red(darkOff, 260, y))).toBeLessThanOrEqual(2);
     expect(red(on, 260, y)).toBeGreaterThan(red(dark, 260, y) + 10);
+  });
+
+  it('draws the veins in the deep shade of their strain as the CPU reference says, and none without the picture', async () => {
+    const [w, h] = [64, 48];
+    // A band of tubes along rows 15 to 33 whose flow memory falls away from row 24: veins of every strength, from none
+    // at the edges of the band to whole ones in its middle (VEINS.low to VEINS.high).
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = 6;
+    const memory = memoryOf(w, h, (_, y) => (Math.abs(y - 24) <= 9 ? [0.55 ** Math.abs(y - 24), 1] : undefined));
+    const sim = await make(flowing({ bloom: 0 }), w, h);
+    sim.writeTrail(trail);
+    sim.writeFlow(memory);
+    const grid: TubeGrid = { width: w, height: h, boundary: 'box', shape: await sim.readShape() };
+    const view: View = { center: [32, 24], scale: 1 / 8 };
+    const [cw, ch] = [512, 384];
+    const color = hexToLinear(defaultStrain(0).color);
+    const ground = hexToLinear(BACKGROUND.glow);
+    /** The glow of strain A at a pixel (render.wgsl glow(), bloom 0, black level 0), as sRGB bytes without the dither. */
+    const glowAt = (picture: Float32Array, roots: Float32Array | undefined, px: number, py: number) => {
+      const [x, y] = [(px + 0.5 - cw / 2) * view.scale + 32, (py + 0.5 - ch / 2) * view.scale + 24];
+      const [i, j] = [Math.floor(x - 0.5), Math.floor(y - 0.5)];
+      const [fx, fy] = [x - 0.5 - i, y - 0.5 - j];
+      const at = (a: number, b: number) => picture[(b * w + a) * 4] ?? 0;
+      const v =
+        (at(i, j) * (1 - fx) + at(i + 1, j) * fx) * (1 - fy) + (at(i, j + 1) * (1 - fx) + at(i + 1, j + 1) * fx) * fy;
+      const deep = roots ? (veinDeep(grid, roots, x, y)[0] ?? 0) : 0;
+      return {
+        deep,
+        bytes: veinShade(color, deep).map((c, k) =>
+          toByte((ground[k] ?? 0) + (1 - (ground[k] ?? 0)) * (1 - Math.exp(-v * c * LEVELS.gain))),
+        ),
+      };
+    };
+    const frame = async (patch: Partial<Settings>) => {
+      const settings = flowing({ bloom: 0, ...patch });
+      sim.update(settings);
+      return backend.capture(sim, settings, view, cw, ch, LEVELS);
+    };
+    // Every 3rd pixel of a column across the band, and of a row along its middle.
+    const pixels: [number, number][] = [];
+    for (let py = 96; py < 288; py += 3) pixels.push([260, py]);
+    for (let px = 40; px < 480; px += 11) pixels.push([px, 196]);
+    for (const patch of [{}, { showTubes: false }, { flow: false }]) {
+      const img = await frame(patch);
+      const picture = await sim.readPicture();
+      const roots = patch.showTubes === false || patch.flow === false ? undefined : await sim.readTubeRoots();
+      let [worstOff, whole, part, apart] = [0, 0, 0, 0];
+      for (const [px, py] of pixels) {
+        const want = glowAt(picture, roots, px, py);
+        const got = [0, 1, 2].map((k) => img.data[(py * cw + px) * 4 + k] ?? 0);
+        // The dither adds up to 1 byte.
+        worstOff = Math.max(worstOff, ...got.map((g, k) => Math.abs(g - (want.bytes[k] ?? 0))));
+        if (want.deep >= 0.95 * VEINS.deep) whole++;
+        else if (want.deep > 0.05) part++;
+        const plain = glowAt(picture, undefined, px, py).bytes;
+        if (Math.max(...plain.map((b, k) => Math.abs(b - (want.bytes[k] ?? 0)))) > 20) apart++;
+      }
+      expect(worstOff, JSON.stringify(patch)).toBeLessThanOrEqual(2);
+      if (roots) {
+        // The case is not empty: whole veins, veins in part, and both far from the colour of the strain.
+        expect([whole, part].map((n) => n > 10)).toEqual([true, true]);
+        expect(apart).toBeGreaterThan(40);
+      } else {
+        expect(whole + part).toBe(0);
+      }
+    }
   });
 
   it('draws the scent of the state of each frame under the picture', async () => {

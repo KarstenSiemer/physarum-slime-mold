@@ -19,7 +19,9 @@ layout(std140) uniform View {
   // The stream of the plasm: drawn (1) or not (0), the phases of its pattern and of its swing. w is not of the stream:
   // 1 while an electrode may be painted (ADR 0047).
   vec4 streamFx;
-  vec4 gelFx;    // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
+  // gel style: the white in the colour of the thinnest gel, the ground that it hides; z: 1 while the picture draws
+  // the veins (ADR 0099), in every style that draws the trail; w unused
+  vec4 gelFx;
   vec4 scentFx; // scent view: map level (0 to 3), unused, unused, unused
   vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())

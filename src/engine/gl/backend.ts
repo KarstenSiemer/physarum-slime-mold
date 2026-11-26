@@ -412,6 +412,8 @@ export class WebGl2Backend implements Backend<GlSim> {
     // The stream of the plasm, while the view draws the grains: with the picture of the tubes or without it (ADR 0095).
     const stream = sim.streamTarget()?.texture;
     const streamStep = stream ? sim.step : undefined;
+    // The factors of the radius of the tubes of the picture, for the veins (ADR 0099): after pictureTarget().
+    const veins = sim.veinTarget()?.texture;
     // The film of the slime (ADR 0055, decision 8), while the settings show it and the simulation holds the field:
     // without a field no cell has a stamp, and the picture is the one without the film. Its programs are built from
     // the first frame that asks for them, as those of the scent view.
@@ -439,6 +441,7 @@ export class WebGl2Backend implements Backend<GlSim> {
       streamStep,
       sim.hasElectrodes,
       (wet ?? grown) ? sim.step : undefined,
+      veins !== undefined,
     );
     gl.bindBufferBase(gl.UNIFORM_BUFFER, VIEW_BINDING, this.viewUbo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(this.viewData));
@@ -572,6 +575,8 @@ export class WebGl2Backend implements Backend<GlSim> {
       trailLevels,
       // Without the grains no frame reads the stream: the trail stands in.
       stream: stream ?? trail,
+      // Without the picture of the tubes no frame reads the veins (ADR 0099): the trail stands in.
+      veins: veins ?? trail,
       // The outline distances of the electrodes (ADR 0058): only the program with ENV reads them, and only while a
       // pole may be painted. Without a pole the simulation holds none: those of walls and food stand in.
       poles: sim.poleTexture ?? sim.shapeTexture,

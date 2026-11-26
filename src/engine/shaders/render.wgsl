@@ -24,7 +24,9 @@ struct View {
   // The stream of the plasm: drawn (1) or not (0), the phases of its pattern and its swing. w is not of the stream:
   // 1 while an electrode may be painted (ADR 0047).
   streamFx: vec4f,
-  gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
+  // gel style: the white in the colour of the thinnest gel, the ground that it hides; z: 1 while the picture draws
+  // the veins (ADR 0099), in every style that draws the trail; w unused
+  gelFx: vec4f,
   scentFx: vec4f,     // scent view: map level (0 to 3), unused, unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
@@ -49,6 +51,9 @@ const DISH_FILL = 0.945;
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
+// The fourth root of the strength across the tube of each cell and strain (`roots` in tubes.wgsl); read for the veins
+// only (V.gelFx.z, ADR 0099).
+@group(0) @binding(13) var veins: texture_2d<f32>;
 @group(0) @binding(14) var<storage, read> stamps: array<u32>; // the stamps of the slime field (slime.wgsl); read by `slimeFilm` only
 @group(0) @binding(18) var<storage, read> amounts: array<u32>; // the amounts of slime (amount.wgsl); read by `slimeFilm` only
 @group(0) @binding(15) var film: texture_2d<f32>; // the film of the slime, one texel per cell (written by `slimeFilm`)
@@ -220,6 +225,81 @@ fn tint(v: vec4f) -> vec3f {
   return c;
 }
 
+// ---- The veins (ADR 0099) ----------------------------------------------------------------------------------------
+// While the picture of the tubes shows, a vein of the model has a deeper and darker shade of the colour of its strain
+// than the sheet around it, and in the gel style it is a low ridge, as the prototype draws it (research/front/
+// picture.ts look()). The strength of a vein is the square root of the strength across its tube (tubes.ts, point 2),
+// as the prototype takes the square root of the strength of a cell. Display only.
+const VEIN_DEEP = 0.8;  // how far a whole vein goes from the colour of its strain to the deep shade
+const VEIN_DARK = 0.8;  // the deep shade: the colour of the strain squared, which is more saturated, times this
+const VEIN_LOW = 0.2;   // the strength of a vein at which the shade begins
+const VEIN_HIGH = 0.7;  // and at which it is whole
+const VEIN_RISE = 1.0;  // gel style: the height of the ridge of a whole vein, in cells
+
+struct Veins {
+  deep: vec4f,  // per strain: how far the colour goes to the deep shade, 0 to VEIN_DEEP
+  slope: vec2f, // the slope of the ridge, per cell: the gradient of the sum of `deep`
+}
+
+// The strength across the tube of cell c (tubes.ts, point 2), per strain: 0 outside the arena.
+fn veinCell(c: vec2i) -> vec4f {
+  let q = cellXY(c);
+  if (q.x < 0) { return vec4f(0.0); }
+  let r = textureLoad(veins, q, 0);
+  let a = r * r;
+  return a * a;
+}
+
+// The veins at p: the strength across the tube as a quadratic B-spline over the 3 × 3 cells around p (spline()), so
+// that a vein has no tooth at the edge of a cell, and its gradient from the same cells.
+fn veinsAt(p: vec2f) -> Veins {
+  let q = p - 0.5;
+  let c = vec2i(floor(q + 0.5));
+  let u = q - vec2f(c);
+  let wx = spline(u.x);
+  let wy = spline(u.y);
+  let sx = splineSlope(u.x);
+  let sy = splineSlope(u.y);
+  var sum = vec4f(0.0);
+  var gx = vec4f(0.0);
+  var gy = vec4f(0.0);
+  for (var j = 0; j < 3; j++) {
+    var row = vec4f(0.0);
+    var rowSlope = vec4f(0.0);
+    for (var i = 0; i < 3; i++) {
+      let a = veinCell(c + vec2i(i - 1, j - 1));
+      row += wx[i] * a;
+      rowSlope += sx[i] * a;
+    }
+    sum += wy[j] * row;
+    gx += wy[j] * rowSlope;
+    gy += sy[j] * row;
+  }
+  let v = sqrt(sum);
+  let t = clamp((v - VEIN_LOW) / (VEIN_HIGH - VEIN_LOW), vec4f(0.0), vec4f(1.0));
+  var r: Veins;
+  r.deep = VEIN_DEEP * t * t * (3.0 - 2.0 * t);
+  // d deep / d sum: the slope of the smoothstep times that of the square root.
+  // Below VEIN_LOW t is 0, and so is the slope.
+  let k = VEIN_DEEP * 6.0 * t * (1.0 - t) / ((VEIN_HIGH - VEIN_LOW) * 2.0 * max(v, vec4f(1e-30)));
+  r.slope = vec2f(dot(k, gx), dot(k, gy));
+  return r;
+}
+
+// The colour of strain s where its colour goes `deep` of the way to the deep shade.
+fn shade(s: u32, deep: f32) -> vec3f {
+  let c = V.colors[s].rgb;
+  if (deep <= 0.0) { return c; }
+  return mix(c, VEIN_DARK * c * c, deep);
+}
+
+// tint() with the veins: each strain in its shade (`deep`: Veins.deep).
+fn veined(v: vec4f, deep: vec4f) -> vec3f {
+  var c = vec3f(0.0);
+  for (var s = 0u; s < V.frame.y; s++) { c += v[s] * shade(s, deep[s]); }
+  return c;
+}
+
 fn srgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, 12.92 * c, c <= vec3f(0.0031308));
 }
@@ -239,17 +319,18 @@ fn cover(sd: f32) -> f32 {
 
 // Linear light per strain, then a per-channel exponential tone curve: dense overlaps turn white-hot.
 // `base` is what lies below the trail: the background, or food on it.
-fn glow(v: vec4f, halo: vec4f, base: vec3f) -> vec3f {
+// `vein`: the share of the deep shade of each strain (Veins.deep), 0 without the veins.
+fn glow(v: vec4f, halo: vec4f, base: vec3f, vein: vec4f) -> vec3f {
   // The bloom chain sums 5 blur levels (bloom.ts); divide to keep the strength scale intuitive.
-  let l = 1.0 - exp(-(tint(v) * V.exposure + tint(halo) * V.fx.x * 0.2));
+  let l = 1.0 - exp(-(veined(v, vein) * V.exposure + tint(halo) * V.fx.x * 0.2));
   return base + (1.0 - base) * l;
 }
 
 // Ink on paper: each strain absorbs the complement of its color (Beer–Lambert).
-fn paper(v: vec4f, base: vec3f) -> vec3f {
+fn paper(v: vec4f, base: vec3f, vein: vec4f) -> vec3f {
   var absorb = vec3f(0.0);
   for (var s = 0u; s < V.frame.y; s++) {
-    absorb += v[s] * (0.15 + 0.85 * (1.0 - V.colors[s].rgb));
+    absorb += v[s] * (0.15 + 0.85 * (1.0 - shade(s, vein[s])));
   }
   return base * exp(-absorb * V.exposure);
 }
@@ -351,7 +432,7 @@ fn thick(y: f32) -> f32 {
 // one, has the full colour of its strain and hides the ground. Thin gel is pale and clear, as much as the setting of
 // the gel colour says (V.gelFx, GEL_FX in render.ts). The gel is clear enough to
 // show a flake of food below it (`f`, see flakeAt): over food its colour takes in the flake's, grain and outline.
-fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
+fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake, vein: Veins) -> vec3f {
   // The slope of the thickness from 8 lookups around p, 2 on each side: their mean smooths the cells.
   let a = 1.25 * max(V.scale, 1.0);
   let b = 0.5 * max(V.scale, 1.0);
@@ -360,7 +441,8 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   let south = vec2f(thick(heightFiltered(p + vec2f(b, a))), thick(heightFiltered(p + vec2f(-b, a))));
   let north = vec2f(thick(heightFiltered(p + vec2f(b, -a))), thick(heightFiltered(p + vec2f(-b, -a))));
   let rise = vec2f(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
-  let n = normalize(vec3f(-GEL_HIGH * rise, 1.0));
+  // A vein is a low ridge on the gel (ADR 0099).
+  let n = normalize(vec3f(-GEL_HIGH * rise - VEIN_RISE * vein.slope, 1.0));
   let l = normalize(vec3f(-0.45, -0.6, 0.65));
   // Light goes a little way through the gel, so the side away from the light is not black.
   let diffuse = clamp((dot(n, l) + 0.35) / 1.35, 0.0, 1.0);
@@ -368,7 +450,7 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   let shine = max(dot(n, normalize(l + vec3f(0.0, 0.0, 1.0))), 0.0);
   let spec = 0.9 * pow(shine, 120.0) + 0.1 * pow(shine, 14.0);
   let total = v.x + v.y + v.z + v.w;
-  var albedo = select(V.colors[0].rgb, tint(v) / max(total, 1e-6), total > 1e-6);
+  var albedo = select(V.colors[0].rgb, veined(v, vein.deep) / max(total, 1e-6), total > 1e-6);
   if (ENV && f.cover > 0.0) { albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover); }
   let here = heightFiltered(p);
   // The thickness of the tube that p is a part of: the largest around p, so a tube has one colour up to its rim.
@@ -1232,12 +1314,15 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
     }
   }
   if (ENV && near) { base = substrate(f, base); }
+  // The veins, while the picture of the tubes shows (ADR 0099). The agents style draws none.
+  var vein: Veins;
+  if (V.gelFx.z != 0.0 && V.style != 3u) { vein = veinsAt(p); }
   var c: vec3f;
   switch V.style {
-    case 1u: { c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain); }
-    case 2u: { c = paper(v, base); }
-    case 3u: { c = glow(dots, vec4f(0.0), base); }
-    default: { c = glow(v, halo, base); }
+    case 1u: { c = gel(p, v, base, f, vein) * (1.0 - STREAM_DARK * grain); }
+    case 2u: { c = paper(v, base, vein.deep); }
+    case 3u: { c = glow(dots, vec4f(0.0), base, vec4f(0.0)); }
+    default: { c = glow(v, halo, base, vein.deep); }
   }
   if (near) {
     c += e.light * select(vec3f(0.22, 0.2, 0.12), vec3f(-0.04, -0.03, -0.12), V.style == 2u);
