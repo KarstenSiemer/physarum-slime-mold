@@ -1065,7 +1065,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The avoidance of slime (6.11)           | `sinks.gpu.test.ts`: the weights at a weight on slime of 0.3 and 1 and the reaches 2 and 4, against the CPU copy                |
 | The flow with the sinks (8.7)           | `flow-sinks.gpu.test.ts`: memory and pressure against the CPU copy, 2 strains in a dish with walls; a large R; the drift        |
 | The drift `take` (8.7)                  | `flow-sinks.gpu.test.ts`: the turns of 256 agents on and off the tubes against the CPU copy; a shift of the tubes moves no one  |
-| The paid births (9.1)                   | `paid.gpu.test.ts`: keys, rank, births, budget against the CPU copy, 2 strains, light; ties; budgets above the front, below 1   |
+| The paid births (9.1)                   | `paid.gpu.test.ts`: keys, rank, P, births, budget against the CPU copy, 2 strains, light; ties; a full budget on slime; below 1 |
 | The start territory (6.10, 10)          | `territory.gpu.test.ts`: the disc in each arena, with walls; `engine-env.test.ts`: the disc of each strain, the restart         |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |
@@ -1085,7 +1085,7 @@ and the pressure of two strains in a dish with walls against the CPU copy, one w
 cells pay, with a tube that adapts only from the step after the first step with flux; a strain without a sink and with
 one site keeps its flow memory; the sinks take S with the rates as R counted them, where their own rates would take
 more than twice S; a large R, whose low word wraps; the turns of 256 agents of both strains by the drift `take`
-(ADR 0075), with the drift 1.5 and 0, against the CPU copy: on and off the tubes of their strain, with sensors on and
+(ADR 0075), with the drift 1.5 and 0, and with 3 covered foods and a trail (the drift of one food, ADR 0100), against the CPU copy: on and off the tubes of their strain, with sensors on and
 off them, a sink rate on every cell, a strain whose front takes flux and one whose front takes none, and every value
 exact; a shift of the pressure of every tube cell of each strain by 200, which changes no move, where the form of
 before turns more than 20 agents otherwise; and the memory of the drift on each backend. `flow-reference.test.ts`
@@ -1107,9 +1107,11 @@ moves of a twin without growth: two colonies of two strains with a tube body und
 wall and light, where the keys agree with the CPU copy to 10⁻⁵ and the agents, the budget, the agents of the front and
 the paid claims exactly, then a step without the growth test and one without a sink rate; two agents with the same
 key, of which the one with the smaller id is paid, with a budget above the agents of the front for the other strain;
-a budget below 1, which pays nothing and stays without an agent of the front; and on WebGPU an agent whose claim key
-is 0. `paid.test.ts` tests the constants, the key and its odds (Efraimidis and Spirakis), the series of the key in
-float32, the budget, and the CPU copy on cases made by hand.
+a budget below 1, which pays nothing and stays without an agent of the front; a budget that covers the front, where
+the threshold k · P < B pays sinks near fresh ground often and sinks on slime seldom, with the two parts of P against
+the CPU copy (ADR 0100, part A); and on WebGPU an agent whose claim key is 0. `paid.test.ts` tests the constants, the
+key and its odds (Efraimidis and Spirakis), the series of the key in float32, the budget, the steps of P and the
+threshold, and the CPU copy on cases made by hand.
 
 `flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
 route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of
