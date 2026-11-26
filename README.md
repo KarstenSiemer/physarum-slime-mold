@@ -119,8 +119,8 @@ says, a vein is darker, and the slime lies below as a grey film.
 
 ## More scenes
 
-The Steiner tree of Jones (2010), Fig. 19, in the Gel style: a loose network around four foods
-contracts to a short tree between them. Steps 500, 2,000 and 12,000:
+The Steiner tree of Jones (2010), Fig. 19, in the Gel style, seed 6: a loose network around four
+foods contracts to a short tree, two junctions joined by a bridge. Steps 500, 2,000 and 12,000:
 
 ![The Steiner tree at three steps](docs/images/steiner.jpg)
 

@@ -132,11 +132,13 @@ const PICTURES: Picture[] = [
     file: 'steiner',
     width: 400,
     crop: SQUARE,
+    // Seed 6: of seeds 1 to 20 at step 12,000, its tree shows the bridge between its two junctions most clearly.
     panels: [500, 2000, 12000].map((step) => ({
       scene: 'steiner',
+      patch: () => ({ seed: 6 }),
       step,
-      view: { at: [0.5, 0.5], zoom: 1.8 },
-      text: `step ${step.toLocaleString('en-US')}`,
+      view: { at: [0.5, 0.5], zoom: 2.2 },
+      text: `seed 6, step ${step.toLocaleString('en-US')}`,
     })),
   },
   {
