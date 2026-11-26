@@ -258,12 +258,16 @@ fn headroom(pc: vec4f, signs: vec4f) -> vec4f {
 }
 //#if TERRITORY
 
+// What the sinks of strain s take together while its front takes flux: S = U.take.x · I0 for each covered port, at
+// least one (ADR 0100; ADR 0093, `feed=flux`), the covered ports P from the state.
+fn frontTotal(s: u32) -> f32 { return U.take.x * U.a.x * max(1.0, states[s * 2u].w); }
+
 // What the sink of the tube cell c takes in this step while the front of the strain takes flux (ADR 0070): the share
-// S · r / R of S = U.take.x · I0, with its rate r as R counted it, in steps of 2^-16 rounded to the nearest (ADR 0067,
+// S · r / R of S (frontTotal()), with its rate r as R counted it, in steps of 2^-16 rounded to the nearest (ADR 0067,
 // decision 3), and R from the state.
 fn taken(c: i32) -> f32 {
   let s = u32(U.f.z);
-  let total = U.take.x * U.a.x;
+  let total = frontTotal(s);
   let steps = u32(abs(rates[s * W() * H() + u32(c)]) * 16777216.0);
   let r = f32((steps + 128u) >> 8u) * (1.0 / 65536.0);
   return total * r / states[s * 2u].x;
@@ -278,7 +282,7 @@ fn sinksAndSources(p: vec2i, g: f32) -> f32 {
   if (states[s * 2u + 1u].x == 0.0) { return 0.0; }
   // R, C, N and the covered ports P.
   let sums = states[s * 2u];
-  let total = U.take.x * U.a.x;
+  let total = frontTotal(s);
   let c = p.y * i32(W()) + p.x;
   var q = 0.0;
   if (g > 0.0) {

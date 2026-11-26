@@ -158,6 +158,9 @@ export class CpuSim implements Sim {
   readPaidKeys() {
     return Promise.resolve(new Float32Array(0));
   }
+  readPaidCounts() {
+    return Promise.resolve(new Uint32Array(0));
+  }
   writeSinks() {
     // nothing to write
   }

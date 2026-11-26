@@ -8,6 +8,13 @@ uniform sampler2D claims; // highest claim key per cell (collision mode)
 uniform sampler2D clearance; // per clearance tile (walls.frag)
 uniform int agentWidth;
 uniform int mode;
+#if TERRITORY
+// Mode 3, the respawns that the budget pays (`pay` in agents.wgsl, ADR 0100): the state of the sinks (sinks.frag PASS
+// 3), texel (1, s) with the budget of strain s in y, and the counts of the step (paid.vert), texel 2 the respawns that
+// wait, a lane per strain.
+uniform sampler2D paidState;
+uniform sampler2D paidCounts;
+#endif
 
 out vec4 result;
 
@@ -268,8 +275,20 @@ void main() {
       }
     }
   } else if (mode == 1) {
+#if TERRITORY
+    vec4 found = a;
+#endif
     bool alive = shrinkage(a, i);
+#if TERRITORY
+    // A death that the model makes gives its plasm back to the budget (ADR 0100); the cut and a wall take it away.
+    if ((bitsOf(found) & ALIVE) != 0u && !alive && !removed(found)) a.w += float(DIED);
+    if (placement(a, i).cell >= 0 && respawns(a, i)) {
+      // A respawn waits for the budget: mode 3 draws for it.
+      a.w += float(WAITS);
+    } else if (placement(a, i).cell >= 0) {
+#else
     if (placement(a, i).cell >= 0) {
+#endif
       // A tool's spot is claimed like a move (points.vert kind 1); the agent stays as it is until mode 2.
       a.w += float(WANTS | PLACE);
     } else if (alive) {
@@ -278,6 +297,19 @@ void main() {
       if (senses()) a.z = steer(a, s, rng, clear);
       if (canClaim(a, cellOf(destination(a)), clear)) a.w += float(WANTS);
     }
+#if TERRITORY
+  } else if (mode == 3) {
+    // Each of the n respawns of strain s that wait claims its cell with the chance min(1, max(0, B) / n) and a draw of
+    // its own (`pay` in agents.wgsl).
+    uint bits = bitsOf(a);
+    if ((bits & WAITS) != 0u) {
+      int s = int(bits & 3u);
+      float waiting = texelFetch(paidCounts, ivec2(2, 0), 0)[s];
+      float chance = min(1.0, max(0.0, texelFetch(paidState, ivec2(1, s), 0).y) / waiting);
+      uint rng = rngSeed(i, PAY_RESPAWN);
+      if (rand(rng) < chance) a.w += float(WANTS | PLACE);
+    }
+#endif
   } else {
     uint bits = bitsOf(a) & (ALIVE | 3u);
     if ((bitsOf(a) & PLACE) != 0u) {
@@ -286,6 +318,10 @@ void main() {
       if (spot.cell >= 0 && texelFetch(claims, cellCoord(spot.cell), 0).r == claimKey(i)) {
         a.xyz = vec3(spot.pos, spot.heading);
         bits |= ALIVE;
+#if TERRITORY
+        // A respawn that came to life costs one from the budget (ADR 0100).
+        if ((bitsOf(a) & WAITS) != 0u) bits |= REBORN;
+#endif
       }
     } else if ((bits & ALIVE) != 0u) {
       vec2 p = destination(a);

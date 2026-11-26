@@ -1,12 +1,16 @@
 // The births that the flux pays, the third part of the rules of stage 4 (ADR 0071; ADR 0065, decisions 1 and 7; ADR
-// 0067, decisions 1 and 6 to 8). While the front of a strain takes flux, the budget B of the strain grows by 2 · I0 / 20
-// in a step: S / 20 with the flux to the front k = 1, S / (20 k) with another k (ADR 0086). In a growth step, after
-// Jones' births, each agent of the front with a free cell of its territory beside it draws a key −ln(1 − u) / r, r the
-// sink rate of its cell, and the ⌊B⌋ agents of the strain with the least keys claim a child as a parent of Jones' rule
-// does: the weighted order of Efraimidis and Spirakis that the prototype runs
-// (`paidByRank()` in research/front/sim.ts). The passes are `test`, `rank` and `win` in shaders/growth.wgsl and PASS 2
-// and 5 of gl/glsl/growth.frag with gl/glsl/paid.vert; the budget is in the pass `state` of shaders/sinks.wgsl and in
-// PASS 3 of gl/glsl/sinks.frag. The CPU copy is in growth-reference.ts.
+// 0067, decisions 1 and 6 to 8), and since ADR 0100 every birth while the rules run (ADR 0097, option 1). The budget B
+// of a strain is a count of area: every birth costs one, every death that the model makes gives one back, and while
+// the front takes flux the food credits 2 · I0 / 20 for each covered food, but B only up to the agents of the front.
+// The respawns of a step wait for B: each of the n of them comes to life with the chance min(1, B / n). In a growth
+// step each agent of the front with a free cell of its territory beside it draws a key −ln(1 − u) / r, r the sink rate
+// of its cell, and the ⌊B⌋ agents of the strain with the least keys claim a child: the weighted order of Efraimidis and
+// Spirakis that the prototype runs (`paidByRank()` in research/front/sim.ts). Then each of the n parents of Jones' rule
+// that the front did not pay claims its child with the chance min(1, B' / n), B' what the front left. The passes are
+// `claim`, `pay` and `settle` in shaders/agents.wgsl, `test`, `rank`, `jones`, `win` and `birth` in shaders/growth.wgsl
+// and their PASSES in gl/glsl/agents.frag and growth.frag with gl/glsl/paid.vert; the budget is in the pass `state` of
+// shaders/sinks.wgsl and in PASS 3 of gl/glsl/sinks.frag. The CPU copies are in growth-reference.ts and
+// territory-reference.ts.
 import { FLOW_TAKE_SLOT } from './flow';
 import { SINK_STATE_LANES, SINKS } from './sinks';
 
@@ -54,40 +58,97 @@ export const exponential = (u: number): number => -Math.log1p(-u);
  */
 export const paidKey = (u: number, rate: number): number => Math.fround(exponential(u) / Math.abs(rate));
 
+/** The random streams of the draws of the paid respawns and of the paid parents of Jones' rule (ADR 0100; 7.7). */
+export const PAY_RESPAWN = 13;
+export const PAY_JONES = 14;
+
 /**
- * The budget of a strain after a step, from the budget before it (ADR 0071): in a growth step with a budget of at
- * least 1, the paid claims K come off, and the budget becomes at most the agents F of the front; then it grows by
- * `increment` while the front takes flux in the step. A budget below 1 pays nothing and keeps what it has, as in the
- * prototype. In float32 with one rounding per operation, as the passes compute it.
+ * The deaths and births of a step that settle the budget (ADR 0100): the deaths of the agent pass that the model
+ * makes (starvation and random shrinkage, not the cut or a wall) and its respawns; the deaths by shrinkage of the
+ * growth pass and its births.
+ */
+export interface BudgetCounts {
+  died: number;
+  reborn: number;
+  crowded: number;
+  born: number;
+}
+
+/**
+ * The budget that the growth pass of a step spends (ADR 0100): the budget before the step, plus a death and less a
+ * respawn of the agent pass. Each pass settles in the next one, as atomic counts do. In float32: the difference of
+ * the counts is a whole number, and the sum rounds once.
+ */
+export const budgetAfterMoves = (budget: number, died: number, reborn: number): number =>
+  Math.fround(Math.fround(budget) + (died - reborn));
+
+/**
+ * The chance of each of n waiting claims to be paid from a budget b: min(1, max(0, b) / n), in float32 as the passes
+ * compute it; 0 without a claim. The respawns of the agent pass wait for the budget before the step, and the parents
+ * of Jones' rule for what the front left of the budget of the growth pass (ADR 0100).
+ */
+export const payChance = (budget: number, n: number): number =>
+  n > 0 ? Math.min(1, Math.fround(Math.max(0, Math.fround(budget)) / n)) : 0;
+
+/**
+ * The budget of a strain after a step, from the budget before it (ADR 0100; ADR 0097, option 1): every death that the
+ * model makes gives one back and every birth costs one, the agent pass and the growth pass each (`counts`). Then the
+ * food credits it while the front takes flux: `increment` for each covered food, at least one (`covered`; ADR 0093),
+ * but only up to the agents F of the front of the last growth step (`front`; the cap of docs/model.md 9.1 on the
+ * credit). In float32 with one rounding per operation, as the passes compute it.
  */
 export function nextBudget(
   budget: number,
+  counts: BudgetCounts,
   front: number,
-  claims: number,
-  grew: boolean,
+  covered: number,
   takes: boolean,
   increment: number,
 ): number {
   const f = Math.fround;
-  let b = f(budget);
-  if (grew && b >= 1) b = Math.min(f(b - claims), front);
-  return takes ? f(b + increment) : b;
+  let b = budgetAfterMoves(budget, counts.died, counts.reborn);
+  b = f(b + (counts.crowded - counts.born));
+  if (!takes) return b;
+  const credit = Math.min(f(f(increment) * Math.max(1, covered)), Math.max(0, f(front - b)));
+  return f(b + credit);
 }
 
 /** The strains that the state of the sinks holds room for on WebGPU: the 2 bits of the strain of an agent. */
 export const STATE_STRAINS = 4;
 
 /**
+ * The counts of the paid births of a strain in a step (ADR 0071, ADR 0100), whole numbers that every step clears: F,
+ * the agents of the front; K, the paid claims; the respawns that wait for the budget, and those that came to life;
+ * the deaths of the agent pass that give plasm back; the parents of Jones' rule that wait for the budget; the births
+ * of the growth pass; and its deaths by shrinkage. On WebGPU PAID_COUNT_LANES words per strain, on WebGL2 a texel each
+ * with a lane per strain.
+ */
+export const PAID_COUNTS = {
+  front: 0,
+  claims: 1,
+  waiting: 2,
+  reborn: 3,
+  died: 4,
+  parents: 5,
+  born: 6,
+  crowded: 7,
+} as const;
+export const PAID_COUNT_LANES = 8;
+
+/**
  * WebGPU: the buffer of the state of the sinks (sim.ts `sinks.state`; ADR 0067, decision 7). From byte 0 the state of
- * STATE_STRAINS strains, SINK_STATE_LANES floats each; from PAID_COUNTS_BYTE the agents of the front F and the paid
- * claims K of each strain as integers, which the passes add with atomics and every step clears; from PAID_KEYS_BYTE the
- * key of every agent, a float by its id.
+ * STATE_STRAINS strains, SINK_STATE_LANES floats each; from PAID_COUNTS_BYTE the counts of each strain (PAID_COUNTS),
+ * which the passes add with atomics and every step clears; from PAID_KEYS_BYTE the key of every agent, a float by its
+ * id.
  */
 export const PAID_COUNTS_BYTE = STATE_STRAINS * SINK_STATE_LANES * 4;
-export const PAID_COUNTS_BYTES = STATE_STRAINS * 2 * 4;
+export const PAID_COUNTS_BYTES = STATE_STRAINS * PAID_COUNT_LANES * 4;
 export const PAID_KEYS_BYTE = PAID_COUNTS_BYTE + PAID_COUNTS_BYTES;
 
-/** The lanes of the state of a strain that the paid births use (SINK_STATE_LANES): the budget, F and K of the step. */
+/**
+ * The lanes of the state of a strain that the paid births use (SINK_STATE_LANES): the budget, F of the last growth
+ * step (ADR 0100: the cap of the credit reads it), and K of the step.
+ */
 export const BUDGET_LANE = 5;
 export const FRONT_LANE = 6;
 export const CLAIMS_LANE = 7;

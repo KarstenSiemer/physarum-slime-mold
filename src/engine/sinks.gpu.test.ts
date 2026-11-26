@@ -8,7 +8,7 @@ import { flowPorts } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { grid } from './growth-reference';
 import { growthTests, strainEnds } from './pack';
-import { BUDGET_LANE, CLAIMS_LANE, FRONT_LANE, paidIncrement } from './paid';
+import { BUDGET_LANE, FRONT_LANE, PAID_COUNT_LANES, PAID_COUNTS, paidIncrement } from './paid';
 import { flowSites, type FlowSites, type FoodStroke } from './sites';
 import { freshReachOf, RATE_ONE, SINK_STATE_LANES, SINK_SUM_WORDS, SINKS, slimeWeightOf } from './sinks';
 import { sinkState, sinksStep, sinkWeight, slimeAfter, type SinkInput, type SinkStep } from './sinks-reference';
@@ -177,11 +177,12 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
     const memoryBefore = await Promise.all(all.map((strain) => sim.readFlow(strain)));
     const stateBefore = await sim.readSinkState();
     sim.run(1);
-    const [owners, stamps, sums, state] = [
+    const [owners, stamps, sums, state, counts] = [
       await sim.readOwners(),
       await sim.readSlime(),
       await sim.readSinkSums(),
       await sim.readSinkState(),
+      await sim.readPaidCounts(),
     ];
     expect(sums.length).toBe(SINK_SUM_WORDS * strains);
     expect(state.length).toBe(SINK_STATE_LANES * strains);
@@ -213,12 +214,15 @@ describe.each(Object.entries(BACKENDS))('the sinks on %s (ADR 0069)', (_kind, cr
       expect(Array.from(sums.subarray(words, words + SINK_SUM_WORDS)), at).toEqual(pass.sums);
       const covered = ports.filter((c) => c >= 0).length;
       const lanes = SINK_STATE_LANES * strain;
-      // The budget of the paid births from the one before the step, with F and K of the step as the GPU counted them:
-      // paid.gpu.test.ts compares those with the CPU copy (ADR 0071).
+      // The budget of the paid births from the one before the step, with the counts of the step as the GPU counted
+      // them: paid.gpu.test.ts compares those with the CPU copy (ADR 0071, ADR 0100).
+      const count = (name: keyof typeof PAID_COUNTS) => counts[PAID_COUNT_LANES * strain + PAID_COUNTS[name]] ?? 0;
       const budget = {
         budget: stateBefore[lanes + BUDGET_LANE] ?? 0,
-        front: state[lanes + FRONT_LANE] ?? 0,
-        claims: state[lanes + CLAIMS_LANE] ?? 0,
+        frontBefore: stateBefore[lanes + FRONT_LANE] ?? 0,
+        front: count('front'),
+        claims: count('claims'),
+        counts: { died: count('died'), reborn: count('reborn'), crowded: count('crowded'), born: count('born') },
         grew: growthTests(s, k).grow,
         increment: paidIncrement(s.flowStrength),
       };

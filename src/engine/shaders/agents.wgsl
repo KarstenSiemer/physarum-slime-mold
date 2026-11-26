@@ -70,6 +70,15 @@ fn inTerritory(c: i32, s: u32) -> bool { return c >= 0 && inTerritoryAt(cellCoor
 // What the sink of each cell takes over the conductivity of the cell, take / G, a layer per strain, from the flow of
 // the step before (flow.wgsl `takes`, ADR 0075): 0 at a cell without a tube and while the front takes no flux.
 @group(0) @binding(16) var takes: texture_2d_array<f32>;
+// The state of the sinks of every strain (sinks.wgsl `state`), with the budget B of the paid births in y of the second
+// vec4 of a strain, then the counts of each strain (paid.ts PAID_COUNTS), which every step clears (ADR 0100). The keys
+// of growth follow them; no agent pass reads them.
+struct Paid {
+  states: array<vec4f, 8>,
+  counts: array<atomic<u32>, 32>,
+}
+@group(0) @binding(17) var<storage, read_write> paid: Paid;
+const PAY_RESPAWN = 13u; // the draw of a respawn that waits for the budget (paid.ts PAY_RESPAWN)
 //#endif
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
@@ -457,9 +466,24 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   if (i >= P.grid.z) { return; }
   var a = agents[i];
   let id = agentId(a);
+//#if TERRITORY
+  let found = a;
+//#endif
   let alive = shrinkage(&a, id);
+//#if TERRITORY
+  // While the rules of stage 4 run, a death that the model makes gives its plasm back to the budget (ADR 0100); the cut
+  // and a wall take it away (removed()).
+  if ((found.bits & ALIVE) != 0u && !alive && !removed(found)) { atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 4u], 1u); }
+//#endif
   let spot = placement(a, id);
+//#if TERRITORY
+  if (spot.cell >= 0 && respawns(a, id)) {
+    // A respawn waits for the budget: `pay` draws for it (ADR 0100).
+    atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 2u], 1u);
+  } else if (spot.cell >= 0) {
+//#else
   if (spot.cell >= 0) {
+//#endif
     // A tool's spot is claimed like a move; the agent stays as it is until `settle`.
     atomicMax(&claims[spot.cell], key(id));
   } else if (alive) {
@@ -517,6 +541,49 @@ fn settle(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
   }
   flushTally(li);
 }
+
+//#if TERRITORY
+// Whether the spot of the dead agent a is a respawn of the flow, and not a dab of the tool Inoculate (placement()):
+// the test of the tool with its draws, which placement() makes first.
+fn respawns(a: Agent, id: u32) -> bool {
+  if ((a.bits & ALIVE) != 0u) { return false; }
+  if (P.tool.w != 1.0 || f32(a.bits & 3u) != P.tool2.x) { return true; }
+  var rng = rngSeed(id, TOOL);
+  if (rand(&rng) >= P.tool2.y) { return true; }
+  return !openCell(cellOf(randomIn(P.tool.xy, P.tool.z, &rng)));
+}
+
+// The respawns that the budget pays (ADR 0100), after `claim`: while the rules of stage 4 run, each of the n respawns
+// of strain s that `claim` counted claims its cell with the chance min(1, max(0, B) / n), B the budget of s before the
+// step and a draw of its own. The others stay dead and draw again in the next step.
+@compute @workgroup_size(256)
+fn pay(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = index(gid, groups);
+  if (i >= P.grid.z) { return; }
+  let a = agents[i];
+  let id = agentId(a);
+  let spot = placement(a, id);
+  if (spot.cell < 0 || !respawns(a, id)) { return; }
+  let s = a.bits & 3u;
+  let waiting = atomicLoad(&paid.counts[s * 8u + 2u]);
+  let chance = min(1.0, max(0.0, paid.states[s * 2u + 1u].y) / f32(waiting));
+  var rng = rngSeed(id, PAY_RESPAWN);
+  if (rand(&rng) < chance) { atomicMax(&claims[spot.cell], key(id)); }
+}
+
+// The respawns that came to life (ADR 0100), after `pay` and before `settle`: a respawn whose key its cell holds. Each
+// costs one from the budget. A pass of its own, because `settle` binds as many storage buffers as a pass may.
+@compute @workgroup_size(256)
+fn reborn(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = index(gid, groups);
+  if (i >= P.grid.z) { return; }
+  let a = agents[i];
+  let id = agentId(a);
+  let spot = placement(a, id);
+  if (spot.cell < 0 || !respawns(a, id) || atomicLoad(&claims[spot.cell]) != key(id)) { return; }
+  atomicAdd(&paid.counts[(a.bits & 3u) * 8u + 3u], 1u);
+}
+//#endif
 
 // Rebuilds occupancy from positions (after init or when collisions are switched on).
 @compute @workgroup_size(256)

@@ -3,7 +3,7 @@
 // gl/glsl/sinks.frag: the sink test of each cell, the mean of its sink rate, the sums R, C and N of each strain, and
 // the state of each strain. It follows the paths over the cells of the grid with a queue; the passes hold rows of bits.
 import { grid } from './growth-reference';
-import { nextBudget } from './paid';
+import { nextBudget, type BudgetCounts } from './paid';
 import { RATE_ONE, SINK_WINDOW, SINKS, SUM_ONE } from './sinks';
 import { wall, type TerritoryGrid } from './territory-reference';
 
@@ -180,33 +180,43 @@ export function sinksStep(input: SinkInput): SinkStep {
   return { rates, weights, sums: [r % 2 ** 32, Math.floor(r / 2 ** 32), tubes, count] };
 }
 
-/** What the budget of the paid births of a strain reads in the pass of its state (sinkState(); ADR 0071). */
+/** What the budget of the paid births of a strain reads in the pass of its state (sinkState(); ADR 0071, ADR 0100). */
 export interface BudgetInput {
-  /** The budget before the step (paid.ts BUDGET_LANE of the state before it). */
+  /** The budget before the step, and F of the last growth step before it (paid.ts BUDGET_LANE and FRONT_LANE). */
   budget: number;
-  /** F and K of the step: the agents of the front and the paid claims of the strain, 0 in a step without growth. */
+  frontBefore: number;
+  /** The counts of the step (paid.ts PAID_COUNTS): F and K, 0 in a step without growth, and the deaths and births. */
   front: number;
   claims: number;
-  /** Whether the step tested growth (pack.ts growthTests()). */
+  counts: BudgetCounts;
+  /** Whether the step tested growth (pack.ts growthTests()): then F of the step replaces F before it. */
   grew: boolean;
-  /** The growth of the budget in a step while the front takes flux (paid.ts paidIncrement()). */
+  /** The growth of the budget in a step per covered port while the front takes flux (paid.ts paidIncrement()). */
   increment: number;
 }
 
-const NO_BUDGET: BudgetInput = { budget: 0, front: 0, claims: 0, grew: false, increment: 0 };
+const NO_BUDGET: BudgetInput = {
+  budget: 0,
+  frontBefore: 0,
+  front: 0,
+  claims: 0,
+  counts: { died: 0, reborn: 0, crowded: 0, born: 0 },
+  grew: false,
+  increment: 0,
+};
 
 /**
  * The state of a strain after the step (sinks.wgsl `state`) from its sums and the number of its covered ports: R as a
  * float in the unit of the rate, C, N, the ports, and 1 while the front takes flux (a sink, R above 0, and a covered
- * port or a tube cell that pays); then the budget of the paid births after the step (paid.ts nextBudget()), F and K of
- * the step, from `paid`, by default a budget of 0 that does not grow.
+ * port or a tube cell that pays); then the budget of the paid births after the step (paid.ts nextBudget()), F of the
+ * last growth step and K of the step, from `paid`, by default a budget of 0 that does not grow.
  */
 export function sinkState(sums: readonly number[], covered: number, paid: BudgetInput = NO_BUDGET): number[] {
   const f = Math.fround;
   const [low = 0, high = 0, tubes = 0, count = 0] = sums;
   const r = f(f(high * 65536 + (low >>> 16)) + (low & 0xffff) / 65536);
   const takes = count > 0 && (low > 0 || high > 0) && (covered > 0 || tubes > 0);
-  const { budget, front, claims, grew, increment } = paid;
-  const next = nextBudget(budget, front, claims, grew, takes, increment);
-  return [r, f(tubes), f(count), covered, takes ? 1 : 0, next, front, claims];
+  const front = paid.grew ? paid.front : paid.frontBefore;
+  const next = nextBudget(paid.budget, paid.counts, front, covered, takes, paid.increment);
+  return [r, f(tubes), f(count), covered, takes ? 1 : 0, next, front, paid.claims];
 }

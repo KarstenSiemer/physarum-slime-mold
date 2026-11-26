@@ -40,6 +40,11 @@ const uint ALIVE = 4u;
 const uint MOVED = 8u;  // deposited this step (read by the point pass)
 const uint WANTS = 16u; // claimed a cell this step (collision mode); at init: waits for a start cell
 const uint PLACE = 32u; // with WANTS: claimed the cell of a tool's spot (tools.glsl placement)
+// With the rules of stage 4 (ADR 0100; paid.vert counts them): a respawn that waits for the budget (agents.frag mode 1),
+// a death that gives plasm back (mode 1), and a respawn that came to life (mode 2).
+const uint WAITS = 4096u;
+const uint DIED = 8192u;
+const uint REBORN = 16384u;
 
 int W() { return int(P.grid.x); }
 int H() { return int(P.grid.y); }

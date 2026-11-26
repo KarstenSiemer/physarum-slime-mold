@@ -71,6 +71,7 @@ layout(std140) uniform Flow {
 } F;
 const uint STARVE = 9u; // streams 4 to 6: growth.glsl; 7 and every 7 + k * 65536: the start (init.frag)
 const uint RESPAWN = 8u;
+const uint PAY_RESPAWN = 13u;
 
 // The memory of the flow of strain s at cell q (a layer of `flowMemory` in agents.wgsl).
 vec4 flowMemoryOf(uint s, ivec2 q) {
@@ -153,3 +154,16 @@ Spot placement(vec4 a, uint i) {
   return Spot(a.xy, a.z, -1);
 #endif
 }
+
+#if TERRITORY
+// Whether the spot of the dead agent a is a respawn of the flow, and not a dab of the tool Inoculate (respawns in
+// agents.wgsl, ADR 0100): the test of the tool with its draws, which placement() makes first.
+bool respawns(vec4 a, uint i) {
+  uint bits = bitsOf(a);
+  if ((bits & ALIVE) != 0u) return false;
+  if (P.tool.w != 1.0 || float(bits & 3u) != P.tool2.x) return true;
+  uint rng = rngSeed(i, TOOL);
+  if (rand(rng) >= P.tool2.y) return true;
+  return !openCell(cellOf(randomIn(P.tool.xy, P.tool.z, rng)));
+}
+#endif

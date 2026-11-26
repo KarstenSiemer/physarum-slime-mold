@@ -251,8 +251,7 @@ export function roleSigns(code: number): number[] {
 /**
  * What the sinks of a strain take and what its sources give at every cell in a step, while the rules of stage 4 run
  * (flow.wgsl sinksAndSources(), ADR 0070), in float32 as the passes compute it: nothing while the front of the strain
- * takes no flux (the fifth lane of the state). Else the sinks take S = 2 · I0 together (the slot FLOW_TAKE_SLOT of the
- * block), each tube cell (a conductivity above 0 in `memory`, after the update) the share S · r / R with its rate r as
+ * takes no flux (the fifth lane of the state). Else the sinks take S together (frontTotal()), each tube cell (a conductivity above 0 in `memory`, after the update) the share S · r / R with its rate r as
  * R counted it, in steps of 2^-16 rounded to the nearest (ADR 0067, decision 3). The covered ports of the step give S in
  * equal shares, and without one every tube cell gives S / C. `rates`: those of the step, with a minus sign for a sink;
  * `state`: the state of the step, SINK_STATE_LANES values (R, C, N, the covered ports, whether the front takes flux).
@@ -269,7 +268,7 @@ export function sinksAndSources(
   const out = new Float32Array(n);
   if (state.length < SINK_STATE_LANES || (state[4] ?? 0) === 0) return out;
   const [R = 0, C = 0, , P = 0] = Array.from(state).slice(0, 4);
-  const total = f((u[FLOW_TAKE_SLOT * 4] ?? 0) * (u[0] ?? 0));
+  const total = frontTotal(u, state);
   for (let c = 0; c < n; c++) {
     if (!((memory[c * 4 + 2] ?? 0) > 0)) continue;
     let q = -taken(total, rates[c] ?? 0, R);
@@ -278,6 +277,16 @@ export function sinksAndSources(
   }
   if (P > 0) for (const c of portsOf(u, ports)) if (c >= 0) out[c] = f((out[c] ?? 0) + f(total / P));
   return out;
+}
+
+/**
+ * What the sinks of a strain take together while its front takes flux (flow.wgsl frontTotal()): S = 2 k · I0 (the slot
+ * FLOW_TAKE_SLOT of the block) for each covered port of the state, at least one (ADR 0100; ADR 0093, `feed=flux`), in
+ * float32.
+ */
+function frontTotal(u: Float32Array, state: ArrayLike<number>): number {
+  const f = Math.fround;
+  return f(f((u[FLOW_TAKE_SLOT * 4] ?? 0) * (u[0] ?? 0)) * Math.max(1, state[3] ?? 0));
 }
 
 /**
@@ -307,7 +316,7 @@ export function takesOf(
   const n = rates.length;
   const out = new Float32Array(n);
   if (state.length < SINK_STATE_LANES || (state[4] ?? 0) === 0) return out;
-  const total = f((u[FLOW_TAKE_SLOT * 4] ?? 0) * (u[0] ?? 0));
+  const total = frontTotal(u, state);
   for (let c = 0; c < n; c++) {
     const g = memory[c * 4 + 2] ?? 0;
     if (g > 0) out[c] = f(taken(total, rates[c] ?? 0, state[0] ?? 0) / g);

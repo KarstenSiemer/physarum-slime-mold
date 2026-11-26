@@ -15,6 +15,7 @@ import {
   trailSaturation,
   type AgentTool,
 } from '../pack';
+import { PAID_COUNT_LANES, PAID_COUNTS } from '../paid';
 import { SINK_STATE_LANES, SINK_SUM_WORDS } from '../sinks';
 import { diffusePlanOf, sinkLevels, viewTrailOn } from '../sizing';
 import { packTerritory, territoryOn } from '../territory';
@@ -110,7 +111,8 @@ interface GlGrowth {
  * sizing.ts sinkLevels()), whose top of one texel holds them; the state of every strain in two targets (RGBA32F, 2
  * texels per strain) that PASS 3 writes in turn. The births that the flux pays (ADR 0071; ADR 0067, decision 7): the
  * key of every agent (R32F, a texel per agent slot), which the test of growth writes as a second target, and the
- * counts F and K of a growth step (RGBA32F, 2 × 1 texels, a lane per strain), which paid.vert adds.
+ * counts of a step (RGBA32F, PAID_COUNT_LANES × 1 texels, a lane per strain; paid.ts PAID_COUNTS), which paid.vert adds
+ * (ADR 0100).
  */
 interface GlSinks {
   /** The strains of the settings that the targets were made for. */
@@ -165,7 +167,7 @@ function makeSinks(
     levels: each(() => sinkLevels(width, height).map(([w, h]) => make(w, h, gl.RGBA32UI))),
     state: [make(2, strains, gl.RGBA32F), make(2, strains, gl.RGBA32F)],
     keys: make(agentWidth, agentHeight, gl.R32F),
-    counts: make(2, 1, gl.RGBA32F),
+    counts: make(PAID_COUNT_LANES, 1, gl.RGBA32F),
     pressures: make(width, height, gl.RGBA32F),
     takes: make(width, height, gl.RGBA32F),
   };
@@ -173,6 +175,21 @@ function makeSinks(
 
 /** Cells of some rectangles. */
 const area = (rects: readonly Rect[]) => rects.reduce((sum, [, , w, h]) => sum + w * h, 0);
+
+/**
+ * The marks of the agent bits that paid.vert counts (ADR 0071, ADR 0100), as common.glsl and growth.glsl define them,
+ * each with the count of paid.ts PAID_COUNTS that it adds to.
+ */
+const MARKS = {
+  front: [1024, PAID_COUNTS.front],
+  paid: [2048, PAID_COUNTS.claims],
+  waits: [4096, PAID_COUNTS.waiting],
+  died: [8192, PAID_COUNTS.died],
+  reborn: [16384, PAID_COUNTS.reborn],
+  jones: [32768, PAID_COUNTS.parents],
+  crowded: [65536, PAID_COUNTS.crowded],
+  born: [131072, PAID_COUNTS.born],
+} as const;
 
 /** Uniform values of the levels of a pyramid, for an array of 13 (growth.frag PASS 4): a grid side of up to 4096. */
 function padded(values: readonly number[]): Int32Array {
@@ -1820,10 +1837,15 @@ export class GlSim implements Sim {
     const sinks = territory ? this.ensureSinks() : undefined;
     // With the rules the sensors read the mean pressure of the flow of the step before and what the sink of each cell
     // takes over its conductivity, of each strain (TERRITORY in agents.frag, ADR 0070, ADR 0075), which PASS 5 of
-    // flow.frag writes first: 14 samplers in all, of the 16 that a device has.
+    // flow.frag writes first, and the state and the counts of the paid births (ADR 0100): 16 samplers in all, the 16
+    // that every device has.
     if (flow && sinks) this.encodeDrift(flow, sinks);
     const pressures: Record<string, WebGLTexture> =
       flow && sinks ? { pressures: sinks.pressures.texture, takes: sinks.takes.texture } : {};
+    // With the rules of stage 4, mode 3 reads the budget and the counts of the step (ADR 0100): 16 samplers in all.
+    const paidTextures: Record<string, WebGLTexture> = sinks
+      ? { paidState: sinks.state[this.st].texture, paidCounts: sinks.counts.texture }
+      : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1839,6 +1861,7 @@ export class GlSim implements Sim {
           ...flowMemory,
           ...held,
           ...pressures,
+          ...paidTextures,
         },
         { agentWidth: this.agentWidth, mode },
       );
@@ -1851,11 +1874,26 @@ export class GlSim implements Sim {
       const [A, B] = [this.agentsTex[this.a], this.agentsTex[flip(this.a)]];
       const occ = col.occ[this.q];
       agentPass(1, A, B, occ.texture, dummy);
+      // With the rules of stage 4 (ADR 0100): the counts of the step start at 0; the respawns that wait and the deaths
+      // of mode 1, then mode 3 lets the respawns that the budget pays claim their cells. The agents then lie in A.
+      let claimed = B;
+      if (sinks) {
+        clear(gl, sinks.counts);
+        this.countPaid(sinks, B, [MARKS.waits, MARKS.died]);
+        agentPass(3, B, A, occ.texture, dummy);
+        claimed = A;
+      }
       clear(gl, col.claims);
       // A tool's spot needs the occupancy (tools.glsl placement), and a spot of the flow its memory and the territory.
       const claimPoints = territory ? this.prog.territory().points : flow ? this.prog.flow().points : this.prog.points;
-      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture, ...flowMemory, ...held }, claimPoints);
-      agentPass(2, B, A, occ.texture, col.claims.texture);
+      const spots = { occ: occ.texture, ...flowMemory, ...held };
+      this.points(1, col.claims, gl.MAX, claimed, [0, 0, 0, 0], spots, claimPoints);
+      if (sinks) {
+        // Settle into B, and count the respawns that came to life.
+        agentPass(2, A, B, occ.texture, col.claims.texture);
+        this.a = flip(this.a);
+        this.countPaid(sinks, B, [MARKS.reborn]);
+      } else agentPass(2, B, A, occ.texture, col.claims.texture);
       const next = col.occ[flip(this.q)];
       clear(gl, next);
       this.points(2, next, gl.FUNC_ADD);
@@ -1919,6 +1957,33 @@ export class GlSim implements Sim {
     // The push last (ADR 0067, decision 6). It reads the constants of stage 4 of the uniform block of the flow, which the
     // block of every strain holds (flowBlock()).
     if (territory && flow) this.encodePush(territory);
+  }
+
+  /**
+   * Adds the agents of `agents` that hold each mark of `marks` to its count of the step (paid.vert, ADR 0100): one point
+   * per agent slot and mark, with additive blending into `sinks.counts`, a lane per strain.
+   */
+  private countPaid(sinks: GlSinks, agents: Target, marks: readonly (readonly [number, number])[]) {
+    const gl = this.gl;
+    const p = this.prog.territory().paid;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sinks.counts.fbo);
+    gl.viewport(0, 0, sinks.counts.width, sinks.counts.height);
+    gl.useProgram(p.program);
+    textures(gl, p.program, { agents: agents.texture });
+    gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
+    gl.uniform1i(p.loc('parts'), marks.length);
+    gl.uniform1i(p.loc('lanes'), PAID_COUNT_LANES);
+    gl.uniform1uiv(
+      p.loc('marks'),
+      Uint32Array.from({ length: 4 }, (_, k) => marks[k]?.[0] ?? 0),
+    );
+    gl.uniform1iv(
+      p.loc('texels'),
+      Int32Array.from({ length: 4 }, (_, k) => marks[k]?.[1] ?? 0),
+    );
+    this.blend(gl.FUNC_ADD);
+    gl.drawArrays(gl.POINTS, 0, marks.length * this.agents);
+    gl.disable(gl.BLEND);
   }
 
   /** The owners of every cell from the agents after the moves and the births (owners.vert, PASS 2 of territory.frag). */
@@ -2184,6 +2249,20 @@ export class GlSim implements Sim {
     return Promise.resolve(Float32Array.from({ length: this.agents }, (_, i) => rgba[i * 4] ?? 0));
   }
 
+  /** For tests: the counts of the last step that settle the budget (../sim.ts readPaidCounts(); ADR 0100). */
+  readPaidCounts(): Promise<Uint32Array> {
+    const strains = flowStrains(this.settings);
+    if (!this.sinks) return Promise.resolve(new Uint32Array(PAID_COUNT_LANES * strains));
+    const rgba = readTarget(this.gl, this.sinks.counts);
+    const n = this.sinks.strains;
+    return Promise.resolve(
+      Uint32Array.from(
+        { length: PAID_COUNT_LANES * n },
+        (_, k) => rgba[(k % PAID_COUNT_LANES) * 4 + Math.floor(k / PAID_COUNT_LANES)] ?? 0,
+      ),
+    );
+  }
+
   /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
   writeSinks(data: Float32Array, strain = 0) {
     if (!territoryOn(this.settings)) return;
@@ -2377,20 +2456,30 @@ export class GlSim implements Sim {
           ...flowMemory,
           ...territory,
           state: paid.state[this.st].texture,
+          paidCounts: paid.counts.texture,
         },
         { agentWidth },
       );
       this.a = flip(this.a);
-      // F and K of the step for the state (paid.vert): two points per agent slot.
-      clear(gl, paid.counts);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, paid.counts.fbo);
-      gl.viewport(0, 0, paid.counts.width, paid.counts.height);
-      gl.useProgram(stage4.paid.program);
-      textures(gl, stage4.paid.program, { agents: this.agentsTex[this.a].texture });
-      gl.uniform1i(stage4.paid.loc('agentWidth'), agentWidth);
-      this.blend(gl.FUNC_ADD);
-      gl.drawArrays(gl.POINTS, 0, 2 * this.agents);
-      gl.disable(gl.BLEND);
+    }
+    if (paid) {
+      // F, K, the parents of Jones' rule that wait and the deaths by shrinkage of the step (paid.vert, ADR 0100).
+      this.countPaid(paid, this.agentsTex[this.a], [MARKS.front, MARKS.paid, MARKS.jones, MARKS.crowded]);
+    }
+    if (grow && paid) {
+      // The parents of Jones' rule that the budget pays (PASS 6, ADR 0100): they mark GROWS.
+      const stage4 = this.prog.territory();
+      this.pass(
+        stage4.jones,
+        this.agentsTex[flip(this.a)],
+        {
+          agentsIn: this.agentsTex[this.a].texture,
+          state: paid.state[this.st].texture,
+          paidCounts: paid.counts.texture,
+        },
+        { agentWidth },
+      );
+      this.a = flip(this.a);
     }
     if (grow) {
       const agents = this.agentsTex[this.a];
@@ -2414,7 +2503,7 @@ export class GlSim implements Sim {
       this.buildPyramid(p.build, g.dead, agents, 1);
       const [c, d] = [g.cells, g.dead];
       this.pass(
-        p.birth,
+        paid ? this.prog.territory().birth : p.birth,
         this.agentsTex[flip(this.a)],
         {
           agentsIn: agents.texture,
@@ -2432,6 +2521,8 @@ export class GlSim implements Sim {
         },
       );
       this.a = flip(this.a);
+      // The births of the step (paid.vert, ADR 0100).
+      if (paid) this.countPaid(paid, this.agentsTex[this.a], [MARKS.born]);
     }
     const next = col.occ[flip(this.q)];
     clear(gl, next);

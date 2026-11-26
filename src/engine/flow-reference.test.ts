@@ -97,20 +97,21 @@ describe('the flow takes the sinks (ADR 0070)', () => {
     }
   });
 
-  it('gives the colony the share S / C at each tube cell without a covered port, and S / P at each port with one', () => {
+  it('gives the colony the share S / C at each tube cell without a covered port, and S at each of P covered ports', () => {
     // Every tube cell with the same rate: the colony gives each one what it takes, so nothing is left at any cell.
     const same = () => 3 * 256;
     const colony = sinkCase(1000, 0.5, same, 0, 31);
     const extra = sinksAndSources(colony.u, colony.memory, colony.list, colony.rates, colony.state);
     expect(extra.every((v) => Math.abs(v) < 1e-9 * S)).toBe(true);
-    // With two covered ports each port gives S / 2, and every tube cell takes S / C.
+    // With two covered ports the sinks take 2 S (ADR 0100; ADR 0093, `feed=flux`): each port gives S, and every tube
+    // cell takes 2 S / C.
     const fed = sinkCase(1000, 0.5, same, 2, 37);
     const at = sinksAndSources(fed.u, fed.memory, fed.list, fed.rates, fed.state);
     const C = fed.state[1] ?? 1;
     for (let c = 0; c < 1000; c++) {
       const tube = (fed.memory[c * 4 + 2] ?? 0) > 0;
       const port = c === fed.list[0] || c === fed.list[2];
-      const want = (tube ? -S / C : 0) + (port ? S / 2 : 0);
+      const want = (tube ? (-2 * S) / C : 0) + (port ? S : 0);
       expect(at[c], `cell ${String(c)}`).toBeCloseTo(want, 6);
     }
   });

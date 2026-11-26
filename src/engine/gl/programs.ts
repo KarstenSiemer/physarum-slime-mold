@@ -132,7 +132,11 @@ export interface TerritoryPrograms {
   test: Program;
   /** PASS 5 of growth.frag: the rank of the births that the flux pays (ADR 0071). */
   rank: Program;
-  /** The counts of the agents of the front and of the paid parents (paid.vert with points.frag, ADR 0071). */
+  /** PASS 6 of growth.frag: the parents of Jones' rule that the budget pays (ADR 0100). */
+  jones: Program;
+  /** PASS 4 of growth.frag with the territory: the births, which mark BORN for the counts (ADR 0100). */
+  birth: Program;
+  /** The counts of the births and deaths that the budget settles (paid.vert with points.frag, ADR 0071, ADR 0100). */
   paid: Program;
 }
 
@@ -501,6 +505,8 @@ export function compile(gl: GL): Programs {
         ),
         test: sim(`#define PASS 2\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
         rank: sim(`#define PASS 5\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
+        jones: sim(`#define PASS 6\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
+        birth: sim(`#define PASS 4\n#define FLOW 1\n#define TERRITORY 1\n${growthGlsl}${growthFrag}`),
         paid: wrap(gl, program(gl, V + common + growthGlsl + paidVert, V + common + pointsFrag)),
       }),
     sinks: () =>
