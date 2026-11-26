@@ -3,7 +3,9 @@
 - Status: accepted. The owner approved the port of option 1 of ADR 0097 on 2026-11-26 ("Ja"), with its estimate of
   about 500,000 tokens and 2.5 hours of GPU. Decisions 1 to 3 are the coordinator's, on the same day, under the
   owner's delegation of 2026-11-12. An agent built it on 2026-11-26 under the same delegation and made the choices
-  under "The agent's choices".
+  under "The agent's choices". The same day the Y-maze with slime lost its choice; the coordinator set parts A and B,
+  a second agent found the cause and chose the rule of decision 4 on the evidence of part A, and the coordinator
+  decided decision 5, whose look the owner approved.
 - Date: 2026-11-26
 - Extends [ADR 0071](0071-the-births-that-the-flux-pays-in-the-engine.md) (the births that the flux pays),
   [ADR 0092](0092-the-boom-at-a-new-food-is-jones-births-without-starvation.md) (option 3: every birth from the
@@ -128,8 +130,9 @@ already, so no memory is added.
 
 - **Each pass settles in the next one**, as the prototype says a GPU must: the agent pass counts its deaths and its
   respawns, growth spends the budget plus those deaths and less those respawns, and the pass of the state settles the
-  deaths and births of growth before the credit. The counts are 8 whole numbers per strain (`PAID_COUNTS` in
-  `src/engine/paid.ts`): atomics on WebGPU, marks of the agents and points with additive blending on WebGL2.
+  deaths and births of growth before the credit. The counts are 10 whole numbers per strain (`PAID_COUNTS` in
+  `src/engine/paid.ts`, the last two the parts of the sum P of decision 4): atomics on WebGPU, marks of the agents and
+  points with additive blending on WebGL2.
 - **Two passes count the respawns**: `claim` counts the respawns that pass their tests, `pay` draws for them, and
   `reborn` counts those that win their cells. `settle` cannot count them: it binds 8 storage buffers already, the
   most that WebGPU grants without a request. On WebGL2 mode 3 of the agent pass draws, and paid.vert counts.
@@ -143,83 +146,108 @@ already, so no memory is added.
 - **A claim key of 0** (WebGPU, one id in 2^32 per step): such a parent of Jones' rule does not count and claims
   nothing.
 - **No new setting**: the rules are part of Rules of the growth front. No memory per cell or per agent more.
+- **The sum P in steps of 2^-12, in two counts** (decision 4): WebGL2 adds the counts as floats, which stay exact only
+  below 2^24. Each agent adds its steps / 64 and the rest, so each count stays exact for fewer than 2^18 agents with a
+  key in a strain, and the sum of the steps fits a u32 for fewer than 2^20. The rank compares k · P with B, a product
+  that WGSL and GLSL round once, where B / P would be a division of 2.5 units in the last place. WebGL2 adds the parts
+  of P with a pass of points (`paid.vert` with SHARE) between the test and the rank, as it adds the other counts.
+- **The drift of one food in `driftOf()`** (decision 5): the pass of the agents reads the covered ports from the state
+  that it binds already; the division by a whole number may err by 2.5 units in the last place in WGSL. The
+  CPU copy (`driftOfFoods()`) divides in float32.
 
 ## Measures
 
+The measures of the port with decisions 4 and 5. The first port (before parts A and B, the same day) is named so;
+its records are in `research/front/out/owner/port/` of the main checkout, those of this one in
+`research/front/out/owner/port2/`.
+
 **The look.** Food ring with the levers of the crown (`{territory:true, flowEdges:8, flowBase:0.002, frontFlux:2,
-flowStrength:8}`), WebGPU, seed 7, against row 3 of `p1e-compare.png`: at step 5,000 a ring of plasm at the rim with
-veins inside; at 10,000 a thick band along the wall and veins from the middle food to the ring, with fewer fans than
-the prototype shows; at 15,000 and 20,000 a closed network of tubes that joins all nine foods. The pictures are in
-`research/front/out/owner/port/` of the main checkout.
+flowStrength:8}`), WebGPU, seed 7: at step 5,000 a ring of plasm with veins from the middle food to it; at 10,000 a
+ring-shaped mesh of veins with holes that reaches the wall, and no band along the wall (the first port: a thick band
+along the wall); at 15,000 a network of tubes with the last parts of the mesh; at 20,000 a polygonal network that joins
+the nine foods. Against the prototype with the drift of one food (`p1e-drift.png`) the middle of the mesh at 10,000 is
+emptier: a few veins from the middle food, where the prototype has a mesh over the whole dish.
 
 **Food ring**, the same levers, seeds 1 to 3 on each backend, to step 20,000 (`bash research/front/p100.sh ring`,
 `research/front/p100-ring.gpu.test.ts`; the table `bash research/front/p100.sh table`):
 
-| Run       | Agents at 10,000 | Agents at 20,000 | Budget at 20,000 | Sheet at 10,000; 20,000 | Rise at the second food |
-| --------- | ---------------- | ---------------- | ---------------- | ----------------------- | ----------------------- |
-| WebGPU s1 | 22,139           | 2,665            | 19,704           | 0.59; 0.17              | +110 %                  |
-| WebGPU s2 | 22,220           | 2,652            | 19,907           | 0.53; 0.16              | +96 %                   |
-| WebGPU s3 | 23,087           | 2,693            | 21,002           | 0.60; 0.16              | +86 %                   |
-| WebGL2 s1 | 21,615           | 2,533            | 19,260           | 0.52; 0.16              | +67 %                   |
-| WebGL2 s2 | 22,171           | 2,558            | 20,612           | 0.56; 0.16              | +77 %                   |
-| WebGL2 s3 | 22,743           | 2,793            | 20,322           | 0.55; 0.17              | +92 %                   |
-| Prototype | 21,228           | 3,608            | 18,020           | 0.65; 0.17              | +119 %                  |
+| Run        | Agents at 10,000 | Agents at 20,000 | Budget at 20,000 | Sheet at 10,000; 20,000 | Rise at the second food |
+| ---------- | ---------------- | ---------------- | ---------------- | ----------------------- | ----------------------- |
+| WebGPU s1  | 13,825           | 5,171            | 11,262           | 0.47; 0.23              | +83 %                   |
+| WebGPU s2  | 12,943           | 4,379            | 11,808           | 0.54; 0.23              | +57 %                   |
+| WebGPU s3  | 12,552           | 3,596            | 13,067           | 0.48; 0.18              | +67 %                   |
+| WebGL2 s1  | 14,143           | 3,229            | 13,643           | 0.50; 0.18              | +69 %                   |
+| WebGL2 s2  | 14,527           | 4,545            | 13,051           | 0.49; 0.21              | +86 %                   |
+| WebGL2 s3  | 13,184           | 2,842            | 13,846           | 0.54; 0.15              | +81 %                   |
+| First port | 21,615–23,087    | 2,533–2,793      | 19,260–21,002    | 0.52–0.60; 0.16–0.17    | +67 to +110 %           |
+| Prototype  | 10,847           | 5,062            | 13,733           | 0.58; 0.24              | +78 %                   |
 
-The prototype is `cap-f9`, seed 1 (ADR 0097). The colony peaks at 21,716 to 23,540 agents at step 10,300 to 10,900,
-when it fills the dish; the front stops taking flux at step 10,400 to 11,200, and the colony falls to about 2,700.
-The rise counts from the first record with two covered ports, every 100 steps.
+The prototype is `frontPay=share` with the drift of one food, nine foods, seed 1 (`p1f.sh`). The colony peaks at
+16,125 to 17,417 agents at step 12,800 to 14,300, when it fills the dish, and then falls. At step 8,000 it holds 8,845
+to 9,008 agents on WebGPU and 9,702 to 10,338 on WebGL2; at 10,000 the three runs of WebGL2 lie 2 to 12 % above those
+of WebGPU. Three seeds per backend do not tell whether this is a gap of the backends.
 
-**The help texts** (WebGPU, seed 1): with Flow strength 2 and the other levers Food ring holds 2,912 agents at step
-10,000 (22,139 with 8); with the rules and the levers of the scene it holds 1,358 at step 8,000, and 15,665 to
-17,340 with the levers of the crown (3 seeds).
+**The help texts** (WebGPU, seed 1): with Flow strength 2 and the other levers Food ring holds 1,806 agents at step
+10,000 (13,825 with 8); with the rules and the levers of the scene it holds 1,214 at step 8,000, and 8,845 to 9,008
+with the levers of the crown (3 seeds).
 
-**The Y-maze with slime**, seeds 1 to 10 per backend (`bash research/front/p100.sh y`, the runner of ADR 0088):
+**The Y-maze**, seeds 1 to 10 (`bash research/front/p100.sh y`, the runner of ADR 0088; slime on both arms and no
+slime on WebGPU only):
 
-| Y-maze with slime on one arm | Blank arm first | First food (median, range) | The other food after it (median) |
-| ---------------------------- | --------------- | -------------------------- | -------------------------------- |
-| WebGPU                       | 5 of 10         | 2,912.5 (2,522 to 3,140)   | +297 steps                       |
-| WebGL2                       | 5 of 10         | 2,953 (2,632 to 3,220)     | +192 steps                       |
-| `main`, WebGL2               | 10 of 10        | 3,207.5 (3,097 to 3,722)   | +1,912.5 steps                   |
+| Y-maze                           | Choice         | First food (median, range) | The other food after it (median) |
+| -------------------------------- | -------------- | -------------------------- | -------------------------------- |
+| Slime on one arm, WebGPU         | 10 : 0         | 3,103.5 (2,873 to 3,307)   | +1,588.5 steps                   |
+| Slime on one arm, WebGL2         | 10 : 0         | 3,051.5 (2,870 to 3,229)   | +1,728 steps                     |
+| Slime on both arms, WebGPU       | 6 : 4 (p 0.75) | 3,097.5 (2,758 to 3,263)   | +80 steps                        |
+| No slime, WebGPU                 | 5 : 5 (p 1.0)  | 3,068.5 (2,758 to 3,235)   | +109.5 steps                     |
+| Slime on one arm, first port     | 5 : 5 each     | 2,912.5 and 2,953          | +297 and +192 steps              |
+| Slime on one arm, `main`, WebGL2 | 10 : 0         | 3,207.5 (3,097 to 3,722)   | +1,912.5 steps                   |
 
-ADR 0088 had 40 of 40 on each backend, and Reid et al. 39 of 40. With the budget the colony no longer avoids the
-slime: it grows faster (WebGL2 seed 1: 694 agents at step 2,000 against 463 on `main`) and reaches both foods within
-a few hundred steps of each other. The owner said that 39 : 1 against 40 : 0 does not matter (ADR 0098); 5 : 5 is the
-level of chance. See "Open".
+So the choice is back, and the controls show no preference. Slime on both arms against none: 1.01 times as late (p
+0.24). The colony reaches the first food 3 to 5 % sooner than on `main`.
 
 **The Crown of veins**, WebGPU seeds 1 to 3, to step 16,000 (`bash research/front/p100.sh crown`), live agents /
 reach of the tube body in cells, against ADR 0087 (seeds 1 and 2):
 
 | Step   | ADR 0087 s1; s2          | ADR 0100 s1; s2; s3                      |
 | ------ | ------------------------ | ---------------------------------------- |
-| 2,000  | 506 / 46; 505 / 48       | 525 / 46; 637 / 50; 527 / 47             |
-| 4,000  | 1,572 / 79; 1,567 / 80   | 1,871 / 87; 2,020 / 92; 1,877 / 92       |
-| 8,000  | 3,950 / 129; 4,015 / 130 | 4,904 / 168; 5,074 / 176; 4,912 / 176    |
-| 12,000 | 5,763 / 169; 5,960 / 171 | 8,092 / 251; 8,280 / 255; 8,058 / 255    |
-| 16,000 | 7,207 / 209; 7,223 / 210 | 11,185 / 330; 11,447 / 336; 11,221 / 332 |
+| 2,000  | 506 / 46; 505 / 48       | 495 / 45; 619 / 50; 583 / 51             |
+| 4,000  | 1,572 / 79; 1,567 / 80   | 1,801 / 86; 2,011 / 92; 1,888 / 91       |
+| 8,000  | 3,950 / 129; 4,015 / 130 | 4,653 / 162; 4,995 / 168; 4,927 / 164    |
+| 12,000 | 5,763 / 169; 5,960 / 171 | 7,825 / 231; 8,145 / 241; 7,940 / 242    |
+| 16,000 | 7,207 / 209; 7,223 / 210 | 10,913 / 310; 11,309 / 314; 11,071 / 314 |
 
-The crown grows about 1.5 times as fast and reaches 330 cells at step 16,000 in place of 210: the deaths behind the
-front pay births at the front. The look changes too (seed 1, WebGPU, steps 8,000 and 16,000, in
-`research/front/out/owner/port/crown-s1-webgpu/` of the main checkout): a band of plasm along the rim and two main
-veins from the neck that fork toward it, and between them empty ground, where ADR 0087 showed a half disc of sheet
-with veins in it.
+The first port had 11,185 to 11,447 agents and a reach of 330 to 336 at step 16,000. The crown grows about 1.5 times as
+fast as in ADR 0087: the deaths behind the front pay births at the front. The look (seed 1, steps 8,000 and 16,000): a
+fan of veins from the neck to a band of plasm along the rim at 8,000; at 16,000 the band, two main veins from the neck
+that fork toward it, and empty ground between them, where ADR 0087 showed a half disc of sheet with veins in it. The
+look is that of the first port.
 
 **The bytes of the scenes** (`research/flow/README.md`, part 36): after 500 steps on both backends, 58 of 68 runs keep
 the bytes of `main`; the 10 others are the five scenes with the rules (the three Y-mazes, Slime everywhere, the Crown
-of veins) on each backend, which differ after 500 steps and after 3,000.
+of veins) on each backend.
+
+**The wrong rules**: PB16 to PB23 are new (the drift of one food, the sum P and the threshold, on each backend and in
+the CPU copy), and the texts of TY120, TY123, TY159, TY232 to TY235, TY237, TY246 to TY248 and TY250 follow the code.
+Each of PB16 to PB23, TY120, TY123, TY159, TY235 and TY248 fails at least one test. PB16 and PB17 needed a trail in
+the case of the drift: without one every sensor reads 0 less the drift times the pressure, and the size of the drift
+changes no turn.
 
 ## Consequences
 
-- `docs/model.md` 7.1, 7.2, 7.7, 8.7, 9 and 9.1 hold the rules; the help of Rules of the growth front, Flow strength
-  and Flux to the front name the new numbers.
-- Wrong rules: the texts of 33 wrong rules followed the code, TY170 went (its rule is gone), and PB1 to PB15 are new;
-  FP15 of the prototype had a stale text, which follows `sim.ts` again.
-- Open (decision 3): the boom at a new food, the fall of a full dish with the budget that holds the rest of the area
-  and that no picture shows, and the sheet of 0.52 to 0.60 at step 10,000 with nine foods. At 10,000 the engine draws
-  a band along the wall with fewer fans of veins than the prototype.
-- Open, and new: the Y-maze with slime loses its choice (5 : 5 on each backend over 10 seeds, against 40 : 0 in ADR
-  0088), and the Crown of veins grows 1.5 times as fast and leaves the ground behind its rim empty. The cause is not
-  isolated. A guess, not tested: the budget no longer binds the front (the deaths behind it pay its births), so the sinks on slime, which
-  take 40 times less flux, are paid as the others are. The coordinator decides whether the scenes of Reid et al. keep
-  this rule, and whether a study isolates the cause first (in the prototype, ADR 0074 has the Y-maze there).
-- Not measured: more than 3 seeds of Food ring, Food ring with one food in the engine, the other scenes of the app
-  with the rules switched on, and a stored budget spent at a food that comes after the dish is full.
+- `docs/model.md` 7.1, 7.2, 7.3, 7.7, 8.7, 9 and 9.1 hold the rules; the help of Rules of the growth front, Flow
+  strength, Flux to the front and Drift name the new numbers.
+- Wrong rules: the first port changed the texts of 33 wrong rules, removed TY170 (its rule is gone) and added PB1 to
+  PB15; FP15 of the prototype had a stale text, which follows `sim.ts` again. Parts A and B added PB16 to PB23.
+- The Y-maze with slime takes the blank arm again (10 : 0 on each backend), and the controls show no preference. The
+  e2e test of the Y-maze (`tests/e2e/y-maze.spec.ts`) passes with its margin of 1.2 again.
+- Open (decision 3): the boom at a new food (+57 to +86 % in the engine, +78 % in the prototype), the fall of a full
+  dish with the budget that holds the rest of the area and that no picture shows, and the sheet of 0.47 to 0.54 at
+  step 10,000 with nine foods. The middle of the mesh at step 10,000 is emptier than in the prototype.
+- Open: the Crown of veins grows 1.5 times as fast as in ADR 0087 and leaves the ground behind its rim empty, as with
+  the first port. The coordinator decides whether that look stays.
+- Not measured: more than 3 seeds of Food ring (whether WebGL2 holds 2 to 12 % more agents at step 10,000 than
+  WebGPU), Food ring with one food in the engine, the Y-maze with 40 seeds in the engine, slime on both arms and no
+  slime on WebGL2, Slime everywhere with the rules, the other scenes of the app with the rules switched on, a stored
+  budget spent at a food that comes after the dish is full, and the prototype's `share` with one food and with more
+  seeds than seed 1 in Food ring.

@@ -461,12 +461,18 @@ any port (ADR 0096).
       fills. No form reaches the aims; the agent recommends no port until the owner decides whether an agent is mass.
 - [x] Phase 2, option 1 of ADR 0097 (ADR 0100, 2026-11-26): every birth from the budget, the front first, the plasm
       of the dead back to it, the flux per covered food and the cap on the credit, on both backends. Food ring with
-      the levers of the crown: 21,615 to 23,087 agents at step 10,000 and 2,533 to 2,793 at 20,000 (3 seeds per
-      backend), a sheet of 0.52 to 0.60 at 10,000.
-- [ ] Open after ADR 0100 (the coordinator's decision 3): the boom at a new food (+67 to +110 % in the engine), the
+      the levers of the crown. The Y-maze with slime then lost its choice (5 : 5); part A of ADR 0100 found the cause
+      (the plasm of the dead keeps the budget above the front, and the rank pays every agent of it) and the rule: an
+      agent of the front is paid only while k · P < B, in the share of its sink. With it and the drift of one food
+      (part B, approved by the owner): the Y-maze 10 : 0 on each backend; Food ring 12,552 to 14,527 agents at step
+      10,000 and 2,842 to 5,171 at 20,000 (3 seeds per backend), a sheet of 0.47 to 0.54 at 10,000, a mesh of veins
+      with holes at 10,000 and no band at the wall.
+- [ ] Open after ADR 0100 (the coordinator's decision 3): the boom at a new food (+57 to +86 % in the engine), the
       fall of a full dish while the budget holds the rest of the area, and the sheet above 0.3 at step 10,000 with
-      nine foods. At step 10,000 the engine draws a band along the wall with fewer fans of veins than the prototype.
-      The owner watches the scenes run.
+      nine foods. The middle of the mesh at step 10,000 is emptier than in the prototype. The Crown of veins grows 1.5
+      times as fast as in ADR 0087 with empty ground behind its rim. Not measured: more seeds of Food ring (WebGL2
+      lies 2 to 12 % above WebGPU at step 10,000 in 3 seeds), the Y-maze with 40 seeds in the engine. The owner
+      watches the scenes run.
 - [ ] Phase 3, after study 1d and only if the rim is still smooth: a rim that advances where the flux arrives (plan
       2.4, option 4), the prototype first.
 - [ ] Phase 4, the scenes: a dish with the rules, and the parts E4b to E4e of ADR 0089, when the owner finds the rules
