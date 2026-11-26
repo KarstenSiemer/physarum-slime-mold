@@ -75,7 +75,13 @@ import territoryWgsl from './shaders/territory.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
-import { GROWTH_BINDINGS, GROWTH_FLOW_BINDINGS, GROWTH_TERRITORY_BINDINGS, Simulation } from './sim';
+import {
+  GROWTH_BINDINGS,
+  GROWTH_FLOW_BINDINGS,
+  GROWTH_TERRITORY_BINDINGS,
+  GROWTH_TERRITORY_UNUSED,
+  Simulation,
+} from './sim';
 import { equilibrium } from './sizing';
 import { SHAPE_RANGE, type AgentState, type Backend, type Sim, type Stroke, type View } from './types';
 import { WebGpuBackend } from './webgpu';
@@ -6241,7 +6247,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         [true, true],
       ] as const) {
         const passes = kernels.growth(flow, rules);
-        const names = Object.keys(lists).filter((name) => rules || name !== 'rank');
+        const names = Object.keys(lists).filter((name) => rules || (name !== 'rank' && name !== 'jones'));
         expect(Object.keys(passes).sort()).toEqual(names.sort());
         for (const [name, pipeline] of Object.entries(passes)) {
           device.pushErrorScope('validation');
@@ -6258,7 +6264,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           if (rules)
             for (const binding of stage4[name] ?? [])
               entries.push({ binding, resource: binding === 17 ? territory.createView() : { buffer } });
-          device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
+          // The bindings that the lines of the rules take out (ADR 0100): `test` claims no cell then.
+          const unused = rules ? ((GROWTH_TERRITORY_UNUSED as Record<string, readonly number[]>)[name] ?? []) : [];
+          const kept = entries.filter((e) => !unused.includes(e.binding));
+          device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: kept });
           const at = `${name}${flow ? ' with the flow' : ''}${rules ? ' and the rules of stage 4' : ''}`;
           expect((await device.popErrorScope())?.message, at).toBeUndefined();
         }

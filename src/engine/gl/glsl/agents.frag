@@ -8,6 +8,14 @@ uniform sampler2D claims; // highest claim key per cell (collision mode)
 uniform sampler2D clearance; // per clearance tile (walls.frag)
 uniform int agentWidth;
 uniform int mode;
+#if TERRITORY
+// Mode 3, the respawns that the budget pays (`pay` in agents.wgsl, ADR 0100): the state of the sinks (sinks.frag PASS
+// 3), texel (1, s) with the budget of strain s in y (and texel (0, s) with its covered foods in w, for the drift of
+// mode 1), and the counts of the step (paid.vert), texel 2 the respawns that
+// wait, a lane per strain.
+uniform sampler2D paidState;
+uniform sampler2D paidCounts;
+#endif
 
 out vec4 result;
 
@@ -113,16 +121,20 @@ uniform sampler2D takes;
 bool tubeAt(ivec2 q, int s) { return flowMemoryOf(uint(s), q).z > 0.0; }
 
 // What the cell of an agent of strain s gives its sensors (driftOf in agents.wgsl, ADR 0075): whether it holds a tube
-// of s, and what a sensor on a cell without a tube of s reads, the mean pressure there less `so` times take / G.
+// of s, and what a sensor on a cell without a tube of s reads, the mean pressure there less `so` times take / G; and the
+// drift of one food (ADR 0100, part B): the drift of s over the foods that its last flow pass covered, at least one
+// (texel (0, s) of the state, w; sinks.frag PASS 3).
 struct Drift {
   bool on;
   float ground;
+  float weight;
 };
 
 Drift driftOf(vec2 pos, int s, float so) {
   ivec2 q = cellXY(ivec2(floor(pos)));
-  if (q.x < 0 || !tubeAt(q, s)) return Drift(false, 0.0);
-  return Drift(true, texelFetch(pressures, q, 0)[s] - so * texelFetch(takes, q, 0)[s]);
+  if (q.x < 0 || !tubeAt(q, s)) return Drift(false, 0.0, 0.0);
+  float weight = P.drift[s] / max(1.0, texelFetch(paidState, ivec2(0, s), 0).w);
+  return Drift(true, texelFetch(pressures, q, 0)[s] - so * texelFetch(takes, q, 0)[s], weight);
 }
 #endif
 
@@ -151,7 +163,7 @@ float sense(vec2 pos, vec2 p, int s, int clear) {
 }
 #if TERRITORY
 
-// What the sensor at p reads while the rules of stage 4 run: minus the drift of the strain times the mean pressure of
+// What the sensor at p reads while the rules of stage 4 run: minus the drift of one food (`d.weight`) times the mean pressure of
 // its flow at the cell of the sensor if it holds a tube of the strain, else times the ground of the agent's cell `d`;
 // nothing more for an agent off the tubes (sense in agents.wgsl, ADR 0070, ADR 0075). A blocked sensor stays blocked.
 float sense(vec2 pos, vec2 p, int s, int clear, Drift d) {
@@ -160,7 +172,7 @@ float sense(vec2 pos, vec2 p, int s, int clear, Drift d) {
   ivec2 q = cellXY(ivec2(floor(p)));
   float v = d.ground;
   if (tubeAt(q, s)) v = texelFetch(pressures, q, 0)[s];
-  return read - P.drift[s] * v;
+  return read - d.weight * v;
 }
 #endif
 
@@ -268,8 +280,20 @@ void main() {
       }
     }
   } else if (mode == 1) {
+#if TERRITORY
+    vec4 found = a;
+#endif
     bool alive = shrinkage(a, i);
+#if TERRITORY
+    // A death that the model makes gives its plasm back to the budget (ADR 0100); the cut and a wall take it away.
+    if ((bitsOf(found) & ALIVE) != 0u && !alive && !removed(found)) a.w += float(DIED);
+    if (placement(a, i).cell >= 0 && respawns(a, i)) {
+      // A respawn waits for the budget: mode 3 draws for it.
+      a.w += float(WAITS);
+    } else if (placement(a, i).cell >= 0) {
+#else
     if (placement(a, i).cell >= 0) {
+#endif
       // A tool's spot is claimed like a move (points.vert kind 1); the agent stays as it is until mode 2.
       a.w += float(WANTS | PLACE);
     } else if (alive) {
@@ -278,6 +302,19 @@ void main() {
       if (senses()) a.z = steer(a, s, rng, clear);
       if (canClaim(a, cellOf(destination(a)), clear)) a.w += float(WANTS);
     }
+#if TERRITORY
+  } else if (mode == 3) {
+    // Each of the n respawns of strain s that wait claims its cell with the chance min(1, max(0, B) / n) and a draw of
+    // its own (`pay` in agents.wgsl).
+    uint bits = bitsOf(a);
+    if ((bits & WAITS) != 0u) {
+      int s = int(bits & 3u);
+      float waiting = texelFetch(paidCounts, ivec2(2, 0), 0)[s];
+      float chance = min(1.0, max(0.0, texelFetch(paidState, ivec2(1, s), 0).y) / waiting);
+      uint rng = rngSeed(i, PAY_RESPAWN);
+      if (rand(rng) < chance) a.w += float(WANTS | PLACE);
+    }
+#endif
   } else {
     uint bits = bitsOf(a) & (ALIVE | 3u);
     if ((bitsOf(a) & PLACE) != 0u) {
@@ -286,6 +323,10 @@ void main() {
       if (spot.cell >= 0 && texelFetch(claims, cellCoord(spot.cell), 0).r == claimKey(i)) {
         a.xyz = vec3(spot.pos, spot.heading);
         bits |= ALIVE;
+#if TERRITORY
+        // A respawn that came to life costs one from the budget (ADR 0100).
+        if ((bitsOf(a) & WAITS) != 0u) bits |= REBORN;
+#endif
       }
     } else if ((bits & ALIVE) != 0u) {
       vec2 p = destination(a);

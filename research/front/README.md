@@ -231,6 +231,13 @@ of the sinks before decision 8:
   `feed.ts` runs the dish of Food ring with one food or nine and keeps a ledger of the births and deaths;
   [P1C-NOTES.md](P1C-NOTES.md) tells the story and has the commands.
 
+- ADR 0100, part A: `frontPay`, what the front may spend of the budget with `payAll`: `all` (the port of option 1),
+  `take`, `rates`, `weights`, `share`, `shareR` and `step` (the comment of `Front.frontPay` in `sim.ts` says what each
+  limits). `share` is the rule of the engine. `ywhy.sh` runs the Y-maze with slime on one arm for cases of rules,
+  `ymaze-why.ts` counts the births by kind on each arm and the steps in which the budget covers the front,
+  `ywhy-table.ts` prints the table, and `p1f.sh` runs Food ring with nine foods for the forms;
+  [P1F-NOTES.md](P1F-NOTES.md) tells the story.
+
 - The options of study 1a (ADR 0091), each off by default: `credit` (the D of fresh ground, FLOW.fresh), `creditJobs`
   (which of its three jobs take it: `all`, `start`, `cap`, `fall`) and `creditOn` (`feeder`, form (i): a new cell of
   the territory takes the D of the tube cell that feeds it; `births`, form (ii): the agents read a level of their own

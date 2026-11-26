@@ -5,6 +5,7 @@
 import type { Boundary } from '../model/params';
 import { FLOW } from './flow';
 import { claimKey, grid, rngSeed, stream } from './growth-reference';
+import { PAY_RESPAWN, payChance } from './paid';
 import { PUSH, PUSH_CHANCES } from './territory';
 import type { AgentState } from './types';
 
@@ -153,6 +154,12 @@ export interface RespawnInput {
   territory?: Uint8Array;
   step: number;
   seed: number;
+  /**
+   * With the rules of stage 4 (ADR 0100): the budget of each strain before the step. The n respawns of a strain that
+   * pass their test then wait for it, and each claims its cell with the chance min(1, max(0, B) / n) (paid.ts
+   * payChance()) and a draw of the stream PAY_RESPAWN.
+   */
+  budget?: readonly number[];
 }
 
 /**
@@ -162,7 +169,7 @@ export interface RespawnInput {
  * birth · (D − from) / (1 − from), in float32 as the passes compute it. Of the agents that claim one cell, the one with
  * the highest key of the backend takes it. Returns the agents after the step, and how many draws the territory refused.
  */
-export function respawnStep(input: RespawnInput): { agents: AgentState[]; refused: number } {
+export function respawnStep(input: RespawnInput): { agents: AgentState[]; refused: number; waiting: number[] } {
   const { kind, g, step, memory } = input;
   const seed = input.seed >>> 0;
   const f = Math.fround;
@@ -191,6 +198,19 @@ export function respawnStep(input: RespawnInput): { agents: AgentState[]; refuse
     if (body < low || draw() >= f(f(birth * f(d - from)) / f(1 - from))) return;
     spots.set(id, { x: px, y: py, heading: f(draw() * TAU), cell: c });
   });
+  // The respawns that wait for the budget (ADR 0100): a chance per strain from their number.
+  const waiting = [0, 0, 0, 0];
+  for (const id of spots.keys()) {
+    const s = (input.agents[id]?.bits ?? 0) & 3;
+    waiting[s] = (waiting[s] ?? 0) + 1;
+  }
+  if (input.budget) {
+    const chances = waiting.map((n, s) => payChance(input.budget?.[s] ?? 0, n));
+    for (const id of [...spots.keys()]) {
+      const s = (input.agents[id]?.bits ?? 0) & 3;
+      if (stream(rngSeed(id, PAY_RESPAWN, step, seed))() >= (chances[s] ?? 0)) spots.delete(id);
+    }
+  }
   const claims = new Map<number, number>();
   for (const [id, spot] of spots)
     claims.set(spot.cell, Math.max(claims.get(spot.cell) ?? 0, claimKey(kind, id, step, seed)));
@@ -199,5 +219,5 @@ export function respawnStep(input: RespawnInput): { agents: AgentState[]; refuse
     if (!spot || claims.get(spot.cell) !== claimKey(kind, id, step, seed)) return { ...a };
     return { x: spot.x, y: spot.y, heading: spot.heading, bits: (a.bits & 3) | ALIVE };
   });
-  return { agents, refused };
+  return { agents, refused, waiting };
 }

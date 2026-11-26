@@ -6,7 +6,7 @@ import type { Boundary, Settings } from '../model/params';
 import { DISH_FILL } from './brush';
 import { FLOW, pcg } from './flow';
 import { strainEnds } from './pack';
-import { NO_KEY, PAID_KEY, paidKey } from './paid';
+import { NO_KEY, PAID_KEY, PAY_JONES, SHARE_SPLIT, payChance, paidKey, sharePays, shareSteps, shareSum } from './paid';
 import type { AgentState } from './types';
 
 const ALIVE = 4;
@@ -145,7 +145,10 @@ export interface GrowthInput {
    * neighbour may be.
    */
   territory?: Uint8Array;
-  /** With the rules of stage 4 (ADR 0071): the births that the flux pays. They need `territory` and `memory`. */
+  /**
+   * With the rules of stage 4 (ADR 0071, ADR 0100): the births that the budget pays, every birth of the step. They need
+   * `territory` and `memory`.
+   */
   paid?: PaidInput;
 }
 
@@ -153,7 +156,10 @@ export interface GrowthInput {
 export interface PaidInput {
   /** The sink rates of each strain before the step, one float per cell (Sim.readSinks()). */
   rates: readonly Float32Array[];
-  /** The budget of each strain before the step (lane paid.ts BUDGET_LANE of its state, Sim.readSinkState()). */
+  /**
+   * The budget of each strain that growth spends: the budget before the step (lane paid.ts BUDGET_LANE of its state,
+   * Sim.readSinkState()) after the deaths and respawns of the agent passes of the step (paid.ts budgetAfterMoves()).
+   */
   budget: readonly number[];
   /**
    * The keys that a GPU drew in the step, one float by id (Sim.readPaidKeys()): the rank then takes them. Without them
@@ -173,6 +179,16 @@ export interface PaidStep {
   claims: number[];
   /** The cell that each paid parent claims, by id. */
   parents: Map<number, number>;
+  /** The parents of Jones' rule of each strain that waited for the budget after the front (ADR 0100). */
+  waiting: number[];
+  /** The cell that each parent of Jones' rule claims that the budget paid, by id. */
+  jones: Map<number, number>;
+  /** The births and the deaths by shrinkage of each strain in the step (paid.ts PAID_COUNTS born and crowded). */
+  born: number[];
+  crowded: number[];
+  /** The sum P of the rates of the agents with a key of each strain, in its two counts (paid.ts shareSteps()). */
+  shareHigh: number[];
+  shareLow: number[];
 }
 
 /**
@@ -230,25 +246,29 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
     if (chance > 0 && Math.fround(stream(rngSeed(id, SHADE, step, seed))() * 255) < chance) return -1;
     return t;
   };
-  // Shrinkage, then the claims of the parents that survive.
+  // Shrinkage, then the claims of the parents that survive. With the budget (ADR 0100) a parent of Jones' rule waits for
+  // it and claims nothing yet, and a parent with the claim key 0 makes no claim.
   const claims = new Map<number, number>();
   const wants = new Map<number, number>();
+  const crowded = s.strains.map(() => 0);
   agents.forEach((a, id) => {
     const c = cellOf(a);
     if (!(a.bits & ALIVE) || c < 0) return;
     const n = windows[c * 2 + 1] ?? 0;
     if (shrink && (n < s.shrinkMin || n > s.shrinkMax)) {
       a.bits &= 3;
+      crowded[a.bits] = (crowded[a.bits] ?? 0) + 1;
       return;
     }
     const t = divideInto(a, id, c);
     if (t < 0) return;
     const key = claimKey(kind, id, step, seed);
+    if (input.paid && key === 0) return;
     wants.set(id, t);
-    claims.set(t, Math.max(claims.get(t) ?? 0, key));
+    if (!input.paid) claims.set(t, Math.max(claims.get(t) ?? 0, key));
   });
   if (!grow) return { agents, windows };
-  // The births that the flux pays, after Jones' births (ADR 0071): their claims join those of Jones' rule.
+  // The births that the budget pays (ADR 0071, ADR 0100): the front first, then the parents of Jones' rule.
   const paid = input.paid ? paidClaims(input, agents, occ, wants, claims) : undefined;
   // The births in the order of place(), per strain, and the dead agents in the order of their ids.
   const births = new Map<number, { strain: number; cell: number }>();
@@ -273,24 +293,30 @@ export function growthStep(input: GrowthInput): { agents: AgentState[]; windows:
       a.y = Math.min(Math.fround(y + fy), below(y + 1));
       a.heading = Math.fround(draw() * TAU);
       a.bits = strain | ALIVE;
+      if (paid) paid.born[strain] = (paid.born[strain] ?? 0) + 1;
     }
   });
+  if (paid) paid.crowded = crowded;
   return { agents, windows, ...(paid ? { paid } : {}) };
 }
 
 /**
- * The claims of the births that the flux pays in a growth step (ADR 0071; `test`, `rank` and `win` in growth.wgsl),
- * after Jones' claims: `agents` after shrinkage, `occ` the agents per cell after the moves, `wants` the cells that
- * Jones' parents claim, and `claims` the highest claim key of each cell, to which the paid claims are added.
+ * The claims of the births that the budget pays in a growth step (ADR 0071, ADR 0100; `test`, `rank`, `jones` and
+ * `win` in growth.wgsl): `agents` after shrinkage, `occ` the agents per cell after the moves, `wants` the cells of the
+ * children of Jones' parents, which wait for the budget, and `claims` the highest claim key of each cell, to which the
+ * paid claims are added.
  *
- * An agent of the front of strain s is alive and no parent of Jones' rule in this step; its cell has a sink rate of s
- * that is not 0 and is not starved for s; and it lies at the rim: a neighbour is open, empty after the moves and holds
- * no tube body of s. It draws the key −ln(1 − u) / |r| (paid.ts paidKey()) if a free cell of the territory of s lies
+ * An agent of the front of strain s is alive; its cell has a sink rate of s that is not 0 and is not starved for s; and
+ * it lies at the rim: a neighbour is open, empty after the moves and holds no tube body of s. A parent of Jones' rule
+ * may be one. It draws the key −ln(1 − u) / |r| (paid.ts paidKey()) if a free cell of the territory of s lies
  * beside it, as Jones' rule finds one, and if its claim key is not 0 (a claim with the key 0 could not be told from no
  * claim); every other agent has the key NO_KEY. The ⌊B⌋ agents of the strain with the least keys claim, the same key
- * and a smaller id first: each the cell of its child with its claim key, a free cell without a tube body of s if one
+ * and a smaller id first, but only those whose key k lies below B / P, k · P < B (paid.ts sharePays(); ADR 0100, part
+ * A), P the sum of the rates of the agents of the strain with a key in steps of 2^-12 (paid.ts shareSteps()): each the cell of its child with its claim key, a free cell without a tube body of s if one
  * lies beside it (the child goes out), else any free cell, picked with the draw of Jones' rule. Light may stop the
- * birth as it stops one of Jones' rule; then the agent makes no claim. A budget below 1 pays nothing.
+ * birth as it stops one of Jones' rule; then the agent makes no claim. A budget below 1 pays nothing. Then each of the n
+ * parents of Jones' rule of s that made no paid claim claims the cell of its child with the chance min(1, max(0, B − K)
+ * / n) (paid.ts payChance()), B the budget and K the paid claims of s, and a draw of the stream PAY_JONES.
  */
 function paidClaims(
   input: GrowthInput,
@@ -348,7 +374,7 @@ function paidClaims(
   };
   agents.forEach((a, id) => {
     const c = cellOf(a);
-    if (!(a.bits & ALIVE) || c < 0 || wants.has(id)) return;
+    if (!(a.bits & ALIVE) || c < 0) return;
     const strain = a.bits & 3;
     const rate = Math.abs(paid.rates[strain]?.[c] ?? 0);
     if (rate === 0 || starved(strain, c) || !atRim(strain, c)) return;
@@ -358,16 +384,25 @@ function paidClaims(
   });
   const ranked = paid.keys ?? keys;
   const ends = strainEnds(s.strains, agents.length);
+  const shareHigh = Array.from({ length: strains }, () => 0);
+  const shareLow = Array.from({ length: strains }, () => 0);
   for (let strain = 0; strain < strains; strain++) {
-    const budget = Math.floor(Math.fround(paid.budget[strain] ?? 0));
-    if (budget < 1) continue;
+    const budget = Math.floor(Math.max(0, Math.fround(paid.budget[strain] ?? 0)));
     const ids: number[] = [];
     for (let id = strain > 0 ? (ends[strain - 1] ?? 0) : 0; id < (ends[strain] ?? 0); id++)
       if ((ranked[id] ?? NO_KEY) < NO_KEY) ids.push(id);
+    // The sum P of the rates of the agents with a key (ADR 0100, part A).
+    for (const id of ids) {
+      const a = agents[id];
+      const steps = a ? shareSteps(paid.rates[strain]?.[cellOf(a)] ?? 0) : 0;
+      shareHigh[strain] = (shareHigh[strain] ?? 0) + Math.floor(steps / SHARE_SPLIT);
+      shareLow[strain] = (shareLow[strain] ?? 0) + (steps % SHARE_SPLIT);
+    }
+    const sum = shareSum(shareHigh[strain] ?? 0, shareLow[strain] ?? 0);
     ids.sort((p, q) => (ranked[p] ?? 0) - (ranked[q] ?? 0) || p - q);
     for (const id of ids.slice(0, budget)) {
       const a = agents[id];
-      if (!a) continue;
+      if (!a || !sharePays(ranked[id] ?? NO_KEY, sum, paid.budget[strain] ?? 0)) continue;
       const t = childCell(id, strain, cellOf(a));
       if (t < 0) continue;
       parents.set(id, t);
@@ -375,5 +410,24 @@ function paidClaims(
       counted[strain] = (counted[strain] ?? 0) + 1;
     }
   }
-  return { keys, front, claims: counted, parents };
+  // The parents of Jones' rule that the front did not pay, with what the front left (ADR 0100).
+  const jones = new Map<number, number>();
+  const waiting = Array.from({ length: strains }, () => 0);
+  const ready = [...wants].filter(([id]) => !parents.has(id));
+  for (const [id] of ready) {
+    const strain = (agents[id]?.bits ?? 0) & 3;
+    waiting[strain] = (waiting[strain] ?? 0) + 1;
+  }
+  const f = Math.fround;
+  const chances = waiting.map((n, strain) =>
+    payChance(f(Math.max(0, f(paid.budget[strain] ?? 0)) - (counted[strain] ?? 0)), n),
+  );
+  for (const [id, t] of ready) {
+    const strain = (agents[id]?.bits ?? 0) & 3;
+    if (stream(rngSeed(id, PAY_JONES, step, seed))() >= (chances[strain] ?? 0)) continue;
+    jones.set(id, t);
+    claims.set(t, Math.max(claims.get(t) ?? 0, claimKey(kind, id, step, seed)));
+  }
+  const none = () => Array.from({ length: strains }, () => 0);
+  return { keys, front, claims: counted, parents, waiting, jones, born: none(), crowded: none(), shareHigh, shareLow };
 }

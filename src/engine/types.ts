@@ -232,6 +232,11 @@ export interface Sim {
    * id: paid.ts NO_KEY for an agent without a key. Empty while the rules of stage 4 do not run.
    */
   readPaidKeys(): Promise<Float32Array>;
+  /**
+   * For tests: the counts of the last step that settle the budget (ADR 0100), paid.ts PAID_COUNT_LANES whole numbers
+   * per strain in the order of paid.ts PAID_COUNTS. Only zeros while the rules of stage 4 do not run.
+   */
+  readPaidCounts(): Promise<Uint32Array>;
   /** For tests: replaces the sink rates of a strain, one float per cell as readSinks() returns them, while the rules run. */
   writeSinks(data: Float32Array, strain?: number): void;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */

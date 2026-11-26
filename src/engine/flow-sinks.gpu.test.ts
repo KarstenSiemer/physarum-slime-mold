@@ -6,6 +6,7 @@ import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import { FLOW, FLOW_ITERATIONS, packFlow } from './flow';
 import {
   drifted,
+  driftOfFoods,
   flowPorts,
   flowPressure,
   flowStart,
@@ -20,7 +21,8 @@ import {
 } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
 import { rngSeed, stream } from './growth-reference';
-import { strainEnds } from './pack';
+import { growthTests, strainEnds } from './pack';
+import { FRONT_LANE, nextBudget, PAID_COUNT_LANES, PAID_COUNTS, paidIncrement } from './paid';
 import { flowSites, NO_SITES, type FlowSites, type FoodStroke } from './sites';
 import { RATE_ONE, SINK_STATE_LANES, SINKS, SUM_ONE } from './sinks';
 import { DRIFT_BYTES_PER_CELL_GL, SINK_BYTES_PER_CELL, SINK_BYTES_PER_CELL_GL } from './sizing';
@@ -186,15 +188,19 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
   }
 
   // Also with the levers of the crown (ADR 0086): 8 neighbours, the base conductance 0.002 and the flux to the front 2.
+  // And with two covered foods of strain 0 (ADR 0100): its sinks take the flux of both, and the food credits the budget
+  // for both.
   it.each([
-    ['', {}],
+    ['', {}, 1],
     [
       ' over 8 neighbours, with the base 0.002 and the flux to the front 2',
       { flowEdges: 8, flowBase: 0.002, frontFlux: 2 },
+      1,
     ],
+    [', with two covered foods', {}, 2],
   ] as const)(
     'takes the sinks and the sources in the pressure and adapts while the front took flux, as the CPU copy%s',
-    async (_, patch) => {
+    async (_, patch, foods) => {
       // Two strains in a dish with a wall that has a gap. Strain 0 covers a food dab: one covered port gives what its
       // sinks take, and it has no roles (one site). Strain 1 covers no food: its tube cells give it. Neither strain has
       // two sites with a role, so a tube adapts only while the front of its strain took flux in the step before.
@@ -203,6 +209,7 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       const s = stage4({ boundary: 'dish', seed: 19, ...patch });
       const sim = await make({ ...s, collisions: false }, w, h, n);
       const food: FoodStroke[] = [[{ kind: 'food', from: [30, 26], to: [30, 26], radius: 1.5 }]];
+      if (foods === 2) food.push([{ kind: 'food', from: [30, 12], to: [30, 12], radius: 1.5 }]);
       sim.paint(food.flat());
       const sites = flowSites(food, w, h, 'dish');
       sim.foodSites(sites);
@@ -226,6 +233,10 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
           Float32Array.from({ length: n }, () => Math.fround((rnd() < 0.5 ? -1 : 1) * rnd())),
           strain,
         );
+      // No growth test runs, so F stays as written: 1,000 agents of the front, and the cap leaves the credit whole.
+      const start = await sim.readSinkState();
+      for (const strain of [0, 1]) start[strain * SINK_STATE_LANES + FRONT_LANE] = 1000;
+      sim.writeSinkState(start);
       // Per strain the tube cells whose flow memory changed in the first step, and in the steps after it.
       const frozen = [0, 0];
       const adapted = [0, 0];
@@ -233,7 +244,7 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
         const before = await sim.readSinkState();
         const prior = [await sim.readFlow(0), await sim.readFlow(1)];
         sim.run(1);
-        const [trail, state] = [await sim.readTrail(), await sim.readSinkState()];
+        const [trail, state, counts] = [await sim.readTrail(), await sim.readSinkState(), await sim.readPaidCounts()];
         for (const strain of [0, 1]) {
           const at = `strain ${String(strain)}, step ${String(step)}`;
           const u = blockOf(s, sites, strain);
@@ -243,6 +254,24 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
           // Every step the front of each strain takes flux; before the first step it took none.
           expect(sinks.state[4], at).toBe(1);
           expect(took, at).toBe(step > 0);
+          // The budget after the step (ADR 0100): the deaths and births of the step, then the credit of each covered
+          // food up to the agents of the front.
+          const count = (name: keyof typeof PAID_COUNTS) => counts[strain * PAID_COUNT_LANES + PAID_COUNTS[name]] ?? 0;
+          const earlier = stateOf(before, strain);
+          const front = growthTests(s, step).grow ? count('front') : (earlier[6] ?? 0);
+          const settled = {
+            died: count('died'),
+            reborn: count('reborn'),
+            crowded: count('crowded'),
+            born: count('born'),
+          };
+          const increment = paidIncrement(s.flowStrength);
+          const budget = nextBudget(earlier[5] ?? 0, settled, front, sinks.state[3] ?? 0, true, increment);
+          expect(sinks.state[5], `budget, ${at}`).toBe(budget);
+          // Below the agents of the front the credit is whole: the increment for each covered food.
+          const settledOnly = nextBudget(earlier[5] ?? 0, settled, front, 0, false, increment);
+          const credit = Math.fround(increment * Math.max(1, sinks.state[3] ?? 0));
+          expect(budget, `the credit, ${at}`).toBe(Math.fround(settledOnly + credit));
           const next = flowStep(grid, u, old, trail, step, s.seed, sites.cells, sinks);
           const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
           expect(worstOf(memory, next.memory), `memory, ${at}`).toBeLessThan(1e-3);
@@ -264,9 +293,9 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
           fields[strain] = next;
         }
       }
-      // The covered port of strain 0, and none of strain 1.
+      // The covered ports of strain 0, and none of strain 1.
       const state = await sim.readSinkState();
-      expect([stateOf(state, 0)[3], stateOf(state, 1)[3]]).toEqual([1, 0]);
+      expect([stateOf(state, 0)[3], stateOf(state, 1)[3]]).toEqual([foods, 0]);
       expect(frozen).toEqual([0, 0]);
       for (const k of adapted) expect(k).toBeGreaterThan(500);
     },
@@ -404,9 +433,11 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
    * rate of k / 16 on every cell (k from 0 to 15, with a sign and a rest that R rounds away), and a pressure of whole
    * numbers in every lane: so take / G and every value that a sensor reads are exact. Strain 0 takes flux with R = 16,
    * strain 1 with R = 8 takes none. `shift`: a pressure added to every lane of every tube cell, + for strain 0 and −
-   * for strain 1. The memory 0.5 lets almost no agent starve and no dead agent come to life.
+   * for strain 1. The memory 0.5 lets almost no agent starve and no dead agent come to life. `covered`: the foods that
+   * the last flow pass of strain 0 covered, which divide its drift (ADR 0100, part B); with it a trail of whole numbers
+   * 0 to 3 in the lane of strain 0, which the sensors read against the drift, so that the size of the drift counts.
    */
-  async function driftCase(drift: number, shift = 0, frontFlux = 1) {
+  async function driftCase(drift: number, shift = 0, frontFlux = 1, covered = 0) {
     const [w, h] = [64, 64];
     const n = w * h;
     const RA = 30;
@@ -424,6 +455,12 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       }
     sim.update(s);
     sim.writeTerritory(new Uint8Array(n).fill(3));
+    const trail = new Float32Array(n * 4);
+    if (covered > 0) {
+      const t = random(67);
+      for (let c = 0; c < n; c++) trail[c * 4] = Math.floor(t() * 4);
+      sim.writeTrail(trail);
+    }
     const rnd = random(61);
     const memories = [0, 1].map((strain) => {
       const m = new Float32Array(n * 4);
@@ -443,7 +480,7 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       return r;
     });
     const state = new Float32Array(SINK_STATE_LANES * 2);
-    state.set([16, 0, 0, 0, 1, 0, 0, 0], 0);
+    state.set([16, 0, 0, covered, 1, 0, 0, 0], 0);
     state.set([8, 0, 0, 0, 0, 0, 0, 0], SINK_STATE_LANES);
     sim.writeSinkState(state);
     const pressures = [0, 1].map((strain) => {
@@ -474,10 +511,14 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
       const lanes = (c: number) => p.subarray(c * 4, c * 4 + 4);
       const a = at(x, y);
       const ground = groundOf(tube(a), lanes(a), form === 'no take' ? 0 : (t[a] ?? 0), 9);
+      const weight = driftOfFoods(drift, strain === 0 ? covered : 0);
+      // What a sensor reads without the rules: the trail of strain 0 times the weight of the strain for it.
+      const attraction = s.strains[strain]?.attraction[0] ?? 0;
+      const read = (c: number) => Math.fround((trail[c * 4] ?? 0) * attraction);
       return [at(x + 9, y), at(x + 6, y - 6), at(x + 6, y + 6)].map((c) =>
         form === 'all'
-          ? drifted(0, Math.fround(drift), 0, true, lanes(c))
-          : drifted(0, Math.fround(drift), ground, tube(c), lanes(c)),
+          ? drifted(read(c), weight, 0, true, lanes(c))
+          : drifted(read(c), weight, ground, tube(c), lanes(c)),
       );
     };
     const tubeAgent = (x: number, y: number, strain: number) => (memories[strain]?.[(y * w + x) * 4 + 2] ?? 0) > 0;
@@ -497,12 +538,14 @@ describe.each(Object.entries(BACKENDS))('the flow with the rules of stage 4 on %
 
   it('turns an agent by the pressure on the tubes of its strain and by what its sink takes, times the drift', async () => {
     // With the flux to the front 2 (ADR 0086) every sink takes twice its share of the flow strength.
-    for (const [drift, frontFlux] of [
-      [1.5, 1],
-      [0, 1],
-      [1.5, 2],
+    // With 3 covered foods strain 0 reads the drift of one food, 0.5 (ADR 0100, part B).
+    for (const [drift, frontFlux, covered] of [
+      [1.5, 1, 0],
+      [0, 1, 0],
+      [1.5, 2, 0],
+      [1.5, 1, 3],
     ] as const) {
-      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift, 0, frontFlux);
+      const { s, sim, agents, placed, reads, tubeAgent, takes, RA } = await driftCase(drift, 0, frontFlux, covered);
       const ra = Math.fround((RA * Math.PI) / 180);
       const counts = { keep: 0, left: 0, right: 0, random: 0, offTube: 0, byTake: 0, dead: 0 };
       for (const { id, x, y, strain } of placed) {

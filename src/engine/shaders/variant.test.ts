@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { PAID_KEY } from '../paid';
+import { PAID_KEY, PAY_JONES, PAY_RESPAWN } from '../paid';
 import { PUSH } from '../territory';
 import { variant } from './variant';
 
@@ -98,8 +98,9 @@ function inOrder(less: string, more: string, skip = new Set<string>()) {
 // The passes that the territory changes (ADR 0068). Its lines come only with those of the flow, and without them each
 // source is the one of the code before: with the flow alone, and without the flow. They add lines to the source of
 // the flow, and replace only the lines after a `//#else` of TERRITORY: in agents.wgsl the name of the sensor of the
-// flow, which the drift wraps (ADR 0070), and the three calls of the sensors, which pass them what the cell of the
-// agent gives (ADR 0075).
+// flow, which the drift wraps (ADR 0070), the three calls of the sensors, which pass them what the cell of the agent
+// gives (ADR 0075), and the claim of a placement, which a respawn leaves to the budget (ADR 0100); in growth.wgsl the
+// claim of a parent of Jones' rule, which waits for the budget (ADR 0100).
 describe.each(['./agents.wgsl', './growth.wgsl'])('the territory in %s', (path) => {
   const source = read(path);
 
@@ -108,7 +109,7 @@ describe.each(['./agents.wgsl', './growth.wgsl'])('the territory in %s', (path) 
     for (const off of [variant(source), flow]) expect(off.includes('territory')).toBe(false);
     expect(both.includes('var territory: texture_2d<u32>;')).toBe(true);
     const replaced = elseLines(source, 'TERRITORY');
-    expect(replaced.size).toBe(path === './agents.wgsl' ? 4 : 0);
+    expect(replaced.size).toBe(path === './agents.wgsl' ? 5 : 1);
     inOrder(flow, both, replaced);
   });
 });
@@ -158,8 +159,8 @@ describe('the random streams of the agent passes', () => {
 
   it('gives every draw of the flow a stream of its own, in WGSL and in GLSL', () => {
     const wgsl = [
-      ...streams('./agents.wgsl', /^const (STEER|TOOL|SHRINK|BLOCK|STARVE|RESPAWN) = (\d+)u;/gm),
-      ...streams('./growth.wgsl', /^const (GROW|BIRTH|PLACE_ORDER|SHADE|PAID_KEY) = (\d+)u;/gm),
+      ...streams('./agents.wgsl', /^const (STEER|TOOL|SHRINK|BLOCK|STARVE|RESPAWN|PAY_RESPAWN) = (\d+)u;/gm),
+      ...streams('./growth.wgsl', /^const (GROW|BIRTH|PLACE_ORDER|SHADE|PAID_KEY|PAY_JONES) = (\d+)u;/gm),
       ...streams('./territory.wgsl', /^const (PUSH) = (\d+)u;/gm),
     ];
     expect(wgsl.map(([name]) => name).sort()).toEqual(
@@ -168,6 +169,8 @@ describe('the random streams of the agent passes', () => {
         'BLOCK',
         'GROW',
         'PAID_KEY',
+        'PAY_JONES',
+        'PAY_RESPAWN',
         'PLACE_ORDER',
         'PUSH',
         'RESPAWN',
@@ -180,8 +183,11 @@ describe('the random streams of the agent passes', () => {
     );
     expect(new Set(wgsl.map(([, n]) => n)).size).toBe(wgsl.length);
     const glsl = [
-      ...streams('../gl/glsl/tools.glsl', /^const uint (STEER|TOOL|SHRINK|BLOCK|STARVE|RESPAWN) = (\d+)u;/gm),
-      ...streams('../gl/glsl/growth.glsl', /^const uint (GROW|BIRTH|PLACE_ORDER|SHADE|PAID_KEY) = (\d+)u;/gm),
+      ...streams(
+        '../gl/glsl/tools.glsl',
+        /^const uint (STEER|TOOL|SHRINK|BLOCK|STARVE|RESPAWN|PAY_RESPAWN) = (\d+)u;/gm,
+      ),
+      ...streams('../gl/glsl/growth.glsl', /^const uint (GROW|BIRTH|PLACE_ORDER|SHADE|PAID_KEY|PAY_JONES) = (\d+)u;/gm),
       ...streams('../gl/glsl/territory.frag', /^const uint (PUSH) = (\d+)u;/gm),
     ];
     expect(Object.fromEntries(glsl)).toEqual(Object.fromEntries(wgsl));
@@ -194,6 +200,11 @@ describe('the random streams of the agent passes', () => {
     expect(Object.fromEntries(wgsl).PUSH).toBe(PUSH);
     expect(Object.fromEntries(wgsl).PAID_KEY).toBe(PAID_KEY);
     expect(PAID_KEY % 0x10000).not.toBe(PUSH);
+    // The draws of the respawns and the parents of Jones' rule that wait for the budget (ADR 0100): the CPU copies take
+    // their numbers from paid.ts.
+    expect(Object.fromEntries(wgsl).PAY_RESPAWN).toBe(PAY_RESPAWN);
+    expect(Object.fromEntries(wgsl).PAY_JONES).toBe(PAY_JONES);
+    for (const n of [PAY_RESPAWN, PAY_JONES]) expect(n % 0x10000).not.toBe(PUSH);
   });
 
   it('seeds every draw of a shader with a named stream, and the start with its own streams', () => {
@@ -202,6 +213,8 @@ describe('the random streams of the agent passes', () => {
       'BLOCK',
       'GROW',
       'PAID_KEY',
+      'PAY_JONES',
+      'PAY_RESPAWN',
       'PLACE_ORDER',
       'RESPAWN',
       'SHADE',
@@ -221,9 +234,10 @@ describe('the random streams of the agent passes', () => {
           ),
         );
     const all = [...calls('./'), ...calls('../gl/glsl/')];
-    // Both backends draw in the same places: 15 calls each (agents, growth, the start, the push of the territory, and
-    // the key and the cell of a child of the births that the flux pays).
-    expect(all.length).toBe(30);
+    // Both backends draw in the same places: 18 calls each (agents, growth, the start, the push of the territory, the
+    // key and the cell of a child of the births that the flux pays, and the draws of the budget and the test of a dab of
+    // Inoculate for them, ADR 0100).
+    expect(all.length).toBe(36);
     for (const [file, stream] of all) {
       if (file.startsWith('init.')) expect(stream, file).toBe('7u + round * 0x10000u');
       else expect(names, `${file}: ${stream}`).toContain(stream);

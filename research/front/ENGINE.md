@@ -122,7 +122,7 @@ the values of the crown (E5b, ADR 0087).
 | state               | `sinks.state`: 2 vec4 per strain, in place                        | `sinks.state`: `RGBA32F`, 2 × strains, 2 copies     |
 | pressure (E2b)      | the flow's `pressureArrays`, a layer per strain, to `claim`       | `sinks.pressures`: `RGBA32F`, the mean, lane s      |
 | take / G (E2e)      | `sinks.takes`: `r32float`, a layer per strain, `takes` writes it  | `sinks.takes`: `RGBA32F`, lane s, PASS 5 writes it  |
-| counts F, K (E3)    | `sinks.state` from `PAID_COUNTS_BYTE`, atomics, cleared each step | `sinks.counts`: `RGBA32F`, 2 × 1, a lane per strain |
+| counts (E3, 0100)   | `sinks.state` from `PAID_COUNTS_BYTE`, atomics, cleared each step | `sinks.counts`: `RGBA32F`, 8 × 1, a lane per strain |
 | keys (E3)           | `sinks.state` from `PAID_KEYS_BYTE`, a float by id                | `sinks.keys`: `R32F`, a texel per agent             |
 
 - The territory and the owners hold one byte per cell, bit s for strain s. In the texture of WebGPU cell (x, y) is
@@ -131,8 +131,9 @@ the values of the crown (E5b, ADR 0087).
   sink of the step, on both backends. A reader takes its size; `abs(r) · 2^24` gives the whole number back.
 - The sums per strain: R low, R high (R in steps of 2^-16), C, N (`SINK_SUM_WORDS`). The state per strain
   (`SINK_STATE_LANES`): R as a float in the unit of the rate, C, N, the covered ports; then 1 while the front takes
-  flux, the budget of the paid births, F and K of the step (`BUDGET_LANE`, `FRONT_LANE`, `CLAIMS_LANE` in
-  `src/engine/paid.ts`). On WebGPU the buffer of the state holds room for 4 strains, then the counts, then the keys:
+  flux, the budget of the paid births, F of the last growth step and K of the step (`BUDGET_LANE`, `FRONT_LANE`,
+  `CLAIMS_LANE` in `src/engine/paid.ts`). Since ADR 0100 the counts are 8 per strain (`PAID_COUNTS`): F, K, and the
+  births and deaths that settle the budget. On WebGPU the buffer of the state holds room for 4 strains, then the counts, then the keys:
   `readSinkState()` gives the lanes of the strains of the settings only.
 - The order in a step: first, per strain, what the sensors read of the flow of the step before (E2e; WebGPU `takes`
   of `flow.wgsl`, WebGL2 PASS 5 of `flow.frag`); the agent passes and growth read the current copy of the territory;

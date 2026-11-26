@@ -2922,6 +2922,50 @@ test passes there in 2.6 minutes. The records are in `logs/engine/reid-0088/`:
 | `mutations.txt`       | the tests that fail for each of the wrong rules SA1 to SA23                                      |
 | `turns.txt`           | the order of the runs, with the load of the machine at the start of each                         |
 
+### 36. Which scenes change when every birth comes from the budget? [ADR 0100]
+
+Every birth costs one from the budget of the paid births while the rules of the growth front run, a death gives one
+back, each covered food gives the front its flux, and the food credits the budget only up to the agents of the front.
+Only the passes of the rules change, so every scene without them must keep its bytes.
+
+**The bytes of the scenes.** The digests of the branch, and of `main` from a copy of `main` (`git archive`) run with
+`--root`. Keep that copy outside the checkout: the configuration of the research runs takes every
+`research/**/*.gpu.test.ts`, so a copy inside it runs its own tests beside those of the branch, with the code of
+`main`, and both write the same records.
+
+```bash
+VITE_FLOW=1 VITE_NAME=g100-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g100-digest-branch.jsonl <main>/research/flow/out/engine/main-digest.jsonl
+```
+
+Result: 58 of 68 runs are equal. The 10 others are the five scenes with the rules on each backend; they differ also
+after 3,000 steps (`VITE_ONLY=y-maze,y-maze-both,y-maze-blank,slime-everywhere,crown VITE_STEPS=3000`).
+
+**The wrong rules** of ADR 0100, and those whose texts follow the code again (about 40 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts L3 TY108 TY117 TY142 TY154 TY159 TY160 TY166 TY167 TY168 TY169 TY171 TY172 TY173 TY174 TY177 TY178 TY187 TY190 TY192 TY193 TY195 TY196 TY197 TY199 TY204 TY238 TY251 TY261 LV7 LV8 LV14 LV15 FP15 PB1 PB2 PB3 PB4 PB5 PB6 PB7 PB8 PB9 PB10 PB11 PB12 PB13 PB14 PB15
+```
+
+Result: each of the 49 wrong rules fails at least one test. TY177, PB14 and PB15 needed two more checks: the counts F
+and K of a growth step against the CPU copy (`paid.gpu.test.ts`), and the whole credit of two covered foods while the
+budget lies below the agents of the front (`flow-sinks.gpu.test.ts`).
+
+**The measures** are in ADR 0100: `bash research/front/p100.sh ring|help|y|crown`, and `table` for the table of Food
+ring.
+
+**Parts A and B of ADR 0100** (the share of a sink limits its paid births; the drift of one food). The digests again:
+58 of 68 runs keep the bytes of `main`, the other 10 are the five scenes with the rules. The new wrong rules, and those
+whose texts followed the code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts PB16 PB17 PB18 PB19 PB20 PB21 PB22 PB23 TY120 TY123 TY159 TY232 TY233 TY234 TY235 TY237 TY246 TY247 TY248 TY250
+```
+
+Result: each fails at least one test. PB16 and PB17 needed a trail in the case of the drift of
+`flow-sinks.gpu.test.ts`: without one every sensor reads 0 less the drift times the pressure, and the size of the
+drift changes no turn.
+
 ## The logs
 
 The logs are one archive in the repository, `logs.tar.gz`: 927 files, 22.6 MB of text. Unpacked,

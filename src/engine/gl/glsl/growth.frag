@@ -2,7 +2,8 @@
 // programs.ts compiles one program per PASS, so that each binds only its own samplers:
 // 0 row sums of the occupancy over both windows, 1 window counts, 2 the tests of the agents (shrinkage deletes,
 // a parent marks GROWS and its neighbour), 3 one level of a pyramid of sums, 4 the births, and with the rules of stage
-// 4 5 the rank of the births that the flux pays (ADR 0071).
+// 4 5 the rank of the births that the flux pays (ADR 0071) and 6 the parents of Jones' rule that the budget pays (ADR
+// 0100).
 
 // Flow in the tubes (ADR 0029; `//#if FLOW` in ../../shaders/growth.wgsl), and the territory of each strain (ADR 0068;
 // `//#if TERRITORY` there): programs.ts compiles PASS 2 with them, and PASS 5 always with both.
@@ -62,7 +63,7 @@ void main() {
 }
 #endif
 
-#if PASS == 2 || PASS == 5
+#if PASS == 2 || PASS == 5 || PASS == 6
 uniform sampler2D agentsIn;
 uniform sampler2D occ; // agents per cell after this step's moves
 uniform sampler2D env;
@@ -306,19 +307,28 @@ void main() {
   if (shrinkTest()) {
     float n = texelFetch(windows, cellCoord(c), 0).g;
     if (n < float(P.shrinkage.z) || n > float(P.shrinkage.w)) {
+#if TERRITORY
+      // The plasm of the agent goes back to the budget (ADR 0100).
+      result.w = float((bits & 3u) | CROWDED);
+#else
       result.w = float(bits & 3u);
+#endif
       return;
     }
   }
   int k = target(bits, c, i);
-  if (k >= 0) result.w = float(bits | GROWS | (uint(k) << DIR_SHIFT));
 #if TERRITORY
-  // The births that the flux pays, after Jones' rule (ADR 0071).
-  if (k < 0 && growthTest()) {
+  // While the rules of stage 4 run, every birth costs one from the budget (ADR 0100): a parent of Jones' rule marks
+  // JONES and waits for what the front leaves (PASS 6), and every agent of the front may be paid first (PASS 5), a
+  // parent of Jones' rule too.
+  if (k >= 0) result.w = float(bits | JONES | (uint(k) << DIR_SHIFT));
+  if (growthTest()) {
     float key;
-    if (paidTest(bits, c, i, key)) result.w = float(bits | FRONT);
+    if (paidTest(bits, c, i, key)) result.w = float(bitsOf(result) | FRONT);
     paidKey = vec4(key);
   }
+#else
+  if (k >= 0) result.w = float(bits | GROWS | (uint(k) << DIR_SHIFT));
 #endif
 }
 #endif
@@ -327,10 +337,13 @@ void main() {
 // The rank of the births that the flux pays (rank in growth.wgsl; ADR 0071), after PASS 2 in a growth step. An agent
 // with a key counts the agents of its strain with a smaller key, or with the same key and a smaller id, and stops when
 // the count reaches ⌊B⌋ of its strain. Below it the agent marks GROWS, PAID and the neighbour of its child (paidCell()),
-// and the points of growth.vert claim the neighbour for it as for a parent of Jones' rule. A budget below 1 pays
-// nothing.
+// and the points of growth.vert claim the neighbour for it as for a parent of Jones' rule. An agent whose key k is not
+// below B / P (k · P < B), P the sum of the rates of the agents of its strain with a key (paid.vert SHARE, texels
+// shareHigh and shareLow of the counts), claims nothing either (paid.ts sharePays(); ADR 0100, part A). A budget below
+// 1 pays nothing.
 uniform sampler2D keys; // the key of every agent of the test (PASS 2), by its texel
 uniform sampler2D state; // the state of the strains (sinks.frag PASS 3), texel (1, s): y the budget of strain s
+uniform sampler2D paidCounts; // the counts of the step (paid.vert): texel j count j of paid.ts PAID_COUNTS
 
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy);
@@ -341,7 +354,15 @@ void main() {
   if (i >= P.grid.z || mine == NO_KEY) return;
   uint bits = bitsOf(a);
   uint s = bits & 3u;
-  uint budget = uint(texelFetch(state, ivec2(1, int(s)), 0).y);
+  // The budget after the agent pass (budgetOf in growth.wgsl): plus its deaths, less its respawns.
+  float died = texelFetch(paidCounts, ivec2(4, 0), 0)[int(s)] - texelFetch(paidCounts, ivec2(3, 0), 0)[int(s)];
+  float left = max(0.0, texelFetch(state, ivec2(1, int(s)), 0).y + died);
+  // P from its two counts (paid.ts shareSum()): whole numbers below 2^24 in each texel.
+  uint high = uint(texelFetch(paidCounts, ivec2(8, 0), 0)[int(s)]);
+  uint low = uint(texelFetch(paidCounts, ivec2(9, 0), 0)[int(s)]);
+  float share = float(high * 64u + low) * (1.0 / 4096.0);
+  if (!(mine * share < left)) return;
+  uint budget = uint(left);
   uint j = s > 0u ? P.strainEnd[s - 1u] : 0u;
   ivec2 at = ivec2(int(j) % agentWidth, int(j) / agentWidth);
   uint before = 0u;
@@ -353,7 +374,32 @@ void main() {
   }
   if (before >= budget) return;
   int k = paidCell(bits, cellOf(a.xy), i);
-  if (k >= 0) result.w = float(bits | GROWS | PAID | (uint(k) << DIR_SHIFT));
+  // A parent of Jones' rule that the front pays waits no longer (ADR 0100): it leaves JONES and its neighbour.
+  if (k >= 0) result.w = float((bits & ~(JONES | DIRS)) | GROWS | PAID | (uint(k) << DIR_SHIFT));
+}
+#endif
+
+#if PASS == 6
+// The parents of Jones' rule that the budget pays (jones in growth.wgsl; ADR 0100), after PASS 5 and the counts of
+// paid.vert in a growth step: each of the n parents of strain s that still marks JONES claims its child with the chance
+// min(1, max(0, B − K) / n), B the budget after the agent pass and K the paid claims, and a draw of its own. It then
+// marks GROWS, and the points of growth.vert claim its neighbour.
+uniform sampler2D state;
+uniform sampler2D paidCounts;
+
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  uint i = uint(t.y * agentWidth + t.x);
+  vec4 a = texelFetch(agentsIn, t, 0);
+  result = a;
+  uint bits = bitsOf(a);
+  if (i >= P.grid.z || (bits & JONES) == 0u) return;
+  int s = int(bits & 3u);
+  float died = texelFetch(paidCounts, ivec2(4, 0), 0)[s] - texelFetch(paidCounts, ivec2(3, 0), 0)[s];
+  float left = max(0.0, texelFetch(state, ivec2(1, s), 0).y + died) - texelFetch(paidCounts, ivec2(1, 0), 0)[s];
+  float chance = min(1.0, max(0.0, left) / texelFetch(paidCounts, ivec2(5, 0), 0)[s]);
+  uint rng = rngSeed(i, PAY_JONES);
+  if (rand(rng) < chance) result.w = float(bits | GROWS);
 }
 #endif
 
@@ -477,6 +523,11 @@ void main() {
   float fx = rand(rng);
   float fy = rand(rng);
   float heading = rand(rng) * TAU;
+#if TERRITORY
+  // A birth costs one from the budget (ADR 0100): paid.vert counts BORN.
+  result = vec4(inCell(cellCoord(c), vec2(fx, fy)), heading, float(s | ALIVE | BORN));
+#else
   result = vec4(inCell(cellCoord(c), vec2(fx, fy)), heading, float(s | ALIVE));
+#endif
 }
 #endif

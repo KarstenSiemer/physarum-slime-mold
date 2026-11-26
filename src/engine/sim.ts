@@ -34,7 +34,7 @@ import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
-import { PAID_COUNTS_BYTE, PAID_COUNTS_BYTES, PAID_KEYS_BYTE } from './paid';
+import { PAID_COUNT_LANES, PAID_COUNTS_BYTE, PAID_COUNTS_BYTES, PAID_KEYS_BYTE } from './paid';
 import { SINK_STATE_LANES, SINK_SUM_WORDS } from './sinks';
 import { packTerritory, territoryOn } from './territory';
 import { grainsShown, STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
@@ -1688,6 +1688,8 @@ export class Simulation implements Sim {
     if (growth && tests.grow) {
       enc.clearBuffer(growth.claims);
       enc.clearBuffer(growth.births);
+      // The marks of the paid parents of `rank` for `jones` (growth.wgsl, ADR 0100), before `win` writes it.
+      if (territoryOn(this.settings)) enc.clearBuffer(growth.dead);
     }
     // The rules of stage 4 (ADR 0068): the agent passes and growth read the territory of the step before, the owners
     // pass fills the owners anew, and the push writes the next territory.
@@ -1792,9 +1794,25 @@ export class Simulation implements Sim {
           territoryView,
           pressures,
           takes,
+          sinks ? sinks.state : null,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
+      // With the rules of stage 4 the respawns that `claim` counted claim their cells with the chance that the budget
+      // gives (agents.wgsl `pay`, ADR 0100): the group holds the state of the sinks, which dropSinks() forgets with it.
+      // Then those that came to life cost one each (`reborn`).
+      if (flowing?.pay && flowing.reborn && sinks) {
+        const resources = [this.params, this.agentBuffer, null, null, this.env, null, null, occ, col.claims];
+        const more = [null, null, null, flowMemory, flowUniform, territoryView, null, null, sinks.state];
+        for (const [name, pipeline] of [
+          ['pay', flowing.pay],
+          ['reborn', flowing.reborn],
+        ] as const) {
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, this.bind(`${name}${q}${a}${held}-sinks`, pipeline, [...resources, ...more]));
+          pass.dispatchWorkgroups(...this.groups);
+        }
+      }
       // Without the flow one `settle` serves every variant of the agent passes. With the flow each variant has its
       // own (Kernels.flowing()), so the key names the variant, as the keys of `move` and `claim` do.
       const settle = flowing?.settle ?? k.settle;
@@ -2071,6 +2089,14 @@ export class Simulation implements Sim {
     return all.slice(PAID_KEYS_BYTE / 4, PAID_KEYS_BYTE / 4 + this.agents);
   }
 
+  /** For tests: the counts of the last step that settle the budget (Sim.readPaidCounts(); ADR 0100). */
+  async readPaidCounts(): Promise<Uint32Array> {
+    const strains = flowStrains(this.settings);
+    if (!this.sinks) return new Uint32Array(PAID_COUNT_LANES * strains);
+    const all = new Uint32Array(await readBuffer(this.device, this.sinks.state));
+    return all.slice(PAID_COUNTS_BYTE / 4, PAID_COUNTS_BYTE / 4 + PAID_COUNT_LANES * this.sinks.strains);
+  }
+
   /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
   writeSinks(data: Float32Array, strain = 0) {
     if (!territoryOn(this.settings)) return;
@@ -2301,7 +2327,7 @@ export class Simulation implements Sim {
         ...GROWTH_BINDINGS[name],
         ...(flow ? GROWTH_FLOW_BINDINGS[name] : []),
         ...(territory ? GROWTH_TERRITORY_BINDINGS[name] : []),
-      ];
+      ].filter((b) => !territory || !(GROWTH_TERRITORY_UNUSED[name] ?? []).includes(b));
       const stage4 = [flowMemory, flowUniform, territory, sinks?.rates ?? null, sinks?.state ?? null];
       return [...resources, extra, ...stage4].map((r, i) => (bindings.includes(i) ? r : null));
     };
@@ -2316,8 +2342,10 @@ export class Simulation implements Sim {
     run('windowSums', cellGroups);
     run('test', this.groups);
     if (grow) {
-      // The rank of the births that the flux pays, after the keys of `test` (ADR 0071).
+      // The rank of the births that the flux pays, after the keys of `test` (ADR 0071); then the parents of Jones' rule
+      // that the budget pays (ADR 0100).
       if (paid) run('rank', this.groups);
+      if (paid) run('jones', this.groups);
       run('win', this.groups);
       const build = (name: 'buildCells' | 'buildDead', n: number) => {
         const pipeline = k[name];
@@ -2491,7 +2519,8 @@ export const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   rowSums: [0, 3, 5],
   windowSums: [0, 5, 6],
   test: [0, 1, 2, 3, 4, 6, 7],
-  rank: [0, 1, 2, 3, 7],
+  rank: [0, 1, 2, 3, 4, 6, 7, 10],
+  jones: [0, 1, 2, 3, 4, 6, 7, 10],
   win: [0, 1, 2, 3, 4, 6, 7, 8, 10],
   buildCells: [0, 8, 9, 14],
   buildDead: [0, 10, 11, 14],
@@ -2507,6 +2536,7 @@ export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]
   windowSums: [],
   test: [15, 16],
   rank: [15, 16],
+  jones: [15, 16],
   win: [15, 16],
   buildCells: [],
   buildDead: [],
@@ -2516,18 +2546,25 @@ export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]
 /**
  * The bindings that a pass of growth.wgsl uses in addition while the rules of stage 4 run (`//#if TERRITORY`): the
  * territory, in the passes that pick the cell of a child; the sink rates and the state of the sinks with the counts
- * and the keys of the paid births, in `test` and `rank` (ADR 0071).
+ * and the keys of the paid births, in `test` and `rank` (ADR 0071), and the counts in `jones` and `birth` (ADR 0100).
  */
 export const GROWTH_TERRITORY_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   rowSums: [],
   windowSums: [],
   test: [17, 18, 19],
   rank: [17, 19],
+  jones: [17, 19],
   win: [17],
   buildCells: [],
   buildDead: [],
-  birth: [],
+  birth: [19],
 };
+
+/**
+ * The bindings that a pass of growth.wgsl no longer uses while the rules of stage 4 run: `test` claims no cell then,
+ * because every parent of Jones' rule waits for the budget (ADR 0100).
+ */
+export const GROWTH_TERRITORY_UNUSED: Partial<Record<keyof GrowthKernels, readonly number[]>> = { test: [7] };
 
 /** The passes of growth and shrinkage (growth.wgsl, ADR 0025). `rank`: only with the rules of stage 4 (ADR 0071). */
 interface GrowthKernels {
@@ -2535,6 +2572,7 @@ interface GrowthKernels {
   windowSums: GPUComputePipeline;
   test: GPUComputePipeline;
   rank?: GPUComputePipeline;
+  jones?: GPUComputePipeline;
   win: GPUComputePipeline;
   buildCells: GPUComputePipeline;
   buildDead: GPUComputePipeline;
@@ -2560,9 +2598,15 @@ interface Steering {
   claim: GPUComputePipeline;
 }
 
-/** The agent passes with the flow in the tubes (Kernels.flowing()): `settle` places agents by the flow too. */
+/**
+ * The agent passes with the flow in the tubes (Kernels.flowing()): `settle` places agents by the flow too. `pay`: with
+ * the rules of stage 4, the respawns that the budget pays, and `reborn`, which counts those that came to life (ADR
+ * 0100).
+ */
 interface Flowing extends Steering {
   settle: GPUComputePipeline;
+  pay?: GPUComputePipeline;
+  reborn?: GPUComputePipeline;
 }
 
 /** The passes of the flow in the tubes (flow.wgsl): the update, and the pressure iteration by RECENTRE (0, 1, 2). */
@@ -2679,6 +2723,7 @@ class Kernels {
       const pipeline = (entryPoint: string) =>
         this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
       p = { move: pipeline('advance'), claim: pipeline('claim'), settle: pipeline('settle') };
+      if (territory) Object.assign(p, { pay: pipeline('pay'), reborn: pipeline('reborn') });
       this.flowingPipelines.set(key, p);
     }
     return p;
@@ -2895,6 +2940,8 @@ class Kernels {
     };
     // The rank of the births that the flux pays (ADR 0071): its entry point is in the source only with the rules.
     if (territory) pipelines.rank = pipeline('rank');
+    // The parents of Jones' rule that the budget pays (ADR 0100): with the rules only, too.
+    if (territory) pipelines.jones = pipeline('jones');
     if (territory) this.growthTerritoryPipelines = pipelines;
     else if (flow) this.growthFlowPipelines = pipelines;
     else this.growthPipelines = pipelines;

@@ -426,7 +426,8 @@ agents read them (8.7). Their weight on slime is the avoidance of slime (ADR 008
 - **The state** of strain s after the step: R_s as a float in the unit of the rate, computed as high · 2^16 + low / 2^16
   from the two words, so that each addition rounds once; C_s; N_s; the covered ports P_s, the sites with a port of s in
   this step (8.2); and whether the front of s takes flux: N_s > 0, R_s > 0, and P_s > 0 or C_s > 0. The last three
-  lanes hold the budget of the paid births of s, its agents of the front and its paid claims of the step (9.1).
+  lanes hold the budget of the paid births of s, its agents of the front of the last growth step and its paid claims
+  of the step (9.1).
 - **The order** (ADR 0067, decision 6): for each strain the pass of the sinks and the pass of its state run after the
   update of its flow and before its pressure. The owners come before them, the push after them, so a sink reads the
   territory of the step.
@@ -454,7 +455,9 @@ The agent pass runs these parts in order for each agent.
 
 A dead agent neither moves nor deposits in this step. Whatever killed it, it is a dead agent like any other:
 inoculate, respawn (7.2) and a birth (section 9) can bring it back to life, also in the step in which it died, and no
-count of alive agents holds it.
+count of alive agents holds it. While the rules of stage 4 run, a death by random shrinkage or by starvation gives one
+back to the budget of the paid births of its strain; a death in the wound of the cut or under a wall gives nothing back
+(9.1, ADR 0100).
 
 ### 7.2 Placement by a tool, by the flow or off a wall
 
@@ -482,7 +485,12 @@ no move and no deposit in its step.
   agent claims it like a move (7.6). While the cut is held, a point within its radius (the wound) is no respawn point,
   with and without growth: the agent stays dead and draws again in the next step (ADR 0041). This test draws no random
   number, so every other draw of the stream respawn (7.7) stays as it is. While the rules of stage 4 run, the cell
-  must also lie in the territory of the agent's strain (6.10), a test that draws no number either.
+  must also lie in the territory of the agent's strain (6.10), a test that draws no number either, and the respawn
+  waits for the budget of the paid births (9.1, ADR 0100): of the n respawns of strain s that pass their tests in the
+  step, each claims its cell with the chance min(1, max(0, B_s) / n), B_s the budget before the step, and a draw u of
+  a stream of its own (13, 7.7), u < the chance. The others stay dead and draw again in the next step. A pass after the
+  claims counts n (`claim`, then `pay` in `agents.wgsl`; mode 1, paid.vert, then mode 3 in `agents.frag`), and a pass
+  counts the respawns that win their cells (`reborn`; mode 2 and paid.vert). Each costs one from the budget.
 
 ### 7.3 Sensing
 
@@ -496,7 +504,8 @@ The agent senses only if the step senses: always sensing first; moving first in 
 - Otherwise it reads V = Σ_l A[s][l] · σ_K(T_l) + w_F[s] · C_F − w_L[s] · C_L, with σ_K(t) = t without saturation
   (section 6.8). In the Jones model w_F = w_L = A[0][0], the own weight +1 or −1 (section 6.4). So a strain that
   follows its trail turns away from a repellent, and a strain that flees its trail turns toward it.
-- While the rules of stage 4 run, it reads V minus the drift times a pressure of the flow of its strain (8.7): that of
+- While the rules of stage 4 run, it reads V minus the drift of one food times a pressure of the flow of its strain
+  (8.7): that of
   its cell if the cell holds a tube of the strain, else that of the agent's cell less the drop that the flux of the
   sink there would have over the sensor offset. An agent on a cell without a tube of its strain reads V alone.
 
@@ -549,8 +558,9 @@ Every random number comes from a PCG hash of (id, step, seed, stream): rng = pcg
 then u = (pcg(state) >> 8) / 2^24 (`shaders/common.wgsl`). The streams: steer 0, tool 1 (also an agent under a wall,
 7.2), shrink 2, blocked heading 3, growth 4 to 6, start round k 7 + 65536 · k, respawn 8, starve 9, light stops growth
 10 (section 9), the push of the territory 11 + 65536 · s for strain s (6.10), which draws with the index of the
-cell in place of the id, and the key of a paid birth 12 (9.1); the death in the wound of a cut and under a wall (7.1)
-draws no number. So a run is the same
+cell in place of the id, the key of a paid birth 12 (9.1), the respawn that waits for the budget 13 (7.2) and the
+parent of Jones' rule that waits for it 14 (9.1); the death in the wound of a cut and under a wall (7.1) draws no
+number. So a run is the same
 for the same seed on one backend. For one agent and step the streams differ by construction, because pcg is a
 bijection. A start round's stream can equal another stream of an agent at a later step: for seeds 0 to 999, start
 rounds 0 to 64 and steps below 10^6, this happens at one step in each of 134 (seed, round, stream) cases.
@@ -702,9 +712,12 @@ draws flux, and the plasm streams to it. The scenes of 6.10 turn the rules on (A
 passes have the source of the code before, character for character.
 
 - **What the sinks take**: while the front of strain s takes flux in the step (its state, 6.11), its sinks take
-  S = 2 k · I0 together, with k the setting Flux to the front (`frontFlux`, ADR 0086): 1 by default, 2 in the Crown
-  of veins (ADR 0087), from 0.25 to 16. k does not change the budget of the paid births (9.1): it is the `norm` = 2 k of the prototype with
-  its `paid` = 20 k (`research/front/e2m.sh`). Every tube cell c of s (G_s > 0 after the update) takes S · r_c / R_s,
+  S = 2 k · I0 · max(1, P_s) together, with k the setting Flux to the front (`frontFlux`, ADR 0086): 1 by default, 2
+  in the Crown of veins (ADR 0087), from 0.25 to 16; and P_s the covered ports of s in the step (6.11): each covered
+  food gives the front the flux of one food (ADR 0100; ADR 0093, `feed=flux`). k does not change the budget of the
+  paid births (9.1): it is the `norm` = 2 k of the prototype with its `paid` = 20 k (`research/front/e2m.sh`). The
+  passes compute S as (2 k · I0) · max(1, P_s) in float32 (`frontTotal()` in `flow.wgsl`, `flow.frag` and
+  `flow-reference.ts`). Every tube cell c of s (G_s > 0 after the update) takes S · r_c / R_s,
   with r_c its rate as R_s counted it, ⌊(|r| · 2^24 + 128) / 256⌋ / 2^16, and R_s from the state. So the sinks take
   exactly S, up to the rounding of float32 (below 10⁻⁶ of S). A cell that is no sink in the step takes the share of its
   rate, which falls over about 100 steps (6.11).
@@ -725,7 +738,12 @@ passes have the source of the code before, character for character.
   cell beyond it. No sensor reads the pressure of the ground beside a network, whose level only the history of the
   solver sets (ADR 0072, finding 3): a shift of the pressure of every tube cell of s by a constant changes no move. An
   agent on a cell without a tube of s reads V alone. δ is the setting `drift`, a lane per strain of the parameters, as
-  the food weight; one value for all strains now. So the plasm streams down the pressure, to the sinks. The drift sets
+  the food weight; one value for all strains now, divided by the foods n_s that the flow of s covered in the step
+  before, at least one (the drift of one food, ADR 0100, part B): δ / max(1, n_s), in float32. With `feed=flux` each
+  covered food gives the front the flux of one food (9.1), so the pressure grows with the covered foods; the division
+  lets the sensors read the pressure of one food, and the zone behind the front stays narrow (ADR 0097, finding 7).
+  The passes read n_s from lane w of the first vec4 of the state of s (`driftOfFoods()` in flow-reference.ts). So the
+  plasm streams down the pressure, to the sinks. The drift sets
   the form of the front (ADR 0065, decision 6): 0 a tree of tubes with small heads, 1.25 to 1.5 a tube with a crown, 5
   a fan (measured with the form `all` of ADR 0070; ADR 0074 measured `take` at 1.5 and 5). Its default 1.5 is
   provisional (ADR 0070).
@@ -763,8 +781,9 @@ copy in `src/engine/growth-reference.ts`.
   and the cell of the child. D_s is that of the strain of the parent, which is the strain of the child.
 - **Only onto the territory** (rules of stage 4, 6.10): a neighbour outside the territory of the parent's strain is not
   free. The agent picks among the other free neighbours, with the same one draw.
-- **The births that the flux pays** (rules of stage 4): after this rule, agents at the rim of the colony claim children
-  that the flux of their strain pays (9.1).
+- **The births that the flux pays** (rules of stage 4): every birth costs one from the budget of its strain (9.1, ADR
+  0100). The agents at the rim of the colony claim the children that the budget pays first; then a parent of Jones'
+  rule claims its child with a chance from what is left. A parent of Jones' rule makes no claim of its own then.
 - **Light stops growth** (extended model, ADR 0050): the birth onto the picked neighbour m fails with the chance
   G_L · λ(m), G_L the setting Light stops growth and λ the light byte / 255 of m. The agent then makes no claim in this
   step and picks no other neighbour. The draw u is the first of a stream of its own (10), and the birth fails if
@@ -783,50 +802,80 @@ Defaults (Jones 2011): Gf 3, Gw 9, Gmin 1, Gmax 10; Sf 3, Sw 5, Smin 0, Smax 20.
 
 ### 9.1 The births that the flux pays
 
-ADR 0071, the rule set of ADR 0065 (decisions 1 and 7) in the form of ADR 0067 (decision 1, `paidBy=rank`). Code: the
-lines between `//#if TERRITORY` and `//#endif` in `shaders/growth.wgsl` (`test`, `rank` and `win`), the pass `state`
-of `shaders/sinks.wgsl`; PASS 2 with `#if TERRITORY` and PASS 5 of `gl/glsl/growth.frag`, `gl/glsl/paid.vert`, PASS 3
-of `gl/glsl/sinks.frag`; `src/engine/paid.ts`; CPU reference `paidClaims()` in `src/engine/growth-reference.ts` and
+ADR 0071, the rule set of ADR 0065 (decisions 1 and 7) in the form of ADR 0067 (decision 1, `paidBy=rank`); every
+birth from the budget, the plasm of the dead back to it, the flux per covered food and the cap on the credit since ADR
+0100 (option 1 of ADR 0097). Code: the lines between `//#if TERRITORY` and `//#endif` in `shaders/agents.wgsl`
+(`claim`, `pay`, `reborn`) and `shaders/growth.wgsl` (`test`, `rank`, `jones`, `win`, `birth`), the pass `state` of
+`shaders/sinks.wgsl`; mode 1 to 3 with `#if TERRITORY` of `gl/glsl/agents.frag`, PASS 2, 4, 5 and 6 with `#if
+TERRITORY` of `gl/glsl/growth.frag`, `gl/glsl/paid.vert`, PASS 3 of `gl/glsl/sinks.frag`; `src/engine/paid.ts`; CPU
+references `paidClaims()` in `src/engine/growth-reference.ts`, `respawnStep()` in `territory-reference.ts` and
 `nextBudget()` in `paid.ts`.
 
 The paid births are the third of the rules of stage 4 (6.10). They run with the other rules (`territoryOn()`), in the
-scenes of 6.10. The flux that the front of a strain takes becomes plasm where it goes: it pays births at the
-rim of the colony, in the share of the sink rate of each agent there.
+scenes of 6.10. An agent is not mass: it stands for an area of plasm (ADR 0098). The budget of a strain counts that
+area: the flux that the front of a strain takes pays it, every birth costs one, and every death that the model makes
+gives one back. So the agents and the budget of a strain change together only by what the food credits.
 
-- **The budget** of strain s is a float in its state (6.11). In every step in which the front of s takes flux (6.11),
-  it grows by 2 · I0 / 20 births: S / 20 with the flux to the front k = 1 (8.7), and S / (20 k) with another k, so one
-  birth costs 20 k of flux (ADR 0086). The CPU computes this number once and gives it to the passes as float32
-  (`paidIncrement()`). In a growth step with a budget of at least 1, the paid claims of the step come off it, and it
-  becomes at most the number of the agents of the front of the step: min(budget − claims, agents of the front). Then
-  it grows as above. A budget below 1 pays nothing and keeps what it has. Each operation rounds to float32 once, so
-  both backends and the CPU give the same float. A reset sets it to 0.
-- **An agent of the front** of strain s in a growth step is an alive agent of s that is no parent of Jones' rule in
-  this step (section 9), whose cell has a sink rate r of s that is not 0 and a flow memory D_s ≥ 0.01, and that lies
-  at the rim of the colony: one of its 8 neighbours is open, empty after the moves, and holds no tube body of s
-  (B_s < 0.05). The rate, the memory and the body are those of the step before; a sink of that step holds its rate
-  with a minus sign (6.11). The test counts the agents of the front of each strain.
+- **The budget** B of strain s is a float in its state (6.11). A reset sets it to 0.
+- **What a step settles**: each pass counts its deaths and births, and the next pass settles them, as atomic counts
+  do: the agent pass counts its deaths by random shrinkage and starvation (not those of the cut or a wall, 7.1), its
+  respawns that wait and those that come to life (7.2); growth counts its deaths by shrinkage, the parents of Jones'
+  rule that wait, and its births. Growth spends B' = B + D_a − R_a, the budget before the step plus the deaths and less
+  the respawns of the agent pass, in float32 with one rounding (`budgetAfterMoves()`). The pass of the state takes
+  B'' = B' + D_g − N_g, the deaths and the births of growth.
+- **What the food credits**: while the front of s takes flux in the step (6.11), the budget grows by
+  i · max(1, P_s), i = 2 · I0 / 20 (S / 20 with the flux to the front k = 1, and S / (20 k) with another k, so one
+  birth costs 20 k of flux, ADR 0086), P_s the covered ports of the step: each covered food pays as one does (ADR 0093).
+  But the credit is at most max(0, F − B''), F the agents of the front of the last growth step: the budget never grows
+  above the agents of the front, and the cap takes no plasm off the budget (the cap of the prototype, `feedCap`). The
+  CPU computes i once and gives it to the passes as float32 (`paidIncrement()`). Each operation rounds to float32 once,
+  so both backends and the CPU give the same float (`nextBudget()`).
+- **An agent of the front** of strain s in a growth step is an alive agent of s, a parent of Jones' rule too, whose
+  cell has a sink rate r of s that is not 0 and a flow memory D_s ≥ 0.01, and that lies at the rim of the colony: one
+  of its 8 neighbours is open, empty after the moves, and holds no tube body of s (B_s < 0.05). The rate, the memory
+  and the body are those of the step before; a sink of that step holds its rate with a minus sign (6.11). The test
+  counts the agents of the front of each strain.
 - **The key**: an agent of the front with a free neighbour, free as for Jones' rule (open, empty after the moves, not
   starved, in the territory of s, and no diagonal one between two walls), draws u, the first draw of a stream of its
   own (12, 7.7), and gets the key −ln(1 − u) / |r|. Every other agent has no key, which the passes write as the
   largest float32. The passes compute −ln(1 − u) up to u = 1/2 as the series of 2 · atanh(u / (2 − u)) and above it
   as −log(1 − u): so the key is right to a few units in the last place also for a small u, where `log` near 1 may err
   by 2^-21 (WGSL and GLSL).
-- **The rank**: the ⌊budget⌋ agents of s with the least keys claim a child; of two agents with the same key the one
-  with the smaller id comes first. This is the weighted order of Efraimidis and Spirakis: an agent comes early with odds
-  in its sink rate. A GPU lets each agent with a key count the agents of its strain with a smaller key, and stop when
-  the count reaches ⌊budget⌋. The ⌊budget⌋ agents with the least keys read every key of their strain.
-- **The claim**: an agent below ⌊budget⌋ picks a free neighbour with the draw of Jones' rule (stream 4): among the
+- **The sum P** (ADR 0100, part A): the test adds the rate of each agent with a key to P of its strain, in steps of
+  2^-12 rounded to the nearest, (|r| · 2^24 + 2048) >> 12 (`shareSteps()`), in two counts: the steps / 64 and the rest.
+  P is (high · 64 + low) / 4096 in float32 (`shareSum()`). So each count stays a whole number below 2^24 for fewer than
+  2^18 agents with a key, which the float blending of WebGL2 adds without error.
+- **The rank**: the ⌊max(0, B')⌋ agents of s with the least keys claim a child; of two agents with the same key the
+  one with the smaller id comes first. This is the weighted order of Efraimidis and Spirakis: an agent comes early with
+  odds in its sink rate. A GPU lets each agent with a key count the agents of its strain with a smaller key, and stop
+  when the count reaches ⌊max(0, B')⌋. Those agents read every key of their strain. Of them, only an agent whose key k
+  satisfies k · P < max(0, B') in float32 claims (`sharePays()`): so each agent of the front is paid with the chance
+  1 − e^(−B' · r / P) at most, B' times the share of its sink in the rates of the front. Without it the rank pays every
+  agent of the front once B' covers them, which the plasm of the dead does: then a sink on slime (weight 0.025, 8.7) is
+  paid as one near fresh ground, and the Y-maze with slime on one arm lost its choice (5 : 5; ADR 0100, part A).
+- **The claim**: an agent below the rank picks a free neighbour with the draw of Jones' rule (stream 4): among the
   free neighbours without a tube body of s if there is one, so that the child goes out, and else among all of them.
   Light stops the birth as it stops one of Jones' rule (section 9): the agent then makes no claim. It claims the cell
-  with its claim key as a parent of Jones' rule does, so the claims of both rules compete for a cell, and the winners
-  are born as in section 9. The claims count into the paid claims of the strain, also those that lose their cell.
+  with its claim key as a parent of Jones' rule does, and the winners are born as in section 9. The claims count into
+  the paid claims K of the strain, also those that lose their cell.
+- **The parents of Jones' rule** (ADR 0100): a parent of Jones' rule (section 9) claims nothing in the test. Of the n
+  parents of strain s that made no paid claim, each claims the cell of its child with the chance
+  min(1, max(0, B' − K) / n) (`payChance()`) and a draw u of a stream of its own (14, 7.7), u < the chance; the
+  others do not divide in this step. So the front is paid first, and Jones' rule takes what it leaves.
 - **A claim key of 0**: on WebGPU the claim key of one id in 2^32 is 0 in a step. A claim with it cannot be told from
-  no claim, so that agent gets no key. On WebGL2 no claim key is 0.
-- **The state** of s after the step holds the budget, the agents of the front and the paid claims of the step in its
-  last three lanes (6.11); in a step without the growth test the last two are 0.
+  no claim, so that agent gets no key, and as a parent of Jones' rule it does not count and claims nothing. On WebGL2
+  no claim key is 0.
+- **Tools**: a dab of Inoculate places its agents without the budget, and the cut and a wall take their plasm away
+  (7.1): the tools act from outside the model.
+- **The state** of s after the step holds the budget, F of the last growth step and the paid claims of the step in its
+  last three lanes (6.11); in a step without the growth test K is 0, and F stays.
 - **Memory**: 4 B per agent for the keys (`PAID_BYTES_PER_AGENT`): on WebGPU after the state of 4 strains and the
-  counts in the buffer of the state of the sinks, by id; on WebGL2 a target of the agents (`R32F`), and the counts a
-  target of 2 × 1 texels.
+  counts in the buffer of the state of the sinks, by id; on WebGL2 a target of the agents (`R32F`). The counts are 10
+  whole numbers per strain (`PAID_COUNTS`, the last two the parts of P): on WebGPU 40 words in the same buffer, on
+  WebGL2 a target of 10 × 1 texels. On WebGL2 the points of `paid.vert` with SHARE add the parts of P after the test
+  and before the rank.
+  The marks of the paid parents of the rank for the parents of Jones' rule reuse the buffer of the dead agents of
+  growth on WebGPU, which `win` writes anew; on WebGL2 they are bits of the agents.
 
 ## 10. Start layouts
 
@@ -1016,7 +1065,7 @@ All in `src/engine/sim.gpu.test.ts` on both backends unless another file is name
 | The avoidance of slime (6.11)           | `sinks.gpu.test.ts`: the weights at a weight on slime of 0.3 and 1 and the reaches 2 and 4, against the CPU copy                |
 | The flow with the sinks (8.7)           | `flow-sinks.gpu.test.ts`: memory and pressure against the CPU copy, 2 strains in a dish with walls; a large R; the drift        |
 | The drift `take` (8.7)                  | `flow-sinks.gpu.test.ts`: the turns of 256 agents on and off the tubes against the CPU copy; a shift of the tubes moves no one  |
-| The paid births (9.1)                   | `paid.gpu.test.ts`: keys, rank, births, budget against the CPU copy, 2 strains, light; ties; budgets above the front, below 1   |
+| The paid births (9.1)                   | `paid.gpu.test.ts`: keys, rank, P, births, budget against the CPU copy, 2 strains, light; ties; a full budget on slime; below 1 |
 | The start territory (6.10, 10)          | `territory.gpu.test.ts`: the disc in each arena, with walls; `engine-env.test.ts`: the disc of each strain, the restart         |
 | No child onto starved ground (9)        | `flow.gpu.test.ts`: a growth step against the CPU copy with the memory of two strains, box and wrap; `growth-reference.test.ts` |
 | The mark of starved ground (8.4)        | `flow.gpu.test.ts`: a starved tube that vanishes leaves the floor, a fed one keeps its memory; ground recovers by the factor    |
@@ -1036,7 +1085,7 @@ and the pressure of two strains in a dish with walls against the CPU copy, one w
 cells pay, with a tube that adapts only from the step after the first step with flux; a strain without a sink and with
 one site keeps its flow memory; the sinks take S with the rates as R counted them, where their own rates would take
 more than twice S; a large R, whose low word wraps; the turns of 256 agents of both strains by the drift `take`
-(ADR 0075), with the drift 1.5 and 0, against the CPU copy: on and off the tubes of their strain, with sensors on and
+(ADR 0075), with the drift 1.5 and 0, and with 3 covered foods and a trail (the drift of one food, ADR 0100), against the CPU copy: on and off the tubes of their strain, with sensors on and
 off them, a sink rate on every cell, a strain whose front takes flux and one whose front takes none, and every value
 exact; a shift of the pressure of every tube cell of each strain by 200, which changes no move, where the form of
 before turns more than 20 agents otherwise; and the memory of the drift on each backend. `flow-reference.test.ts`
@@ -1058,9 +1107,11 @@ moves of a twin without growth: two colonies of two strains with a tube body und
 wall and light, where the keys agree with the CPU copy to 10⁻⁵ and the agents, the budget, the agents of the front and
 the paid claims exactly, then a step without the growth test and one without a sink rate; two agents with the same
 key, of which the one with the smaller id is paid, with a budget above the agents of the front for the other strain;
-a budget below 1, which pays nothing and stays without an agent of the front; and on WebGPU an agent whose claim key
-is 0. `paid.test.ts` tests the constants, the key and its odds (Efraimidis and Spirakis), the series of the key in
-float32, the budget, and the CPU copy on cases made by hand.
+a budget below 1, which pays nothing and stays without an agent of the front; a budget that covers the front, where
+the threshold k · P < B pays sinks near fresh ground often and sinks on slime seldom, with the two parts of P against
+the CPU copy (ADR 0100, part A); and on WebGPU an agent whose claim key is 0. `paid.test.ts` tests the constants, the
+key and its odds (Efraimidis and Spirakis), the series of the key in float32, the budget, the steps of P and the
+threshold, and the CPU copy on cases made by hand.
 
 `flow.gpu.test.ts` also tests the flow of each strain (ADR 0031) on both backends: each strain its whole I0 on its own
 route between the same foods; the CPU copy for the strains s = 1 to 3 (the second of two, the third and the fourth of

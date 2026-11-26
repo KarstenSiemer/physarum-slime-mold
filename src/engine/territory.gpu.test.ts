@@ -6,6 +6,8 @@ import { defaultSettings, defaultStrain, type Boundary, type Settings } from '..
 import { WebGl2Backend } from './gl/backend';
 import { growthStep, rngSeed, stream } from './growth-reference';
 import { strainEnds } from './pack';
+import { BUDGET_LANE, PAID_COUNT_LANES, PAID_COUNTS } from './paid';
+import { SINK_STATE_LANES } from './sinks';
 import { PUSH, PUSH_CHANCES, TERRITORY } from './territory';
 import { addDisc, owners, push, respawnStep, territoryMoves, type TerritoryGrid } from './territory-reference';
 import type { Backend, Sim, Stroke } from './types';
@@ -158,10 +160,16 @@ describe.each(Object.entries(BACKENDS))('the territory on %s (ADR 0068)', (kind,
     expect(expected.moved).toBeGreaterThan(80);
   }, 120_000);
 
-  it('brings a dead agent to life only on the territory of its strain', async () => {
+  it('brings a dead agent to life only on the territory of its strain, as far as the budget pays', async () => {
     const [w, h] = [64, 64];
     const s = stage4({ seed: 13 });
     const sim = await make(s, w, h, 3000);
+    // The budget of the paid births pays the respawns (ADR 0100): that of strain 0 pays about 60 of them, that of
+    // strain 1 all.
+    const budget = [60, 1e6];
+    const state = new Float32Array(SINK_STATE_LANES * 2);
+    budget.forEach((b, strain) => (state[strain * SINK_STATE_LANES + BUDGET_LANE] = b));
+    sim.writeSinkState(state);
     // A fed tube on every cell for both strains: a dead agent comes to life on its cell with the chance 0.2.
     const memory = [memoryOf(w * h, 1, 1), memoryOf(w * h, 1, 1)];
     memory.forEach((m, strain) => {
@@ -181,12 +189,24 @@ describe.each(Object.entries(BACKENDS))('the territory on %s (ADR 0068)', (kind,
       territory,
       step: 0,
       seed: s.seed,
+      budget,
     });
     expect(await sim.readAgents()).toEqual(expected.agents);
     const born = expected.agents.filter((a) => a.bits & ALIVE);
-    // Without the territory about 600 of 3,000 dead agents would come to life; it refuses about half of the draws.
+    // Without the territory about 600 of 3,000 dead agents would come to life; it refuses about half of the draws, and
+    // the budget of strain 0 most of the rest.
     expect(born.length).toBeGreaterThan(200);
     expect(expected.refused).toBeGreaterThan(1000);
+    // The passes count the respawns that wait and those that come to life (ADR 0100).
+    const counts = await sim.readPaidCounts();
+    for (const strain of [0, 1]) {
+      const at = `strain ${String(strain)}`;
+      const waiting = counts[strain * PAID_COUNT_LANES + PAID_COUNTS.waiting];
+      expect(waiting, at).toBe(expected.waiting[strain]);
+      const reborn = born.filter((a) => (a.bits & 3) === strain).length;
+      expect(counts[strain * PAID_COUNT_LANES + PAID_COUNTS.reborn], at).toBe(reborn);
+      if (strain === 0) expect(reborn).toBeLessThan(0.75 * (waiting ?? 0));
+    }
     for (const a of born) {
       const cell = Math.floor(a.y) * w + Math.floor(a.x);
       expect(((territory[cell] ?? 0) >> (a.bits & 3)) & 1).toBe(1);
@@ -221,13 +241,18 @@ describe.each(Object.entries(BACKENDS))('the territory on %s (ADR 0068)', (kind,
       });
     const territory = randomTerritory(n, 2, 0.6, random(23));
     a.writeTerritory(territory);
+    // A budget that pays every parent of Jones' rule, and no sink rate, so no agent of the front (ADR 0100).
+    const state = new Float32Array(SINK_STATE_LANES * 2);
+    for (const strain of [0, 1]) state[strain * SINK_STATE_LANES + BUDGET_LANE] = 1e6;
+    a.writeSinkState(state);
     const env = await a.readEnv();
     a.run(1);
     b.run(1);
     const moved = await b.readAgents();
     const input = { kind: kind as 'webgpu' | 'webgl2', settings: s, w, h, env, step: 0, agents: moved, memory };
     const counts = await b.readCounts();
-    const expected = growthStep({ ...input, counts, territory });
+    const paid = { rates: [new Float32Array(n), new Float32Array(n)], budget: [1e6, 1e6] };
+    const expected = growthStep({ ...input, counts, territory, paid });
     const got = await a.readAgents();
     expect(got).toEqual(expected.agents);
     const children = got.filter((g, id) => g.bits & ALIVE && !((moved[id]?.bits ?? 0) & ALIVE));

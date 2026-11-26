@@ -236,7 +236,7 @@ out uvec4 result;
 uniform highp usampler2D sums; // the top of the pyramid of the strain: one texel
 uniform sampler2D ports; // texel (site, strain): x the port of this step, −1 for none (flow.frag)
 uniform sampler2D stateIn; // the state before the step
-// The counts of the paid births of a growth step (paid.vert): texel 0 F, texel 1 K, lane s for strain s.
+// The counts of the paid births of the step (paid.vert; paid.ts PAID_COUNTS): texel j count j, lane s for strain s.
 uniform sampler2D paidCounts;
 out vec4 result;
 #endif
@@ -293,14 +293,17 @@ void main() {
     result = vec4(r, float(v.z), float(v.w), float(covered));
   } else {
     bool takes = v.w > 0u && (v.x | v.y) != 0u && (covered > 0u || v.z > 0u);
-    // The budget of the paid births (ADR 0071), as `state` in sinks.wgsl computes it. The counts hold those of the last
-    // growth step: a step without the growth test counts no agent.
+    // The budget of the paid births (ADR 0100), as `state` in sinks.wgsl computes it: the deaths and the births of the
+    // step, then the credit of the food up to F of the last growth step. A step without the growth test keeps F.
     bool grew = P.growth.x > 0u && P.grid.w % P.growth.x == 0u;
-    float front = grew ? texelFetch(paidCounts, ivec2(0, 0), 0)[int(s)] : 0.0;
+    vec4 before = texelFetch(stateIn, q, 0);
+    float front = grew ? texelFetch(paidCounts, ivec2(0, 0), 0)[int(s)] : before.z;
     float claims = grew ? texelFetch(paidCounts, ivec2(1, 0), 0)[int(s)] : 0.0;
-    float budget = texelFetch(stateIn, q, 0).y;
-    if (grew && budget >= 1.0) budget = min(budget - claims, front);
-    if (takes) budget += U.take.y;
+    float died = texelFetch(paidCounts, ivec2(4, 0), 0)[int(s)] - texelFetch(paidCounts, ivec2(3, 0), 0)[int(s)];
+    float crowded = texelFetch(paidCounts, ivec2(7, 0), 0)[int(s)] - texelFetch(paidCounts, ivec2(6, 0), 0)[int(s)];
+    float budget = before.y + died;
+    budget += crowded;
+    if (takes) budget += min(U.take.y * float(max(1u, covered)), max(0.0, front - budget));
     result = vec4(takes ? 1.0 : 0.0, budget, front, claims);
   }
 #endif

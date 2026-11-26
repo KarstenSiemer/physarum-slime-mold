@@ -125,10 +125,14 @@ ivec2 diagonalXY(ivec2 p, ivec2 o, ivec2 a, ivec2 b) {
 #endif
 #if TERRITORY && (PASS == 1 || PASS == 5)
 
+// What the sinks of strain s take together while its front takes flux (frontTotal in flow.wgsl): S for each covered
+// port, at least one (ADR 0100).
+float frontTotal(int s) { return U.take.x * U.a.x * max(1.0, texelFetch(state, ivec2(0, s), 0).w); }
+
 // What the sink of the tube cell p takes while the front of the strain takes flux (taken in flow.wgsl, ADR 0070).
 float taken(ivec2 p) {
   int s = int(U.f.z);
-  float total = U.take.x * U.a.x;
+  float total = frontTotal(s);
   uint steps = uint(abs(texelFetch(rates, p, 0).r) * 16777216.0);
   float r = float((steps + 128u) >> 8u) * (1.0 / 65536.0);
   return total * r / texelFetch(state, ivec2(0, s), 0).x;
@@ -320,7 +324,7 @@ float sinksAndSources(ivec2 p, float g) {
   if (texelFetch(state, ivec2(1, s), 0).x == 0.0) return 0.0;
   // R, C, N and the covered ports P.
   vec4 sums = texelFetch(state, ivec2(0, s), 0);
-  float total = U.take.x * U.a.x;
+  float total = frontTotal(s);
   int c = p.y * W() + p.x;
   float q = 0.0;
   if (g > 0.0) {

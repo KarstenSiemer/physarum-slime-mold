@@ -4,6 +4,7 @@
   ([ADR 0096](0096-gate-1-study-1d-before-a-port.md)). An agent ran it on 2026-11-23 under the owner's delegation of
   2026-11-12; the owner decides at the next gate.
 - Date: 2026-11-23
+- Extended by [ADR 0100](0100-every-birth-from-the-budget-in-the-engine.md) (2026-11-26): option 1 is in the engine, on both backends.
 - Extended by [ADR 0098](0098-the-switch-of-the-rules-sets-the-levers-of-the-crown.md) (2026-11-26): the
   coordinator reads the owner's words as the answer to the question of mass: an agent is not mass.
 - Extends [ADR 0092](0092-the-boom-at-a-new-food-is-jones-births-without-starvation.md) (every birth from the budget),
