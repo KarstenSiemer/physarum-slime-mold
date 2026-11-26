@@ -2954,6 +2954,18 @@ budget lies below the agents of the front (`flow-sinks.gpu.test.ts`).
 **The measures** are in ADR 0100: `bash research/front/p100.sh ring|help|y|crown`, and `table` for the table of Food
 ring.
 
+**Parts A and B of ADR 0100** (the share of a sink limits its paid births; the drift of one food). The digests again:
+58 of 68 runs keep the bytes of `main`, the other 10 are the five scenes with the rules. The new wrong rules, and those
+whose texts followed the code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts PB16 PB17 PB18 PB19 PB20 PB21 PB22 PB23 TY120 TY123 TY159 TY232 TY233 TY234 TY235 TY237 TY246 TY247 TY248 TY250
+```
+
+Result: each fails at least one test. PB16 and PB17 needed a trail in the case of the drift of
+`flow-sinks.gpu.test.ts`: without one every sensor reads 0 less the drift times the pressure, and the size of the
+drift changes no turn.
+
 ## The logs
 
 The logs are one archive in the repository, `logs.tar.gz`: 927 files, 22.6 MB of text. Unpacked,

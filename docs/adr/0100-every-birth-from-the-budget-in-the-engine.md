@@ -229,7 +229,7 @@ of veins) on each backend.
 
 **The wrong rules**: PB16 to PB23 are new (the drift of one food, the sum P and the threshold, on each backend and in
 the CPU copy), and the texts of TY120, TY123, TY159, TY232 to TY235, TY237, TY246 to TY248 and TY250 follow the code.
-Each of PB16 to PB23, TY120, TY123, TY159, TY235 and TY248 fails at least one test. PB16 and PB17 needed a trail in
+Each of them fails at least one test (`research/flow/README.md`, part 36). PB16 and PB17 needed a trail in
 the case of the drift: without one every sensor reads 0 less the drift times the pressure, and the size of the drift
 changes no turn.
 
@@ -241,6 +241,9 @@ changes no turn.
   PB15; FP15 of the prototype had a stale text, which follows `sim.ts` again. Parts A and B added PB16 to PB23.
 - The Y-maze with slime takes the blank arm again (10 : 0 on each backend), and the controls show no preference. The
   e2e test of the Y-maze (`tests/e2e/y-maze.spec.ts`) passes with its margin of 1.2 again.
+- A young Crown of veins grows slower: in 20 runs (seeds 1 to 10 on each backend) it grew by at least 6 agents in 30
+  steps from a first count at step 2 to 7, and by at least 25 in 60 steps. Its e2e test (`tests/e2e/tubes.spec.ts`)
+  now waits 60 steps and asks for more than 12 agents more: about 30 s more in the image of CI, about 90 s on GitHub.
 - Open (decision 3): the boom at a new food (+57 to +86 % in the engine, +78 % in the prototype), the fall of a full
   dish with the budget that holds the rest of the area and that no picture shows, and the sheet of 0.47 to 0.54 at
   step 10,000 with nine foods. The middle of the mesh at step 10,000 is emptier than in the prototype.
