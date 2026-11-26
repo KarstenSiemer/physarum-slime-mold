@@ -1657,8 +1657,8 @@ const MUTATIONS: [name: string, file: string, right: string, wrong: string, test
   [
     'V96 webgpu: a frame keeps the stream of the frame that built its bind group',
     'src/engine/render.ts',
-    '      cached.poles !== poles ||\n      cached.stream !== stream\n',
-    '      cached.poles !== poles\n',
+    '      cached.poles !== poles ||\n      cached.stream !== stream ||\n',
+    '      cached.poles !== poles ||\n',
     GPU,
     TUBES_SPEC,
   ],

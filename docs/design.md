@@ -343,7 +343,10 @@ the arrows.
   off (`grainsShown()` in `tubes.ts`), and without the picture the grains lie on the trail of the view. Then only the
   third pass is built and run, and the GPU holds only its texture. The fit of the grid to the memory of the GPU counts
   the three textures while the flow is on, with the switch on or off, so the switch never changes the grid. The
-  simulation never reads the picture or the stream.
+  simulation never reads the picture or the stream. With the picture the render pass also draws the veins (ADR 0099): it reads the factors of the
+  first pass, takes the square root of the strength across the tube as a quadratic B-spline over the 3 × 3 cells
+  around a pixel, and from 0.2 to 0.7 moves the colour c of the strain up to 0.8 of the way to 0.8 · c², a deeper
+  shade; in the gel style a vein is also a low lit ridge. It needs no texture of its own.
 - Film of the slime (ADR 0055, decision 8; ADR 0057): while the model has slime, the view draws the slime as a wet film
   on the ground, with a switch below the Slime life time that is on at the start. The flake of food, the trail, the
   tubes, the light, the walls and the electrodes lie on the film. The slime of a cell is as thick as
