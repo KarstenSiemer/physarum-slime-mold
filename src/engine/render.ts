@@ -98,7 +98,7 @@ export function trailLevel(scale: number): number {
  * the simulation keeps agents per cell (collision mode), for the agents style and for agents on food. `stream`: the
  * step of the state, while the view draws the stream of the plasm (tubes.ts, point 6). `electrodes`: an electrode may
  * be painted (Sim.hasElectrodes). `slime`: the steps that ran so far (Sim.step), while the frame draws the film of
- * the slime (ADR 0055, decision 8).
+ * the slime (ADR 0055, decision 8). `veins`: the frame draws the picture of the tubes, and with it the veins (ADR 0099).
  */
 export function packView(
   data: ArrayBuffer,
@@ -115,6 +115,7 @@ export function packView(
   stream?: number,
   electrodes = false,
   slime?: number,
+  veins = false,
 ) {
   const fl = new Float32Array(data);
   const u = new Uint32Array(data);
@@ -136,7 +137,7 @@ export function packView(
   // scenes do not read their outline distances.
   fl.set(stream === undefined ? [0, 0, 0, 0] : [1, ...phases(stream), 0], 36);
   fl[39] = electrodes ? 1 : 0;
-  fl.set([...GEL_FX[settings.gelColor], 0, 0], 40);
+  fl.set([...GEL_FX[settings.gelColor], veins ? 1 : 0, 0], 40);
   // The scent view: the map it reads (scentLevel()), and the sensors of its line, their half spread and the hold of a
   // strand (scentSensors()). It draws the repellent in both models: both read it (ADR 0044).
   const level = settings.showScent ? scentLevel(view.scale) : 0;
@@ -187,6 +188,8 @@ interface Groups {
    * (ADR 0095), so the trail does not say which stream a frame reads, and a simulation frees the stream while it lives.
    */
   stream: GPUTexture | undefined;
+  /** The factors of the radius of the tubes in `group`, for the veins (ADR 0099), or none. */
+  veins: GPUTexture | undefined;
 }
 
 /** The maps of the scent view: `scentDown`. The render passes with the view are apart (Renderer.viewNow()). */
@@ -389,6 +392,7 @@ export class Renderer {
         { binding: 10, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 11, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 12, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 13, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         storage(16),
         { binding: 15, visibility: F, texture: { sampleType: 'unfilterable-float' } },
         { binding: 17, visibility: F, texture: { sampleType: 'unfilterable-float' } },
@@ -538,6 +542,10 @@ export class Renderer {
     const wet = filmy ? this.slimeNow() : undefined;
     const frontReady = fanned ? this.frontNow() : undefined;
     const grown = frontReady && (!filmy || wet) ? frontReady : undefined;
+    // The trail that the frame draws: the picture of the tubes while the settings show it (ADR 0034), and with it the
+    // factors of the radius of its tubes, for the veins (ADR 0099).
+    const trail = sim.pictureTexture;
+    const veins = sim.veinTexture;
     packView(
       this.data,
       width,
@@ -553,13 +561,13 @@ export class Renderer {
       stream ? sim.step : undefined,
       sim.hasElectrodes,
       (wet ?? grown) ? sim.step : undefined,
+      veins !== undefined,
     );
     this.device.queue.writeBuffer(this.uniform, 0, this.data);
 
     // The map after the step's diffusion in either order of a step, trail and scent alike (ADR 0027). The trail is the
     // picture of the tubes while the settings show it (ADR 0034): every map below is made from the trail that is drawn.
     const { scent } = sim.viewTextures;
-    const trail = sim.pictureTexture;
     const occ = sim.occupancy;
     const heights = this.heightsFor(trail);
     const scented = f.settings.showScent && this.fixed === undefined;
@@ -594,7 +602,8 @@ export class Renderer {
       cached?.bloom !== f.bloom ||
       cached.sampler !== f.sampler ||
       cached.poles !== poles ||
-      cached.stream !== stream
+      cached.stream !== stream ||
+      cached.veins !== veins
     ) {
       const trailView = trail.createView();
       const scentView = scent.createView();
@@ -616,6 +625,8 @@ export class Renderer {
           { binding: 11, resource: this.trailCoarse?.view ?? this.noCoarse.createView() },
           // The stream of the grains, with the picture of the tubes or without it (Groups.stream).
           { binding: 12, resource: (stream ?? this.noCoarse).createView() },
+          // The factors of the radius of the tubes, for the veins (ADR 0099). A frame without the veins reads none.
+          { binding: 13, resource: (veins ?? this.noCoarse).createView() },
           // The outline distances of the electrodes (ADR 0058).
           { binding: 16, resource: { buffer: poles } },
           // The maps of the film of the slime (ADR 0057). A frame without the film reads none of them.
@@ -643,7 +654,7 @@ export class Renderer {
           { binding: 9, resource: scentView },
         ],
       });
-      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, poles, stream };
+      cached = { group, heights: heightGroup, down, bloom: f.bloom, sampler: f.sampler, poles, stream, veins };
       byOcc.set(occ, cached);
     }
     if (wet && stamps && amounts && cached.film?.stamps !== stamps) {

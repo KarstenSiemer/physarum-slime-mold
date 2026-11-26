@@ -3,7 +3,7 @@
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
 import { FLOW, FLOW_EIGHT } from './flow';
-import { STREAM, TUBES, TUBE_REACH, TUBE_WINDOW } from './tubes';
+import { STREAM, TUBES, TUBE_REACH, TUBE_WINDOW, VEINS } from './tubes';
 
 /** The grid as the passes see it: 4 bytes per cell as Sim.readShape() returns them (the first is the wall byte). */
 export interface TubeGrid {
@@ -94,6 +94,32 @@ export function tubeRoots(grid: TubeGrid, memories: readonly Float32Array[]): Fl
       });
     }
   return out;
+}
+
+/**
+ * The veins at the point (px, py) of the grid, in cells (tubes.ts, point 7; `veinsAt` in render.wgsl): per strain how
+ * far its colour goes to the deep shade, 0 to VEINS.deep. `roots`: the result of tubeRoots(). A cell outside the arena
+ * holds no vein.
+ */
+export function veinDeep(grid: TubeGrid, roots: Float32Array, px: number, py: number): number[] {
+  const spline = (u: number) => [0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)];
+  const [cx, cy] = [Math.floor(px), Math.floor(py)];
+  const [wx, wy] = [spline(px - 0.5 - cx), spline(py - 0.5 - cy)];
+  return [0, 1, 2, 3].map((s) => {
+    let sum = 0;
+    for (let j = 0; j < 3; j++)
+      for (let i = 0; i < 3; i++) {
+        const q = arenaCell(grid, cx + i - 1, cy + j - 1);
+        if (q >= 0) sum += (wx[i] ?? 0) * (wy[j] ?? 0) * (roots[q * 4 + s] ?? 0) ** 4;
+      }
+    const t = Math.min(1, Math.max(0, (Math.sqrt(sum) - VEINS.low) / (VEINS.high - VEINS.low)));
+    return VEINS.deep * t * t * (3 - 2 * t);
+  });
+}
+
+/** The colour of a strain (linear RGB) where it goes `deep` of the way to the deep shade (veinDeep()). */
+export function veinShade(color: readonly number[], deep: number): number[] {
+  return color.map((c) => c + (VEINS.dark * c * c - c) * deep);
 }
 
 /**

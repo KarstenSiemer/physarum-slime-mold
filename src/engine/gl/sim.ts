@@ -653,6 +653,15 @@ export class GlSim implements Sim {
   }
 
   /**
+   * The factors of the radius of the tubes of the picture, for the veins of the view (../sim.ts veinTexture, ADR 0099):
+   * set after pictureTarget() while it is the picture of the tubes, else undefined. Display only.
+   */
+  veinTarget(): Target | undefined {
+    if (!tubesShown(this.settings) || !this.flow || this.tubesStale) return undefined;
+    return this.tubes?.roots;
+  }
+
+  /**
    * The stream of the plasm of the state that the view draws, for the grains (../sim.ts streamTexture): made once for
    * each state while the view draws the grains (tubes.ts grainsShown(), ADR 0095); undefined while it draws none.
    */

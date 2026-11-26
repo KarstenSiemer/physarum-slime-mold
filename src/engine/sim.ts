@@ -523,6 +523,15 @@ export class Simulation implements Sim {
   }
 
   /**
+   * The factors of the radius of the tubes of the picture (tubes.wgsl `roots`), for the veins of the view (ADR 0099):
+   * set after pictureTexture while it is the picture of the tubes, else undefined. Display only.
+   */
+  get veinTexture(): GPUTexture | undefined {
+    if (!tubesShown(this.settings) || !this.flow || this.tubesStale) return undefined;
+    return this.tubes?.roots;
+  }
+
+  /**
    * The stream of the plasm of the state that the view draws (tubes.ts, point 6): per cell the direction of the flow
    * times its speed, for the grains. Made once for each state while the view draws the grains (tubes.ts grainsShown()),
    * with the picture of the tubes or without it (ADR 0095). Undefined while the view draws no grains.
