@@ -122,6 +122,44 @@ describe('the switch of the rule of one agent per cell', () => {
   });
 });
 
+// The switch of the rules of the growth front (ADR 0098): on, it also sets the levers of the Crown of veins, so that a
+// colony grows faster and forms veins; off, it changes no lever. A scene keeps its own values.
+describe('the switch of the rules of the growth front', () => {
+  it('sets the levers of the Crown of veins when it turns the rules on', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('food-ring');
+    const s = app.settings;
+    expect([s.territory, s.flowEdges, s.flowBase, s.frontFlux, s.flowStrength]).toEqual([false, 4, 0.02, 1, 2]);
+    setRules(true);
+    expect([s.territory, s.flowEdges, s.flowBase, s.frontFlux, s.flowStrength]).toEqual([true, 8, 0.002, 2, 8]);
+  });
+
+  it('keeps a Flow strength above 8', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('food-ring');
+    app.settings.flowStrength = 16;
+    setRules(true);
+    expect(app.settings.flowStrength).toBe(16);
+  });
+
+  it('changes no lever when it turns the rules off', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('y-maze');
+    const s = app.settings;
+    Object.assign(s, { flowEdges: 4, flowBase: 0.05, frontFlux: 3, flowStrength: 1 });
+    setRules(false);
+    expect([s.territory, s.flowEdges, s.flowBase, s.frontFlux, s.flowStrength]).toEqual([false, 4, 0.05, 3, 1]);
+  });
+
+  it('changes nothing when the rules are as asked already', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('y-maze');
+    const before = JSON.stringify(app.settings);
+    setRules(true);
+    expect(JSON.stringify(app.settings)).toBe(before);
+  });
+});
+
 describe('the current scene', () => {
   it('is the loaded preset, unchanged until a model parameter changes', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();

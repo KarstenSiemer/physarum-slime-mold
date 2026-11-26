@@ -5,6 +5,7 @@ import { slimeSteps } from '../engine/slime';
 import { drawingOf, kindsOf, type Drawing } from '../model/link';
 import {
   constrain,
+  crownLevers,
   defaultSettings,
   globalSpec,
   JONES_DENSITY,
@@ -470,6 +471,18 @@ export function setRule(on: boolean) {
   const growth = growing ? ` ${GROWTH_OFF}` : '';
   if (scene && usesRule(scene)) showNotice(ruleOffNotice(scene) + growth, 15_000);
   else if (growing) showNotice(GROWTH_OFF);
+}
+
+/**
+ * The panel's switch of the rules of the growth front (ADR 0068, ADR 0087). On, it also sets the levers of the Crown
+ * of veins (crownLevers(), ADR 0098), so that a colony grows faster and forms veins; off, it changes no lever. The
+ * engine restarts the population on every switch (territoryOn()).
+ */
+export function setRules(on: boolean) {
+  const s = app.settings;
+  if (on === s.territory) return;
+  s.territory = on;
+  if (on) Object.assign(s, crownLevers(s));
 }
 
 /**

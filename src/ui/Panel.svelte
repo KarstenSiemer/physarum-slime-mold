@@ -59,6 +59,7 @@
     removeStrain,
     setModel,
     setRule,
+    setRules,
     useSceneLattice,
   } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
@@ -519,14 +520,18 @@
         <Slider spec={globalSpec.flowBase} bind:value={s.flowBase} id="flow-base" />
         <!-- The rules of the growth front run only with growth, and so with one agent per cell, and the flow
         (territoryOn(), ADR 0068); a switch restarts the scene. Their drift and their flux to the front act only with
-        them (ADR 0070, ADR 0086). -->
+        them (ADR 0070, ADR 0086). Their switch on also sets the levers of the Crown of veins (setRules(),
+        ADR 0098). -->
         {#if s.growth && canGrow}
           <div class="check">
             <label>
               <input
                 type="checkbox"
-                bind:checked={s.territory}
+                checked={s.territory}
                 aria-describedby={territoryHelpOpen ? 'territory-help' : undefined}
+                onchange={(e) => {
+                  setRules(e.currentTarget.checked);
+                }}
               />
               <span>{territoryHelp.label}</span>
             </label>

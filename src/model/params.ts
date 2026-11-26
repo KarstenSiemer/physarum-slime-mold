@@ -523,9 +523,24 @@ export const flowEdgesHelp = {
  */
 export const territoryHelp = {
   label: 'Rules of the growth front',
-  help: 'Only the extended model has these rules, and only with Growth and shrinkage and Flow in the tubes. They follow the growth front of the slime mold. Each strain has a ground of its own: its agents move, come back to life and are born only there. The agents at the edge push the ground open: a cell beside it joins it with a chance of about 0.4 % per step for each agent of the strain next to the cell, so the front moves faster where more plasm lies at it. The agents at the edge with free ground beside them take flux from the foods, 40 times less on slime than near ground without slime by default (Weight on slime and Reach to fresh ground, in the Slime section). The tubes carry this flux to the front, and it pays births there: a tenth of the Flow strength in each step, so Flow strength sets how fast the colony grows. The colony keeps only a part of these births. In the scenes of this app it still grew at step 20,000 in 10 of 16 runs with the rules, by 0.03 to 0.30 agents per step. The flow still starves the tubes without flux and closes their ground for children: in the Y-mazes and in Slime everywhere this stops the growth. The plasm streams down the pressure of the flow, to the front (Drift). A switch of the rules restarts the scene.',
+  help: 'Only the extended model has these rules, and only with Growth and shrinkage and Flow in the tubes. They follow the growth front of the slime mold. Each strain has a ground of its own: its agents move, come back to life and are born only there. The agents at the edge push the ground open: a cell beside it joins it with a chance of about 0.4 % per step for each agent of the strain next to the cell, so the front moves faster where more plasm lies at it. The agents at the edge with free ground beside them take flux from the foods, 40 times less on slime than near ground without slime by default (Weight on slime and Reach to fresh ground, in the Slime section). The tubes carry this flux to the front, and it pays births there: a tenth of the Flow strength in each step, so Flow strength sets how fast the colony grows. The colony keeps only a part of these births. In the scenes of this app it still grew at step 20,000 in 10 of 16 runs with the rules, by 0.03 to 0.30 agents per step. The flow still starves the tubes without flux and closes their ground for children: in the Y-mazes and in Slime everywhere this stops the growth. The plasm streams down the pressure of the flow, to the front (Drift). When you switch the rules on here, the panel also sets the levers of the scene Crown of veins: Flow over 8 neighbours, a Base conductance of 0.002, a Flux to the front of 2, and a Flow strength of 8 or more (a higher value stays). With these levers a colony grows faster and forms veins that run from the food to its rim and fork there. In Food ring with the rules it held 5,497 agents at step 8,000, and 835 without the levers. When you switch the rules off, these levers do not change. A scene and a link keep their own values. A switch of the rules restarts the scene.',
   ref: 'Kuroda et al. 2015, J. Exp. Biol. 218: 3729',
 } as const;
+
+/**
+ * The levers of the Crown of veins (ADR 0087) that the panel's switch of the rules of the growth front sets when it
+ * turns them on (ADR 0098, the owner's decision of 2026-11-26): with them a colony grows faster and forms veins. The Flow
+ * strength is at least `CROWN_LEVERS.flowStrength`; a higher one stays. A scene and a link keep their own values.
+ */
+export const CROWN_LEVERS = { flowEdges: 8, flowBase: 0.002, frontFlux: 2, flowStrength: 8 } as const;
+
+/** The values that the switch of the rules sets when it turns them on (CROWN_LEVERS, ADR 0098). */
+export function crownLevers(
+  s: Pick<Settings, 'flowStrength'>,
+): Pick<Settings, 'flowEdges' | 'flowBase' | 'frontFlux' | 'flowStrength'> {
+  const { flowEdges, flowBase, frontFlux, flowStrength } = CROWN_LEVERS;
+  return { flowEdges, flowBase, frontFlux, flowStrength: Math.max(s.flowStrength, flowStrength) };
+}
 
 /** Help for the switch "Draw the tubes by their flow" below Flow in the tubes (ADR 0034); Learn → Controls lists it. */
 export const tubeViewHelp = {
