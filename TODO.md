@@ -487,9 +487,9 @@ The owner's open decisions (plan, section 6):
    which reopens ADR 0054.
 3. The cost of phase 2: about 850,000 tokens of helpers and about 6 hours of GPU (plan, section 5). The coordinator
    names the cost of each port before it starts. Phase 1 is approved, study 1d too (ADR 0096).
-4. Whether an agent of the model is mass (ADR 0097). If it is, every birth is paid and the dead give their plasm back,
-   the rate of the organism binds the growth (one doubling in 8 hours), and the scenes with growth start with the mass
-   that covers their arena. If it is not, an agent stands for an area of plasm, and no rate of the organism binds it.
+4. Answered on 2026-11-26 (ADR 0098): an agent is not mass. It stands for an area of plasm, and the rate of Mohberg
+   and Rusch does not bind the growth. The switch of the rules in the panel now sets the levers of the Crown of veins.
+   Open: whether the Y-maze scenes and Slime everywhere take these levers too (it changes their bytes).
 
 Also open for the owner:
 

@@ -6,6 +6,8 @@
   panel controls, the tests and the time of a step. Decisions 1, 3 and 4 and the order of the work are the
   coordinator's; the other choices are an agent's. Both under the owner's delegation of 2026-11-12.
 - Date: 2026-11-21
+- Extended by [ADR 0098](0098-the-switch-of-the-rules-sets-the-levers-of-the-crown.md) (2026-11-26): the switch of
+  the rules in the panel sets the levers of the crown.
 - Extends [ADR 0085](0085-the-crown-so-far.md) (the best form so far, now a scene),
   [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (its levers, now in the panel and in Learn) and
   [ADR 0076](0076-the-crown-at-the-head-of-a-tube.md) (finding 3: what the drift gives, now in its help).

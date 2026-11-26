@@ -310,6 +310,14 @@ test('the Crown of veins shows its rules and levers in the Flow section, and its
   await expect(page.getByLabel('Drift value')).toHaveCount(0);
   await expect(page.getByLabel('Flux to the front value')).toHaveCount(0);
   await expect(page.getByLabel('Base conductance value')).toHaveValue('0.002');
+  // The switch on sets the levers of the Crown of veins again (ADR 0098).
+  const base = page.getByLabel('Base conductance value');
+  await base.fill('0.02');
+  await base.press('Enter');
+  await page.waitForFunction(() => globalThis.physarum?.settings.flowBase === 0.02);
+  await page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true }).check();
+  await expect(base).toHaveValue('0.002');
+  await expect(page.getByLabel('Flux to the front value')).toHaveValue('2');
   await page.getByRole('checkbox', { name: 'Flow in the tubes', exact: true }).uncheck();
   await expect(page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true })).toHaveCount(0);
   await expect(page.getByRole('checkbox', { name: 'Flow over 8 neighbours', exact: true })).toHaveCount(0);
