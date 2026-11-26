@@ -3,6 +3,7 @@
 - Status: proposed. Study 1b of phase 1 of the plan of 2026-11-22, which the owner approved on that day for all
   three studies side by side. Done by an agent under the owner's delegation of 2026-11-12. The owner decides at gate 1.
 - Date: 2026-11-22
+- Extended by [ADR 0100](0100-every-birth-from-the-budget-in-the-engine.md) (2026-11-26): its option 3 is in the engine, with the cap on the credit; the boom at a new food stays.
 - Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d
   before a port.
 - Extended by [ADR 0097](0097-paid-births-thin-the-sheet-and-fill-the-dish.md) (2026-11-23): study 1d measured

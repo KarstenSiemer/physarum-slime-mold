@@ -4,6 +4,7 @@
   An agent ran it on 2026-11-22 under the owner's delegation of 2026-11-12. It records what the study found and what it
   recommends for phase 2. The owner decides at gate 1.
 - Date: 2026-11-22
+- Extended by [ADR 0100](0100-every-birth-from-the-budget-in-the-engine.md) (2026-11-26): `feed=flux` and the plasm of the dead back to the budget are in the engine.
 - Would extend [ADR 0071](0071-the-births-that-the-flux-pays-in-the-engine.md) (the births that the flux pays) and
   [ADR 0086](0086-three-levers-of-the-crown-as-settings.md) (the flux to the front).
 - Extended by [ADR 0096](0096-gate-1-study-1d-before-a-port.md) (2026-11-23): at gate 1 the owner chose study 1d

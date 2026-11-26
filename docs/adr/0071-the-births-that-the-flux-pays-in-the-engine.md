@@ -6,6 +6,7 @@
   (decision 1) in the form of ADR 0067 (decision 1, `paidBy=rank`); the measured form is `paidByRank()` with the budget
   code of `research/front/sim.ts`. The choices below are an agent's, under the owner's delegation of 2026-11-12.
 - Date: 2026-11-20
+- Extended by [ADR 0100](0100-every-birth-from-the-budget-in-the-engine.md) (2026-11-26): every birth comes from the budget, a death gives one back, and the food credits it per covered food, up to the agents of the front.
 - Extends [ADR 0067](0067-the-rules-of-stage-4-in-the-forms-of-a-gpu.md) (decisions 1 and 6 to 8),
   [ADR 0069](0069-the-sinks-of-each-strain-in-the-engine.md) (the lanes of the state) and
   [ADR 0070](0070-the-flow-takes-the-sinks-in-the-engine.md) (the slot of what the sinks take).

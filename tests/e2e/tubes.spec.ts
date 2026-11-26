@@ -261,7 +261,8 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
 // The Crown of veins (ADR 0087): the rules of the growth front with the levers of the crown of ADR 0084, which the Flow
 // section shows. The colony starts on the food at the closed end of the neck, and its growth front takes the flux of
 // the tubes from its first steps on: in 12 runs on WebGPU and WebGL2 on the GPU of an M3 Pro (seeds 1 to 6), the
-// colony grew by 27 to 38 agents from step 10 to step 40, and it had 16 to 29 sinks at step 30. It leaves the neck
+// colony grew by 15 to 22 agents from step 10 to step 40, and it had 8 to 19 sinks at step 30, since every birth comes
+// from the budget (ADR 0100; before it 27 to 38 agents and 16 to 29 sinks). It leaves the neck
 // only after 1,150 to 1,450 steps (`bash research/front/e5b.sh neck`): too many for CI, whose SwiftShader runs the
 // scene at about one step per second in the image on 4 cores (ADR 0087).
 test('the Crown of veins shows its rules and levers in the Flow section, and its front takes flux', async ({
@@ -295,7 +296,7 @@ test('the Crown of veins shows its rules and levers in the Flow section, and its
     const [alive, sinks] = [(await sim.alive())[0] ?? -1, await sim.readSinks(0)];
     return { alive, sinks: sinks.filter((r) => r < 0).length };
   });
-  expect(later.alive).toBeGreaterThan(colony + 20);
+  expect(later.alive).toBeGreaterThan(colony + 8);
   expect(later.sinks).toBeGreaterThan(0);
   // The link holds the rules and the levers of the scene.
   await expect

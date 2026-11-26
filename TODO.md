@@ -459,9 +459,14 @@ any port (ADR 0096).
       nine foods still rise by 102 to 114 % within 1,000 steps. The rate of Mohberg and Rusch stops a young colony
       (130 agents at step 20,000). The band at the wall is the zone behind the front that the drift of nine foods
       fills. No form reaches the aims; the agent recommends no port until the owner decides whether an agent is mass.
-- [ ] Phase 2, each rule that passed phase 1, in a pull request of its own: both backends, `docs/model.md`, wrong
-      rules, the digests of every scene, then the numbers of ADR 0087 and ADR 0088. The owner watches the scenes run.
-      It waits for study 1d: then the owner decides which rules go into the engine (ADR 0096).
+- [x] Phase 2, option 1 of ADR 0097 (ADR 0100, 2026-11-26): every birth from the budget, the front first, the plasm
+      of the dead back to it, the flux per covered food and the cap on the credit, on both backends. Food ring with
+      the levers of the crown: 21,615 to 23,087 agents at step 10,000 and 2,533 to 2,793 at 20,000 (3 seeds per
+      backend), a sheet of 0.52 to 0.60 at 10,000.
+- [ ] Open after ADR 0100 (the coordinator's decision 3): the boom at a new food (+67 to +110 % in the engine), the
+      fall of a full dish while the budget holds the rest of the area, and the sheet above 0.3 at step 10,000 with
+      nine foods. At step 10,000 the engine draws a band along the wall with fewer fans of veins than the prototype.
+      The owner watches the scenes run.
 - [ ] Phase 3, after study 1d and only if the rim is still smooth: a rim that advances where the flux arrives (plan
       2.4, option 4), the prototype first.
 - [ ] Phase 4, the scenes: a dish with the rules, and the parts E4b to E4e of ADR 0089, when the owner finds the rules
@@ -476,7 +481,7 @@ any port (ADR 0096).
       food and No stall without the full dish (640 to 768 cells, 1 to 2 hours a run); a stored budget spent at a food
       that comes after the dish is full (2 runs); nine foods with the cap of 9.1 on the credit and Jones' births first,
       or only at the edge of the territory (`jones=edge`), which could keep the plasm that the front cannot place off
-      the fed ground behind it (1 run each, about 30 minutes). And the engine and WebGL2.
+      the fed ground behind it (1 run each, about 30 minutes).
 
 The owner's open decisions (plan, section 6):
 

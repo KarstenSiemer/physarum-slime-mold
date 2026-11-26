@@ -216,7 +216,7 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
     const before = new Float32Array(SINK_STATE_LANES * s.strains.length);
     c.budget.forEach((v, strain) => (before[strain * SINK_STATE_LANES + BUDGET_LANE] = v));
     a.writeSinkState(before);
-    const env = await a.readEnv();
+    const [env, found] = [await a.readEnv(), await a.readAgents()];
     a.run(1);
     b.run(1);
     const [moved, counts, tally] = [await b.readAgents(), await b.readCounts(), await a.readPaidCounts()];
@@ -224,6 +224,13 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
     const count = (strain: number, name: keyof typeof PAID_COUNTS) =>
       tally[strain * PAID_COUNT_LANES + PAID_COUNTS[name]] ?? 0;
     const budget = c.budget.map((v, strain) => budgetAfterMoves(v, count(strain, 'died'), count(strain, 'reborn')));
+    // Every agent that the moves of the twin left dead died in the agent pass, and gives one back.
+    for (const strain of c.budget.keys()) {
+      const died = found.filter(
+        (f, id) => f.bits & ALIVE && (f.bits & 3) === strain && !((moved[id]?.bits ?? 0) & ALIVE),
+      );
+      expect(count(strain, 'died'), `strain ${String(strain)}`).toBe(died.length);
+    }
     const input: GrowthInput = {
       kind: kind as 'webgpu' | 'webgl2',
       settings: s,
@@ -241,11 +248,13 @@ describe.each(Object.entries(BACKENDS))('the births that the flux pays on %s (AD
     const own = growthStep(input).paid;
     const expected = growthStep({ ...input, paid: { rates, budget, keys } });
     if (!own || !expected.paid) throw new Error('No paid births in a growth step');
-    // The counts of growth on the GPU are those of the CPU copy: the parents of Jones' rule that waited, the births and
-    // the deaths by shrinkage (ADR 0100).
+    // The counts of growth on the GPU are those of the CPU copy: F, K, the parents of Jones' rule that waited, the births
+    // and the deaths by shrinkage (ADR 0100).
     const paid = expected.paid;
     for (const strain of c.budget.keys()) {
       const at = `strain ${String(strain)}`;
+      expect(count(strain, 'front'), at).toBe(paid.front[strain]);
+      expect(count(strain, 'claims'), at).toBe(paid.claims[strain]);
       expect(count(strain, 'parents'), at).toBe(paid.waiting[strain]);
       expect(count(strain, 'born'), at).toBe(paid.born[strain]);
       expect(count(strain, 'crowded'), at).toBe(paid.crowded[strain]);
