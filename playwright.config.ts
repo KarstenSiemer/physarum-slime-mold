@@ -24,7 +24,8 @@ export default defineConfig({
   timeout: ci ? 240_000 : 30_000,
   forbidOnly: ci,
   retries: ci ? 1 : 0,
-  reporter: ci ? [['github'], ['html', { open: 'never' }]] : 'list',
+  // CI prints a line with the time of each test: the log of a shard shows which tests fill its 30 minutes (ADR 0102).
+  reporter: ci ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${port}`,
     channel: webgpuLaunch.channel,
