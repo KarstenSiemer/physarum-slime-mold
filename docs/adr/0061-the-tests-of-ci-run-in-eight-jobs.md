@@ -6,6 +6,7 @@
 - Date: 2026-11-18
 - Extends [ADR 0014](0014-ci-hardening.md), which made two e2e shards and two GPU parts, and
   [ADR 0049](0049-build-the-diffusion-and-outline-passes-at-their-first-use.md), which balanced the shards.
+- Extended by [ADR 0102](0102-six-e2e-shards-and-the-crown-test-apart.md).
 
 ## Context
 

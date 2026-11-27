@@ -104,9 +104,9 @@ jobs:
           path: .vitest/attachments/
           retention-days: 7
 
-  # Playwright shares the e2e tests out by test (fullyParallel in playwright.config.ts). Four shards: with two, the
-  # second took 24.8 to 28.3 min of its 30 on main (ADR 0061). The list of the matrix is the one place that holds the
-  # number of shards.
+  # Playwright shares the e2e tests out by test (fullyParallel in playwright.config.ts). Six shards: with four, the
+  # third took 19.5 to more than 30 min of its 30 on main (ADR 0102). The list of the matrix is the one place that
+  # holds the number of shards.
   verify-e2e:
     name: verify-e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: build
@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     # Chromium and its system packages come with the image, so a run needs no Ubuntu mirror (2026-11-11:
     # the runners could not resolve archive.ubuntu.com for 45 min). The image's Playwright version must
     # equal @playwright/test in package.json; Renovate updates both in one pull request (ADR 0014).
