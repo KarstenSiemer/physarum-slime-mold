@@ -10,11 +10,13 @@ import { it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { Engine } from '../../src/engine/engine';
 import { FLOW } from '../../src/engine/flow';
+import { instance } from '../../src/engine/instance';
 import { AgentToolKind } from '../../src/engine/pack';
 import { plasmLevels } from '../../src/engine/slime';
-import type { Simulation } from '../../src/engine/sim';
+import { Simulation } from '../../src/engine/sim';
 import { WebGpuBackend } from '../../src/engine/webgpu';
 import { WebGl2Backend } from '../../src/engine/gl/backend';
+import { GlSim } from '../../src/engine/gl/sim';
 import { constrain, type Settings } from '../../src/model/params';
 import { presetById } from '../../src/model/presets';
 
@@ -55,10 +57,7 @@ it('runs a scene with a record', { timeout: 7_200_000 }, async () => {
   const settings = constrain({ ...preset.settings(), ...PATCH });
   const canvas = document.createElement('canvas');
   [canvas.width, canvas.height] = [CW, CH];
-  // Both backends have measured() and capture() of the same form; the type of one of them serves both.
-  const backend = (
-    env.VITE_BACKEND === 'webgl2' ? WebGl2Backend.create(canvas) : await WebGpuBackend.create(canvas)
-  ) as WebGpuBackend;
+  const backend = env.VITE_BACKEND === 'webgl2' ? WebGl2Backend.create(canvas) : await WebGpuBackend.create(canvas);
   const engine = await Engine.create(canvas, settings, undefined, backend);
   await engine.load(settings, preset.env ?? []);
   const sim = engine.sim;
@@ -187,7 +186,10 @@ it('runs a scene with a record', { timeout: 7_200_000 }, async () => {
         );
       }
       const median = quantile(Float32Array.from(onAgents).sort(), 0.5);
-      const measured = await backend.measured(sim as Simulation);
+      const measured =
+        backend instanceof WebGpuBackend
+          ? await backend.measured(instance(sim, Simulation))
+          : await backend.measured(instance(sim, GlSim));
       const whiteNow = measured.gain > 0 ? TARGET / measured.gain + measured.black : 0;
       const white = Math.max(whiteNow, median);
       const black = Math.min(measured.black, 0.8 * white, 0.5 * median);
@@ -211,7 +213,11 @@ it('runs a scene with a record', { timeout: 7_200_000 }, async () => {
       await commands.writeFile(`${OUT}/dims.json`, JSON.stringify({ w, h, low }));
       await commands.writeFile(
         `${OUT}/fix-${name}.png.b64`,
-        await png(await backend.capture(sim as Simulation, settings, engine.view, canvas.width, canvas.height, fix)),
+        await png(
+          backend instanceof WebGpuBackend
+            ? await backend.capture(instance(sim, Simulation), settings, engine.view, canvas.width, canvas.height, fix)
+            : await backend.capture(instance(sim, GlSim), settings, engine.view, canvas.width, canvas.height, fix),
+        ),
       );
     }
     lines.push(JSON.stringify(row));

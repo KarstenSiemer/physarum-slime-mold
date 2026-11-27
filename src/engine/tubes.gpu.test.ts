@@ -5,6 +5,7 @@ import { hexToLinear } from '../model/color';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
+import { instance } from './instance';
 import { BACKGROUND } from './render';
 import { flowSites, type FoodStroke } from './sites';
 import { TUBE_MAP_BYTES_PER_CELL_GL } from './sizing';
@@ -771,7 +772,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       flowing({ stepOrder: 'move-first', diffusion: 2, strains: [strain], ...patch });
     const sim = await backend.createSim(moving({}), w, h, 300);
     live.push(sim);
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     const view: View = { center: [20, 16], scale: 1 / 4 };
     /**
      * New settings, then twice: a step, a memory with a tube on every cell, the picture against the rule and a frame.
@@ -976,7 +977,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
     sim.writeTrail(trail);
     sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     device?.pushErrorScope('validation');
     // The second measurement and the one for a PNG wait for the first. Meanwhile the switch goes off, and the
     // simulation frees the picture: they must measure the trail that is drawn then, not a texture that is gone.
@@ -1024,7 +1025,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
     sim.writeTrail(trail);
     sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     const gl = kind === 'webgl2' ? (backend as unknown as { gl: WebGL2RenderingContext }).gl : undefined;
     device?.pushErrorScope('validation');
     gl?.getError();
@@ -1067,7 +1068,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     for (let c = 0; c < w * h; c++) trail[c * 4] = 1 + noise(c, 7);
     sim.writeTrail(trail);
     sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
-    const device = kind === 'webgpu' ? (fresh as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(fresh, WebGpuBackend).gpu.device : undefined;
     const gl = kind === 'webgl2' ? (fresh as unknown as { gl: WebGL2RenderingContext }).gl : undefined;
     device?.pushErrorScope('validation');
     gl?.getError();

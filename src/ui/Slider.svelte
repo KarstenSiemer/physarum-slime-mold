@@ -54,8 +54,10 @@
       aria-expanded={open}
       aria-controls="{id}-help"
       aria-label="About {spec.label}"
-      onclick={() => (open = !open)}>?</button
+      onclick={() => (open = !open)}
     >
+      ?
+    </button>
   </div>
   <input
     {id}

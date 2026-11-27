@@ -115,8 +115,10 @@
         aria-selected={app.learnTab === t}
         aria-controls="learn-panel"
         tabindex={app.learnTab === t ? 0 : -1}
-        onclick={() => (app.learnTab = t)}>{t}</button
+        onclick={() => (app.learnTab = t)}
       >
+        {t}
+      </button>
     {/each}
   </div>
 
@@ -329,16 +331,19 @@
                   type="button"
                   onclick={() => {
                     run(p.id);
-                  }}>Load<span class="sr-only"> {p.name}</span></button
+                  }}
                 >
+                  Load<span class="sr-only"> {p.name}</span>
+                </button>
                 <button
                   type="button"
                   class="ghost"
                   aria-expanded={details[p.id] === true}
                   aria-controls="details-{p.id}"
                   onclick={() => (details[p.id] = !details[p.id])}
-                  >Details<span class="sr-only"> of {p.name}</span></button
                 >
+                  Details<span class="sr-only"> of {p.name}</span>
+                </button>
               </div>
               {#if details[p.id]}
                 <div class="details" id="details-{p.id}">
@@ -346,9 +351,9 @@
                   {#if p.figure}
                     <p>
                       <strong>The result in the paper:</strong>
-                      <a href={p.figure.href} target="_blank" rel="noreferrer"
-                        >{p.figure.label}<span class="sr-only"> (opens in a new tab)</span></a
-                      >, {p.figure.note}.
+                      <a href={p.figure.href} target="_blank" rel="noreferrer">
+                        {p.figure.label}<span class="sr-only"> (opens in a new tab)</span>
+                      </a>, {p.figure.note}.
                     </p>
                   {/if}
                   <p>{p.about}</p>

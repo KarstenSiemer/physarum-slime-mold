@@ -12,6 +12,7 @@ import { WebGl2Backend } from './gl/backend';
 import { readTarget, type Target } from './gl/gl';
 import renderFrag from './gl/glsl/render.frag?raw';
 import { compile } from './gl/programs';
+import { instance } from './instance';
 import { paintReference } from './paint-reference';
 import { readTexture } from './readback';
 import { BACKGROUND, LATTICE_COPIES, SLIME_LOOK, trailLevel } from './render';
@@ -1494,7 +1495,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       let texels: Float32Array;
       let width: number;
       if (kind === 'webgpu') {
-        const device = (backend as WebGpuBackend).gpu.device;
+        const device = instance(backend, WebGpuBackend).gpu.device;
         const held = (backend as unknown as { renderer: Record<string, { texture: GPUTexture } | undefined> }).renderer;
         const source = held[name]?.texture;
         if (!source) throw new Error(`The renderer holds no ${name}`);
@@ -2142,7 +2143,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       sim.run(1);
       // The frames draw the picture of the tubes, a texture of its own.
       expect((await sim.readTubeRoots()).length).toBe(PW * PH * 4);
-      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
       device?.pushErrorScope('validation');
       const out: View = { center: [32, 24], scale: 2.5 };
       const before = await follows(sim, tubes, out);
@@ -2484,7 +2485,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
         hook.renderFrom();
       });
       // A new WebGPU renderer counts frames from 0, so both runs dither alike; WebGL2 captures keep the frame.
-      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
       device?.pushErrorScope('validation');
       hook.renderFrom(kind === 'webgpu' ? WITHOUT_SLIME.wgsl : WITHOUT_SLIME.glsl);
       const before = await captures();
@@ -2552,7 +2553,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       });
       const jones: Settings = { ...extended, model: 'jones' };
       const sim = await make(extended, PW, PH, 40);
-      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
       device?.pushErrorScope('validation');
       const view: View = { center: [32, 24], scale: 0.5 };
       const size = [128, 96] as const;
@@ -2627,7 +2628,7 @@ describe.each(Object.entries(BACKENDS))('the slime field on %s', (kind, create) 
       let ready: (settings?: Settings) => Promise<unknown>;
       let frameOf: (settings: Settings) => void;
       if (kind === 'webgpu') {
-        const gpu = backend as WebGpuBackend;
+        const gpu = instance(backend, WebGpuBackend);
         onTestFinished(() => {
           vi.restoreAllMocks();
           gpu.renderFrom();

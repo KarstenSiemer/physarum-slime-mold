@@ -12,6 +12,7 @@ import { commands } from 'vitest/browser';
 import { Engine } from '../../src/engine/engine';
 import { WebGl2Backend } from '../../src/engine/gl/backend';
 import type { Target } from '../../src/engine/gl/gl';
+import { instance } from '../../src/engine/instance';
 import { strainEnds } from '../../src/engine/pack';
 import { BUDGET_LANE, FRONT_LANE, NO_KEY } from '../../src/engine/paid';
 import { SINK_STATE_LANES } from '../../src/engine/sinks';
@@ -142,7 +143,7 @@ it('measures the time of the pass rank in the start scene', async () => {
       const budgets = Array.from({ length: strains }, (_, s) => state[s * SINK_STATE_LANES + BUDGET_LANE] ?? 0);
       const front = Array.from({ length: strains }, (_, s) => state[s * SINK_STATE_LANES + FRONT_LANE] ?? 0);
       const batch = async (runs: number) =>
-        kind === 'webgpu' ? gpuBatch(backend as WebGpuBackend, sim, runs) : glBatch(sim, runs);
+        kind === 'webgpu' ? gpuBatch(instance(backend, WebGpuBackend), sim, runs) : glBatch(sim, runs);
       for (const b of [...BUDGETS, ...budgets.map((v) => Math.floor(v))]) {
         // The budget of every strain, half a birth above b: the pass reads ⌊B⌋.
         const written = state.slice();
