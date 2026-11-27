@@ -51,4 +51,12 @@ No test changes what it checks. The count of the tests stays 86.
   its longest shard.
 - The split still follows the names of the files. A new file of tests that wait for steps can tip it again
   (ADR 0049). The times in the log show it.
-- Not measured: a run of the six shards on a slow runner. The numbers above come from one run.
+
+## Results
+
+Run 46011076488 of this pull request, with six shards: 8.3, 7.2, 12.1, 15.8, 7.4 and 10.9 min of tests. The estimate
+was 10.6, 9.7, 9.3, 11.7, 4.6 and 12.3 min. The runners differ: the fourth shard ran 1.35 times slower than its
+estimate, and the first two ran faster. The longest shard, with a start of 1 to 2 min, used a little more than half
+of its limit.
+
+Not measured: more runs. Each column of numbers comes from one run.
